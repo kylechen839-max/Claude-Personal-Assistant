@@ -34,3 +34,23 @@ Run all tests with `pytest` (from the project root, venv active).
   match.
 - Known issue: in the build sandbox the Whisper model can't be downloaded
   (huggingface.co blocked), so the real test is skipped there. See BLOCKERS.md.
+
+## Stage 4 - Wake word ✅
+- `assistant/wakeword.py`: audio arrives as 512-sample int16 frames from
+  `MicSource` (live mic, paused while the assistant is thinking/speaking) or
+  `FileSource` (a .wav). `PorcupineDetector` listens for the custom
+  "Hey Claude" `.ppn` (falls back to the built-in "computer" keyword).
+  After the wake word a chime plays, ~250 ms is skipped so the chime isn't
+  recorded, and `EnergyVAD` + `record_until_silence` capture the command
+  until 0.8 s of silence (adaptive noise floor, pre-roll, 15 s cap, 5 s
+  no-speech timeout).
+- `--mode wake` (now the default) and `--audio-file path.wav` to run the
+  whole pipeline on a recording. In wake mode "goodbye" ends the
+  conversation but keeps listening; Ctrl+C quits.
+- Tested by `tests/test_wakeword.py`: builds a .wav containing two
+  "Hey Claude, what is on my calendar tomorrow" sessions with pyttsx3 and
+  runs it through the real VAD pipeline with a scripted detector (asserts two
+  wakes, two chimes, and command lengths); an end-to-end CLI wake-mode test
+  over the file with mocked STT/Claude; network error handling.
+  The real Porcupine test and the Whisper-on-pipeline test skip without
+  `PICOVOICE_ACCESS_KEY` / the Whisper model (see BLOCKERS.md).
