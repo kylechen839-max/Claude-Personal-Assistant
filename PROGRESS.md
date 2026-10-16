@@ -22,3 +22,15 @@ Run all tests with `pytest` (from the project root, venv active).
 - Tested by `tests/test_tts.py`: renders real pyttsx3 speech to a .wav and
   asserts it exists, is non-empty, and is not silent; Piper CLI invocation is
   mocked; wav round-trip/resample.
+
+## Stage 3 - Speech to text ✅
+- `assistant/stt.py`: `Transcriber` lazily loads faster-whisper (`base.en`,
+  CPU, int8); `record_push_to_talk()` records between two Enter presses with
+  sounddevice; `rough_match()` for fuzzy transcript checks.
+- `--mode voice`: push-to-talk, spoken replies.
+- Tested by `tests/test_stt.py`: mocked-model transcription and fuzzy
+  matching always run; the real test renders "What is on my calendar
+  tomorrow" with pyttsx3, transcribes it with Whisper, and asserts a rough
+  match.
+- Known issue: in the build sandbox the Whisper model can't be downloaded
+  (huggingface.co blocked), so the real test is skipped there. See BLOCKERS.md.

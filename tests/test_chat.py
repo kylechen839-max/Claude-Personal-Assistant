@@ -67,3 +67,22 @@ def test_run_speak_mode_speaks_reply(fake_client):
     run_text(ClaudeChat(client=fake_client), input_fn=lambda _: next(inputs),
              output_fn=lambda *_: None, tts=PrintTTS(said.append))
     assert said == ["[speaking] Hello."]
+
+
+def test_run_voice_loop(fake_client):
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from assistant.cli import run_voice
+    from assistant.tts import PrintTTS
+
+    fake_client.queue = [make_response(text_block("It's sunny."))]
+    recordings = iter([None, np.ones(10), np.ones(10)])
+    texts = iter(["How's the weather?", "Goodbye."])
+    transcriber = SimpleNamespace(transcribe=lambda a: next(texts))
+    said = []
+    run_voice(ClaudeChat(client=fake_client), PrintTTS(said.append),
+              transcriber, record_fn=lambda: next(recordings),
+              output_fn=lambda *_: None)
+    assert said == ["[speaking] It's sunny."]
