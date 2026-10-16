@@ -56,3 +56,14 @@ def test_run_text_loop(fake_client):
     run_text(chat, input_fn=lambda _: next(inputs), output_fn=out.append)
     assert "Claude: Four." in out
     assert out[-1] == "Bye!"
+
+
+def test_run_speak_mode_speaks_reply(fake_client):
+    from assistant.tts import PrintTTS
+
+    fake_client.queue = [make_response(text_block("Hello."))]
+    said = []
+    inputs = iter(["hi", "bye"])
+    run_text(ClaudeChat(client=fake_client), input_fn=lambda _: next(inputs),
+             output_fn=lambda *_: None, tts=PrintTTS(said.append))
+    assert said == ["[speaking] Hello."]

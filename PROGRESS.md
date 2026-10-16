@@ -11,3 +11,14 @@ Run all tests with `pytest` (from the project root, venv active).
 - `assistant/cli.py`: text-mode loop (`python -m assistant --mode text`).
 - Tested by `tests/test_chat.py` with a mocked Anthropic client (history,
   system prompt, error rollback, trimming, exit words, the text loop).
+
+## Stage 2 - Text to speech ✅
+- `assistant/tts.py`: a `TTS` interface (`speak`, `save_to_file`) with
+  `Pyttsx3TTS` (offline OS voice: SAPI5 on Windows, eSpeak on the Pi),
+  `PiperTTS` (offline neural voice via the `piper` CLI, a drop-in upgrade),
+  and `PrintTTS` (no audio). `make_tts(name)` picks one.
+- `assistant/audio.py`: wav read/write, resampling to 16 kHz, chime, playback.
+- `--mode speak`: typed input, spoken replies.
+- Tested by `tests/test_tts.py`: renders real pyttsx3 speech to a .wav and
+  asserts it exists, is non-empty, and is not silent; Piper CLI invocation is
+  mocked; wav round-trip/resample.

@@ -7,6 +7,7 @@ import argparse
 import anthropic
 
 from assistant.chat import ClaudeChat
+from assistant.tts import make_tts
 
 EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 
@@ -18,12 +19,15 @@ def is_exit(text: str) -> bool:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="python -m assistant",
                                      description="Hey Claude voice assistant")
-    parser.add_argument("--mode", choices=["text"], default="text")
+    parser.add_argument("--mode", choices=["text", "speak"], default="text")
     return parser.parse_args(argv)
 
 
-def run_text(chat: ClaudeChat, input_fn=input, output_fn=print) -> None:
-    output_fn("Claude assistant (text mode). Type 'quit' to exit.")
+def run_text(chat: ClaudeChat, input_fn=input, output_fn=print,
+             tts=None) -> None:
+    """Typed input; replies printed, and spoken too if a TTS engine is given."""
+    mode = "speak" if tts else "text"
+    output_fn(f"Claude assistant ({mode} mode). Type 'quit' to exit.")
     while True:
         try:
             user_text = input_fn("\nYou: ").strip()
@@ -39,10 +43,13 @@ def run_text(chat: ClaudeChat, input_fn=input, output_fn=print) -> None:
             output_fn(f"API error: {e}")
             continue
         output_fn(f"Claude: {reply}")
+        if tts:
+            tts.speak(reply)
     output_fn("Bye!")
 
 
 def main(argv=None) -> int:
-    parse_args(argv)
-    run_text(ClaudeChat())
+    args = parse_args(argv)
+    tts = make_tts("pyttsx3") if args.mode == "speak" else None
+    run_text(ClaudeChat(), tts=tts)
     return 0
