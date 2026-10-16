@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import time
 
 import anthropic
 
@@ -80,7 +82,7 @@ def run_text(chat: ClaudeChat, input_fn=input, output_fn=print,
         output_fn(f"Claude: {reply}")
         if tts:
             tts.speak(reply)
-    output_fn("Bye!")
+    finish(chat, output_fn)
 
 
 def run_voice(chat: ClaudeChat, tts, transcriber: Transcriber,
@@ -103,14 +105,25 @@ def run_voice(chat: ClaudeChat, tts, transcriber: Transcriber,
         reply = get_reply(chat, user_text, output_fn)
         output_fn(f"Claude: {reply}")
         tts.speak(reply)
+    finish(chat, output_fn)
+
+
+def finish(chat: ClaudeChat, output_fn=print) -> None:
+    summary = chat.end_conversation()
+    if summary:
+        output_fn(f"(Saved to memory: {summary})")
     output_fn("Bye!")
 
 
 def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
-             output_fn=print, wake_phrase: str = "Hey Claude") -> None:
-    """Always listening. 'Goodbye' ends the conversation (history is reset)
-    but keeps listening; Ctrl+C quits. With a file source, stops at its end."""
+             output_fn=print, wake_phrase: str = "Hey Claude",
+             conversation_timeout: float = 300, clock=time.monotonic) -> None:
+    """Always listening. A conversation ends on 'goodbye' or after
+    `conversation_timeout` seconds without a request; it is then summarized
+    to memory and history is reset. Ctrl+C quits. A file source stops at its
+    end."""
     output_fn(f"Listening for '{wake_phrase}'... (Ctrl+C to quit)")
+    last_exchange = clock()
     while True:
         try:
             woke, recording = listener.listen(source)
@@ -118,6 +131,11 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
             break
         if not woke:
             break  # audio file finished
+        if chat.history and clock() - last_exchange > conversation_timeout:
+            summary = chat.end_conversation()  # new conversation starts now
+            if summary:
+                output_fn(f"(Saved to memory: {summary})")
+        last_exchange = clock()
         if recording is None:
             output_fn("(heard the wake word but no command)")
             continue
@@ -126,18 +144,19 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
         if not user_text:
             continue
         if is_exit(user_text):
-            chat.reset()
             tts.speak("Goodbye!")
+            summary = chat.end_conversation()
+            if summary:
+                output_fn(f"(Saved to memory: {summary})")
             continue
         reply = get_reply(chat, user_text, output_fn)
         output_fn(f"Claude: {reply}")
         tts.speak(reply)
-    output_fn("Bye!")
+    finish(chat, output_fn)
 
 
 def build_tools(output_fn=print) -> ToolRegistry:
     """Register every service whose credentials are available."""
-    import os
     from pathlib import Path
 
     registry = ToolRegistry()
@@ -192,7 +211,14 @@ def build_wake_components(args):
 def main(argv=None) -> int:
     args = parse_args(argv)
     tools = build_tools()
-    chat = ClaudeChat(tools=tools)
+    memory = None
+    if os.environ.get("PINECONE_API_KEY"):
+        from assistant.memory import PineconeMemory
+
+        memory = PineconeMemory()
+    else:
+        print("(Memory off: PINECONE_API_KEY not set)")
+    chat = ClaudeChat(tools=tools, memory=memory)
     if args.mode == "text":
         tools.confirm = text_confirm()
         run_text(chat)

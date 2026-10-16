@@ -8,6 +8,7 @@ google-api-python-client>=2.100
 google-auth-oauthlib>=1.2
 google-auth-httplib2>=0.2
 notion-client>=3.0
+pinecone>=7.0
 tzlocal>=5.0
 tzdata
 python-dotenv>=1.0

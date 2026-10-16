@@ -34,8 +34,10 @@ class ClaudeChat:
 
     def __init__(self, client=None, model: str | None = None,
                  max_tokens: int = 500, system_prompt: str = SYSTEM_PROMPT,
-                 max_history: int = 40, tools=None, max_tool_rounds: int = 6):
+                 max_history: int = 40, tools=None, max_tool_rounds: int = 6,
+                 memory=None):
         self._client = client
+        self.memory = memory  # a PineconeMemory, or None
         self.tools = tools  # a ToolRegistry, or None
         self.max_tool_rounds = max_tool_rounds
         self.model = model or default_model()
@@ -55,29 +57,69 @@ class ClaudeChat:
     def reset(self) -> None:
         self.history = []
 
-    def build_system(self) -> str:
+    def build_system(self, notes: list[str] | None = None) -> str:
         now = datetime.now().astimezone()
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
+        if notes:
+            parts.append("Notes from long-term memory that may be relevant "
+                         "(use only if they help):\n"
+                         + "\n".join(f"- {n}" for n in notes))
         parts.append(f"Current local date and time: "
                      f"{now:%A, %B %d, %Y, %I:%M %p} ({now:%Z}, UTC{now:%z}).")
         return "\n\n".join(parts)
 
     def ask(self, user_text: str) -> str:
         """Send one user turn, run any tool calls, and return the text reply."""
+        notes = self.recall(user_text)
         start = len(self.history)
         self.history.append({"role": "user", "content": user_text})
         try:
-            reply = self._run()
+            reply = self._run(notes)
         except Exception:
             del self.history[start:]  # keep history valid so the user can retry
             raise
         self._trim_history()
         return reply
 
-    def _run(self) -> str:
-        system = self.build_system()
+    def recall(self, user_text: str) -> list[str]:
+        if not self.memory:
+            return []
+        try:
+            return self.memory.retrieve(user_text)
+        except Exception as e:  # memory is a bonus; never block a reply
+            log.warning("Memory lookup failed: %s", e)
+            return []
+
+    def end_conversation(self) -> str | None:
+        """Summarize the conversation into long-term memory, then reset.
+
+        Returns the stored summary, or None if nothing was stored."""
+        from assistant.memory import SUMMARY_PROMPT, transcript
+
+        text = transcript(self.history)
+        self.reset()
+        if not self.memory or not text:
+            return None
+        try:
+            response = self.client.messages.create(
+                model=self.model, max_tokens=200, system=SUMMARY_PROMPT,
+                messages=[{"role": "user", "content": text}])
+            summary = "".join(b.text for b in response.content
+                              if b.type == "text").strip()
+            if not summary or summary.upper().startswith("NOTHING"):
+                return None
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d")
+            summary = f"{stamp}: {summary}"
+            self.memory.store(summary)
+            return summary
+        except Exception as e:
+            log.warning("Could not save conversation summary: %s", e)
+            return None
+
+    def _run(self, notes: list[str] | None = None) -> str:
+        system = self.build_system(notes)
         for _ in range(self.max_tool_rounds + 1):
             kwargs = dict(model=self.model, max_tokens=self.max_tokens,
                           system=system, messages=self.history)

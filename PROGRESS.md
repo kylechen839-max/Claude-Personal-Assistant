@@ -77,3 +77,22 @@ Run all tests with `pytest` (from the project root, venv active).
   accepted), yes/no parsing, Notion filters/time-zone conversion/fuzzy and
   ambiguous names. One real read-only call per service runs automatically
   when `NOTION_TOKEN` / `token.json` exist (skipped in the sandbox).
+
+## Stage 6 - Long-term memory ✅
+- `assistant/memory.py`: `PineconeMemory` on the existing `project-context`
+  index. Embeddings use Pinecone's hosted `llama-text-embed-v2` (1024-d) —
+  verified to be the model the index was built with (relevant notes score
+  ~0.5-0.6, unrelated ~0.15; `multilingual-e5-large` scored ~0.07 for
+  everything). Default relevance cutoff 0.4.
+- Before each reply: the user's words are matched across all namespaces and
+  up to 4 good notes are added to the system prompt. A memory failure is
+  logged and the reply goes ahead without notes.
+- After each conversation (exit, "goodbye", or 5 idle minutes in wake mode)
+  Claude writes a 1-3 sentence note, which is stored in the
+  `voice-assistant` namespace. Small talk ("NOTHING") is not stored. Other
+  namespaces are never written.
+- Tested by `tests/test_memory.py` with a mocked Pinecone client (score
+  filtering, namespaces, upsert shape, prompt injection, failure tolerance,
+  summarize/skip, transcript excludes tool data, wake-mode idle timeout),
+  plus one real read-only query against your index (runs when
+  `PINECONE_API_KEY` is set; it passed during the build).
