@@ -96,3 +96,39 @@ Run all tests with `pytest` (from the project root, venv active).
   summarize/skip, transcript excludes tool data, wake-mode idle timeout),
   plus one real read-only query against your index (runs when
   `PINECONE_API_KEY` is set; it passed during the build).
+
+## Stage 7 - Polish ✅
+- `config.toml` + `assistant/config.py`: every setting in one file, merged
+  over built-in defaults; secrets from `.env`; `CLAUDE_MODEL` (and a few
+  others) override from the environment. Python 3.10 uses `tomli`.
+- Logging to `logs/assistant.log` (rotating, 1 MB x 3): startup, what was
+  heard, tool calls, replies, errors with tracebacks. Console shows warnings.
+- Error handling: network down / timeouts, bad API key, rate limits and
+  other API errors each produce a short spoken sentence; tool errors are
+  reported to Claude, which explains them; memory failures are skipped;
+  in wake mode a failing command never stops the loop, and mic errors are
+  retried (gives up with a clear message after 5 in a row); startup problems
+  (missing key, no mic, bad config) print one clear line and exit 1.
+- Single entry point `python -m assistant` (wake mode by default);
+  `claude_assistant.py` is now a thin shim to it.
+- Tested by `tests/test_config_cli.py` (config merge/env/.env, shipped
+  config.toml valid, log file written, missing-key exit, full `main()` text
+  run, startup error message, tools/memory enabled per config, wake-loop
+  recovery and give-up, error messages) and `tests/test_end_to_end.py`:
+  "Hey Claude, what's on my calendar tomorrow?" from a .wav through the
+  real wake/VAD pipeline, the Claude tool loop, the real calendar tool code
+  (Google API mocked), to the spoken answer.
+
+## Test summary
+`pytest`: 61 passed, 5 skipped in the build sandbox. The skips are
+real-service tests that need things only Kyle can provide (Whisper model
+download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
+
+## Known issues / notes
+- The wake word itself (Porcupine + your `.ppn`) and the real Whisper model
+  have not been exercised in the sandbox; they are the first things to check
+  in MANUAL_TEST.md.
+- pyttsx3 on some Windows setups stops speaking after the first reply; if
+  that happens, switch `[tts] engine = "piper"` (and tell me).
+- The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
+- Two Notion databases are named "Assignments"; the Fall 2026 one is used.

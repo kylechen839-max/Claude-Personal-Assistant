@@ -1,0 +1,112 @@
+"""Settings: built-in defaults <- config.toml <- environment variables.
+
+Secrets live in .env (loaded here); everything else in config.toml.
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+import logging.handlers
+import os
+import sys
+from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10
+    import tomli as tomllib
+
+DEFAULTS: dict = {
+    "assistant": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 500,
+        "max_history": 40,
+        "max_tool_rounds": 6,
+        "conversation_timeout": 300,  # seconds idle before a new conversation
+        "api_max_retries": 3,
+        "api_timeout": 30,
+        "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
+    },
+    "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
+            "piper_model": "", "piper_executable": "piper"},
+    "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
+    "wake": {
+        "keyword_path": "",  # your "Hey Claude" .ppn from Picovoice Console
+        "builtin_keyword": "computer",  # used if keyword_path is missing
+        "sensitivity": 0.6,
+        "chime": True,
+        "silence_ms": 800,
+        "max_seconds": 15,
+        "no_speech_timeout": 5,
+        "vad_min_threshold": 0.015,
+        "mic_device": "",  # sounddevice name or index; "" = default
+    },
+    "calendar": {"enabled": True, "credentials": "credentials.json",
+                 "token": "token.json", "calendar_id": "primary"},
+    "notion": {"enabled": True,
+               "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
+    "memory": {"enabled": True, "index": "project-context",
+               "namespace": "voice-assistant", "search_namespaces": "*",
+               "embed_model": "llama-text-embed-v2", "top_k": 4,
+               "min_score": 0.4},
+    "logging": {"file": "logs/assistant.log", "level": "INFO"},
+}
+
+# Environment variables that override config values.
+ENV_OVERRIDES = {
+    "CLAUDE_MODEL": ("assistant", "model"),
+    "PORCUPINE_KEYWORD_PATH": ("wake", "keyword_path"),
+    "NOTION_ASSIGNMENTS_DB": ("notion", "database_id"),
+    "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
+    "GOOGLE_TOKEN": ("calendar", "token"),
+    "PINECONE_INDEX": ("memory", "index"),
+}
+
+
+def _merge(base: dict, override: dict) -> dict:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def load_config(path: str | Path | None = "config.toml",
+                env_file: str | Path | None = ".env") -> dict:
+    if env_file and Path(env_file).exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_file)
+    config = copy.deepcopy(DEFAULTS)
+    if path and Path(path).exists():
+        with open(path, "rb") as f:
+            _merge(config, tomllib.load(f))
+    for var, (section, key) in ENV_OVERRIDES.items():
+        if os.environ.get(var):
+            config[section][key] = os.environ[var]
+    return config
+
+
+def setup_logging(config: dict) -> Path:
+    """Detailed log to a rotating file; only warnings on the console."""
+    log_file = Path(config["logging"]["file"])
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setLevel(config["logging"]["level"].upper())
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    root.addHandler(file_handler)
+    root.addHandler(console)
+    for noisy in ("httpx", "httpcore", "urllib3", "googleapiclient", "faster_whisper"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    return log_file

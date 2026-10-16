@@ -1,0 +1,51 @@
+# Hey Claude settings. Secrets (API keys) go in .env, not here.
+# Any value left out uses the built-in default (see assistant/config.py).
+
+[assistant]
+model = "claude-sonnet-4-5"   # CLAUDE_MODEL in the environment overrides this
+max_tokens = 500
+conversation_timeout = 300    # seconds of quiet before a new conversation starts
+timezone = ""                 # e.g. "America/New_York"; empty = system time zone
+
+[tts]
+engine = "pyttsx3"            # "pyttsx3" (offline), "piper" (better offline voice), "print"
+rate = 185
+voice = ""                    # part of a voice name, e.g. "Zira" on Windows
+piper_model = ""              # path to a Piper .onnx voice when engine = "piper"
+
+[stt]
+model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
+device = "cpu"
+compute_type = "int8"
+
+[wake]
+keyword_path = ""             # e.g. "keywords/Hey-Claude_en_windows_v3_0_0.ppn"
+builtin_keyword = "computer"  # fallback while you don't have the .ppn
+sensitivity = 0.6             # 0-1; higher = fewer misses, more false wakes
+chime = true
+silence_ms = 800              # how long a pause ends your command
+max_seconds = 15
+no_speech_timeout = 5
+mic_device = ""               # "" = default mic
+
+[calendar]
+enabled = true
+credentials = "credentials.json"
+token = "token.json"
+calendar_id = "primary"
+
+[notion]
+enabled = true
+database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments
+
+[memory]
+enabled = true
+index = "project-context"
+namespace = "voice-assistant" # where conversation summaries are written
+search_namespaces = "*"       # "*" = read all namespaces, or a list like ["projects"]
+top_k = 4
+min_score = 0.4
+
+[logging]
+file = "logs/assistant.log"
+level = "INFO"

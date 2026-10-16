@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import re
 import time
 
 import anthropic
 
 from assistant import audio
 from assistant.chat import ClaudeChat
-from assistant.tools import ToolRegistry
 from assistant.stt import Transcriber, record_push_to_talk
+from assistant.tools import ToolRegistry
 from assistant.tts import make_tts
 
 EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
              "affirmative", "confirm", "confirmed", "absolutely", "definitely"}
 NO_WORDS = {"no", "nope", "don't", "dont", "not", "cancel", "stop", "wait"}
-DEFAULT_NOTION_DB = "7eefabe3-0226-47a8-a287-584be0d2ea9b"  # Fall 2026 Assignments
+log = logging.getLogger(__name__)
 
 
 def is_exit(text: str) -> bool:
@@ -27,8 +29,6 @@ def is_exit(text: str) -> bool:
 
 def is_yes(text: str) -> bool:
     """Strict yes: a yes word and no negation ('yes, but no' -> False)."""
-    import re
-
     words = set(re.findall(r"[a-z']+", text.lower()))
     phrase = " ".join(re.findall(r"[a-z']+", text.lower()))
     yes = bool(words & YES_WORDS) or phrase in {"go ahead", "do it", "please do"}
@@ -45,8 +45,10 @@ def parse_args(argv=None):
     parser.add_argument("--audio-file",
                         help="wake mode: feed this .wav through the wake-word "
                              "pipeline instead of the live mic, then exit")
-    parser.add_argument("--tts", default="pyttsx3",
-                        choices=["pyttsx3", "piper", "print"])
+    parser.add_argument("--tts", choices=["pyttsx3", "piper", "print"],
+                        help="override the TTS engine from config.toml")
+    parser.add_argument("--config", default="config.toml",
+                        help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
                         help="Porcupine .ppn file for the 'Hey Claude' wake word")
     return parser.parse_args(argv)
@@ -56,17 +58,28 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print) -> str:
     """Ask Claude; on failure return a short sentence that can be spoken."""
     try:
         return chat.ask(user_text)
-    except anthropic.APIConnectionError as e:
+    except anthropic.APIConnectionError as e:  # includes timeouts
+        log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
         return "Sorry, I can't reach the internet right now."
+    except anthropic.AuthenticationError as e:
+        log.error("Authentication error: %s", e)
+        output_fn(f"API error: {e}")
+        return "Sorry, my Anthropic API key isn't working. Please check it."
+    except anthropic.RateLimitError as e:
+        log.warning("Rate limited: %s", e)
+        output_fn(f"API error: {e}")
+        return "I'm getting too many requests right now. Try again in a minute."
     except anthropic.APIError as e:
+        log.error("API error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
 
 
-def run_text(chat: ClaudeChat, input_fn=input, output_fn=print,
+def run_text(chat: ClaudeChat, input_fn=None, output_fn=print,
              tts=None) -> None:
     """Typed input; replies printed, and spoken too if a TTS engine is given."""
+    input_fn = input_fn or input
     mode = "speak" if tts else "text"
     output_fn(f"Claude assistant ({mode} mode). Type 'quit' to exit.")
     while True:
@@ -117,18 +130,29 @@ def finish(chat: ClaudeChat, output_fn=print) -> None:
 
 def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
              output_fn=print, wake_phrase: str = "Hey Claude",
-             conversation_timeout: float = 300, clock=time.monotonic) -> None:
+             conversation_timeout: float = 300, clock=time.monotonic,
+             max_failures: int = 5, retry_delay: float = 2.0) -> None:
     """Always listening. A conversation ends on 'goodbye' or after
     `conversation_timeout` seconds without a request; it is then summarized
     to memory and history is reset. Ctrl+C quits. A file source stops at its
     end."""
     output_fn(f"Listening for '{wake_phrase}'... (Ctrl+C to quit)")
     last_exchange = clock()
+    failures = 0
     while True:
         try:
             woke, recording = listener.listen(source)
+            failures = 0
         except KeyboardInterrupt:
             break
+        except Exception as e:  # e.g. mic unplugged: retry a few times
+            failures += 1
+            log.exception("Listening failed (%d in a row)", failures)
+            if failures >= max_failures:
+                raise
+            output_fn(f"(Microphone problem: {e}; retrying)")
+            time.sleep(retry_delay)
+            continue
         if not woke:
             break  # audio file finished
         if chat.history and clock() - last_exchange > conversation_timeout:
@@ -139,48 +163,82 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
         if recording is None:
             output_fn("(heard the wake word but no command)")
             continue
-        user_text = transcriber.transcribe(recording)
-        output_fn(f"You: {user_text}")
-        if not user_text:
-            continue
-        if is_exit(user_text):
-            tts.speak("Goodbye!")
-            summary = chat.end_conversation()
-            if summary:
-                output_fn(f"(Saved to memory: {summary})")
-            continue
-        reply = get_reply(chat, user_text, output_fn)
-        output_fn(f"Claude: {reply}")
-        tts.speak(reply)
+        try:
+            handle_command(chat, tts, transcriber, recording, output_fn)
+        except KeyboardInterrupt:
+            break
+        except Exception:  # never let one bad request stop the assistant
+            log.exception("Error handling a command")
+            output_fn("(Something went wrong; still listening)")
+            try:
+                tts.speak("Sorry, something went wrong.")
+            except Exception:
+                log.exception("TTS failed too")
     finish(chat, output_fn)
 
 
-def build_tools(output_fn=print) -> ToolRegistry:
-    """Register every service whose credentials are available."""
+def handle_command(chat: ClaudeChat, tts, transcriber, recording,
+                   output_fn=print) -> None:
+    user_text = transcriber.transcribe(recording)
+    output_fn(f"You: {user_text}")
+    log.info("Heard: %r", user_text)
+    if not user_text:
+        return
+    if is_exit(user_text):
+        tts.speak("Goodbye!")
+        summary = chat.end_conversation()
+        if summary:
+            output_fn(f"(Saved to memory: {summary})")
+        return
+    reply = get_reply(chat, user_text, output_fn)
+    output_fn(f"Claude: {reply}")
+    log.info("Replied: %r", reply)
+    tts.speak(reply)
+
+
+def build_tools(config: dict, output_fn=print) -> ToolRegistry:
+    """Register every service that is enabled and has credentials."""
     from pathlib import Path
 
     registry = ToolRegistry()
-    creds = os.environ.get("GOOGLE_CREDENTIALS", "credentials.json")
-    token = os.environ.get("GOOGLE_TOKEN", "token.json")
-    if Path(creds).exists() or Path(token).exists():
+    tz = config["assistant"]["timezone"] or None
+    cal = config["calendar"]
+    if cal["enabled"] and (Path(cal["credentials"]).exists()
+                           or Path(cal["token"]).exists()):
         from assistant.tools.calendar import GoogleCalendar
 
-        registry.register(*GoogleCalendar(credentials_path=creds,
-                                          token_path=token).tools())
-    else:
-        output_fn(f"(Calendar tools off: {creds} not found)")
-    if os.environ.get("NOTION_TOKEN"):
+        registry.register(*GoogleCalendar(
+            credentials_path=cal["credentials"], token_path=cal["token"],
+            calendar_id=cal["calendar_id"], timezone=tz).tools())
+    elif cal["enabled"]:
+        output_fn(f"(Calendar tools off: {cal['credentials']} not found)")
+    if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
-        db = os.environ.get("NOTION_ASSIGNMENTS_DB", DEFAULT_NOTION_DB)
-        registry.register(*NotionAssignments(db).tools())
-    else:
+        registry.register(*NotionAssignments(config["notion"]["database_id"],
+                                             timezone=tz).tools())
+    elif config["notion"]["enabled"]:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
     return registry
 
 
-def text_confirm(input_fn=input):
-    return lambda question: is_yes(input_fn(f"{question} (yes/no): "))
+def build_memory(config: dict, output_fn=print):
+    mem = config["memory"]
+    if not mem["enabled"]:
+        return None
+    if not os.environ.get("PINECONE_API_KEY"):
+        output_fn("(Memory off: PINECONE_API_KEY not set)")
+        return None
+    from assistant.memory import PineconeMemory
+
+    return PineconeMemory(index_name=mem["index"], namespace=mem["namespace"],
+                          search_namespaces=mem["search_namespaces"],
+                          embed_model=mem["embed_model"], top_k=mem["top_k"],
+                          min_score=mem["min_score"])
+
+
+def text_confirm(input_fn=None):
+    return lambda question: is_yes((input_fn or input)(f"{question} (yes/no): "))
 
 
 def voice_confirm(tts, record_fn, transcriber, output_fn=print):
@@ -195,44 +253,74 @@ def voice_confirm(tts, record_fn, transcriber, output_fn=print):
     return confirm
 
 
-def build_wake_components(args):
-    from assistant.wakeword import (FileSource, MicSource, WakeListener,
-                                    make_detector)
+def build_wake_components(args, config: dict):
+    from assistant.wakeword import (EnergyVAD, FileSource, MicSource,
+                                    WakeListener, make_detector)
 
-    detector = make_detector(keyword_path=args.keyword_path)
+    wake = config["wake"]
+    detector = make_detector(keyword_path=args.keyword_path or wake["keyword_path"],
+                             builtin_keyword=wake["builtin_keyword"],
+                             sensitivity=wake["sensitivity"])
     chime = audio.make_chime()
-    on_wake = None if args.audio_file else (lambda: audio.play(chime))
-    listener = WakeListener(detector, on_wake=on_wake)
-    source = FileSource(args.audio_file) if args.audio_file else MicSource(
-        detector.frame_length)
+    on_wake = (lambda: audio.play(chime)) if wake["chime"] and not args.audio_file else None
+    listener = WakeListener(detector, vad=EnergyVAD(wake["vad_min_threshold"]),
+                            on_wake=on_wake, silence_ms=wake["silence_ms"],
+                            max_seconds=wake["max_seconds"],
+                            no_speech_timeout=wake["no_speech_timeout"])
+    device = wake["mic_device"]
+    if isinstance(device, str) and device.isdigit():
+        device = int(device)
+    source = (FileSource(args.audio_file) if args.audio_file
+              else MicSource(detector.frame_length, device=device or None))
     return listener, source, detector.phrase
 
 
-def main(argv=None) -> int:
-    args = parse_args(argv)
-    tools = build_tools()
-    memory = None
-    if os.environ.get("PINECONE_API_KEY"):
-        from assistant.memory import PineconeMemory
+def build_chat(config: dict, tools=None, memory=None) -> ClaudeChat:
+    a = config["assistant"]
+    client = anthropic.Anthropic(max_retries=a["api_max_retries"],
+                                 timeout=a["api_timeout"])
+    return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
+                      max_history=a["max_history"], tools=tools,
+                      max_tool_rounds=a["max_tool_rounds"], memory=memory)
 
-        memory = PineconeMemory()
-    else:
-        print("(Memory off: PINECONE_API_KEY not set)")
-    chat = ClaudeChat(tools=tools, memory=memory)
-    if args.mode == "text":
-        tools.confirm = text_confirm()
-        run_text(chat)
-    elif args.mode == "speak":
-        tools.confirm = text_confirm()
-        run_text(chat, tts=make_tts(args.tts))
-    elif args.mode == "voice":
-        tts, transcriber = make_tts(args.tts), Transcriber()
-        tools.confirm = voice_confirm(tts, record_push_to_talk, transcriber)
-        run_voice(chat, tts, transcriber)
-    else:
-        listener, source, phrase = build_wake_components(args)
-        tts, transcriber = make_tts(args.tts), Transcriber()
-        tools.confirm = voice_confirm(
-            tts, lambda: listener.record_reply(source), transcriber)
-        run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase)
+
+def main(argv=None) -> int:
+    from assistant.config import load_config, setup_logging
+
+    args = parse_args(argv)
+    config = load_config(args.config)
+    log_file = setup_logging(config)
+    log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")
+        return 1
+    tts_cfg = config["tts"]
+    tts_name = args.tts or tts_cfg["engine"]
+    stt_cfg = config["stt"]
+    try:
+        tools = build_tools(config)
+        chat = build_chat(config, tools, build_memory(config))
+        if args.mode in ("text", "speak"):
+            tools.confirm = text_confirm()
+            tts = make_tts(tts_name, **tts_cfg) if args.mode == "speak" else None
+            run_text(chat, tts=tts)
+            return 0
+        tts = make_tts(tts_name, **tts_cfg)
+        transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
+                                  stt_cfg["compute_type"])
+        if args.mode == "voice":
+            tools.confirm = voice_confirm(tts, record_push_to_talk, transcriber)
+            run_voice(chat, tts, transcriber)
+        else:
+            listener, source, phrase = build_wake_components(args, config)
+            tools.confirm = voice_confirm(
+                tts, lambda: listener.record_reply(source), transcriber)
+            run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase,
+                     conversation_timeout=config["assistant"]["conversation_timeout"])
+    except KeyboardInterrupt:
+        print("Bye!")
+    except Exception as e:  # startup problems: missing key, no mic, bad config
+        log.exception("Fatal error")
+        print(f"Error: {e}\n(Details in {log_file})")
+        return 1
     return 0

@@ -1,6 +1,11 @@
 # Blockers
 
 Things only Kyle can do. Everything else has been built and tested around them.
+None of these block the code; each one switches on a feature.
+
+## 0. Anthropic API key
+- No key was available in the build sandbox, so every Claude call in the
+  tests is mocked. **To do:** put `ANTHROPIC_API_KEY=...` in `.env`.
 
 ## 1. Whisper model could not be downloaded in the build sandbox
 - The build environment's network policy blocks `huggingface.co`, so the
@@ -41,3 +46,9 @@ Things only Kyle can do. Everything else has been built and tested around them.
   names (Assignment, Course, Due, Status, Type) were read from your
   workspace and are the defaults. Note: there is a second "Assignments"
   database under "Student Planner"; the Fall 2026 one is used.
+
+## 5. Pinecone
+- Nothing to do: `PINECONE_API_KEY` was available during the build and a real
+  read-only query against `project-context` passed. Put the same key in your
+  `.env`. The assistant writes only to the new `voice-assistant` namespace;
+  no test writes to the real index.

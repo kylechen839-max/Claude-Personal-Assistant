@@ -261,9 +261,9 @@ def test_notion_update_status_fuzzy_and_ambiguous():
 @pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("NOTION_TOKEN"), reason="NOTION_TOKEN not set")
 def test_live_notion_list_assignments():
-    from assistant.cli import DEFAULT_NOTION_DB
+    from assistant.config import load_config
 
-    db = os.environ.get("NOTION_ASSIGNMENTS_DB", DEFAULT_NOTION_DB)
+    db = load_config()["notion"]["database_id"]
     out = NotionAssignments(db).list_assignments(days_ahead=30)
     assert "assignments" in out
 
