@@ -54,3 +54,26 @@ Run all tests with `pytest` (from the project root, venv active).
   over the file with mocked STT/Claude; network error handling.
   The real Porcupine test and the Whisper-on-pipeline test skip without
   `PICOVOICE_ACCESS_KEY` / the Whisper model (see BLOCKERS.md).
+
+## Stage 5 - Tools ✅
+- `assistant/tools/__init__.py`: `Tool` + `ToolRegistry` (schemas for the
+  API, dispatch, errors reported back to Claude instead of crashing, and a
+  confirmation gate that defaults to "no").
+- `ClaudeChat` now runs the tool-use loop (bounded rounds; a failed turn is
+  rolled back entirely so history stays valid).
+- `assistant/tools/calendar.py` (Google Calendar): list events for
+  today/tomorrow/a weekday/a date, create, move (keeps duration, handles
+  all-day events and DST), delete. Delete asks for **spoken confirmation**
+  ("Do you want me to delete Dentist on Saturday, October 17 at 3 PM? Please
+  say yes or no.") and only a clear yes proceeds.
+- `assistant/tools/notion.py`: list upcoming/overdue unfinished assignments
+  from the Fall 2026 Assignments database; set Status (Not started /
+  In progress / Done) by id or by (fuzzy) name, asking to clarify if
+  ambiguous. Uses the Notion 2025-09-03 data-sources API.
+- Tools are only enabled when their credentials are present.
+- Tested by `tests/test_tools.py` with mocked Anthropic, Google, and Notion
+  clients: tool-call parsing and dispatch, tool results threaded back, loop
+  bound, rollback, every calendar operation, delete confirmation (declined and
+  accepted), yes/no parsing, Notion filters/time-zone conversion/fuzzy and
+  ambiguous names. One real read-only call per service runs automatically
+  when `NOTION_TOKEN` / `token.json` exist (skipped in the sandbox).

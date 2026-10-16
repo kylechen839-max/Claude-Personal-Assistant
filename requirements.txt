@@ -4,5 +4,11 @@ pyttsx3>=2.90
 sounddevice>=0.4.6
 faster-whisper>=1.0
 pvporcupine>=3.0
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+notion-client>=3.0
+tzlocal>=5.0
+tzdata
 python-dotenv>=1.0
 pytest>=8.0
