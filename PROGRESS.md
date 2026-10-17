@@ -269,7 +269,8 @@ Run all tests with `pytest` (from the project root, venv active).
 - Two cases: `whisper` (real faster-whisper) and `mocked-stt` (only the
   transcription replaced by the known transcript). In the sandbox
   huggingface.co is blocked, so the `whisper` case skips with that reason;
-  CI downloads the model and runs it.
+  CI downloads the model and runs it: it passed with real Whisper on
+  Ubuntu (3.10, 3.12) and Windows (3.12) at ffd03fa.
 
 ### Latency timings (2026-10-17)
 - `assistant/timing.py`: `TurnTimer` stamps each stage of a turn with one
@@ -355,8 +356,9 @@ Run all tests with `pytest` (from the project root, venv active).
   fake clock.
 
 ## Test summary
-`pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
-build sandbox). The skips are real-service tests that need things the
+`pytest` on branch claude/voice-loop (Linux build sandbox, Python 3.13):
+179 passed, 7 skipped. The 7th skip, compared with master's 155/6, is the
+real-Whisper case of the definition-of-done test; CI runs it. The skips are real-service tests that need things the
 sandbox lacks (Whisper model download, Notion token, Google sign-in); see
 BLOCKERS.md.
 
