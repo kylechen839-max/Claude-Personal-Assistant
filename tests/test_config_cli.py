@@ -1,4 +1,5 @@
 import logging
+import os
 from types import SimpleNamespace
 
 import numpy as np
@@ -49,7 +50,9 @@ def test_env_file_loaded(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("NOTION_ASSIGNMENTS_DB=abc123\n")
     assert load_config(None, env)["notion"]["database_id"] == "abc123"
-    monkeypatch.delenv("NOTION_ASSIGNMENTS_DB", raising=False)
+    # load_dotenv set it outside monkeypatch; a second delenv would record
+    # "abc123" and restore it at teardown, leaking into later tests.
+    os.environ.pop("NOTION_ASSIGNMENTS_DB", None)
 
 
 def test_setup_logging_writes_file(tmp_path):
