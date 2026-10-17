@@ -1,14 +1,15 @@
 """Always-listening loop: wake word -> chime -> record until silence.
 
-Audio flows as fixed-size int16 frames (Porcupine wants 512 samples at
-16 kHz) from either the live mic (`MicSource`) or a .wav file
-(`FileSource`, used by --audio-file and the tests).
+Audio flows as fixed-size int16 frames (512 samples at 16 kHz; openWakeWord
+buffers them into its own 80 ms steps) from either the live mic
+(`MicSource`) or a .wav file (`FileSource`, used by --audio-file and the
+tests).
 """
 
 from __future__ import annotations
 
 import logging
-import os
+import re
 from pathlib import Path
 from typing import Callable, Iterator, Protocol
 
@@ -92,42 +93,76 @@ class WakeWordDetector(Protocol):
     def process(self, frame: np.ndarray) -> bool: ...
 
 
-class PorcupineDetector:
-    def __init__(self, access_key: str, keyword_path: str | None = None,
-                 builtin_keyword: str = "computer", sensitivity: float = 0.6):
-        import pvporcupine
+BUILTIN_KEYWORDS = ("hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy")
 
-        if keyword_path and Path(keyword_path).exists():
-            self.phrase = Path(keyword_path).stem.split("_")[0].replace("-", " ")
-            self._porcupine = pvporcupine.create(
-                access_key=access_key, keyword_paths=[keyword_path],
-                sensitivities=[sensitivity])
+
+def phrase_from_model(path: str | Path) -> str:
+    """'keywords/hey_claude_v0.1.onnx' -> 'hey claude'."""
+    words = Path(path).stem.replace("-", "_").split("_")
+    return " ".join(w for w in words
+                    if w and not re.fullmatch(r"v\d+(\.\d+)*", w)).lower()
+
+
+class OpenWakeWordDetector:
+    """openWakeWord (open source, runs offline, no account or key).
+
+    `model` is a built-in name (see BUILTIN_KEYWORDS) or a path to a custom
+    .onnx model such as one trained for "Hey Claude". ONNX runs on both
+    Windows and the Raspberry Pi, so one model file serves both.
+    """
+
+    def __init__(self, model: str = "hey_jarvis", sensitivity: float = 0.5):
+        from openwakeword.model import Model
+
+        custom = model.endswith(".onnx")
+        if custom:
+            self.phrase = phrase_from_model(model)
+        elif model in BUILTIN_KEYWORDS:
+            self.phrase = model.replace("_", " ")
         else:
-            if keyword_path:
-                log.warning("Wake word file %s not found; using built-in '%s'",
-                            keyword_path, builtin_keyword)
-            self.phrase = builtin_keyword
-            self._porcupine = pvporcupine.create(
-                access_key=access_key, keywords=[builtin_keyword],
-                sensitivities=[sensitivity])
-        self.frame_length = self._porcupine.frame_length
+            raise ValueError(f"Unknown wake word '{model}': use a .onnx model "
+                             f"file or one of {', '.join(BUILTIN_KEYWORDS)}")
+        _ensure_feature_models(None if custom else model)
+        self._model = Model(wakeword_models=[model], inference_framework="onnx")
+        self.threshold = 1.0 - sensitivity  # score needed to count as a wake
+        self.frame_length = FRAME_LENGTH
 
     def process(self, frame: np.ndarray) -> bool:
-        return self._porcupine.process(frame) >= 0
+        scores = self._model.predict(frame)
+        if max(scores.values()) >= self.threshold:
+            self._model.reset()  # don't fire again on the same utterance
+            return True
+        return False
 
     def close(self) -> None:
-        self._porcupine.delete()
+        pass
 
 
-def make_detector(access_key: str | None = None, keyword_path: str | None = None,
-                  builtin_keyword: str = "computer",
-                  sensitivity: float = 0.6) -> PorcupineDetector:
-    access_key = access_key or os.environ.get("PICOVOICE_ACCESS_KEY")
-    if not access_key:
-        raise RuntimeError("PICOVOICE_ACCESS_KEY is not set. Get a free key at "
-                           "https://console.picovoice.ai and put it in .env")
-    return PorcupineDetector(access_key, keyword_path, builtin_keyword,
-                             sensitivity)
+def _ensure_feature_models(builtin: str | None) -> None:
+    """Download openWakeWord's shared models (and a built-in) on first use."""
+    import openwakeword
+    from openwakeword.utils import download_models
+
+    folder = Path(openwakeword.__file__).parent / "resources" / "models"
+    needed = ["melspectrogram.onnx", "embedding_model.onnx"]
+    if builtin:
+        needed.append(f"{builtin}_v0.1.onnx")
+    if not all((folder / name).exists() for name in needed):
+        log.info("Downloading openWakeWord models (one time, a few MB)")
+        # names match by substring and [] means "all", so a custom model
+        # passes a name that matches nothing to get only the shared models
+        download_models(model_names=[builtin or "no-builtin-needed"])
+
+
+def make_detector(keyword_path: str | None = None,
+                  builtin_keyword: str = "hey_jarvis",
+                  sensitivity: float = 0.5) -> OpenWakeWordDetector:
+    if keyword_path and Path(keyword_path).exists():
+        return OpenWakeWordDetector(keyword_path, sensitivity)
+    if keyword_path:
+        log.warning("Wake word model %s not found; using built-in '%s'",
+                    keyword_path, builtin_keyword)
+    return OpenWakeWordDetector(builtin_keyword, sensitivity)
 
 
 # ---------- voice activity detection ----------

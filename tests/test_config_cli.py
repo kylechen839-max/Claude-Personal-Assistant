@@ -89,10 +89,10 @@ def test_main_text_mode_end_to_end(tmp_path, monkeypatch, fake_client, capsys):
 def test_main_reports_startup_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    monkeypatch.delenv("PICOVOICE_ACCESS_KEY", raising=False)
     monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    (tmp_path / "config.toml").write_text('[wake]\nbuiltin_keyword = "computer"\n')
     assert cli.main(["--mode", "wake", "--tts", "print"]) == 1
-    assert "PICOVOICE_ACCESS_KEY" in capsys.readouterr().out
+    assert "Unknown wake word 'computer'" in capsys.readouterr().out
 
 
 def test_build_tools_and_memory_respect_config(tmp_path, monkeypatch):

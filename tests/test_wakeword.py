@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 import pytest
 
@@ -8,13 +6,13 @@ from assistant.audio import SAMPLE_RATE
 from assistant.tts import Pyttsx3TTS
 from assistant.wakeword import (FRAME_LENGTH, EnergyVAD, FileSource,
                                 WakeListener, make_detector,
-                                record_until_silence)
+                                phrase_from_model, record_until_silence)
 
 COMMAND = "What is on my calendar tomorrow"
 
 
 class ScriptedDetector:
-    """Stands in for Porcupine: fires when the file reaches given frames."""
+    """Stands in for openWakeWord: fires when the file reaches given frames."""
 
     frame_length = FRAME_LENGTH
 
@@ -102,23 +100,31 @@ def test_pipeline_transcribes_command(session_file):
     assert woke and rough_match(COMMAND, t.transcribe(utt))
 
 
-def test_make_detector_requires_key(monkeypatch):
-    monkeypatch.delenv("PICOVOICE_ACCESS_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="PICOVOICE_ACCESS_KEY"):
-        make_detector()
+def test_phrase_from_model_name():
+    assert phrase_from_model("keywords/hey_claude_v0.1.onnx") == "hey claude"
+    assert phrase_from_model("Hey-Claude.onnx") == "hey claude"
 
 
-@pytest.mark.live
-@pytest.mark.skipif(not os.environ.get("PICOVOICE_ACCESS_KEY"),
-                    reason="PICOVOICE_ACCESS_KEY not set")
-def test_real_porcupine_detects_builtin_keyword(tmp_path):
-    clip = tts_clip(tmp_path, "Computer", "kw")
+def test_make_detector_rejects_unknown_builtin():
+    with pytest.raises(ValueError, match="hey_jarvis"):
+        make_detector(builtin_keyword="computer")
+
+
+def detections(detector, tmp_path, text):
+    clip = tts_clip(tmp_path, text, "kw")
     path = tmp_path / "kw.wav"
     audio.write_wav(path, np.concatenate([audio.silence(1), clip, audio.silence(1)]))
-    detector = make_detector(builtin_keyword="computer", sensitivity=0.8)
-    hits = sum(detector.process(f) for f in FileSource(path).frames())
-    detector.close()
-    assert hits >= 1
+    return sum(detector.process(f) for f in FileSource(path).frames())
+
+
+@pytest.mark.slow
+def test_real_openwakeword_detects_builtin_keyword(tmp_path):
+    """Real openWakeWord (downloads a few MB of models on first run)."""
+    detector = make_detector(keyword_path="keywords/missing.onnx",
+                             builtin_keyword="hey_jarvis")
+    assert detector.phrase == "hey jarvis"
+    assert detections(detector, tmp_path, "Hey Jarvis") == 1  # fires once
+    assert detections(detector, tmp_path, COMMAND) == 0
 
 
 def test_cli_wake_mode_with_audio_file(session_file, fake_client):

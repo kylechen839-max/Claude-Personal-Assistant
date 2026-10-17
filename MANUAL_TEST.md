@@ -6,7 +6,7 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 ## 0. Setup check
 - [ ] `pytest -rs` passes. The only skips should be services you haven't set
       up yet. With all keys present: **0 skipped** (this confirms Whisper
-      downloaded and the real Porcupine, Notion, Google and Pinecone calls
+      downloaded and the real openWakeWord, Notion, Google and Pinecone calls
       work).
 - [ ] `python -m assistant --mode text`: startup prints no "(... off: ...)"
       lines; "hello" gets a short reply.
@@ -24,8 +24,8 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] Try from across the room / with background music; note accuracy.
 
 ## 3. Wake word
-- [ ] `python -m assistant`: the banner names your wake phrase ("Hey Claude",
-      not "computer" — if it says computer, the `.ppn` path is wrong).
+- [ ] `python -m assistant`: the banner names your wake phrase ("hey claude",
+      not "hey jarvis" — if it says hey jarvis, the `.onnx` path is wrong).
 - [ ] Say "Hey Claude": the **chime** plays within ~half a second.
 - [ ] Ten tries from normal distance: it wakes at least 9 times.
 - [ ] Talk normally / play a video for 5 minutes: no (or very rare) false
@@ -64,6 +64,6 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] `logs/assistant.log` shows what was heard and replied.
 
 ## 8. Raspberry Pi (later)
-- [ ] Repeat sections 1-4 on the Pi with the Raspberry Pi `.ppn`.
+- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model.
 - [ ] Note response time from end of speech to start of reply; if slow, try
       `[stt] model = "tiny.en"` and Piper.
