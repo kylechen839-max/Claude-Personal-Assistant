@@ -120,7 +120,7 @@ Run all tests with `pytest` (from the project root, venv active).
   (Google API mocked), to the spoken answer.
 
 ## Test summary
-`pytest`: 75 passed, 5 skipped in the build sandbox. The skips are
+`pytest`: 76 passed, 5 skipped in the build sandbox. The skips are
 real-service tests that need things only Kyle can provide (Whisper model
 download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
 
@@ -143,6 +143,9 @@ download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
   fixed 512 samples.
 - pyttsx3 builds a fresh engine for each reply on Windows, the usual fix
   for it going silent after the first reply (not yet tried on Windows).
+- pyttsx3 2.99's `save_to_file` writes an empty (header-only) .wav on
+  Windows; found by the Windows CI job. Files are now rendered through SAPI
+  directly on Windows (live speech still goes through pyttsx3).
 - Memory reads note text from the first of `text`, `chunk_text`, `content`,
   `summary` in the metadata (`[memory] text_fields` in config.toml).
 

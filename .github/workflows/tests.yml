@@ -50,15 +50,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: List text-to-speech voices
-        run: >-
-          python -c "import pyttsx3.engine as e;
-          print([(v.name, v.id) for v in e.Engine().getProperty('voices')])"
-
-      - name: TTS probe (Windows, temporary)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: python .github/diag/tts_probe.py
-
       - name: Run tests
         run: python -m pytest -rs
