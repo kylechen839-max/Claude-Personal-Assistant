@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-SAMPLE_RATE = 16000  # what Whisper and Porcupine expect
+SAMPLE_RATE = 16000  # what Whisper and openWakeWord expect
 
 
 def read_wav(path: str | Path) -> tuple[np.ndarray, int]:

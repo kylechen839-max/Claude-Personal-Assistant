@@ -19,9 +19,9 @@ device = "cpu"
 compute_type = "int8"
 
 [wake]
-keyword_path = ""             # e.g. "keywords/Hey-Claude_en_windows_v3_0_0.ppn"
-builtin_keyword = "computer"  # fallback while you don't have the .ppn
-sensitivity = 0.6             # 0-1; higher = fewer misses, more false wakes
+keyword_path = ""             # e.g. "keywords/hey_claude.onnx" (openWakeWord)
+builtin_keyword = "hey_jarvis"  # fallback until then: hey_jarvis, alexa, hey_mycroft, hey_rhasspy
+sensitivity = 0.5             # 0-1; higher = fewer misses, more false wakes
 chime = true
 silence_ms = 800              # how long a pause ends your command
 max_seconds = 15

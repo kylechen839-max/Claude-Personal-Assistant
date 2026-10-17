@@ -14,20 +14,18 @@ None of these block the code; each one switches on a feature.
   first use (~150 MB) and the test runs for real.
 - **To do:** run `pytest` once on your PC; confirm 0 skips in `test_stt.py`.
 
-## 2. Picovoice access key and custom "Hey Claude" wake word
-- Porcupine needs a free account key, and a custom phrase must be trained in
-  the Picovoice Console (only you can sign up).
-- **To do:**
-  1. Sign up at https://console.picovoice.ai, copy your AccessKey into `.env`
-     as `PICOVOICE_ACCESS_KEY=...`.
-  2. In the console go to Porcupine, type the phrase "Hey Claude", train it
-     for **Windows** (and later again for **Raspberry Pi**), download the
-     `.ppn` files, and put them in `keywords/` (e.g.
-     `keywords/Hey-Claude_en_windows.ppn`). Point `--keyword-path` (or the
-     config file) at it.
-- Until then the pipeline was tested with a scripted stand-in detector, and
-  the app falls back to the built-in keyword "computer" if no `.ppn` is found
-  (it still needs the access key).
+## 2. Custom "Hey Claude" wake word (openWakeWord)
+- The wake word engine is openWakeWord: open source, offline, no account or
+  key. (Picovoice Porcupine was dropped because its console now requires a
+  company email and only offers a trial.)
+- **Until a custom model exists, say "Hey Jarvis"** (the built-in fallback;
+  `[wake] builtin_keyword` can also be `alexa`, `hey_mycroft`, `hey_rhasspy`).
+- **To do:** train "hey claude" with openWakeWord's Google Colab notebook
+  (https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb,
+  linked from https://github.com/dscripka/openWakeWord; needs a Google
+  sign-in, under an hour). Download the `.onnx` file, save it as
+  `keywords/hey_claude.onnx`, and add `WAKEWORD_MODEL_PATH=keywords/hey_claude.onnx`
+  to `.env`. The same `.onnx` works on Windows and the Raspberry Pi.
 
 ## 3. Google Calendar OAuth (credentials.json)
 - **To do:** in https://console.cloud.google.com create a project, enable the

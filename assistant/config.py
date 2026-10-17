@@ -32,9 +32,9 @@ DEFAULTS: dict = {
             "piper_model": "", "piper_executable": "piper"},
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
-        "keyword_path": "",  # your "Hey Claude" .ppn from Picovoice Console
-        "builtin_keyword": "computer",  # used if keyword_path is missing
-        "sensitivity": 0.6,
+        "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
+        "builtin_keyword": "hey_jarvis",  # used if keyword_path is missing
+        "sensitivity": 0.5,
         "chime": True,
         "silence_ms": 800,
         "max_seconds": 15,
@@ -56,7 +56,7 @@ DEFAULTS: dict = {
 # Environment variables that override config values.
 ENV_OVERRIDES = {
     "CLAUDE_MODEL": ("assistant", "model"),
-    "PORCUPINE_KEYWORD_PATH": ("wake", "keyword_path"),
+    "WAKEWORD_MODEL_PATH": ("wake", "keyword_path"),
     "NOTION_ASSIGNMENTS_DB": ("notion", "database_id"),
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),

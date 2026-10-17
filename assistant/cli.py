@@ -50,7 +50,7 @@ def parse_args(argv=None):
     parser.add_argument("--config", default="config.toml",
                         help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
-                        help="Porcupine .ppn file for the 'Hey Claude' wake word")
+                        help="openWakeWord .onnx model for the 'Hey Claude' wake word")
     return parser.parse_args(argv)
 
 

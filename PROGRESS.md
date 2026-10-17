@@ -38,8 +38,9 @@ Run all tests with `pytest` (from the project root, venv active).
 ## Stage 4 - Wake word ✅
 - `assistant/wakeword.py`: audio arrives as 512-sample int16 frames from
   `MicSource` (live mic, paused while the assistant is thinking/speaking) or
-  `FileSource` (a .wav). `PorcupineDetector` listens for the custom
-  "Hey Claude" `.ppn` (falls back to the built-in "computer" keyword).
+  `FileSource` (a .wav). `OpenWakeWordDetector` listens for the custom
+  "Hey Claude" `.onnx` (falls back to the built-in "hey jarvis" model).
+  Switched from Picovoice Porcupine, whose console now needs a company email.
   After the wake word a chime plays, ~250 ms is skipped so the chime isn't
   recorded, and `EnergyVAD` + `record_until_silence` capture the command
   until 0.8 s of silence (adaptive noise floor, pre-roll, 15 s cap, 5 s
@@ -52,8 +53,9 @@ Run all tests with `pytest` (from the project root, venv active).
   runs it through the real VAD pipeline with a scripted detector (asserts two
   wakes, two chimes, and command lengths); an end-to-end CLI wake-mode test
   over the file with mocked STT/Claude; network error handling.
-  The real Porcupine test and the Whisper-on-pipeline test skip without
-  `PICOVOICE_ACCESS_KEY` / the Whisper model (see BLOCKERS.md).
+  A real openWakeWord test checks "Hey Jarvis" (generated speech) fires
+  exactly once and a normal sentence doesn't. The Whisper-on-pipeline test
+  skips without the Whisper model (see BLOCKERS.md).
 
 ## Stage 5 - Tools ✅
 - `assistant/tools/__init__.py`: `Tool` + `ToolRegistry` (schemas for the
@@ -122,7 +124,7 @@ Run all tests with `pytest` (from the project root, venv active).
 ## Test summary
 `pytest`: 64 passed, 5 skipped in the build sandbox. The skips are
 real-service tests that need things only Kyle can provide (Whisper model
-download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
+download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.md.
 
 ## Fixes after review
 - A reply cut off by `max_tokens` mid tool call left an unanswered
@@ -136,7 +138,7 @@ download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
   `test_config_cli.py`).
 
 ## Known issues / notes
-- The wake word itself (Porcupine + your `.ppn`) and the real Whisper model
+- The wake word itself (openWakeWord + your `.onnx`) and the real Whisper model
   have not been exercised in the sandbox; they are the first things to check
   in MANUAL_TEST.md.
 - pyttsx3 on some Windows setups stops speaking after the first reply; if

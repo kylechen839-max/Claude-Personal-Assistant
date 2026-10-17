@@ -6,7 +6,7 @@ Calendar, check and update your Notion assignments, and remembers past
 conversations in Pinecone.
 
 ```
-mic -> Porcupine wake word -> chime -> record until silence (VAD)
+mic -> openWakeWord wake word -> chime -> record until silence (VAD)
     -> faster-whisper (speech to text) -> Claude (+ tools, + memory)
     -> pyttsx3 / Piper (text to speech) -> speaker
 ```
@@ -27,7 +27,7 @@ mic -> Porcupine wake word -> chime -> record until silence (VAD)
    | What | Where | Goes in |
    |---|---|---|
    | Anthropic API key | console.anthropic.com | `.env` `ANTHROPIC_API_KEY` |
-   | Picovoice AccessKey + "Hey Claude" `.ppn` (Windows) | console.picovoice.ai | `.env` + `keywords/` + `config.toml [wake] keyword_path` |
+   | "Hey Claude" `.onnx` model (optional; until then say "Hey Jarvis") | openWakeWord training notebook (see BLOCKERS.md) | `keywords/` + `WAKEWORD_MODEL_PATH` in `.env` |
    | Pinecone API key | app.pinecone.io | `.env` `PINECONE_API_KEY` |
    | Notion integration secret (share the Assignments DB with it) | notion.so/profile/integrations | `.env` `NOTION_TOKEN` |
    | Google OAuth Desktop client | console.cloud.google.com | `credentials.json` |
@@ -52,7 +52,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
 | `--audio-file f.wav` | Wake mode on a recording instead of the mic, then exit |
 | `--tts print` | No audio output (prints what it would say) |
-| `--keyword-path f.ppn` | Override the wake-word file |
+| `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 
 In wake mode, "goodbye" ends the conversation (it's summarized into memory)
@@ -89,9 +89,8 @@ pip install -r requirements.txt
 cp .env.example .env && nano .env
 ```
 
-- **Wake word:** in Picovoice Console, train "Hey Claude" again for
-  **Raspberry Pi**, copy that `.ppn` into `keywords/`, and point
-  `[wake] keyword_path` at it (`.ppn` files are platform-specific).
+- **Wake word:** copy the same `keywords/hey_claude.onnx` over; openWakeWord
+  models are not platform-specific.
 - **Google sign-in:** the Pi usually has no browser. Either copy `token.json`
   from your PC, or run `python -m assistant.tools.calendar --headless`: open
   the printed link on your phone/PC, sign in, then paste back the
@@ -126,7 +125,7 @@ assistant/
   chat.py       Claude conversation, tool loop, memory hooks
   tts.py        TTS interface: pyttsx3, Piper, print
   stt.py        push-to-talk recording, faster-whisper
-  wakeword.py   Porcupine, energy VAD, mic/file sources
+  wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   audio.py      wav I/O, resampling, chime
   tools/        calendar.py, notion.py, tool registry
