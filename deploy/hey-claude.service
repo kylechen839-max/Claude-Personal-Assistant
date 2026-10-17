@@ -1,0 +1,42 @@
+# systemd *user* unit for the Hey Claude assistant.
+#
+# A user unit (not a system one) because on Raspberry Pi OS Bookworm the
+# sound server (PipeWire/PulseAudio) runs inside the user's login session; a
+# system service can't reach it without extra hacks. With "lingering"
+# enabled (scripts/install_service.sh does this) the user manager, and so
+# this service, starts at boot without anyone logging in.
+#
+# Install with scripts/install_service.sh, which fills in @REPO_DIR@ and
+# copies this file to ~/.config/systemd/user/hey-claude.service.
+
+[Unit]
+Description=Hey Claude voice assistant
+Documentation=file://@REPO_DIR@/README.md
+# Sound: start after the user's audio server when there is one (on Pi OS
+# Lite there may be none; then ALSA is used directly and these are no-ops).
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+After=pipewire.service pipewire-pulse.service wireplumber.service pulseaudio.service
+# Give up after 5 crashes in 5 minutes (e.g. a missing API key) instead of
+# looping forever; `systemctl --user restart hey-claude` tries again.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_DIR@
+# User managers can't order against the system's network-online.target, so
+# wait (up to 2 minutes) until DNS for the Anthropic API resolves.
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do getent hosts api.anthropic.com >/dev/null && exit 0; sleep 2; done; echo "network not up after 120s; starting anyway"'
+ExecStart=@REPO_DIR@/.venv/bin/python -m assistant --mode wake
+Restart=on-failure
+RestartSec=10
+# Console output (warnings and errors) goes to the journal:
+#   journalctl --user -u hey-claude -f
+# The detailed log is still written to logs/assistant.log (see config.toml).
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hey-claude
+
+[Install]
+WantedBy=default.target
