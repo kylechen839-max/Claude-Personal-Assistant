@@ -277,3 +277,38 @@ def test_live_calendar_list_today():
                                                          "credentials.json")
                          ).list_events("today")
     assert "events" in out
+
+
+def test_headless_oauth_flow(tmp_path):
+    from urllib.parse import parse_qs, urlparse
+
+    from assistant.tools import calendar as cal_mod
+
+    creds = tmp_path / "credentials.json"
+    creds.write_text(json.dumps({"installed": {
+        "client_id": "cid.apps.googleusercontent.com", "client_secret": "s",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "redirect_uris": ["http://localhost"]}}))
+    state_file = tmp_path / "state.json"
+    url = cal_mod.headless_start(str(creds), str(state_file))
+    q = parse_qs(urlparse(url).query)
+    assert q["redirect_uri"] == [cal_mod.HEADLESS_REDIRECT]
+    assert q["access_type"] == ["offline"] and "code_challenge" in q
+    saved = json.loads(state_file.read_text())
+    assert saved["state"] == q["state"][0] and saved["code_verifier"]
+
+    with pytest.raises(RuntimeError, match="State mismatch"):
+        cal_mod.headless_finish("http://localhost:8765/?code=c&state=wrong",
+                                str(creds), str(tmp_path / "t.json"), str(state_file))
+
+    from unittest.mock import patch
+    with patch("google_auth_oauthlib.flow.Flow.fetch_token") as fetch, \
+         patch("google_auth_oauthlib.flow.Flow.credentials",
+               new=MagicMock(to_json=lambda: '{"token": "x"}')):
+        cal_mod.headless_finish(
+            f"http://localhost:8765/?state={saved['state']}&code=abc&scope=x",
+            str(creds), str(tmp_path / "t.json"), str(state_file))
+    fetch.assert_called_once_with(code="abc")
+    assert json.loads((tmp_path / "t.json").read_text()) == {"token": "x"}
+    assert not state_file.exists()

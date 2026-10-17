@@ -92,8 +92,10 @@ cp .env.example .env && nano .env
 - **Wake word:** in Picovoice Console, train "Hey Claude" again for
   **Raspberry Pi**, copy that `.ppn` into `keywords/`, and point
   `[wake] keyword_path` at it (`.ppn` files are platform-specific).
-- **Google sign-in:** the Pi usually has no browser. Sign in on your PC
-  (`python -m assistant.tools.calendar`) and copy `token.json` to the Pi.
+- **Google sign-in:** the Pi usually has no browser. Either copy `token.json`
+  from your PC, or run `python -m assistant.tools.calendar --headless`: open
+  the printed link on your phone/PC, sign in, then paste back the
+  `localhost:8765/...` address the browser ends up on.
 - **Speed:** set `[stt] model = "tiny.en"` if `base.en` feels slow; Piper
   sounds much better than eSpeak and runs well on a Pi 4/5.
 - **Audio devices:** `python -m sounddevice` lists them; set

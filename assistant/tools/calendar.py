@@ -42,6 +42,51 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
     return creds
 
 
+HEADLESS_REDIRECT = "http://localhost:8765/"
+
+
+def headless_start(credentials_path="credentials.json",
+                   state_path=".oauth_state.json") -> str:
+    """Step 1 of sign-in without a local browser (Raspberry Pi over SSH, a
+    cloud box): return the URL to open on any device. The PKCE verifier and
+    state are saved so step 2 can run in a separate process."""
+    import json
+
+    from google_auth_oauthlib.flow import Flow
+
+    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
+                                         redirect_uri=HEADLESS_REDIRECT)
+    url, state = flow.authorization_url(access_type="offline", prompt="consent")
+    Path(state_path).write_text(json.dumps(
+        {"state": state, "code_verifier": flow.code_verifier}))
+    return url
+
+
+def headless_finish(redirected_url: str, credentials_path="credentials.json",
+                    token_path="token.json", state_path=".oauth_state.json"):
+    """Step 2: after signing in, the browser lands on a localhost page that
+    fails to load. Its full address (with ?code=...) is `redirected_url`."""
+    import json
+    from urllib.parse import parse_qs, urlparse
+
+    from google_auth_oauthlib.flow import Flow
+
+    saved = json.loads(Path(state_path).read_text())
+    query = parse_qs(urlparse(redirected_url.strip()).query)
+    if "error" in query:
+        raise RuntimeError(f"Google sign-in failed: {query['error'][0]}")
+    if query.get("state", [None])[0] != saved["state"]:
+        raise RuntimeError("State mismatch: use the URL from the latest sign-in link")
+    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
+                                         redirect_uri=HEADLESS_REDIRECT,
+                                         state=saved["state"],
+                                         code_verifier=saved["code_verifier"])
+    flow.fetch_token(code=query["code"][0])
+    Path(token_path).write_text(flow.credentials.to_json())
+    Path(state_path).unlink(missing_ok=True)
+    return flow.credentials
+
+
 class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
@@ -202,9 +247,33 @@ class GoogleCalendar:
 
 
 if __name__ == "__main__":  # python -m assistant.tools.calendar  -> sign in once
+    import argparse
+
     from dotenv import load_dotenv
 
     load_dotenv()
-    get_credentials(os.environ.get("GOOGLE_CREDENTIALS", "credentials.json"),
-                    os.environ.get("GOOGLE_TOKEN", "token.json"))
-    print("Google Calendar authorized; token saved.")
+    parser = argparse.ArgumentParser(prog="python -m assistant.tools.calendar",
+                                     description="Sign in to Google Calendar")
+    parser.add_argument("--headless", action="store_true",
+                        help="no local browser: print a link, then paste back "
+                             "the localhost URL you land on")
+    parser.add_argument("--start", action="store_true",
+                        help="headless step 1 only: print the link and exit")
+    parser.add_argument("--finish", metavar="URL",
+                        help="headless step 2 only: the localhost URL")
+    args = parser.parse_args()
+    creds = os.environ.get("GOOGLE_CREDENTIALS", "credentials.json")
+    token = os.environ.get("GOOGLE_TOKEN", "token.json")
+    if args.finish:
+        headless_finish(args.finish, creds, token)
+    elif args.headless or args.start:
+        print("Open this link on any device and sign in:\n\n"
+              + headless_start(creds) + "\n\nAfterwards the browser shows "
+              "'This site can't be reached'. That's expected: copy the full "
+              "address from the address bar.")
+        if args.start:
+            raise SystemExit(0)
+        headless_finish(input("\nPaste that address here: "), creds, token)
+    else:
+        get_credentials(creds, token)
+    print("Google Calendar authorized; token saved to", token)
