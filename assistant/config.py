@@ -20,7 +20,7 @@ else:  # Python 3.10
 DEFAULTS: dict = {
     "assistant": {
         "model": "claude-sonnet-5-5",
-        "max_tokens": 500,
+        "max_tokens": 1500,  # room for thinking + web search; replies stay short
         "max_history": 40,
         "max_tool_rounds": 6,
         "conversation_timeout": 300,  # seconds idle before a new conversation
@@ -46,6 +46,18 @@ DEFAULTS: dict = {
                  "token": "token.json", "calendar_id": "primary"},
     "notion": {"enabled": True,
                "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
+    "web": {
+        "enabled": True,
+        "search": True,             # Anthropic web search (server-side)
+        "fetch": True,              # Anthropic web fetch (read a page)
+        "browser": True,            # open pages in this computer's browser
+        "max_searches": 3,          # per request
+        "max_fetches": 3,
+        "max_fetch_tokens": 8000,   # cap on each fetched page
+        "allowed_domains": [],      # restrict to these sites, or
+        "blocked_domains": [],      # never use these (not both)
+        "location": {"city": "", "region": "", "country": "", "timezone": ""},
+    },
     "memory": {"enabled": True, "index": "project-context",
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,

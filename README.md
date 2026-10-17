@@ -62,7 +62,17 @@ first.
 
 Things to try: "What's on my calendar tomorrow?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
-"Mark Homework 6 as done", "Delete the study group tomorrow".
+"Mark Homework 6 as done", "Delete the study group tomorrow",
+"What's the weather this afternoon?", "Who won the Braves game last night?",
+"What does this page say: emory.edu/...", "Open YouTube",
+"Pull up the Canvas page for Classical Mechanics".
+
+**Internet access:** web search and reading web pages run on Anthropic's
+servers as part of the Claude request (no extra keys; usage is billed to
+your Anthropic account per search). "Open ..." requests open pages in this
+computer's default browser. Set `[web] location` in `config.toml` for local
+answers like the weather, and `allowed_domains` / `blocked_domains` to limit
+which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
 
 ## Settings
 

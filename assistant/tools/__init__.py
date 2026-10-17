@@ -27,6 +27,9 @@ class Tool:
 class ToolRegistry:
     def __init__(self, confirm: Callable[[str], bool] | None = None):
         self.tools: dict[str, Tool] = {}
+        # Anthropic-run tools (web search/fetch): sent with the request,
+        # executed by the API, never dispatched here.
+        self.server_tools: list[dict] = []
         # Default to refusing: never run a destructive tool unconfirmed.
         self.confirm = confirm or (lambda prompt: False)
 
@@ -34,11 +37,18 @@ class ToolRegistry:
         for tool in tools:
             self.tools[tool.name] = tool
 
+    def add_server_tools(self, *definitions: dict) -> None:
+        self.server_tools.extend(definitions)
+
     def __bool__(self) -> bool:
-        return bool(self.tools)
+        return bool(self.tools or self.server_tools)
+
+    def has(self, name: str) -> bool:
+        return name in self.tools or any(t["name"] == name
+                                         for t in self.server_tools)
 
     def schemas(self) -> list[dict]:
-        return [t.schema() for t in self.tools.values()]
+        return [t.schema() for t in self.tools.values()] + self.server_tools
 
     def dispatch(self, name: str, tool_input: dict) -> tuple[str, bool]:
         """Run a tool. Returns (result text for Claude, is_error)."""

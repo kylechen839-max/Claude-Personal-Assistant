@@ -82,7 +82,8 @@ def test_chat_runs_tool_calls(fake_client):
     assert reply == "You have the dentist at 3 PM tomorrow."
     first, second = fake_client.calls
     assert first["tools"][0]["name"] == "list_calendar_events"
-    assert "Google Calendar" in first["system"]
+    assert "Use your tools" in first["system"]
+    assert "search the web" not in first["system"]  # no web tools registered
     tool_result = second["messages"][2]["content"][0]
     assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "toolu_1"
     assert "Dentist" in tool_result["content"]

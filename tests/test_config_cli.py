@@ -34,7 +34,7 @@ def test_load_config_defaults_file_and_env(tmp_path, monkeypatch):
     assert cfg["wake"]["sensitivity"] == 0.8 and cfg["wake"]["chime"] is True
     monkeypatch.setenv("CLAUDE_MODEL", "claude-opus-4-1")
     assert load_config(cfg_file, None)["assistant"]["model"] == "claude-opus-4-1"
-    assert DEFAULTS["assistant"]["max_tokens"] == 500  # defaults not mutated
+    assert DEFAULTS["assistant"]["max_tokens"] == 1500  # defaults not mutated
 
 
 def test_repo_config_toml_is_valid(monkeypatch):
@@ -108,6 +108,7 @@ def test_build_tools_and_memory_respect_config(tmp_path, monkeypatch):
     assert {"list_calendar_events", "delete_calendar_event", "list_assignments",
             "update_assignment_status"} <= names
     cfg["calendar"]["enabled"] = cfg["notion"]["enabled"] = False
+    cfg["web"]["enabled"] = False
     assert not cli.build_tools(cfg, lambda *_: None)
     assert cli.build_memory(cfg).index_name == "project-context"
     cfg["memory"]["enabled"] = False

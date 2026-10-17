@@ -223,6 +223,14 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
                                              timezone=tz).tools())
     elif config["notion"]["enabled"]:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
+    web = config["web"]
+    if web["enabled"]:
+        from assistant.tools import web as web_tools
+
+        registry.add_server_tools(
+            *web_tools.server_tools(config["assistant"]["model"], web))
+        if web["browser"]:
+            registry.register(*web_tools.browser_tools())
     return registry
 
 

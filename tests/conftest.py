@@ -23,7 +23,8 @@ def fake_client():
     client.queue = []
 
     def create(**kwargs):
-        client.calls.append(kwargs)
+        # snapshot messages: the chat keeps appending to the same list
+        client.calls.append({**kwargs, "messages": list(kwargs.get("messages", []))})
         return client.queue.pop(0)
 
     client.calls = []

@@ -3,7 +3,7 @@
 
 [assistant]
 model = "claude-sonnet-5-5"   # CLAUDE_MODEL in the environment overrides this
-max_tokens = 500
+max_tokens = 1500            # a ceiling, not a target: room for thinking and web search
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 
@@ -37,6 +37,20 @@ calendar_id = "primary"
 [notion]
 enabled = true
 database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments
+
+[web]
+enabled = true
+search = true                 # search the web (runs on Anthropic's servers)
+fetch = true                  # read a specific web page
+browser = true                # open pages in this computer's default browser
+max_searches = 3              # per question
+max_fetches = 3
+max_fetch_tokens = 8000       # cap on each page read
+allowed_domains = []          # only use these sites, e.g. ["wikipedia.org"], or
+blocked_domains = []          # never use these sites (set one list, not both)
+# Approximate location for local results ("weather", "open near me").
+location = { city = "", region = "", country = "", timezone = "" }
+# e.g. location = { city = "Atlanta", region = "Georgia", country = "US", timezone = "America/New_York" }
 
 [memory]
 enabled = true

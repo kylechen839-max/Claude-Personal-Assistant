@@ -69,6 +69,18 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
       basement", then "Goodbye". The console prints "(Saved to memory: ...)".
 - [ ] Restart the app. "Hey Claude, where do I like to study?" — it knows.
 
+## 6b. Internet and browser
+- [ ] Set `[web] location` in `config.toml` to your city first.
+- [ ] "Hey Claude, what's the weather today?" — a short, correct answer for
+      your city; no URLs or "according to source 1" read aloud.
+- [ ] "Hey Claude, what's the latest news about <something from today>?" —
+      it's current (not from the model's training data).
+- [ ] "Hey Claude, open YouTube" — YouTube opens in your default browser.
+- [ ] "Hey Claude, search for Emory library hours and open it" — a Google
+      results page (or the library page) opens.
+- [ ] `logs/assistant.log` shows `open_in_browser` calls; web searches show
+      up as part of Claude's reply (they run on Anthropic's side).
+
 ## 7. Failure handling
 - [ ] Turn Wi-Fi off, ask something: it **says** it can't reach the internet
       and keeps listening. Turn Wi-Fi on: next question works.
