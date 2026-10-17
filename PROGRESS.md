@@ -15,13 +15,49 @@ Run all tests with `pytest` (from the project root, venv active).
 ## Stage 2 - Text to speech ✅
 - `assistant/tts.py`: a `TTS` interface (`speak`, `save_to_file`) with
   `Pyttsx3TTS` (offline OS voice: SAPI5 on Windows, eSpeak on the Pi),
-  `PiperTTS` (offline neural voice via the `piper` CLI, a drop-in upgrade),
-  and `PrintTTS` (no audio). `make_tts(name)` picks one.
+  `PiperTTS` (offline neural voice via the `piper-tts` package, a drop-in
+  upgrade), and `PrintTTS` (no audio). `make_tts(name)` picks one.
 - `assistant/audio.py`: wav read/write, resampling to 16 kHz, chime, playback.
 - `--mode speak`: typed input, spoken replies.
 - Tested by `tests/test_tts.py`: renders real pyttsx3 speech to a .wav and
-  asserts it exists, is non-empty, and is not silent; Piper CLI invocation is
-  mocked; wav round-trip/resample.
+  asserts it exists, is non-empty, and is not silent; wav round-trip/resample.
+  Piper: see "Piper voice" below.
+
+### Piper voice (2026-10-17)
+- `PiperTTS` now uses the `piper-tts` Python package (pinned 1.8.0: abi3
+  wheels for Windows x64, Linux x86_64 and Linux aarch64, any Python 3.9+,
+  with espeak-ng data bundled) instead of shelling out to a `piper`
+  executable. The voice loads once on first use; `save_to_file` writes a
+  .wav, `speak` plays through sounddevice like the other engines.
+- `config.toml` `[tts]`: `engine = "pyttsx3" | "piper" | "print"` (default
+  still pyttsx3) and `piper_voice` (path to the `.onnx`, with its
+  `.onnx.json` next to it; default `voices/en_US-lessac-medium.onnx`). The old
+  `piper_model` key is still read.
+- `python -m assistant.tts --download-voice en_US-lessac-medium` downloads a
+  voice from the official rhasspy/piper-voices Hugging Face repo into
+  `voices/` (gitignored), via `.part` files so an interrupted download never
+  leaves a broken voice. `--say TEXT` tries a voice out loud.
+- If the engine is piper but the voice, its `.onnx.json`, or the package is
+  missing, `make_tts` logs a warning naming the problem and the download
+  command, and falls back to pyttsx3 (it used to raise).
+- Tests (`tests/test_tts.py`): engine selection from `config.toml`, fallback
+  for each missing piece, save/speak with a fake `piper` module, voice URLs,
+  the download helper with a mocked `requests`. Real tests: Piper renders a
+  non-empty, non-silent .wav (`test_piper_renders_wav`), and Whisper
+  transcribes Piper output (`tests/test_stt.py::test_transcribe_piper_speech`).
+  Both skip only when the voice can't be downloaded. The old
+  `test_piper_invokes_cli` (mocked `piper` CLI) was replaced by the mocked
+  package test, and `test_make_tts_factory` no longer expects
+  `make_tts("piper")` without a voice to raise, since it now falls back.
+- In the sandbox huggingface.co is blocked, so the real tests were run
+  against the same lessac-medium voice from the rhasspy/piper GitHub release
+  (v0.0.2), put in `voices/` by hand: the .wav test passed, and synthesis ran
+  at about 40x real time on the sandbox CPU. Whisper is also on Hugging Face,
+  so the Piper -> Whisper round-trip runs only in CI (which caches the voice).
+- License: `piper-tts` 1.3+ is GPL-3.0-or-later (the Home Assistant
+  piper1-gpl fork). Fine for personal use; matters only if this project is
+  ever distributed under another license. Voices have their own licenses
+  (lessac: see its MODEL_CARD in the voices repo).
 
 ## Stage 3 - Speech to text ✅
 - `assistant/stt.py`: `Transcriber` lazily loads faster-whisper (`base.en`,
@@ -189,6 +225,8 @@ secrets are given to CI); the Whisper tests do run, since CI can download
 the model. On Linux the job installs espeak-ng for pyttsx3 and then
 openWakeWord with `pip install --no-deps`, the same as the Pi setup in the
 README, because its tflite-runtime dependency has no wheels for newer Pythons.
+The Piper voice is downloaded into `voices/` by the tests and cached
+between runs, like the Whisper model.
 The wake-word pipeline test measures command length from the TTS clip
 trimmed once in `tts_clip`, so SAPI's silence padding on Windows does not
 skew it.
@@ -200,6 +238,10 @@ skew it.
 - pyttsx3 on some Windows setups stops speaking after the first reply. A
   fresh engine per reply is now used on Windows; if it still happens,
   switch `[tts] engine = "piper"` (and tell me).
+- The pyttsx3/eSpeak tests occasionally crash (segfault in pyttsx3's eSpeak
+  driver) or fail in the Linux sandbox, about 1 run in 10. This happens on
+  master too, without Piper loaded, so it is a pyttsx3/eSpeak issue, not a
+  Piper one.
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
 - Two Notion databases are named "Assignments"; the Fall 2026 one is used.
 - Default model changed from `claude-sonnet-4-5` to `claude-sonnet-5-5`

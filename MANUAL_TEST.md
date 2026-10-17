@@ -30,6 +30,17 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] Ask two questions in a row: the **second** reply is also spoken
       (pyttsx3 on Windows sometimes goes silent after the first; if so,
       report it).
+- [ ] Piper voice (optional upgrade; README "Better voice: Piper"):
+      `python -m assistant.tts --download-voice en_US-lessac-medium`, then
+      `python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"`:
+      you hear a natural voice.
+- [ ] Set `[tts] engine = "piper"` in `config.toml`, run
+      `python -m assistant --mode speak`, ask two questions: both replies are
+      spoken in the Piper voice, and the reply starts without a long pause.
+      Keep it if you prefer it; otherwise set `engine = "pyttsx3"` again.
+- [ ] Fallback: temporarily rename `voices/` and start
+      `python -m assistant --mode speak`: a warning says the Piper voice is
+      unavailable and replies are spoken with pyttsx3. Rename it back.
 
 ## 2. Microphone (STT)
 - [ ] `python -m assistant --mode voice`: press Enter, say "What time is
@@ -89,6 +100,7 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] `logs/assistant.log` shows what was heard and replied.
 
 ## 8. Raspberry Pi (later)
-- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model.
+- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model, including
+      the Piper voice checks (download the voice on the Pi or copy `voices/`).
 - [ ] Note response time from end of speech to start of reply; if slow, try
       `[stt] model = "tiny.en"` and Piper.

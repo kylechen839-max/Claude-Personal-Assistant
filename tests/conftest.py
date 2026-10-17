@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -30,3 +31,18 @@ def fake_client():
     client.calls = []
     client.messages.create.side_effect = create
     return client
+
+
+@pytest.fixture(scope="session")
+def piper_voice():
+    """The real en_US-lessac-medium Piper voice, downloaded into voices/ once.
+
+    Skips only when the voice can't be fetched (e.g. huggingface.co blocked).
+    """
+    from assistant.tts import DEFAULT_PIPER_VOICE, download_voice
+
+    voices = Path(__file__).resolve().parent.parent / "voices"
+    try:
+        return download_voice(DEFAULT_PIPER_VOICE, voices)
+    except Exception as e:
+        pytest.skip(f"Piper voice {DEFAULT_PIPER_VOICE} unavailable: {type(e).__name__}")

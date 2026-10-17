@@ -8,10 +8,13 @@ conversation_timeout = 300    # seconds of quiet before a new conversation start
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 
 [tts]
-engine = "pyttsx3"            # "pyttsx3" (offline), "piper" (better offline voice), "print"
-rate = 185
-voice = ""                    # part of a voice name, e.g. "Zira" on Windows
-piper_model = ""              # path to a Piper .onnx voice when engine = "piper"
+engine = "pyttsx3"            # "pyttsx3" (offline OS voice), "piper" (better offline voice), "print"
+rate = 185                    # pyttsx3 only
+voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" on Windows
+# Piper voice (.onnx, with its .onnx.json next to it), used when engine = "piper".
+# Get one with: python -m assistant.tts --download-voice en_US-lessac-medium
+# If the file is missing, the assistant warns and uses pyttsx3 instead.
+piper_voice = "voices/en_US-lessac-medium.onnx"
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
