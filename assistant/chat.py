@@ -158,9 +158,12 @@ class ClaudeChat:
                     return text.strip() or "Sorry, I can't help with that one."
                 return text.strip()
             results = []
+            untrusted = has_web_content(self.history)
             for call in calls:
-                log.info("Claude called %s %s", call.name, call.input)
-                content, is_error = self.tools.dispatch(call.name, dict(call.input))
+                log.info("Claude called %s %s%s", call.name, call.input,
+                         " (web content in context)" if untrusted else "")
+                content, is_error = self.tools.dispatch(call.name, dict(call.input),
+                                                        untrusted=untrusted)
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})
             self.history.append({"role": "user", "content": results})
@@ -175,6 +178,18 @@ class ClaudeChat:
                                and isinstance(trimmed[0]["content"], str)):
             trimmed.pop(0)
         self.history = trimmed
+
+
+def has_web_content(history: list[dict]) -> bool:
+    """True if any server tool result (web search/fetch, or code run over
+    them) is in the history. Those blocks hold text from the internet, which
+    may contain instructions aimed at Claude, and they stay in context for
+    the rest of the conversation. Client tool results are plain
+    "tool_result" blocks in user turns and don't count."""
+    return any(isinstance(m["content"], list) and m["role"] == "assistant"
+               and any(b.get("type", "").endswith("_tool_result")
+                       for b in m["content"])
+               for m in history)
 
 
 def _block_dict(block) -> dict:

@@ -140,6 +140,16 @@ class NotionAssignments:
             properties={self.status_prop: {"status": {"name": match}}})
         return {"status": "updated", "assignment": self._summarize(page)}
 
+    def describe_for_update(self, tool_input: dict) -> str:
+        what = tool_input.get("name") or "that assignment"
+        if not tool_input.get("name") and tool_input.get("assignment_id"):
+            try:
+                page = self.client.pages.retrieve(page_id=tool_input["assignment_id"])
+                what = self._summarize(page)["name"]
+            except Exception:
+                pass
+        return f"Do you want me to mark {what} as {tool_input.get('status')}?"
+
     def tools(self) -> list[Tool]:
         return [
             Tool("list_assignments",
@@ -162,5 +172,5 @@ class NotionAssignments:
                      "name": {"type": "string", "description": "Assignment name, "
                               "e.g. 'Homework 6'"}},
                   "required": ["status"]},
-                 self.update_status),
+                 self.update_status, confirm_if_untrusted=self.describe_for_update),
         ]

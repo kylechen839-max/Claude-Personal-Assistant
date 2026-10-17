@@ -217,6 +217,29 @@ class GoogleCalendar:
         except Exception:
             return "Do you want me to delete that event?"
 
+    def _spoken_when(self, iso: str) -> str:
+        dt = parse_datetime(iso, self.tz)
+        return f"{spoken_date(dt.date())} at {spoken_time(dt)}"
+
+    def describe_for_create(self, tool_input: dict) -> str:
+        try:
+            when = self._spoken_when(tool_input["start"])
+            return (f"Do you want me to add {tool_input['title']} on {when} "
+                    "to your calendar?")
+        except Exception:
+            return "Do you want me to add that event to your calendar?"
+
+    def describe_for_move(self, tool_input: dict) -> str:
+        try:
+            event = self.service.events().get(
+                calendarId=self.calendar_id,
+                eventId=tool_input["event_id"]).execute()
+            title = event.get("summary", "that event")
+            when = self._spoken_when(tool_input["new_start"])
+            return f"Do you want me to move {title} to {when}?"
+        except Exception:
+            return "Do you want me to move that event?"
+
     def tools(self) -> list[Tool]:
         iso = ("ISO 8601 local date-time without offset, e.g. "
                "2026-10-17T15:00:00")
@@ -249,7 +272,7 @@ class GoogleCalendar:
                      "location": {"type": "string"},
                      "description": {"type": "string"}},
                   "required": ["title", "start"]},
-                 self.create_event),
+                 self.create_event, confirm_if_untrusted=self.describe_for_create),
             Tool("move_calendar_event",
                  "Move an existing event to a new time, keeping its length "
                  "unless new_end is given. Get event_id from "
@@ -261,7 +284,7 @@ class GoogleCalendar:
                                  iso + ". Optional. For all-day events, the "
                                  "last day (YYYY-MM-DD, inclusive)."}},
                   "required": ["event_id", "new_start"]},
-                 self.move_event),
+                 self.move_event, confirm_if_untrusted=self.describe_for_move),
             Tool("delete_calendar_event",
                  "Delete an event. Kyle is asked to confirm out loud "
                  "automatically; just call this tool, don't ask first yourself. "
