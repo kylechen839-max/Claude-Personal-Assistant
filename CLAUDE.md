@@ -27,7 +27,7 @@ Windows PC first and should later move to a Raspberry Pi with minimal changes.
   plus Google OAuth credentials.json for Calendar.
 - Starting point: claude_assistant.py (already has text, speak, and
   push-to-talk voice modes). Refactor it into a package as needed.
-- Default model: read from CLAUDE_MODEL env var, default "claude-sonnet-4-5".
+- Default model: read from CLAUDE_MODEL env var, default "claude-sonnet-5-5".
 
 ## Stages
 1. **Core chat**: Clean module that sends messages to the Anthropic API with
