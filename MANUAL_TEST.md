@@ -99,8 +99,30 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
       (and exits with a clear message if it stays unplugged).
 - [ ] `logs/assistant.log` shows what was heard and replied.
 
-## 8. Raspberry Pi (later)
+## 8. Raspberry Pi
+Setup steps are in README.md ("Raspberry Pi").
+- [ ] `./scripts/install_pi.sh` finishes without errors on the Pi (first run
+      takes a while), and running it a second time changes nothing.
+- [ ] Copy `.env`, `credentials.json` and `token.json` from the PC (or use
+      the `--headless` Google sign-in). `keywords/hey_claude.onnx` comes
+      with the repo.
+- [ ] `.venv/bin/python -m assistant --check` shows OK for the API key,
+      token.json, wake-word model, your USB mic under "Input devices" and
+      your speaker under "Output devices", and prints no key values.
+- [ ] If the mic isn't the default, set `[wake] mic_device` to its index
+      and `--check` shows "Configured mic: ... -> <your mic>".
+- [ ] `speaker-test -t wav -c 2` is audible.
 - [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model, including
-      the Piper voice checks (download the voice on the Pi or copy `voices/`).
+      the Piper voice checks (download the voice on the Pi or copy `voices/`);
+      with `engine = "piper"`, `--check` shows "TTS (piper): ... ok".
 - [ ] Note response time from end of speech to start of reply; if slow, try
       `[stt] model = "tiny.en"` and Piper.
+- [ ] `./scripts/install_service.sh`, then reboot **without logging in**:
+      after a minute "Hey Claude, what time is it?" answers.
+- [ ] `journalctl --user -u hey-claude -n 20` shows the startup lines and
+      `logs/assistant.log` keeps growing.
+- [ ] Unplug the network cable / Wi-Fi, reboot: the service waits up to two
+      minutes, starts anyway, and says it can't reach the internet when
+      asked; plug back in and it works.
+- [ ] Crash recovery: `pkill -f "python -m assistant"`; within ~10 seconds
+      `systemctl --user status hey-claude` shows it running again.

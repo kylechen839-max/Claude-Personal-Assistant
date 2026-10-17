@@ -189,10 +189,74 @@ Run all tests with `pytest` (from the project root, venv active).
   round-tripped through the history conversion. Not yet run against the real
   API (no Anthropic key in the build environment).
 
+## Extra - Raspberry Pi deployment ✅
+- `scripts/install_pi.sh`: one-step, re-runnable Pi setup (Pi 4/5, 64-bit
+  Raspberry Pi OS Bookworm). Installs only the missing apt packages
+  (`python3-venv python3-dev libportaudio2 espeak-ng libespeak1
+  alsa-utils`), creates `.venv` (needs Python 3.10+), installs
+  `requirements.txt` then `openwakeword --no-deps` (tflite-runtime has no
+  wheels for newer Pythons; only ONNX is used), copies `.env.example` to
+  `.env` if missing (chmod 600; contents never printed), pre-downloads the
+  Whisper and openWakeWord models (non-fatal if offline) and prints the next
+  steps. `SKIP_APT`, `SKIP_MODELS`, `PYTHON` override steps.
+- `deploy/hey-claude.service` + `scripts/install_service.sh`: a systemd
+  **user** unit, because the Bookworm sound server (PipeWire) lives in the
+  user session and a system service can't reach it; lingering is enabled so
+  it starts at boot without a login. It runs
+  `.venv/bin/python -m assistant --mode wake`, orders after
+  PipeWire/WirePlumber/PulseAudio, waits up to 2 minutes for DNS of
+  api.anthropic.com (a user manager can't depend on the system's
+  `network-online.target`), restarts on failure (10 s delay, gives up after
+  5 failures in 5 minutes) and logs to the journal plus `logs/assistant.log`.
+  `--uninstall` removes it.
+- `python -m assistant --check` (`assistant/doctor.py`): reports whether each
+  key is set (never the value), credentials.json/token.json, the wake-word
+  model, audio input/output devices with indexes (and the configured
+  `mic_device`), whether the Whisper model is cached (checked with
+  `local_files_only`, so it never downloads), and the TTS engine's
+  dependencies. Exits 1 if a required check fails. It runs before the
+  API-key check so it works on a half-configured Pi.
+- README: Pi section rewritten around the scripts (copying files from the PC
+  with scp, headless Google sign-in, service commands) plus troubleshooting
+  (no mic, choosing the device index, ALSA messages, audio group, service
+  restarts, lingering).
+- Tested: `tests/test_doctor.py` (9 tests, all mocked: each check's
+  pass/fail path, no secret in the output, CLI wiring without an API key).
+  Both scripts pass `shellcheck` 0.9; the unit (with the path filled in)
+  passes `systemd-analyze verify`. `install_pi.sh` was run in a fresh copy of
+  the repo with `PYTHON=python3.11` in an Ubuntu 24.04 container (Debian
+  family, real apt): it installed the missing apt packages, created `.venv`,
+  installed everything and created `.env` (mode 600). The model pre-download
+  was blocked by the sandbox's network proxy, which exercised the "download
+  on first run instead" fallback. A second run was a no-op ("already
+  installed", existing `.venv` and `.env` kept, pip "already satisfied"). In
+  that `.venv`: full `pytest` 93 passed, 4 skipped (before merging master); a real `--check` printed
+  the expected report (no audio devices in the container, so it exited 1)
+  and did not print the test key from `.env`. Not tested: a real Pi, a real
+  systemd user session and lingering (no systemd running in the sandbox),
+  real audio devices; see MANUAL_TEST.md section 8.
+- After merging master (trained "Hey Claude" model, tool safety, Piper TTS):
+  `--check` reports the bundled `keywords/hey_claude.onnx` and, with
+  `[tts] engine = "piper"`, whether the voice `.onnx`, its `.onnx.json` and
+  the `piper` package are there (a warning, since the assistant falls back
+  to pyttsx3), with the `--download-voice` command. `install_pi.sh` lists
+  the Piper voice download as an optional next step; the README no longer
+  says to copy the wake-word model. aarch64 check: `pip download
+  --only-binary=:all: --platform manylinux_2_28_aarch64 --python-version
+  3.11 -r requirements.txt` resolves all 79 packages to prebuilt wheels,
+  including `piper_tts-1.8.0-cp39-abi3-manylinux_2_17_aarch64` (needs glibc
+  2.17+; Bookworm has 2.36), onnxruntime, ctranslate2, av, scipy and
+  scikit-learn, so nothing compiles on the Pi. Re-running the merged
+  `install_pi.sh` was again a no-op. `pytest`: 150 passed, 6 skipped,
+  1 failed: `test_wakeword.py::test_real_hey_claude_model` (known: the
+  model doesn't fire on eSpeak's voice on Linux; being fixed separately
+  with SAPI fixture files, test left unchanged).
+
 ## Test summary
-`pytest`: 96 passed, 4 skipped in the Linux build sandbox. The skips are
-real-service tests that need things the sandbox lacks (Whisper model
-download, Notion token, Google sign-in); see BLOCKERS.md.
+`pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
+build sandbox). The skips are real-service tests that need things the
+sandbox lacks (Whisper model download, Notion token, Google sign-in); see
+BLOCKERS.md.
 
 ## Fixes after review
 - A reply cut off by `max_tokens` mid tool call left an unanswered

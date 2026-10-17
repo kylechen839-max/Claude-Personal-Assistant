@@ -51,6 +51,9 @@ def parse_args(argv=None):
                         help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
                         help="openWakeWord .onnx model for the 'Hey Claude' wake word")
+    parser.add_argument("--check", action="store_true",
+                        help="check keys, files, audio devices and models, "
+                             "then exit (prints no secret values)")
     return parser.parse_args(argv)
 
 
@@ -303,6 +306,10 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     config = load_config(args.config)
     log_file = setup_logging(config)
+    if args.check:
+        from assistant import doctor
+
+        return doctor.report(doctor.run_checks(config, args.keyword_path))
     log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")
