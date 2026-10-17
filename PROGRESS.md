@@ -39,7 +39,8 @@ Run all tests with `pytest` (from the project root, venv active).
 - `assistant/wakeword.py`: audio arrives as 512-sample int16 frames from
   `MicSource` (live mic, paused while the assistant is thinking/speaking) or
   `FileSource` (a .wav). `OpenWakeWordDetector` listens for the custom
-  "Hey Claude" `.onnx` (falls back to the built-in "hey jarvis" model).
+  "Hey Claude" model `keywords/hey_claude.onnx`, trained in the openWakeWord
+  Colab notebook (falls back to the built-in "hey jarvis" if it's missing).
   Switched from Picovoice Porcupine, whose console now needs a company email.
   After the wake word a chime plays, ~250 ms is skipped so the chime isn't
   recorded, and `EnergyVAD` + `record_until_silence` capture the command
@@ -53,8 +54,9 @@ Run all tests with `pytest` (from the project root, venv active).
   runs it through the real VAD pipeline with a scripted detector (asserts two
   wakes, two chimes, and command lengths); an end-to-end CLI wake-mode test
   over the file with mocked STT/Claude; network error handling.
-  A real openWakeWord test checks "Hey Jarvis" (generated speech) fires
-  exactly once and a normal sentence doesn't. The Whisper-on-pipeline test
+  Real openWakeWord tests check that the built-in "Hey Jarvis" and the
+  trained "Hey Claude" model each fire exactly once on generated speech of
+  their phrase and not on other speech. The Whisper-on-pipeline test
   skips without the Whisper model (see BLOCKERS.md).
 
 ## Stage 5 - Tools ✅

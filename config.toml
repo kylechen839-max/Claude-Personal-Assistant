@@ -19,8 +19,8 @@ device = "cpu"
 compute_type = "int8"
 
 [wake]
-keyword_path = ""             # e.g. "keywords/hey_claude.onnx" (openWakeWord)
-builtin_keyword = "hey_jarvis"  # fallback until then: hey_jarvis, alexa, hey_mycroft, hey_rhasspy
+keyword_path = "keywords/hey_claude.onnx"  # openWakeWord model (Windows and Pi)
+builtin_keyword = "hey_jarvis"  # used if keyword_path is missing: hey_jarvis, alexa, hey_mycroft, hey_rhasspy
 sensitivity = 0.5             # 0-1; higher = fewer misses, more false wakes
 chime = true
 silence_ms = 800              # how long a pause ends your command

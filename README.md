@@ -27,7 +27,7 @@ mic -> openWakeWord wake word -> chime -> record until silence (VAD)
    | What | Where | Goes in |
    |---|---|---|
    | Anthropic API key | console.anthropic.com | `.env` `ANTHROPIC_API_KEY` |
-   | "Hey Claude" `.onnx` model (optional; until then say "Hey Jarvis") | openWakeWord training notebook (see BLOCKERS.md) | `keywords/` + `WAKEWORD_MODEL_PATH` in `.env` |
+   | "Hey Claude" wake word model | already included: `keywords/hey_claude.onnx` (retraining: see BLOCKERS.md) | `config.toml [wake] keyword_path` |
    | Pinecone API key | app.pinecone.io | `.env` `PINECONE_API_KEY` |
    | Notion integration secret (share the Assignments DB with it) | notion.so/profile/integrations | `.env` `NOTION_TOKEN` |
    | Google OAuth Desktop client | console.cloud.google.com | `credentials.json` |

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -128,6 +130,21 @@ def test_real_openwakeword_detects_builtin_keyword(tmp_path):
                              builtin_keyword="hey_jarvis")
     assert detector.phrase == "hey jarvis"
     assert detections(detector, tmp_path, "Hey Jarvis") == 1  # fires once
+    assert detections(detector, tmp_path, COMMAND) == 0
+
+
+HEY_CLAUDE_MODEL = Path(__file__).resolve().parents[1] / "keywords" / "hey_claude.onnx"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not HEY_CLAUDE_MODEL.exists(),
+                    reason="keywords/hey_claude.onnx not present")
+def test_real_hey_claude_model(tmp_path):
+    """The trained "Hey Claude" model wakes on it and ignores other speech."""
+    detector = make_detector(keyword_path=str(HEY_CLAUDE_MODEL))
+    assert detector.phrase == "hey claude"
+    assert detections(detector, tmp_path, "Hey Claude") == 1
+    assert detections(detector, tmp_path, "Hey Jarvis") == 0
     assert detections(detector, tmp_path, COMMAND) == 0
 
 

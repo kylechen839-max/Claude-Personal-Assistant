@@ -37,8 +37,8 @@ Windows PC first and should later move to a Raspberry Pi with minimal changes.
 3. **Speech to text**: Push-to-talk recording with sounddevice, transcribed
    with faster-whisper (base.en, CPU, int8).
 4. **Wake word**: Replace push-to-talk with an always-listening loop using
-   openWakeWord (open source, no key) and a custom "Hey Claude" .onnx model
-   (built-in "hey jarvis" until it's trained). After the wake word,
+   openWakeWord (open source, no key) and the custom "Hey Claude" model
+   keywords/hey_claude.onnx. After the wake word,
    record until silence (simple voice-activity detection), then transcribe.
    Play a short chime when listening starts.
 5. **Tools**: Add Claude tool use for:

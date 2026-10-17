@@ -30,15 +30,20 @@ from the live data.
   pytest -rs
   ```
 
-## Still to do: custom "Hey Claude" wake word (openWakeWord)
+## Done: custom "Hey Claude" wake word (openWakeWord)
 - The wake word engine is openWakeWord: open source, offline, no account or
   key. (Picovoice Porcupine was dropped because its console now requires a
   company email and only offers a trial.)
-- **Until a custom model exists, say "Hey Jarvis"** (the built-in fallback;
-  `[wake] builtin_keyword` can also be `alexa`, `hey_mycroft`, `hey_rhasspy`).
-- **To do:** train "hey claude" with openWakeWord's Google Colab notebook
+- `keywords/hey_claude.onnx` was trained on 2026-10-17 with openWakeWord's
+  Colab notebook
   (https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb,
-  linked from https://github.com/dscripka/openWakeWord; needs a Google
-  sign-in, under an hour). Download the `.onnx` file, save it as
-  `keywords/hey_claude.onnx`, and add `WAKEWORD_MODEL_PATH=keywords/hey_claude.onnx`
-  to `.env`. The same `.onnx` works on Windows and the Raspberry Pi.
+  default settings, CPU) and is committed; `config.toml` points at it. The
+  same file works on Windows and the Raspberry Pi. On generated speech it
+  scores ~0.82 for "Hey Claude" and ~0.001 for "Hey Jarvis" or a normal
+  sentence; "Hey cloud" also wakes it (~0.7), which is expected.
+- To retrain: Colab's default runtime is now Python 3.13, which the notebook's
+  pinned packages don't support. Choose Runtime -> Change runtime type ->
+  Runtime version **2025.07** (Python 3.11) first, set `target_word`, Run all,
+  and accept the one "Restart session" prompt, then Run all again.
+- If the file is missing, the app falls back to the built-in "Hey Jarvis"
+  (`[wake] builtin_keyword`).
