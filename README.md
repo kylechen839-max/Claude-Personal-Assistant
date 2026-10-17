@@ -23,20 +23,27 @@ mic -> openWakeWord wake word -> chime -> record until silence (VAD)
    copy .env.example .env
    notepad .env        # paste your keys
    ```
-3. Get the keys and files (details in `BLOCKERS.md`):
+3. Get the keys and files:
    | What | Where | Goes in |
    |---|---|---|
    | Anthropic API key | console.anthropic.com | `.env` `ANTHROPIC_API_KEY` |
-   | "Hey Claude" wake word model | already included: `keywords/hey_claude.onnx` (retraining: see BLOCKERS.md) | `config.toml [wake] keyword_path` |
+   | "Hey Claude" wake word model | already included: `keywords/hey_claude.onnx` | `config.toml` `[wake] keyword_path` |
    | Pinecone API key | app.pinecone.io | `.env` `PINECONE_API_KEY` |
-   | Notion integration secret (share the Assignments DB with it) | notion.so/profile/integrations | `.env` `NOTION_TOKEN` |
-   | Google OAuth Desktop client | console.cloud.google.com | `credentials.json` |
-4. Sign in to Google once: `python -m assistant.tools.calendar`
-5. Check everything: `pytest` (live tests run when the matching keys exist).
+   | Notion integration secret | notion.so/profile/integrations; share the Fall 2026 Assignments database with it | `.env` `NOTION_TOKEN` |
+   | Google OAuth Desktop client | console.cloud.google.com: enable the Calendar API, add yourself as a test user, create a Desktop OAuth client | `credentials.json` |
+4. Sign in to Google once: `python -m assistant.tools.calendar` (saves `token.json`).
+5. Check the setup: `python -m assistant --check` (one line per key, file,
+   audio device and model; never prints key values).
 6. Run it:
    ```powershell
    python -m assistant              # always listening (wake word)
    python -m assistant --mode text  # type instead of talking
+   ```
+7. Optional: `pytest`. The live tests (real Notion, Google, Pinecone calls)
+   read keys from the environment, not `.env`, so load it first:
+   ```powershell
+   Get-Content .env | % { if ($_ -match '^([A-Z_]+)=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[2] } }
+   pytest -rs
    ```
 
 Any service without credentials is simply switched off (the app tells you
@@ -97,10 +104,24 @@ which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
 
 ## Settings
 
-`config.toml` holds all non-secret settings (model, voice, wake word
-sensitivity, silence length, follow-up window, Notion database, Pinecone index, time zone,
-log file). `CLAUDE_MODEL` in the environment overrides the model. Logs go to
-`logs/assistant.log` (rotating); the console only shows warnings.
+`config.toml` holds all non-secret settings; anything left out uses the
+default in `assistant/config.py`. `CLAUDE_MODEL` in the environment
+overrides `[assistant] model` (default `claude-sonnet-5-5`). Logs go to
+`logs/assistant.log` (rotating); the console only shows warnings. The ones
+you are most likely to tune:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `[wake] sensitivity` | 0.5 | Higher = fewer missed wakes, more false wakes |
+| `[wake] silence_ms` | 800 | Pause that ends your command |
+| `[wake] vad_min_threshold` | 0.015 | Minimum loudness counted as speech; raise in a noisy room |
+| `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
+| `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
+| `[wake] mic_device` | "" | Mic index or part of its name (`--check` lists them) |
+| `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
+| `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
+| `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
+| `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
 ### Better voice: Piper
 
@@ -253,7 +274,8 @@ assistant/
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   audio.py      wav I/O, resampling, chime
-  tools/        calendar.py, notion.py, tool registry
+  timing.py     per-turn latency               (--timings)
+  tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)
@@ -261,5 +283,5 @@ tests/          pytest suite (offline; live tests skip without keys)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,
-`BLOCKERS.md` for setup only you can do, and `MANUAL_TEST.md` for the final
+`BLOCKERS.md` for what is still open for you, and `MANUAL_TEST.md` for the final
 hands-on checklist.

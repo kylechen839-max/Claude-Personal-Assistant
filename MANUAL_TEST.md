@@ -1,154 +1,191 @@
 # Manual test checklist
 
-Everything else is covered by `pytest`. These need a human, a mic, and a
-speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
+One sitting on the Windows PC, about 25 minutes. Do the steps in order; each
+one says what to do, what should happen, and what to change in `config.toml`
+if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
+then run it again).
 
-## 0. Setup check
-- [x] Notion integration ("Hey Claude", Kyle Chen's Space, shared with
-      Fall 2026 Assignments -> Assignments) and `NOTION_TOKEN` in `.env`.
-      Done 2026-10-17.
-- [x] Google Calendar OAuth: project `hey-claude-511904`, Calendar API on,
-      External/Testing consent screen with kylechen839@gmail.com as test
-      user, Desktop client as `credentials.json`, `token.json` from sign-in.
-      Done 2026-10-17.
-- [x] `pytest -rs` passes. The only skips should be services you haven't set
-      up yet. With all keys present: **0 skipped** (this confirms Whisper
-      downloaded and the real openWakeWord, Notion, Google and Pinecone calls
-      work). 71 passed, 0 skipped on 2026-10-17 (tests read keys from the
-      environment, so load `.env` into the shell first).
-- [x] `python -m assistant --mode text`: startup prints no "(... off: ...)"
-      lines; "hello" gets a short reply. Checked 2026-10-17 with "what's on
-      my calendar tomorrow?" and "what assignments are due this week?".
-- [ ] Cleanup: in the Google Cloud console, check whether a project
-      `strange-bird-511904-u7` exists. It was the auto-suggested ID before the
-      project was named "Hey Claude", and only `hey-claude-511904` showed up
-      afterwards, so it probably doesn't. If it does exist and is empty, delete it.
+**Already covered automatically, no need to repeat:** CI (`pytest` on Ubuntu
+and Windows) checks the chat/tool/memory logic, TTS rendering, Whisper
+transcription, the wake-word + VAD pipeline on recorded audio, the follow-up
+window, self-hearing, the delete confirmation flow and error messages, and the
+end-to-end "what's on my calendar tomorrow?" run with mocked services. Your
+keys, Google sign-in, Notion sharing and live text-mode answers were checked
+on this PC on 2026-10-17.
 
-## 1. Speaker (TTS)
-- [ ] `python -m assistant --mode speak`, type "say a short sentence":
-      you hear it clearly at a comfortable speed (adjust `[tts] rate`).
-- [ ] Ask two questions in a row: the **second** reply is also spoken
-      (pyttsx3 on Windows sometimes goes silent after the first; if so,
-      report it).
-- [ ] Piper voice (optional upgrade; README "Better voice: Piper"):
-      `python -m assistant.tts --download-voice en_US-lessac-medium`, then
-      `python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"`:
-      you hear a natural voice.
-- [ ] Set `[tts] engine = "piper"` in `config.toml`, run
-      `python -m assistant --mode speak`, ask two questions: both replies are
-      spoken in the Piper voice, and the reply starts without a long pause.
-      Keep it if you prefer it; otherwise set `engine = "pyttsx3"` again.
-- [ ] Fallback: temporarily rename `voices/` and start
-      `python -m assistant --mode speak`: a warning says the Piper voice is
-      unavailable and replies are spoken with pyttsx3. Rename it back.
+Open PowerShell in the project folder with the venv active
+(`.\.venv\Scripts\Activate.ps1`). Have Google Calendar and the Notion
+Assignments database open in a browser to compare.
 
-## 2. Microphone (STT)
-- [ ] `python -m assistant --mode voice`: press Enter, say "What time is
-      it?", press Enter. The printed "You:" text matches what you said.
-- [ ] Try from across the room / with background music; note accuracy.
+## 1. Setup (2 min)
+- [ ] `python -m assistant --check`
+  - Should: every line `[OK  ]` (a `[WARN]` for Piper is fine), your mic under
+    "Input devices", your speakers under "Output devices", no key values
+    printed, and "All required checks passed."
+  - If not: fix whatever line says FAIL (missing key in `.env`, missing
+    `credentials.json`/`token.json`). If the wrong mic is the default, note
+    its `[index]` and set `[wake] mic_device = "<index>"` (or part of its
+    name), then re-run: "Configured mic: ... -> <your mic>".
 
-## 3. Wake word
-- [ ] `python -m assistant`: the banner names your wake phrase ("hey claude",
-      not "hey jarvis" — if it says hey jarvis, the `.onnx` path is wrong).
-- [ ] Say "Hey Claude": the **chime** plays within ~half a second.
-- [ ] Ten tries from normal distance: it wakes at least 9 times.
-- [ ] Talk normally / play a video for 5 minutes: no (or very rare) false
-      wakes. Tune `[wake] sensitivity` if needed.
-- [ ] After the chime, say a command with a short pause in the middle: it
-      isn't cut off. Then stop talking: it responds in about a second
-      (tune `[wake] silence_ms`).
-- [ ] Say "Hey Claude" then nothing: after ~5 s it goes back to listening.
-- [ ] The assistant does not wake itself up from its own voice.
+## 2. Speaker and mic (3 min)
+- [ ] **Speaker:** `python -m assistant --mode speak`, type "say a short
+      sentence", then a second question.
+  - Should: both replies are spoken clearly at a comfortable speed (the
+    second one too: pyttsx3 sometimes went silent after the first reply).
+  - If not: speed is `[tts] rate` (default 185); a different Windows voice is
+    `[tts] voice = "Zira"` (part of the name). If the second reply is silent,
+    use Piper (step 9) and note it in BLOCKERS.md. Type `quit`.
+- [ ] **Mic level:** `python -m assistant --mode voice`, press Enter, say
+      "What time is it?" at normal volume, press Enter.
+  - Should: the printed `You:` line matches what you said.
+  - If not: empty or wrong text usually means the wrong mic or a low level.
+    Check Windows Settings -> System -> Sound -> Input (the level bar
+    should move when you talk; raise the input volume to ~80%), or set
+    `[wake] mic_device`. Say "goodbye" to exit.
 
-## 3b. Follow-up mode and timings
-- [ ] "Hey Claude, what's on my calendar tomorrow?" After the answer you
-      hear a **soft, low blip** (quieter than the wake chime). Within 5 s
-      say "and what about Friday?" without the wake word: it answers about
-      Friday, so it kept the conversation.
-- [ ] After an answer, stay quiet: after ~5 s it is back to waiting for the
-      wake word (the next request needs "Hey Claude" again).
-- [ ] Self-hearing: with the speaker at normal volume, ask something with a
-      long answer and say nothing. The answer must **not** trigger another
-      reply (no "You: ..." line with its own words in the console). Try with
-      the speaker louder and the mic closer to it.
-- [ ] Start your follow-up right after the blip, and once ~1 s before the
-      answer finishes: talking over the answer isn't heard (expected), and
-      the follow-up after the blip is.
-- [ ] Delete flow: "Hey Claude, delete <a test event>". It asks out loud;
-      say "yes". It deletes and confirms, then the blip plays. Say nothing:
-      no extra reply to "yes". Repeat with "no": the event stays.
-- [ ] Noise during the window (cough, door) shouldn't start a turn; if it
-      does, raise `[wake] vad_min_threshold` a little, or set
-      `follow_up_seconds = 0` if you don't want follow-ups at all.
-- [ ] `python -m assistant --timings`: after each answer a
-      "(Turn timings from wake: ...)" line prints. Note the "end of speech
-      to first audio" figure on the PC and on the Pi (that's the wait you
-      feel) and send it to me; it's also in `logs/assistant.log`.
+## 3. Wake word (8 min)
+Run `python -m assistant` for steps 3-8 and leave it running.
+- [ ] **Banner:** it prints `Listening for 'hey claude'...`
+  - If it says "hey jarvis": `keywords/hey_claude.onnx` wasn't found; check
+    `[wake] keyword_path`.
+- [ ] **Chime:** say "Hey Claude" (then nothing).
+  - Should: a two-note chime within about half a second; after ~5 s of
+    silence it prints "(heard the wake word but no command)" and listens
+    again.
+  - If no chime: check `[wake] chime = true` and the speaker. The 5 s wait is
+    `[wake] no_speech_timeout`.
+- [ ] **Hit rate.** Say "Hey Claude" 5 times in each position and tick how
+      many chimed (wait for it to go back to listening between tries):
+  - [ ] 1 m, normal voice: __/5
+  - [ ] 1 m, soft voice: __/5
+  - [ ] 3 m, normal voice: __/5
+  - [ ] 3 m, soft voice: __/5
+  - Should: at least 4/5 at 1 m and at 3 m normal; soft at 3 m may be lower.
+  - If it misses: raise `[wake] sensitivity` in steps of 0.1 (default 0.5;
+    higher = fewer misses but more false wakes). The model was trained on
+    synthetic voices, so your real-voice result here is the first real data.
+- [ ] **False wakes:** 2 minutes of normal talk or TV near the PC, without
+      saying "Hey Claude".
+  - Should: no chime, or at most one. (Saying "hey cloud" does wake it; that's
+    expected.)
+  - If more: lower `[wake] sensitivity` by 0.1 and repeat the hit-rate row
+    for 1 m normal, to find a value that does both.
+- [ ] **Command capture:** "Hey Claude, what's the date today and, um... what
+      day of the week is it?" with a short pause in the middle.
+  - Should: not cut off at the pause; after you stop it answers within a
+    second or two.
+  - If cut off: raise `[wake] silence_ms` (default 800). If it waits too long
+    or never stops in a noisy room: raise `vad_min_threshold` (default 0.015;
+    add the line under `[wake]`, try 0.025). Long commands are capped at
+    `max_seconds` (15).
 
-## 4. The main scenario
-- [ ] "Hey Claude, what's on my calendar tomorrow?" — it reads tomorrow's
-      events correctly (compare with Google Calendar).
-- [ ] "Hey Claude, add lunch with Sam tomorrow at noon" — appears in Google
-      Calendar at the right time (time zone correct).
-- [ ] "Hey Claude, move lunch with Sam to 1 PM" — moved, still 1 hour.
-- [ ] "Hey Claude, delete lunch with Sam" — it **asks you out loud** to
-      confirm. Say "no": event is still there. Repeat and say "yes": it's gone.
+## 4. Follow-up mode (2 min)
+- [ ] "Hey Claude, what's on my calendar tomorrow?"
+  - Should: it reads tomorrow's events (compare with Google Calendar), then a
+    soft, low blip (quieter than the wake chime).
+- [ ] Within 5 s of the blip, without the wake word: "and what about Friday?"
+  - Should: it answers about Friday's events, so it kept the conversation.
+- [ ] After that answer, say nothing.
+  - Should: after ~5 s it goes back to waiting for "Hey Claude"; it doesn't
+    reply to its own voice (no `You:` line with its own words).
+  - If it hears itself or noise (cough, door) starts a turn: raise `[wake]
+    vad_min_threshold`, lower the speaker volume or move the mic away from
+    it. The window length is `follow_up_seconds` (`0` turns follow-ups off);
+    `follow_up_chime = false` drops the blip only.
 
-## 5. Notion
-- [ ] "Hey Claude, what assignments are due this week?" — matches the
-      Upcoming view in Notion.
-- [ ] "Hey Claude, mark <an assignment> as in progress" — Status changes in
-      Notion. Set it back afterwards.
+## 5. Calendar create and spoken delete (3 min)
+- [ ] "Hey Claude, add a test event called Manual Test tomorrow at noon."
+  - Should: it appears in Google Calendar tomorrow 12:00-13:00 (right time
+    zone).
+  - If the time is off: set `[assistant] timezone = "America/New_York"` (your
+    IANA zone).
+- [ ] "Hey Claude, delete Manual Test tomorrow." It asks out loud "... Please
+      say yes or no." Say **"no"**.
+  - Should: the event is still there.
+- [ ] Repeat and say **"yes"**.
+  - Should: it confirms and the event is gone from Google Calendar; your "yes"
+    isn't answered again as a follow-up.
+  - If your answer isn't heard: same mic/VAD settings as step 3 (it records
+    the answer like a command).
 
-## 6. Memory
+## 6. Notion status (1 min)
+- [ ] "Hey Claude, what assignments are due this week?"
+  - Should: matches the Upcoming view in Notion.
+- [ ] "Hey Claude, mark <one of them> as in progress." Then "mark it as not
+      started" (or whatever it was before).
+  - Should: Status changes in Notion, then changes back.
+  - If it can't find it: say the name as it appears in Notion; it asks you
+    to choose if two names are similar.
+
+## 7. Memory across two conversations (2 min)
 - [ ] "Hey Claude, remember that my favorite study spot is the library
-      basement", then "Goodbye" (or just wait out the 5 s follow-up window).
-      The console prints "(Saved to memory: ...)".
-- [ ] Restart the app. "Hey Claude, where do I like to study?" — it knows.
+      basement." Then say "goodbye".
+  - Should: the console prints `(Saved to memory: ...)`.
+- [ ] Ctrl+C, run `python -m assistant` again. "Hey Claude, where do I like
+      to study?"
+  - Should: "the library basement".
+  - If not: check the console for "(Memory off: ...)"; `[memory] min_score`
+    (default 0.4) can be lowered to 0.3 if notes are missed.
 
-## 6b. Internet and browser
-- [ ] Set `[web] location` in `config.toml` to your city first.
-- [ ] "Hey Claude, what's the weather today?" — a short, correct answer for
-      your city; no URLs or "according to source 1" read aloud.
-- [ ] "Hey Claude, what's the latest news about <something from today>?" —
-      it's current (not from the model's training data).
-- [ ] "Hey Claude, open YouTube" — YouTube opens in your default browser.
-- [ ] "Hey Claude, search for Emory library hours and open it" — a Google
-      results page (or the library page) opens.
-- [ ] `logs/assistant.log` shows `open_in_browser` calls; web searches show
-      up as part of Claude's reply (they run on Anthropic's side).
+## 8. Web search (1 min)
+- [ ] "Hey Claude, what's the weather today?" and "Hey Claude, open YouTube."
+  - Should: a short, current answer for your city with no URLs read out;
+    YouTube opens in your browser.
+  - If the city is wrong: set `[web] location = { city = "...", region =
+    "...", country = "US", timezone = "America/New_York" }`.
 
-## 7. Failure handling
-- [ ] Turn Wi-Fi off, ask something: it **says** it can't reach the internet
-      and keeps listening. Turn Wi-Fi on: next question works.
-- [ ] Unplug the mic while running: it prints "Microphone problem; retrying"
-      (and exits with a clear message if it stays unplugged).
-- [ ] `logs/assistant.log` shows what was heard and replied.
+Ctrl+C to stop.
 
-## 8. Raspberry Pi
-Setup steps are in README.md ("Raspberry Pi").
-- [ ] `./scripts/install_pi.sh` finishes without errors on the Pi (first run
-      takes a while), and running it a second time changes nothing.
-- [ ] Copy `.env`, `credentials.json` and `token.json` from the PC (or use
-      the `--headless` Google sign-in). `keywords/hey_claude.onnx` comes
-      with the repo.
-- [ ] `.venv/bin/python -m assistant --check` shows OK for the API key,
-      token.json, wake-word model, your USB mic under "Input devices" and
-      your speaker under "Output devices", and prints no key values.
-- [ ] If the mic isn't the default, set `[wake] mic_device` to its index
-      and `--check` shows "Configured mic: ... -> <your mic>".
-- [ ] `speaker-test -t wav -c 2` is audible.
-- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model, including
-      the Piper voice checks (download the voice on the Pi or copy `voices/`);
-      with `engine = "piper"`, `--check` shows "TTS (piper): ... ok".
-- [ ] Note response time from end of speech to start of reply; if slow, try
-      `[stt] model = "tiny.en"` and Piper.
-- [ ] `./scripts/install_service.sh`, then reboot **without logging in**:
-      after a minute "Hey Claude, what time is it?" answers.
-- [ ] `journalctl --user -u hey-claude -n 20` shows the startup lines and
-      `logs/assistant.log` keeps growing.
-- [ ] Unplug the network cable / Wi-Fi, reboot: the service waits up to two
-      minutes, starts anyway, and says it can't reach the internet when
-      asked; plug back in and it works.
-- [ ] Crash recovery: `pkill -f "python -m assistant"`; within ~10 seconds
+## 9. Piper vs pyttsx3 voice (3 min)
+- [ ] `python -m assistant.tts --download-voice en_US-lessac-medium`, then
+      `python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"`
+  - Should: a natural-sounding voice.
+- [ ] Set `[tts] engine = "piper"`, run `python -m assistant --mode speak`,
+      ask two questions.
+  - Should: both replies in the Piper voice, starting without a long pause.
+  - Keep whichever voice you prefer (`engine = "pyttsx3"` to go back). If
+    the voice file is missing, it warns and uses pyttsx3.
+
+## 10. Network down (2 min)
+- [ ] Run `python -m assistant`, turn Wi-Fi off (or unplug the cable), then
+      "Hey Claude, what time is it?"
+  - Should: within ~30 s it **says** it can't reach the internet, and it
+    keeps listening.
+  - If it takes too long: lower `[assistant] api_timeout` (default 30 s) or
+    `api_max_retries` (default 3).
+- [ ] Turn Wi-Fi back on and ask again.
+  - Should: a normal answer without restarting.
+
+## 11. Latency (1 min)
+- [ ] `python -m assistant --timings`, ask "Hey Claude, what's on my
+      calendar tomorrow?" twice.
+  - Should: after each answer a `(Turn timings from wake: ...)` line. Write
+    down the last figure, "end of speech to first audio" (the wait you
+    feel): ____ s. Under ~3 s is good.
+  - If slow: the `transcript` step is Whisper (try `[stt] model =
+    "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
+    `silence_ms` pause.
+
+Note anything that failed or any setting you changed in BLOCKERS.md.
+
+---
+
+## Raspberry Pi (optional, ~15 min)
+Setup is in README.md ("Raspberry Pi").
+- [ ] `./scripts/install_pi.sh` finishes without errors; running it again
+      changes nothing.
+- [ ] Copy `.env`, `credentials.json`, `token.json` (and `voices/` if you use
+      Piper) from the PC, then `.venv/bin/python -m assistant --check`.
+  - Should: all required checks pass, with your USB mic and speaker listed.
+  - If the mic isn't the default: `[wake] mic_device = "<index>"`. Speaker:
+    `sudo raspi-config` -> System Options -> Audio, test with
+    `speaker-test -t wav -c 2`.
+- [ ] `.venv/bin/python -m assistant --timings`: repeat steps 3 (1 m normal
+      only), 4 and 11.
+  - If slow: `[stt] model = "tiny.en"` and `[tts] engine = "piper"`.
+- [ ] `./scripts/install_service.sh`, reboot without logging in, wait a
+      minute, then "Hey Claude, what time is it?"
+  - Should: it answers. `journalctl --user -u hey-claude -n 20` shows the
+    startup lines.
+- [ ] `pkill -f "python -m assistant"`: within ~10 s
       `systemctl --user status hey-claude` shows it running again.
