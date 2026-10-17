@@ -66,3 +66,30 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -rs
+
+  # The Pinecone MCP connector (deployed separately, see render.yaml):
+  # type-check, build, and check the server starts and answers its health check.
+  pinecone-mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: pinecone-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: pinecone-mcp/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Smoke test
+        env:
+          PINECONE_API_KEY: dummy
+          MCP_SECRET: ci-only-secret-0123456789abcdef
+          PORT: "3999"
+        run: |
+          node dist/server.js &
+          for i in $(seq 1 20); do curl -sf localhost:3999/ && break; sleep 0.5; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3999/mcp/wrong)" = 404
