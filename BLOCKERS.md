@@ -1,49 +1,36 @@
 # Blockers
 
-Things only Kyle can do. Everything else has been built and tested around them.
-None of these block the code; each one switches on a feature.
+Only what is still open for Kyle. None of it blocks the code.
 
-## Done (2026-10-17, on Kyle's Windows PC)
-Full `pytest` with `.env` loaded: **71 passed, 0 skipped**, including the
-real Whisper, Notion, Google Calendar and Pinecone tests. Text mode answered
-"what's on my calendar tomorrow?" and "what assignments are due this week?"
-from the live data.
-- **Anthropic API key**: in `.env`. The default model is now
-  `claude-sonnet-5-5` (`claude-sonnet-4-5` returns 404).
-- **Whisper**: downloaded on first run; `test_stt.py` runs with no skips.
-- **Google Calendar**: Cloud project `hey-claude-511904`, Calendar API on,
+## Open
+- [ ] **Delete the extra Google Cloud project.** In console.cloud.google.com,
+      check whether a project `strange-bird-511904-u7` exists (the
+      auto-suggested ID before the project was named "Hey Claude"). If it
+      exists and is empty, delete it. The real one is `hey-claude-511904`.
+- [ ] **Real-voice wake-word tuning.** The "Hey Claude" model was trained on
+      synthetic voices only. Run MANUAL_TEST.md step 3 and set `[wake]
+      sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what
+      works for your voice and room.
+- [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
+      spoken delete, Notion, memory, web, Piper, network down, latency).
+      Note anything that fails here.
+- [ ] **Raspberry Pi** (when you have one set up): the Pi section of
+      MANUAL_TEST.md.
+
+## Resolved (2026-10-17)
+- Anthropic API key in `.env`; default model `claude-sonnet-5-5`
+  (`claude-sonnet-4-5` now returns 404).
+- Google Calendar: project `hey-claude-511904`, Calendar API on,
   External/Testing consent screen with kylechen839@gmail.com as test user,
-  Desktop OAuth client saved as `credentials.json`, `token.json` from the
-  one-time sign-in (scope: calendar events). Both files are gitignored.
-- **Notion**: internal connection "Hey Claude" in Kyle Chen's Space, shared
-  with **Fall 2026 Assignments -> Assignments**
-  (`7eefabe3-0226-47a8-a287-584be0d2ea9b`, not the second "Assignments"
-  database under "Student Planner"). `NOTION_TOKEN` in `.env`. Property
-  names (Assignment, Course, Due, Status, Type) are the defaults.
-- **Pinecone**: `PINECONE_API_KEY` in `.env`. The assistant writes only to
-  the `voice-assistant` namespace; no test writes to the real index.
-- The tests read keys from the environment, not from `.env`, so load it into
-  the shell first (PowerShell):
-
-  ```
-  Get-Content .env | % { if ($_ -match '^([A-Z_]+)=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[2] } }
-  pytest -rs
-  ```
-
-## Done: custom "Hey Claude" wake word (openWakeWord)
-- The wake word engine is openWakeWord: open source, offline, no account or
-  key. (Picovoice Porcupine was dropped because its console now requires a
-  company email and only offers a trial.)
-- `keywords/hey_claude.onnx` was trained on 2026-10-17 with openWakeWord's
-  Colab notebook
-  (https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb,
-  default settings, CPU) and is committed; `config.toml` points at it. The
-  same file works on Windows and the Raspberry Pi. On generated speech it
-  scores ~0.82 for "Hey Claude" and ~0.001 for "Hey Jarvis" or a normal
-  sentence; "Hey cloud" also wakes it (~0.7), which is expected.
-- To retrain: Colab's default runtime is now Python 3.13, which the notebook's
-  pinned packages don't support. Choose Runtime -> Change runtime type ->
-  Runtime version **2025.07** (Python 3.11) first, set `target_word`, Run all,
-  and accept the one "Restart session" prompt, then Run all again.
-- If the file is missing, the app falls back to the built-in "Hey Jarvis"
-  (`[wake] builtin_keyword`).
+  Desktop OAuth client as `credentials.json`, `token.json` from sign-in.
+- Notion: integration "Hey Claude" shared with Fall 2026 Assignments ->
+  Assignments; `NOTION_TOKEN` in `.env`.
+- Pinecone: `PINECONE_API_KEY` in `.env`; writes go only to the
+  `voice-assistant` namespace.
+- Whisper model downloads on first run.
+- Custom "Hey Claude" wake word trained with openWakeWord (no account or key)
+  and committed as `keywords/hey_claude.onnx`. To retrain: in the
+  openWakeWord Colab notebook pick Runtime version 2025.07 (Python 3.11),
+  set `target_word`, Run all, accept the restart, Run all again.
+- Full `pytest` on Kyle's PC with keys loaded: 0 skipped; text mode answered
+  calendar and assignment questions from live data.
