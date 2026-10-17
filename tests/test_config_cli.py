@@ -170,3 +170,15 @@ def test_get_reply_error_messages(fake_client, exc, expected):
         "err", response=httpx.Response(status, request=req), body=None)
     reply = cli.get_reply(ClaudeChat(client=fake_client), "hi", lambda *_: None)
     assert expected in reply
+
+
+def test_text_mode_survives_unexpected_errors(fake_client):
+    from assistant.chat import ClaudeChat
+
+    fake_client.messages.create.side_effect = [ValueError("weird"),
+                                               make_response(text_block("Hi."))]
+    inputs, out = iter(["hello", "again", "quit"]), []
+    cli.run_text(ClaudeChat(client=fake_client), input_fn=lambda _: next(inputs),
+                 output_fn=out.append)
+    assert "Claude: Sorry, something went wrong." in out
+    assert "Claude: Hi." in out

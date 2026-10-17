@@ -71,6 +71,8 @@ class PineconeMemory:
         return list(result.data[0]["values"])
 
     def namespaces(self) -> list[str]:
+        if isinstance(self.search_namespaces, str) and self.search_namespaces != "*":
+            return [self.search_namespaces]  # a single namespace name
         if self.search_namespaces != "*":
             return list(self.search_namespaces)
         if self._namespaces is None:

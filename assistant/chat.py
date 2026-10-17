@@ -126,12 +126,16 @@ class ClaudeChat:
             if self.tools:
                 kwargs["tools"] = self.tools.schemas()
             response = self.client.messages.create(**kwargs)
+            calls = [b for b in response.content if b.type == "tool_use"]
+            done = response.stop_reason != "tool_use" or not calls or not self.tools
+            # A tool call we won't run (e.g. cut off by max_tokens) must not
+            # stay in history: the API rejects tool_use without a tool_result.
             blocks = [_block_dict(b) for b in response.content
-                      if not (b.type == "text" and not b.text.strip())]
+                      if not (b.type == "text" and not b.text.strip())
+                      and not (done and b.type == "tool_use")]
             self.history.append({"role": "assistant", "content": blocks or
                                  [{"type": "text", "text": "(no reply)"}]})
-            calls = [b for b in response.content if b.type == "tool_use"]
-            if response.stop_reason != "tool_use" or not calls or not self.tools:
+            if done:
                 text = "".join(b.text for b in response.content if b.type == "text")
                 return text.strip()
             results = []
