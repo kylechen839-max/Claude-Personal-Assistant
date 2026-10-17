@@ -67,6 +67,14 @@ def make_chime(sr: int = SAMPLE_RATE) -> np.ndarray:
     return np.concatenate([tone(880, 0.09), tone(1320, 0.12)]).astype(np.float32)
 
 
+def make_follow_up_chime(sr: int = SAMPLE_RATE) -> np.ndarray:
+    """One short, quiet low note: "still listening" (softer than the wake chime)."""
+    dur = 0.1
+    t = np.arange(int(sr * dur)) / sr
+    env = np.minimum(1.0, np.minimum(t, dur - t) / 0.02)  # 20 ms fades
+    return (0.1 * np.sin(2 * np.pi * 660 * t) * env).astype(np.float32)
+
+
 def play(samples: np.ndarray, sr: int = SAMPLE_RATE) -> None:
     import sounddevice as sd
 

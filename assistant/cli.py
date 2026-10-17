@@ -133,9 +133,7 @@ def run_voice(chat: ClaudeChat, tts, transcriber: Transcriber,
 
 
 def finish(chat: ClaudeChat, output_fn=print) -> None:
-    summary = chat.end_conversation()
-    if summary:
-        output_fn(f"(Saved to memory: {summary})")
+    end_conversation(chat, output_fn)
     output_fn("Bye!")
 
 
@@ -143,55 +141,111 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
              output_fn=print, wake_phrase: str = "Hey Claude",
              conversation_timeout: float = 300, clock=time.monotonic,
              max_failures: int = 5, retry_delay: float = 2.0,
-             show_timings: bool = False,
-             timing_clock=time.monotonic) -> None:
-    """Always listening. A conversation ends on 'goodbye' or after
-    `conversation_timeout` seconds without a request; it is then summarized
-    to memory and history is reset. Ctrl+C quits. A file source stops at its
-    end. Each turn's latency is logged (`timing_clock` must be the clock the
-    listener stamps `wake_time` with); `show_timings` prints it too."""
+             show_timings: bool = False, timing_clock=time.monotonic,
+             follow_up_seconds: float = 0) -> None:
+    """Always listening. Ctrl+C quits. A file source stops at its end.
+
+    With `follow_up_seconds` > 0, after each reply it keeps listening that
+    long without the wake word; speech in that window is the next turn of
+    the same conversation, and silence ends the conversation (summarized to
+    memory, history reset) until the next wake word. With 0, a conversation
+    ends on 'goodbye' or after `conversation_timeout` seconds without a
+    request. Each turn's latency is logged (`timing_clock` must be the clock
+    the listener stamps `wake_time` with); `show_timings` prints it too."""
     output_fn(f"Listening for '{wake_phrase}'... (Ctrl+C to quit)")
     last_exchange = clock()
     failures = 0
-    while True:
-        try:
-            woke, recording = listener.listen(source)
-            failures = 0
-        except KeyboardInterrupt:
-            break
-        except Exception as e:  # e.g. mic unplugged: retry a few times
-            failures += 1
-            log.exception("Listening failed (%d in a row)", failures)
-            if failures >= max_failures:
-                raise
-            output_fn(f"(Microphone problem: {e}; retrying)")
-            time.sleep(retry_delay)
-            continue
-        if not woke:
-            break  # audio file finished
-        timer = TurnTimer(timing_clock, "wake", at=getattr(listener, "wake_time", None))
-        timer.mark("speech_end")
-        if chat.history and clock() - last_exchange > conversation_timeout:
-            summary = chat.end_conversation()  # new conversation starts now
-            if summary:
-                output_fn(f"(Saved to memory: {summary})")
-        last_exchange = clock()
-        if recording is None:
-            output_fn("(heard the wake word but no command)")
-            continue
-        try:
-            handle_command(chat, tts, transcriber, recording, output_fn, timer)
-        except KeyboardInterrupt:
-            break
-        except Exception:  # never let one bad request stop the assistant
-            log.exception("Error handling a command")
-            output_fn("(Something went wrong; still listening)")
+    timings_out = output_fn if show_timings else None
+    try:
+        while True:
             try:
-                tts.speak("Sorry, something went wrong.")
-            except Exception:
-                log.exception("TTS failed too")
-        report_timings(timer, output_fn if show_timings else None)
+                woke, recording = listener.listen(source)
+                failures = 0
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:  # e.g. mic unplugged: retry a few times
+                failures += 1
+                log.exception("Listening failed (%d in a row)", failures)
+                if failures >= max_failures:
+                    raise
+                output_fn(f"(Microphone problem: {e}; retrying)")
+                time.sleep(retry_delay)
+                continue
+            if not woke:
+                break  # audio file finished
+            timer = TurnTimer(timing_clock, "wake",
+                              at=getattr(listener, "wake_time", None))
+            timer.mark("speech_end")
+            if chat.history and clock() - last_exchange > conversation_timeout:
+                end_conversation(chat, output_fn)  # new conversation starts now
+            last_exchange = clock()
+            if recording is None:
+                output_fn("(heard the wake word but no command)")
+                continue
+            keep_listening = run_turn(chat, tts, transcriber, recording,
+                                      output_fn, timer, wake_phrase, timings_out)
+            if follow_up_seconds <= 0:
+                continue
+            while keep_listening:
+                timer = TurnTimer(timing_clock, "follow-up window")
+                recording = listen_follow_up(listener, source, follow_up_seconds)
+                if recording is None:
+                    log.info("No follow-up within %s s", follow_up_seconds)
+                    break
+                timer.mark("speech_end")
+                keep_listening = run_turn(chat, tts, transcriber, recording,
+                                          output_fn, timer, wake_phrase,
+                                          timings_out)
+            end_conversation(chat, output_fn)  # back to waiting for the wake word
+    except KeyboardInterrupt:
+        pass
     finish(chat, output_fn)
+
+
+def listen_follow_up(listener, source, seconds: float):
+    """The follow-up recording, or None (silence, or the mic failed)."""
+    try:
+        return listener.record_follow_up(source, seconds)
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        log.exception("Listening for a follow-up failed")
+        return None
+
+
+def run_turn(chat: ClaudeChat, tts, transcriber, recording, output_fn,
+             timer: TurnTimer, wake_phrase: str, timings_out=None) -> bool:
+    """One request and its spoken reply. True if a follow-up may come."""
+    try:
+        return handle_command(chat, tts, transcriber, recording, output_fn,
+                              timer, wake_phrase)
+    except KeyboardInterrupt:
+        raise
+    except Exception:  # never let one bad request stop the assistant
+        log.exception("Error handling a command")
+        output_fn("(Something went wrong; still listening)")
+        try:
+            tts.speak("Sorry, something went wrong.")
+        except Exception:
+            log.exception("TTS failed too")
+        return True
+    finally:
+        report_timings(timer, timings_out)
+
+
+def end_conversation(chat: ClaudeChat, output_fn=print) -> None:
+    summary = chat.end_conversation()
+    if summary:
+        output_fn(f"(Saved to memory: {summary})")
+
+
+def strip_wake_phrase(text: str, wake_phrase: str | None) -> str:
+    """'Hey Claude, what time is it?' -> 'what time is it?' (people often
+    repeat the wake word during the follow-up window)."""
+    if not wake_phrase:
+        return text
+    words = r"\W+".join(re.escape(w) for w in wake_phrase.split())
+    return re.sub(rf"^\W*{words}\b\W*", "", text, flags=re.IGNORECASE)
 
 
 def report_timings(timer: TurnTimer, output_fn=None) -> None:
@@ -220,26 +274,29 @@ def speak(tts, text: str, timer: TurnTimer | None = None) -> None:
 
 
 def handle_command(chat: ClaudeChat, tts, transcriber, recording,
-                   output_fn=print, timer: TurnTimer | None = None) -> None:
-    user_text = transcriber.transcribe(recording)
+                   output_fn=print, timer: TurnTimer | None = None,
+                   wake_phrase: str | None = None) -> bool:
+    """Transcribe, answer, speak. Returns True if the conversation goes on
+    (a follow-up may come), False if nothing was heard or it was 'goodbye'."""
+    heard = transcriber.transcribe(recording)
     if timer:
         timer.mark("transcript")
-    output_fn(f"You: {user_text}")
-    log.info("Heard: %r", user_text)
+    output_fn(f"You: {heard}")
+    log.info("Heard: %r", heard)
+    user_text = strip_wake_phrase(heard, wake_phrase).strip()
     if not user_text:
-        return
+        return bool(heard)  # just "Hey Claude": still listening
     if is_exit(user_text):
         tts.speak("Goodbye!")
-        summary = chat.end_conversation()
-        if summary:
-            output_fn(f"(Saved to memory: {summary})")
-        return
+        end_conversation(chat, output_fn)
+        return False
     reply = get_reply(chat, user_text, output_fn)
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
     log.info("Replied: %r", reply)
     speak(tts, reply, timer)
+    return True
 
 
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
@@ -316,10 +373,14 @@ def build_wake_components(args, config: dict):
     detector = make_detector(keyword_path=args.keyword_path or wake["keyword_path"],
                              builtin_keyword=wake["builtin_keyword"],
                              sensitivity=wake["sensitivity"])
-    chime = audio.make_chime()
-    on_wake = (lambda: audio.play(chime)) if wake["chime"] and not args.audio_file else None
+    chime, soft_chime = audio.make_chime(), audio.make_follow_up_chime()
+    chimes = wake["chime"] and not args.audio_file
+    on_wake = (lambda: audio.play(chime)) if chimes else None
+    on_follow_up = ((lambda: audio.play(soft_chime))
+                    if chimes and wake["follow_up_chime"] else None)
     listener = WakeListener(detector, vad=EnergyVAD(wake["vad_min_threshold"]),
-                            on_wake=on_wake, silence_ms=wake["silence_ms"],
+                            on_wake=on_wake, on_follow_up=on_follow_up,
+                            silence_ms=wake["silence_ms"],
                             max_seconds=wake["max_seconds"],
                             no_speech_timeout=wake["no_speech_timeout"])
     device = wake["mic_device"]
@@ -376,7 +437,8 @@ def main(argv=None) -> int:
                 tts, lambda: listener.record_reply(source), transcriber)
             run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase,
                      conversation_timeout=config["assistant"]["conversation_timeout"],
-                     show_timings=args.timings)
+                     show_timings=args.timings,
+                     follow_up_seconds=config["wake"]["follow_up_seconds"])
     except KeyboardInterrupt:
         print("Bye!")
     except Exception as e:  # startup problems: missing key, no mic, bad config

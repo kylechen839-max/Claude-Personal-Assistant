@@ -40,6 +40,8 @@ DEFAULTS: dict = {
         "silence_ms": 800,
         "max_seconds": 15,
         "no_speech_timeout": 5,
+        "follow_up_seconds": 5,  # listen this long after a reply; 0 = off
+        "follow_up_chime": True,  # soft blip when the follow-up window opens
         "vad_min_threshold": 0.015,
         "mic_device": "",  # sounddevice name or index; "" = default
     },

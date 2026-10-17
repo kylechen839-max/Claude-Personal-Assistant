@@ -49,6 +49,13 @@ class MicSource:
             self._stream.close()
             self._stream = None
 
+    def drain(self) -> None:
+        """Throw away anything already buffered (e.g. our own voice)."""
+        if self._stream is not None:
+            available = self._stream.read_available
+            if available:
+                self._stream.read(available)
+
     def frames(self) -> Iterator[np.ndarray]:
         self.start()
         while self._stream is not None:
@@ -59,10 +66,16 @@ class MicSource:
 
 
 class FileSource:
-    """Plays a .wav file through the pipeline instead of the mic."""
+    """Plays a .wav file through the pipeline instead of the mic.
+
+    By default the file pauses while the source is stopped. With a `clock`
+    it keeps "playing" in clock time instead, and the audio that went by
+    while stopped is lost, as with the real mic, which is closed while the
+    assistant thinks and speaks (tests use this with a fake clock)."""
 
     def __init__(self, path: str | Path, frame_length: int = FRAME_LENGTH,
-                 tail_silence: float = 2.0):
+                 tail_silence: float = 2.0,
+                 clock: Callable[[], float] | None = None):
         samples = np.concatenate([audio.load_audio(path),
                                   audio.silence(tail_silence)])
         pcm = (np.clip(samples, -1, 1) * 32767).astype(np.int16)
@@ -71,6 +84,8 @@ class FileSource:
         self._frames = self._generate()
         self.frame_length = frame_length
         self.position = 0  # index of the next frame to be read
+        self.clock = clock
+        self._stopped_at: float | None = None
 
     def _generate(self) -> Iterator[np.ndarray]:
         while self.position < len(self._all):
@@ -78,10 +93,17 @@ class FileSource:
             yield self._all[self.position - 1]
 
     def start(self) -> None:
-        pass
+        if self.clock is not None and self._stopped_at is not None:
+            missed = self.clock() - self._stopped_at
+            self.position += int(missed * SAMPLE_RATE / self.frame_length)
+        self._stopped_at = None
 
     def stop(self) -> None:
-        pass
+        if self.clock is not None and self._stopped_at is None:
+            self._stopped_at = self.clock()
+
+    def drain(self) -> None:
+        pass  # a stopped file buffers nothing
 
     def frames(self) -> Iterator[np.ndarray]:
         return self._frames  # shared iterator: resumes where it left off
@@ -239,10 +261,12 @@ class WakeListener:
                  on_wake: Callable[[], None] | None = None,
                  silence_ms: int = 800, max_seconds: float = 15.0,
                  no_speech_timeout: float = 5.0, ignore_after_wake_ms: int = 250,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 on_follow_up: Callable[[], None] | None = None):
         self.detector = detector
         self.vad = vad or EnergyVAD()
         self.on_wake = on_wake
+        self.on_follow_up = on_follow_up  # e.g. a soft chime
         self.silence_ms = silence_ms
         self.max_seconds = max_seconds
         self.no_speech_timeout = no_speech_timeout
@@ -257,15 +281,18 @@ class WakeListener:
             self.vad.is_speech(frame)  # keep the noise floor current
         return False  # source ran out
 
-    def record_command(self, frames: Iterator[np.ndarray]) -> np.ndarray | None:
+    def record_command(self, frames: Iterator[np.ndarray],
+                       no_speech_timeout: float | None = None) -> np.ndarray | None:
         frame_length = self.detector.frame_length
         skip = int(self.ignore_after_wake_ms * SAMPLE_RATE / 1000 / frame_length)
         for _ in range(skip):  # let the chime echo die away
             if next(frames, None) is None:
                 return None
+        if no_speech_timeout is None:
+            no_speech_timeout = self.no_speech_timeout
         return record_until_silence(frames, self.vad, frame_length,
                                     self.silence_ms, self.max_seconds,
-                                    self.no_speech_timeout)
+                                    no_speech_timeout)
 
     def listen(self, source) -> tuple[bool, np.ndarray | None]:
         """Block until the wake word, then record one command.
@@ -285,10 +312,29 @@ class WakeListener:
         finally:
             source.stop()
 
+    def record_follow_up(self, source, seconds: float) -> np.ndarray | None:
+        """After a reply: record the next request without the wake word, if
+        speech starts within `seconds`; None if it doesn't.
+
+        Call it only once playback has finished. The mic is closed while the
+        assistant speaks, anything still buffered is drained, and the first
+        `ignore_after_wake_ms` are skipped (room echo, the chime), so our
+        own voice can't come back as a follow-up."""
+        if self.on_follow_up:
+            self.on_follow_up()  # plays before the mic opens
+        source.start()
+        try:
+            source.drain()
+            return self.record_command(iter(source.frames()),
+                                       no_speech_timeout=seconds)
+        finally:
+            source.stop()
+
     def record_reply(self, source) -> np.ndarray | None:
         """Record an answer without needing the wake word (e.g. yes/no)."""
         source.start()
         try:
+            source.drain()  # not the question we just asked
             return self.record_command(iter(source.frames()))
         finally:
             source.stop()

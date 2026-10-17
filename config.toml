@@ -29,6 +29,8 @@ chime = true
 silence_ms = 800              # how long a pause ends your command
 max_seconds = 15
 no_speech_timeout = 5
+follow_up_seconds = 5         # after a reply, keep listening this long without the wake word; 0 = off
+follow_up_chime = true        # soft blip when that window opens (only if chime = true)
 mic_device = ""               # "" = default mic
 
 [calendar]

@@ -304,6 +304,56 @@ Run all tests with `pytest` (from the project root, venv active).
   Whisper base.en on CPU and the Claude round trip(s); run with
   `--timings` on the PC and the Pi to see them.
 
+### Follow-up mode (2026-10-17)
+- After each reply, `run_wake` keeps listening for `[wake]
+  follow_up_seconds` (default 5, `0` = off) without the wake word
+  (`WakeListener.record_follow_up`). Speech that starts in that window is
+  recorded until silence (same VAD settings) and becomes the next turn of
+  the same conversation; then the window opens again. If nobody speaks, the
+  conversation ends: `chat.end_conversation()` summarizes it to Pinecone as
+  before, and the assistant waits for the wake word. "Goodbye" ends it
+  without another window. With follow-up off, the old rule (goodbye or
+  `conversation_timeout`) applies unchanged.
+- Chime: a softer, different sound, chosen over no sound so Kyle can tell it
+  is still listening: one quiet 660 Hz blip of 0.1 s (the wake chime is two
+  rising notes at three times the volume). `[wake] follow_up_chime = false`
+  drops it; `chime = false` drops both; never played with `--audio-file`.
+- Not hearing itself: the window opens only after `speak()` returns (the
+  blip plays before the mic opens); the mic stream is closed while the
+  assistant thinks and speaks, so nothing from playback is buffered;
+  `MicSource.drain()` throws away anything that is buffered anyway; and the
+  first 250 ms after the mic opens are skipped (echo, the blip's tail).
+  The spoken yes/no confirmation recording drains the mic the same way.
+- Yes/no confirmation: the answer is recorded inside the tool call
+  (`voice_confirm` -> `record_reply`), before the final reply, so it is never
+  a follow-up, and the window opens only after the final reply.
+- If Whisper hears "Hey Claude, ..." in a follow-up (people repeat the wake
+  word), the phrase is stripped; just "Hey Claude" keeps the window open.
+- Each follow-up turn gets its own timing line, measured from when its
+  window opened ("Turn timings from follow-up window: ...").
+- Tests: `tests/test_follow_up.py` (14) runs .wav fixtures (eSpeak clips and
+  silence) through the real `WakeListener`/VAD with a scripted wake detector
+  and mocked Claude/Calendar/STT. `FileSource(clock=...)` plays the file in
+  fake-clock time and loses the audio that goes by while the source is
+  stopped, like the closed mic, while a fake TTS takes 3 s of fake time to
+  "speak". Covered: a follow-up continues the same conversation and the
+  summary is stored once when the window times out; speech after the
+  window is ignored; follow-up off keeps the old behavior; a copy of the
+  reply placed in the file during playback is not heard (and *is* heard in
+  a control run with the file running through playback, so the fixture is
+  real); the window opens only after playback; delete + spoken "yes": the
+  yes answers the question, the event is deleted, Claude gets one user
+  turn, and one window opens afterwards; no answer cancels the delete;
+  goodbye in a follow-up; per-turn timings; wake-phrase stripping; mic
+  drain; config defaults and chime wiring. Disabling the follow-up loop
+  fails 6 of them; disabling the playback drop fails the self-hearing test.
+  The definition-of-done test also runs follow-up mode (shipped default,
+  5 s): the window expires in the file's trailing silence.
+- `--audio-file` from the command line doesn't simulate the closed mic
+  (the file pauses while the assistant is busy), since real Whisper/Claude
+  times would cut into the recording unpredictably; only the tests use the
+  fake clock.
+
 ## Test summary
 `pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
 build sandbox). The skips are real-service tests that need things the
