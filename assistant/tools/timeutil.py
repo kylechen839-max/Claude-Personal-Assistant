@@ -21,20 +21,29 @@ def zone_name(tz: tzinfo) -> str | None:
     return getattr(tz, "key", None) or getattr(tz, "zone", None)
 
 
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday"]
+
+
 def resolve_day(day: str, tz: tzinfo) -> date:
-    """'today', 'tomorrow', a weekday name, or YYYY-MM-DD."""
+    """'today', 'tomorrow', 'yesterday', YYYY-MM-DD, or a weekday name.
+
+    'friday' / 'this friday' is the coming Friday, or today if it is Friday.
+    'next friday' is always after today: on a Friday it means a week out.
+    """
     today = datetime.now(tz).date()
-    d = (day or "today").strip().lower()
+    d = " ".join((day or "today").strip().lower().split())
     if d == "today":
         return today
     if d == "tomorrow":
         return today + timedelta(days=1)
     if d == "yesterday":
         return today - timedelta(days=1)
-    weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday",
-                "saturday", "sunday"]
-    if d in weekdays:
-        ahead = (weekdays.index(d) - today.weekday()) % 7
+    prefix, _, name = d.rpartition(" ")
+    if name in WEEKDAYS and prefix in ("", "this", "on", "next"):
+        ahead = (WEEKDAYS.index(name) - today.weekday()) % 7
+        if prefix == "next" and ahead == 0:
+            ahead = 7
         return today + timedelta(days=ahead)
     return date.fromisoformat(d)
 

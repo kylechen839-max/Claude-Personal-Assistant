@@ -51,3 +51,86 @@ def test_wav_roundtrip_and_resample(tmp_path):
     back = audio.load_audio(path)
     assert abs(len(back) - 16000) <= 1
     assert len(audio.make_chime()) > 0
+
+
+def test_pyttsx3_fresh_engine_per_reply(monkeypatch):
+    import pyttsx3.engine
+
+    made = []
+
+    class FakeEngine:
+        def __init__(self):
+            made.append(self)
+            self.props = {}
+
+        def setProperty(self, k, v):
+            self.props[k] = v
+
+        def say(self, text):
+            pass
+
+        def runAndWait(self):
+            pass
+
+    monkeypatch.setattr(pyttsx3.engine, "Engine", FakeEngine)
+    tts = Pyttsx3TTS(rate=150, fresh_engine=True)
+    tts.speak("one")
+    tts.speak("two")
+    assert len(made) == 2 and made[1].props["rate"] == 150
+    reused = Pyttsx3TTS(fresh_engine=False)
+    reused.speak("one")
+    reused.speak("two")
+    assert len(made) == 3
+
+
+def test_pyttsx3_windows_file_output_uses_sapi(tmp_path, monkeypatch):
+    """pyttsx3's save_to_file writes an empty file on Windows, so SAPI is
+    driven directly there; check the calls with a fake comtypes."""
+    import sys
+    import types
+
+    calls = []
+
+    class Token:
+        def __init__(self, name):
+            self.name = name
+
+        def GetDescription(self):
+            return self.name
+
+    class Tokens:
+        items = [Token("Microsoft David Desktop"), Token("Microsoft Zira Desktop")]
+        Count = 2
+
+        def Item(self, i):
+            return self.items[i]
+
+    class SpVoice:
+        Voice = Rate = AudioOutputStream = None
+
+        def GetVoices(self):
+            return Tokens()
+
+        def Speak(self, text, flags):
+            calls.append(("speak", text, flags, self.Voice.name, self.Rate,
+                          self.AudioOutputStream))
+
+    class SpFileStream:
+        def Open(self, path, mode):
+            calls.append(("open", path, mode))
+
+        def Close(self):
+            calls.append(("close",))
+
+    client = types.SimpleNamespace(CreateObject=lambda name: {
+        "SAPI.SpVoice": SpVoice, "SAPI.SpFileStream": SpFileStream}[name]())
+    monkeypatch.setitem(sys.modules, "comtypes", types.SimpleNamespace(client=client))
+    monkeypatch.setitem(sys.modules, "comtypes.client", client)
+
+    out = tmp_path / "x.wav"
+    Pyttsx3TTS(rate=185, voice="zira", sapi_files=True).save_to_file("hi", out)
+    assert calls[0] == ("open", str(out.resolve()), 3)
+    _, text, flags, voice, rate, stream = calls[1]
+    assert (text, flags, voice) == ("hi", 0, "Microsoft Zira Desktop")
+    assert rate == 1 and isinstance(stream, SpFileStream)
+    assert calls[2] == ("close",)

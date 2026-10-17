@@ -8,8 +8,10 @@ Pick one with `make_tts(name)`: "pyttsx3" (offline, default), "piper"
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Protocol
@@ -26,34 +28,79 @@ class TTS(Protocol):
 
 
 class Pyttsx3TTS:
-    """Uses the OS voice: SAPI5 on Windows, eSpeak on Linux / Raspberry Pi."""
+    """Uses the OS voice: SAPI5 on Windows, eSpeak on Linux / Raspberry Pi.
 
-    def __init__(self, rate: int = 185, voice: str | None = None):
+    On Windows a reused pyttsx3 engine can go silent after the first
+    runAndWait(), so by default a fresh engine is built for every reply
+    there (`fresh_engine`); elsewhere one engine is kept. pyttsx3's
+    save_to_file writes an empty .wav on Windows (its SAPI driver never
+    closes the file stream properly), so files are rendered with SAPI
+    directly there (`sapi_files`).
+    """
+
+    def __init__(self, rate: int = 185, voice: str | None = None,
+                 fresh_engine: bool | None = None,
+                 sapi_files: bool | None = None):
         self.rate = rate
         self.voice = voice
+        on_windows = sys.platform == "win32"
+        self.fresh_engine = on_windows if fresh_engine is None else fresh_engine
+        self.sapi_files = on_windows if sapi_files is None else sapi_files
         self._engine = None
+
+    def _new_engine(self):
+        from pyttsx3.engine import Engine  # pyttsx3.init() would reuse one
+
+        engine = Engine()
+        engine.setProperty("rate", self.rate)
+        if self.voice:
+            for v in engine.getProperty("voices"):
+                if self.voice.lower() in (v.name or "").lower():
+                    engine.setProperty("voice", v.id)
+                    break
+        return engine
 
     @property
     def engine(self):
+        if self.fresh_engine:
+            return self._new_engine()
         if self._engine is None:
-            import pyttsx3
-
-            self._engine = pyttsx3.init()
-            self._engine.setProperty("rate", self.rate)
-            if self.voice:
-                for v in self._engine.getProperty("voices"):
-                    if self.voice.lower() in (v.name or "").lower():
-                        self._engine.setProperty("voice", v.id)
-                        break
+            self._engine = self._new_engine()
         return self._engine
 
     def speak(self, text: str) -> None:
-        self.engine.say(text)
-        self.engine.runAndWait()
+        engine = self.engine
+        engine.say(text)
+        engine.runAndWait()
 
     def save_to_file(self, text: str, path: str | Path) -> None:
-        self.engine.save_to_file(text, str(path))
-        self.engine.runAndWait()
+        if self.sapi_files:
+            self._sapi_save_to_file(text, path)
+            return
+        engine = self.engine
+        engine.save_to_file(text, str(path))
+        engine.runAndWait()
+
+    def _sapi_save_to_file(self, text: str, path: str | Path) -> None:
+        import comtypes.client
+
+        voice = comtypes.client.CreateObject("SAPI.SpVoice")
+        if self.voice:
+            tokens = voice.GetVoices()
+            for i in range(tokens.Count):
+                token = tokens.Item(i)
+                if self.voice.lower() in token.GetDescription().lower():
+                    voice.Voice = token
+                    break
+        # Same words-per-minute -> SAPI rate (-10..10) mapping as pyttsx3.
+        voice.Rate = max(-10, min(10, int(math.log(self.rate / 156.63, 1.11))))
+        stream = comtypes.client.CreateObject("SAPI.SpFileStream")
+        stream.Open(str(Path(path).resolve()), 3)  # SSFMCreateForWrite
+        try:
+            voice.AudioOutputStream = stream
+            voice.Speak(text, 0)  # synchronous
+        finally:
+            stream.Close()
 
 
 class PiperTTS:

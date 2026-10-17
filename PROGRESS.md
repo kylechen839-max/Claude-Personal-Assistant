@@ -152,9 +152,9 @@ Run all tests with `pytest` (from the project root, venv active).
   API (no Anthropic key in the build environment).
 
 ## Test summary
-`pytest`: 64 passed, 5 skipped in the build sandbox. The skips are
-real-service tests that need things only Kyle can provide (Whisper model
-download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.md.
+`pytest`: 96 passed, 4 skipped in the Linux build sandbox. The skips are
+real-service tests that need things the sandbox lacks (Whisper model
+download, Notion token, Google sign-in); see BLOCKERS.md.
 
 ## Fixes after review
 - A reply cut off by `max_tokens` mid tool call left an unanswered
@@ -166,13 +166,40 @@ download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.m
   now produce a spoken "Sorry, something went wrong" and the loop goes on.
 - Tests: one regression test per fix (`test_chat.py`, `test_memory.py`,
   `test_config_cli.py`).
+- Weekday names: "friday" (or "this friday") is the coming Friday, or
+  today on a Friday; "next friday" is never today. The tool description
+  asks Claude to prefer YYYY-MM-DD for other days.
+- All-day events can be created (date-only start/end; `end` is the last
+  day, inclusive). Moving an all-day event with `new_end` is inclusive too.
+- `--audio-file` cuts audio into the detector's frame length instead of a
+  fixed 512 samples.
+- pyttsx3 builds a fresh engine for each reply on Windows, the usual fix
+  for it going silent after the first reply (not yet tried on Windows).
+- pyttsx3 2.99's `save_to_file` writes an empty (header-only) .wav on
+  Windows; found by the Windows CI job. Files are now rendered through SAPI
+  directly on Windows (live speech still goes through pyttsx3).
+- Memory reads note text from the first of `text`, `chunk_text`, `content`,
+  `summary` in the metadata (`[memory] text_fields` in config.toml).
+
+## Continuous testing
+`.github/workflows/tests.yml` runs `pytest` on every push and pull request,
+plus weekly (Mondays), on Ubuntu (Python 3.10 and 3.12, as a stand-in for
+the Pi) and Windows (Python 3.12). Live-service tests skip there (no
+secrets are given to CI); the Whisper tests do run, since CI can download
+the model. On Linux the job installs espeak-ng for pyttsx3 and then
+openWakeWord with `pip install --no-deps`, the same as the Pi setup in the
+README, because its tflite-runtime dependency has no wheels for newer Pythons.
+The wake-word pipeline test measures command length from the TTS clip
+trimmed once in `tts_clip`, so SAPI's silence padding on Windows does not
+skew it.
 
 ## Known issues / notes
 - The wake word itself (openWakeWord + your `.onnx`) and the real Whisper model
   have not been exercised in the sandbox; they are the first things to check
   in MANUAL_TEST.md.
-- pyttsx3 on some Windows setups stops speaking after the first reply; if
-  that happens, switch `[tts] engine = "piper"` (and tell me).
+- pyttsx3 on some Windows setups stops speaking after the first reply. A
+  fresh engine per reply is now used on Windows; if it still happens,
+  switch `[tts] engine = "piper"` (and tell me).
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
 - Two Notion databases are named "Assignments"; the Fall 2026 one is used.
 - Default model changed from `claude-sonnet-4-5` to `claude-sonnet-5-5`

@@ -148,3 +148,13 @@ def test_single_namespace_string_is_not_split():
     assert mem.namespaces() == ["projects"]
     assert mem.retrieve("x") == ["note"]
     assert index.query.call_args.kwargs["namespace"] == "projects"
+
+
+def test_retrieve_reads_other_text_fields():
+    m = [SimpleNamespace(score=0.9, metadata={"chunk_text": "from chunk"}),
+         SimpleNamespace(score=0.9, metadata={"content": "from content"}),
+         SimpleNamespace(score=0.9, metadata={"other": "ignored"})]
+    mem, _, _ = make_memory(m)
+    assert mem.retrieve("x") == ["from chunk", "from content"]
+    mem.text_fields = ["content"]
+    assert mem.retrieve("x") == ["from content"]

@@ -141,6 +141,7 @@ assistant/
   audio.py      wav I/O, resampling, chime
   tools/        calendar.py, notion.py, tool registry
 tests/          pytest suite (offline; live tests skip without keys)
+.github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,

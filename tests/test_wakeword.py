@@ -85,7 +85,7 @@ def test_pipeline_on_audio_file(session_file):
     for utt, expected in zip(results, cmd_lengths):
         assert utt is not None
         seconds = len(utt) / SAMPLE_RATE
-        # the command plus pre-roll and a little trailing silence
+        # the spoken command plus pre-roll and a little trailing silence
         assert expected - 0.3 < seconds < expected + 1.0, (seconds, expected)
 
 
@@ -172,3 +172,20 @@ def test_get_reply_handles_network_error(fake_client):
         request=httpx.Request("POST", "https://api.anthropic.com"))
     reply = get_reply(ClaudeChat(client=fake_client), "hi", lambda *_: None)
     assert "internet" in reply
+
+
+def test_audio_file_uses_detector_frame_length(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from assistant import cli, wakeword
+    from assistant.config import DEFAULTS
+
+    path = tmp_path / "in.wav"
+    audio.write_wav(path, audio.silence(1.0))
+    fake = SimpleNamespace(frame_length=480, phrase="hey claude",
+                           process=lambda frame: False)
+    monkeypatch.setattr(wakeword, "make_detector", lambda **_: fake)
+    args = cli.parse_args(["--audio-file", str(path)])
+    _, source, _ = cli.build_wake_components(args, DEFAULTS)
+    assert source.frame_length == 480
+    assert all(len(f) == 480 for f in source.frames())

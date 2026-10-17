@@ -59,6 +59,7 @@ namespace = "voice-assistant" # where conversation summaries are written
 search_namespaces = "*"       # "*" = read all namespaces, or a list like ["projects"]
 top_k = 4
 min_score = 0.4
+text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 
 [logging]
 file = "logs/assistant.log"
