@@ -252,6 +252,25 @@ Run all tests with `pytest` (from the project root, venv active).
   model doesn't fire on eSpeak's voice on Linux; being fixed separately
   with SAPI fixture files, test left unchanged).
 
+## Extra - Voice loop: end-to-end test, timings, follow-up mode
+### Definition-of-done test (2026-10-17)
+- `tests/test_end_to_end.py::test_definition_of_done_phrase` builds one .wav:
+  1 s of silence, a committed SAPI "Hey Claude" recording
+  (`tests/fixtures/hey_claude_sapi_zira_180.wav`; the trained model doesn't
+  fire on eSpeak), 0.4 s, pyttsx3 saying "what's on my calendar tomorrow",
+  then 2 s of silence. It runs `cli.main(["--mode", "wake", "--audio-file",
+  ...])`, i.e. `python -m assistant` with the shipped settings (memory off),
+  so the real openWakeWord model, VAD, tool loop and calendar code run. Only
+  the Anthropic client (asks for `list_calendar_events {"day": "tomorrow"}`,
+  then answers from the tool result it gets back) and the Google API are
+  mocked. Asserts: one wake, the transcript reaches Claude, the calendar
+  is queried from tomorrow 00:00 to the next midnight in America/New_York,
+  and the spoken answer names the mocked event.
+- Two cases: `whisper` (real faster-whisper) and `mocked-stt` (only the
+  transcription replaced by the known transcript). In the sandbox
+  huggingface.co is blocked, so the `whisper` case skips with that reason;
+  CI downloads the model and runs it.
+
 ## Test summary
 `pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
 build sandbox). The skips are real-service tests that need things the
