@@ -3,7 +3,15 @@ numpy>=1.24
 pyttsx3>=2.90
 sounddevice>=0.4.6
 faster-whisper>=1.0
-openwakeword>=0.6
+# openWakeWord: on Linux its metadata pulls in tflite-runtime, which has no
+# wheels for Python 3.12+. We only use its ONNX backend, so on Linux (Pi)
+# install it with `pip install --no-deps openwakeword` (see README).
+openwakeword>=0.6; platform_system != "Linux"
+onnxruntime>=1.16
+scipy>=1.10
+scikit-learn>=1.3
+tqdm>=4.0
+requests>=2.0
 google-api-python-client>=2.100
 google-auth-oauthlib>=1.2
 google-auth-httplib2>=0.2

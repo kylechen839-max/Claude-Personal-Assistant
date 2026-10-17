@@ -86,6 +86,7 @@ sudo apt install -y python3-venv python3-dev libportaudio2 espeak-ng libespeak1
 git clone <this repo> hey-claude && cd hey-claude
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install --no-deps "openwakeword>=0.6"   # skips tflite-runtime (no wheels for Python 3.12+)
 cp .env.example .env && nano .env
 ```
 
