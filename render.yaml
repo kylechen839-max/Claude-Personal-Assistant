@@ -1,0 +1,22 @@
+# Render Blueprint for the Pinecone MCP connector (pinecone-mcp/).
+# The voice assistant itself runs on Kyle's PC / Pi and is not deployed here.
+services:
+  - type: web
+    name: pinecone-mcp
+    runtime: node
+    rootDir: pinecone-mcp
+    # free plan sleeps after ~15 min idle; the first call after that takes ~1 min.
+    # Switch to "starter" (paid) in the Render dashboard if that is too slow.
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: MCP_SECRET
+        generateValue: true
+      - key: DEFAULT_INDEX
+        value: project-context
+      - key: ALLOW_WRITES
+        value: "false"
