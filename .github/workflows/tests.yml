@@ -50,5 +50,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: List text-to-speech voices
+        run: >-
+          python -c "import pyttsx3.engine as e;
+          print([(v.name, v.id) for v in e.Engine().getProperty('voices')])"
+
       - name: Run tests
         run: python -m pytest -rs
