@@ -49,7 +49,8 @@ DEFAULTS: dict = {
     "memory": {"enabled": True, "index": "project-context",
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,
-               "min_score": 0.4},
+               "min_score": 0.4,
+               "text_fields": ["text", "chunk_text", "content", "summary"]},
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 

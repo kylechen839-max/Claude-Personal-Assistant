@@ -6,7 +6,8 @@ conversation Claude writes a short summary, which is stored as a new vector
 in the assistant's own namespace (other namespaces are only read).
 
 Embeddings use Pinecone's hosted `llama-text-embed-v2` at 1024 dimensions,
-the model the existing `project-context` index was built with.
+the model the existing `project-context` index was built with. Note text
+is read from the first metadata field in `text_fields` that is present.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ class PineconeMemory:
                  embed_model: str = "llama-text-embed-v2", dimension: int = 1024,
                  top_k: int = 4, min_score: float = 0.4,
                  max_note_chars: int = 600, api_key: str | None = None,
+                 text_fields=("text", "chunk_text", "content", "summary"),
                  pc=None, index=None):
         self.index_name = index_name
         self.namespace = namespace
@@ -43,6 +45,8 @@ class PineconeMemory:
         self.top_k = top_k
         self.min_score = min_score
         self.max_note_chars = max_note_chars
+        self.text_fields = ([text_fields] if isinstance(text_fields, str)
+                            else list(text_fields))
         self.api_key = api_key
         self._pc = pc
         self._index = index
@@ -97,7 +101,9 @@ class PineconeMemory:
                 top_k=self.top_k, include_metadata=True)
         notes = []
         for match in result.matches:
-            text = (match.metadata or {}).get("text", "").strip()
+            meta = match.metadata or {}
+            text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
+                        "").strip()
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
         log.info("Memory: %d notes for %r", len(notes), query[:60])

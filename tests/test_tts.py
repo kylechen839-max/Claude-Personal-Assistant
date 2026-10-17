@@ -51,3 +51,33 @@ def test_wav_roundtrip_and_resample(tmp_path):
     back = audio.load_audio(path)
     assert abs(len(back) - 16000) <= 1
     assert len(audio.make_chime()) > 0
+
+
+def test_pyttsx3_fresh_engine_per_reply(monkeypatch):
+    import pyttsx3.engine
+
+    made = []
+
+    class FakeEngine:
+        def __init__(self):
+            made.append(self)
+            self.props = {}
+
+        def setProperty(self, k, v):
+            self.props[k] = v
+
+        def say(self, text):
+            pass
+
+        def runAndWait(self):
+            pass
+
+    monkeypatch.setattr(pyttsx3.engine, "Engine", FakeEngine)
+    tts = Pyttsx3TTS(rate=150, fresh_engine=True)
+    tts.speak("one")
+    tts.speak("two")
+    assert len(made) == 2 and made[1].props["rate"] == 150
+    reused = Pyttsx3TTS(fresh_engine=False)
+    reused.speak("one")
+    reused.speak("two")
+    assert len(made) == 3

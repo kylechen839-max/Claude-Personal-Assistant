@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Protocol
@@ -26,34 +27,50 @@ class TTS(Protocol):
 
 
 class Pyttsx3TTS:
-    """Uses the OS voice: SAPI5 on Windows, eSpeak on Linux / Raspberry Pi."""
+    """Uses the OS voice: SAPI5 on Windows, eSpeak on Linux / Raspberry Pi.
 
-    def __init__(self, rate: int = 185, voice: str | None = None):
+    On Windows a reused pyttsx3 engine can go silent after the first
+    runAndWait(), so by default a fresh engine is built for every reply
+    there (`fresh_engine`); elsewhere one engine is kept.
+    """
+
+    def __init__(self, rate: int = 185, voice: str | None = None,
+                 fresh_engine: bool | None = None):
         self.rate = rate
         self.voice = voice
+        self.fresh_engine = (sys.platform == "win32" if fresh_engine is None
+                             else fresh_engine)
         self._engine = None
+
+    def _new_engine(self):
+        from pyttsx3.engine import Engine  # pyttsx3.init() would reuse one
+
+        engine = Engine()
+        engine.setProperty("rate", self.rate)
+        if self.voice:
+            for v in engine.getProperty("voices"):
+                if self.voice.lower() in (v.name or "").lower():
+                    engine.setProperty("voice", v.id)
+                    break
+        return engine
 
     @property
     def engine(self):
+        if self.fresh_engine:
+            return self._new_engine()
         if self._engine is None:
-            import pyttsx3
-
-            self._engine = pyttsx3.init()
-            self._engine.setProperty("rate", self.rate)
-            if self.voice:
-                for v in self._engine.getProperty("voices"):
-                    if self.voice.lower() in (v.name or "").lower():
-                        self._engine.setProperty("voice", v.id)
-                        break
+            self._engine = self._new_engine()
         return self._engine
 
     def speak(self, text: str) -> None:
-        self.engine.say(text)
-        self.engine.runAndWait()
+        engine = self.engine
+        engine.say(text)
+        engine.runAndWait()
 
     def save_to_file(self, text: str, path: str | Path) -> None:
-        self.engine.save_to_file(text, str(path))
-        self.engine.runAndWait()
+        engine = self.engine
+        engine.save_to_file(text, str(path))
+        engine.runAndWait()
 
 
 class PiperTTS:

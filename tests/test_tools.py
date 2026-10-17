@@ -165,6 +165,29 @@ def test_calendar_move_keeps_duration_across_dst():
     assert body["end"]["dateTime"] == "2026-11-02T11:00:00-05:00"
 
 
+def test_calendar_create_all_day_event():
+    service, events = make_service()
+    cal = GoogleCalendar(service=service, timezone=TZ)
+    out = cal.create_event("Fall break", "2026-10-22", "2026-10-23")
+    body = events.insert.call_args.kwargs["body"]
+    # Google's all-day end date is exclusive; the tool's `end` is inclusive.
+    assert body["start"] == {"date": "2026-10-22"}
+    assert body["end"] == {"date": "2026-10-24"}
+    assert out["event"]["all_day"] is True
+    cal.create_event("Holiday", "2026-12-25")
+    assert events.insert.call_args.kwargs["body"]["end"] == {"date": "2026-12-26"}
+    with pytest.raises(ValueError):
+        cal.create_event("Bad", "2026-10-22", "2026-10-21")
+
+
+def test_calendar_move_all_day_event_with_new_end():
+    service, events = make_service(event=HOLIDAY)
+    GoogleCalendar(service=service, timezone=TZ).move_event(
+        "ev2", "2026-10-24", "2026-10-24")
+    assert events.patch.call_args.kwargs["body"] == {
+        "start": {"date": "2026-10-24"}, "end": {"date": "2026-10-25"}}
+
+
 def test_calendar_move_all_day_event():
     service, events = make_service(event=HOLIDAY)
     GoogleCalendar(service=service, timezone=TZ).move_event("ev2", "2026-10-24")
@@ -194,6 +217,30 @@ def test_resolve_day():
     assert resolve_day("Tomorrow", tz) == today + timedelta(days=1)
     assert resolve_day("2026-12-25", tz).month == 12
     assert 0 <= (resolve_day("friday", tz) - today).days < 7
+
+
+@pytest.mark.parametrize("today_iso,day,expected", [
+    ("2026-10-16", "friday", "2026-10-16"),        # Friday: plain name = today
+    ("2026-10-16", "this Friday", "2026-10-16"),
+    ("2026-10-16", "next friday", "2026-10-23"),   # never today
+    ("2026-10-14", "next friday", "2026-10-16"),
+    ("2026-10-14", "monday", "2026-10-19"),
+    ("2026-10-14", "on  Monday", "2026-10-19"),
+])
+def test_resolve_day_weekdays(monkeypatch, today_iso, day, expected):
+    from assistant.tools import timeutil
+
+    fixed = datetime.fromisoformat(today_iso + "T09:00:00")
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed.replace(tzinfo=tz)
+
+    monkeypatch.setattr(timeutil, "datetime", FakeDatetime)
+    assert resolve_day(day, ZoneInfo(TZ)).isoformat() == expected
+    with pytest.raises(ValueError):
+        resolve_day("next week", ZoneInfo(TZ))
 
 
 # ---------- Notion ----------
