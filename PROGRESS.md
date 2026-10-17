@@ -252,9 +252,113 @@ Run all tests with `pytest` (from the project root, venv active).
   model doesn't fire on eSpeak's voice on Linux; being fixed separately
   with SAPI fixture files, test left unchanged).
 
+## Extra - Voice loop: end-to-end test, timings, follow-up mode
+### Definition-of-done test (2026-10-17)
+- `tests/test_end_to_end.py::test_definition_of_done_phrase` builds one .wav:
+  1 s of silence, a committed SAPI "Hey Claude" recording
+  (`tests/fixtures/hey_claude_sapi_zira_180.wav`; the trained model doesn't
+  fire on eSpeak), 0.4 s, pyttsx3 saying "what's on my calendar tomorrow",
+  then 2 s of silence. It runs `cli.main(["--mode", "wake", "--audio-file",
+  ...])`, i.e. `python -m assistant` with the shipped settings (memory off),
+  so the real openWakeWord model, VAD, tool loop and calendar code run. Only
+  the Anthropic client (asks for `list_calendar_events {"day": "tomorrow"}`,
+  then answers from the tool result it gets back) and the Google API are
+  mocked. Asserts: one wake, the transcript reaches Claude, the calendar
+  is queried from tomorrow 00:00 to the next midnight in America/New_York,
+  and the spoken answer names the mocked event.
+- Two cases: `whisper` (real faster-whisper) and `mocked-stt` (only the
+  transcription replaced by the known transcript). In the sandbox
+  huggingface.co is blocked, so the `whisper` case skips with that reason;
+  CI downloads the model and runs it: it passed with real Whisper on
+  Ubuntu (3.10, 3.12) and Windows (3.12) at ffd03fa.
+
+### Latency timings (2026-10-17)
+- `assistant/timing.py`: `TurnTimer` stamps each stage of a turn with one
+  monotonic clock: wake word detected -> end of speech (VAD) -> transcript
+  ready -> Claude's reply -> first audio played. Each stage is logged at
+  INFO as it happens (`Timing: transcript +0.42 s (2.31 s after wake)`), and
+  every turn ends with one summary line in `logs/assistant.log`:
+  `Turn timings from wake: end of speech +1.50 s, transcript +0.40 s, Claude
+  reply +1.10 s, first audio +0.20 s; wake to first audio 3.20 s (end of
+  speech to first audio 1.70 s)`. `--timings` prints that line to the
+  console too.
+- "Claude reply" is the whole reply, tool calls included: the assistant
+  doesn't stream, so there is no separate first-token time. "First audio"
+  is when sound starts: pyttsx3 reports it through its `started-utterance`
+  callback, Piper after synthesis just before playback; engines without the
+  `on_audio_start` hook are stamped when `speak()` is called.
+- "Wake -> end of speech" includes the time spent talking plus the
+  `[wake] silence_ms` pause (0.8 s) the VAD waits for, so the latency Kyle
+  feels after he stops talking is roughly 0.8 s + the last three stages
+  (the "end of speech to first audio" figure in the summary).
+- Tested by `tests/test_timing.py` with a fake clock: step and summary
+  maths, first-mark-wins, INFO records, the summary in the log file and on
+  the console only with `--timings`, and the audio-start hook for PrintTTS,
+  Piper (before playback) and pyttsx3 (from the engine callback).
+- Numbers from the build sandbox (4-core cloud VM, no audio devices; **not**
+  real hardware, and Claude/Whisper weren't reachable, so those stages
+  aren't measured): openWakeWord + VAD process audio at about 50x real time
+  (0.6 ms per 32 ms frame; loading the model takes 0.7 s at startup); eSpeak
+  renders a 3.5 s reply in 0.02 s, so first audio comes right after the
+  reply; Piper was measured earlier at about 40x real time. On a real
+  turn expect the time to be dominated by the 0.8 s end-of-speech pause,
+  Whisper base.en on CPU and the Claude round trip(s); run with
+  `--timings` on the PC and the Pi to see them.
+
+### Follow-up mode (2026-10-17)
+- After each reply, `run_wake` keeps listening for `[wake]
+  follow_up_seconds` (default 5, `0` = off) without the wake word
+  (`WakeListener.record_follow_up`). Speech that starts in that window is
+  recorded until silence (same VAD settings) and becomes the next turn of
+  the same conversation; then the window opens again. If nobody speaks, the
+  conversation ends: `chat.end_conversation()` summarizes it to Pinecone as
+  before, and the assistant waits for the wake word. "Goodbye" ends it
+  without another window. With follow-up off, the old rule (goodbye or
+  `conversation_timeout`) applies unchanged.
+- Chime: a softer, different sound, chosen over no sound so Kyle can tell it
+  is still listening: one quiet 660 Hz blip of 0.1 s (the wake chime is two
+  rising notes at three times the volume). `[wake] follow_up_chime = false`
+  drops it; `chime = false` drops both; never played with `--audio-file`.
+- Not hearing itself: the window opens only after `speak()` returns (the
+  blip plays before the mic opens); the mic stream is closed while the
+  assistant thinks and speaks, so nothing from playback is buffered;
+  `MicSource.drain()` throws away anything that is buffered anyway; and the
+  first 250 ms after the mic opens are skipped (echo, the blip's tail).
+  The spoken yes/no confirmation recording drains the mic the same way.
+- Yes/no confirmation: the answer is recorded inside the tool call
+  (`voice_confirm` -> `record_reply`), before the final reply, so it is never
+  a follow-up, and the window opens only after the final reply.
+- If Whisper hears "Hey Claude, ..." in a follow-up (people repeat the wake
+  word), the phrase is stripped; just "Hey Claude" keeps the window open.
+- Each follow-up turn gets its own timing line, measured from when its
+  window opened ("Turn timings from follow-up window: ...").
+- Tests: `tests/test_follow_up.py` (14) runs .wav fixtures (eSpeak clips and
+  silence) through the real `WakeListener`/VAD with a scripted wake detector
+  and mocked Claude/Calendar/STT. `FileSource(clock=...)` plays the file in
+  fake-clock time and loses the audio that goes by while the source is
+  stopped, like the closed mic, while a fake TTS takes 3 s of fake time to
+  "speak". Covered: a follow-up continues the same conversation and the
+  summary is stored once when the window times out; speech after the
+  window is ignored; follow-up off keeps the old behavior; a copy of the
+  reply placed in the file during playback is not heard (and *is* heard in
+  a control run with the file running through playback, so the fixture is
+  real); the window opens only after playback; delete + spoken "yes": the
+  yes answers the question, the event is deleted, Claude gets one user
+  turn, and one window opens afterwards; no answer cancels the delete;
+  goodbye in a follow-up; per-turn timings; wake-phrase stripping; mic
+  drain; config defaults and chime wiring. Disabling the follow-up loop
+  fails 6 of them; disabling the playback drop fails the self-hearing test.
+  The definition-of-done test also runs follow-up mode (shipped default,
+  5 s): the window expires in the file's trailing silence.
+- `--audio-file` from the command line doesn't simulate the closed mic
+  (the file pauses while the assistant is busy), since real Whisper/Claude
+  times would cut into the recording unpredictably; only the tests use the
+  fake clock.
+
 ## Test summary
-`pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
-build sandbox). The skips are real-service tests that need things the
+`pytest` on branch claude/voice-loop (Linux build sandbox, Python 3.13):
+179 passed, 7 skipped. The 7th skip, compared with master's 155/6, is the
+real-Whisper case of the definition-of-done test; CI runs it. The skips are real-service tests that need things the
 sandbox lacks (Whisper model download, Notion token, Google sign-in); see
 BLOCKERS.md.
 
@@ -317,7 +421,10 @@ See SECURITY.md for the attack paths checked and the ones left alone.
   fresh engine per reply is now used on Windows; if it still happens,
   switch `[tts] engine = "piper"` (and tell me).
 - The pyttsx3/eSpeak tests occasionally crash (segfault in pyttsx3's eSpeak
-  driver) or fail in the Linux sandbox, about 1 run in 10. This happens on
+  driver) or fail in the Linux sandbox, about 1 run in 10. The common
+  failure, an empty .wav after a `ReferenceError` in the driver's callback
+  (seen in CI on `test_real_hey_claude_model`), is now handled by the
+  tests' `tts_clip` helper, which re-renders an empty clip (up to 3 tries). This happens on
   master too, without Piper loaded, so it is a pyttsx3/eSpeak issue, not a
   Piper one.
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.

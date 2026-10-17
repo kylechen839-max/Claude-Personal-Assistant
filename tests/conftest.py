@@ -46,3 +46,21 @@ def piper_voice():
         return download_voice(DEFAULT_PIPER_VOICE, voices)
     except Exception as e:
         pytest.skip(f"Piper voice {DEFAULT_PIPER_VOICE} unavailable: {type(e).__name__}")
+
+
+@pytest.fixture
+def restore_root_logging():
+    """For tests that call setup_logging() (e.g. through cli.main): put the
+    root logger's handlers and level back afterwards."""
+    import logging
+
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        if h not in handlers:
+            h.close()
+    for h in handlers:
+        root.addHandler(h)
+    root.setLevel(level)

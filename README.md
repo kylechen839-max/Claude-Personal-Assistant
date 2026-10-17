@@ -52,14 +52,34 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
 | `--audio-file f.wav` | Wake mode on a recording instead of the mic, then exit |
 | `--tts print` | No audio output (prints what it would say) |
+| `--timings` | Also print each turn's latency summary (always in the log) |
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 | `--check` | Check keys, files, audio devices and models, then exit |
 
-In wake mode, "goodbye" ends the conversation (it's summarized into memory)
-and the assistant keeps listening; a conversation also ends after 5 quiet
-minutes. Ctrl+C quits. Deleting a calendar event always asks "yes or no?"
-first.
+**Follow-up mode:** after a reply, the assistant plays a soft, low blip
+and keeps listening for 5 seconds without the wake word, so you can just
+keep talking ("...and what about Friday?"). The follow-up is the next turn
+of the same conversation. If you say nothing in that window it goes back to
+waiting for "Hey Claude" and the conversation ends (it's summarized into
+memory). "Goodbye" also ends it. Saying "Hey Claude" again during the window
+is fine (it's stripped from what you said). The window opens only after the
+reply has finished playing, and the mic is closed while the assistant
+speaks, so it doesn't hear its own voice as a follow-up. Settings in
+`config.toml` `[wake]`: `follow_up_seconds` (default 5; `0` turns follow-up
+mode off, and then a conversation ends on "goodbye" or after
+`[assistant] conversation_timeout`, 5 quiet minutes) and `follow_up_chime`
+(`false` keeps the window but drops the blip; `chime = false` silences both
+chimes). Ctrl+C quits. Deleting a calendar event always asks "yes or no?"
+first; that answer goes to the question, not to the follow-up window.
+
+**Timings:** every turn writes one line to `logs/assistant.log`, e.g.
+`Turn timings from wake: end of speech +2.10 s, transcript +0.60 s, Claude
+reply +1.80 s, first audio +0.10 s; wake to first audio 4.60 s (end of
+speech to first audio 2.50 s)`. "End of speech" includes the time you spent
+talking and the `silence_ms` pause that tells it you're done; the last
+figure is the wait you notice. Run with `--timings` to see it on the
+console too.
 
 Things to try: "What's on my calendar tomorrow?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
@@ -78,7 +98,7 @@ which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
 ## Settings
 
 `config.toml` holds all non-secret settings (model, voice, wake word
-sensitivity, silence length, Notion database, Pinecone index, time zone,
+sensitivity, silence length, follow-up window, Notion database, Pinecone index, time zone,
 log file). `CLAUDE_MODEL` in the environment overrides the model. Logs go to
 `logs/assistant.log` (rotating); the console only shows warnings.
 

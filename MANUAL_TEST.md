@@ -60,6 +60,31 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] Say "Hey Claude" then nothing: after ~5 s it goes back to listening.
 - [ ] The assistant does not wake itself up from its own voice.
 
+## 3b. Follow-up mode and timings
+- [ ] "Hey Claude, what's on my calendar tomorrow?" After the answer you
+      hear a **soft, low blip** (quieter than the wake chime). Within 5 s
+      say "and what about Friday?" without the wake word: it answers about
+      Friday, so it kept the conversation.
+- [ ] After an answer, stay quiet: after ~5 s it is back to waiting for the
+      wake word (the next request needs "Hey Claude" again).
+- [ ] Self-hearing: with the speaker at normal volume, ask something with a
+      long answer and say nothing. The answer must **not** trigger another
+      reply (no "You: ..." line with its own words in the console). Try with
+      the speaker louder and the mic closer to it.
+- [ ] Start your follow-up right after the blip, and once ~1 s before the
+      answer finishes: talking over the answer isn't heard (expected), and
+      the follow-up after the blip is.
+- [ ] Delete flow: "Hey Claude, delete <a test event>". It asks out loud;
+      say "yes". It deletes and confirms, then the blip plays. Say nothing:
+      no extra reply to "yes". Repeat with "no": the event stays.
+- [ ] Noise during the window (cough, door) shouldn't start a turn; if it
+      does, raise `[wake] vad_min_threshold` a little, or set
+      `follow_up_seconds = 0` if you don't want follow-ups at all.
+- [ ] `python -m assistant --timings`: after each answer a
+      "(Turn timings from wake: ...)" line prints. Note the "end of speech
+      to first audio" figure on the PC and on the Pi (that's the wait you
+      feel) and send it to me; it's also in `logs/assistant.log`.
+
 ## 4. The main scenario
 - [ ] "Hey Claude, what's on my calendar tomorrow?" — it reads tomorrow's
       events correctly (compare with Google Calendar).
@@ -77,7 +102,8 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 
 ## 6. Memory
 - [ ] "Hey Claude, remember that my favorite study spot is the library
-      basement", then "Goodbye". The console prints "(Saved to memory: ...)".
+      basement", then "Goodbye" (or just wait out the 5 s follow-up window).
+      The console prints "(Saved to memory: ...)".
 - [ ] Restart the app. "Hey Claude, where do I like to study?" — it knows.
 
 ## 6b. Internet and browser

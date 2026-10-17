@@ -30,8 +30,18 @@ def tts_clip(tmp_path, text, name):
     """Spoken `text`, trimmed of the silence some voices (Windows SAPI) pad
     their output with, so the clip length is the speech length."""
     path = tmp_path / f"{name}.wav"
-    Pyttsx3TTS(rate=160).save_to_file(text, path)
-    clip = audio.load_audio(path)
+    engine = Pyttsx3TTS(rate=160)  # kept alive until the file is read
+    for attempt in range(3):
+        # pyttsx3's eSpeak driver now and then leaves an empty file (its
+        # callback hits a dead weakref); rendering again fixes it
+        engine.save_to_file(text, path)
+        try:
+            clip = audio.load_audio(path)
+        except EOFError:
+            clip = np.zeros(0, dtype=np.float32)
+        if len(clip):
+            break
+    assert len(clip), f"TTS rendered no audio for {text!r}"
     loud = np.flatnonzero(np.abs(clip) > 0.02)
     return clip[loud[0]:loud[-1] + 1] if len(loud) else clip
 
