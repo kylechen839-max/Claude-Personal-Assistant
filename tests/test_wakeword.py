@@ -26,6 +26,13 @@ class ScriptedDetector:
         return self.source.position - 1 in self.fire_at
 
 
+def voiced_seconds(samples, level=0.01):
+    """Length of the span from the first to the last audible sample; TTS
+    engines pad clips with silence (SAPI on Windows adds a lot)."""
+    loud = np.flatnonzero(np.abs(samples) > level)
+    return (loud[-1] - loud[0] + 1) / SAMPLE_RATE if len(loud) else 0.0
+
+
 def tts_clip(tmp_path, text, name):
     path = tmp_path / f"{name}.wav"
     Pyttsx3TTS(rate=160).save_to_file(text, path)
@@ -48,7 +55,7 @@ def session_file(tmp_path_factory):
             pos += len(chunk)
             if is_wake:
                 fire_at.append(pos // FRAME_LENGTH)
-        cmd_lengths.append(len(cmd) / SAMPLE_RATE)
+        cmd_lengths.append(voiced_seconds(cmd))
     path = tmp / "session.wav"
     audio.write_wav(path, np.concatenate(parts))
     return path, fire_at, cmd_lengths
@@ -83,7 +90,7 @@ def test_pipeline_on_audio_file(session_file):
     for utt, expected in zip(results, cmd_lengths):
         assert utt is not None
         seconds = len(utt) / SAMPLE_RATE
-        # the command plus pre-roll and a little trailing silence
+        # the spoken command plus pre-roll and a little trailing silence
         assert expected - 0.3 < seconds < expected + 1.0, (seconds, expected)
 
 
