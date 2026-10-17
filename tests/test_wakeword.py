@@ -116,8 +116,11 @@ def test_make_detector_rejects_unknown_builtin():
         make_detector(builtin_keyword="computer")
 
 
-def detections(detector, tmp_path, text):
-    clip = tts_clip(tmp_path, text, "kw")
+def detections(detector, tmp_path, text=None, clip=None):
+    """Wake count for spoken `text` (or a ready `clip`) with 1 s of silence
+    on each side."""
+    if clip is None:
+        clip = tts_clip(tmp_path, text, "kw")
     path = tmp_path / "kw.wav"
     audio.write_wav(path, np.concatenate([audio.silence(1), clip, audio.silence(1)]))
     return sum(detector.process(f) for f in FileSource(path).frames())
@@ -133,17 +136,26 @@ def test_real_openwakeword_detects_builtin_keyword(tmp_path):
     assert detections(detector, tmp_path, COMMAND) == 0
 
 
-HEY_CLAUDE_MODEL = Path(__file__).resolve().parents[1] / "keywords" / "hey_claude.onnx"
+HERE = Path(__file__).resolve().parent
+HEY_CLAUDE_MODEL = HERE.parent / "keywords" / "hey_claude.onnx"
+# "Hey Claude" rendered once with Windows SAPI voices (David, Zira at rates
+# 140 and 180). Recordings rather than live TTS because eSpeak, the TTS on
+# Linux CI and the Pi, is too robotic to trigger a model trained on
+# natural-sounding synthetic speech.
+HEY_CLAUDE_CLIPS = sorted((HERE / "fixtures").glob("hey_claude_sapi_*.wav"))
+
+
+def test_hey_claude_fixtures_present():
+    assert HEY_CLAUDE_MODEL.exists() and len(HEY_CLAUDE_CLIPS) == 4
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not HEY_CLAUDE_MODEL.exists(),
-                    reason="keywords/hey_claude.onnx not present")
-def test_real_hey_claude_model(tmp_path):
-    """The trained "Hey Claude" model wakes on it and ignores other speech."""
+@pytest.mark.parametrize("clip_path", HEY_CLAUDE_CLIPS, ids=lambda p: p.stem)
+def test_real_hey_claude_model(tmp_path, clip_path):
+    """The trained "Hey Claude" model wakes once on it, not on other speech."""
     detector = make_detector(keyword_path=str(HEY_CLAUDE_MODEL))
     assert detector.phrase == "hey claude"
-    assert detections(detector, tmp_path, "Hey Claude") == 1
+    assert detections(detector, tmp_path, clip=audio.load_audio(clip_path)) == 1
     assert detections(detector, tmp_path, "Hey Jarvis") == 0
     assert detections(detector, tmp_path, COMMAND) == 0
 

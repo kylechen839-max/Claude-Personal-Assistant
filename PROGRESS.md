@@ -257,6 +257,11 @@ See SECURITY.md for the attack paths checked and the ones left alone.
   master too, without Piper loaded, so it is a pyttsx3/eSpeak issue, not a
   Piper one.
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
+- The "Hey Claude" model was trained only on synthetic voices. Tests use
+  Windows SAPI recordings (`tests/fixtures/`), and eSpeak's robotic voice
+  doesn't trigger it at all. Real-voice accuracy and the false-wake rate in
+  normal conversation still need Kyle's MANUAL_TEST check (section 3); tune
+  `[wake] sensitivity` there if needed. "Hey cloud" also wakes it.
 - Two Notion databases are named "Assignments"; the Fall 2026 one is used.
 - Default model changed from `claude-sonnet-4-5` to `claude-sonnet-5-5`
   (2026-10-17): the API now returns 404 for `claude-sonnet-4-5`, so every
