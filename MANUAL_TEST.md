@@ -4,12 +4,25 @@ Everything else is covered by `pytest`. These need a human, a mic, and a
 speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 
 ## 0. Setup check
-- [ ] `pytest -rs` passes. The only skips should be services you haven't set
+- [x] Notion integration ("Hey Claude", Kyle Chen's Space, shared with
+      Fall 2026 Assignments -> Assignments) and `NOTION_TOKEN` in `.env`.
+      Done 2026-10-17.
+- [x] Google Calendar OAuth: project `hey-claude-511904`, Calendar API on,
+      External/Testing consent screen with kylechen839@gmail.com as test
+      user, Desktop client as `credentials.json`, `token.json` from sign-in.
+      Done 2026-10-17.
+- [x] `pytest -rs` passes. The only skips should be services you haven't set
       up yet. With all keys present: **0 skipped** (this confirms Whisper
       downloaded and the real openWakeWord, Notion, Google and Pinecone calls
-      work).
-- [ ] `python -m assistant --mode text`: startup prints no "(... off: ...)"
-      lines; "hello" gets a short reply.
+      work). 71 passed, 0 skipped on 2026-10-17 (tests read keys from the
+      environment, so load `.env` into the shell first).
+- [x] `python -m assistant --mode text`: startup prints no "(... off: ...)"
+      lines; "hello" gets a short reply. Checked 2026-10-17 with "what's on
+      my calendar tomorrow?" and "what assignments are due this week?".
+- [ ] Cleanup: in the Google Cloud console, check whether a project
+      `strange-bird-511904-u7` exists. It was the auto-suggested ID before the
+      project was named "Hey Claude", and only `hey-claude-511904` showed up
+      afterwards, so it probably doesn't. If it does exist and is empty, delete it.
 
 ## 1. Speaker (TTS)
 - [ ] `python -m assistant --mode speak`, type "say a short sentence":
