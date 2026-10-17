@@ -25,9 +25,13 @@ class ScriptedDetector:
 
 
 def tts_clip(tmp_path, text, name):
+    """Spoken `text`, trimmed of the silence some voices (Windows SAPI) pad
+    their output with, so the clip length is the speech length."""
     path = tmp_path / f"{name}.wav"
     Pyttsx3TTS(rate=160).save_to_file(text, path)
-    return audio.load_audio(path)
+    clip = audio.load_audio(path)
+    loud = np.flatnonzero(np.abs(clip) > 0.02)
+    return clip[loud[0]:loud[-1] + 1] if len(loud) else clip
 
 
 @pytest.fixture(scope="module")
