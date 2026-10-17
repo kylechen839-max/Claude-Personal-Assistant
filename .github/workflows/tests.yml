@@ -45,6 +45,13 @@ jobs:
           path: ~/.cache/huggingface
           key: whisper-base.en-${{ runner.os }}
 
+      # The real Piper tests download this voice into voices/ when it's missing.
+      - name: Cache Piper voice
+        uses: actions/cache@v4
+        with:
+          path: voices
+          key: piper-voice-en_US-lessac-medium
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

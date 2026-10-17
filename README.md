@@ -81,9 +81,36 @@ sensitivity, silence length, Notion database, Pinecone index, time zone,
 log file). `CLAUDE_MODEL` in the environment overrides the model. Logs go to
 `logs/assistant.log` (rotating); the console only shows warnings.
 
-Better voice: install [Piper](https://github.com/rhasspy/piper), download a
-voice (`.onnx` + `.onnx.json`), and set `[tts] engine = "piper"` and
-`piper_model = "path/to/voice.onnx"`.
+### Better voice: Piper
+
+The default voice is pyttsx3 (the OS voice: SAPI5 on Windows, eSpeak on the
+Pi). [Piper](https://github.com/OHF-Voice/piper1-gpl) is an offline neural
+voice that sounds far more natural and is fast enough for a Pi 4/5. It is
+installed by `requirements.txt` (`piper-tts`); you only need to download a
+voice once (about 60 MB, from the official
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) repo):
+
+```powershell
+# Windows (PowerShell, venv active) - same command on the Pi
+python -m assistant.tts --download-voice en_US-lessac-medium
+python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
+```
+
+That saves `voices/en_US-lessac-medium.onnx` and its `.onnx.json` (the
+`voices/` folder is not committed). Then switch the engine in `config.toml`:
+
+```toml
+[tts]
+engine = "piper"
+piper_voice = "voices/en_US-lessac-medium.onnx"
+```
+
+To go back, set `engine = "pyttsx3"`. If the voice file is missing, the
+assistant logs a warning and uses pyttsx3 instead of crashing. Other voices:
+pick a name from the voices repo (e.g. `en_US-amy-medium`,
+`en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
+on the command line tries Piper for one run without editing the config.
+`[tts] rate` and `voice` apply to pyttsx3 only.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS)
 
@@ -106,8 +133,12 @@ cp .env.example .env && nano .env
   from your PC, or run `python -m assistant.tools.calendar --headless`: open
   the printed link on your phone/PC, sign in, then paste back the
   `localhost:8765/...` address the browser ends up on.
-- **Speed:** set `[stt] model = "tiny.en"` if `base.en` feels slow; Piper
-  sounds much better than eSpeak and runs well on a Pi 4/5.
+- **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
+  (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
+  `python -m assistant.tts --download-voice en_US-lessac-medium` on the Pi
+  (or copy `voices/` from your PC) and set `[tts] engine = "piper"`, as in
+  [Better voice: Piper](#better-voice-piper).
+- **Speed:** set `[stt] model = "tiny.en"` if `base.en` feels slow.
 - **Audio devices:** `python -m sounddevice` lists them; set
   `[wake] mic_device` if the default isn't your USB mic. Test the speaker
   with `speaker-test -t wav -c 2`.
@@ -134,7 +165,7 @@ assistant/
   cli.py        modes, main loop, error handling   (python -m assistant)
   config.py     config.toml + .env loading, logging
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface: pyttsx3, Piper, print
+  tts.py        TTS interface: pyttsx3, Piper, print; Piper voice download
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries

@@ -30,7 +30,7 @@ DEFAULTS: dict = {
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
     "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_model": "", "piper_executable": "piper"},
+            "piper_voice": ""},  # .onnx path; its .onnx.json sits beside it
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
