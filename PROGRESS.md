@@ -421,7 +421,10 @@ See SECURITY.md for the attack paths checked and the ones left alone.
   fresh engine per reply is now used on Windows; if it still happens,
   switch `[tts] engine = "piper"` (and tell me).
 - The pyttsx3/eSpeak tests occasionally crash (segfault in pyttsx3's eSpeak
-  driver) or fail in the Linux sandbox, about 1 run in 10. This happens on
+  driver) or fail in the Linux sandbox, about 1 run in 10. The common
+  failure, an empty .wav after a `ReferenceError` in the driver's callback
+  (seen in CI on `test_real_hey_claude_model`), is now handled by the
+  tests' `tts_clip` helper, which re-renders an empty clip (up to 3 tries). This happens on
   master too, without Piper loaded, so it is a pyttsx3/eSpeak issue, not a
   Piper one.
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
