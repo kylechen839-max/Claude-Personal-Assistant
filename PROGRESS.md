@@ -167,6 +167,18 @@ download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.m
 - Tests: one regression test per fix (`test_chat.py`, `test_memory.py`,
   `test_config_cli.py`).
 
+## Security review (tool safety)
+See SECURITY.md for the attack paths checked and the ones left alone.
+- Once web search/fetch results are in the conversation, moving or creating
+  calendar events, changing a Notion status, and opening a browser page all
+  ask for a spoken yes first (deletes always did).
+- `open_in_browser` now refuses user@host addresses, backslashes, spaces and
+  control characters, bad ports and very long addresses; the confirmation
+  names the real host (punycode for look-alike international domains).
+- The log file masks API keys, OAuth tokens and client secrets, which
+  `requests_oauthlib` logs at DEBUG level.
+- Tests: `tests/test_security.py`; `pytest`: 120 passed, 4 skipped.
+
 ## Known issues / notes
 - The wake word itself (openWakeWord + your `.onnx`) and the real Whisper model
   have not been exercised in the sandbox; they are the first things to check
