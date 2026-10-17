@@ -140,3 +140,11 @@ def test_wake_mode_idle_timeout_ends_conversation(fake_client):
 def test_live_pinecone_retrieve_read_only():
     notes = PineconeMemory().retrieve("Apple interview preparation")
     assert isinstance(notes, list)
+
+
+def test_single_namespace_string_is_not_split():
+    mem, _, index = make_memory([match(0.9, "note")])
+    mem.search_namespaces = "projects"
+    assert mem.namespaces() == ["projects"]
+    assert mem.retrieve("x") == ["note"]
+    assert index.query.call_args.kwargs["namespace"] == "projects"

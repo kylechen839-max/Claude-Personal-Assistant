@@ -86,3 +86,23 @@ def test_run_voice_loop(fake_client):
               transcriber, record_fn=lambda: next(recordings),
               output_fn=lambda *_: None)
     assert said == ["[speaking] It's sunny."]
+
+
+def test_cut_off_tool_call_is_dropped_from_history(fake_client):
+    from assistant.tools import Tool, ToolRegistry
+    from tests.conftest import tool_use_block
+
+    tools = ToolRegistry()
+    tools.register(Tool("t", "d", {"type": "object", "properties": {}},
+                        lambda: "ok"))
+    fake_client.queue = [
+        make_response(text_block("Let me check"), tool_use_block("t", {}),
+                      stop_reason="max_tokens"),
+        make_response(text_block("Done."))]
+    chat = ClaudeChat(client=fake_client, tools=tools)
+    assert chat.ask("hi") == "Let me check"
+    assert chat.history[-1]["content"] == [{"type": "text", "text": "Let me check"}]
+    chat.ask("again")  # history sent here must hold no unanswered tool_use
+    sent = fake_client.calls[-1]["messages"]
+    assert not any(b.get("type") == "tool_use" for m in sent
+                   if isinstance(m["content"], list) for b in m["content"])

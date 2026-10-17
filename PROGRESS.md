@@ -120,9 +120,20 @@ Run all tests with `pytest` (from the project root, venv active).
   (Google API mocked), to the spoken answer.
 
 ## Test summary
-`pytest`: 61 passed, 5 skipped in the build sandbox. The skips are
+`pytest`: 64 passed, 5 skipped in the build sandbox. The skips are
 real-service tests that need things only Kyle can provide (Whisper model
 download, Picovoice key, Notion token, Google sign-in); see BLOCKERS.md.
+
+## Fixes after review
+- A reply cut off by `max_tokens` mid tool call left an unanswered
+  `tool_use` in history, so every later request failed until the
+  conversation reset. Unrun tool calls are now dropped from history.
+- `[memory] search_namespaces = "name"` (a single string) was split into
+  letters; it is now treated as one namespace.
+- Unexpected (non-API) errors in text/voice mode crashed the session; they
+  now produce a spoken "Sorry, something went wrong" and the loop goes on.
+- Tests: one regression test per fix (`test_chat.py`, `test_memory.py`,
+  `test_config_cli.py`).
 
 ## Known issues / notes
 - The wake word itself (Porcupine + your `.ppn`) and the real Whisper model

@@ -74,6 +74,10 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print) -> str:
         log.error("API error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
+    except Exception as e:  # anything else: keep the session alive
+        log.exception("Unexpected error answering %r", user_text)
+        output_fn(f"Error: {e}")
+        return "Sorry, something went wrong."
 
 
 def run_text(chat: ClaudeChat, input_fn=None, output_fn=print,
