@@ -3,18 +3,34 @@
 Things only Kyle can do. Everything else has been built and tested around them.
 None of these block the code; each one switches on a feature.
 
-## 0. Anthropic API key
-- No key was available in the build sandbox, so every Claude call in the
-  tests is mocked. **To do:** put `ANTHROPIC_API_KEY=...` in `.env`.
+## Done (2026-10-17, on Kyle's Windows PC)
+Full `pytest` with `.env` loaded: **71 passed, 0 skipped**, including the
+real Whisper, Notion, Google Calendar and Pinecone tests. Text mode answered
+"what's on my calendar tomorrow?" and "what assignments are due this week?"
+from the live data.
+- **Anthropic API key**: in `.env`. The default model is now
+  `claude-sonnet-5-5` (`claude-sonnet-4-5` returns 404).
+- **Whisper**: downloaded on first run; `test_stt.py` runs with no skips.
+- **Google Calendar**: Cloud project `hey-claude-511904`, Calendar API on,
+  External/Testing consent screen with kylechen839@gmail.com as test user,
+  Desktop OAuth client saved as `credentials.json`, `token.json` from the
+  one-time sign-in (scope: calendar events). Both files are gitignored.
+- **Notion**: internal connection "Hey Claude" in Kyle Chen's Space, shared
+  with **Fall 2026 Assignments -> Assignments**
+  (`7eefabe3-0226-47a8-a287-584be0d2ea9b`, not the second "Assignments"
+  database under "Student Planner"). `NOTION_TOKEN` in `.env`. Property
+  names (Assignment, Course, Due, Status, Type) are the defaults.
+- **Pinecone**: `PINECONE_API_KEY` in `.env`. The assistant writes only to
+  the `voice-assistant` namespace; no test writes to the real index.
+- The tests read keys from the environment, not from `.env`, so load it into
+  the shell first (PowerShell):
 
-## 1. Whisper model could not be downloaded in the build sandbox
-- The build environment's network policy blocks `huggingface.co`, so the
-  real transcription test (`tests/test_stt.py::test_transcribe_generated_speech`)
-  is **skipped** there. It is not faked: on your PC the model downloads on
-  first use (~150 MB) and the test runs for real.
-- **To do:** run `pytest` once on your PC; confirm 0 skips in `test_stt.py`.
+  ```
+  Get-Content .env | % { if ($_ -match '^([A-Z_]+)=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[2] } }
+  pytest -rs
+  ```
 
-## 2. Custom "Hey Claude" wake word (openWakeWord)
+## Still to do: custom "Hey Claude" wake word (openWakeWord)
 - The wake word engine is openWakeWord: open source, offline, no account or
   key. (Picovoice Porcupine was dropped because its console now requires a
   company email and only offers a trial.)
@@ -26,27 +42,3 @@ None of these block the code; each one switches on a feature.
   sign-in, under an hour). Download the `.onnx` file, save it as
   `keywords/hey_claude.onnx`, and add `WAKEWORD_MODEL_PATH=keywords/hey_claude.onnx`
   to `.env`. The same `.onnx` works on Windows and the Raspberry Pi.
-
-## 3. Google Calendar OAuth (credentials.json)
-- **To do:** in https://console.cloud.google.com create a project, enable the
-  **Google Calendar API**, configure the OAuth consent screen (External,
-  add yourself as a test user), then Credentials -> Create OAuth client ID ->
-  **Desktop app** -> download as `credentials.json` into the project folder.
-  Then run `python -m assistant.tools.calendar` once to sign in (creates
-  `token.json`).
-
-## 4. Notion integration token
-- **To do:** at https://www.notion.so/profile/integrations create an internal
-  integration, copy its secret into `.env` as `NOTION_TOKEN=...`, then open
-  the **Fall 2026 Assignments -> Assignments** database in Notion, click
-  `...` -> Connections -> add your integration.
-- The database id (`7eefabe3-0226-47a8-a287-584be0d2ea9b`) and its property
-  names (Assignment, Course, Due, Status, Type) were read from your
-  workspace and are the defaults. Note: there is a second "Assignments"
-  database under "Student Planner"; the Fall 2026 one is used.
-
-## 5. Pinecone
-- Nothing to do: `PINECONE_API_KEY` was available during the build and a real
-  read-only query against `project-context` passed. Put the same key in your
-  `.env`. The assistant writes only to the new `voice-assistant` namespace;
-  no test writes to the real index.
