@@ -2,7 +2,7 @@
 # Any value left out uses the built-in default (see assistant/config.py).
 
 [assistant]
-model = "claude-sonnet-4-5"   # CLAUDE_MODEL in the environment overrides this
+model = "claude-sonnet-5-5"   # CLAUDE_MODEL in the environment overrides this
 max_tokens = 500
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone

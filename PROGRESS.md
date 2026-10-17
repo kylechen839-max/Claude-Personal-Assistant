@@ -5,7 +5,7 @@ Run all tests with `pytest` (from the project root, venv active).
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps conversation history, adds a short
   spoken-style system prompt plus the current local date/time, and calls the
-  Messages API. Model comes from `CLAUDE_MODEL` (default `claude-sonnet-4-5`).
+  Messages API. Model comes from `CLAUDE_MODEL` (default `claude-sonnet-5-5`).
   A failed request is rolled back so history stays valid; long histories are
   trimmed so they always start with a plain user turn.
 - `assistant/cli.py`: text-mode loop (`python -m assistant --mode text`).
@@ -145,3 +145,6 @@ download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.m
   that happens, switch `[tts] engine = "piper"` (and tell me).
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
 - Two Notion databases are named "Assignments"; the Fall 2026 one is used.
+- Default model changed from `claude-sonnet-4-5` to `claude-sonnet-5-5`
+  (2026-10-17): the API now returns 404 for `claude-sonnet-4-5`, so every
+  request failed. Found during the first live end-to-end check on Kyle's PC.

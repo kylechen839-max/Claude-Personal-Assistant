@@ -30,7 +30,7 @@ def test_load_config_defaults_file_and_env(tmp_path, monkeypatch):
     cfg_file.write_text('[assistant]\nmax_tokens = 300\n[wake]\nsensitivity = 0.8\n')
     cfg = load_config(cfg_file, None)
     assert cfg["assistant"]["max_tokens"] == 300
-    assert cfg["assistant"]["model"] == "claude-sonnet-4-5"  # default kept
+    assert cfg["assistant"]["model"] == "claude-sonnet-5-5"  # default kept
     assert cfg["wake"]["sensitivity"] == 0.8 and cfg["wake"]["chime"] is True
     monkeypatch.setenv("CLAUDE_MODEL", "claude-opus-4-1")
     assert load_config(cfg_file, None)["assistant"]["model"] == "claude-opus-4-1"

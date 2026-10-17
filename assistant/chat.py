@@ -8,7 +8,7 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 SYSTEM_PROMPT = (
     "You are Kyle's personal voice assistant. Your replies are read aloud, so "

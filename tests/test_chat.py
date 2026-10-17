@@ -7,7 +7,7 @@ from tests.conftest import make_response, text_block
 
 def test_default_model(monkeypatch):
     monkeypatch.delenv("CLAUDE_MODEL", raising=False)
-    assert default_model() == DEFAULT_MODEL == "claude-sonnet-4-5"
+    assert default_model() == DEFAULT_MODEL == "claude-sonnet-5-5"
     monkeypatch.setenv("CLAUDE_MODEL", "claude-opus-4-1")
     assert default_model() == "claude-opus-4-1"
 
