@@ -59,25 +59,75 @@ def server_tools(model: str, cfg: dict) -> list[dict]:
     return tools
 
 
-def open_in_browser(url: str | None = None, search: str | None = None,
-                    opener=webbrowser.open) -> dict:
-    """Open a web page (or a Google search) in the default browser."""
+MAX_URL_LENGTH = 2048
+
+
+def check_url(url: str) -> str:
+    """Return `url` as a safe http(s) address to open, or raise ValueError.
+
+    Anything without a scheme gets https://, so 'ms-settings:x' becomes a
+    harmless web address. Rejected: other schemes (javascript:, file:,
+    data:, ...), user:password@host addresses (they disguise the real
+    site), backslashes (browsers read them as /), whitespace and control
+    characters, bad ports, and very long addresses."""
+    url = url.strip()
+    if "://" not in url:
+        if re.match(r"(?i)(javascript|data|file|vbscript|about|blob):", url):
+            raise ValueError(f"Only http(s) web addresses can be opened: {url[:100]}")
+        url = "https://" + url
+    if len(url) > MAX_URL_LENGTH:
+        raise ValueError("That web address is too long to open")
+    if re.search(r"[\x00-\x20\x7f\\]", url):
+        raise ValueError(f"Web address has spaces or odd characters: {url[:100]!r}")
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"Only http(s) web addresses can be opened: {url[:100]}")
+    if "@" in parsed.netloc:
+        raise ValueError("Web addresses with a user name (user@site) can't be opened")
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError(f"Bad port in web address: {url[:100]}") from None
+    return url
+
+
+def spoken_host(url: str) -> str:
+    """The site an address really goes to, in ASCII (punycode for
+    international names, so a look-alike domain doesn't sound genuine)."""
+    host = urlparse(url).hostname or url
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return host
+
+
+def _url_for(url: str | None, search: str | None) -> str:
     if not url and not search:
         raise ValueError("Give a url or a search")
     if not url:
-        url = "https://www.google.com/search?q=" + quote_plus(search)
-    if "://" not in url:
-        if re.match(r"(?i)(javascript|data|file|vbscript|about|blob):", url):
-            raise ValueError(f"Only http(s) web addresses can be opened: {url}")
-        url = "https://" + url
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError(f"Only http(s) web addresses can be opened: {url}")
+        return "https://www.google.com/search?q=" + quote_plus(search)
+    return check_url(url)
+
+
+def open_in_browser(url: str | None = None, search: str | None = None,
+                    opener=webbrowser.open) -> dict:
+    """Open a web page (or a Google search) in the default browser."""
+    url = _url_for(url, search)
     if not opener(url):
         return {"status": "failed",
                 "message": "No web browser is available on this computer."}
     log.info("Opened %s in the browser", url)
     return {"status": "opened", "url": url}
+
+
+def describe_for_open(tool_input: dict) -> str:
+    try:
+        url = _url_for(tool_input.get("url"), tool_input.get("search"))
+    except ValueError:
+        return "Do you want me to open that page in your browser?"
+    if tool_input.get("url"):
+        return f"Do you want me to open a page on {spoken_host(url)} in your browser?"
+    return f"Do you want me to open a Google search for {tool_input['search']}?"
 
 
 def browser_tools() -> list[Tool]:
@@ -92,4 +142,4 @@ def browser_tools() -> list[Tool]:
             "url": {"type": "string", "description": "http(s) address to open"},
             "search": {"type": "string",
                        "description": "Google search to open if no url"}}},
-        open_in_browser)]
+        open_in_browser, confirm_if_untrusted=describe_for_open)]

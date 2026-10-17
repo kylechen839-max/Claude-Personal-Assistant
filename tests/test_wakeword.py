@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -85,7 +87,7 @@ def test_pipeline_on_audio_file(session_file):
     for utt, expected in zip(results, cmd_lengths):
         assert utt is not None
         seconds = len(utt) / SAMPLE_RATE
-        # the command plus pre-roll and a little trailing silence
+        # the spoken command plus pre-roll and a little trailing silence
         assert expected - 0.3 < seconds < expected + 1.0, (seconds, expected)
 
 
@@ -131,6 +133,21 @@ def test_real_openwakeword_detects_builtin_keyword(tmp_path):
     assert detections(detector, tmp_path, COMMAND) == 0
 
 
+HEY_CLAUDE_MODEL = Path(__file__).resolve().parents[1] / "keywords" / "hey_claude.onnx"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not HEY_CLAUDE_MODEL.exists(),
+                    reason="keywords/hey_claude.onnx not present")
+def test_real_hey_claude_model(tmp_path):
+    """The trained "Hey Claude" model wakes on it and ignores other speech."""
+    detector = make_detector(keyword_path=str(HEY_CLAUDE_MODEL))
+    assert detector.phrase == "hey claude"
+    assert detections(detector, tmp_path, "Hey Claude") == 1
+    assert detections(detector, tmp_path, "Hey Jarvis") == 0
+    assert detections(detector, tmp_path, COMMAND) == 0
+
+
 def test_cli_wake_mode_with_audio_file(session_file, fake_client):
     """End to end: file -> wake -> VAD -> (mock) STT -> (mock) Claude -> TTS."""
     from types import SimpleNamespace
@@ -172,3 +189,20 @@ def test_get_reply_handles_network_error(fake_client):
         request=httpx.Request("POST", "https://api.anthropic.com"))
     reply = get_reply(ClaudeChat(client=fake_client), "hi", lambda *_: None)
     assert "internet" in reply
+
+
+def test_audio_file_uses_detector_frame_length(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from assistant import cli, wakeword
+    from assistant.config import DEFAULTS
+
+    path = tmp_path / "in.wav"
+    audio.write_wav(path, audio.silence(1.0))
+    fake = SimpleNamespace(frame_length=480, phrase="hey claude",
+                           process=lambda frame: False)
+    monkeypatch.setattr(wakeword, "make_detector", lambda **_: fake)
+    args = cli.parse_args(["--audio-file", str(path)])
+    _, source, _ = cli.build_wake_components(args, DEFAULTS)
+    assert source.frame_length == 480
+    assert all(len(f) == 480 for f in source.frames())

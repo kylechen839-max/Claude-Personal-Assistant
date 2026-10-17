@@ -5,7 +5,7 @@ import pytest
 
 from assistant import audio
 from assistant.stt import Transcriber, rough_match
-from assistant.tts import Pyttsx3TTS
+from assistant.tts import PiperTTS, Pyttsx3TTS
 
 PHRASE = "What is on my calendar tomorrow"
 
@@ -42,5 +42,13 @@ def whisper():
 def test_transcribe_generated_speech(tmp_path, whisper):
     wav = tmp_path / "phrase.wav"
     Pyttsx3TTS(rate=160).save_to_file(PHRASE, wav)
+    text = whisper.transcribe(audio.load_audio(wav))
+    assert rough_match(PHRASE, text), text
+
+
+@pytest.mark.slow
+def test_transcribe_piper_speech(tmp_path, piper_voice, whisper):
+    wav = tmp_path / "piper_phrase.wav"
+    PiperTTS(piper_voice).save_to_file(PHRASE, wav)
     text = whisper.transcribe(audio.load_audio(wav))
     assert rough_match(PHRASE, text), text

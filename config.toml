@@ -8,10 +8,13 @@ conversation_timeout = 300    # seconds of quiet before a new conversation start
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 
 [tts]
-engine = "pyttsx3"            # "pyttsx3" (offline), "piper" (better offline voice), "print"
-rate = 185
-voice = ""                    # part of a voice name, e.g. "Zira" on Windows
-piper_model = ""              # path to a Piper .onnx voice when engine = "piper"
+engine = "pyttsx3"            # "pyttsx3" (offline OS voice), "piper" (better offline voice), "print"
+rate = 185                    # pyttsx3 only
+voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" on Windows
+# Piper voice (.onnx, with its .onnx.json next to it), used when engine = "piper".
+# Get one with: python -m assistant.tts --download-voice en_US-lessac-medium
+# If the file is missing, the assistant warns and uses pyttsx3 instead.
+piper_voice = "voices/en_US-lessac-medium.onnx"
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
@@ -19,8 +22,8 @@ device = "cpu"
 compute_type = "int8"
 
 [wake]
-keyword_path = ""             # e.g. "keywords/hey_claude.onnx" (openWakeWord)
-builtin_keyword = "hey_jarvis"  # fallback until then: hey_jarvis, alexa, hey_mycroft, hey_rhasspy
+keyword_path = "keywords/hey_claude.onnx"  # openWakeWord model (Windows and Pi)
+builtin_keyword = "hey_jarvis"  # used if keyword_path is missing: hey_jarvis, alexa, hey_mycroft, hey_rhasspy
 sensitivity = 0.5             # 0-1; higher = fewer misses, more false wakes
 chime = true
 silence_ms = 800              # how long a pause ends your command
@@ -59,6 +62,7 @@ namespace = "voice-assistant" # where conversation summaries are written
 search_namespaces = "*"       # "*" = read all namespaces, or a list like ["projects"]
 top_k = 4
 min_score = 0.4
+text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 
 [logging]
 file = "logs/assistant.log"

@@ -15,13 +15,49 @@ Run all tests with `pytest` (from the project root, venv active).
 ## Stage 2 - Text to speech ✅
 - `assistant/tts.py`: a `TTS` interface (`speak`, `save_to_file`) with
   `Pyttsx3TTS` (offline OS voice: SAPI5 on Windows, eSpeak on the Pi),
-  `PiperTTS` (offline neural voice via the `piper` CLI, a drop-in upgrade),
-  and `PrintTTS` (no audio). `make_tts(name)` picks one.
+  `PiperTTS` (offline neural voice via the `piper-tts` package, a drop-in
+  upgrade), and `PrintTTS` (no audio). `make_tts(name)` picks one.
 - `assistant/audio.py`: wav read/write, resampling to 16 kHz, chime, playback.
 - `--mode speak`: typed input, spoken replies.
 - Tested by `tests/test_tts.py`: renders real pyttsx3 speech to a .wav and
-  asserts it exists, is non-empty, and is not silent; Piper CLI invocation is
-  mocked; wav round-trip/resample.
+  asserts it exists, is non-empty, and is not silent; wav round-trip/resample.
+  Piper: see "Piper voice" below.
+
+### Piper voice (2026-10-17)
+- `PiperTTS` now uses the `piper-tts` Python package (pinned 1.8.0: abi3
+  wheels for Windows x64, Linux x86_64 and Linux aarch64, any Python 3.9+,
+  with espeak-ng data bundled) instead of shelling out to a `piper`
+  executable. The voice loads once on first use; `save_to_file` writes a
+  .wav, `speak` plays through sounddevice like the other engines.
+- `config.toml` `[tts]`: `engine = "pyttsx3" | "piper" | "print"` (default
+  still pyttsx3) and `piper_voice` (path to the `.onnx`, with its
+  `.onnx.json` next to it; default `voices/en_US-lessac-medium.onnx`). The old
+  `piper_model` key is still read.
+- `python -m assistant.tts --download-voice en_US-lessac-medium` downloads a
+  voice from the official rhasspy/piper-voices Hugging Face repo into
+  `voices/` (gitignored), via `.part` files so an interrupted download never
+  leaves a broken voice. `--say TEXT` tries a voice out loud.
+- If the engine is piper but the voice, its `.onnx.json`, or the package is
+  missing, `make_tts` logs a warning naming the problem and the download
+  command, and falls back to pyttsx3 (it used to raise).
+- Tests (`tests/test_tts.py`): engine selection from `config.toml`, fallback
+  for each missing piece, save/speak with a fake `piper` module, voice URLs,
+  the download helper with a mocked `requests`. Real tests: Piper renders a
+  non-empty, non-silent .wav (`test_piper_renders_wav`), and Whisper
+  transcribes Piper output (`tests/test_stt.py::test_transcribe_piper_speech`).
+  Both skip only when the voice can't be downloaded. The old
+  `test_piper_invokes_cli` (mocked `piper` CLI) was replaced by the mocked
+  package test, and `test_make_tts_factory` no longer expects
+  `make_tts("piper")` without a voice to raise, since it now falls back.
+- In the sandbox huggingface.co is blocked, so the real tests were run
+  against the same lessac-medium voice from the rhasspy/piper GitHub release
+  (v0.0.2), put in `voices/` by hand: the .wav test passed, and synthesis ran
+  at about 40x real time on the sandbox CPU. Whisper is also on Hugging Face,
+  so the Piper -> Whisper round-trip runs only in CI (which caches the voice).
+- License: `piper-tts` 1.3+ is GPL-3.0-or-later (the Home Assistant
+  piper1-gpl fork). Fine for personal use; matters only if this project is
+  ever distributed under another license. Voices have their own licenses
+  (lessac: see its MODEL_CARD in the voices repo).
 
 ## Stage 3 - Speech to text ✅
 - `assistant/stt.py`: `Transcriber` lazily loads faster-whisper (`base.en`,
@@ -39,7 +75,8 @@ Run all tests with `pytest` (from the project root, venv active).
 - `assistant/wakeword.py`: audio arrives as 512-sample int16 frames from
   `MicSource` (live mic, paused while the assistant is thinking/speaking) or
   `FileSource` (a .wav). `OpenWakeWordDetector` listens for the custom
-  "Hey Claude" `.onnx` (falls back to the built-in "hey jarvis" model).
+  "Hey Claude" model `keywords/hey_claude.onnx`, trained in the openWakeWord
+  Colab notebook (falls back to the built-in "hey jarvis" if it's missing).
   Switched from Picovoice Porcupine, whose console now needs a company email.
   After the wake word a chime plays, ~250 ms is skipped so the chime isn't
   recorded, and `EnergyVAD` + `record_until_silence` capture the command
@@ -53,8 +90,9 @@ Run all tests with `pytest` (from the project root, venv active).
   runs it through the real VAD pipeline with a scripted detector (asserts two
   wakes, two chimes, and command lengths); an end-to-end CLI wake-mode test
   over the file with mocked STT/Claude; network error handling.
-  A real openWakeWord test checks "Hey Jarvis" (generated speech) fires
-  exactly once and a normal sentence doesn't. The Whisper-on-pipeline test
+  Real openWakeWord tests check that the built-in "Hey Jarvis" and the
+  trained "Hey Claude" model each fire exactly once on generated speech of
+  their phrase and not on other speech. The Whisper-on-pipeline test
   skips without the Whisper model (see BLOCKERS.md).
 
 ## Stage 5 - Tools ✅
@@ -192,16 +230,33 @@ Run all tests with `pytest` (from the project root, venv active).
   was blocked by the sandbox's network proxy, which exercised the "download
   on first run instead" fallback. A second run was a no-op ("already
   installed", existing `.venv` and `.env` kept, pip "already satisfied"). In
-  that `.venv`: full `pytest` 93 passed, 4 skipped; a real `--check` printed
+  that `.venv`: full `pytest` 93 passed, 4 skipped (before merging master); a real `--check` printed
   the expected report (no audio devices in the container, so it exited 1)
   and did not print the test key from `.env`. Not tested: a real Pi, a real
   systemd user session and lingering (no systemd running in the sandbox),
   real audio devices; see MANUAL_TEST.md section 8.
+- After merging master (trained "Hey Claude" model, tool safety, Piper TTS):
+  `--check` reports the bundled `keywords/hey_claude.onnx` and, with
+  `[tts] engine = "piper"`, whether the voice `.onnx`, its `.onnx.json` and
+  the `piper` package are there (a warning, since the assistant falls back
+  to pyttsx3), with the `--download-voice` command. `install_pi.sh` lists
+  the Piper voice download as an optional next step; the README no longer
+  says to copy the wake-word model. aarch64 check: `pip download
+  --only-binary=:all: --platform manylinux_2_28_aarch64 --python-version
+  3.11 -r requirements.txt` resolves all 79 packages to prebuilt wheels,
+  including `piper_tts-1.8.0-cp39-abi3-manylinux_2_17_aarch64` (needs glibc
+  2.17+; Bookworm has 2.36), onnxruntime, ctranslate2, av, scipy and
+  scikit-learn, so nothing compiles on the Pi. Re-running the merged
+  `install_pi.sh` was again a no-op. `pytest`: 150 passed, 6 skipped,
+  1 failed: `test_wakeword.py::test_real_hey_claude_model` (known: the
+  model doesn't fire on eSpeak's voice on Linux; being fixed separately
+  with SAPI fixture files, test left unchanged).
 
 ## Test summary
-`pytest`: 93 passed, 4 skipped in the build sandbox (Python 3.11 `.venv` made by `scripts/install_pi.sh`). The skips are
-real-service tests that need things only Kyle can provide (Whisper model
-download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.md.
+`pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
+build sandbox). The skips are real-service tests that need things the
+sandbox lacks (Whisper model download, Notion token, Google sign-in); see
+BLOCKERS.md.
 
 ## Fixes after review
 - A reply cut off by `max_tokens` mid tool call left an unanswered
@@ -213,13 +268,58 @@ download, "Hey Claude" wake model, Notion token, Google sign-in); see BLOCKERS.m
   now produce a spoken "Sorry, something went wrong" and the loop goes on.
 - Tests: one regression test per fix (`test_chat.py`, `test_memory.py`,
   `test_config_cli.py`).
+- Weekday names: "friday" (or "this friday") is the coming Friday, or
+  today on a Friday; "next friday" is never today. The tool description
+  asks Claude to prefer YYYY-MM-DD for other days.
+- All-day events can be created (date-only start/end; `end` is the last
+  day, inclusive). Moving an all-day event with `new_end` is inclusive too.
+- `--audio-file` cuts audio into the detector's frame length instead of a
+  fixed 512 samples.
+- pyttsx3 builds a fresh engine for each reply on Windows, the usual fix
+  for it going silent after the first reply (not yet tried on Windows).
+- pyttsx3 2.99's `save_to_file` writes an empty (header-only) .wav on
+  Windows; found by the Windows CI job. Files are now rendered through SAPI
+  directly on Windows (live speech still goes through pyttsx3).
+- Memory reads note text from the first of `text`, `chunk_text`, `content`,
+  `summary` in the metadata (`[memory] text_fields` in config.toml).
+
+## Continuous testing
+`.github/workflows/tests.yml` runs `pytest` on every push and pull request,
+plus weekly (Mondays), on Ubuntu (Python 3.10 and 3.12, as a stand-in for
+the Pi) and Windows (Python 3.12). Live-service tests skip there (no
+secrets are given to CI); the Whisper tests do run, since CI can download
+the model. On Linux the job installs espeak-ng for pyttsx3 and then
+openWakeWord with `pip install --no-deps`, the same as the Pi setup in the
+README, because its tflite-runtime dependency has no wheels for newer Pythons.
+The Piper voice is downloaded into `voices/` by the tests and cached
+between runs, like the Whisper model.
+The wake-word pipeline test measures command length from the TTS clip
+trimmed once in `tts_clip`, so SAPI's silence padding on Windows does not
+skew it.
+
+## Security review (tool safety)
+See SECURITY.md for the attack paths checked and the ones left alone.
+- Once web search/fetch results are in the conversation, moving or creating
+  calendar events, changing a Notion status, and opening a browser page all
+  ask for a spoken yes first (deletes always did).
+- `open_in_browser` now refuses user@host addresses, backslashes, spaces and
+  control characters, bad ports and very long addresses; the confirmation
+  names the real host (punycode for look-alike international domains).
+- The log file masks API keys, OAuth tokens and client secrets, which
+  `requests_oauthlib` logs at DEBUG level.
+- Tests: `tests/test_security.py`; `pytest`: 120 passed, 4 skipped.
 
 ## Known issues / notes
 - The wake word itself (openWakeWord + your `.onnx`) and the real Whisper model
   have not been exercised in the sandbox; they are the first things to check
   in MANUAL_TEST.md.
-- pyttsx3 on some Windows setups stops speaking after the first reply; if
-  that happens, switch `[tts] engine = "piper"` (and tell me).
+- pyttsx3 on some Windows setups stops speaking after the first reply. A
+  fresh engine per reply is now used on Windows; if it still happens,
+  switch `[tts] engine = "piper"` (and tell me).
+- The pyttsx3/eSpeak tests occasionally crash (segfault in pyttsx3's eSpeak
+  driver) or fail in the Linux sandbox, about 1 run in 10. This happens on
+  master too, without Piper loaded, so it is a pyttsx3/eSpeak issue, not a
+  Piper one.
 - The energy VAD may need `[wake] vad_min_threshold` raised in a noisy room.
 - Two Notion databases are named "Assignments"; the Fall 2026 one is used.
 - Default model changed from `claude-sonnet-4-5` to `claude-sonnet-5-5`

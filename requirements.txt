@@ -1,6 +1,8 @@
 anthropic>=0.69
 numpy>=1.24
 pyttsx3>=2.90
+# Piper neural TTS; wheels for Windows x64, Linux x86_64 and aarch64 (Pi), Python 3.9+
+piper-tts==1.8.0
 sounddevice>=0.4.6
 faster-whisper>=1.0
 # openWakeWord: on Linux its metadata pulls in tflite-runtime, which has no

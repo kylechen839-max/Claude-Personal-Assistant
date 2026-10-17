@@ -9,6 +9,7 @@ import copy
 import logging
 import logging.handlers
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,7 +30,7 @@ DEFAULTS: dict = {
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
     "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_model": "", "piper_executable": "piper"},
+            "piper_voice": ""},  # .onnx path; its .onnx.json sits beside it
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
@@ -61,7 +62,8 @@ DEFAULTS: dict = {
     "memory": {"enabled": True, "index": "project-context",
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,
-               "min_score": 0.4},
+               "min_score": 0.4,
+               "text_fields": ["text", "chunk_text", "content", "summary"]},
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 
@@ -101,6 +103,42 @@ def load_config(path: str | Path | None = "config.toml",
     return config
 
 
+SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
+                   "ELEVENLABS_API_KEY")
+_SECRET_PATTERNS = [
+    re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
+    re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens
+    re.compile(r"\bya29\.[\w.-]+"),             # Google access tokens
+    re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
+    re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
+    # OAuth / API fields in JSON, dict reprs, form bodies and URLs
+    re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
+               r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"
+               r"[^\"'&,\s}]+"),
+    re.compile(r"([?&]code=)[^&\s\"']+"),      # OAuth sign-in codes
+]
+
+
+def redact(text: str) -> str:
+    """Mask API keys, tokens and OAuth secrets in a log line."""
+    for var in SECRET_ENV_VARS:
+        value = os.environ.get(var, "")
+        if len(value) >= 8:
+            text = text.replace(value, "[REDACTED]")
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(lambda m: (m.group(1) if m.groups() else "")
+                           + "[REDACTED]", text)
+    return text
+
+
+class RedactingFormatter(logging.Formatter):
+    """Formats as usual (traceback included), then masks secrets: with
+    level DEBUG, libraries such as requests_oauthlib log whole tokens."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
+
+
 def setup_logging(config: dict) -> Path:
     """Detailed log to a rotating file; only warnings on the console."""
     log_file = Path(config["logging"]["file"])
@@ -112,11 +150,11 @@ def setup_logging(config: dict) -> Path:
     file_handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     file_handler.setLevel(config["logging"]["level"].upper())
-    file_handler.setFormatter(logging.Formatter(
+    file_handler.setFormatter(RedactingFormatter(
         "%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
     console = logging.StreamHandler()
     console.setLevel(logging.WARNING)
-    console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    console.setFormatter(RedactingFormatter("[%(levelname)s] %(message)s"))
     root.addHandler(file_handler)
     root.addHandler(console)
     for noisy in ("httpx", "httpcore", "urllib3", "googleapiclient", "faster_whisper"):

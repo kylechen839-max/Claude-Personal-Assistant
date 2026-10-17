@@ -1,5 +1,6 @@
 """python -m assistant --check: everything mocked, no secrets printed."""
 
+import sys
 from unittest.mock import MagicMock
 
 from assistant import cli, doctor
@@ -121,14 +122,27 @@ def test_calendar_disabled(tmp_path):
     assert doctor.check_google_files(cfg)[0].detail == "disabled in config.toml"
 
 
-def test_tts_checks(tmp_path):
+def test_tts_checks(tmp_path, monkeypatch):
     cfg = config(tmp_path)
     cfg["tts"]["engine"] = "piper"
-    assert not doctor.check_tts(cfg, which=lambda exe: None).ok
     voice = tmp_path / "voice.onnx"
+    cfg["tts"]["piper_voice"] = str(voice)
+    missing = doctor.check_tts(cfg)
+    assert not missing.ok and not missing.required
+    assert "voice file not found" in missing.detail
+    assert "--download-voice en_US-lessac-medium" in missing.detail
     voice.write_bytes(b"x")
-    cfg["tts"]["piper_model"] = str(voice)
-    assert doctor.check_tts(cfg, which=lambda exe: "/usr/bin/piper").ok
+    (tmp_path / "voice.onnx.json").write_text("{}")
+    monkeypatch.setitem(sys.modules, "piper", MagicMock())
+    assert doctor.check_tts(cfg).ok
+    cfg["tts"]["engine"] = "pyttsx3"
+    assert not doctor.check_tts(cfg, which=lambda exe: None).ok
+
+
+def test_bundled_wake_model_is_found(monkeypatch):
+    monkeypatch.delenv("WAKEWORD_MODEL_PATH", raising=False)
+    check = doctor.check_wake_model(load_config("config.toml", None))
+    assert check.ok and "keywords/hey_claude.onnx found" in check.detail
 
 
 def test_cli_check_runs_without_api_key(monkeypatch, tmp_path):

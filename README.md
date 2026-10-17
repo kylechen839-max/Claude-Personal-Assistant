@@ -27,7 +27,7 @@ mic -> openWakeWord wake word -> chime -> record until silence (VAD)
    | What | Where | Goes in |
    |---|---|---|
    | Anthropic API key | console.anthropic.com | `.env` `ANTHROPIC_API_KEY` |
-   | "Hey Claude" `.onnx` model (optional; until then say "Hey Jarvis") | openWakeWord training notebook (see BLOCKERS.md) | `keywords/` + `WAKEWORD_MODEL_PATH` in `.env` |
+   | "Hey Claude" wake word model | already included: `keywords/hey_claude.onnx` (retraining: see BLOCKERS.md) | `config.toml [wake] keyword_path` |
    | Pinecone API key | app.pinecone.io | `.env` `PINECONE_API_KEY` |
    | Notion integration secret (share the Assignments DB with it) | notion.so/profile/integrations | `.env` `NOTION_TOKEN` |
    | Google OAuth Desktop client | console.cloud.google.com | `credentials.json` |
@@ -82,9 +82,36 @@ sensitivity, silence length, Notion database, Pinecone index, time zone,
 log file). `CLAUDE_MODEL` in the environment overrides the model. Logs go to
 `logs/assistant.log` (rotating); the console only shows warnings.
 
-Better voice: install [Piper](https://github.com/rhasspy/piper), download a
-voice (`.onnx` + `.onnx.json`), and set `[tts] engine = "piper"` and
-`piper_model = "path/to/voice.onnx"`.
+### Better voice: Piper
+
+The default voice is pyttsx3 (the OS voice: SAPI5 on Windows, eSpeak on the
+Pi). [Piper](https://github.com/OHF-Voice/piper1-gpl) is an offline neural
+voice that sounds far more natural and is fast enough for a Pi 4/5. It is
+installed by `requirements.txt` (`piper-tts`); you only need to download a
+voice once (about 60 MB, from the official
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) repo):
+
+```powershell
+# Windows (PowerShell, venv active) - same command on the Pi
+python -m assistant.tts --download-voice en_US-lessac-medium
+python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
+```
+
+That saves `voices/en_US-lessac-medium.onnx` and its `.onnx.json` (the
+`voices/` folder is not committed). Then switch the engine in `config.toml`:
+
+```toml
+[tts]
+engine = "piper"
+piper_voice = "voices/en_US-lessac-medium.onnx"
+```
+
+To go back, set `engine = "pyttsx3"`. If the voice file is missing, the
+assistant logs a warning and uses pyttsx3 instead of crashing. Other voices:
+pick a name from the voices repo (e.g. `en_US-amy-medium`,
+`en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
+on the command line tries Piper for one run without editing the config.
+`[tts] rate` and `voice` apply to pyttsx3 only.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
@@ -113,11 +140,13 @@ the Pi's host name or IP):
 
 ```powershell
 scp .env credentials.json token.json pi@raspberrypi:~/hey-claude/
-scp keywords\hey_claude.onnx pi@raspberrypi:~/hey-claude/keywords/
+scp -r voices pi@raspberrypi:~/hey-claude/   # only if you use Piper
 ```
 
-Or type the keys into `nano .env` on the Pi. The wake-word `.onnx` file is
-the same on both (openWakeWord models are not platform-specific).
+Or type the keys into `nano .env` on the Pi. The "Hey Claude" wake-word
+model (`keywords/hey_claude.onnx`) is in the repo and works on both
+(openWakeWord models are not platform-specific), so there's nothing to copy
+for it.
 
 **Google sign-in without a browser:** if you don't copy `token.json`, run
 `.venv/bin/python -m assistant.tools.calendar --headless` on the Pi. Open the
@@ -135,7 +164,8 @@ fail to load; that's expected). This needs `credentials.json` on the Pi.
 
 `--check` prints which keys are set (never their values), whether
 `credentials.json`, `token.json` and the wake-word model exist, the audio
-devices with their index numbers, and whether the Whisper model is cached.
+devices with their index numbers, whether the Whisper model is cached, and,
+with `[tts] engine = "piper"`, whether the Piper voice is there.
 It exits with 1 if something required is missing.
 
 `install_service.sh` installs `deploy/hey-claude.service` as a systemd
@@ -151,9 +181,15 @@ systemctl --user restart hey-claude     # after changing .env or config.toml
 ./scripts/install_service.sh --uninstall
 ```
 
+**Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
+(the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
+`.venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium` on
+the Pi (or copy `voices/` from your PC) and set `[tts] engine = "piper"`, as
+in [Better voice: Piper](#better-voice-piper). Without the voice file the
+assistant falls back to eSpeak.
+
 **Speed:** set `[stt] model = "tiny.en"` in `config.toml` if `base.en` feels
-slow; Piper sounds much better than eSpeak and runs well on a Pi 4/5. On a
-Pi with no screen, set `[web] browser = false`.
+slow. On a Pi with no screen, set `[web] browser = false`.
 
 ### Troubleshooting
 
@@ -192,7 +228,7 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface: pyttsx3, Piper, print
+  tts.py        TTS interface: pyttsx3, Piper, print; Piper voice download
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
@@ -201,6 +237,7 @@ assistant/
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)
+.github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,

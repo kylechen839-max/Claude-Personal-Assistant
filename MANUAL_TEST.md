@@ -30,6 +30,17 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 - [ ] Ask two questions in a row: the **second** reply is also spoken
       (pyttsx3 on Windows sometimes goes silent after the first; if so,
       report it).
+- [ ] Piper voice (optional upgrade; README "Better voice: Piper"):
+      `python -m assistant.tts --download-voice en_US-lessac-medium`, then
+      `python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"`:
+      you hear a natural voice.
+- [ ] Set `[tts] engine = "piper"` in `config.toml`, run
+      `python -m assistant --mode speak`, ask two questions: both replies are
+      spoken in the Piper voice, and the reply starts without a long pause.
+      Keep it if you prefer it; otherwise set `engine = "pyttsx3"` again.
+- [ ] Fallback: temporarily rename `voices/` and start
+      `python -m assistant --mode speak`: a warning says the Piper voice is
+      unavailable and replies are spoken with pyttsx3. Rename it back.
 
 ## 2. Microphone (STT)
 - [ ] `python -m assistant --mode voice`: press Enter, say "What time is
@@ -92,16 +103,18 @@ speaker. Do them on the Windows PC after finishing `BLOCKERS.md`.
 Setup steps are in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors on the Pi (first run
       takes a while), and running it a second time changes nothing.
-- [ ] Copy `.env`, `credentials.json`, `token.json` and
-      `keywords/hey_claude.onnx` from the PC (or use the `--headless`
-      Google sign-in).
+- [ ] Copy `.env`, `credentials.json` and `token.json` from the PC (or use
+      the `--headless` Google sign-in). `keywords/hey_claude.onnx` comes
+      with the repo.
 - [ ] `.venv/bin/python -m assistant --check` shows OK for the API key,
       token.json, wake-word model, your USB mic under "Input devices" and
       your speaker under "Output devices", and prints no key values.
 - [ ] If the mic isn't the default, set `[wake] mic_device` to its index
       and `--check` shows "Configured mic: ... -> <your mic>".
 - [ ] `speaker-test -t wav -c 2` is audible.
-- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model.
+- [ ] Repeat sections 1-4 on the Pi with the same `.onnx` model, including
+      the Piper voice checks (download the voice on the Pi or copy `voices/`);
+      with `engine = "piper"`, `--check` shows "TTS (piper): ... ok".
 - [ ] Note response time from end of speech to start of reply; if slow, try
       `[stt] model = "tiny.en"` and Piper.
 - [ ] `./scripts/install_service.sh`, then reboot **without logging in**:

@@ -106,8 +106,9 @@ Done. Next steps:
   1. Put your keys in .env:          nano $REPO_DIR/.env
   2. Google Calendar: copy credentials.json and token.json from your PC into
      $REPO_DIR (or sign in with: .venv/bin/python -m assistant.tools.calendar --headless)
-  3. Wake word: copy keywords/hey_claude.onnx from your PC and set
-     WAKEWORD_MODEL_PATH=keywords/hey_claude.onnx in .env
+  3. Optional, a much better voice (Piper, about 60 MB):
+       .venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium
+     then set [tts] engine = "piper" in config.toml (or copy voices/ from your PC)
   4. Check the setup:                .venv/bin/python -m assistant --check
   5. Try it:                         .venv/bin/python -m assistant
   6. Start it at boot:               ./scripts/install_service.sh

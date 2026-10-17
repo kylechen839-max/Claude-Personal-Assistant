@@ -121,13 +121,18 @@ def check_tts(config: dict, which=shutil.which) -> Check:
     tts = config["tts"]
     engine = tts["engine"]
     if engine == "piper":
-        exe = which(tts["piper_executable"])
-        model = tts["piper_model"]
-        ok = bool(exe) and bool(model) and Path(model).exists()
-        return Check("TTS (piper)", ok,
-                     f"executable {'found' if exe else 'missing'}, voice "
-                     f"{model or '(not set)'} "
-                     f"{'found' if model and Path(model).exists() else 'missing'}")
+        from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
+
+        # piper_model is the old name of piper_voice
+        voice = tts.get("piper_voice") or tts.get("piper_model")
+        problem = piper_voice_problem(voice)
+        if problem is None:
+            return Check("TTS (piper)", True, f"voice {voice} ok")
+        # the assistant falls back to pyttsx3, so this is only a warning
+        return Check("TTS (piper)", False,
+                     f"{problem}; using pyttsx3 instead. Get it with: python -m "
+                     f"assistant.tts --download-voice {DEFAULT_PIPER_VOICE}",
+                     required=False)
     if engine == "pyttsx3" and sys.platform.startswith("linux"):
         found = which("espeak-ng") or which("espeak")
         return Check("TTS (pyttsx3)", bool(found),

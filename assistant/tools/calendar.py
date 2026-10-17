@@ -87,6 +87,15 @@ def headless_finish(redirected_url: str, credentials_path="credentials.json",
     return flow.credentials
 
 
+def _is_date(value: str) -> bool:
+    """True for a bare YYYY-MM-DD (an all-day value), not a date-time."""
+    try:
+        date.fromisoformat(value.strip())
+        return len(value.strip()) == 10
+    except ValueError:
+        return False
+
+
 class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
@@ -150,11 +159,19 @@ class GoogleCalendar:
     def create_event(self, title: str, start: str, end: str | None = None,
                      duration_minutes: int = 60, location: str | None = None,
                      description: str | None = None) -> dict:
-        start_dt = parse_datetime(start, self.tz)
-        end_dt = (parse_datetime(end, self.tz) if end
-                  else start_dt + timedelta(minutes=duration_minutes))
-        body = {"summary": title, "start": self._when(start_dt),
-                "end": self._when(end_dt)}
+        if _is_date(start):  # all-day; `end` is the last day, inclusive
+            start_d = date.fromisoformat(start.strip())
+            end_d = date.fromisoformat(end.strip()[:10]) if end else start_d
+            if end_d < start_d:
+                raise ValueError("end is before start")
+            body = {"summary": title, "start": {"date": start_d.isoformat()},
+                    "end": {"date": (end_d + timedelta(days=1)).isoformat()}}
+        else:
+            start_dt = parse_datetime(start, self.tz)
+            end_dt = (parse_datetime(end, self.tz) if end
+                      else start_dt + timedelta(minutes=duration_minutes))
+            body = {"summary": title, "start": self._when(start_dt),
+                    "end": self._when(end_dt)}
         if location:
             body["location"] = location
         if description:
@@ -173,10 +190,10 @@ class GoogleCalendar:
             end_dt = (parse_datetime(new_end, self.tz) if new_end
                       else start_dt + (old_end - old_start))
             patch = {"start": self._when(start_dt), "end": self._when(end_dt)}
-        else:  # all-day event: keep it all-day
+        else:  # all-day event: keep it all-day; new_end is the last day
             start_d = date.fromisoformat(new_start[:10])
-            end_d = (date.fromisoformat(new_end[:10]) if new_end
-                     else start_d + (old_end - old_start))
+            end_d = (date.fromisoformat(new_end[:10]) + timedelta(days=1)
+                     if new_end else start_d + (old_end - old_start))
             patch = {"start": {"date": start_d.isoformat()},
                      "end": {"date": end_d.isoformat()}}
         event = self.service.events().patch(calendarId=self.calendar_id,
@@ -200,6 +217,29 @@ class GoogleCalendar:
         except Exception:
             return "Do you want me to delete that event?"
 
+    def _spoken_when(self, iso: str) -> str:
+        dt = parse_datetime(iso, self.tz)
+        return f"{spoken_date(dt.date())} at {spoken_time(dt)}"
+
+    def describe_for_create(self, tool_input: dict) -> str:
+        try:
+            when = self._spoken_when(tool_input["start"])
+            return (f"Do you want me to add {tool_input['title']} on {when} "
+                    "to your calendar?")
+        except Exception:
+            return "Do you want me to add that event to your calendar?"
+
+    def describe_for_move(self, tool_input: dict) -> str:
+        try:
+            event = self.service.events().get(
+                calendarId=self.calendar_id,
+                eventId=tool_input["event_id"]).execute()
+            title = event.get("summary", "that event")
+            when = self._spoken_when(tool_input["new_start"])
+            return f"Do you want me to move {title} to {when}?"
+        except Exception:
+            return "Do you want me to move that event?"
+
     def tools(self) -> list[Tool]:
         iso = ("ISO 8601 local date-time without offset, e.g. "
                "2026-10-17T15:00:00")
@@ -210,22 +250,29 @@ class GoogleCalendar:
                  "delete events.",
                  {"type": "object", "properties": {
                      "day": {"type": "string", "description":
-                             "'today', 'tomorrow', a weekday name, or YYYY-MM-DD"},
+                             "'today', 'tomorrow', YYYY-MM-DD (preferred for "
+                             "other days), 'friday' (the coming one, or today "
+                             "if it is Friday), or 'next friday' (never today)"},
                      "days": {"type": "integer", "minimum": 1, "maximum": 14,
                               "description": "Number of days to include (default 1)"}},
                   "required": ["day"]},
                  self.list_events),
-            Tool("create_calendar_event", "Create an event on Kyle's calendar.",
+            Tool("create_calendar_event",
+                 "Create an event on Kyle's calendar. For an all-day event "
+                 "pass dates only (YYYY-MM-DD) as start and end.",
                  {"type": "object", "properties": {
                      "title": {"type": "string"},
-                     "start": {"type": "string", "description": iso},
-                     "end": {"type": "string", "description": iso + ". Optional."},
+                     "start": {"type": "string", "description":
+                               iso + ", or YYYY-MM-DD for an all-day event"},
+                     "end": {"type": "string", "description":
+                             "Optional. " + iso + ", or for an all-day event "
+                             "the last day (YYYY-MM-DD, inclusive)"},
                      "duration_minutes": {"type": "integer", "description":
                                           "Used if end is omitted (default 60)"},
                      "location": {"type": "string"},
                      "description": {"type": "string"}},
                   "required": ["title", "start"]},
-                 self.create_event),
+                 self.create_event, confirm_if_untrusted=self.describe_for_create),
             Tool("move_calendar_event",
                  "Move an existing event to a new time, keeping its length "
                  "unless new_end is given. Get event_id from "
@@ -233,9 +280,11 @@ class GoogleCalendar:
                  {"type": "object", "properties": {
                      "event_id": {"type": "string"},
                      "new_start": {"type": "string", "description": iso},
-                     "new_end": {"type": "string", "description": iso + ". Optional."}},
+                     "new_end": {"type": "string", "description":
+                                 iso + ". Optional. For all-day events, the "
+                                 "last day (YYYY-MM-DD, inclusive)."}},
                   "required": ["event_id", "new_start"]},
-                 self.move_event),
+                 self.move_event, confirm_if_untrusted=self.describe_for_move),
             Tool("delete_calendar_event",
                  "Delete an event. Kyle is asked to confirm out loud "
                  "automatically; just call this tool, don't ask first yourself. "

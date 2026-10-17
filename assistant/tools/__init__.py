@@ -18,6 +18,9 @@ class Tool:
     handler: Callable[..., Any]
     # Given the tool input, return a yes/no question to ask before running.
     confirm_prompt: Callable[[dict], str] | None = None
+    # Same, but asked only when untrusted web content is in the conversation
+    # (a fetched page could be trying to steer Claude into this action).
+    confirm_if_untrusted: Callable[[dict], str] | None = None
 
     def schema(self) -> dict:
         return {"name": self.name, "description": self.description,
@@ -50,14 +53,20 @@ class ToolRegistry:
     def schemas(self) -> list[dict]:
         return [t.schema() for t in self.tools.values()] + self.server_tools
 
-    def dispatch(self, name: str, tool_input: dict) -> tuple[str, bool]:
-        """Run a tool. Returns (result text for Claude, is_error)."""
+    def dispatch(self, name: str, tool_input: dict,
+                 untrusted: bool = False) -> tuple[str, bool]:
+        """Run a tool. Returns (result text for Claude, is_error).
+
+        `untrusted`: web content the user didn't write is in the context, so
+        actions that change things need a spoken yes too."""
         tool = self.tools.get(name)
         if tool is None:
             return f"Unknown tool: {name}", True
         try:
-            if tool.confirm_prompt is not None:
-                question = tool.confirm_prompt(tool_input)
+            ask = tool.confirm_prompt or (tool.confirm_if_untrusted
+                                          if untrusted else None)
+            if ask is not None:
+                question = ask(tool_input)
                 if not self.confirm(question):
                     log.info("User declined %s", name)
                     return json.dumps({"status": "cancelled",

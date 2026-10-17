@@ -1,0 +1,68 @@
+name: tests
+
+# Runs the offline test suite on every push and pull request, and once a
+# week so breakage from new library releases shows up even without pushes.
+# Live-service tests skip themselves (no secrets are given to CI).
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 13 * * 1"  # Mondays 13:17 UTC
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest   # stands in for the Raspberry Pi
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: windows-latest  # Kyle's PC
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: System audio/TTS libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng libespeak1 libportaudio2
+
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-base.en-${{ runner.os }}
+
+      # The real Piper tests download this voice into voices/ when it's missing.
+      - name: Cache Piper voice
+        uses: actions/cache@v4
+        with:
+          path: voices
+          key: piper-voice-en_US-lessac-medium
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # requirements.txt leaves openWakeWord out on Linux: its metadata pulls
+      # in tflite-runtime, which has no wheels for newer Pythons. We only use
+      # the ONNX backend, so install it without dependencies (as on the Pi).
+      - name: Install openWakeWord (Linux)
+        if: runner.os == 'Linux'
+        run: pip install --no-deps "openwakeword>=0.6"
+
+      - name: Run tests
+        run: python -m pytest -rs

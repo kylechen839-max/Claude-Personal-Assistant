@@ -249,7 +249,8 @@ def build_memory(config: dict, output_fn=print):
     return PineconeMemory(index_name=mem["index"], namespace=mem["namespace"],
                           search_namespaces=mem["search_namespaces"],
                           embed_model=mem["embed_model"], top_k=mem["top_k"],
-                          min_score=mem["min_score"])
+                          min_score=mem["min_score"],
+                          text_fields=mem["text_fields"])
 
 
 def text_confirm(input_fn=None):
@@ -285,7 +286,7 @@ def build_wake_components(args, config: dict):
     device = wake["mic_device"]
     if isinstance(device, str) and device.isdigit():
         device = int(device)
-    source = (FileSource(args.audio_file) if args.audio_file
+    source = (FileSource(args.audio_file, detector.frame_length) if args.audio_file
               else MicSource(detector.frame_length, device=device or None))
     return listener, source, detector.phrase
 
