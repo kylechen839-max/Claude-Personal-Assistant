@@ -15,7 +15,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 
@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 
 
 class TTS(Protocol):
+    # Optional: called once when sound actually starts (used for timings).
+    on_audio_start: Callable[[], None] | None
+
     def speak(self, text: str) -> None: ...
 
     def save_to_file(self, text: str, path: str | Path) -> None: ...
@@ -50,6 +53,7 @@ class Pyttsx3TTS:
         self.fresh_engine = on_windows if fresh_engine is None else fresh_engine
         self.sapi_files = on_windows if sapi_files is None else sapi_files
         self._engine = None
+        self.on_audio_start = None
 
     def _new_engine(self):
         from pyttsx3.engine import Engine  # pyttsx3.init() would reuse one
@@ -73,8 +77,15 @@ class Pyttsx3TTS:
 
     def speak(self, text: str) -> None:
         engine = self.engine
-        engine.say(text)
-        engine.runAndWait()
+        hook = self.on_audio_start
+        token = (engine.connect("started-utterance", lambda name=None: hook())
+                 if hook else None)
+        try:
+            engine.say(text)
+            engine.runAndWait()
+        finally:
+            if token is not None:
+                engine.disconnect(token)
 
     def save_to_file(self, text: str, path: str | Path) -> None:
         if self.sapi_files:
@@ -117,6 +128,7 @@ class PiperTTS:
     def __init__(self, voice: str | Path):
         self.voice_path = Path(voice)
         self._voice = None
+        self.on_audio_start = None
 
     @property
     def voice(self):
@@ -141,6 +153,8 @@ class PiperTTS:
     def speak(self, text: str) -> None:
         samples, sr = self.synthesize(text)
         if len(samples):
+            if self.on_audio_start:
+                self.on_audio_start()
             audio.play(samples, sr)
 
 
@@ -149,8 +163,11 @@ class PrintTTS:
 
     def __init__(self, output_fn=print):
         self.output_fn = output_fn
+        self.on_audio_start = None
 
     def speak(self, text: str) -> None:
+        if self.on_audio_start:
+            self.on_audio_start()
         self.output_fn(f"[speaking] {text}")
 
     def save_to_file(self, text: str, path: str | Path) -> None:

@@ -95,7 +95,7 @@ def _dod_config(tmp_path):
 @pytest.mark.slow
 @pytest.mark.parametrize("stt", ["whisper", "mocked-stt"])
 def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
-                                   fake_client):
+                                   fake_client, restore_root_logging):
     """'Hey Claude, what's on my calendar tomorrow?' as a .wav, through
     `python -m assistant --mode wake --audio-file`: real openWakeWord with the
     trained model, real VAD, real Whisper (the "whisper" case; "mocked-stt"

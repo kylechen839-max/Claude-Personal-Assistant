@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Callable, Iterator, Protocol
 
@@ -237,7 +238,8 @@ class WakeListener:
     def __init__(self, detector: WakeWordDetector, vad: EnergyVAD | None = None,
                  on_wake: Callable[[], None] | None = None,
                  silence_ms: int = 800, max_seconds: float = 15.0,
-                 no_speech_timeout: float = 5.0, ignore_after_wake_ms: int = 250):
+                 no_speech_timeout: float = 5.0, ignore_after_wake_ms: int = 250,
+                 clock: Callable[[], float] = time.monotonic):
         self.detector = detector
         self.vad = vad or EnergyVAD()
         self.on_wake = on_wake
@@ -245,6 +247,8 @@ class WakeListener:
         self.max_seconds = max_seconds
         self.no_speech_timeout = no_speech_timeout
         self.ignore_after_wake_ms = ignore_after_wake_ms
+        self.clock = clock
+        self.wake_time: float | None = None  # clock() when the wake word fired
 
     def wait_for_wake_word(self, frames: Iterator[np.ndarray]) -> bool:
         for frame in frames:
@@ -273,6 +277,7 @@ class WakeListener:
             frames = iter(source.frames())
             if not self.wait_for_wake_word(frames):
                 return False, None
+            self.wake_time = self.clock()
             log.info("Wake word detected")
             if self.on_wake:
                 self.on_wake()

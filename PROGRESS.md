@@ -271,6 +271,39 @@ Run all tests with `pytest` (from the project root, venv active).
   huggingface.co is blocked, so the `whisper` case skips with that reason;
   CI downloads the model and runs it.
 
+### Latency timings (2026-10-17)
+- `assistant/timing.py`: `TurnTimer` stamps each stage of a turn with one
+  monotonic clock: wake word detected -> end of speech (VAD) -> transcript
+  ready -> Claude's reply -> first audio played. Each stage is logged at
+  INFO as it happens (`Timing: transcript +0.42 s (2.31 s after wake)`), and
+  every turn ends with one summary line in `logs/assistant.log`:
+  `Turn timings from wake: end of speech +1.50 s, transcript +0.40 s, Claude
+  reply +1.10 s, first audio +0.20 s; wake to first audio 3.20 s (end of
+  speech to first audio 1.70 s)`. `--timings` prints that line to the
+  console too.
+- "Claude reply" is the whole reply, tool calls included: the assistant
+  doesn't stream, so there is no separate first-token time. "First audio"
+  is when sound starts: pyttsx3 reports it through its `started-utterance`
+  callback, Piper after synthesis just before playback; engines without the
+  `on_audio_start` hook are stamped when `speak()` is called.
+- "Wake -> end of speech" includes the time spent talking plus the
+  `[wake] silence_ms` pause (0.8 s) the VAD waits for, so the latency Kyle
+  feels after he stops talking is roughly 0.8 s + the last three stages
+  (the "end of speech to first audio" figure in the summary).
+- Tested by `tests/test_timing.py` with a fake clock: step and summary
+  maths, first-mark-wins, INFO records, the summary in the log file and on
+  the console only with `--timings`, and the audio-start hook for PrintTTS,
+  Piper (before playback) and pyttsx3 (from the engine callback).
+- Numbers from the build sandbox (4-core cloud VM, no audio devices; **not**
+  real hardware, and Claude/Whisper weren't reachable, so those stages
+  aren't measured): openWakeWord + VAD process audio at about 50x real time
+  (0.6 ms per 32 ms frame; loading the model takes 0.7 s at startup); eSpeak
+  renders a 3.5 s reply in 0.02 s, so first audio comes right after the
+  reply; Piper was measured earlier at about 40x real time. On a real
+  turn expect the time to be dominated by the 0.8 s end-of-speech pause,
+  Whisper base.en on CPU and the Claude round trip(s); run with
+  `--timings` on the PC and the Pi to see them.
+
 ## Test summary
 `pytest`: see the latest run noted in "Extra - Raspberry Pi deployment" (Linux
 build sandbox). The skips are real-service tests that need things the

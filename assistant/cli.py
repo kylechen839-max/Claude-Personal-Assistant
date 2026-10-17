@@ -12,6 +12,7 @@ import anthropic
 
 from assistant import audio
 from assistant.chat import ClaudeChat
+from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
 from assistant.tools import ToolRegistry
 from assistant.tts import make_tts
@@ -51,6 +52,9 @@ def parse_args(argv=None):
                         help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
                         help="openWakeWord .onnx model for the 'Hey Claude' wake word")
+    parser.add_argument("--timings", action="store_true",
+                        help="wake mode: print each turn's latency summary to "
+                             "the console too (it is always in the log file)")
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
@@ -138,11 +142,14 @@ def finish(chat: ClaudeChat, output_fn=print) -> None:
 def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
              output_fn=print, wake_phrase: str = "Hey Claude",
              conversation_timeout: float = 300, clock=time.monotonic,
-             max_failures: int = 5, retry_delay: float = 2.0) -> None:
+             max_failures: int = 5, retry_delay: float = 2.0,
+             show_timings: bool = False,
+             timing_clock=time.monotonic) -> None:
     """Always listening. A conversation ends on 'goodbye' or after
     `conversation_timeout` seconds without a request; it is then summarized
     to memory and history is reset. Ctrl+C quits. A file source stops at its
-    end."""
+    end. Each turn's latency is logged (`timing_clock` must be the clock the
+    listener stamps `wake_time` with); `show_timings` prints it too."""
     output_fn(f"Listening for '{wake_phrase}'... (Ctrl+C to quit)")
     last_exchange = clock()
     failures = 0
@@ -162,6 +169,8 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
             continue
         if not woke:
             break  # audio file finished
+        timer = TurnTimer(timing_clock, "wake", at=getattr(listener, "wake_time", None))
+        timer.mark("speech_end")
         if chat.history and clock() - last_exchange > conversation_timeout:
             summary = chat.end_conversation()  # new conversation starts now
             if summary:
@@ -171,7 +180,7 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
             output_fn("(heard the wake word but no command)")
             continue
         try:
-            handle_command(chat, tts, transcriber, recording, output_fn)
+            handle_command(chat, tts, transcriber, recording, output_fn, timer)
         except KeyboardInterrupt:
             break
         except Exception:  # never let one bad request stop the assistant
@@ -181,12 +190,40 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
                 tts.speak("Sorry, something went wrong.")
             except Exception:
                 log.exception("TTS failed too")
+        report_timings(timer, output_fn if show_timings else None)
     finish(chat, output_fn)
 
 
+def report_timings(timer: TurnTimer, output_fn=None) -> None:
+    """One summary line per turn in the log, and on the console if asked."""
+    line = timer.summary()
+    log.info(line)
+    if output_fn:
+        output_fn(f"({line})")
+
+
+def speak(tts, text: str, timer: TurnTimer | None = None) -> None:
+    """Speak, marking the moment sound starts. Engines that report it
+    (on_audio_start) are exact; for others the call time is used."""
+    if timer is None:
+        tts.speak(text)
+        return
+    if not hasattr(tts, "on_audio_start"):
+        timer.mark("audio")
+        tts.speak(text)
+        return
+    tts.on_audio_start = lambda: timer.mark("audio")
+    try:
+        tts.speak(text)
+    finally:
+        tts.on_audio_start = None
+
+
 def handle_command(chat: ClaudeChat, tts, transcriber, recording,
-                   output_fn=print) -> None:
+                   output_fn=print, timer: TurnTimer | None = None) -> None:
     user_text = transcriber.transcribe(recording)
+    if timer:
+        timer.mark("transcript")
     output_fn(f"You: {user_text}")
     log.info("Heard: %r", user_text)
     if not user_text:
@@ -198,9 +235,11 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
             output_fn(f"(Saved to memory: {summary})")
         return
     reply = get_reply(chat, user_text, output_fn)
+    if timer:
+        timer.mark("reply")
     output_fn(f"Claude: {reply}")
     log.info("Replied: %r", reply)
-    tts.speak(reply)
+    speak(tts, reply, timer)
 
 
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
@@ -336,7 +375,8 @@ def main(argv=None) -> int:
             tools.confirm = voice_confirm(
                 tts, lambda: listener.record_reply(source), transcriber)
             run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase,
-                     conversation_timeout=config["assistant"]["conversation_timeout"])
+                     conversation_timeout=config["assistant"]["conversation_timeout"],
+                     show_timings=args.timings)
     except KeyboardInterrupt:
         print("Bye!")
     except Exception as e:  # startup problems: missing key, no mic, bad config
