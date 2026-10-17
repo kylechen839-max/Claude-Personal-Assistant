@@ -136,7 +136,11 @@ def test_tts_checks(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "piper", MagicMock())
     assert doctor.check_tts(cfg).ok
     cfg["tts"]["engine"] = "pyttsx3"
+    # pyttsx3 needs espeak only on Linux; Windows uses the built-in SAPI voices
+    monkeypatch.setattr(sys, "platform", "linux")
     assert not doctor.check_tts(cfg, which=lambda exe: None).ok
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert doctor.check_tts(cfg, which=lambda exe: None).ok
 
 
 def test_bundled_wake_model_is_found(monkeypatch):
