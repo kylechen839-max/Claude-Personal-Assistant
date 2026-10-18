@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 320 passed, 8 skipped (Linux build sandbox,
+**Current test count:** 323 passed, 8 skipped (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
 builds and smoke-tests the cloud Docker image. The
@@ -26,7 +26,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
-| `test_webapp.py` | 57 | phone web app (`--mode web`) |
+| `test_webapp.py` | 60 | phone web app (`--mode web`) |
 | `test_cloud.py` | 52 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
@@ -184,7 +184,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   mic: sign-in, typed turn, Yes button, and a held-mic WebM upload.
 - Public-server hardening (for a host like Render): `PORT` and
   `TRUSTED_PROXY` from the environment; X-Forwarded-For/Proto used only
-  behind a trusted proxy (rightmost entry); http -> https redirect and HSTS
+  behind a trusted proxy (rightmost entry; `trusted_proxy` is a count, or the
+  proxy's address such as 127.0.0.1 for `tailscale serve`, and then the
+  headers count only from that address); http -> https redirect and HSTS
   there; per-address (5 per 15 min) and global (50) sign-in lockouts that also
   cover wrong Bearer tokens; constant-time compare and generic errors (no
   stack traces, no FastAPI docs, no directory listing); 411 without

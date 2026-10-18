@@ -231,7 +231,9 @@ Blueprint in the next section (it adds an auth wall in front of every route
 and escalating lockouts). By hand, behind an HTTPS proxy: set `WEB_TOKEN`
 as a secret in the host's environment (the app refuses to listen on anything
 but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
-trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers, and
+trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
+also takes the proxy's address instead, e.g. `TRUSTED_PROXY=127.0.0.1` for
+`tailscale serve` on the same PC: the headers then count only from there), and
 run `python -m assistant --mode web --host 0.0.0.0` (it reads `PORT` from the
 environment). With a trusted proxy, plain-http requests are redirected to
 https and HSTS is sent. Five wrong tokens from one address lock that address

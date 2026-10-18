@@ -197,7 +197,7 @@ def test_client_ip():
     assert webapp.client_ip(conn, 5) == "1.2.3.4"
     for value, hops in (("", 0), ("0", 0), ("false", 0), (None, 0),
                         ("true", 1), ("1", 1), ("2", 2), (True, 1), (3, 3)):
-        assert webapp.parse_trusted_proxy(value) == hops
+        assert webapp.parse_trusted_proxy(value).hops == hops
 
 
 def test_cross_origin_requests_are_rejected(make_app):
@@ -769,7 +769,7 @@ def test_port_and_trusted_proxy_from_environment(monkeypatch):
     monkeypatch.setenv("TRUSTED_PROXY", "true")
     cfg = load_config(None, None)
     assert int(cfg["webapp"]["port"]) == 10000
-    assert webapp.parse_trusted_proxy(cfg["webapp"]["trusted_proxy"]) == 1
+    assert webapp.parse_trusted_proxy(cfg["webapp"]["trusted_proxy"]).hops == 1
 
 
 def test_serve_behind_a_proxy(monkeypatch, tmp_path):
@@ -790,7 +790,7 @@ def test_serve_behind_a_proxy(monkeypatch, tmp_path):
     assert webapp.serve(cfg, host="0.0.0.0", port=10000, tts_name="print",
                         output_fn=out.append) == 0
     assert seen["host"] == "0.0.0.0" and seen["port"] == 10000
-    assert seen["app"].state.web.trusted_proxy == 1
+    assert seen["app"].state.web.trusted_proxy.hops == 1
     assert not any("WARNING" in line for line in out)
     assert TOKEN not in "\n".join(out)
 
@@ -928,3 +928,46 @@ def test_bearer_token_for_other_clients(make_app, fake_client):
         assert client.get("/api/state", headers=bad).status_code == 401
     # locked out now (per address), even with the right token
     assert client.get("/api/state", headers=good).status_code == 401
+
+
+def test_trusted_proxy_by_address():
+    """tailscale serve on the same PC: trust forwarded headers only from it."""
+    trust = webapp.parse_trusted_proxy("127.0.0.1")
+    assert trust.hops == 1 and trust.addresses == {"127.0.0.1"}
+    both = webapp.parse_trusted_proxy("127.0.0.1, ::1")
+    assert both.addresses == {"127.0.0.1", "::1"}
+    assert webapp.parse_trusted_proxy(["127.0.0.1"]).addresses == {"127.0.0.1"}
+    headers = {"x-forwarded-for": "100.64.0.7"}
+    local = SimpleNamespace(headers=headers, client=SimpleNamespace(host="127.0.0.1"))
+    other = SimpleNamespace(headers=headers, client=SimpleNamespace(host="192.168.1.9"))
+    assert webapp.client_ip(local, trust) == "100.64.0.7"
+    assert webapp.client_ip(other, trust) == "192.168.1.9"  # not the proxy: ignored
+    with pytest.raises(ValueError, match="trusted_proxy"):
+        webapp.parse_trusted_proxy("localhost-ish")
+
+
+def test_redirect_only_from_the_trusted_address(make_app):
+    # TestClient's peer address is "testclient"
+    _, client = make_app(trusted_proxy="10.9.9.9")
+    r = client.get("/", headers={"X-Forwarded-Proto": "http"}, follow_redirects=False)
+    assert r.status_code == 200 and "strict-transport-security" not in r.headers
+
+
+def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
+    from assistant.config import load_config
+
+    monkeypatch.setenv("WEB_TOKEN", TOKEN)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)
+    cfg = load_config(None, None)
+    cfg["calendar"]["enabled"] = False
+    seen = {}
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw, app=app))
+    assert webapp.serve(cfg, tts_name="print", env_file=tmp_path / ".env",
+                        output_fn=lambda m: None) == 0
+    assert seen["host"] == "127.0.0.1"
+    assert seen["app"].state.web.trusted_proxy.addresses == {"127.0.0.1"}
