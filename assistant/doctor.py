@@ -158,6 +158,31 @@ def check_tts(config: dict, which=shutil.which) -> Check:
     return Check(f"TTS ({engine})", True, "ok")
 
 
+def check_web(environ=os.environ, find_spec=None) -> list[Check]:
+    """The phone web app (--mode web): its token and packages."""
+    import importlib.util
+
+    find_spec = find_spec or importlib.util.find_spec
+    token = environ.get("WEB_TOKEN", "")
+    if not token:
+        token_check = Check("WEB_TOKEN", False, "not set (created in .env the "
+                            "first time you run --mode web)", required=False)
+    elif len(token) < 32:
+        token_check = Check("WEB_TOKEN", False, "set but too short (use 32+ "
+                            "random characters, or delete it to get a new one)",
+                            required=False)
+    else:
+        token_check = Check("WEB_TOKEN", True, "set")
+    missing = [m for m in ("fastapi", "uvicorn") if find_spec(m) is None]
+    if find_spec("python_multipart") is None and find_spec("multipart") is None:
+        missing.append("python-multipart")
+    return [token_check,
+            Check("Web app packages", not missing,
+                  "fastapi, uvicorn, python-multipart installed" if not missing
+                  else f"missing {', '.join(missing)} (pip install -r "
+                       "requirements.txt)", required=False)]
+
+
 def run_checks(config: dict, keyword_path: str | None = None,
                environ=os.environ, sd=None, download_model=None,
                which=shutil.which) -> list[Check]:
@@ -165,7 +190,7 @@ def run_checks(config: dict, keyword_path: str | None = None,
             check_wake_model(config, keyword_path),
             *check_audio_devices(config, sd),
             check_whisper_model(config, download_model),
-            check_tts(config, which)]
+            check_tts(config, which), *check_web(environ)]
 
 
 def report(checks: list[Check], output_fn=print) -> int:
