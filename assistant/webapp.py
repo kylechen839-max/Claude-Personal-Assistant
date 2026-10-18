@@ -1119,6 +1119,8 @@ def wrap_failover(app, token: str, failover, web: WebAuth):
                           backends=list(failover.backends),
                           limiter=web.limiter,
                           client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
+                          trusts_proxy=lambda scope: web.trusted_proxy.trusts(
+                              HTTPConnection(scope)),
                           root_bearer_sid=web.bearer_sid)
 
 

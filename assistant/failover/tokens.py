@@ -32,6 +32,8 @@ SCOPES = ("app", "sync")
 APP_TTL = 30 * 24 * 3600   # phone app: 30 days unless refreshed
 MAX_SESSION = 90 * 24 * 3600  # then sign in with WEB_TOKEN again
 SYNC_TTL = 300             # peers mint a fresh one per sync round
+LEEWAY = 600               # accept tokens this many seconds past expiry: a Pi
+                           # boots with a stale clock until NTP catches up
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -50,11 +52,12 @@ def _sig(secret: str, scope: str, sid: str, expires: int, signed_in: int) -> str
 
 
 class TokenAuthority:
-    def __init__(self, secret: str, clock=time.time):
+    def __init__(self, secret: str, clock=time.time, leeway: int = LEEWAY):
         if not secret or len(secret) < 32:
             raise ValueError("WEB_TOKEN must be at least 32 characters")
         self._secret = secret
         self.clock = clock
+        self.leeway = leeway
 
     def check_root(self, given: str) -> bool:
         """Is `given` the shared WEB_TOKEN itself (constant time)?"""
@@ -92,7 +95,7 @@ class TokenAuthority:
         expires, signed_in = int(expires_s), int(signed_s)
         if not hmac.compare_digest(sig, _sig(self._secret, tscope, sid, expires, signed_in)):
             return None
-        if expires <= self.clock():
+        if expires + self.leeway <= self.clock():
             return None
         if scope is not None and tscope != scope:
             return None

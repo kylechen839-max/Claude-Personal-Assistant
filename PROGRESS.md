@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 570 passed, 8 skipped (plus 33 node tests) (Linux build sandbox,
+**Current test count:** 700 passed, 8 skipped (plus 33 node tests) (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
@@ -28,9 +28,10 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webapp.py` | 60 | phone web app (`--mode web`) |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
-| `test_failover_edge.py` | 47 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
-| `test_failover_sync.py` | 79 | failover: history event log merge, redaction and sync |
-| `test_failover_leader.py` | 170 | failover: leader check for scheduled jobs |
+| `test_failover_edge.py` | 49 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
+| `test_failover_sync.py` | 160 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
+| `test_failover_leader.py` | 213 | failover: leader check for scheduled jobs (incl. the real network topology) |
+| `test_failover_eventlog.py` | 4 | failover: the SQLite event log |
 | `test_failover_config.py` | 7 | failover: `[failover]` settings, `--role` |
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |

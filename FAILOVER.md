@@ -142,11 +142,18 @@ the web app's own `require_session` check, as without failover.
 
 **Lockout:** the edge uses the web app's own `LoginLimiter` and client
 address on each backend (per address, plus a global limit; the same one
-`/api/login` uses). Wrong `WEB_TOKEN`s and invalid bearer tokens count; a
-missing token doesn't (an app polling before sign-in). Once an address is
-locked out, its *wrong* attempts get 429. The right `WEB_TOKEN` and any
-valid bearer token are always accepted, so someone hammering the public
-cloud URL can't lock you out of your own app.
+`/api/login` uses). Only guesses at `WEB_TOKEN` count: a wrong token on
+`/api/auth/token`, or a bearer that isn't a derived (`hc1.`) token.
+Missing, expired or bad derived tokens don't count: they are 256-bit HMACs,
+so guessing is hopeless, and an old phone or a Pi with a stale clock
+retrying must not lock its owner out. Once an address is locked out, its
+wrong attempts get 429; the right `WEB_TOKEN` and any valid bearer token
+are always accepted.
+
+**Clocks:** tokens are accepted up to 10 minutes past their expiry, for a
+Pi that boots with a stale clock until NTP catches up. `X-Forwarded-Host`
+counts as "our own host" in the origin check only from a trusted proxy
+(the web app's `trusted_proxy`), like the rest of the web app.
 
 **API version:** `assistant/failover/__init__.py` `API_VERSION` (now 1) is
 bumped on any breaking change to the client API. The app accepts the range
@@ -217,7 +224,7 @@ Every change to history is an event:
 | `rename` | `{title}` | last writer wins on (ts, id) |
 | `pin` | `{pinned}` | last writer wins on (ts, id) |
 | `delete` | `{}` | permanent tombstone for the conversation |
-| `delete_message` | `{target}` | permanent tombstone for one message |
+| `delete_message` | `{target}` | permanent tombstone for one message of the same conversation |
 | `job` | `{key}` (conv `job:<key>`) | scheduled-job fires, section 5.3 |
 
 **Deletes redact.** Besides hiding things, a tombstone removes the text
@@ -259,8 +266,13 @@ answers. Pushed events are validated (`parse_event`: id format, known
 kind, size ≤ 64 KB, timestamp at most a day ahead) and a batch is accepted
 all or nothing.
 
-**Storage API** (what the SQLite store implements; `MemoryEventLog` is the
-reference): `log_id`, `append(events) -> inserted` (applying the
+**Storage:** `assistant/failover/eventlog.py` `SqliteEventLog` is the
+persistent log: its own `sync_events` / `sync_meta` tables, so it can share
+the history database file without touching the history store's tables
+(seq is AUTOINCREMENT, never reused; ids 32-hex; ts in ms; redaction on
+insert). The history store records each change as an event in it and
+applies the events `append` returns from peers. The same contract tests
+run on it and on `MemoryEventLog`. **Storage API**: `log_id`, `append(events) -> inserted` (applying the
 redactions above, see `covered_by` and `redacted`), `since(seq, limit)`,
 `by_conv(conv)`, `meta_get/meta_set`. The history store owns the schema;
 this module owns the protocol.
@@ -274,10 +286,16 @@ this module owns the protocol.
    right before firing (2 tries each, so one lost probe of a flapping peer
    doesn't count as "down"). If one answers, stand down (optionally
    re-checking after a delay, in case the leader is restarting). The Pi
-   never stands down; the cloud fires only if neither Pi nor PC answers.
+   never stands down. **The cloud can't reach the tailnet**, so for it a
+   peer also counts as alive if it synced with the cloud in the last 2
+   minutes (the sync endpoint records each caller), and it re-checks after
+   more than one sync interval before firing, so a fire the Pi already
+   recorded has time to arrive.
 3. Record a `job` event, sync, and look again: if another backend's fire
-   sorts first, ours is a duplicate and is **suppressed**. Only the first
-   fire acts.
+   wins, ours is a duplicate and is **suppressed**. The winner is the
+   earliest fire, except that among fires less than a minute apart (clock
+   skew) the highest-priority role wins, so skewed clocks can't make two
+   backends each think they were first.
 
 Across a real partition (the PC can't reach the Pi, the Pi is up but can't
 reach anyone) both may act; both fires are then in the merged log, so the
@@ -334,7 +352,13 @@ environment variables and secret files on Render): `ANTHROPIC_API_KEY`,
   (40 seeds), always ending identical.
 - `tests/test_failover_leader.py`: exactly one leader, flapping peers
   (the job runs exactly once over 80 random scenarios), partitions (double
-  fires are recorded), concurrent fires suppressed.
+  fires are recorded), concurrent fires suppressed, and the real topology
+  (the cloud can't probe the tailnet and only hears from inbound syncs):
+  the reminder goes out exactly once from the highest live backend over 40
+  scenarios; without the inbound-sync signal 17 of them double-fire.
+- `tests/test_failover_eventlog.py`: the SQLite log survives restarts,
+  never reuses seq, shares a file with the history tables, concurrent
+  appends.
 
 ## 8. Known limits
 

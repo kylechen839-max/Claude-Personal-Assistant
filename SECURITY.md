@@ -79,8 +79,12 @@ all three, which `assistant/failover/edge.py` closes the same way on each:
 - **`/healthz`** is public and returns only `ok`, the API version number and
   the role: no hostnames, versions, load or errors.
 - **Lockout** stays per backend and is the web app's own `LoginLimiter`
-  (per address plus a global limit). Wrong `WEB_TOKEN`s and bad bearer
-  tokens count; once an address is locked out its wrong attempts get 429.
+  (per address plus a global limit). Only guesses at `WEB_TOKEN` count
+  (a wrong one on the token endpoint, or a non-derived bearer); expired or
+  bad derived tokens don't, since they can't be guessed and an old phone
+  retrying shouldn't lock Kyle out. Once an address is locked out its wrong
+  attempts get 429. `X-Forwarded-Host` is trusted only from the configured
+  proxy (`trusted_proxy`).
   The right `WEB_TOKEN` and valid bearer tokens are always accepted, so
   hammering the public cloud URL can't lock Kyle out.
 - **Cookies keep working on the same origin.** A same-origin request with
@@ -92,9 +96,11 @@ all three, which `assistant/failover/edge.py` closes the same way on each:
   reaches it, whichever arrives first.
 - **History sync** between backends uses the same token scheme (sync scope)
   over HTTPS; pushed events are validated (id format, known kinds, size, a
-  timestamp at most a day ahead) and taken all or nothing. A backend that
-  has `WEB_TOKEN` can write history on the others, so every backend is
-  equally trusted; keep `WEB_TOKEN` out of logs (it is redacted) and out of
+  timestamp at most a day ahead) and taken all or nothing. Events are not
+  tied to the pushing backend (`origin` can be another backend's, because
+  events are relayed: the PC forwards the Pi's events to the cloud). A
+  backend that has `WEB_TOKEN` can write history on the others, so every
+  backend is equally trusted; keep `WEB_TOKEN` out of logs (it is redacted) and out of
   git.
 
 ## Not fixed, on purpose

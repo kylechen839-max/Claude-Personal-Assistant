@@ -5,8 +5,9 @@ import random
 
 import pytest
 
-from assistant.failover.leader import (FIRED, SKIPPED_DONE, SKIPPED_NOT_LEADER, SUPPRESSED,
-                                       JobRunner, LeaderCheck, fires)
+from assistant.failover.leader import (FIRED, FIRE_TOLERANCE_MS, SKIPPED_DONE,
+                                       SKIPPED_NOT_LEADER, SUPPRESSED, JobRunner,
+                                       LeaderCheck, fires, store_heard_from, winner)
 from assistant.failover.peers import Backend, Health, parse_health
 from assistant.failover.sync import MemoryEventLog
 from assistant.failover import API_VERSION
@@ -135,7 +136,7 @@ def test_flapping_peer_job_runs_exactly_once(seed):
     can sync: the job's action runs exactly once, by the first fire."""
     c, alive, outcomes, fired = run_cluster(seed, sync_loss=0.0)
     assert len(c.ran) == 1, outcomes
-    assert c.ran == [fired[0].origin]
+    assert c.ran == [winner(fired).origin]
     if alive["pi"]:
         assert outcomes["pi"] in (FIRED, SKIPPED_DONE, SUPPRESSED)  # never "not leader"
     for role, outcome in outcomes.items():
@@ -173,3 +174,128 @@ def test_concurrent_double_fire_is_suppressed():
     # it sees PC's fire already in the log and skips
     assert pi.run("k", lambda: ran.append("pi")) == SKIPPED_DONE
     assert ran == ["pc"]
+
+
+# --- the real topology: the cloud can't reach the tailnet ---------------------
+
+def test_cloud_stands_down_when_a_peer_synced_recently():
+    store = MemoryEventLog()
+    now = [10_000_000]
+    check = LeaderCheck("cloud", [PI, PC], prober({}),  # tailnet probes always fail
+                        heard_from=store_heard_from(store), clock_ms=lambda: now[0])
+    assert check.is_leader()
+    store.meta_set("heard:pi", str(now[0] - 30_000))  # the Pi synced 30 s ago
+    assert not check.is_leader()
+    now[0] += 200_000  # nothing from the Pi for over 2 minutes
+    assert check.is_leader()
+
+
+def test_sync_endpoint_records_who_called():
+    import asyncio
+
+    from assistant.failover.sync import make_sync_app
+    from assistant.failover.tokens import Claims
+
+    store = MemoryEventLog()
+    app = make_sync_app(store)
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(m):
+        sent.append(m)
+
+    scope = {"type": "http", "method": "GET", "path": "/api/sync/events", "query_string": b"",
+             "auth": Claims("sync", "pi", 0, 0)}
+    asyncio.run(app(scope, receive, send))
+    assert store_heard_from(store)("pi") is not None
+    assert store_heard_from(store)("pc") is None
+
+
+class Topology:
+    """Pi and PC on the tailnet (they probe each other), the cloud on the
+    internet: it can't probe them; they push/pull to it every sync interval,
+    which is how it hears from them."""
+
+    SYNC_MS = 30_000
+
+    def __init__(self, rng, alive):
+        self.rng = rng
+        self.alive = alive
+        self.stores = {b.role: MemoryEventLog() for b in ALL}
+        self.now = int(__import__("time").time() * 1000)
+        self.ran = []
+
+    def clock(self):
+        return self.now
+
+    def probe_from(self, me):
+        def probe(b):
+            reachable = me != "cloud" and b.role != "cloud" or (me != "cloud" and b.role == "cloud")
+            return Health(True, API_VERSION, b.role) if reachable and self.alive[b.role] \
+                else Health(False)
+        return probe
+
+    def sync_round(self, role):
+        """What Syncer.sync_all does for role (Pi/PC only)."""
+        if role == "cloud" or not self.alive[role]:
+            return
+        for other in ("pi", "pc", "cloud"):
+            if other != role and self.alive[other]:
+                self.stores[other].append(self.stores[role].all())
+                self.stores[role].append(self.stores[other].all())
+                if other == "cloud":
+                    self.stores["cloud"].meta_set(f"heard:{role}", str(self.now))
+
+    def tick(self, ms):
+        """Time passes; Pi and PC run their sync rounds."""
+        end = self.now + ms
+        while self.now < end:
+            self.now += self.SYNC_MS
+            for role in ("pi", "pc"):
+                self.sync_round(role)
+
+    def runner(self, role):
+        me = next(b for b in ALL if b.role == role)
+        store = self.stores[role]
+        return JobRunner(store, LeaderCheck(role, [b for b in ALL if b != me],
+                                            self.probe_from(role),
+                                            heard_from=store_heard_from(store),
+                                            clock_ms=self.clock),
+                         sync=lambda: self.sync_round(role), sleep=lambda s: self.tick(s * 1000),
+                         clock_ms=self.clock)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_real_topology_reminder_goes_out_once(seed):
+    rng = random.Random(seed)
+    alive = {"pi": rng.random() < 0.6, "pc": rng.random() < 0.6, "cloud": True}
+    t = Topology(rng, alive)
+    t.tick(5 * 60_000)  # running for a while: the cloud has heard from the live ones
+    roles = [r for r in ("pi", "pc", "cloud") if alive[r]]
+    rng.shuffle(roles)  # all schedulers wake for the 08:00 reminder in some order
+    outcomes = {}
+    for role in roles:
+        # the cloud waits longer than a sync interval before deciding
+        delays = (45, 45) if role == "cloud" else ()
+        outcomes[role] = t.runner(role).run("reminder-0800",
+                                            lambda role=role: t.ran.append(role),
+                                            recheck_delays=delays)
+    top = next(r for r in ("pi", "pc", "cloud") if alive[r])
+    assert t.ran == [top], (alive, outcomes)
+
+
+def test_winner_prefers_priority_within_clock_skew():
+    from assistant.failover.sync import parse_event
+
+    def fire(origin, ts, id_):
+        return parse_event({"id": id_ * 32, "ts": ts, "origin": origin, "kind": "job",
+                            "conv": "job:k", "data": {"key": "k"}})
+
+    pc_early = fire("pc", 1_000, "a")
+    pi_late = fire("pi", 3_000, "b")  # the Pi's clock is 2 s behind... or ahead
+    assert winner([pc_early, pi_late]) == pi_late
+    assert winner([pi_late, pc_early]) == pi_late
+    far = fire("pi", 1_000 + FIRE_TOLERANCE_MS + 1, "c")
+    assert winner([pc_early, far]) == pc_early  # far apart: the earlier one

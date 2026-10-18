@@ -1,6 +1,7 @@
 """History sync protocol (failover/sync.py): merge, transport, convergence."""
 
 import json
+import sys
 import random
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,7 +15,20 @@ from assistant.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, covered_
                                      make_sync_app, materialize, new_event, new_id,
                                      parse_event)
 from assistant.failover.tokens import TokenAuthority, bearer_of
+from assistant.failover.eventlog import SqliteEventLog
 from tests.asgi_harness import request
+
+make_store = MemoryEventLog
+
+
+@pytest.fixture(autouse=True, params=["memory", "sqlite"])
+def store_kind(request, tmp_path, monkeypatch):
+    """Every test runs against both EventLog implementations."""
+    if request.param == "sqlite":
+        counter = iter(range(10_000))
+        monkeypatch.setattr(sys.modules[__name__], "make_store",
+                            lambda: SqliteEventLog(tmp_path / f"h{next(counter)}.db"))
+    return request.param
 
 SECRET = "s" * 43
 URLS = {"pi": "https://pi.t.ts.net", "pc": "https://pc.t.ts.net",
@@ -52,7 +66,7 @@ class Network:
 
 
 def three():
-    stores = {r: MemoryEventLog() for r in URLS}
+    stores = {r: make_store() for r in URLS}
     return stores, Network(stores)
 
 
@@ -135,7 +149,7 @@ def all_text(store):
 
 @pytest.mark.parametrize("delete_first", [False, True])
 def test_delete_redacts_the_text_in_the_store(delete_first):
-    s = MemoryEventLog()
+    s = make_store()
     msgs = [new_event("message", "c", {"role": "user", "text": f"secret {i}"}, origin="pi",
                       ts=10 + i) for i in range(3)]
     ren = new_event("rename", "c", {"title": "Secret plans"}, origin="pc", ts=20)
@@ -152,7 +166,7 @@ def test_delete_redacts_the_text_in_the_store(delete_first):
 
 @pytest.mark.parametrize("delete_first", [False, True])
 def test_delete_message_redacts_its_target(delete_first):
-    s = MemoryEventLog()
+    s = make_store()
     keep = new_event("message", "c", {"role": "user", "text": "fine"}, origin="pi", ts=1)
     drop = new_event("message", "c", {"role": "user", "text": "oops my password"}, origin="pi", ts=2)
     d = new_event("delete_message", "c", {"target": drop.id}, origin="pc", ts=3)
@@ -160,6 +174,16 @@ def test_delete_message_redacts_its_target(delete_first):
         s.append(batch)
     assert "password" not in all_text(s) and "fine" in all_text(s)
     assert [m["text"] for m in materialize(s.all())["conversations"]["c"].messages] == ["fine"]
+
+
+def test_delete_message_only_applies_in_its_own_conversation():
+    target = new_event("message", "c", {"role": "user", "text": "stays"}, origin="pi", ts=1)
+    # a delete_message filed under another conversation does nothing to it
+    wrong = new_event("delete_message", "d", {"target": target.id}, origin="pc", ts=2)
+    s = make_store()
+    s.append([target, wrong])
+    assert "stays" in all_text(s)
+    assert [m["text"] for m in materialize(s.all())["conversations"]["c"].messages] == ["stays"]
 
 
 def test_redaction_reaches_every_peer():
@@ -178,7 +202,7 @@ def test_redaction_reaches_every_peer():
 
 
 def test_store_append_is_idempotent_and_since_pages():
-    s = MemoryEventLog()
+    s = make_store()
     ev = [new_event("message", "c", {"text": str(i)}, origin="pi", ts=i) for i in range(5)]
     assert len(s.append(ev)) == 5
     assert s.append(ev) == []
@@ -189,7 +213,7 @@ def test_store_append_is_idempotent_and_since_pages():
 
 
 def test_push_rejects_bad_batches():
-    s = MemoryEventLog()
+    s = make_store()
     assert handle_push(s, {"events": "x"})[0] == 400
     assert handle_push(s, [])[0] == 400
     big = [new_event("message", "c", {}, origin="pi").to_json() for _ in range(MAX_BATCH + 1)]
@@ -236,7 +260,7 @@ def test_peer_database_reset_resends_everything():
     stores["pi"].append([new_event("message", "c", {}, origin="pi") for _ in range(5)])
     pi = net.syncer("pi")
     pi.sync_all()
-    stores["cloud"] = net.stores["cloud"] = MemoryEventLog()  # Render disk wiped
+    stores["cloud"] = net.stores["cloud"] = make_store()  # Render disk wiped
     stores["cloud"].append([new_event("message", "d", {}, origin="cloud")])
     pi.sync_all()
     assert len(stores["cloud"].all()) == 6
@@ -261,7 +285,7 @@ def test_wrong_token_refused():
 
 
 def test_sync_app_behind_edge_middleware():
-    store = MemoryEventLog()
+    store = make_store()
     authority = TokenAuthority(SECRET)
 
     async def nothing(scope, receive, send):
@@ -376,7 +400,7 @@ def test_merge_is_order_and_duplicate_independent(seed):
         rng.shuffle(shuffled)
         assert fingerprint(materialize(shuffled)) == want
         # and splitting into stores that each saw a different subset, then merging
-        a, b = MemoryEventLog(), MemoryEventLog()
+        a, b = make_store(), make_store()
         for e in shuffled:
             (a if rng.random() < 0.5 else b).append([e])
         a.append(b.all())

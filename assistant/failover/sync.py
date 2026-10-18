@@ -166,8 +166,8 @@ def covered_by(tombstone: Event, e: Event) -> bool:
     if tombstone.kind == "delete":
         # tombstones themselves hold no text (only ids) and must survive
         return e.conv == tombstone.conv and e.kind not in ("delete", "delete_message", "job")
-    if tombstone.kind == "delete_message":
-        return e.id == tombstone.data.get("target")
+    if tombstone.kind == "delete_message":  # only within its own conversation
+        return e.id == tombstone.data.get("target") and e.conv == tombstone.conv
     return False
 
 
@@ -241,7 +241,8 @@ def materialize(events: Iterable[Event]) -> dict:
     ordered = sorted(unique.values(), key=lambda e: e.order)
     convs: dict[str, Conversation] = {}
     jobs: dict[str, list[str]] = {}
-    dead_msgs = {e.data.get("target") for e in ordered if e.kind == "delete_message"}
+    dead_msgs = {(e.conv, e.data.get("target")) for e in ordered
+                 if e.kind == "delete_message"}
     dead_convs = {e.conv for e in ordered if e.kind == "delete"}
     for e in ordered:
         if e.kind == "job":
@@ -251,7 +252,7 @@ def materialize(events: Iterable[Event]) -> dict:
         c.updated = max(c.updated, e.ts)
         if not e.data and e.kind in ("message", "rename", "pin"):
             continue  # redacted by a tombstone that may not have arrived yet
-        if e.kind == "message" and e.id not in dead_msgs:
+        if e.kind == "message" and (e.conv, e.id) not in dead_msgs:
             c.messages.append({"id": e.id, "ts": e.ts, "origin": e.origin,
                                "role": e.data.get("role"), "text": e.data.get("text", "")})
         elif e.kind == "rename":
@@ -306,8 +307,11 @@ def make_sync_app(store: EventLog):
     async def app(scope, receive, send):
         if scope["type"] != "http":
             return
-        if getattr(scope.get("auth"), "scope", None) != "sync":
+        auth = scope.get("auth")
+        if getattr(auth, "scope", None) != "sync":
             return await _respond(send, 401, {"error": "unauthorized"})
+        if auth.sid in ROLES:  # the leader check counts this as a sign of life
+            store.meta_set(f"heard:{auth.sid}", str(now_ms()))
         if scope.get("path") != "/api/sync/events":
             return await _respond(send, 404, {"error": "not found"})
         if scope["method"] == "GET":

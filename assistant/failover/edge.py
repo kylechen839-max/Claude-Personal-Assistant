@@ -62,11 +62,13 @@ def _headers(scope) -> dict[str, str]:
     return out
 
 
-def own_origins(headers: dict[str, str]) -> set[str]:
-    """host[:port] values this request was addressed to."""
-    return {h.strip().lower() for h in (headers.get("host", ""),
-                                        headers.get("x-forwarded-host", ""))
-            if h.strip()}
+def own_origins(headers: dict[str, str], trust_forwarded: bool = False) -> set[str]:
+    """host[:port] values this request was addressed to. X-Forwarded-Host
+    counts only from a trusted proxy (anyone can send the header)."""
+    hosts = [headers.get("host", "")]
+    if trust_forwarded:
+        hosts.append(headers.get("x-forwarded-host", ""))
+    return {h.strip().lower() for h in hosts if h.strip()}
 
 
 def connect_src(backends: list[Backend]) -> str:
@@ -83,6 +85,7 @@ class EdgeMiddleware:
                  app_origins=(), backends: list[Backend] = (),
                  routes: dict | None = None,
                  limiter=None, client_ip=default_client_ip,
+                 trusts_proxy=lambda scope: False,
                  ws_auth_timeout: float = 5.0, protected_prefix: str = "/api/",
                  root_bearer_sid: str | None = None):
         self.app = app
@@ -101,6 +104,7 @@ class EdgeMiddleware:
             limiter = LoginLimiter()
         self.limiter = limiter
         self.client_ip = client_ip
+        self.trusts_proxy = trusts_proxy  # scope -> bool (webapp's trusted_proxy)
         self.ws_auth_timeout = ws_auth_timeout
         self.protected_prefix = protected_prefix
         # Scripts may also send WEB_TOKEN itself as the bearer token (as the
@@ -109,7 +113,8 @@ class EdgeMiddleware:
 
     # --- origin -------------------------------------------------------------
 
-    def origin_verdict(self, headers: dict[str, str]) -> tuple[bool, str | None]:
+    def origin_verdict(self, headers: dict[str, str],
+                       scope=None) -> tuple[bool, str | None]:
         """(allowed, origin to echo in CORS headers or None)."""
         origin = headers.get("origin")
         if origin is None:
@@ -120,7 +125,8 @@ class EdgeMiddleware:
             return False, None  # "null", garbage
         if norm in self.app_origins:
             return True, norm
-        if urlsplit(norm).netloc in own_origins(headers):
+        trusted = bool(scope is not None and self.trusts_proxy(scope))
+        if urlsplit(norm).netloc in own_origins(headers, trusted):
             return True, None  # same origin: no CORS headers needed
         return False, None
 
@@ -150,7 +156,7 @@ class EdgeMiddleware:
     async def _http(self, scope, receive, send):
         headers = _headers(scope)
         path, method = scope.get("path", ""), scope.get("method", "GET")
-        allowed, cors_origin = self.origin_verdict(headers)
+        allowed, cors_origin = self.origin_verdict(headers, scope)
         if not allowed:
             log.warning("Refused a request from another origin")
             return await _json(send, 403, {"error": "origin not allowed"})
@@ -193,12 +199,17 @@ class EdgeMiddleware:
         if path.startswith(self.protected_prefix) and not cookie_client:
             claims = self.check_bearer(headers, path)
             if claims is None:
-                ip = self.client_ip(scope)
-                if self.limiter.blocked(ip):
-                    return await _json(send, 429, {"error": "too many attempts"},
-                                       cors([("retry-after", "900")]))
-                if "authorization" in headers:
-                    self.limiter.fail(ip)  # a wrong token, not just a missing one
+                # Derived tokens are 256-bit HMACs: guessing them is hopeless,
+                # so bad, expired or missing ones are not counted (an old
+                # phone retrying must not lock out its owner). Only a bearer
+                # that could be a guess at WEB_TOKEN itself counts.
+                given = bearer_of(headers.get("authorization"))
+                if given and self.root_bearer_sid and not given.startswith("hc1."):
+                    ip = self.client_ip(scope)
+                    if self.limiter.blocked(ip):
+                        return await _json(send, 429, {"error": "too many attempts"},
+                                           cors([("retry-after", "900")]))
+                    self.limiter.fail(ip)
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
             scope = dict(scope, auth=claims)
@@ -233,8 +244,7 @@ class EdgeMiddleware:
         if path == "/api/auth/refresh":
             claims = self.authority.verify(bearer_of(headers.get("authorization")),
                                            scope="app")
-            if claims is None:
-                self.limiter.fail(self.client_ip(scope))
+            if claims is None:  # not counted: see the bearer check above
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
             if claims.expires >= claims.signed_in + MAX_SESSION:
@@ -272,7 +282,7 @@ class EdgeMiddleware:
         first = await receive()
         if first["type"] != "websocket.connect":
             return
-        allowed, cors_origin = self.origin_verdict(headers)
+        allowed, cors_origin = self.origin_verdict(headers, scope)
         if not allowed:
             log.warning("Refused a WebSocket from another origin")
             return await send({"type": "websocket.close",
@@ -303,7 +313,6 @@ class EdgeMiddleware:
         except ValueError:
             pass
         if claims is None:
-            self.limiter.fail(self.client_ip(scope))
             return await send({"type": "websocket.close",
                                "code": WS_CLOSE_UNAUTHORIZED, "reason": "unauthorized"})
         await send({"type": "websocket.send", "text": json.dumps({"type": "auth_ok"})})

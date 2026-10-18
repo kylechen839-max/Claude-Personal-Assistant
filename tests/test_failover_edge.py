@@ -8,7 +8,7 @@ from assistant.failover import API_VERSION
 from assistant.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZED,
                                      EdgeMiddleware, connect_src)
 from assistant.failover.peers import parse_backends
-from assistant.failover.tokens import TokenAuthority, bearer_of
+from assistant.failover.tokens import LEEWAY, TokenAuthority, bearer_of
 from tests.asgi_harness import request, websocket
 
 SECRET = "s" * 43
@@ -54,6 +54,7 @@ def setup():
 
     limiter = LoginLimiter(per_ip=5, global_max=50, window=900, lockout=900, clock=clock)
     app = EdgeMiddleware(inner, authority=authority, role="pi", app_origins=[APP],
+                         root_bearer_sid="script",
                          backends=parse_backends([{"role": "pi", "url": PI},
                                                   {"role": "cloud", "url": APP}]),
                          limiter=limiter, ws_auth_timeout=0.3)
@@ -75,6 +76,8 @@ def test_tokens_roundtrip_expiry_and_scope():
     assert a.verify(token, scope="sync") is None
     assert SECRET not in token
     clock.t += 61
+    assert a.verify(token) is not None  # within the clock leeway
+    clock.t += LEEWAY
     assert a.verify(token) is None
 
 
@@ -208,7 +211,7 @@ def test_expired_token_is_401(setup):
     app, authority, _, clock = setup
     token, _ = authority.mint("app", ttl=10)
     assert request(app, "GET", "https://pi/api/state", auth(token)).status == 200
-    clock.t += 11
+    clock.t += 11 + LEEWAY
     assert request(app, "GET", "https://pi/api/state", auth(token)).status == 401
 
 
@@ -282,7 +285,7 @@ def test_refresh_stops_at_the_session_limit(setup):
         assert claims.signed_in == signed_in
         assert claims.expires <= signed_in + MAX_SESSION
     assert r.status == 401
-    clock.t = signed_in + MAX_SESSION + 1
+    clock.t = signed_in + MAX_SESSION + LEEWAY + 1
     assert authority.verify(token) is None
 
 
@@ -300,8 +303,12 @@ def test_wrong_web_token_locks_out_that_address_but_never_the_right_token(setup)
     # that address now gets 429 for wrong tokens...
     assert request(app, "POST", "https://pi/api/auth/token", scoped("1.1.1.1"),
                    {"token": "x" * 43}).status == 429
+    # a guessed WEB_TOKEN as bearer is refused too; derived-token garbage is
+    # just 401 (unguessable, so not counted)
     assert request(app, "GET", "https://pi/api/state",
-                   {**auth("hc1.nope"), **scoped("1.1.1.1")}).status == 429
+                   {**auth("y" * 43), **scoped("1.1.1.1")}).status == 429
+    assert request(app, "GET", "https://pi/api/state",
+                   {**auth("hc1.nope"), **scoped("1.1.1.1")}).status == 401
     # ...but the right WEB_TOKEN and a valid bearer token still work, even from it
     assert request(app, "POST", "https://pi/api/auth/token", scoped("1.1.1.1"),
                    {"token": SECRET}).status == 200
@@ -310,6 +317,22 @@ def test_wrong_web_token_locks_out_that_address_but_never_the_right_token(setup)
     # and other addresses are not affected
     assert request(app, "POST", "https://pi/api/auth/token", scoped("2.2.2.2"),
                    {"token": "x" * 43}).status == 401
+
+
+def test_expired_or_bad_derived_tokens_never_lock_out_the_owner(setup):
+    """An old phone retrying with an expired token, a Pi with a stale clock
+    sending sync tokens, a WebSocket with a bad token: none of it counts."""
+    app, authority, _, clock = setup
+    old, _ = authority.mint("app", ttl=1)
+    clock.t += 10_000
+    for _ in range(30):
+        assert request(app, "GET", "https://pi/api/state", {"origin": APP, **auth(old)}).status == 401
+        assert request(app, "POST", "https://pi/api/auth/refresh", auth(old)).status == 401
+        assert request(app, "GET", "https://pi/api/sync/events", auth("hc1.sync.pc.1.1.x")).status == 401
+    for _ in range(6):
+        websocket(app, "/api/ws", [json.dumps({"type": "auth", "token": old})], {"origin": APP})
+    assert request(app, "POST", "https://pi/api/auth/token", body={"token": SECRET}).status == 200
+    assert request(app, "POST", "https://pi/api/auth/token", body={"token": "x" * 43}).status == 401
 
 
 def test_missing_token_does_not_count_toward_lockout(setup):
@@ -390,6 +413,15 @@ def test_ws_foreign_origin_refused_at_handshake(setup):
                      {"origin": EVIL})
     assert sent and sent[0]["type"] == "websocket.close"  # before accept: HTTP 403
     assert not any(m["type"] == "websocket.accept" for m in sent)
+
+
+def test_forwarded_host_counts_only_from_a_trusted_proxy(setup):
+    app, _, token, _ = setup
+    hdrs = {"origin": "https://attacker.example", "x-forwarded-host": "attacker.example",
+            **auth(token)}
+    assert request(app, "GET", "https://pi.tail1234.ts.net/api/state", hdrs).status == 403
+    app.trusts_proxy = lambda scope: True  # e.g. Render's proxy, set via trusted_proxy
+    assert request(app, "GET", "https://pi.tail1234.ts.net/api/state", hdrs).status == 200
 
 
 def test_connect_src_lists_backends():
