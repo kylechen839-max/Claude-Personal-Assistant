@@ -258,12 +258,13 @@ def client_ip(conn, trusted_proxy=0) -> str:
 
 # --- request origin -----------------------------------------------------------
 
-def is_cross_origin(headers, allowed_origins=()) -> bool:
+def is_cross_origin(headers, allowed_origins=(), trust_forwarded: bool = True) -> bool:
     """True for a browser request made by another site.
 
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
-    the Host (or X-Forwarded-Host, as set by a proxy). Requests with neither
-    header (curl, tests) pass; they still need the session cookie."""
+    the Host (or X-Forwarded-Host, as set by a proxy, if `trust_forwarded`).
+    Requests with neither header (curl, tests) pass; they still need the
+    session cookie."""
     site = headers.get("sec-fetch-site")
     if site in ("cross-site", "same-site"):
         return True
@@ -275,9 +276,10 @@ def is_cross_origin(headers, allowed_origins=()) -> bool:
     if origin in allowed_origins:
         return False
     host = urlsplit(origin).netloc.lower()
-    own = {h.strip().lower() for h in (headers.get("host", ""),
-                                       headers.get("x-forwarded-host", ""))
-           if h.strip()}
+    hosts = [headers.get("host", "")]
+    if trust_forwarded:
+        hosts.append(headers.get("x-forwarded-host", ""))
+    own = {h.strip().lower() for h in hosts if h.strip()}
     return host not in own
 
 
@@ -413,6 +415,12 @@ class Session:
         self.busy = threading.Lock()
         self.pending: PendingConfirm | None = None
         self.thread: threading.Thread | None = None
+        # While chat_stream(on_event=...) runs, that caller gets this turn's
+        # tool/confirm/status events instead of the shared queue.
+        self.listener: Callable[[dict], None] | None = None
+
+    def emit(self, event: dict) -> None:
+        (self.listener or self.events.put)(event)
 
 
 class SessionTools(ToolRegistry):
@@ -478,7 +486,7 @@ class WebAssistant:
         holder: dict = {}
         registry = SessionTools(self.tools,
                                 confirm=lambda q: self._confirm(holder["s"], q),
-                                emit=lambda e: holder["s"].events.put(e))
+                                emit=lambda e: holder["s"].emit(e))
         s = Session(sid, self.chat_factory(registry), registry, self.clock())
         holder["s"] = s
         return s
@@ -589,13 +597,13 @@ class WebAssistant:
         """Called in the turn's thread: ask the page and wait for the answer."""
         pending = PendingConfirm(question)
         s.pending = pending
-        s.events.put({"type": "confirm", "question": question,
+        s.emit({"type": "confirm", "question": question,
                       "audio": f"/api/audio/{self.remember(question)}"})
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
             log.info("No answer to %r; treating it as no", question)
-            s.events.put({"type": "status", "text": "No answer, so I didn't do it."})
+            s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
     def answer(self, s: Session, yes: bool) -> bool:
@@ -624,16 +632,19 @@ class WebAssistant:
                 return
 
     def chat_stream(self, s: Session, text: str,
-                    cancel: threading.Event | None = None):
+                    cancel: threading.Event | None = None, on_event=None):
         """Ask Claude in this session's conversation and yield the reply's
         text deltas as they arrive. Setting `cancel` stops it (barge-in);
         what was said so far stays in the conversation. Tool calls and
         confirmations work as in a normal turn (a confirmation is answered
-        with `answer()`). Raises RuntimeError if a turn is already running."""
+        with `answer()`). With `on_event`, this turn's tool, confirm and status
+        events go to it rather than to the session's queue (which a page may
+        be reading). Raises RuntimeError if a turn is already running."""
         from assistant.cli import get_reply
 
         if not s.busy.acquire(timeout=2):
             raise RuntimeError("a turn is already running in this session")
+        s.listener = on_event
         deltas: queue.Queue = queue.Queue()
         end = object()
 
@@ -649,6 +660,7 @@ class WebAssistant:
                     deltas.put(reply)
             finally:
                 s.last_active = self.clock()
+                s.listener = None
                 s.busy.release()
                 deltas.put(end)
 
@@ -768,7 +780,8 @@ class WebAuth:
         return self.assistant.session(sid) if sid else None
 
     def cross_origin(self, conn) -> bool:
-        return is_cross_origin(conn.headers, self.allowed_origins)
+        return is_cross_origin(conn.headers, self.allowed_origins,
+                               trust_forwarded=self.trusted_proxy.trusts(conn))
 
     def client_ip(self, conn) -> str:
         return client_ip(conn, self.trusted_proxy)

@@ -253,8 +253,10 @@ speech); what you say next is the new question, and Claude remembers only
 the part of its answer you actually heard. The conversation keeps going
 turn after turn until you tap **End**, say "goodbye", or stay quiet for
 `idle_timeout` (2 minutes); then it is summarized to memory like the voice
-loop. Deletes still ask out loud; your next "yes" or "no" answers the
-question and is never sent to Claude as a new request.
+loop. Deletes still ask out loud. Let the question finish, then say
+"yes" (or "yeah, delete it", "go ahead"); anything else, or talking over the
+question, means no ("OK, I won't delete it"). The answer is never sent to
+Claude as a new request.
 
 - Buttons: **End**, **Mute** (stops listening; the reply still plays),
   **CC** (captions of what it heard and what it is saying, remembered on
