@@ -117,12 +117,35 @@ def check_whisper_model(config: dict, download_model=None) -> Check:
     return Check("Whisper model", True, f"{name} cached at {path}")
 
 
-def check_tts(config: dict, which=shutil.which) -> Check:
+def check_tts(config: dict, which=shutil.which, environ=os.environ) -> Check:
+    from assistant import tts_kokoro
+    from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
+
     tts = config["tts"]
     engine = tts["engine"]
+    kokoro_hint = "python -m assistant --download-voice kokoro"
+    if engine == "elevenlabs":
+        if environ.get("ELEVENLABS_API_KEY"):  # never the value
+            return Check("TTS (elevenlabs)", True,
+                         "ELEVENLABS_API_KEY set; the local voice is the fallback")
+        return Check("TTS (elevenlabs)", False, "ELEVENLABS_API_KEY not set in "
+                     ".env; using the local voice instead", required=False)
+    if engine in ("auto", "kokoro"):
+        problem = tts_kokoro.kokoro_problem(tts.get("kokoro_model"),
+                                            tts.get("kokoro_voices"))
+        if problem is None:
+            return Check(f"TTS ({engine})", True,
+                         f"Kokoro, voice {tts.get('kokoro_voice') or 'af_heart'}")
+        if engine == "kokoro":
+            return Check("TTS (kokoro)", False, f"{problem}; using Piper or "
+                         f"pyttsx3 instead. Get it with: {kokoro_hint}",
+                         required=False)
+        engine = "piper" if tts.get("piper_voice") else "pyttsx3"
+        if engine == "piper" and piper_voice_problem(tts["piper_voice"]) is None:
+            return Check("TTS (auto)", True, f"Piper voice {tts['piper_voice']}; "
+                         f"for a more natural voice: {kokoro_hint}")
+        engine = "pyttsx3"
     if engine == "piper":
-        from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
-
         # piper_model is the old name of piper_voice
         voice = tts.get("piper_voice") or tts.get("piper_model")
         problem = piper_voice_problem(voice)

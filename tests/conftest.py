@@ -89,6 +89,23 @@ def piper_voice():
         pytest.skip(f"Piper voice {DEFAULT_PIPER_VOICE} unavailable: {type(e).__name__}")
 
 
+@pytest.fixture(scope="session")
+def kokoro_files():
+    """The real Kokoro int8 model and voices in models/kokoro/, downloaded
+    (checksum-verified) once; CI caches them. Skips when they can't be had."""
+    from assistant import tts_kokoro
+
+    try:
+        import kokoro_onnx  # noqa: F401
+    except ImportError:
+        pytest.skip("kokoro-onnx not installed")
+    dest = Path(__file__).resolve().parent.parent / tts_kokoro.DEFAULT_DIR
+    try:
+        return tts_kokoro.download(dest, output_fn=lambda m: None)
+    except Exception as e:
+        pytest.skip(f"Kokoro model unavailable: {type(e).__name__}")
+
+
 @pytest.fixture
 def restore_root_logging():
     """For tests that call setup_logging() (e.g. through cli.main): put the

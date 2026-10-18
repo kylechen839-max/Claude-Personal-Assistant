@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import re
+import threading
 import time
 
 import anthropic
@@ -15,7 +16,7 @@ from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
 from assistant.tools import ToolRegistry
-from assistant.tts import make_tts
+from assistant.tts import ENGINES, make_tts
 
 EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
@@ -26,6 +27,30 @@ log = logging.getLogger(__name__)
 
 def is_exit(text: str) -> bool:
     return text.lower().strip(" .!?,") in EXIT_WORDS
+
+
+def download_voice_command(name: str, output_fn=print) -> int:
+    """--download-voice: Kokoro (checksummed) or a Piper voice. Setup only:
+    voices are never downloaded while answering."""
+    from assistant import tts, tts_kokoro
+
+    try:
+        if name.lower().startswith("kokoro"):
+            variant = name.lower().partition("-")[2] or "int8"
+            model, voices = tts_kokoro.download(variant=variant, output_fn=output_fn)
+            output_fn(f"Saved {model} and {voices} (checksums ok). With "
+                      '[tts] engine = "auto" (the default) Kokoro is used now.')
+            if variant != "int8":
+                output_fn(f'Set [tts] kokoro_model = "{model.as_posix()}" to use it.')
+        else:
+            model = tts.download_voice(name)
+            output_fn(f"Saved {model}. To use it, set in config.toml:\n"
+                      f'[tts]\nengine = "piper"\npiper_voice = "{model.as_posix()}"')
+    except Exception as e:
+        log.exception("Voice download failed")
+        output_fn(f"Download failed: {e}")
+        return 1
+    return 0
 
 
 def is_yes(text: str) -> bool:
@@ -47,8 +72,13 @@ def parse_args(argv=None):
     parser.add_argument("--audio-file",
                         help="wake mode: feed this .wav through the wake-word "
                              "pipeline instead of the live mic, then exit")
-    parser.add_argument("--tts", choices=["pyttsx3", "piper", "print"],
+    parser.add_argument("--tts", choices=list(ENGINES),
                         help="override the TTS engine from config.toml")
+    parser.add_argument("--download-voice", metavar="VOICE",
+                        help='download a voice at setup time and exit: "kokoro" '
+                             '(int8 model and voices, checksum-verified, into '
+                             'models/kokoro/), "kokoro-fp16", or a Piper voice '
+                             'such as en_US-lessac-medium (into voices/)')
     parser.add_argument("--config", default="config.toml",
                         help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
@@ -440,6 +470,8 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     config = load_config(args.config)
     log_file = setup_logging(config)
+    if args.download_voice:
+        return download_voice_command(args.download_voice)
     if args.check:
         from assistant import doctor
 
@@ -468,6 +500,9 @@ def main(argv=None) -> int:
             run_text(chat, tts=tts)
             return 0
         tts = make_tts(tts_name, **tts_cfg)
+        if callable(getattr(tts, "warm_up", None)):  # load the voice model now
+            threading.Thread(target=tts.warm_up, name="tts-warm-up",
+                             daemon=True).start()
         transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
                                   stt_cfg["compute_type"])
         if args.mode == "voice":

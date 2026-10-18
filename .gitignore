@@ -13,8 +13,11 @@ __pycache__/
 
 # Downloaded Piper voices (python -m assistant.tts --download-voice ...)
 voices/
+# Kokoro model (python -m assistant --download-voice kokoro)
+models/
 
 # Runtime output
 logs/
 *.wav
 !tests/fixtures/*.wav
+!assistant/web/earcons/*.wav
