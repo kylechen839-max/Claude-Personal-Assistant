@@ -14,7 +14,10 @@
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/voice.css">
 <script src="/app.js" defer></script>
+<script src="/voice-core.js" defer></script>
+<script src="/voice.js" defer></script>
 </head>
 <body>
 <main id="login" class="login" hidden>
@@ -63,7 +66,27 @@
       <img src="/icon.svg" alt="">
     </button>
     <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
+    <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
   </footer>
 </main>
+
+<section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
+  <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>
+  <div class="voice-orb-wrap">
+    <button id="voice-orb" class="voice-orb" type="button" aria-label="Voice orb (tap to resume when paused)"></button>
+  </div>
+  <button id="voice-resume" class="voice-resume" type="button" hidden>Tap to continue</button>
+  <div id="voice-captions" class="voice-captions" aria-live="polite">
+    <p id="voice-user" class="voice-user"></p>
+    <p id="voice-reply" class="voice-reply"></p>
+  </div>
+  <pre id="voice-debug" class="voice-debug" hidden></pre>
+  <div class="voice-controls">
+    <button id="voice-mute" type="button" aria-pressed="false">Mute</button>
+    <button id="voice-end" class="voice-end" type="button">End</button>
+    <button id="voice-cc" type="button" aria-pressed="true" aria-label="Captions">CC</button>
+    <button id="voice-timings" type="button" aria-pressed="false" aria-label="Latency timings">&#9201;</button>
+  </div>
+</section>
 </body>
 </html>

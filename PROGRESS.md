@@ -3,8 +3,9 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 249 passed, 8 skipped (Linux build sandbox,
-Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
+**Current test count:** 307 passed, 9 skipped (Linux build sandbox,
+Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
+CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
 model and Piper voice downloads (Hugging Face is blocked; CI downloads both
@@ -28,6 +29,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webapp.py` | 60 | phone web app (`--mode web`) |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
+| `test_sentences.py` | 17 | voice mode: sentence splitter |
+| `test_voice.py` | 22 | voice mode: turn pipeline, barge-in |
+| `test_voice_ws.py` | 20 | voice mode: WebSocket, limits, files |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -208,6 +212,125 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
 
+## Voice conversation mode (phone web app) ✅
+Hands-free, turn-by-turn conversation in the phone page, like voice mode in
+the Claude apps. Tap "Voice conversation" once; End, "goodbye" or 2 minutes
+of quiet ends it.
+- Files: `assistant/voice_ws.py` (WebSocket route, limits, static files),
+  `assistant/voice_session.py` (turn pipeline), `assistant/sentences.py`,
+  `ClaudeChat.ask_stream / abort / mark_interrupted` in `chat.py`;
+  `assistant/web/voice.js` (mic, playback, socket, UI),
+  `voice-core.js` (DOM-free: endpointer, energy VAD, turn state machine,
+  framing), `voice-worklet.js` (16 kHz capture), `voice.css`, and the
+  vendored `web/vad/` (onnxruntime-web 1.22.0 + Silero v5, see its NOTICE).
+  Edits to the phone-web files are additive: CSP `'wasm-unsafe-eval'`, a
+  `voice=` argument and one `add_voice_routes()` call in `create_app`, and
+  the button + view in `index.html`.
+
+Design decisions:
+- **Capture**: `getUserMedia` with echo cancellation, noise suppression and
+  auto gain; one AudioContext for mic and playback, created and resumed
+  inside the tap (iOS unlock), `navigator.audioSession = "play-and-record"`
+  where supported. An AudioWorklet downsamples to 16 kHz 512-sample frames.
+- **VAD**: Silero v5 in onnxruntime-web (single-threaded WASM, no
+  cross-origin isolation needed), a ~20-line wrapper following
+  @ricky0123/vad-web's (so its whole bundle isn't needed); everything served
+  from `/static/vad/`, wasm/onnx gzipped on the fly and cached a week. If it
+  fails to load, an adaptive energy VAD (noise floor x3) feeds the same
+  endpointer. The endpointer: speech above `vad_threshold`, end of turn after
+  `silence_ms` (700) below threshold-0.15, `min_utterance_ms` (300) or it's
+  a misfire, `max_utterance_s` (30) cut, 320 ms of pre-roll kept. While a
+  reply plays the threshold is raised by 0.25 so the speaker's echo doesn't
+  count.
+- **Transport: one WebSocket** rather than SSE + chunk fetches: both sides
+  talk at any time (utterances and barge-ins up; transcript, text deltas
+  and audio down), chunks go out the moment they're rendered with no
+  per-chunk round trip (a phone on mobile data pays ~100+ ms per request),
+  and a closed socket is an unambiguous cancel. Binary frames carry a small
+  JSON header + payload (16 kHz PCM16 up, one WAV per sentence down).
+- **Pipeline**: Whisper (shared, locked) -> `messages.stream` -> sentence
+  splitter (waits one character past a period, so "3:30 p.m. tomorrow",
+  "Dr. Lee", "e.g.", "U.S.", "$3.50" stay whole, and "at 3 PM. Then"
+  splits; long runs are cut at a comma) -> a per-turn TTS thread (through
+  the web app's single TTS thread: Piper in memory, eSpeak directly on Linux
+  for the pyttsx3 engine, SAPI to a file on Windows) -> WAV chunks. The page
+  schedules chunks back to back in Web Audio. Text before a tool call ("Let
+  me check.") is spoken while the tool runs.
+- **Barge-in**: ~250 ms of confident speech while thinking or speaking stops
+  playback immediately and sends `interrupt` with how much was heard (whole
+  chunks + fraction of the current one). The server sets the turn's stop
+  event and closes the Claude stream (`abort()`), skips remaining TTS, and
+  rewrites the turn's assistant text to just the heard part plus
+  "[interrupted: Kyle started talking, so the rest of this reply was not
+  said]"; tool calls/results and web-result blocks are kept, so the
+  web-content confirmation rule still applies. Late chunks of a cancelled
+  turn are dropped on the page by turn id.
+- **Confirmations**: the tools' confirm callback speaks the question and
+  waits; the next utterance is transcribed and answers it (strict `is_yes`)
+  and is never sent to Claude. Talking over the question doesn't cancel the
+  turn. No answer within `confirm_timeout` (60 s) is "no".
+- **Conversation**: one ClaudeChat per voice connection (tools and memory
+  as in the web app); End, "goodbye", idle (2 min) or the 30 min cap ends
+  it and stores the Pinecone summary; so does closing the socket.
+- **iOS**: start from the tap, Wake Lock (rejections ignored, re-requested
+  when visible), pause on `visibilitychange`, AudioContext "interrupted"
+  (calls, Siri) and mic track mute; "Tap to continue" resumes.
+- **UI**: one orb (CSS radial gradient scaled by the live mic or output
+  level), state label, captions (toggle remembered), Mute, End, latency
+  panel. `prefers-reduced-motion` turns the scaling/pulse off; colors follow
+  the light/dark preference.
+- **Timings**: server `TurnTimer` stages from "utterance received"
+  (transcript, first words, first sentence, first audio sent, whole reply;
+  `TurnTimer` now takes custom stages and orders steps by time), logged
+  always and printed with `--timings` in web mode; the page's panel adds
+  its own clock (end of turn -> transcript -> first words -> first audio
+  playing, and "after you stopped talking" = + `silence_ms`) and reports it
+  back to the log.
+
+Tested:
+- `tests/test_sentences.py` (17): abbreviations, initials, decimals, times
+  ("3:30 PM.", "p.m. tomorrow"), quotes, streaming token by token.
+- `tests/test_voice.py` (22): `ask_stream` (deltas, tool rounds, rollback,
+  stop mid-stream), `mark_interrupted` keeping web blocks; the chunker sends
+  the first sentence's audio while the mocked Claude stream is still held
+  open; barge-in mid-reply aborts the stream, skips unsynthesized sentences
+  and truncates history to "First sentence here. Second one..."; barge-in
+  after the reply finished; interrupt before any audio; spoken confirmation
+  yes / no / unrelated answer (never sent to Claude), timeout; goodbye and
+  memory; idle/max-length; End during a turn; API error spoken; real eSpeak
+  render.
+- `tests/test_voice_ws.py` (20): no/forged cookie and missing/foreign/`null`/
+  look-alike Origin rejected (1008); a whole streamed turn over the socket;
+  barge-in over the socket and the next request's history; closing the
+  socket aborts generation and saves the summary; oversize/wrong-rate/junk
+  frames (1009/1003), long text and message floods, utterance rate limit
+  (1008), max session length; vendored files served byte-exact (SHA-256 in
+  NOTICE) and gzipped; CSP; first-audio latency (fake Whisper/Claude, real
+  eSpeak) and, in CI, with real Whisper; the JS tests via node.
+- `tests/js/voice-core.test.js` (12, node:test, no packages): listening ->
+  thinking -> speaking -> listening; barge-in (stop, position report, late
+  chunks dropped, next turn); talking while it thinks; confirmation turn and
+  cutting the question short; mute/pause/resume/end; endpointer silence,
+  misfire, max length, strict mode; energy VAD in steady noise; framing.
+  pytest runs them when `node` is on PATH (GitHub's Ubuntu and Windows
+  runners have it), so CI needs no extra step.
+- Browser smoke test (headless Chromium with a fake mic playing an eSpeak
+  question, real page/CSP/WebSocket/Silero, fake Whisper and Claude, real
+  eSpeak): states went listening -> thinking -> speaking -> listening for
+  each turn; Silero loaded; with a mic clip that talks again over the reply,
+  playback stopped and the next request's history held only the heard part
+  ("Tomorrow you have the dentist at 3:30... [interrupted: ...]"); the
+  energy fallback worked too; End closed the view.
+- **Measured first-audio latency** (mocked Claude streaming at ~50 ms per
+  delta): server, utterance received -> first audio sent 0.13 s; page, end
+  of turn (VAD) -> first audio playing 0.17-0.20 s, i.e. ~0.9 s after the
+  speech actually stopped (700 ms of that is the end-of-turn silence). The
+  pytest WebSocket round trip with real eSpeak: 37 ms. On the real thing add
+  Whisper (base.en on CPU, measured in CI by
+  `test_first_audio_latency_with_real_whisper`) and Claude's time to first
+  token (typically 0.5-1 s), which keeps it under ~2 s on a decent
+  connection.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -226,3 +349,13 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.
+- **Voice mode on a real phone is untested** (no iPhone in the sandbox):
+  iOS audio routing with the mic open (speaker vs. earpiece), echo
+  cancellation of the reply on the loudspeaker, and the interruption
+  handling are in MANUAL_TEST.md. Chrome on desktop only cancels echo of
+  WebRTC audio on some platforms, so there use earphones or a higher
+  `[voice] vad_threshold`.
+- Whisper sometimes "hears" a short phrase in noise; such a turn just gets a
+  short answer. `min_utterance_ms` filters the shortest blips.
+- Voice replies are sent as WAV (~44 KB per second of Piper speech); fine
+  on Tailscale or LTE, could be Opus later.
