@@ -55,7 +55,8 @@ MIN_TOKEN_LENGTH = 32
 # Tools that act on the PC itself make no sense from the phone.
 PC_ONLY_TOOLS = {"open_in_browser"}
 
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+# 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
@@ -555,7 +556,8 @@ def render_wav(tts, text: str, attempts: int = 3) -> bytes:
 
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000,
-               limiter: LoginLimiter | None = None, reap_interval: float = 30):
+               limiter: LoginLimiter | None = None, reap_interval: float = 30,
+               voice: dict | None = None):
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -797,6 +799,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
 
+    from assistant.voice_ws import add_voice_routes
+
+    app.state.voice_conversations = add_voice_routes(
+        app, assistant, token, allowed_origins=allowed, voice=voice)
     return app
 
 
@@ -852,10 +858,12 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                   "the default 127.0.0.1 behind `tailscale serve` (README).")
     assistant = build_assistant(config, tts_name, output_fn)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
-                     max_upload_bytes=int(web["max_upload_mb"] * 1_000_000))
+                     max_upload_bytes=int(web["max_upload_mb"] * 1_000_000),
+                     voice=config.get("voice"))
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop). On your phone, "
               f"use `tailscale serve --https=443 http://127.0.0.1:{port}`.")
     log.info("Web app listening on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port, log_config=None,
-                proxy_headers=False, server_header=False)
+                proxy_headers=False, server_header=False,
+                ws_max_size=2_000_000)  # a 30 s voice utterance is ~1 MB
     return 0

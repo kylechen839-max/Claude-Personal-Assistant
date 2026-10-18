@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +56,8 @@ class ClaudeChat:
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.history: list[dict] = []
+        self._turn_start: dict | None = None  # user message of the last turn
+        self._active_stream = None  # the response being streamed, if any
 
     @property
     def client(self):
@@ -93,6 +97,69 @@ class ClaudeChat:
             raise
         self._trim_history()
         return reply
+
+    def ask_stream(self, user_text: str, on_text: Callable[[str], None],
+                   on_tool: Callable[[str], None] | None = None,
+                   on_round_end: Callable[[], None] | None = None,
+                   stop: threading.Event | None = None) -> tuple[str, bool]:
+        """Like ask(), but streamed (voice conversation mode).
+
+        `on_text(delta)` gets each piece of reply text as it arrives,
+        `on_round_end()` runs when a round of text ends before tool calls,
+        `on_tool(name)` before each tool runs. Setting `stop` aborts: the
+        response stream is closed (see abort()), and history keeps the
+        partial reply so it stays valid. Returns (all reply text,
+        interrupted)."""
+        notes = self.recall(user_text)
+        start = len(self.history)
+        message = {"role": "user", "content": user_text}
+        self.history.append(message)
+        self._turn_start = message
+        try:
+            result = self._run_stream(notes, on_text, on_tool, on_round_end, stop)
+        except Exception:
+            del self.history[start:]
+            self._turn_start = None
+            raise
+        self._trim_history()
+        return result
+
+    def abort(self) -> None:
+        """Close the response being streamed (call from another thread, after
+        setting the `stop` event given to ask_stream)."""
+        stream = self._active_stream
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:  # already closed
+                pass
+
+    def mark_interrupted(self, spoken: str) -> bool:
+        """After a barge-in: keep only the part of the last turn's reply that
+        was actually said aloud, marked as interrupted. Tool calls, tool
+        results and web results of the turn stay as they were. False if the
+        turn is no longer in history."""
+        start = next((i for i, m in enumerate(self.history)
+                      if m is self._turn_start), None)
+        if start is None:
+            return False
+        replies = [m for m in self.history[start + 1:] if m["role"] == "assistant"]
+        if not replies:
+            return False
+        for m in replies:
+            content = m["content"]
+            if isinstance(content, str):
+                content = []
+            m["content"] = [b for b in content if b.get("type") != "text"]
+        spoken = spoken.strip()
+        note = (f"{spoken} [interrupted: Kyle started talking, so the rest of "
+                "this reply was not said]" if spoken else
+                "[interrupted: Kyle started talking before I said anything]")
+        replies[-1]["content"].append({"type": "text", "text": note})
+        for m in replies[:-1]:
+            if not m["content"]:  # never happens with tool rounds; keep it valid
+                m["content"] = [{"type": "text", "text": "(...)"}]
+        return True
 
     def recall(self, user_text: str) -> list[str]:
         if not self.memory:
@@ -168,6 +235,84 @@ class ClaudeChat:
                                 "content": content, "is_error": is_error})
             self.history.append({"role": "user", "content": results})
         return "Sorry, that took too many steps. Could you ask a simpler way?"
+
+    def _run_stream(self, notes, on_text, on_tool, on_round_end, stop):
+        system = self.build_system(notes)
+        said: list[str] = []
+
+        def stopped() -> bool:
+            return stop is not None and stop.is_set()
+
+        def interrupted(partial: str):
+            self.history.append({"role": "assistant", "content": [
+                {"type": "text", "text": partial.strip() or "(interrupted)"}]})
+            return "".join(said), True
+
+        for _ in range(self.max_tool_rounds + 1):
+            if stopped():
+                return interrupted("")
+            kwargs = dict(model=self.model, max_tokens=self.max_tokens,
+                          system=system, messages=self.history)
+            if self.tools:
+                kwargs["tools"] = self.tools.schemas()
+            parts: list[str] = []
+            response = None
+            with self.client.messages.stream(**kwargs) as stream:
+                self._active_stream = stream
+                try:
+                    for event in stream:
+                        if stopped():
+                            break
+                        if (event.type == "content_block_delta"
+                                and getattr(event.delta, "type", "") == "text_delta"):
+                            parts.append(event.delta.text)
+                            said.append(event.delta.text)
+                            on_text(event.delta.text)
+                    if not stopped():
+                        response = stream.get_final_message()
+                except Exception:
+                    if not stopped():  # a real error, not our abort()
+                        raise
+                finally:
+                    self._active_stream = None
+            if response is None:
+                return interrupted("".join(parts))
+            if response.stop_reason == "pause_turn":
+                self.history.append({"role": "assistant", "content":
+                                     [_block_dict(b) for b in response.content]})
+                continue
+            calls = [b for b in response.content if b.type == "tool_use"]
+            done = response.stop_reason != "tool_use" or not calls or not self.tools
+            blocks = [_block_dict(b) for b in response.content
+                      if not (b.type == "text" and not b.text.strip())
+                      and not (done and b.type == "tool_use")]
+            self.history.append({"role": "assistant", "content": blocks or
+                                 [{"type": "text", "text": "(no reply)"}]})
+            if done:
+                text = "".join(said).strip()
+                if response.stop_reason == "refusal" and not text:
+                    text = "Sorry, I can't help with that one."
+                    on_text(text)
+                return text, False
+            if on_round_end:
+                on_round_end()
+            results = []
+            untrusted = has_web_content(self.history)
+            for call in calls:
+                log.info("Claude called %s %s%s", call.name, call.input,
+                         " (web content in context)" if untrusted else "")
+                if on_tool:
+                    on_tool(call.name)
+                content, is_error = self.tools.dispatch(call.name, dict(call.input),
+                                                        untrusted=untrusted)
+                results.append({"type": "tool_result", "tool_use_id": call.id,
+                                "content": content, "is_error": is_error})
+            self.history.append({"role": "user", "content": results})
+        text = "Sorry, that took too many steps. Could you ask a simpler way?"
+        on_text(text)
+        self.history.append({"role": "assistant",
+                             "content": [{"type": "text", "text": text}]})
+        return text, False
 
     def _trim_history(self) -> None:
         if len(self.history) <= self.max_history:

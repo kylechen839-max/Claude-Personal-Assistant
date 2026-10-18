@@ -74,26 +74,32 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print) -> str:
     """Ask Claude; on failure return a short sentence that can be spoken."""
     try:
         return chat.ask(user_text)
-    except anthropic.APIConnectionError as e:  # includes timeouts
+    except Exception as e:
+        return friendly_error(e, user_text, output_fn)
+
+
+def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
+    """Log a failed request and return a short sentence to speak instead."""
+    if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
         return "Sorry, I can't reach the internet right now."
-    except anthropic.AuthenticationError as e:
+    if isinstance(e, anthropic.AuthenticationError):
         log.error("Authentication error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, my Anthropic API key isn't working. Please check it."
-    except anthropic.RateLimitError as e:
+    if isinstance(e, anthropic.RateLimitError):
         log.warning("Rate limited: %s", e)
         output_fn(f"API error: {e}")
         return "I'm getting too many requests right now. Try again in a minute."
-    except anthropic.APIError as e:
+    if isinstance(e, anthropic.APIError):
         log.error("API error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
-    except Exception as e:  # anything else: keep the session alive
-        log.exception("Unexpected error answering %r", user_text)
-        output_fn(f"Error: {e}")
-        return "Sorry, something went wrong."
+    # anything else: keep the session alive
+    log.error("Unexpected error answering %r", user_text, exc_info=e)
+    output_fn(f"Error: {e}")
+    return "Sorry, something went wrong."
 
 
 def run_text(chat: ClaudeChat, input_fn=None, output_fn=print,

@@ -22,12 +22,17 @@ LABELS = dict(STAGES)
 
 class TurnTimer:
     """Timestamps for one turn, measured from `start` (the wake word, or the
-    moment a follow-up window opened). Only the first mark of a stage counts."""
+    moment a follow-up window opened). Only the first mark of a stage counts.
+    `stages` replaces the (key, label) pipeline, e.g. for voice conversation
+    mode, which streams and so has more steps."""
 
     def __init__(self, clock: Callable[[], float] = time.monotonic,
-                 start: str = "wake", at: float | None = None):
+                 start: str = "wake", at: float | None = None,
+                 stages: tuple[tuple[str, str], ...] = STAGES):
         self.clock = clock
         self.start = start
+        self.stages = stages
+        self.labels = dict(stages)
         self.t0 = clock() if at is None else at
         self.marks: dict[str, float] = {}
 
@@ -37,13 +42,13 @@ class TurnTimer:
         t = self.clock() if at is None else at
         prev = max(self.marks.values(), default=self.t0)
         self.marks[stage] = t
-        log.info("Timing: %s +%.2f s (%.2f s after %s)", LABELS.get(stage, stage),
-                 t - prev, t - self.t0, self.start)
+        log.info("Timing: %s +%.2f s (%.2f s after %s)",
+                 self.labels.get(stage, stage), t - prev, t - self.t0, self.start)
 
     def steps(self) -> list[tuple[str, float]]:
         """(label, seconds since the previous stage) for the stages reached."""
         out, prev = [], self.t0
-        for key, label in STAGES:
+        for key, label in self.stages:
             if key in self.marks:
                 out.append((label, self.marks[key] - prev))
                 prev = self.marks[key]
@@ -59,3 +64,7 @@ class TurnTimer:
             line += (f" (end of speech to first audio "
                      f"{self.marks['audio'] - self.marks['speech_end']:.2f} s)")
         return line
+
+    def as_dict(self) -> dict[str, float]:
+        """Seconds from the start to each stage reached (for the web page)."""
+        return {k: round(t - self.t0, 3) for k, t in self.marks.items()}
