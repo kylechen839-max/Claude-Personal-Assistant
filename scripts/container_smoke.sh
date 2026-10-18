@@ -54,6 +54,9 @@ docker cp hc:/tmp/clip.wav "$WORK/clip.wav"
 docker restart hc >/dev/null   # measure the server on its own
 for _ in $(seq 1 60); do curl -sf $URL/healthz >/dev/null && break; sleep 1; done
 sleep 20  # let the warm-up load Whisper and the voice
+# /data is a tmpfs here (Render's disk survives restarts): sign in again
+test "$(status -c "$WORK/cookies" -H 'Content-Type: application/json' \
+        -d "{\"token\":\"$TOKEN\"}" $URL/api/login)" = 200
 curl -s -b "$WORK/cookies" -F "audio=@$WORK/clip.wav;type=audio/wav" \
     $URL/api/turn > "$WORK/turn.ndjson"
 cat "$WORK/turn.ndjson"
