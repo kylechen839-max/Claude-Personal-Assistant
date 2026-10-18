@@ -44,6 +44,26 @@ headers, OAuth fields (`access_token`, `refresh_token`, `client_secret`, ...)
 and OAuth sign-in `code=` values, tracebacks included. At the default INFO
 level nothing secret was found being logged.
 
+### Voice conversation WebSocket (`/api/voice`)
+The socket is reachable wherever the web app is (including the public
+hosted setup), so it gets the same protection as the rest of the API plus
+limits of its own. The handshake is refused (close code 1008) without the
+signed session cookie or without an Origin header naming this site
+(`[webapp] allowed_origins` for a rewriting proxy; X-Forwarded-Host counts
+only from a `trusted_proxy`); browsers always send
+Origin on WebSockets, so unlike plain requests a missing one is refused,
+which blocks cross-site WebSocket hijacking. Each utterance is at most
+`[voice] max_utterance_s` of 16 kHz PCM (uvicorn also caps frames at 2 MB),
+text messages at 4 KB; more than `utterances_per_minute` utterances or 60
+control messages per 10 s closes the socket; a conversation ends after
+`max_session_minutes` or `idle_timeout`; one voice conversation per signed-in
+browser. Closing the socket aborts the Claude stream and pending TTS and
+answers a pending confirmation with "no". Tool confirmations work as before:
+only a clear spoken yes proceeds. The VAD runs from files the app serves
+itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
+compilation), still no inline script, eval or third-party hosts. Tests:
+`tests/test_voice_ws.py`.
+
 ## Not fixed, on purpose
 
 - **Calendar invites with hostile titles.** Anyone can send Kyle an invite,
@@ -51,6 +71,10 @@ level nothing secret was found being logged.
   data like web content would make every move ask for confirmation (a move
   always starts by listing), which defeats the point. Titles are short, the
   description field is never sent to Claude, and deletes always ask.
+- **Voice mode and nearby speech.** Hands-free mode listens continuously
+  while it is open, so speech from a TV can become a turn (as with a false
+  wake word below). It only runs while the view is open on screen and ends
+  after 2 minutes of quiet.
 - **Speech from a TV, video, or another person.** A false wake word followed
   by "move my 3 PM to Friday" would run without asking, and a "yes" from the
   same source could answer a confirmation. This needs someone in earshot of

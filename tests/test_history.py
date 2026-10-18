@@ -597,8 +597,9 @@ def test_interrupted_reply_is_marked(store, fake_client):
     chat.mark_interrupted("A very long")
     last = store.get(chat.conversation_id)["messages"][-1]
     assert last["interrupted"] and last["text"] == "A very long"
-    chat.mark_interrupted()  # without the heard text: the flag only
-    assert store.get(chat.conversation_id)["messages"][-1]["text"] == "A very long"
+    assert chat.history[-1]["content"][-1]["text"].startswith("A very long [interrupted")
+    chat.mark_interrupted("")  # cut off before any word was said
+    assert store.get(chat.conversation_id)["messages"][-1]["text"] == "(interrupted)"
 
 
 def test_end_conversation_titles_and_links_memory(store, fake_client):

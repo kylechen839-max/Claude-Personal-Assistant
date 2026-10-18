@@ -639,7 +639,10 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz"]
+          "/silence.wav", "/healthz",
+          # voice conversation page files and the vendored VAD (voice_ws.py)
+          "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
+          "/static/vad/silero_vad_v5.onnx"]
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -652,6 +655,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
+               and r.path != "/static/vad/{name}"
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:

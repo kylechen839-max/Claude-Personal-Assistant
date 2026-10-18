@@ -75,6 +75,18 @@ max_audio_seconds = 60        # longest recording accepted
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
 
+[voice]                       # hands-free voice conversation in the phone web app
+vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)
+silence_ms = 700              # this long a pause ends your turn
+min_utterance_ms = 300        # shorter sounds are ignored
+max_utterance_s = 30
+barge_in_ms = 250             # talk this long over a reply to interrupt it
+vad_threshold = 0.5           # raise (e.g. 0.7) if it hears itself on speaker
+idle_timeout = 120            # seconds of quiet before the conversation ends
+max_session_minutes = 30
+utterances_per_minute = 30
+debug_panel = false           # latency timings on the voice screen
+
 [history]
 # Every conversation (wake word, text, phone) is saved here and can be
 # searched and continued: python -m assistant --history list

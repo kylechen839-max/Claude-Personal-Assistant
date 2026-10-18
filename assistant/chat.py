@@ -25,6 +25,14 @@ TOOLS_PROMPT = (
     "reading everything."
 )
 
+MEMORY_PROMPT = (
+    "You have long-term memory: Kyle's Pinecone database (his project notes "
+    "and summaries of past conversations). Relevant notes are looked up "
+    "automatically before each reply; use search_memory to look something up "
+    "on purpose and remember when he asks you to remember something. If "
+    "asked, say you do have access to his Pinecone memory."
+)
+
 WEB_PROMPT = (
     "You can search the web and read web pages. Use them for anything "
     "current or that you aren't sure of: news, weather, sports, prices, "
@@ -70,6 +78,8 @@ class ClaudeChat:
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.history: list[dict] = []
+        self._turn_start: dict | None = None  # user message of the last turn
+        self._active_stream = None  # the response being streamed, if any
 
     @property
     def client(self):
@@ -97,6 +107,8 @@ class ClaudeChat:
             parts.append(TOOLS_PROMPT)
             if self.tools.has("web_search") or self.tools.has("web_fetch"):
                 parts.append(WEB_PROMPT)
+        if self.memory:
+            parts.append(MEMORY_PROMPT)
         if notes:
             parts.append("Notes from long-term memory that may be relevant "
                          "(use only if they help):\n"
@@ -119,7 +131,9 @@ class ClaudeChat:
             new_thread = not (self.recorder and self.recorder.conversation_id)
             if self.recorder:  # saved before the reply: crash-safe
                 self.recorder.user(user_text)
-            self.history.append({"role": "user", "content": user_text})
+            message = {"role": "user", "content": user_text}
+            self.history.append(message)
+            self._turn_start = message  # for mark_interrupted()
             self._turn_events = []
             self._pending_resume = None
             interrupted = False
@@ -197,11 +211,6 @@ class ClaudeChat:
                          {"role": "assistant", "content": reply}]
         log.info("Resumed conversation %s", conversation_id)
 
-    def mark_interrupted(self, spoken_text: str | None = None) -> None:
-        """The last reply was cut off (barge-in): flag it in history."""
-        if self.recorder:
-            self.recorder.mark_interrupted(spoken_text)
-
     def _confirm_wrapper(self, confirm):
         """Record a spoken/typed confirmation (question and answer)."""
         def wrapped(question: str) -> bool:
@@ -233,6 +242,47 @@ class ClaudeChat:
                 pass
         self._turn_events.append(tool_event(call.name, dict(call.input), status))
         return content, is_error
+
+    def abort(self) -> None:
+        """Close the response being streamed right away (call from another
+        thread after setting the `cancel` event given to ask()), instead of
+        waiting for its next text delta."""
+        stream = self._active_stream
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:  # already closed
+                pass
+
+    def mark_interrupted(self, spoken: str) -> bool:
+        """After a barge-in: keep only the part of the last turn's reply that
+        was actually said aloud, marked as interrupted. Tool calls, tool
+        results and web results of the turn stay as they were. False if the
+        turn is no longer in history. The saved conversation history gets
+        the same: only the spoken part, flagged as interrupted."""
+        if self.recorder:
+            self.recorder.mark_interrupted(spoken)
+        start = next((i for i, m in enumerate(self.history)
+                      if m is self._turn_start), None)
+        if start is None:
+            return False
+        replies = [m for m in self.history[start + 1:] if m["role"] == "assistant"]
+        if not replies:
+            return False
+        for m in replies:
+            content = m["content"]
+            if isinstance(content, str):
+                content = []
+            m["content"] = [b for b in content if b.get("type") != "text"]
+        spoken = spoken.strip()
+        note = (f"{spoken} [interrupted: Kyle started talking, so the rest of "
+                "this reply was not said]" if spoken else
+                "[interrupted: Kyle started talking before I said anything]")
+        replies[-1]["content"].append({"type": "text", "text": note})
+        for m in replies[:-1]:
+            if not m["content"]:  # never happens with tool rounds; keep it valid
+                m["content"] = [{"type": "text", "text": "(...)"}]
+        return True
 
     def recall(self, user_text: str) -> list[str]:
         if not self.memory:
@@ -291,13 +341,23 @@ class ClaudeChat:
             raise _Cancelled("")
         partial = []
         with self.client.messages.stream(**kwargs) as stream:
-            for delta in stream.text_stream:
-                if cancel is not None and cancel.is_set():
-                    raise _Cancelled("".join(partial))
-                partial.append(delta)
-                if on_text:
-                    on_text(delta)
-            return stream.get_final_message()
+            self._active_stream = stream  # so abort() can close it
+            try:
+                for delta in stream.text_stream:
+                    if cancel is not None and cancel.is_set():
+                        raise _Cancelled("".join(partial))
+                    partial.append(delta)
+                    if on_text:
+                        on_text(delta)
+                return stream.get_final_message()
+            except _Cancelled:
+                raise
+            except Exception:
+                if cancel is not None and cancel.is_set():  # closed by abort()
+                    raise _Cancelled("".join(partial)) from None
+                raise
+            finally:
+                self._active_stream = None
 
     def _run(self, notes: list[str] | None = None, on_text=None,
              cancel=None) -> str:

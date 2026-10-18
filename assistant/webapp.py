@@ -67,7 +67,8 @@ MIN_TOKEN_LENGTH = 32
 # Tools that act on the PC itself make no sense from the phone.
 PC_ONLY_TOOLS = {"open_in_browser"}
 
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+# 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
@@ -746,6 +747,11 @@ def _init_com() -> None:
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
+    from assistant.voice_session import fast_wav
+
+    data = fast_wav(tts, text)  # Piper in memory / eSpeak directly
+    if data:
+        return data
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "reply.wav"
         for _ in range(attempts):
@@ -822,7 +828,8 @@ def require_session(conn: HTTPConnection):
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
                max_text_chars: int = 4000, trusted_proxy=0,
-               limiter: LoginLimiter | None = None, reap_interval: float = 30):
+               limiter: LoginLimiter | None = None, reap_interval: float = 30,
+               voice: dict | None = None):
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1118,6 +1125,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return error("not found", 404)
         return Response(data, media_type="audio/wav")
 
+    from assistant.voice_ws import add_voice_routes
+
+    app.state.voice_conversations = add_voice_routes(
+        app, assistant, allowed_origins=web.allowed_origins, voice=voice)
+
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
@@ -1146,7 +1158,8 @@ def set_session_cookie(response, token: str, sid: str) -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import add_history_tools, build_memory, build_tools
+    from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
+                               build_tools)
     from assistant.history import Recorder, open_store
     import anthropic
 
@@ -1158,6 +1171,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
+    add_memory_tools(tools, memory)
     store = open_store(config)  # conversation history (None if off)
     add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1210,7 +1224,8 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
-                     trusted_proxy=trusted_proxy)
+                     trusted_proxy=trusted_proxy,
+                     voice=config.get("voice"))
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))
@@ -1218,5 +1233,6 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
              trusted_proxy)
     uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
                 server_header=False, limit_concurrency=64,
-                timeout_keep_alive=30)
+                timeout_keep_alive=30,
+                ws_max_size=2_000_000)  # a 30 s voice utterance is ~1 MB
     return 0

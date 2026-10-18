@@ -24,7 +24,10 @@ def restore_logging():
 
 
 def test_load_config_defaults_file_and_env(tmp_path, monkeypatch):
-    monkeypatch.delenv("CLAUDE_MODEL", raising=False)
+    from assistant.config import ENV_OVERRIDES
+
+    for var in ENV_OVERRIDES:  # whatever this machine has set
+        monkeypatch.delenv(var, raising=False)
     assert load_config(None, None) == DEFAULTS
     cfg_file = tmp_path / "c.toml"
     cfg_file.write_text('[assistant]\nmax_tokens = 300\n[wake]\nsensitivity = 0.8\n')

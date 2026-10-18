@@ -342,7 +342,8 @@ class HistoryStore:
                 (conversation_id,)).fetchone()
             if not row:
                 return False
-            if spoken_text:
+            if spoken_text is not None:
+                spoken_text = spoken_text.strip() or "(interrupted)"
                 self._con.execute(
                     "UPDATE messages SET interrupted = 1, text = ? WHERE id = ?",
                     (_clean(spoken_text), row["id"]))
