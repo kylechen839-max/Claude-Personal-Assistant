@@ -17,7 +17,9 @@ echo "ANTHROPIC_API_KEY=ci-dummy-key" >> "$WORK/env"
 TOKEN=$(sed -n 's/^WEB_TOKEN=//p' "$WORK/env")
 summary() { echo "$*" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
-docker run -d --name hc -p $PORT:$PORT --env-file "$WORK/env" ${DOCKER_RUN_ARGS:-} "$IMAGE" >/dev/null
+# /data as on Render: a disk mounted at run time, owned by root
+docker run -d --name hc -p $PORT:$PORT --env-file "$WORK/env" \
+    --mount type=tmpfs,destination=/data ${DOCKER_RUN_ARGS:-} "$IMAGE" >/dev/null
 for _ in $(seq 1 60); do curl -sf $URL/healthz >/dev/null && break; sleep 1; done
 
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
@@ -33,12 +35,17 @@ test "$(status -b "$WORK/cookies" $URL/api/state)" = 200     # signed in
 head -c 5000000 /dev/zero > "$WORK/big.wav"                 # over the 4 MB cap
 test "$(status -b "$WORK/cookies" -F "audio=@$WORK/big.wav" $URL/api/turn)" = 413
 echo "auth checks passed"
+# the server runs unprivileged and owns the disk
+test "$(docker exec hc awk '/^Uid:/ {print $2}' /proc/1/status)" = 10001
+test "$(docker exec hc stat -c %u /data)" = 10001
+docker exec -u 10001 hc sh -c 'echo ok > /data/probe && rm /data/probe'
+echo "user and /data checks passed"
 
-docker exec hc python -m assistant --check
+docker exec -u 10001 hc python -m assistant --check
 [ "${SMOKE_ONLY:-}" = 1 ] && exit 0
 
 # One spoken turn through the real server: upload a 5 s Piper clip.
-docker exec hc python scripts/measure_memory.py --model tiny.en \
+docker exec -u 10001 hc python scripts/measure_memory.py --model tiny.en \
     --clip-out /tmp/clip.wav >/dev/null
 docker cp hc:/tmp/clip.wav "$WORK/clip.wav"
 docker restart hc >/dev/null   # measure the server on its own

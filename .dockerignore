@@ -22,7 +22,8 @@ __pycache__/
 .github/
 tests/
 pinecone-mcp/
-deploy/
+deploy/*
+!deploy/docker-entrypoint.sh
 keywords/
 *.md
 !README.md

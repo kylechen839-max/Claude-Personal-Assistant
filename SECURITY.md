@@ -90,8 +90,12 @@ in `tests/test_cloud.py`):
   `token.json`, logs and `voices/` out of the build). Google access tokens
   are refreshed in memory and never written to disk; a failed refresh logs a
   warning with only the error code. All of these values are masked in logs.
-- **Least privilege.** The container runs as an unprivileged user that
-  can't change the app or models; nothing on the PC is reachable from it
+- **Least privilege.** The app runs as an unprivileged user (uid 10001)
+  that can't change the app or models. The container's entrypoint starts as
+  root for one step only, giving that user the persistent disk at `/data`
+  (Render mounts it as root), then drops to it with `setpriv
+  --no-new-privs`, no capabilities and no groups; the CI smoke test checks
+  the server's uid and the disk's owner. `/data` is mode 700; nothing on the PC is reachable from it
   (`open_in_browser` is off).
 
 Left as is: the session cookie lasts 90 days and can't be revoked one by one

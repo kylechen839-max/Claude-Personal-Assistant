@@ -254,13 +254,24 @@ image or on its disk. It is on the public internet, so it is hardened
 (SECURITY.md, "Cloud server"): only the login page, `/healthz` and the app
 icon work without the token, and wrong tokens lock the sender out.
 
-Cost: the Standard plan (2 GB RAM), $25 a month. Speech recognition with
+Cost: about $25.25 a month: the Standard plan (2 GB RAM, $25) plus a 1 GB
+persistent disk ($0.25/GB). Speech recognition with
 Whisper `base.en` plus the Piper voice was measured at up to 564 MB, which
 doesn't fit the $7 Starter plan's 512 MB (PROGRESS.md, "Cloud hosting").
 Render's free Hobby workspace is enough; you pay only for the service. To
 save money you can switch the service to Starter and set `WHISPER_MODEL` to
 `tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
 mishears more often).
+
+**Persistent disk.** The service has a 1 GB disk mounted at `/data`
+(`DATA_DIR`; conversation history goes to `HISTORY_PATH`,
+`/data/history.sqlite`); everything else in the container is wiped on each
+deploy. Render's free instance type can't have a disk, which is one more
+reason the service is on a paid plan. Render takes daily snapshots of the
+disk, but that is the only backup: export your history now and then with
+the history export command (it arrives with the conversation-history
+feature) and keep the file somewhere else. With a disk, Render runs exactly
+one instance and a deploy has a short gap of downtime.
 
 1. **Push** this branch to GitHub (merged into master).
 2. **Create the service.** On render.com: sign up (GitHub login), add a

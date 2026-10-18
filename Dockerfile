@@ -44,13 +44,20 @@ COPY config.toml ./
 COPY assistant ./assistant
 COPY scripts/measure_memory.py ./scripts/measure_memory.py
 
-# Run as an unprivileged user that can't modify the app or the models.
-RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
-USER app
+# The app runs as an unprivileged user that can't modify the app or the
+# models. The entrypoint starts as root only to hand the persistent disk
+# (/data: conversation history, lecture audio, job state) to that user, then
+# drops all privileges for good (setpriv --no-new-privs).
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /data && chown app:app /data && chmod 700 /data
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENV ASSISTANT_PROFILE=server \
+    DATA_DIR=/data \
+    HISTORY_PATH=/data/history.sqlite \
     HF_HUB_OFFLINE=1 \
     HOME=/tmp \
     PORT=10000
 EXPOSE 10000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["python", "-m", "assistant", "--mode", "web"]

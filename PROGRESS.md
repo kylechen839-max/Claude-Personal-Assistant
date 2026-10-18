@@ -243,6 +243,13 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   out. `render.yaml` adds the `hey-claude` service (docker, `standard`,
   `/healthz`, secrets `sync: false`, `WEB_TOKEN` generated) next to
   `pinecone-mcp`.
+- **Persistent disk**: 1 GB at `/data` (`DATA_DIR=/data`,
+  `HISTORY_PATH=/data/history.sqlite`) for conversation history, lecture
+  audio and job state from the history/features branches. Disks need a paid
+  instance type (already the case) and cost $0.25/GB a month, so the total
+  is about $25.25. `deploy/docker-entrypoint.sh` chowns the mounted disk to
+  the app user and drops root with `setpriv --no-new-privs`; CI checks the
+  server's uid is 10001 and that it owns and can write a root-mounted `/data`.
 - **Memory, measured** in CI (`scripts/container_smoke.sh` +
   `scripts/measure_memory.py`, GitHub runner, 4 CPUs, image built from this
   branch), 5 s Piper clip of "Hey Claude, what's on my calendar tomorrow? And
@@ -258,7 +265,7 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   The imports alone are about 120 MB, the Piper voice adds about 160 MB, and
   loading base.en briefly peaks about 150 MB above its steady size. Both
   models transcribed the clip correctly ("...assignments to this week").
-  **Plan: Render Standard (2 GB, 1 CPU, $25/month)**: base.en needs up to
+  **Plan: Render Standard (2 GB, 1 CPU, $25/month; $25.25 with the disk)**: base.en needs up to
   about 565 MB, more than Starter's 512 MB (it only stayed under the cap by
   the kernel reclaiming file cache, with nothing left for a second session).
   Starter ($7, 512 MB, 0.5 CPU) would work with `WHISPER_MODEL=tiny.en` at

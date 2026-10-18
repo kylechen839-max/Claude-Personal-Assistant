@@ -239,6 +239,7 @@ for all of this except the Google sign-in.
 - [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
       by voice.
   - Should: Yes/No buttons and a spoken question, as on the PC.
+- [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
 - [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok`.
 
