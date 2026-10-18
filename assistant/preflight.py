@@ -470,12 +470,13 @@ print("DEFAULT", sd.default.device)
 
 LEVEL_SNIPPET = r"""
 import numpy as np, sounddevice as sd
+from assistant.audio import mic_that_opens, resolve_mic_device
 from assistant.config import load_config
 mic = load_config("config.toml", None)["wake"]["mic_device"]
-if isinstance(mic, str) and mic.isdigit():
-    mic = int(mic)
+info = mic_that_opens(mic, sd)
+print(f"MIC [{info.get('index', '?')}] {info['name']}")
 rec = sd.rec(3 * 16000, samplerate=16000, channels=1, dtype="float32",
-             device=mic or None)
+             device=resolve_mic_device(mic))
 sd.wait()
 x = rec[:, 0]
 db = lambda v: 20 * np.log10(max(float(v), 1e-9))
@@ -505,7 +506,9 @@ def step_mic_level(ctx: Context) -> Result:
     m = re.search(r"LEVEL peak=(-?[\d.]+) rms=(-?[\d.]+)", out)
     if code != 0 or not m:
         return Result("mic-level", FAIL, f"recording failed (exit {code})", out)
-    return Result("mic-level", *judge_level(float(m.group(1)), float(m.group(2))), out)
+    status, detail = judge_level(float(m.group(1)), float(m.group(2)))
+    mic = re.search(r"^MIC (.*)$", out, re.MULTILINE)
+    return Result("mic-level", status, (f"{mic.group(1)}: " if mic else "") + detail, out)
 
 
 USB_SUSPEND = ("2a737441-1930-4402-8d77-b2bebba308a3",  # powercfg: USB settings,

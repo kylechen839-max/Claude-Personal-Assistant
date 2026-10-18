@@ -419,6 +419,12 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   models and pipeline on Bookworm arm64, but not real audio devices,
   systemd lingering or Pi latency; those are `preflight.sh --hardware` and
   MANUAL_TEST.md's Pi part.
+- **Fixed (2026-10-18): `[wake] mic_device = 0`** silently opened the
+  default mic (`device or None`), and push-to-talk ignored `mic_device`
+  altogether, while `--check` reported the configured device as fine. Now
+  one resolver (`audio.resolve_mic_device`) is used by wake mode,
+  push-to-talk, `--check` and the preflight; `--check` shows the device
+  that will actually open and fails if an index resolves to another one.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.

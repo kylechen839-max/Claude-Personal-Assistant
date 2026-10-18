@@ -815,3 +815,34 @@ def test_windows_service_script_registers_both_tasks():
     assert "tailscale serve" in uninstall
     assert not re.search(r"&\s*tailscale|tailscale(\.exe)?\s+serve\s+(reset|off|--https=\d+\s+off)",
                          text, re.IGNORECASE)
+
+
+def test_mic_level_snippet_opens_device_zero(monkeypatch, tmp_path, capsys):
+    """The mic-level step records from the configured device, index 0 too,
+    and names the device it opened."""
+    import sys
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    recorded = {}
+    devices = [{"name": "Front Mic", "max_input_channels": 1, "index": 0},
+               {"name": "Default Mic", "max_input_channels": 1, "index": 1}]
+
+    def query_devices(device=None, kind=None):
+        return devices[1] if device is None else devices[device]
+
+    def rec(frames, samplerate, channels, dtype, device=None):
+        recorded["device"] = device
+        return np.full((frames, 1), 0.1, dtype="float32")
+
+    fake = SimpleNamespace(query_devices=query_devices, rec=rec, wait=lambda: None)
+    monkeypatch.setitem(sys.modules, "sounddevice", fake)
+    (tmp_path / "config.toml").write_text("[wake]\nmic_device = 0\n")
+    monkeypatch.chdir(tmp_path)
+    exec(compile(preflight.LEVEL_SNIPPET, "level", "exec"), {})
+    out = capsys.readouterr().out
+    assert recorded["device"] == 0 and "MIC [0] Front Mic" in out
+    run = FakeRun({r"-c": (0, out)})
+    r = preflight.step_mic_level(ctx_for(tmp_path / ".env", run, tmp_path, hardware=True))
+    assert r.status == PASS and r.detail.startswith("[0] Front Mic: peak -20.0 dBFS")

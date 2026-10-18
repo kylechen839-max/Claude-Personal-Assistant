@@ -25,7 +25,9 @@ Assignments database open in a browser to compare.
   - If not: fix whatever line says FAIL (missing key in `.env`, missing
     `credentials.json`/`token.json`). If the wrong mic is the default, note
     its `[index]` and set `[wake] mic_device = "<index>"` (or part of its
-    name), then re-run: "Configured mic: ... -> <your mic>".
+    name), then re-run: "Configured mic: '<index>' -> [<index>] <your mic>"
+    (without a setting the line is "Mic that will open: [i] ... (the
+    default)"). Index 0 is a real device too.
 
 ## 2. Speaker and mic (3 min)
 - [ ] **Speaker:** `python -m assistant --mode speak`, type "say a short

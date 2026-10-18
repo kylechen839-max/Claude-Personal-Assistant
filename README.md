@@ -120,7 +120,7 @@ you are most likely to tune:
 | `[wake] vad_min_threshold` | 0.015 | Minimum loudness counted as speech; raise in a noisy room |
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
-| `[wake] mic_device` | "" | Mic index or part of its name (`--check` lists them) |
+| `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
 | `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
