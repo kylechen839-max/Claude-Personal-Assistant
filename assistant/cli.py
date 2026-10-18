@@ -54,8 +54,8 @@ def parse_args(argv=None):
     parser.add_argument("--keyword-path",
                         help="openWakeWord .onnx model for the 'Hey Claude' wake word")
     parser.add_argument("--timings", action="store_true",
-                        help="wake mode: print each turn's latency summary to "
-                             "the console too (it is always in the log file)")
+                        help="wake and web voice mode: print each turn's latency "
+                             "summary to the console too (always in the log file)")
     parser.add_argument("--host",
                         help="web mode: address to listen on (default "
                              "127.0.0.1, this computer only)")
@@ -314,6 +314,23 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     return True
 
 
+def show_voice_timings(output_fn=print) -> logging.Handler:
+    """--timings in web mode: print each voice-conversation turn's latency
+    line (it is always in the log file)."""
+    class Timings(logging.Handler):
+        def emit(self, record):
+            message = record.getMessage()
+            if message.startswith("Turn timings"):
+                output_fn(f"({message})")
+
+    handler = Timings(logging.INFO)
+    voice_log = logging.getLogger("assistant.voice_session")
+    voice_log.addHandler(handler)
+    if voice_log.getEffectiveLevel() > logging.INFO:
+        voice_log.setLevel(logging.INFO)
+    return handler
+
+
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     """Register every service that is enabled and has credentials."""
     from pathlib import Path
@@ -435,6 +452,9 @@ def main(argv=None) -> int:
     try:
         if args.mode == "web":
             from assistant import webapp
+
+            if args.timings:  # voice conversation turns: one line each
+                show_voice_timings()
 
             return webapp.serve(config, host=args.host, port=args.port,
                                 tts_name=tts_name, show_token=args.show_token)

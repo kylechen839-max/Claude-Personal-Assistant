@@ -46,12 +46,14 @@ class TurnTimer:
                  self.labels.get(stage, stage), t - prev, t - self.t0, self.start)
 
     def steps(self) -> list[tuple[str, float]]:
-        """(label, seconds since the previous stage) for the stages reached."""
+        """(label, seconds since the previous stage) for the stages reached,
+        in the order they happened."""
         out, prev = [], self.t0
-        for key, label in self.stages:
-            if key in self.marks:
-                out.append((label, self.marks[key] - prev))
-                prev = self.marks[key]
+        reached = sorted((self.marks[k], i, label)
+                         for i, (k, label) in enumerate(self.stages) if k in self.marks)
+        for t, _, label in reached:
+            out.append((label, t - prev))
+            prev = t
         return out
 
     def summary(self) -> str:

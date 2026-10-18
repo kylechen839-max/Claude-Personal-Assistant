@@ -34,6 +34,7 @@ from typing import Callable
 import numpy as np
 
 from assistant import audio
+from assistant.cli import friendly_error, is_exit, is_yes, strip_wake_phrase
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -319,8 +320,6 @@ class VoiceConversation:
         return answered and pending.answer and not self.closed
 
     def _answer(self, pending: PendingConfirm, turn_id: int, samples) -> None:
-        from assistant.cli import is_yes
-
         try:
             text = self.transcribe(samples)
         except Exception:
@@ -394,8 +393,6 @@ class VoiceConversation:
 
     def _turn_body(self, turn: VoiceTurn, samples, timer: TurnTimer) -> bool:
         """Transcribe and answer. True if it was "goodbye"."""
-        from assistant.cli import friendly_error, is_exit, strip_wake_phrase
-
         heard = self.transcribe(samples)
         timer.mark("transcript")
         text = strip_wake_phrase(heard, self.wake_phrase).strip()

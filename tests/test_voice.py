@@ -346,3 +346,19 @@ def test_real_espeak_sentence():
     assert data[:4] == b"RIFF"
     assert 1.0 < wav_duration(data) < 6.0
     assert synthesize_wav(Pyttsx3TTS(), "--help")[:4] == b"RIFF"  # text, not an option
+
+
+def test_timings_flag_prints_voice_turn_lines():
+    import logging
+
+    from assistant import cli
+
+    out = []
+    handler = cli.show_voice_timings(out.append)
+    log = logging.getLogger("assistant.voice_session")
+    try:
+        log.info("Voice heard: %r", "hi")
+        log.info("Turn timings from utterance received: transcript +0.40 s")
+    finally:
+        log.removeHandler(handler)
+    assert out == ["(Turn timings from utterance received: transcript +0.40 s)"]

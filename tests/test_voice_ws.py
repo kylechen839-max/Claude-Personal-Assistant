@@ -41,14 +41,15 @@ class Transcriber:
 @pytest.fixture
 def make_voice(monkeypatch):
     def make(*streams, heard=("what's on my calendar tomorrow",), memory=None,
-             synth=None, **voice):
+             synth=None, transcriber=None, **voice):
         client = stream_client(*streams)
 
         def chat_factory(registry):
             return ClaudeChat(client=client, model="test-model", tools=registry,
                               memory=memory)
 
-        assistant = webapp.WebAssistant(chat_factory, Transcriber(*heard), PrintTTS())
+        assistant = webapp.WebAssistant(chat_factory, transcriber or Transcriber(*heard),
+                                         PrintTTS())
         if synth:
             monkeypatch.setattr(voice_ws, "synthesize_wav", lambda tts, text: synth(text))
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, voice=voice)
@@ -71,8 +72,10 @@ def connect(http, headers=ORIGIN):
     return http.websocket_connect("/api/voice", headers=headers)
 
 
-def utterance(turn, seconds=1.0):
-    pcm = (np.zeros(int(16000 * seconds))).astype("<i2").tobytes()
+def utterance(turn, seconds=1.0, samples=None):
+    if samples is None:
+        samples = np.zeros(int(16000 * seconds))
+    pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     return voice_ws.pack({"type": "utterance", "turn": turn, "sample_rate": 16000}, pcm)
 
 
@@ -184,6 +187,46 @@ def test_first_audio_latency(make_voice, capsys):
     with capsys.disabled():
         print(f"\n[voice latency, {type(tts).__name__}] utterance -> first audio "
               f"frame {first * 1000:.0f} ms (server marks, s: {server})")
+
+
+@pytest.mark.slow
+def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
+    """The definition-of-done question as a voice-mode utterance, through
+    real Whisper (base.en, CPU) and the real TTS route; Claude is mocked.
+    Runs in CI, where the model is downloaded."""
+    from assistant import audio
+    from assistant.stt import Transcriber, rough_match
+    from assistant.tts import Pyttsx3TTS
+
+    whisper = Transcriber()
+    try:
+        whisper.model
+    except Exception as e:
+        pytest.skip(f"Whisper base.en model unavailable: {type(e).__name__}")
+    wav = tmp_path / "q.wav"
+    Pyttsx3TTS(rate=160).save_to_file("What is on my calendar tomorrow", wav)
+    speech = audio.load_audio(wav)
+    if not len(speech):
+        pytest.skip("the OS voice wrote an empty clip")
+    real = voice_ws.synthesize_wav
+    tts = Pyttsx3TTS()
+    _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
+                                  "Then lunch with Sam."),
+                         transcriber=whisper, synth=lambda text: real(tts, text))
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        t0 = time.perf_counter()
+        ws.send_bytes(utterance(1, samples=speech))
+        msgs = receive(ws, "turn_done")
+    first = next(time.perf_counter() - t0 for m in msgs if m["type"] == "audio")
+    heard = next(m["text"] for m in msgs if m["type"] == "transcript")
+    assert rough_match("What is on my calendar tomorrow", heard), heard
+    with capsys.disabled():
+        print(f"\n[voice latency, real Whisper + {type(tts).__name__}] utterance -> "
+              f"first audio {msgs[-1]['timings']['audio']:.2f} s server-side "
+              f"(transcript {msgs[-1]['timings']['transcript']:.2f} s)")
+    assert msgs[-1]["timings"]["audio"] < 2.0
 
 
 def test_barge_in_over_the_socket(make_voice):
