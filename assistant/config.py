@@ -114,13 +114,14 @@ def load_config(path: str | Path | None = "config.toml",
 
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
-                   "ELEVENLABS_API_KEY")
+                   "ELEVENLABS_API_KEY", "WEB_TOKEN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens
     re.compile(r"\bya29\.[\w.-]+"),             # Google access tokens
     re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
     re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
+    re.compile(r"\bhc1\.[\w.-]+"),             # failover access tokens
     # OAuth / API fields in JSON, dict reprs, form bodies and URLs
     re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
                r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"

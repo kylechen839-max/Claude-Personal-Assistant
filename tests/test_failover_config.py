@@ -61,3 +61,14 @@ def test_main_applies_role(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         cli.main(["--role", "cloud", "--config", str(tmp_path / "none.toml")])
     assert seen["role"] == "cloud"
+
+
+def test_failover_tokens_are_redacted_in_logs(monkeypatch):
+    from assistant.config import redact
+    from assistant.failover.tokens import TokenAuthority
+
+    secret = "w" * 43
+    monkeypatch.setenv("WEB_TOKEN", secret)
+    token, _ = TokenAuthority(secret).mint("app")
+    line = redact(f"login with {secret}, got {token} in a message body")
+    assert secret not in line and token not in line

@@ -111,7 +111,7 @@ function setup(opts = {}) {
   const router = new BackendRouter({
     backends: BACKENDS,
     fetch: net.fetch,
-    getToken: async () => 'hc1.app.sid.9999999999.sig',
+    getToken: async () => 'hc1.app.sid.9999999999.1.sig',
     now: clock.now,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
@@ -223,7 +223,7 @@ test('requests carry the bearer token, never cookies', async () => {
   const r = await run(clock, router.request('/api/state'));
   assert.deepEqual(await r.json(), { role: 'pi', path: '/api/state' });
   const call = net.log.find((c) => c.path === '/api/state');
-  assert.equal(call.auth, 'Bearer hc1.app.sid.9999999999.sig');
+  assert.equal(call.auth, 'Bearer hc1.app.sid.9999999999.1.sig');
   assert.equal(call.opts.credentials, 'omit');
 });
 

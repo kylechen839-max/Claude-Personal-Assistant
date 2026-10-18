@@ -67,6 +67,18 @@ jobs:
       - name: Run tests
         run: python -m pytest -rs
 
+  # The phone app's backend router (Pi -> PC -> cloud failover, FAILOVER.md):
+  # node:test, no packages needed.
+  backend-router:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/js/*.test.mjs
+
   # The Pinecone MCP connector (deployed separately, see render.yaml):
   # type-check, build, and check the server starts and answers its health check.
   pinecone-mcp:

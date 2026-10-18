@@ -18,10 +18,10 @@ else:
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ["README.md", "MANUAL_TEST.md"]
-# Flags of other programs that the docs show (pip, systemctl, journalctl,
+# Flags of other programs that the docs show (pip, systemctl, journalctl, node,
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
-               "--user", "--uninstall"}
+               "--user", "--uninstall", "--test"}
 OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
 
 

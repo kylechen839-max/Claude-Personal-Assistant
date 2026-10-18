@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from assistant.failover import API_VERSION
 from assistant.failover.peers import Backend, normalize_url
-from assistant.failover.tokens import Claims, TokenAuthority, bearer_of
+from assistant.failover.tokens import MAX_SESSION, Claims, TokenAuthority, bearer_of
 
 log = logging.getLogger(__name__)
 
@@ -238,7 +238,11 @@ class EdgeMiddleware:
                 self.limiter.fail()
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
-            return await self._issue(send, cors, claims.sid)
+            if claims.expires >= claims.signed_in + MAX_SESSION:
+                # already at the session limit: sign in with WEB_TOKEN again
+                return await _json(send, 401, {"error": "sign in again"},
+                                   cors([("www-authenticate", "Bearer")]))
+            return await self._issue(send, cors, claims.sid, claims.signed_in)
         if self.limiter.blocked():
             return await _json(send, 429, {"error": "too many attempts, wait a few minutes"},
                                cors([("retry-after", "300")]))
@@ -254,9 +258,9 @@ class EdgeMiddleware:
         sid = data.get("sid") if isinstance(data.get("sid"), str) else None
         return await self._issue(send, cors, sid)
 
-    async def _issue(self, send, cors, sid):
+    async def _issue(self, send, cors, sid, signed_in=None):
         try:
-            token, claims = self.authority.mint("app", sid=sid)
+            token, claims = self.authority.mint("app", sid=sid, signed_in=signed_in)
         except ValueError:
             token, claims = self.authority.mint("app")
         return await _json(send, 200, {"access_token": token, "token_type": "Bearer",

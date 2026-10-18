@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 190 passed, 7 skipped (Linux build sandbox,
+**Current test count:** 485 passed, 7 skipped (plus 32 node tests) (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
@@ -27,6 +27,11 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_timing.py` | 9 | `--timings` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
+| `test_failover_edge.py` | 44 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
+| `test_failover_sync.py` | 74 | failover: history event log merge and sync |
+| `test_failover_leader.py` | 170 | failover: leader check for scheduled jobs |
+| `test_failover_config.py` | 7 | failover: `[failover]` settings, `--role` |
+| `tests/js/backend-router.test.mjs` | 32 | failover: the phone app's backend router (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -154,3 +159,35 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.
+
+## Failover: Pi -> PC -> cloud (phase A) ✅
+The phone app's backend failover, documented in FAILOVER.md.
+- `assistant/web/backend-router.js`: the client router as a standalone ES
+  module: parallel `/healthz` probes (1.5 s tailnet, 3 s cloud), highest
+  priority healthy backend with a 300 ms grace for a slower better one, API
+  version check, one retry of idempotent requests on the next backend,
+  writes never replayed (`NeedsUserRetry`), 60 s background re-probe with
+  fail-back after 2 good probes, no switch mid-turn, Auto / forced override,
+  IndexedDB token store.
+- `assistant/failover/edge.py` + `tokens.py`: ASGI middleware for every
+  backend: `/healthz` (ok, api, role only), CORS for the app origin only (no
+  credentials), derived bearer tokens (`POST /api/auth/token`, refresh,
+  scopes app/sync, 90-day session limit), WebSocket first-message auth
+  (4401 / 4408), per-backend lockout.
+- `assistant/failover/sync.py`: history as an append-only, id-addressed
+  event log; `materialize()` is order-independent and idempotent (LWW
+  renames/pins on (ts, id), permanent tombstones); push/pull endpoints and
+  client with cursors and peer-reset detection; `MemoryEventLog` reference
+  store (the SQLite store from claude/history implements the same API).
+- `assistant/failover/leader.py`: leader check (probe higher-priority peers
+  right before firing) and a run-once job runner with a per-job dedupe key
+  in the shared log.
+- `--role pi|pc|cloud`, `[failover]` settings (`ASSISTANT_ROLE`,
+  `APP_ORIGIN` env overrides).
+- Tests (offline): three-fake-backend simulation on a virtual clock (node),
+  CORS rejection and 401s everywhere incl. the WebSocket, property-style
+  sync convergence with three stores, random interleavings, duplicates and
+  outages, tombstones, leader election with flapping peers and partitions.
+  CI runs the node tests in a `backend-router` job.
+- Phase B (wiring into the phone web app, voice mode, cloud host and the
+  SQLite history store) follows as those branches land on master.

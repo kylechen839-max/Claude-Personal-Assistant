@@ -85,7 +85,7 @@ def test_tokens_from_another_secret_or_tampered_are_rejected():
     head, sig = good.rsplit(".", 1)
     assert a.verify(good.replace(".abc.", ".abd.")) is None
     assert a.verify(head + "." + sig[:-1] + ("A" if sig[-1] != "A" else "B")) is None
-    for junk in ("", "x", "hc1....", "hc1.app.abc.notanumber.sig", "a" * 1000, None):
+    for junk in ("", "x", "hc1.....", "hc1.app.abc.notanumber.1.sig", "a" * 1000, None):
         assert a.verify(junk) is None
 
 
@@ -250,6 +250,25 @@ def test_refresh_keeps_sid(setup):
     assert r.status == 200
     new = r.json()["access_token"]
     assert new != token and authority.verify(new).sid == "phone1"
+
+
+def test_refresh_stops_at_the_session_limit(setup):
+    from assistant.failover.tokens import MAX_SESSION
+
+    app, authority, token, clock = setup
+    signed_in = authority.verify(token).signed_in
+    for _ in range(4):  # a stolen token can't be refreshed forever
+        clock.t += 25 * 24 * 3600
+        r = request(app, "POST", "https://pi/api/auth/refresh", auth(token))
+        if r.status != 200:
+            break
+        token = r.json()["access_token"]
+        claims = authority.verify(token)
+        assert claims.signed_in == signed_in
+        assert claims.expires <= signed_in + MAX_SESSION
+    assert r.status == 401
+    clock.t = signed_in + MAX_SESSION + 1
+    assert authority.verify(token) is None
 
 
 def test_wrong_web_token_locks_out_after_five(setup):
