@@ -24,6 +24,14 @@ TOOLS_PROMPT = (
     "reading everything."
 )
 
+MEMORY_PROMPT = (
+    "You have long-term memory: Kyle's Pinecone database (his project notes "
+    "and summaries of past conversations). Relevant notes are looked up "
+    "automatically before each reply; use search_memory to look something up "
+    "on purpose, and save a note when he asks you to remember something. If "
+    "asked, say you do have access to his Pinecone memory."
+)
+
 WEB_PROMPT = (
     "You can search the web and read web pages. Use them for anything "
     "current or that you aren't sure of: news, weather, sports, prices, "
@@ -91,6 +99,8 @@ class ClaudeChat:
                 parts.append(WEB_PROMPT)
             if self.tools.has("email_summary"):
                 parts.append(EMAIL_PROMPT)
+        if self.memory:
+            parts.append(MEMORY_PROMPT)
         if notes:
             parts.append("Notes from long-term memory that may be relevant "
                          "(use only if they help):\n"
@@ -270,6 +280,14 @@ class ClaudeChat:
             untrusted = self.untrusted_memory or has_untrusted_content(
                 self.history, self.tools.untrusted_names())
             for call in calls:
+                if cancel is not None and cancel.is_set():
+                    # Kyle talked over it: run nothing more. Every tool_use
+                    # still needs a tool_result to keep history valid.
+                    log.info("Skipped %s: the turn was interrupted", call.name)
+                    results.append({"type": "tool_result", "tool_use_id": call.id,
+                                    "content": "Not run: the user interrupted.",
+                                    "is_error": True})
+                    continue
                 private = self.tools.is_private(call.name)
                 self.private_turn |= private
                 log.info("Claude called %s %s%s", call.name,
@@ -280,6 +298,9 @@ class ClaudeChat:
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})
             self.history.append({"role": "user", "content": results})
+            if cancel is not None and cancel.is_set():
+                raise _Cancelled("".join(b.text for b in response.content
+                                         if b.type == "text"))
         return "Sorry, that took too many steps. Could you ask a simpler way?"
 
     def _trim_history(self) -> None:

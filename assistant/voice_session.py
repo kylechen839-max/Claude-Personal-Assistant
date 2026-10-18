@@ -37,8 +37,7 @@ from typing import Callable
 import numpy as np
 
 from assistant import audio
-from assistant.cli import (get_reply, is_exit, is_yes, loggable_reply,
-                           strip_wake_phrase)
+from assistant.cli import get_reply, is_exit, strip_wake_phrase
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -123,14 +122,36 @@ def fast_wav(tts, text: str) -> bytes | None:
     return None
 
 
+# --- spoken confirmations ------------------------------------------------------
+
+_YES = {"yes", "yeah", "yep", "yup", "yea", "sure", "confirm", "confirmed",
+        "correct", "absolutely", "definitely", "affirmative"}
+_YES_PHRASES = ("go ahead", "do it", "delete it", "please do", "move it",
+                "change it", "open it", "that's right", "thats right")
+# Words that may sit around a yes without changing it ("yes please do it").
+_FILLER = {"please", "do", "it", "go", "ahead", "delete", "move", "change", "open",
+           "that", "that's", "thats", "right", "ok", "okay", "sure", "hey", "claude",
+           "the", "event", "one", "now", "thanks", "thank", "you"}
+
+
+def is_explicit_yes(text: str) -> bool:
+    """Only a clear, short yes confirms a spoken question: "yes", "yeah,
+    delete it", "go ahead". Anything with other content ("okay, and what
+    about Friday?", "yes but not that one", a new question) is a no."""
+    words = re.findall(r"[a-z']+", text.lower())
+    if not words or len(words) > 6:
+        return False
+    phrase = " ".join(words)
+    has_yes = bool(set(words) & _YES) or any(p in phrase for p in _YES_PHRASES)
+    return has_yes and all(w in _YES or w in _FILLER for w in words)
+
+
+def decline_message(question: str) -> str:
+    return ("OK, I won't delete it." if "delete" in question.lower()
+            else "OK, I won't do that.")
+
+
 # --- backends -------------------------------------------------------------------
-
-def _chat_of(backend):
-    """The ClaudeChat behind a backend (for keeping private replies out
-    of the log), or None."""
-    return getattr(backend, "chat", None) or getattr(
-        getattr(backend, "session", None), "chat", None)
-
 
 class ChatBackend:
     """A plain ClaudeChat. Its tools' confirm callback must be `self.confirm`
@@ -174,7 +195,8 @@ class ChatBackend:
 class WebBackend:
     """The web app's session for this browser (webapp.WebAssistant), so the
     voice view continues the same conversation as push-to-talk. Tool and
-    confirmation events come from the session's event queue; a
+    confirmation events of a voice turn come straight to it (chat_stream's
+    on_event), so a page reading /api/events can't take them; a
     confirmation is answered with WebAssistant.answer()."""
 
     def __init__(self, assistant, session):
@@ -183,38 +205,24 @@ class WebBackend:
         self.conv: "VoiceConversation | None" = None
 
     def ask(self, text, on_text, on_tool, cancel) -> str:
-        s = self.session
-        while not s.events.empty():  # leftovers of an earlier turn
-            s.events.get_nowait()
-        done = threading.Event()
+        def on_event(ev):  # this turn's own events, never the page's queue
+            kind = ev.get("type")
+            if kind == "confirm":
+                self.conv.on_confirm(ev["question"])
+            elif kind == "tool":
+                on_tool(ev["name"])
+            elif kind == "status":
+                self.conv.on_status(ev.get("text", ""))
 
-        def watch():
-            while not done.is_set() or not s.events.empty():
-                try:
-                    ev = s.events.get(timeout=0.05)
-                except queue.Empty:
-                    continue
-                kind = ev.get("type")
-                if kind == "confirm":
-                    self.conv.on_confirm(ev["question"])
-                elif kind == "tool":
-                    on_tool(ev["name"])
-                elif kind == "status":
-                    self.conv.on_status(ev.get("text", ""))
-
-        watcher = threading.Thread(target=watch, name="voice-events", daemon=True)
-        watcher.start()
         parts = []
         try:
-            for delta in self.assistant.chat_stream(s, text, cancel=cancel):
+            for delta in self.assistant.chat_stream(self.session, text, cancel=cancel,
+                                                    on_event=on_event):
                 parts.append(delta)
                 on_text(delta)
         except RuntimeError:  # a push-to-talk turn is running in this session
             parts.append("I'm still working on your last request.")
             on_text(parts[-1])
-        finally:
-            done.set()
-            watcher.join(timeout=2)
         return "".join(parts)
 
     def answer(self, yes: bool) -> bool:
@@ -237,12 +245,14 @@ class Chunk:
     text: str
     duration: float
     reply: bool = True  # False for a spoken confirmation question or error
+    question: bool = False  # a yes/no question (the page reports its end)
 
 
 @dataclass
 class VoiceTurn:
     id: int
     received: float
+    samples: np.ndarray | None = None
     stop: threading.Event = field(default_factory=threading.Event)
     sentences: queue.Queue = field(default_factory=queue.Queue)
     chunks: list[Chunk] = field(default_factory=list)
@@ -281,13 +291,29 @@ class VoiceTurn:
         return " ".join(said)
 
 
+@dataclass
+class PendingConfirm:
+    """A spoken yes/no question of one turn. It can only be answered once
+    the page has reported that the question finished playing."""
+    turn: int
+    question: str
+    chunk: int | None = None  # index of the question's audio chunk
+    played: bool = False
+    answering: bool = False
+
+
 class VoiceConversation:
     """One hands-free conversation. `send(event, audio=None)` delivers an
     event (and, for "audio" events, WAV bytes) to the page; it is called
     from worker threads and must be thread-safe.
 
     `transcribe(samples)` and `synthesize(text)` are the Whisper and TTS
-    functions (the web app passes its shared, locked ones)."""
+    functions (the web app passes its shared, locked ones).
+
+    Turns run one at a time on one worker thread, so the conversation never
+    has two requests in flight. A new utterance cancels the running turn and
+    waits for it to finish; only the newest waiting utterance is kept (older
+    ones are dropped before they are transcribed)."""
 
     def __init__(self, backend, transcribe: Callable[[np.ndarray], str],
                  synthesize: Callable[[str], bytes],
@@ -304,33 +330,52 @@ class VoiceConversation:
         self.max_session = max_session
         self.wake_phrase = wake_phrase
         self.lock = threading.RLock()
-        self.current: VoiceTurn | None = None
-        self.pending: int | None = None  # turn waiting for a spoken yes/no
+        self.wake = threading.Condition(self.lock)
+        self.current: VoiceTurn | None = None  # the turn being run
+        self.waiting: VoiceTurn | None = None  # the next one (newest wins)
+        self.pending: PendingConfirm | None = None
+        self.worker: threading.Thread | None = None
         self.closed = False
         self.started = clock()
         self.last_activity = self.started
         self.ended_reason: str | None = None
+        self.dropped = 0  # utterances superseded before transcription
 
     # --- from the page ---
     def utterance(self, turn_id: int, samples: np.ndarray) -> None:
-        """A finished utterance. Returns at once; the turn runs in a thread."""
+        """A finished utterance. Returns at once; turns run on the worker."""
         with self.lock:
             if self.closed:
                 return
             self.last_activity = self.clock()
-            if self.pending is not None:
-                pending, self.pending = self.pending, None
+            pending = self.pending
+            if pending is not None:
+                if pending.answering:
+                    log.info("Dropped utterance %s: already answering", turn_id)
+                    return
+                if not pending.played:
+                    # Kyle spoke before hearing the whole question: never a yes.
+                    log.info("Utterance %s came before the question was heard; "
+                             "treating it as no", turn_id)
+                    self._decline(pending, "not heard")
+                    return
+                pending.answering = True
                 threading.Thread(target=self._answer, args=(pending, turn_id, samples),
                                  name="voice-confirm", daemon=True).start()
                 return
-            prev = self.current
-            if prev is not None and not prev.finished:
-                self._cancel(prev)  # talked over it without a barge-in message
-            turn = VoiceTurn(turn_id, self.clock())
-            turn.thread = threading.Thread(target=self._run_turn, args=(turn, samples, prev),
-                                           name=f"voice-turn-{turn_id}", daemon=True)
-            self.current = turn
-            turn.thread.start()
+            if self.waiting is not None:
+                self.dropped += 1
+                log.info("Dropped utterance %s (superseded by %s) before "
+                         "transcribing it", self.waiting.id, turn_id)
+            self.waiting = VoiceTurn(turn_id, self.clock(), samples)
+            running = self.current
+            if running is not None and not running.finished:
+                self._cancel(running)  # talked over it without a barge-in message
+            if self.worker is None:
+                self.worker = threading.Thread(target=self._work, name="voice-turns",
+                                               daemon=True)
+                self.worker.start()
+            self.wake.notify_all()
 
     def interrupt(self, turn_id: int, played_index: int = 0,
                   played_fraction: float = 0.0) -> None:
@@ -341,8 +386,12 @@ class VoiceConversation:
             turn = self.current
             if turn is None or turn.id != turn_id:
                 return
-            if self.pending == turn_id:
-                return  # cut the question short: still waiting for the answer
+            pending = self.pending
+            if pending is not None and pending.turn == turn_id:
+                if not pending.answering:
+                    # Talking over a yes/no question cancels the action.
+                    self._decline(pending, "interrupted")
+                return
             turn.played = (int(played_index), float(played_fraction))
             if turn.finished:
                 self._truncate(turn)
@@ -351,6 +400,16 @@ class VoiceConversation:
         log.info("Voice barge-in on turn %s after %s chunk(s) + %.0f%%", turn_id,
                  played_index, 100 * float(played_fraction))
 
+    def chunk_played(self, turn_id: int, index: int) -> None:
+        """The page finished playing chunk `index` of `turn_id` (it reports
+        this for question chunks)."""
+        with self.lock:
+            pending = self.pending
+            if pending is not None and pending.turn == turn_id and \
+                    pending.chunk is not None and int(index) == pending.chunk:
+                pending.played = True
+                self.last_activity = self.clock()
+
     def expired(self) -> str | None:
         """"idle" or "max_length" when the conversation should end."""
         now = self.clock()
@@ -358,7 +417,7 @@ class VoiceConversation:
             if self.max_session and now - self.started > self.max_session:
                 return "max_length"
             busy = (self.current is not None and not self.current.finished) or \
-                self.pending is not None
+                self.pending is not None or self.waiting is not None
             if not busy and now - self.last_activity > self.idle_timeout:
                 return "idle"
         return None
@@ -372,15 +431,17 @@ class VoiceConversation:
                 return None
             self.closed = True
             self.ended_reason = reason
+            self.waiting = None
             turn = self.current
             if turn is not None and not turn.finished:
                 self._cancel(turn)
             if self.pending is not None:
                 self.pending = None
                 self.backend.answer(False)  # unanswered -> no
-        if turn is not None and turn.thread is not None and \
-                turn.thread is not threading.current_thread():
-            turn.thread.join(timeout=15)
+            self.wake.notify_all()
+            worker = self.worker
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=15)
         summary = None
         try:
             summary = self.backend.end()
@@ -392,18 +453,21 @@ class VoiceConversation:
         self._send({"type": "ended", "reason": reason, "saved": bool(summary)})
         return summary
 
-    # --- from the backend (any thread) ---
+    # --- from the backend (the worker thread, or the web events watcher) ---
     def on_confirm(self, question: str) -> None:
-        """A tool wants a yes: say the question; the next utterance answers."""
+        """A tool of the running turn wants a yes: say the question; the next
+        utterance after it has been heard answers it."""
         with self.lock:
             turn = self.current
-            if turn is None or self.closed:
+            if turn is None or turn.finished or turn.stop.is_set() or self.closed:
+                log.info("Declined a confirmation: its turn was cancelled")
                 self.backend.answer(False)
                 return
-            self.pending = turn.id
+            self.pending = PendingConfirm(turn.id, question)
         turn.flush()  # "Okay." before the question, in order
         self._send({"type": "confirm", "turn": turn.id, "question": question})
-        turn.sentences.put(Chunk(question + QUESTION_SUFFIX, 0, reply=False))
+        turn.sentences.put(Chunk(question + QUESTION_SUFFIX, 0, reply=False,
+                                 question=True))
 
     def on_status(self, text: str) -> None:
         with self.lock:
@@ -429,20 +493,55 @@ class VoiceConversation:
         turn.truncated = True
         spoken = turn.spoken_text()
         if self.backend.mark_interrupted(spoken):
-            log.info("Kept the spoken part of the interrupted reply: %r",
-                     loggable_reply(_chat_of(self.backend), spoken))
+            log.info("Kept the spoken part of the interrupted reply (%d chars)",
+                     len(spoken))
 
-    def _answer(self, turn_id: int, utterance_id: int, samples) -> None:
+    def _decline(self, pending: PendingConfirm, why: str, text: str = "") -> None:
+        """Answer `pending` with no and say so (call with the lock held)."""
+        if self.pending is pending:
+            self.pending = None
+        log.info("Confirmation of turn %s declined (%s)", pending.turn, why)
+        self._send({"type": "confirm_answer", "turn": pending.turn, "text": text,
+                    "yes": False, "reason": why})
+        turn = self.current
+        if turn is not None and turn.id == pending.turn and not turn.finished:
+            turn.sentences.put(Chunk(decline_message(pending.question), 0, reply=False))
+        self.backend.answer(False)
+
+    def _answer(self, pending: PendingConfirm, utterance_id: int, samples) -> None:
         try:
             text = self.transcribe(samples)
         except Exception:
             log.exception("Transcribing a confirmation failed")
             text = ""
-        yes = is_yes(text)
-        log.info("Voice confirmation %r -> %s", text, "yes" if yes else "no")
-        self._send({"type": "confirm_answer", "turn": turn_id,
-                    "utterance": utterance_id, "text": text, "yes": yes})
-        self.backend.answer(yes)
+        yes = is_explicit_yes(text)
+        log.info("Voice confirmation (%d chars) -> %s", len(text), "yes" if yes else "no")
+        log.debug("Voice confirmation text: %r", text)
+        with self.lock:
+            if self.pending is not pending:
+                return  # ended or declined meanwhile
+            if not yes:
+                self._decline(pending, "not a clear yes", text)
+                return
+            self.pending = None
+            self._send({"type": "confirm_answer", "turn": pending.turn,
+                        "utterance": utterance_id, "text": text, "yes": True})
+            self.backend.answer(True)
+
+    def _work(self) -> None:
+        """Run turns one at a time."""
+        while True:
+            with self.lock:
+                while self.waiting is None and not self.closed:
+                    self.wake.wait()
+                if self.closed:
+                    return
+                turn, self.waiting = self.waiting, None
+                self.current = turn
+            goodbye = self._run_turn(turn)
+            if goodbye:
+                self.end("goodbye")
+                return
 
     def _speak_worker(self, turn: VoiceTurn) -> None:
         """Synthesize the turn's sentences in order and send each chunk."""
@@ -450,29 +549,31 @@ class VoiceConversation:
             item = turn.sentences.get()
             if item is None:
                 return
-            if turn.stop.is_set():
-                continue
             chunk = item if isinstance(item, Chunk) else Chunk(item, 0)
+            if turn.stop.is_set() and chunk.reply:
+                continue  # cancelled: but still say "OK, I won't delete it."
             try:
                 data = self.synthesize(chunk.text)
             except Exception:
                 log.exception("TTS failed for %r", chunk.text)
                 continue
-            if turn.stop.is_set():
+            if turn.stop.is_set() and chunk.reply:
                 continue
             chunk.duration = wav_duration(data)
             with self.lock:
                 index = len(turn.chunks)
                 turn.chunks.append(chunk)
+                if chunk.question and self.pending is not None and \
+                        self.pending.turn == turn.id:
+                    self.pending.chunk = index
             if turn.timer:
                 turn.timer.mark("audio")
             self._send({"type": "audio", "turn": turn.id, "index": index,
                         "text": chunk.text, "duration": round(chunk.duration, 3),
-                        "reply": chunk.reply}, data)
+                        "reply": chunk.reply, "question": chunk.question}, data)
 
-    def _run_turn(self, turn: VoiceTurn, samples, prev: VoiceTurn | None) -> None:
-        if prev is not None and prev.thread is not None:
-            prev.thread.join(timeout=30)  # history must settle first
+    def _run_turn(self, turn: VoiceTurn) -> bool:
+        """One turn, start to finish (on the worker). True after "goodbye"."""
         timer = turn.timer = TurnTimer(self.clock, "utterance received",
                                        at=turn.received, stages=VOICE_STAGES)
         speaker = threading.Thread(target=self._speak_worker, args=(turn,),
@@ -480,7 +581,7 @@ class VoiceConversation:
         speaker.start()
         goodbye = False
         try:
-            goodbye = self._turn_body(turn, samples, timer)
+            goodbye = self._turn_body(turn, timer)
         except Exception:
             log.exception("Voice turn failed")
             message = "Sorry, something went wrong."
@@ -491,7 +592,7 @@ class VoiceConversation:
             speaker.join(timeout=120)
             with self.lock:
                 turn.finished = True
-                if self.pending == turn.id:
+                if self.pending is not None and self.pending.turn == turn.id:
                     self.pending = None
                 if turn.stop.is_set():
                     self._truncate(turn)
@@ -502,15 +603,18 @@ class VoiceConversation:
                         "interrupted": turn.stop.is_set(),
                         "chunks": len(turn.chunks), "timings": timer.as_dict(),
                         "summary": timer.summary()})
-        if goodbye:
-            self.end("goodbye")
+        return goodbye
 
-    def _turn_body(self, turn: VoiceTurn, samples, timer: TurnTimer) -> bool:
+    def _turn_body(self, turn: VoiceTurn, timer: TurnTimer) -> bool:
         """Transcribe and answer. True if it was "goodbye"."""
-        heard = self.transcribe(samples)
+        if turn.stop.is_set():
+            return False  # superseded while waiting: skip Whisper entirely
+        heard = self.transcribe(turn.samples)
+        turn.samples = None
         timer.mark("transcript")
         text = strip_wake_phrase(heard, self.wake_phrase).strip()
-        log.info("Voice heard: %r", heard)
+        log.info("Voice turn %s: heard %d chars", turn.id, len(heard))
+        log.debug("Voice heard: %r", heard)
         self._send({"type": "transcript", "turn": turn.id, "text": heard})
         if not text or turn.stop.is_set():
             return False
@@ -535,8 +639,8 @@ class VoiceConversation:
         if reply and not streamed:  # an error sentence (nothing was streamed)
             self._send({"type": "error", "turn": turn.id, "message": reply})
             turn.sentences.put(Chunk(reply, 0, reply=False))
-        log.info("Voice replied: %r",
-                 loggable_reply(_chat_of(self.backend), reply))
+        log.info("Voice turn %s: replied %d chars", turn.id, len(reply or ""))
+        log.debug("Voice replied: %r", reply)
         turn.flush()
         timer.mark("reply")
         return False

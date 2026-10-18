@@ -182,3 +182,14 @@ def test_real_pinecone_memory_objects_work(notes):
         "saved": "Saturday, October 17"}
     q.remember_note("x")
     assert index.upsert.call_args.kwargs["namespace"] == "voice-assistant"
+
+
+def test_notes_replace_the_plain_remember_tool_but_keep_search():
+    cfg = load_config(None, None)
+    mem, _, _ = make_memory()
+    reg = ToolRegistry()
+    cli.add_memory_tools(reg, mem)
+    assert reg.has("remember") and reg.has("search_memory")
+    cli.register_notes(reg, mem, cfg)
+    assert not reg.has("remember") and reg.has("search_memory")
+    assert reg.has("remember_note")

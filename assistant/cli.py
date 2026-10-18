@@ -422,12 +422,23 @@ def build_memory(config: dict, output_fn=print):
                           text_fields=mem["text_fields"])
 
 
+def add_memory_tools(tools: ToolRegistry, memory) -> None:
+    """Let Claude search memory and save notes on request (memory on only)."""
+    if memory is not None:
+        from assistant.tools.memory_tools import memory_tools
+
+        tools.register(*memory_tools(memory))
+
+
 def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
-    """Quick-capture note tools; they need Pinecone memory."""
+    """Quick-capture note tools; they need Pinecone memory. They replace
+    the plain `remember` memory tool (same job, plus tags, listing and
+    deleting); `search_memory` stays for searching all of memory."""
     if memory is None or not config["notes"]["enabled"]:
         return False
     from assistant.tools.notes import QuickNotes
 
+    registry.tools.pop("remember", None)
     registry.register(*QuickNotes(memory,
                                   timezone=config["assistant"]["timezone"] or None,
                                   min_score=config["notes"]["min_score"]).tools())
@@ -513,6 +524,7 @@ def main(argv=None) -> int:
                                 tts_name=tts_name, show_token=args.show_token)
         tools = build_tools(config)
         memory = build_memory(config)
+        add_memory_tools(tools, memory)
         register_notes(tools, memory, config)
         chat = build_chat(config, tools, memory)
         if args.mode in ("text", "speak"):
