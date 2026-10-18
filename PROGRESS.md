@@ -3,9 +3,10 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 246 passed, 8 skipped (Linux build sandbox,
+**Current test count:** 320 passed, 8 skipped (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
-push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
+push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
+builds and smoke-tests the cloud Docker image. The
 sandbox skips are the tests that need something it can't reach: the Whisper
 model and Piper voice downloads (Hugging Face is blocked; CI downloads both
 and runs those tests), and the live Notion and Google calls (no keys). On
@@ -26,6 +27,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 57 | phone web app (`--mode web`) |
+| `test_cloud.py` | 52 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 
@@ -205,6 +208,72 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   unlocked `<audio>` element, a service worker that caches only the app shell
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
+
+## Cloud hosting (Render) ✅
+Runs the phone web app 24/7 on Render so it works with the PC off.
+- **Secrets from the environment.** `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON`
+  (the contents of `token.json` / `credentials.json`) replace the files when
+  set; a token from the environment is refreshed in memory and never written
+  to disk (nor any token with `[calendar] save_token = false`). A refused
+  refresh logs one clear warning with only the OAuth error code (e.g.
+  `invalid_grant`) and tells Claude the sign-in expired. The JSON values are
+  in log redaction too. No interactive sign-in on a server.
+- **Server profile** (`ASSISTANT_PROFILE=server`, set in the image; config
+  `SERVER_PROFILE`): Piper with the voice baked in, then espeak-ng (new
+  `EspeakTTS`, the `espeak-ng` command), then text only; no browser tool, no
+  wake word or chimes, logs to stdout only, listens on 0.0.0.0:`$PORT`; web
+  is the default and only audio-free mode. `--check` has a server variant: no
+  mic/speaker/wake-word checks; `WEB_TOKEN` required; time zone,
+  `GOOGLE_TOKEN_JSON` contents, Whisper cache, Piper and espeak-ng checked.
+  New env overrides: `ASSISTANT_TIMEZONE`, `WHISPER_MODEL`.
+- **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
+  itself is unchanged): `/healthz` -> `ok`; every other route needs the
+  cookie or Bearer token except the login page, its static files, login, the
+  manifest and icons (unknown paths 401 too); per-address lockout 5 wrong
+  tokens / 15 min -> 15 min, doubling to a day, global cap 30; forwarded
+  headers only from a private-address peer (`[cloud] trusted_proxies`),
+  rightmost untrusted `X-Forwarded-For` hop as the client; https redirect and
+  HSTS; bodies buffered and capped (4 MB audio, 16 KB otherwise, chunked
+  included); 120 requests/min per address; generic 500s. Whisper and the
+  voice load at startup in the background.
+- **Docker image** (`Dockerfile`, python:3.11-slim + espeak-ng + ffmpeg):
+  Whisper `base.en` and `tiny.en` and the Piper `en_US-lessac-medium` voice
+  downloaded at build time (`HF_HUB_OFFLINE=1` at run time), non-root user,
+  no openWakeWord. `.dockerignore` keeps secrets, logs, voices and the venv
+  out. `render.yaml` adds the `hey-claude` service (docker, `standard`,
+  `/healthz`, secrets `sync: false`, `WEB_TOKEN` generated) next to
+  `pinecone-mcp`.
+- **Memory, measured** in CI (`scripts/container_smoke.sh` +
+  `scripts/measure_memory.py`, GitHub runner, 4 CPUs, image built from this
+  branch), 5 s Piper clip of "Hey Claude, what's on my calendar tomorrow? And
+  do I have any assignments due this week?":
+
+  | Run | Peak RSS | Container (cgroup) peak | Transcribe 5 s |
+  |---|---|---|---|
+  | Server after one spoken turn, base.en + Piper | 465 MB | 395 MB | - |
+  | Script: imports + Piper + base.en + Piper reply | 564 MB | 507 MB | 0.71 s |
+  | Same, capped at 512 MB | 569 MB | 511 MB (at the cap) | - |
+  | Script with tiny.en | 467 MB | 410 MB | 0.43 s |
+
+  The imports alone are about 120 MB, the Piper voice adds about 160 MB, and
+  loading base.en briefly peaks about 150 MB above its steady size. Both
+  models transcribed the clip correctly ("...assignments to this week").
+  **Plan: Render Standard (2 GB, 1 CPU, $25/month)**: base.en needs up to
+  about 565 MB, more than Starter's 512 MB (it only stayed under the cap by
+  the kernel reclaiming file cache, with nothing left for a second session).
+  Starter ($7, 512 MB, 0.5 CPU) would work with `WHISPER_MODEL=tiny.en` at
+  about 410-470 MB, but with under 100 MB to spare and more misheard words;
+  documented in README as the cheaper option. Prices from Render's pricing
+  as listed in October 2026 (render.com itself was unreachable from the build
+  sandbox; check it when signing up).
+- **CI**: new `Docker image (cloud)` job builds the image, starts it as
+  Render would, checks `/healthz`, 401 on `/api/state` and `/silence.wav`,
+  wrong and right logins, a signed-in `/api/state`, a 413 upload, `--check`,
+  one real spoken turn (Whisper + Piper inside the container) and prints the
+  memory table to the job summary.
+- Tests: `test_cloud.py`, `test_server_profile.py` (offline, fake Google
+  credentials, mocked refresh). Not yet run on Render itself: README "Run it
+  in the cloud (Render)" and MANUAL_TEST.md "Cloud server on Render".
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

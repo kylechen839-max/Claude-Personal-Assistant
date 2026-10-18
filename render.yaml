@@ -9,8 +9,9 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Measured peak memory (PROGRESS.md, "Cloud hosting"): base.en + Piper
-    # does not fit Starter's 512 MB, so Standard (2 GB).
+    # Measured (PROGRESS.md, "Cloud hosting"): base.en + Piper peaks at
+    # 465-564 MB, more than Starter's 512 MB; Standard (2 GB, $25/month) has
+    # room. Starter ($7) only with WHISPER_MODEL=tiny.en, and tightly.
     plan: standard
     healthCheckPath: /healthz
     envVars:

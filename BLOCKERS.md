@@ -20,7 +20,7 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Cloud server on Render** (only Kyle can do these; see README "Run it
       in the cloud (Render)" and the Cloud section of MANUAL_TEST.md):
   - [ ] Render account with a payment card; New -> Blueprint from this repo
-        (CLOUD_PLAN plan, CLOUD_COST a month).
+        (Standard plan, $25 a month).
   - [ ] Paste the secrets into the Render dashboard: `ANTHROPIC_API_KEY`,
         `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
         `GOOGLE_TOKEN_JSON` (contents of `token.json`), `GOOGLE_CLIENT_JSON`

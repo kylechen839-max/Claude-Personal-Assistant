@@ -70,7 +70,7 @@ in `tests/test_cloud.py`):
   the rightmost address the proxy didn't vouch for (a client can prepend fake
   ones, not append). Plain http via the proxy is redirected to https; HSTS
   is sent over https. uvicorn's own proxy handling is off.
-- **Cookies:** Secure, HttpOnly, SameSite=Strict, 30 days.
+- **Cookies:** Secure, HttpOnly, SameSite=Strict, 90 days (renewed on use).
 - **Browser protections:** strict CSP (`default-src 'none'`, scripts and
   styles only from the app itself, `frame-ancestors 'none'`), nosniff,
   no-referrer, no CORS headers at all (cross-site API calls are refused with
@@ -94,7 +94,7 @@ in `tests/test_cloud.py`):
   can't change the app or models; nothing on the PC is reachable from it
   (`open_in_browser` is off).
 
-Left as is: the session cookie lasts 30 days and can't be revoked one by one
+Left as is: the session cookie lasts 90 days and can't be revoked one by one
 (rotate `WEB_TOKEN` to sign out everything); the login page itself is public
 (it contains no data); the client address used for lockouts depends on how
 Render fills `X-Forwarded-For` (if it ever arrives without the real client,

@@ -254,9 +254,13 @@ image or on its disk. It is on the public internet, so it is hardened
 (SECURITY.md, "Cloud server"): only the login page, `/healthz` and the app
 icon work without the token, and wrong tokens lock the sender out.
 
-Cost: the CLOUD_PLAN plan, CLOUD_COST a month (measured memory in
-PROGRESS.md, "Cloud hosting"). Render's free Hobby workspace is enough; you
-pay only for the service.
+Cost: the Standard plan (2 GB RAM), $25 a month. Speech recognition with
+Whisper `base.en` plus the Piper voice was measured at up to 564 MB, which
+doesn't fit the $7 Starter plan's 512 MB (PROGRESS.md, "Cloud hosting").
+Render's free Hobby workspace is enough; you pay only for the service. To
+save money you can switch the service to Starter and set `WHISPER_MODEL` to
+`tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
+mishears more often).
 
 1. **Push** this branch to GitHub (merged into master).
 2. **Create the service.** On render.com: sign up (GitHub login), add a
@@ -290,7 +294,8 @@ pay only for the service.
    `https://hey-claude.onrender.com` (the address at the top of the service
    page; Render may add a suffix) in **Safari**, paste the token once,
    allow the microphone, then Share -> **Add to Home Screen**. Open it from
-   the home screen from now on; it stays signed in for 30 days.
+   the home screen from now on; it stays signed in (90 days, renewed
+   each time you use it).
 
 If Google stops working (Render logs say "Google Calendar sign-in could not
 be refreshed"), sign in again on the PC as in step 3 and paste the new

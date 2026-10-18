@@ -37,7 +37,8 @@ RUN if [ "$FETCH_MODELS" = "1" ]; then \
 [urllib.request.urlretrieve(f'{sys.argv[1]}/{sys.argv[2]}{ext}', f'/app/voices/{sys.argv[2]}{ext}') \
  for ext in ('.onnx', '.onnx.json')]" "$PIPER_VOICE_URL" "$PIPER_VOICE" \
       && ls -la /app/voices; \
-    fi
+    fi \
+    && mkdir -p /opt/models /app/voices && chmod -R a+rX /opt/models /app/voices
 
 COPY config.toml ./
 COPY assistant ./assistant
