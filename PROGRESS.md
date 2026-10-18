@@ -208,6 +208,48 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
 
+## Pi preflight ✅
+Everything testable before the move to a Raspberry Pi, in one pass per
+machine, with a go/no-go (`PI_MIGRATION.md`).
+
+- **Simulated Pi in CI** (`.github/workflows/pi-arm64.yml`,
+  `scripts/ci/pi_simulation.sh`): Debian Bookworm linux/arm64 with Python
+  3.11.2 (what 64-bit Raspberry Pi OS is) on GitHub's native
+  `ubuntu-24.04-arm` runner, in a `debian:bookworm` container, as a normal
+  user `pi` with sudo. It runs `install_pi.sh` end to end (apt, venv, pip,
+  openWakeWord `--no-deps`, models), then again (must be a no-op), checks
+  the aarch64 wheels import (onnxruntime, ctranslate2, piper, openwakeword,
+  sounddevice), downloads the Piper voice, runs the **full pytest suite**,
+  `python -m assistant --check`, `install_service.sh` (systemctl/loginctl
+  stubbed and their calls checked) and `preflight.sh`, which runs the real
+  wake word -> VAD -> Whisper -> reply on the committed fixture, both TTS
+  engines, and `--mode web` with a text and an audio turn. Stubbed only:
+  systemd, the sound card (an ALSA `null` device) and Claude
+  (`scripts/ci/fake_claude.py`, no key in CI). Runs on every push to
+  master, on pushes that touch the Pi files, and by hand (with a QEMU
+  option). First green run: about 1.5 minutes in total (install 42 s,
+  pytest 17 s, preflight 8 s) with downloads cached.
+- **Preflight** (`assistant/preflight.py`, `scripts/preflight.ps1` for
+  Windows PowerShell 5.1+, `scripts/preflight.sh`): git, .env, `--check`,
+  pytest offline and live (live skips are a FAIL), the wake-word end to end
+  on `tests/fixtures/hey_claude_calendar_tomorrow.wav` (asserts a wake, a
+  transcript matching the phrase and a non-error reply), text-mode calendar
+  and Notion questions (the log must show both tools called), web mode on
+  127.0.0.1 (healthz, auth refusal, login with `WEB_TOKEN`, text and audio
+  turn), pyttsx3 and Piper renders, and with `--hardware` the audio device
+  list and a 3 s mic level. Table + `logs/preflight-<timestamp>.txt`.
+  Every `.env` value is masked in the console and the report.
+- **Smoke check** (`assistant/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
+  the same web checks against any base URL (Render, or the Pi).
+- **Tests** (`tests/test_preflight.py`): result parsing (junit, wake and
+  text output, mic levels), verdicts, every step's PASS/FAIL/SKIP rules with
+  faked commands, the smoke HTTP flow against a fake app, and redaction: a
+  fake `.env` whose values are echoed by every command never appears in the
+  console or the report. shellcheck and `bash -n` on every .sh; the .ps1
+  files are parsed by Windows PowerShell 5.1 and PSScriptAnalyzer in the
+  Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
+  preflight/smoke flags, step names and script paths.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -221,8 +263,10 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 - **pyttsx3/eSpeak flakiness in tests** (Linux): about 1 run in 10 the eSpeak
   driver writes an empty .wav or crashes. The tests re-render empty clips up
   to 3 times; a crash means re-running.
-- **Real Pi not tested:** systemd lingering, real audio devices and Pi
-  latency are in MANUAL_TEST.md's Raspberry Pi section.
+- **Real Pi not tested:** the arm64 CI job proves the install, packages,
+  models and pipeline on Bookworm arm64, but not real audio devices,
+  systemd lingering or Pi latency; those are `preflight.sh --hardware` and
+  MANUAL_TEST.md's Pi part.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.
