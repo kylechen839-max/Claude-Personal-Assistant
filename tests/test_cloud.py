@@ -46,7 +46,10 @@ def make_cloud(fake_client):
             assistant = webapp.WebAssistant(
                 lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
                 FakeTranscriber("what's on my calendar"), PrintTTS(), clock=clock)
+            trust = cloud.ProxyNetworks(hops=1, networks=tuple(
+                cloud.parse_networks(TRUSTED)))
             app = webapp.create_app(assistant, TOKEN, limiter=cloud.NeverBlock(),
+                                    trusted_proxy=trust,
                                     reap_interval=3600)
         kwargs = {"trusted_proxies": TRUSTED, "max_upload_bytes": 200_000,
                   "max_body_bytes": 16_384,
@@ -459,6 +462,16 @@ def test_forwarded_host_counts_only_from_the_proxy(make_cloud):
     r = direct.post("/api/turn", json={"text": "hi"}, headers={
         "Origin": "https://evil.example", "X-Forwarded-Host": "evil.example"})
     assert r.status_code == 403
+
+
+def test_web_app_trusts_the_same_proxy_networks():
+    from types import SimpleNamespace as NS
+
+    trust = cloud.ProxyNetworks(hops=1, networks=tuple(cloud.parse_networks(TRUSTED)))
+    assert webapp.parse_trusted_proxy(trust) is trust and bool(trust)
+    assert trust.trusts(NS(client=NS(host="10.204.7.1")))
+    assert not trust.trusts(NS(client=NS(host=PUBLIC)))
+    assert not trust.trusts(NS(client=None))
 
 
 def test_voice_page_files_are_public(make_cloud):

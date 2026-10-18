@@ -16,8 +16,8 @@ import pytest
 
 from assistant.chat import ClaudeChat, has_web_content
 from assistant.tools import Tool, ToolRegistry
-from assistant.voice_session import (VoiceConversation, fix_stream_wav, synthesize_wav,
-                                     wav_duration)
+from assistant.voice_session import (ChatBackend, VoiceConversation, fast_wav,
+                                     fix_stream_wav, wav_duration)
 from tests.conftest import make_response, text_block, tool_use_block
 from tests.voice_fakes import (Events, FakeSynth, FakeTranscriber, stream_client,
                                streamed)
@@ -27,13 +27,12 @@ SPEECH = np.zeros(16000, dtype=np.float32)
 
 def make_conv(client, *heard, tools=None, memory=None, clock=None, synth=None, **kw):
     events = Events()
-    holder = {}
     registry = tools or ToolRegistry()
-    registry.confirm = lambda q: holder["c"].confirm(q)
     chat = ClaudeChat(client=client, model="test-model", tools=registry, memory=memory)
-    conv = VoiceConversation(chat, FakeTranscriber(*heard), synth or FakeSynth(), events,
-                             **({"clock": clock} if clock else {}), **kw)
-    holder["c"] = conv
+    backend = ChatBackend(chat, confirm_timeout=kw.pop("confirm_timeout", 60))
+    registry.confirm = backend.confirm
+    conv = VoiceConversation(backend, FakeTranscriber(*heard), synth or FakeSynth(),
+                             events, **({"clock": clock} if clock else {}), **kw)
     return conv, chat, events
 
 
@@ -52,22 +51,9 @@ def user_texts(client):
             if m["role"] == "user" and isinstance(m["content"], str)]
 
 
-# --- ClaudeChat.ask_stream -------------------------------------------------------
+# --- ClaudeChat streaming (ask with on_text/cancel), abort, mark_interrupted -------
 
-def test_ask_stream_streams_text_and_keeps_history():
-    client = stream_client(streamed("Hi ", "Kyle."))
-    chat = ClaudeChat(client=client, model="m")
-    got = []
-    text, interrupted = chat.ask_stream("hello", got.append)
-    assert (text, interrupted) == ("Hi Kyle.", False)
-    assert got == ["Hi ", "Kyle."]
-    assert chat.history == [{"role": "user", "content": "hello"},
-                            {"role": "assistant", "content": [
-                                {"type": "text", "text": "Hi Kyle."}]}]
-    assert client.stream_calls[0]["model"] == "m"
-
-
-def test_ask_stream_runs_tools_between_rounds():
+def test_streamed_ask_runs_tools_between_rounds():
     reg = ToolRegistry()
     reg.register(Tool(name="list_events", description="List.",
                       input_schema={"type": "object", "properties": {}},
@@ -77,42 +63,28 @@ def test_ask_stream_runs_tools_between_rounds():
                  stop_reason="tool_use"),
         streamed("You have the dentist."))
     chat = ClaudeChat(client=client, model="m", tools=reg)
-    calls = []
-    text, _ = chat.ask_stream("what's tomorrow", lambda d: calls.append(("text", d)),
-                              on_tool=lambda n: calls.append(("tool", n)),
-                              on_round_end=lambda: calls.append(("round",)))
-    assert calls == [("text", "Let me check."), ("round",), ("tool", "list_events"),
-                     ("text", "You have the dentist.")]
-    assert text == "Let me check.You have the dentist."
+    got = []
+    text = chat.ask("what's tomorrow", on_text=got.append)
+    assert got == ["Let me check.", "You have the dentist."]
+    assert text == "You have the dentist."
     assert [m["role"] for m in chat.history] == ["user", "assistant", "user", "assistant"]
-    assert chat.history[2]["content"][0]["type"] == "tool_result"
 
 
-def test_ask_stream_error_rolls_back():
-    client = MagicMock()
-    client.messages.stream.side_effect = anthropic.APIConnectionError(
-        request=httpx.Request("POST", "https://api.anthropic.com"))
-    chat = ClaudeChat(client=client, model="m")
-    with pytest.raises(anthropic.APIConnectionError):
-        chat.ask_stream("hello", lambda d: None)
-    assert chat.history == []
-
-
-def test_stop_mid_stream_keeps_partial_reply_valid():
+def test_abort_closes_the_stream_at_once():
     s = streamed("One. ", "Two. ", "Three.", hold_after=1)
     chat = ClaudeChat(client=stream_client(s), model="m")
-    stop = threading.Event()
+    cancel = threading.Event()
     result = {}
     t = threading.Thread(target=lambda: result.update(
-        r=chat.ask_stream("count", lambda d: None, stop=stop)))
+        r=chat.ask("count", on_text=lambda d: None, cancel=cancel)))
     t.start()
-    assert s.held.wait(2)
-    stop.set()
+    assert s.held.wait(2)  # stuck waiting for the next delta
+    cancel.set()
     chat.abort()
     t.join(2)
-    assert result["r"] == ("One. ", True)
-    assert chat.history[-1] == {"role": "assistant",
-                                "content": [{"type": "text", "text": "One."}]}
+    assert not t.is_alive() and s.closed.is_set()
+    assert result["r"] == "One."
+    assert chat.history[-1] == {"role": "assistant", "content": "One."}
 
 
 def test_mark_interrupted_keeps_tool_and_web_blocks():
@@ -126,7 +98,7 @@ def test_mark_interrupted_keeps_tool_and_web_blocks():
     client = stream_client(FakeStream(["Searching. ", "It will rain at 3 PM. ",
                                        "Bring an umbrella."], web))
     chat = ClaudeChat(client=client, model="m")
-    chat.ask_stream("weather?", lambda d: None)
+    chat.ask("weather?", on_text=lambda d: None)
     assert has_web_content(chat.history)
     assert chat.mark_interrupted("Searching. It will rain")
     content = chat.history[-1]["content"]
@@ -342,10 +314,12 @@ def test_fix_stream_wav_and_duration():
 def test_real_espeak_sentence():
     from assistant.tts import Pyttsx3TTS
 
-    data = synthesize_wav(Pyttsx3TTS(), "Your dentist is tomorrow at three thirty.")
+    data = fast_wav(Pyttsx3TTS(), "Your dentist is tomorrow at three thirty.")
     assert data[:4] == b"RIFF"
     assert 1.0 < wav_duration(data) < 6.0
-    assert synthesize_wav(Pyttsx3TTS(), "--help")[:4] == b"RIFF"  # text, not an option
+    assert fast_wav(Pyttsx3TTS(), "--help")[:4] == b"RIFF"  # text, not an option
+    from assistant.webapp import render_wav
+    assert render_wav(Pyttsx3TTS(), "Hello.")[:4] == b"RIFF"  # the web app uses it
 
 
 def test_timings_flag_prints_voice_turn_lines():

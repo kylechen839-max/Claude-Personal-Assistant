@@ -51,6 +51,11 @@ class FakeStream:
             yield SimpleNamespace(type="content_block_delta",
                                   delta=SimpleNamespace(type="text_delta", text=part))
 
+    @property
+    def text_stream(self):
+        for event in self:
+            yield event.delta.text
+
     def get_final_message(self):
         return self.final
 

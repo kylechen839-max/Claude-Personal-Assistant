@@ -49,7 +49,8 @@ The socket is reachable wherever the web app is (including the public
 hosted setup), so it gets the same protection as the rest of the API plus
 limits of its own. The handshake is refused (close code 1008) without the
 signed session cookie or without an Origin header naming this site
-(`[webapp] allowed_origins` for a rewriting proxy); browsers always send
+(`[webapp] allowed_origins` for a rewriting proxy; X-Forwarded-Host counts
+only from a `trusted_proxy`); browsers always send
 Origin on WebSockets, so unlike plain requests a missing one is refused,
 which blocks cross-site WebSocket hijacking. Each utterance is at most
 `[voice] max_utterance_s` of 16 kHz PCM (uvicorn also caps frames at 2 MB),

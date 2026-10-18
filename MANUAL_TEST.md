@@ -212,6 +212,11 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 ## Voice conversation on the phone (optional, ~12 min)
 In the phone web app, tap **Voice conversation**. Turn the latency panel on
 with the stopwatch button.
+- [ ] iPhone permission: from the home-screen app, tap Voice conversation.
+      Deny the microphone the first time, then fix it as the README's
+      "On an iPhone" step 4 says, and try again.
+  - Should: a clear "Voice mode couldn't start" message on deny; after
+    allowing, it starts listening.
 - [ ] First tap: allow the microphone. Ask "What's on my calendar tomorrow?"
       and then just stop talking.
   - Should: the orb moves with your voice, pulses briefly, then the answer

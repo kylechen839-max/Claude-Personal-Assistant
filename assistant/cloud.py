@@ -37,6 +37,7 @@ import os
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 
 from assistant import webapp
 
@@ -59,10 +60,22 @@ WS_MAX_SIZE = 2_000_000  # largest WebSocket message: a 30 s utterance is ~1 MB
 HSTS = "max-age=31536000; includeSubDomains"
 
 
+@dataclass(frozen=True)
+class ProxyNetworks(webapp.ProxyTrust):
+    """The web app's proxy trust, by network instead of exact address: the
+    host's proxy reaches the container from a private address that changes
+    (`[cloud] trusted_proxies`). One proxy hop, as on Render."""
+
+    networks: tuple = ()
+
+    def trusts(self, conn) -> bool:
+        peer = conn.client.host if conn.client else ""
+        return _in_networks(peer, self.networks)
+
+
 class NeverBlock:
-    """Hands login limiting to CloudGuard, which knows the real client
-    address (the web app runs with trusted_proxy = 0 behind it, so to it
-    every request comes from Render's proxy: one shared address)."""
+    """Hands login limiting to CloudGuard, whose lockouts escalate (15 min
+    doubling to a day) and also cover unknown paths and the WebSocket."""
 
     def blocked(self, ip: str = "") -> bool:
         return False
@@ -436,12 +449,15 @@ def cloud_token(environ=os.environ) -> str:
 def build_app(config: dict, web_assistant, token: str):
     web, cloud = config["webapp"], config["cloud"]
     max_upload = int(web["max_upload_mb"] * 1_000_000)
-    # trusted_proxy 0: CloudGuard alone decides which forwarded headers count
+    # The web app trusts forwarded headers from the same networks as the
+    # guard, so its own checks (e.g. the voice socket's Origin against
+    # X-Forwarded-Host) agree with it.
+    trust = ProxyNetworks(hops=1, networks=tuple(parse_networks(cloud["trusted_proxies"])))
     app = webapp.create_app(web_assistant, token,
                             allowed_origins=web["allowed_origins"],
                             max_upload_bytes=max_upload,
                             max_audio_seconds=float(web["max_audio_seconds"]),
-                            trusted_proxy=0, limiter=NeverBlock(),
+                            trusted_proxy=trust, limiter=NeverBlock(),
                             voice=config.get("voice"))
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],

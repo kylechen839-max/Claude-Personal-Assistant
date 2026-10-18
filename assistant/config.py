@@ -107,7 +107,6 @@ DEFAULTS: dict = {
         "vad_threshold": 0.5,       # Silero speech probability, 0-1
         "idle_timeout": 120,        # seconds of quiet before it ends
         "max_session_minutes": 30,
-        "confirm_timeout": 60,      # seconds to wait for a spoken yes
         "utterances_per_minute": 30,  # per connection; more closes it
         "debug_panel": False,       # show latency timings on the page
     },

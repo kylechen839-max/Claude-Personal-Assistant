@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 391 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 394 passed, 9 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -28,13 +28,13 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 60 | phone web app (`--mode web`) |
-| `test_cloud.py` | 62 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_cloud.py` | 63 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 22 | voice mode: turn pipeline, barge-in |
-| `test_voice_ws.py` | 20 | voice mode: WebSocket, limits, files |
+| `test_voice_ws.py` | 24 | voice mode: WebSocket, limits, files |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -244,7 +244,9 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   voice load at startup in the background. The voice WebSocket
   (`/api/voice`) passes the same checks before its handshake (rate limit,
   cookie or Bearer with lockout, same-site Origin); `X-Forwarded-Host` is
-  dropped unless the proxy sent it; uvicorn runs with `ws="auto"` (the
+  dropped unless the proxy sent it. The web app inside trusts forwarded
+  headers from the same networks (`ProxyNetworks`, a `ProxyTrust` by CIDR),
+  so its own proxy-aware checks agree with the guard. uvicorn runs with `ws="auto"` (the
   `websockets` sans-I/O implementation) and `ws_max_size` 2 MB.
 - **Docker image** (`Dockerfile`, python:3.11-slim + espeak-ng + ffmpeg):
   Whisper `base.en` and `tiny.en` and the Piper `en_US-lessac-medium` voice
@@ -301,14 +303,19 @@ the Claude apps. Tap "Voice conversation" once; End, "goodbye" or 2 minutes
 of quiet ends it.
 - Files: `assistant/voice_ws.py` (WebSocket route, limits, static files),
   `assistant/voice_session.py` (turn pipeline), `assistant/sentences.py`,
-  `ClaudeChat.ask_stream / abort / mark_interrupted` in `chat.py`;
+  `ClaudeChat.abort / mark_interrupted` in `chat.py`;
   `assistant/web/voice.js` (mic, playback, socket, UI),
   `voice-core.js` (DOM-free: endpointer, energy VAD, turn state machine,
   framing), `voice-worklet.js` (16 kHz capture), `voice.css`, and the
   vendored `web/vad/` (onnxruntime-web 1.22.0 + Silero v5, see its NOTICE).
-  Edits to the phone-web files are additive: CSP `'wasm-unsafe-eval'`, a
-  `voice=` argument and one `add_voice_routes()` call in `create_app`, and
-  the button + view in `index.html`.
+  It is built on the web app's own pieces: auth through `require_session`
+  (cookie or Bearer, lockouts, cross-site check), the browser's session and
+  conversation through `WebAssistant.chat_stream(session, text, cancel)` and
+  `answer(session, yes)`, and `transcribe` / `synthesize`. Edits to the
+  phone-web files are additive: CSP `'wasm-unsafe-eval'`, a `voice=`
+  argument and one `add_voice_routes()` call in `create_app`, `ws_max_size`
+  in `serve`, eSpeak/Piper fast paths at the top of `render_wav`, and the
+  button + view in `index.html`.
 
 Design decisions:
 - **Capture**: `getUserMedia` with echo cancellation, noise suppression and
@@ -331,30 +338,36 @@ Design decisions:
   per-chunk round trip (a phone on mobile data pays ~100+ ms per request),
   and a closed socket is an unambiguous cancel. Binary frames carry a small
   JSON header + payload (16 kHz PCM16 up, one WAV per sentence down).
-- **Pipeline**: Whisper (shared, locked) -> `messages.stream` -> sentence
+- **Pipeline**: Whisper (shared, locked) -> `chat_stream` (Claude's
+  `messages.stream`) -> sentence
   splitter (waits one character past a period, so "3:30 p.m. tomorrow",
   "Dr. Lee", "e.g.", "U.S.", "$3.50" stay whole, and "at 3 PM. Then"
   splits; long runs are cut at a comma) -> a per-turn TTS thread (through
-  the web app's single TTS thread: Piper in memory, eSpeak directly on Linux
-  for the pyttsx3 engine, SAPI to a file on Windows) -> WAV chunks. The page
+  `WebAssistant.synthesize`, the web app's single TTS thread: Piper in
+  memory, eSpeak directly on Linux for the pyttsx3 engine, SAPI to a file on
+  Windows) -> WAV chunks. The page
   schedules chunks back to back in Web Audio. Text before a tool call ("Let
   me check.") is spoken while the tool runs.
 - **Barge-in**: ~250 ms of confident speech while thinking or speaking stops
   playback immediately and sends `interrupt` with how much was heard (whole
-  chunks + fraction of the current one). The server sets the turn's stop
-  event and closes the Claude stream (`abort()`), skips remaining TTS, and
+  chunks + fraction of the current one). The server sets the turn's
+  `cancel` event and closes the Claude stream at once (`ClaudeChat.abort()`,
+  rather than waiting for its next delta), skips remaining TTS, and
   rewrites the turn's assistant text to just the heard part plus
   "[interrupted: Kyle started talking, so the rest of this reply was not
   said]"; tool calls/results and web-result blocks are kept, so the
   web-content confirmation rule still applies. Late chunks of a cancelled
   turn are dropped on the page by turn id.
-- **Confirmations**: the tools' confirm callback speaks the question and
-  waits; the next utterance is transcribed and answers it (strict `is_yes`)
-  and is never sent to Claude. Talking over the question doesn't cancel the
-  turn. No answer within `confirm_timeout` (60 s) is "no".
-- **Conversation**: one ClaudeChat per voice connection (tools and memory
-  as in the web app); End, "goodbye", idle (2 min) or the 30 min cap ends
-  it and stores the Pinecone summary; so does closing the socket.
+- **Confirmations**: the session's "confirm" event (from the web app's
+  confirmation gate) makes the voice view speak the question; the next
+  utterance is transcribed and answers it through `answer(session, yes)`
+  (strict `is_yes`) and is never sent to Claude. Talking over the question
+  doesn't cancel the turn. No answer within `[webapp] confirm_timeout` is
+  "no".
+- **Conversation**: the phone's one web-app conversation (so push-to-talk
+  and voice continue each other; tools and memory as in the web app); End,
+  "goodbye", idle (2 min) or the 30 min cap ends it and stores the Pinecone
+  summary; so does closing the socket. One voice socket per browser.
 - **iOS**: start from the tap, Wake Lock (rejections ignored, re-requested
   when visible), pause on `visibilitychange`, AudioContext "interrupted"
   (calls, Siri) and mic track mute; "Tap to continue" resumes.
@@ -373,8 +386,9 @@ Design decisions:
 Tested:
 - `tests/test_sentences.py` (17): abbreviations, initials, decimals, times
   ("3:30 PM.", "p.m. tomorrow"), quotes, streaming token by token.
-- `tests/test_voice.py` (22): `ask_stream` (deltas, tool rounds, rollback,
-  stop mid-stream), `mark_interrupted` keeping web blocks; the chunker sends
+- `tests/test_voice.py` (22, on a plain-ClaudeChat backend): streamed
+  tool rounds, `abort()` closing a stalled stream, `mark_interrupted`
+  keeping web blocks; the chunker sends
   the first sentence's audio while the mocked Claude stream is still held
   open; barge-in mid-reply aborts the stream, skips unsynthesized sentences
   and truncates history to "First sentence here. Second one..."; barge-in
@@ -382,9 +396,12 @@ Tested:
   yes / no / unrelated answer (never sent to Claude), timeout; goodbye and
   memory; idle/max-length; End during a turn; API error spoken; real eSpeak
   render.
-- `tests/test_voice_ws.py` (20): no/forged cookie and missing/foreign/`null`/
-  look-alike Origin rejected (1008); a whole streamed turn over the socket;
-  barge-in over the socket and the next request's history; closing the
+- `tests/test_voice_ws.py` (24): no/forged cookie and missing/foreign/`null`/
+  look-alike Origin rejected (1008), X-Forwarded-Host only from a trusted
+  proxy; a whole streamed turn over the socket;
+  barge-in over the socket and the next request's history; spoken yes/no
+  through the web app's confirmation (answer never sent as a request);
+  voice continuing a push-to-talk conversation; closing the
   socket aborts generation and saves the summary; oversize/wrong-rate/junk
   frames (1009/1003), long text and message floods, utterance rate limit
   (1008), max session length; vendored files served byte-exact (SHA-256 in
@@ -405,14 +422,15 @@ Tested:
   ("Tomorrow you have the dentist at 3:30... [interrupted: ...]"); the
   energy fallback worked too; End closed the view.
 - **Measured first-audio latency** (mocked Claude streaming at ~50 ms per
-  delta): server, utterance received -> first audio sent 0.13 s; page, end
-  of turn (VAD) -> first audio playing 0.17-0.20 s, i.e. ~0.9 s after the
-  speech actually stopped (700 ms of that is the end-of-turn silence). The
-  pytest WebSocket round trip with real eSpeak: 37 ms. On the real thing add
-  Whisper (base.en on CPU, measured in CI by
-  `test_first_audio_latency_with_real_whisper`) and Claude's time to first
-  token (typically 0.5-1 s), which keeps it under ~2 s on a decent
-  connection.
+  delta): server, utterance received -> first audio sent 0.13-0.15 s; page,
+  end of turn (VAD) -> first audio playing 0.17-0.21 s, i.e. ~0.9 s after
+  the speech actually stopped (700 ms of that is the end-of-turn silence).
+  pytest WebSocket round trip with real eSpeak: 27-74 ms. With **real
+  Whisper** (base.en, CPU int8, GitHub Ubuntu runner, CI
+  `test_first_audio_latency_with_real_whisper`): utterance -> first audio
+  sent **0.60 s** (transcript 0.58 s). Add Claude's time to first token
+  (typically 0.5-1 s) and the network: about 1.5-2 s after Kyle stops
+  talking, within the ~2 s target on a decent connection.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
