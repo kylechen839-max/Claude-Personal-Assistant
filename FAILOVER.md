@@ -319,6 +319,11 @@ environment variables and secret files on Render): `ANTHROPIC_API_KEY`,
 
 ## 8. Known limits
 
+- Until the SQLite history store (claude/history) is on master and wired to
+  the sync, each backend keeps its own conversation in memory: after a
+  failover, Claude on the new backend doesn't see the earlier turns of the
+  conversation (Pinecone memory still works).
+
 - The phone must be on the tailnet to use the Pi or PC; on cellular without
   Tailscale it uses the cloud.
 - Tokens can't be revoked one device at a time (rotate `WEB_TOKEN`).

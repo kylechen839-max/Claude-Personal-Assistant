@@ -32,7 +32,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_failover_sync.py` | 74 | failover: history event log merge and sync |
 | `test_failover_leader.py` | 170 | failover: leader check for scheduled jobs |
 | `test_failover_config.py` | 7 | failover: `[failover]` settings, `--role` |
-| `tests/js/backend-router.test.mjs` | 32 | failover: the phone app's backend router (`node --test`) |
+| `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
+| `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -261,5 +262,20 @@ The phone app's backend failover, documented in FAILOVER.md.
   sync convergence with three stores, random interleavings, duplicates and
   outages, tombstones, leader election with flapping peers and partitions.
   CI runs the node tests in a `backend-router` job.
-- Phase B (wiring into the phone web app, voice mode, cloud host and the
-  SQLite history store) follows as those branches land on master.
+- Phase B, phone web app (done): with a `[failover] role`, `--mode web` is
+  wrapped in the edge middleware, its CSP lists the backends, and the page
+  switches to bearer tokens + the router, with a Pi / PC / Cloud badge and
+  a Backends section in Settings. Checked in headless Chromium against
+  three live local backends: Pi; Pi killed mid-conversation -> "Pi didn't
+  answer; tap to try again" (not replayed) -> the tap goes to the PC; PC
+  killed -> Cloud; Pi back -> Pi. That run found a real bug the node tests
+  couldn't (window.fetch called as a method), now fixed and tested.
+- Phase B still to do as the branches land on master: the SQLite history
+  store (`claude/history`: run `Syncer` and mount the sync endpoints on it),
+  voice mode's WebSocket (`claude/voice-mode`: first-message auth, and
+  `beginTurn`/`endTurn` around a voice turn) and the cloud host
+  (`claude/cloud-host`: `ASSISTANT_ROLE=cloud`, `APP_ORIGIN`).
+
+Known issue until the history store lands: each backend has its own
+in-memory conversation, so after a failover Claude doesn't see the earlier
+turns of that conversation (memory from Pinecone still works).
