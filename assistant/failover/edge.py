@@ -130,6 +130,13 @@ class EdgeMiddleware:
             return True, None  # same origin: no CORS headers needed
         return False, None
 
+    async def _fail(self, ip: str) -> None:
+        """Count a wrong token. Newer LoginLimiters return a delay that
+        slows wrong attempts once many arrive; honor it (capped)."""
+        delay = self.limiter.fail(ip)
+        if isinstance(delay, (int, float)) and delay > 0:
+            await asyncio.sleep(min(float(delay), 5.0))
+
     @staticmethod
     def needed_scope(path: str) -> str:
         return "sync" if path.startswith("/api/sync/") else "app"
@@ -209,7 +216,7 @@ class EdgeMiddleware:
                     if self.limiter.blocked(ip):
                         return await _json(send, 429, {"error": "too many attempts"},
                                            cors([("retry-after", "900")]))
-                    self.limiter.fail(ip)
+                    await self._fail(ip)
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
             scope = dict(scope, auth=claims)
@@ -262,7 +269,7 @@ class EdgeMiddleware:
             if self.limiter.blocked(ip):
                 return await _json(send, 429, {"error": "too many attempts, wait a few minutes"},
                                    cors([("retry-after", "900")]))
-            self.limiter.fail(ip)
+            await self._fail(ip)
             log.warning("Token request with a wrong WEB_TOKEN")
             return await _json(send, 401, {"error": "wrong token"}, cors())
         sid = data.get("sid") if isinstance(data.get("sid"), str) else None
