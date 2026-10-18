@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 249 passed, 8 skipped (Linux build sandbox,
+**Current test count:** 384 passed, 9 skipped (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
@@ -28,6 +28,11 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webapp.py` | 60 | phone web app (`--mode web`) |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
+| `test_gmail.py` | 28 | Gmail tools, scopes, email as untrusted input |
+| `test_notes.py` | 9 | quick-capture notes |
+| `test_lecture.py` | 28 | lecture uploads, pipeline, Notion database |
+| `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
+| `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -208,6 +213,53 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
 
+## Email, notes, lectures and homework tutor ✅
+Four features on top of the seven stages (branch `claude/features`).
+
+- **Gmail** (`assistant/tools/gmail.py`, `google_auth.py`): `email_summary`
+  (unread/important in the last N hours, capped, sender/subject/one-line
+  gist), `read_email` (plain text, quoted thread and HTML stripped,
+  trimmed), `draft_reply` (a draft in the same thread, after a yes; no send
+  tool, no send scope). Sign-in moved to `google_auth.py` (one token for
+  Calendar + Gmail; `GOOGLE_TOKEN_JSON` for the cloud). An old token keeps
+  Calendar working; Gmail stays off with a message naming
+  `python -m assistant.tools.google_auth`, also in `--check`. Email results
+  count as untrusted content (`Tool.untrusted_output`,
+  `chat.has_untrusted_content`), so changes ask first; `Tool.private`
+  keeps email text and replies out of the log.
+  Tested: mocked Gmail service, prompt-injection emails x 5 actions x 2
+  readers, scope detection, cloud token, log check.
+- **Quick notes** (`assistant/tools/notes.py`): `remember_note`,
+  `recall_notes`, `list_recent_notes`, `delete_note` in Pinecone
+  (`voice-assistant`, `kind=note`, `created_at`, tags). Deletes ask and
+  only touch `note-` ids. `QuickNotes.on_saved` is the hook for showing
+  notes in conversation history once that lands (via the history module's
+  public functions, not its store). Tested with an in-memory fake index.
+- **Lecture recorder** (`assistant/lecture.py`, `webfeatures.py`, Lecture
+  tab): offset-based resumable uploads (gap -> 409 with the server's
+  offset, repeats ignored, size caps), a background job (one at a time,
+  resumes after restart) that decodes with PyAV in 10-minute windows
+  (faster-whisper's own file decoder fails with PyAV 19, and windows keep
+  memory flat), transcribes with progress, summarizes with a forced Claude
+  tool call, finds or creates "Lecture Notes" next to Assignments, and
+  files a page with inline/block equations. Assignment-like action items
+  are offered with Add buttons. Tested: resume after a lost chunk,
+  concurrent resends, pipeline with mocked Whisper/Claude/Notion, retry
+  without re-transcribing, DB find/create/refused paths, real WebM/Opus and
+  MP4/AAC decoding, and (CI) real Whisper on a generated WebM lecture.
+  The page was also driven in headless Chromium with a fake microphone.
+- **Homework tutor** (`assistant/tutor.py`, `mathspeech.py`, Tutor tab):
+  client-side resize to 1600 px, server allowlist (JPEG/PNG/WebP by
+  content), size and pixel caps, EXIF stripped by re-encoding, Socratic
+  prompt with full solutions only on request, KaTeX vendored under
+  `/static/katex` and drawn with `katex.render` (CSP-safe), spoken replies
+  with LaTeX read aloud. Tested: auth on every route, type/size rejection,
+  EXIF removal, mocked vision call, 27 LaTeX-to-speech forms.
+- Waiting on other branches: voice mode (spoken tutor replies in the
+  hands-free mode can use `mathspeech.speakable` and the page's
+  `window.heyClaudeMath`), cloud host (`[lecture] upload_dir` on `/data`,
+  `GOOGLE_TOKEN_JSON`), history (notes via `on_saved`).
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -226,3 +278,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.
+- **Lectures need the app in the foreground.** Phones pause web pages that
+  are in the background or locked; the page holds a screen wake lock, but
+  switching apps during a lecture can stop the recording on iPhone.
+- **Gmail and lectures untested with real accounts** here (no keys in the
+  sandbox): MANUAL_TEST.md "Email, notes, lectures, tutor".

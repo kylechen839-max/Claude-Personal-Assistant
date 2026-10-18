@@ -240,6 +240,84 @@ minutes (signed-in phones keep working). `GET /healthz` answers `{"ok":
 true}` without signing in. Scripts can send `Authorization: Bearer
 <WEB_TOKEN>` instead of the cookie.
 
+## Email, notes, lectures and homework help
+
+### Email triage by voice (Gmail)
+"Anything important in my email?", "Read the one from Professor Smith",
+"Reply that I'll add error bars." The assistant lists unread or important
+mail from the last day (sender, subject, a one-line gist, at most
+`[gmail] max_summary` messages), reads one message in plain text, and saves
+a reply as a **Gmail draft** after you say yes. It never sends email: there
+is no send tool, and the Google sign-in asks only for read access and
+drafts (`gmail.readonly`, `gmail.compose`). You review and send drafts in
+Gmail yourself.
+
+Gmail uses the same Google OAuth client as Calendar, but a `token.json`
+from before this feature only has the Calendar permission. Sign in once
+more so Google can ask for the new ones (Calendar keeps working until you
+do; the startup line and `--check` remind you):
+
+```powershell
+python -m assistant.tools.google_auth            # or add --headless without a browser
+```
+
+In the Google Cloud console the Gmail API must be enabled for the
+"Hey Claude" project (APIs & Services -> Library -> Gmail API -> Enable).
+For a cloud host, put the whole contents of `token.json` in the
+`GOOGLE_TOKEN_JSON` secret instead of copying the file.
+
+Email is written by other people, so it is treated like web pages: while
+an email is in the conversation, anything that changes something
+(calendar, Notion, notes, drafts) asks for a spoken yes first, and email
+text never goes into the log file (see SECURITY.md).
+
+### Quick notes
+"Remember that the lab report needs error bars" saves a short note in
+Pinecone (your `voice-assistant` namespace, tagged as a note);
+"What did I need for the lab report?" finds it by meaning. You can also ask
+for your recent notes or to delete one (it asks first). Notes need
+`[memory]` (Pinecone); `[notes] enabled` turns them off.
+
+### Record a lecture (phone app)
+In the phone app, open the **Lecture** tab, pick the course (the options
+come from the Course property of your Notion Assignments database), and
+tap Start. Ask the professor first: the screen shows a reminder. The page
+keeps the screen awake, shows the elapsed time, and uploads the audio every
+10 seconds in small pieces; if the network drops, it keeps recording and
+resends from where the PC left off, so a 75-minute lecture survives Wi-Fi
+blips (keep the app open in the foreground). Tap Stop when the lecture ends.
+
+The PC then transcribes the recording with faster-whisper (`[lecture]
+model`: "base.en", or "tiny.en" for speed; progress shows in the app),
+asks Claude for notes (Summary, Key concepts, Equations in LaTeX, Action
+items, Questions to ask), and creates a page in a **Lecture Notes**
+database inside your Fall 2026 Assignments page, with Title, Course, Date
+and Duration. The database is created automatically the first time (with
+the same Course options); if the integration isn't allowed to, the job says
+so and BLOCKERS.md has the two-minute fix. Action items that look like
+assignments are listed under the lecture with an **Add** button; nothing is
+added to Assignments unless you tap it. A failed job can be retried without
+transcribing again.
+
+The audio is deleted as soon as it is transcribed (`[lecture] keep_audio =
+true` keeps it) and the transcript once the Notion page exists. Recordings
+and job state live in `[lecture] upload_dir` (`data/lectures`; point it at
+the `/data` disk on a cloud host). Other settings: `max_upload_mb` (300 per
+recording), `chunk_mb` (4), `notes_database_id` (use an existing database
+instead of finding/creating one).
+
+### Homework tutor (phone app)
+In the **Tutor** tab, take or choose a photo of a problem, add a question
+("I got x = -3, where did I go wrong?") or just tap Ask. Claude looks at
+the photo and tutors Socratically: hints and questions, checking your
+reasoning step by step. It gives the full worked solution only when you tick
+"Show the full solution" or ask for it. Equations are drawn with KaTeX
+(bundled with the app, no CDN); with "Read explanations aloud" on, the
+reply is spoken with the maths read naturally ("x squared over 2"). The
+phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
+PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
+metadata (EXIF, including location) before sending it to Claude.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
@@ -362,8 +440,14 @@ assistant/
   audio.py      wav I/O, resampling, chime
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
-  web/          the page: index.html, app.js, app.css, sw.js
-  tools/        calendar.py, notion.py, web.py, tool registry
+  webfeatures.py lecture recorder + tutor routes for the phone app
+  lecture.py    chunked uploads, transcription job, Notion lecture notes
+  tutor.py      homework photos: checks, EXIF removal, Socratic vision call
+  mathspeech.py LaTeX read aloud
+  web/          the page: index.html, app.js, app.css, sw.js;
+                static/ features.js/css, vendored KaTeX
+  tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
+                notion.py, notes.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)

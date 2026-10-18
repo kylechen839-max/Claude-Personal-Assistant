@@ -22,7 +22,10 @@ DOCS = ["README.md", "MANUAL_TEST.md"]
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--bg", "--https"}  # + tailscale serve
-OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
+# Tool names, not settings.
+OTHER_IDENTIFIERS = {"open_in_browser", "email_summary", "read_email",
+                     "draft_reply", "remember_note", "recall_notes",
+                     "list_recent_notes", "delete_note"}
 
 
 class _Captured(Exception):
