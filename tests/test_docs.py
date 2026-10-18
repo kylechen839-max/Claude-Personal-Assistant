@@ -22,7 +22,8 @@ DOCS = ["README.md", "MANUAL_TEST.md"]
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall"}
-OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
+OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
+                     "resume_conversation"}  # tool names, not settings
 
 
 class _Captured(Exception):

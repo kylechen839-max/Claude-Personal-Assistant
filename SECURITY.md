@@ -72,3 +72,56 @@ level nothing secret was found being logged.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
+
+## Conversation history
+
+Every conversation is saved to a SQLite file so it can be searched and
+continued (`assistant/history.py`). What that means for privacy:
+
+- **Where it lives.** One file, `[history] path` (default
+  `data/history.sqlite`, plus `-wal`/`-shm` files next to it while the
+  assistant runs): on the PC's disk, on the Pi's SD card, and on the Render
+  deploy on its persistent disk (`HISTORY_PATH=/data/history.sqlite`).
+  `data/` and `*.sqlite*` are gitignored, so it is never committed. Anyone
+  with access to that disk or a backup of it can read the transcripts.
+- **What is in it.** User and assistant text, the conversation title and
+  summary, timestamps and the source (wake / text / web / voice). For tools,
+  only the tool name, at most four argument values cut to 40 characters, and
+  ok / error / cancelled. Tool *results* (calendar entries, Notion pages,
+  web pages) are never stored. Text is passed through the same redaction as
+  the log file before it is written, so API keys, OAuth tokens and Bearer
+  headers that end up in a message are stored as `[REDACTED]`.
+- **Retention.** Unlimited by default. `[history] retention_days` deletes
+  unpinned conversations older than that many days at each start;
+  `[history] max_mb` (500) deletes the oldest unpinned ones when the file
+  grows past it. Pinned conversations are only deleted by hand. Deleted rows
+  are released with SQLite's incremental vacuum.
+- **Deleting.** `--history delete ID` (and the phone app's delete) removes
+  the conversation, its messages and its search index entries, and first
+  deletes its summary vector(s) from Pinecone (the summary metadata stores
+  the conversation id). If Pinecone can't be reached, nothing is deleted and
+  you're told, so a retry can't leave an orphaned summary. Retention and the
+  size guard delete local history only; long-term memory notes in Pinecone
+  are kept, as they are a separate feature.
+- **Incognito.** `--incognito` or `[history] incognito = true` saves nothing:
+  no history rows and no Pinecone summary. Searching existing history still
+  works; resuming a conversation is refused while incognito.
+- **Ids.** Conversations are addressed by 16 random URL-safe characters
+  (96 bits from `secrets`), not row numbers, so ids in URLs can't be guessed
+  or counted. Every query is also filtered by the store's owner.
+- **Export** contains only the transcript, title, summary, dates and
+  source: no owner, Pinecone ids or other internal fields, and text is
+  redacted again on the way out.
+- **Titles and summaries** are written by one extra call to the Anthropic API
+  (`[history] title_model`) with the conversation text, the same data the
+  conversation already sent. If it fails, the first thing Kyle said is used.
+- **Search tools.** `search_conversations` returns only titles, dates and
+  short snippets to Claude, and `resume_conversation` always asks for a
+  spoken yes first. A web page in context could ask Claude to search history;
+  the snippets then end up in the conversation, but nothing leaves the
+  machine except through tools that already ask before acting.
+- **Not done: encryption at rest.** The database is a plain SQLite file.
+  Encrypting it (SQLCipher) needs a native build on Windows and the Pi and a
+  key that would have to live next to the file anyway, so it is out of
+  scope; use full-disk encryption (BitLocker on Windows, an encrypted disk
+  on the Pi) if the device could be stolen.

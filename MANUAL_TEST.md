@@ -1,6 +1,6 @@
 # Manual test checklist
 
-One sitting on the Windows PC, about 25 minutes. Do the steps in order; each
+One sitting on the Windows PC, about 30 minutes. Do the steps in order; each
 one says what to do, what should happen, and what to change in `config.toml`
 if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
 then run it again).
@@ -165,6 +165,30 @@ Ctrl+C to stop.
   - If slow: the `transcript` step is Whisper (try `[stt] model =
     "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
     `silence_ms` pause.
+
+## 12. Conversation history (4 min)
+- [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
+      lab report graph?" Let the follow-up window close. Wait ~10 s, then
+      `python -m assistant --history list` in a second PowerShell window.
+  - Should: a line with a short title like "Lab report error bars", source
+    `wake`, and today's time.
+- [ ] "Hey Claude, continue our conversation about the lab report."
+  - Should: it asks "Continue 'Lab report error bars' from today? Please say
+    yes or no." Say "yes", then "and what about standard deviation?"
+  - Should: the answer is clearly about error bars (it kept the context).
+    `--history show ID` shows both parts in one conversation.
+- [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
+  - Should: a one or two sentence answer naming the topics.
+- [ ] `python -m assistant --history search error bars`
+  - Should: the conversation, with "error" and "bars" highlighted.
+- [ ] Ctrl+C, run `python -m assistant --mode text --incognito`, type
+      "this is a secret test", then `quit`. Run `--history search secret`.
+  - Should: "No conversations match." (and no "Saved to memory" line).
+- [ ] `python -m assistant --history delete ID` with the lab report id,
+      answer `yes`, then `--history list`.
+  - Should: it's gone. If Pinecone is set up, its memory summary is
+    deleted too (the `voice-assistant` namespace in the Pinecone console
+    has one vector fewer).
 
 Note anything that failed or any setting you changed in BLOCKERS.md.
 

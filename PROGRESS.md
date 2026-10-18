@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 190 passed, 7 skipped (Linux build sandbox,
+**Current test count:** 255 passed, 7 skipped (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
@@ -27,6 +27,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_timing.py` | 9 | `--timings` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
+| `test_history.py` | 65 | conversation history |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -135,6 +136,54 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   CI) and calendar code; only Anthropic and Google are mocked.
 - `tests/test_docs.py`: every `--flag` and `[section] key` in README.md and
   MANUAL_TEST.md exists in the code; no stale names (Porcupine, old models).
+
+## Conversation history ✅ (phase A: PC/Pi and text mode)
+- `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
+  `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
+  `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
+  source wake/text/web/voice, timestamps, title, summary, pinned, archived),
+  `messages` (seq, role, kind chat/confirm, text, interrupted, compact
+  `tool_events` JSON) and `memory_vectors` (Pinecone ids). FTS5 index over
+  messages, titles and summaries kept in sync by triggers, bm25 ranking
+  (titles weigh more), snippets with highlights, prefix matching, filler
+  words dropped, any-word fallback; LIKE search if FTS5 is missing.
+  Retention (`retention_days`) and a size guard (`max_mb`) skip pinned
+  conversations.
+- Recording: `ClaudeChat(recorder=...)` saves the user turn before calling
+  the API and the reply after, with spoken/typed delete confirmations
+  (question and the heard answer) and `mark_interrupted()` for barge-in.
+  `end_conversation()` hands the conversation to a background thread that
+  asks `[history] title_model` for a title (<= 6 words) and summary, with the
+  first user message as the fallback. Conversations left open by a crash are
+  titled at the next start. The Pinecone summary now stores
+  `conversation_id` in its metadata, and its vector id is kept for deletes.
+- Search: FTS ranked keyword hits, then Pinecone semantic hits that link to
+  a conversation; filters by date range, source, pinned, archived.
+- Continue: `rebuild_history()` turns stored messages into plain-text turns
+  (tool events and confirmations as text, interrupted replies noted),
+  trimmed to `max_history` with a summary of older turns first.
+  `ClaudeChat.resume(id)`; tools `search_conversations` (titles, dates,
+  snippets) and `resume_conversation` (asks "Continue '...' from Tuesday?",
+  switches after the reply; a conversation that was only the "continue..."
+  request is dropped, a real one is saved first).
+- CLI: `--history list|search|show|export|delete`, `--format md|json`,
+  filters `--source/--since/--until/--pinned`, `--yes`, `--continue ID|last`,
+  `--incognito`.
+- Tests (`test_history.py`): CRUD, owner scoping, id randomness, migrations
+  (upgrade, rollback, newer schema refused, FTS built later), a real crash
+  in a subprocess then reopen, FTS and LIKE ranking/snippets/filters (each
+  test runs on both), retention and size guard, titles with a mocked API and
+  the fallback, off-the-hot-path titling, recording through ClaudeChat
+  (tool events, confirmations, errors, interruptions, incognito), resume
+  rebuilding and trimming, the tools via mocked Claude tool calls (search,
+  resume yes/no, mid-conversation, unknown id), semantic merge, delete
+  cascading to a mocked Pinecone (and not deleting when Pinecone fails),
+  export redaction, and the CLI commands. Performance: 5,000 seeded
+  conversations (50,000 messages), median search under 100 ms (about
+  30-55 ms in the sandbox even on a tiny vocabulary where every word
+  matches most messages).
+- Still to come (phase B, after phone-web and voice-mode are merged): the
+  authed JSON API, the History screen in the phone app, and voice-mode hooks.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
