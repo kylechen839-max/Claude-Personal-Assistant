@@ -17,6 +17,18 @@ def make_response(*blocks, stop_reason="end_turn"):
     return SimpleNamespace(content=list(blocks), stop_reason=stop_reason)
 
 
+# Settings the web server reads from the environment. On a PC or server
+# that sets them (e.g. TRUSTED_PROXY=127.0.0.1 behind tailscale serve), they
+# would leak into tests that check defaults; tests that need them set them.
+WEB_ENV_VARS = ("PORT", "TRUSTED_PROXY", "WEB_TOKEN")
+
+
+@pytest.fixture(autouse=True)
+def clear_web_env(monkeypatch):
+    for var in WEB_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def fake_client():
     """A mocked anthropic.Anthropic() whose messages.create returns queued replies."""
