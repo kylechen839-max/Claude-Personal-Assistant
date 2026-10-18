@@ -10,9 +10,14 @@ import numpy as np
 SAMPLE_RATE = 16000  # what Whisper and openWakeWord expect
 
 
-def read_wav(path: str | Path) -> tuple[np.ndarray, int]:
-    """Read a PCM .wav file as mono float32 in [-1, 1]."""
-    with wave.open(str(path), "rb") as w:
+def _wav_target(path):
+    """wave.open takes a file name or an open binary file (e.g. BytesIO)."""
+    return path if hasattr(path, "read") or hasattr(path, "write") else str(path)
+
+
+def read_wav(path) -> tuple[np.ndarray, int]:
+    """Read a PCM .wav file (path or binary file) as mono float32 in [-1, 1]."""
+    with wave.open(_wav_target(path), "rb") as w:
         sr, width, channels = w.getframerate(), w.getsampwidth(), w.getnchannels()
         raw = w.readframes(w.getnframes())
     if width == 2:
@@ -28,9 +33,9 @@ def read_wav(path: str | Path) -> tuple[np.ndarray, int]:
     return data, sr
 
 
-def write_wav(path: str | Path, samples: np.ndarray, sr: int = SAMPLE_RATE) -> None:
+def write_wav(path, samples: np.ndarray, sr: int = SAMPLE_RATE) -> None:
     pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
-    with wave.open(str(path), "wb") as w:
+    with wave.open(_wav_target(path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(sr)

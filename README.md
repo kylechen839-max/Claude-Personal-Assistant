@@ -63,6 +63,9 @@ which), so you can start with only the Anthropic key in text mode.
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 | `--check` | Check keys, files, audio devices and models, then exit |
+| `--mode web` | Private phone web app (see "Phone web app" below) |
+| `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
+| `--show-token` | Web mode: print the access token to the console once |
 
 **Follow-up mode:** after a reply, the assistant plays a soft, low blip
 and keeps listening for 5 seconds without the wake word, so you can just
@@ -216,6 +219,89 @@ pick a name from the voices repo (e.g. `en_US-amy-medium`,
 on the command line tries Piper for one run without editing the config.
 `[tts] rate` and `voice` apply to pyttsx3 only.
 
+## Phone web app
+
+`python -m assistant --mode web` runs the same assistant (Calendar, Notion,
+memory, web search, delete confirmations) as a private web page for your
+phone. You talk into the phone's own mic; the PC transcribes with Whisper,
+asks Claude, and sends back the reply as text and audio (Piper if
+`[tts] engine = "piper"`, else pyttsx3; or tick "Use the phone's voice" in
+the page's settings). Hold the big mic button to talk (or tap once to start
+and again to stop), or type. When Claude wants to delete something, Yes/No
+buttons appear; saying "yes" into the mic works too. Each phone/browser
+gets its own conversation; after `[assistant] conversation_timeout` (5
+minutes) of quiet it ends and is summarized to memory, like the voice loop.
+Opening pages in the PC's browser is off in this mode.
+
+**It is private by design.** The server listens on 127.0.0.1 only, so nothing
+outside the PC can reach it. Every request needs a session cookie that you
+get only by entering the access token once (`WEB_TOKEN`, a 43-character
+random value that is created in `.env` the first time you start web mode and
+is never written to the log). Wrong tokens are rate-limited; requests from
+other sites are refused; the page sends strict security headers.
+
+The phone's mic only works over HTTPS, so reach the PC through
+[Tailscale](https://tailscale.com/download), which gives it a private
+HTTPS address that only your own devices can open:
+
+1. Install Tailscale on the PC and on the phone, and sign in to the same
+   account on both. In the Tailscale admin console (DNS page), make sure
+   MagicDNS and HTTPS certificates are enabled.
+2. On the PC, start the web app and print the token once:
+   ```powershell
+   python -m assistant --mode web --show-token
+   ```
+3. In a second PowerShell window, publish it to your tailnet (not the
+   internet; that would be `tailscale funnel`, don't use it):
+   ```powershell
+   tailscale serve --bg --https=443 http://127.0.0.1:8765
+   tailscale serve status    # shows https://<pc-name>.<tailnet>.ts.net
+   ```
+4. On the phone (Tailscale on), open that `https://...ts.net` address, paste
+   the token, and allow the microphone. Add it to the home screen (see
+   below; on Android, Chrome menu -> Add to Home screen).
+
+### Install on iPhone
+
+1. Install the Tailscale app on the iPhone and sign in to the same account
+   as the PC (leave it connected).
+2. Open the `https://<pc-name>.<tailnet>.ts.net` address in **Safari**.
+3. Share -> **Add to Home Screen** -> Add. A "Claude" icon appears.
+4. Open it **from the icon** and enter the token once. The home-screen app
+   keeps its own cookies, separate from Safari, so sign in inside the app
+   even if you already did in Safari. It stays signed in for 90 days, renewed
+   each time you use it.
+5. Tap the mic and allow the microphone. If you said no by mistake: Settings
+   -> Safari -> Microphone -> Allow (or in Safari, aA -> Website Settings ->
+   Microphone), then reopen the app.
+
+Replies play through the phone's speaker even with the ringer switch on
+silent. The app shell (page, script, icons) is cached so it opens quickly;
+conversations and audio are never cached.
+
+`tailscale serve reset` stops publishing it. To sign a phone out everywhere,
+delete `WEB_TOKEN` from `.env` and restart: a new token is created and old
+cookies stop working. Settings live in `config.toml` `[webapp]`: `port`
+(8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
+(10), `max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
+other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
+`--check` reports whether the token is set. On the Pi it is the same: install
+Tailscale there and run the same two commands.
+
+**On a public server** (e.g. Render, behind its HTTPS proxy): set `WEB_TOKEN`
+as a secret in the host's environment (the app refuses to listen on anything
+but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
+trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
+also takes the proxy's address instead, e.g. `TRUSTED_PROXY=127.0.0.1` for
+`tailscale serve` on the same PC: the headers then count only from there), and
+run `python -m assistant --mode web --host 0.0.0.0` (it reads `PORT` from the
+environment). With a trusted proxy, plain-http requests are redirected to
+https and HSTS is sent. Five wrong tokens from one address lock that address
+out for 15 minutes; 50 from everyone together lock new sign-ins for 15
+minutes (signed-in phones keep working). `GET /healthz` answers `{"ok":
+true}` without signing in. Scripts can send `Authorization: Bearer
+<WEB_TOKEN>` instead of the cookie.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
@@ -339,6 +425,8 @@ assistant/
   history_cli.py  python -m assistant --history ...
   audio.py      wav I/O, resampling, chime
   timing.py     per-turn latency               (--timings)
+  webapp.py     private phone web app (FastAPI)  (--mode web)
+  web/          the page: index.html, app.js, app.css, sw.js
   tools/        calendar.py, notion.py, web.py, history.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
 deploy/         hey-claude.service                 (systemd user unit)

@@ -194,6 +194,47 @@ Note anything that failed or any setting you changed in BLOCKERS.md.
 
 ---
 
+## Phone web app (optional, ~10 min)
+Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
+- [ ] `python -m assistant --mode web --show-token`, then in another window
+      `tailscale serve --bg --https=443 http://127.0.0.1:8765`.
+  - Should: `.env` now has a `WEB_TOKEN` line; `logs/assistant.log` does not
+    contain the token.
+- [ ] With the phone on mobile data (Wi-Fi off) and Tailscale on, open the
+      `https://<pc>.<tailnet>.ts.net` address. Enter a wrong token, then the
+      right one.
+  - Should: "wrong token", then the chat page. Turn Tailscale off on the phone
+    and reload: the page doesn't load at all (it's not on the internet).
+- [ ] iPhone install: in Safari, Share -> Add to Home Screen -> Add. Open it
+      from the new "Claude" icon and enter the token once (the home-screen
+      app has its own cookies, so it asks again even if Safari was signed in).
+  - Should: opens full screen (no Safari bars) with the Claude mic icon.
+    Close it, reopen from the icon: still signed in.
+- [ ] Tap the mic in the installed app and allow the microphone.
+  - Should: the orange mic dot in the status bar disappears after each
+    recording. If you tapped "Don't Allow", the page explains how to turn it
+    back on (Settings -> Safari -> Microphone).
+- [ ] Flip the ringer switch to silent and ask something.
+  - Should: the reply is still spoken.
+- [ ] Hold the mic: "What's on my calendar tomorrow?" (allow the mic the first
+      time).
+  - Should: your words appear, then the answer as text and spoken through the
+    phone's speaker within a few seconds.
+  - If no sound: check the phone isn't on silent (iPhone switch), or tick
+    "Use the phone's voice" in the gear menu.
+- [ ] Tap once, ask "Mark Homework 6 as in progress", tap again to send.
+- [ ] Create a test event by typing "Add a test event tomorrow at 3", then say
+      "Delete the test event tomorrow".
+  - Should: Yes/No buttons appear and the question is spoken. Hold the mic and
+    say "yes": the event disappears from Google Calendar. Repeat and press No:
+    it stays.
+- [ ] Leave the page idle for 6 minutes, then ask "What did we just talk
+      about?"
+  - Should: a new conversation; the earlier one shows up in
+    `logs/assistant.log` as "Web conversation saved to memory".
+
+---
+
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again
