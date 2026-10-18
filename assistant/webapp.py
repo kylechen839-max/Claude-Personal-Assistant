@@ -1124,6 +1124,7 @@ def assistant_busy(assistant: "WebAssistant", app) -> bool:
     for conv, _ in list(getattr(app.state, "voice_conversations", {}).values()):
         with conv.lock:
             if (conv.current is not None and not conv.current.finished) \
+                    or getattr(conv, "waiting", None) is not None \
                     or conv.pending is not None:
                 return True
     return False

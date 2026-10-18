@@ -443,7 +443,12 @@ def test_healthz_version_and_local_busy(make_app):
     conv.lock = threading.Lock()
     conv.current = type("Turn", (), {"finished": False})()
     conv.pending = None
+    conv.waiting = None
     app.state.voice_conversations["sid2"] = (conv, None)
+    assert local.get("/healthz").json()["busy"] is True
+    conv.current.finished = True
+    assert local.get("/healthz").json()["busy"] is False
+    conv.waiting = object()  # the next utterance, queued
     assert local.get("/healthz").json()["busy"] is True
     # relayed by a proxy on this machine (tailscale serve): not told
     proxied = local.get("/healthz", headers={"X-Forwarded-For": "100.64.0.9"})
