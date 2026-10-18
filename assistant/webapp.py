@@ -262,7 +262,10 @@ def is_cross_origin(headers, allowed_origins=()) -> bool:
 
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
     the Host (or X-Forwarded-Host, as set by a proxy). Requests with neither
-    header (curl, tests) pass; they still need the session cookie."""
+    header (curl, tests) pass; they still need the session cookie. An Origin
+    in `allowed_origins` (e.g. the failover app origin) is never cross-origin."""
+    if headers.get("origin") and headers.get("origin") in allowed_origins:
+        return False
     site = headers.get("sec-fetch-site")
     if site in ("cross-site", "same-site"):
         return True
@@ -745,6 +748,9 @@ class WebAuth:
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
     def sid(self, conn) -> str | None:
+        claims = conn.scope.get("auth")  # set by failover.edge.EdgeMiddleware
+        if claims is not None:
+            return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             ip = self.client_ip(conn)
@@ -786,7 +792,11 @@ def require_session(conn: HTTPConnection):
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
                max_text_chars: int = 4000, trusted_proxy=0,
-               limiter: LoginLimiter | None = None, reap_interval: float = 30):
+               limiter: LoginLimiter | None = None, reap_interval: float = 30,
+               failover=None):
+    """The ASGI app. With `failover` (a failover.peers.FailoverSettings
+    with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
+    tokens instead of cookies, CORS for the app origin (FAILOVER.md)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -797,6 +807,17 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from starlette.concurrency import run_in_threadpool
 
     limiter = limiter or LoginLimiter()
+    failover = failover if failover is not None and failover.role else None
+    security_headers = dict(SECURITY_HEADERS)
+    if failover:
+        from assistant.failover.edge import connect_src
+
+        allowed_origins = tuple(allowed_origins) + tuple(
+            o for o in (failover.app_origin,) if o)
+        security_headers["Content-Security-Policy"] = CSP.replace(
+            "connect-src 'self'", "connect-src " + connect_src(list(failover.backends)))
+        # the phone app reads replies cross-origin from the Pi and PC
+        security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter)
 
     @asynccontextmanager
@@ -864,7 +885,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             response = error("too large", 413)
         else:
             response = await call_next(request)
-        for k, v in SECURITY_HEADERS.items():
+        for k, v in security_headers.items():
             response.headers.setdefault(k, v)
         if proxied:
             response.headers.setdefault(
@@ -934,7 +955,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
     for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript")):
+                        ("sw.js", "text/javascript"),
+                        ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1078,7 +1100,20 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return error("not found", 404)
         return Response(data, media_type="audio/wav")
 
+    if failover:
+        return wrap_failover(app, token, failover, web.bearer_sid)
     return app
+
+
+def wrap_failover(app, token: str, failover, bearer_sid: str | None = None):
+    """EdgeMiddleware around the web app (FAILOVER.md section 3)."""
+    from assistant.failover.edge import EdgeMiddleware
+    from assistant.failover.tokens import TokenAuthority
+
+    return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
+                          app_origins=[o for o in (failover.app_origin,) if o],
+                          backends=list(failover.backends),
+                          root_bearer_sid=bearer_sid)
 
 
 ICON_SIZES = (180, 192, 512)
@@ -1155,11 +1190,17 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.failover.peers import settings_from_config
+
+    failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
-                     trusted_proxy=trusted_proxy)
+                     trusted_proxy=trusted_proxy, failover=failover)
+    if failover.role:
+        log.info("Failover role %s; backends: %s", failover.role,
+                 ", ".join(b.role for b in failover.backends) or "none")
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

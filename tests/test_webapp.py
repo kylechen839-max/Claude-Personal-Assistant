@@ -638,7 +638,7 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz"]
+          "/silence.wav", "/healthz", "/backend-router.js"]
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):

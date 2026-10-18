@@ -104,7 +104,8 @@ class EdgeMiddleware:
                  app_origins=(), backends: list[Backend] = (),
                  routes: dict | None = None,
                  limiter: FailureLimiter | None = None,
-                 ws_auth_timeout: float = 5.0, protected_prefix: str = "/api/"):
+                 ws_auth_timeout: float = 5.0, protected_prefix: str = "/api/",
+                 root_bearer_sid: str | None = None):
         self.app = app
         self.authority = authority
         self.role = role
@@ -116,6 +117,9 @@ class EdgeMiddleware:
         self.limiter = limiter or FailureLimiter()
         self.ws_auth_timeout = ws_auth_timeout
         self.protected_prefix = protected_prefix
+        # Scripts may also send WEB_TOKEN itself as the bearer token (as the
+        # web app allows without failover); they share this one session.
+        self.root_bearer_sid = root_bearer_sid
 
     # --- origin -------------------------------------------------------------
 
@@ -139,8 +143,13 @@ class EdgeMiddleware:
         return "sync" if path.startswith("/api/sync/") else "app"
 
     def check_bearer(self, headers: dict[str, str], path: str) -> Claims | None:
-        return self.authority.verify(bearer_of(headers.get("authorization")),
-                                     scope=self.needed_scope(path))
+        given = bearer_of(headers.get("authorization"))
+        scope = self.needed_scope(path)
+        claims = self.authority.verify(given, scope=scope)
+        if claims is None and given and self.root_bearer_sid and scope == "app" \
+                and not given.startswith("hc1.") and self.authority.check_root(given):
+            claims = Claims("app", self.root_bearer_sid, 0, 0)
+        return claims
 
     # --- ASGI ---------------------------------------------------------------
 

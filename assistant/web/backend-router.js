@@ -98,7 +98,8 @@ export class BackendRouter {
     onChange = () => {},
     override = 'auto',
   }) {
-    this.fetch = fetchFn;
+    // called unbound: window.fetch throws "Illegal invocation" as a method
+    this.fetch = (...args) => fetchFn(...args);
     this.getToken = getToken;
     this.timeouts = timeouts;
     this.apiRange = apiRange;

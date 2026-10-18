@@ -9,7 +9,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 h1 { font-size: 1.2rem; margin: 0; }
 button, input { font: inherit; color: inherit; }
 button { border: 0; border-radius: 12px; background: var(--panel); padding: .7em 1.1em; }
-input[type=text], input[type=password] { width: 100%; padding: .7em .9em; border-radius: 12px;
+input[type=text], input[type=password], input[type=url], select { width: 100%; padding: .7em .9em; border-radius: 12px;
   border: 1px solid #444; background: var(--panel); }
 
 .login { max-width: 26rem; margin: 0 auto; padding: 3rem 1rem; }
@@ -49,3 +49,14 @@ footer { padding: .5rem 1rem calc(1rem + env(safe-area-inset-bottom)); text-alig
 .mic.recording { transform: scale(1.08); box-shadow: 0 0 0 10px #c9644255, 0 0 0 22px #c9644222; }
 .mic:disabled { opacity: .5; }
 .hint { color: var(--muted); font-size: .85rem; margin: .4rem 0 0; }
+
+.badge { margin-left: auto; margin-right: .6rem; padding: .15em .6em; border-radius: 999px;
+  font-size: .8rem; background: var(--panel); color: var(--muted); }
+.badge[data-role=pi] { background: var(--ok); color: var(--text); }
+.badge[data-role=pc] { background: #3b4a5a; color: var(--text); }
+.badge[data-role=cloud] { background: #5a4a3b; color: var(--text); }
+.badge[data-role=offline] { background: var(--bad); color: var(--text); }
+.backends { border: 1px solid #444; border-radius: 12px; display: grid; gap: .5rem;
+  max-width: 20rem; }
+.backends label { display: grid; gap: .2rem; font-size: .9rem; }
+.backend-status { margin: 0; padding-left: 1.1rem; font-size: .85rem; color: var(--muted); }

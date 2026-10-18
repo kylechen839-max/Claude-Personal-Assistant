@@ -215,6 +215,19 @@ test('incompatible API version is skipped and explained', async () => {
   assert.match(pi.reason, /incompatible API version 2/);
 });
 
+test('fetch is called unbound (window.fetch throws when called as a method)', async () => {
+  const { clock, net } = setup();
+  const strict = function (url, opts) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    return net.fetch(url, opts);
+  };
+  const router = new BackendRouter({
+    backends: BACKENDS, fetch: strict, now: clock.now, setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout, setInterval: clock.setInterval, clearInterval: clock.clearInterval,
+  });
+  assert.equal(await run(clock, router.select()), 'pi');
+});
+
 // --- requests and mid-request failover -----------------------------------------
 
 test('requests carry the bearer token, never cookies', async () => {
