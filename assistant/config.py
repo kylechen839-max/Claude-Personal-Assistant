@@ -72,6 +72,18 @@ DEFAULTS: dict = {
         "backends": [],             # [{role, url}], highest priority first
         "sync_interval": 30,        # seconds between history syncs
     },
+    "webapp": {
+        "host": "127.0.0.1",        # only this computer; use tailscale serve
+        "port": 8765,
+        "confirm_timeout": 120,     # seconds to wait for a yes before "no"
+        "max_upload_mb": 10,
+        "max_audio_seconds": 60,    # longest recording accepted
+        "trusted_proxy": 0,         # proxies adding X-Forwarded-*: 0 = none,
+                                    # a count (1 on Render), or the proxy's
+                                    # address(es) (TRUSTED_PROXY)
+        "allowed_origins": [],      # extra https://... origins, if a proxy
+                                    # rewrites the Host header
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 
@@ -85,6 +97,8 @@ ENV_OVERRIDES = {
     "PINECONE_INDEX": ("memory", "index"),
     "ASSISTANT_ROLE": ("failover", "role"),
     "APP_ORIGIN": ("failover", "app_origin"),
+    "PORT": ("webapp", "port"),                # set by hosts such as Render
+    "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
 }
 
 

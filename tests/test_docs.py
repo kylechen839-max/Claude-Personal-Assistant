@@ -21,7 +21,8 @@ DOCS = ["README.md", "MANUAL_TEST.md"]
 # Flags of other programs that the docs show (pip, systemctl, journalctl, node,
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
-               "--user", "--uninstall", "--test"}
+               "--user", "--uninstall", "--bg", "--https",  # + tailscale serve
+               "--test"}  # node --test
 OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
 
 

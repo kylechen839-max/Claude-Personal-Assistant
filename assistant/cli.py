@@ -39,10 +39,11 @@ def is_yes(text: str) -> bool:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="python -m assistant",
                                      description="Hey Claude voice assistant")
-    parser.add_argument("--mode", choices=["text", "speak", "voice", "wake"],
+    parser.add_argument("--mode", choices=["text", "speak", "voice", "wake", "web"],
                         default="wake",
                         help="text: type/read; speak: type/listen; voice: "
-                             "push-to-talk; wake: always listening (default)")
+                             "push-to-talk; wake: always listening (default); "
+                             "web: private phone web app")
     parser.add_argument("--audio-file",
                         help="wake mode: feed this .wav through the wake-word "
                              "pipeline instead of the live mic, then exit")
@@ -55,6 +56,14 @@ def parse_args(argv=None):
     parser.add_argument("--timings", action="store_true",
                         help="wake mode: print each turn's latency summary to "
                              "the console too (it is always in the log file)")
+    parser.add_argument("--host",
+                        help="web mode: address to listen on (default "
+                             "127.0.0.1, this computer only)")
+    parser.add_argument("--port", type=int,
+                        help="web mode: port (default 8765)")
+    parser.add_argument("--show-token", action="store_true",
+                        help="web mode: print the access token to the console "
+                             "(never written to the log)")
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
@@ -65,10 +74,12 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def get_reply(chat: ClaudeChat, user_text: str, output_fn=print) -> str:
-    """Ask Claude; on failure return a short sentence that can be spoken."""
+def get_reply(chat: ClaudeChat, user_text: str, output_fn=print,
+              **ask_options) -> str:
+    """Ask Claude; on failure return a short sentence that can be spoken.
+    `ask_options` (on_text, cancel) go to ClaudeChat.ask."""
     try:
-        return chat.ask(user_text)
+        return chat.ask(user_text, **ask_options)
     except anthropic.APIConnectionError as e:  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
@@ -424,6 +435,11 @@ def main(argv=None) -> int:
     tts_name = args.tts or tts_cfg["engine"]
     stt_cfg = config["stt"]
     try:
+        if args.mode == "web":
+            from assistant import webapp
+
+            return webapp.serve(config, host=args.host, port=args.port,
+                                tts_name=tts_name, show_token=args.show_token)
         tools = build_tools(config)
         chat = build_chat(config, tools, build_memory(config))
         if args.mode in ("text", "speak"):
