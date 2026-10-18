@@ -1250,7 +1250,7 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import build_memory, build_tools
+    from assistant.cli import add_memory_tools, build_memory, build_tools
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1261,6 +1261,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
+    add_memory_tools(tools, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
