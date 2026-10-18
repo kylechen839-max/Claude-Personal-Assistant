@@ -628,6 +628,30 @@ def test_end_conversation_titles_and_links_memory(store, fake_client):
     assert chat.conversation_id not in (None, cid)
 
 
+def test_a_continued_conversation_keeps_its_title(store, fake_client):
+    old = add_conv(store, turns=["error bars?", "Standard error."],
+                   title="Lab report error bars", summary="Old summary.")
+    fake_client.with_options.return_value = fake_client
+    chat = recorded_chat(store, fake_client)
+    chat.resume(old)
+    fake_client.queue = [
+        make_response(text_block("Use the SD.")),
+        make_response(text_block('{"title": "Standard deviation", '
+                                 '"summary": "Error bars, then the SD."}'))]
+    chat.ask("and standard deviation?")
+    chat.end_conversation()
+    conv = store.get(old)
+    assert conv["title"] == "Lab report error bars"
+    assert conv["summary"] == "Error bars, then the SD."
+    # API down: the old summary stays rather than the first message
+    chat.resume(old)
+    fake_client.queue = [make_response(text_block("Ok."))]
+    chat.ask("thanks")
+    fake_client.messages.create.side_effect = ConnectionError("offline")
+    chat.end_conversation()
+    assert store.get(old)["summary"] == "Error bars, then the SD."
+
+
 def test_titles_are_generated_off_the_hot_path(store, fake_client):
     import threading
 

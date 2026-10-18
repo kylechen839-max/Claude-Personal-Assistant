@@ -505,7 +505,7 @@ class HistoryStore:
         where, params = self._filters(source, pinned, archived, since, until, ids)
         with self._lock:
             rows = self._con.execute(
-                f"SELECT {_CONV_COLS}, ({_FIRST_USER}) AS preview FROM "
+                f"SELECT {_CONV_COLS} FROM "
                 f"conversations c WHERE {where} ORDER BY c.updated_at DESC, "
                 f"c.rid DESC LIMIT ? OFFSET ?", (*params, _limit(limit),
                                                   max(0, int(offset)))).fetchall()
@@ -660,11 +660,12 @@ class HistoryStore:
         return " AND ".join(where), params
 
 
-_CONV_COLS = ("c.id, c.source, c.started_at, c.updated_at, c.ended_at, c.title, "
-              "c.summary, c.pinned, c.archived, (SELECT count(*) FROM messages "
-              "WHERE conversation_id = c.id) AS message_count")
 _FIRST_USER = ("SELECT text FROM messages WHERE conversation_id = c.id AND "
                "role = 'user' AND kind = 'chat' ORDER BY seq LIMIT 1")
+_CONV_COLS = ("c.id, c.source, c.started_at, c.updated_at, c.ended_at, c.title, "
+              "c.summary, c.pinned, c.archived, (SELECT count(*) FROM messages "
+              f"WHERE conversation_id = c.id) AS message_count, ({_FIRST_USER}) "
+              "AS preview")
 
 
 def _limit(limit) -> int:
@@ -677,7 +678,8 @@ def _conv_dict(row) -> dict:
             "ended_at": row["ended_at"], "title": row["title"] or "",
             "summary": row["summary"] or "", "pinned": bool(row["pinned"]),
             "archived": bool(row["archived"]),
-            "message_count": row["message_count"]}
+            "message_count": row["message_count"],
+            "preview": _truncate(row["preview"] or "", 200)}
 
 
 def _msg_dict(row) -> dict:
@@ -786,9 +788,15 @@ def generate_title(client, messages: list[dict],
                    model: str = DEFAULT_TITLE_MODEL) -> tuple[str, str]:
     """One cheap call: (title of at most six words, 1-2 sentence summary).
     Falls back to the first user message if the call fails."""
+    return ask_title(client, messages, model) or fallback_title(messages)
+
+
+def ask_title(client, messages: list[dict],
+              model: str = DEFAULT_TITLE_MODEL) -> tuple[str, str] | None:
+    """(title, summary) from the model, or None if that failed."""
     text = message_transcript(messages, max_chars=6000)
-    if not text:
-        return fallback_title(messages)
+    if not text or client is None:
+        return None
     try:
         api = client.with_options(max_retries=1, timeout=20) \
             if hasattr(client, "with_options") else client
@@ -804,9 +812,8 @@ def generate_title(client, messages: list[dict],
             raise ValueError("no title in reply")
         return title, _truncate(summary, 400) or fallback_title(messages)[1]
     except Exception as e:
-        log.warning("History: title generation failed (%s); using the first "
-                    "message", e)
-        return fallback_title(messages)
+        log.warning("History: title generation failed (%s)", e)
+        return None
 
 
 def message_transcript(messages: list[dict], max_chars: int = 0) -> str:
@@ -1022,11 +1029,15 @@ class Recorder:
                 self.store.delete(cid)
                 return
             client = self.client_fn() if self.client_fn else None
-            title, summary = (generate_title(client, conv["messages"], self.title_model)
-                              if client is not None else
-                              fallback_title(conv["messages"]))
-            self.store.finish(cid, title, summary)
-            log.info("History: saved %s %r", cid, title)
+            asked = ask_title(client, conv["messages"], self.title_model)
+            if conv["title"]:
+                # A continued conversation keeps the title it is known by;
+                # only the summary is brought up to date.
+                self.store.finish(cid, None, asked[1] if asked else None)
+            else:
+                title, summary = asked or fallback_title(conv["messages"])
+                self.store.finish(cid, title, summary)
+            log.info("History: saved %s", cid)
         except KeyError:
             pass  # deleted meanwhile
         except Exception:
