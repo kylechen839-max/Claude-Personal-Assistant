@@ -70,6 +70,15 @@ top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 
+[lecture]
+enabled = true                # "Record lecture" in the phone app
+model = "base.en"             # faster-whisper model for lectures; "tiny.en" is faster
+upload_dir = "data/lectures"  # recordings and job state (use the /data disk in the cloud)
+max_upload_mb = 300           # per recording
+chunk_mb = 4                  # upload piece size; a lost piece is simply resent
+keep_audio = false            # true = keep the audio after it is transcribed
+notes_database_id = ""        # "" = find or create "Lecture Notes" under Fall 2026 Assignments
+
 [notes]
 enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
 min_score = 0.3               # how close a note must be to count as a match

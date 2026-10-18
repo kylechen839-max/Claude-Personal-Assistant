@@ -16,5 +16,6 @@ voices/
 
 # Runtime output
 logs/
+data/
 *.wav
 !tests/fixtures/*.wav
