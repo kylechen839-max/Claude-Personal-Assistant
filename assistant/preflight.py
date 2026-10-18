@@ -6,7 +6,8 @@ each step's output to logs/preflight-<timestamp>.txt. Values from .env are
 loaded into this process (and the commands it starts) only, and are masked
 in everything printed or saved.
 
-Go means no FAIL. A SKIP says why (e.g. --hardware not given, a feature not
+Go means no FAIL. A WARN is worth fixing but doesn't block (e.g. the PC
+is set to sleep, which matters only if it's the always-on host). A SKIP says why (e.g. --hardware not given, a feature not
 on this branch yet).
 """
 
@@ -35,10 +36,10 @@ WAKE_PHRASE = "what's on my calendar tomorrow"
 TEXT_QUESTIONS = ("What's on my calendar tomorrow?",
                   "What assignments are due this week?")
 TEXT_TOOLS = ("list_calendar_events", "list_assignments")
-PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
+PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
 STEPS = ("git", "env", "check", "pytest", "pytest-live", "wake-e2e",
          "text-tools", "web", "tts-pyttsx3", "tts-piper", "audio-devices",
-         "mic-level")
+         "mic-level", "power")
 LOCAL_FILES = {"config.toml"}  # may differ per machine without failing "git"
 MIN_SECRET_LENGTH = 4
 MIC_MIN_PEAK_DB = -35.0  # speech near the mic peaks around -20..-6 dBFS
@@ -507,12 +508,58 @@ def step_mic_level(ctx: Context) -> Result:
     return Result("mic-level", *judge_level(float(m.group(1)), float(m.group(2))), out)
 
 
+USB_SUSPEND = ("2a737441-1930-4402-8d77-b2bebba308a3",  # powercfg: USB settings,
+               "48e6b7a6-50f5-4782-a5d4-53bb8f07e226")  # selective suspend
+
+
+def parse_ac_index(out: str) -> int | None:
+    """The AC value of one `powercfg /query` setting (seconds, or 0/1)."""
+    m = re.search(r"Current AC Power Setting Index:\s*0x([0-9a-fA-F]+)", out)
+    return int(m.group(1), 16) if m else None
+
+
+def judge_power(sleep: int | None, hibernate: int | None,
+                usb_suspend: int | None) -> tuple[str, str]:
+    def after(v):
+        return "unknown" if v is None else ("never" if v == 0 else f"after {v // 60} min")
+    detail = (f"plugged in: sleep {after(sleep)}, hibernate {after(hibernate)}"
+              + {0: ", USB suspend off", 1: ", USB suspend on"}.get(usb_suspend, ""))
+    problems = []
+    if sleep:
+        problems.append("sleep stops the assistant completely")
+    if hibernate:
+        problems.append("so does hibernate")
+    if usb_suspend == 1:
+        problems.append("USB selective suspend can power down a USB mic")
+    if sleep is None or hibernate is None:
+        problems.append("couldn't read the power plan")
+    if problems:
+        return WARN, (detail + " - " + "; ".join(problems) + " (fix: "
+                      ".\\scripts\\install_windows_service.ps1 -PowerOnly)")
+    return PASS, detail
+
+
+def step_power(ctx: Context) -> Result:
+    """Windows: the always-on settings (sleep would stop everything)."""
+    if sys.platform != "win32":
+        return Result("power", SKIP, "Windows only (the PC as the always-on host)")
+
+    def query(*setting):
+        return ctx.run(["powercfg", "/query", "SCHEME_CURRENT", *setting],
+                       cwd=ctx.root, env=ctx.env, timeout=60)[1]
+    outs = [query("SUB_SLEEP", "STANDBYIDLE"), query("SUB_SLEEP", "HIBERNATEIDLE"),
+            query(*USB_SUSPEND)]
+    status, detail = judge_power(*(parse_ac_index(o) for o in outs))
+    return Result("power", status, detail, "\n".join(outs))
+
+
 STEP_FUNCS = {
     "git": step_git, "env": step_env, "check": step_check,
     "pytest": step_pytest, "pytest-live": step_pytest_live,
     "wake-e2e": step_wake_e2e, "text-tools": step_text_tools, "web": step_web,
     "tts-pyttsx3": step_tts_pyttsx3, "tts-piper": step_tts_piper,
     "audio-devices": step_audio_devices, "mic-level": step_mic_level,
+    "power": step_power,
 }
 
 
@@ -528,8 +575,10 @@ def verdict(results: list[Result]) -> str:
     failed = sum(r.status == FAIL for r in results)
     skipped = sum(r.status == SKIP for r in results)
     passed = sum(r.status == PASS for r in results)
+    warned = sum(r.status == WARN for r in results)
     word = "NO-GO" if failed else "GO"
-    return f"{word}: {passed} passed, {failed} failed, {skipped} skipped"
+    return (f"{word}: {passed} passed, {failed} failed, "
+            + (f"{warned} warning(s), " if warned else "") + f"{skipped} skipped")
 
 
 def build_report(results: list[Result], started: datetime, args_text: str) -> str:

@@ -363,7 +363,20 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   list and a 3 s mic level. Table + `logs/preflight-<timestamp>.txt`.
   Every `.env` value is masked in the console and the report.
 - **Smoke check** (`assistant/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
-  the same web checks against any base URL (Render, or the Pi).
+  the same web checks against any base URL (Render, or the Pi), plus a
+  hands-free turn over the voice WebSocket where the server has it.
+- **The PC as the always-on host** (`scripts/install_windows_service.ps1`,
+  `scripts/windows_host.py`): Task Scheduler tasks `\HeyClaude\Wake` and
+  `\HeyClaude\Web` at sign-in, hidden (pythonw), kept running by a small
+  supervisor (network wait, restart after 10 s, 5-minute pause after 5
+  crashes in 5 minutes; Task Scheduler's restart-on-failure doesn't see the
+  assistant's exit codes), `-Uninstall`; a power check that, after a typed
+  `y`, sets never-sleep/never-hibernate on AC and turns off USB selective
+  suspend. The preflight's `power` row WARNs on Windows when sleep is on.
+  Tested: supervisor restart/back-off/network wait and the powercfg parsing
+  in pytest; the .ps1 parses and is PSScriptAnalyzer-clean (checked with
+  PowerShell 7 here and Windows PowerShell 5.1 in CI). Not run on a real
+  Windows Task Scheduler yet: MANUAL_TEST.md.
 - **Tests** (`tests/test_preflight.py`): result parsing (junit, wake and
   text output, mic levels), verdicts, every step's PASS/FAIL/SKIP rules with
   faked commands, the smoke HTTP flow against a fake app, and redaction: a

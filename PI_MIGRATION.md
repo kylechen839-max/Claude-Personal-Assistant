@@ -6,6 +6,30 @@ touched, so you can go back to it at any time (see [Rollback](#8-rollback)).
 Allow about 1.5 hours: 30 min hardware and flashing, 30 min install (mostly
 waiting), 30 min checks.
 
+## Do I need a Pi?
+
+Three ways to run it. All of them use the same keys, Google Calendar,
+Notion and Pinecone memory; they differ in where the always-listening mic is
+and what has to stay on.
+
+| | **PC always on** | **Raspberry Pi** | **Cloud only (phone)** |
+|---|---|---|---|
+| Setup | `.\scripts\install_windows_service.ps1` (10 min) | this guide (~1.5 h) plus about 100-150 USD of hardware | the Render service; nothing at home |
+| "Hey Claude" across the room | yes, where the PC is | yes, wherever you put the Pi | no: you open the app and talk (voice mode) |
+| Power and cost | desktop idle about 30-80 W, i.e. roughly 20-90 USD a year at 0.15 USD/kWh (measure yours with a plug meter) | about 3-5 W, roughly 5 USD a year | Render plan cost; your phone's battery while in use |
+| Noise | the PC's fans, around the clock | silent (with the small fan of the Pi 5 cooler mostly off) | none |
+| Mic placement | the PC's mic: often a desk or headset mic, aimed at you at the desk, weaker across the room | a speakerphone in the middle of the room | the phone's mic, in your hand |
+| Reliability | Windows Update reboots it now and then (it comes back when you sign in, or by itself with automatic sign-in); sleep must be off; a game or app holding the mic in exclusive mode blocks it | an appliance: restarts itself (systemd) after crashes, reboots and network drops; rarely updated | depends on the service and your phone's connection |
+| Conflicts | while you game or call, the wake word hears your voice chat and game audio (false wakes, or "Hey Claude" mid-call); Discord/Teams noise suppression may change what it hears; turn it off with Task Scheduler -> HeyClaude -> Wake -> Disable | none: its mic is its own | none |
+| Privacy | always-on mic in your PC | always-on mic in a box you control | the mic is on only while the app listens |
+
+**Rule of thumb:** if the PC is already on most of the day in the room where
+you'd talk to it, start with the PC (it costs nothing extra and takes ten
+minutes), and run the preflight once to check the power settings. If it
+sleeps, is noisy, is in another room, or you game a lot, the Pi is the
+better home host. Either way the phone uses the cloud host. Run only **one**
+wake-word listener per room (see [section 7](#7-what-runs-where)).
+
 ## 0. Before you start: go/no-go on the PC side
 
 Don't buy or flash anything until all four are true:
@@ -177,7 +201,7 @@ Once the cloud host exists there are three places the assistant can run:
 |---|---|---|
 | **Pi (in the room)** | Always-listening wake word, spoken replies | `--mode wake` (the systemd service) |
 | **Cloud host (Render)** | Phone app and hands-free voice conversation | `--mode web` |
-| **PC** | Development, and the fallback | any, by hand |
+| **PC** | Development, and the fallback (or the home host instead of a Pi, see [Do I need a Pi?](#do-i-need-a-pi)) | any, by hand; or the HeyClaude tasks |
 
 All of them share the same Pinecone memory (same index; summaries go to the
 `voice-assistant` namespace), the same Google Calendar and the same Notion
@@ -187,8 +211,9 @@ database, so a note saved from the phone is recalled by the Pi.
 
 - *Two wake-word loops in one room.* If the PC and the Pi both run `--mode
   wake` within earshot, both answer, and a "delete" could be confirmed twice.
-  Rule: **only the Pi runs the wake word.** On the PC, don't start
-  `python -m assistant` (wake mode) while the Pi service is running; use
+  Rule: **only one machine runs the wake word.** With a Pi, on the PC
+  don't start `python -m assistant` (wake mode) and remove the HeyClaude
+  tasks (`.\scripts\install_windows_service.ps1 -Uninstall`); use
   `--mode text`/`--mode web` for development.
 - *Duplicate memories.* Each conversation is summarized once, by the instance
   that had it, so there is no duplication as long as one conversation happens

@@ -389,6 +389,34 @@ slow. On a Pi with no screen, set `[web] browser = false`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
 
+## Windows PC as the always-on home host
+
+No Pi needed if the PC stays on (see "Do I need a Pi?" in
+[PI_MIGRATION.md](PI_MIGRATION.md) for the trade-offs). In PowerShell, in the
+project folder:
+
+```powershell
+.\scripts\install_windows_service.ps1             # install and start
+.\scripts\install_windows_service.ps1 -NoWeb      # wake word only, no phone app
+.\scripts\install_windows_service.ps1 -PowerOnly  # just the power check
+.\scripts\install_windows_service.ps1 -Uninstall  # stop and remove
+```
+
+It registers two Task Scheduler tasks under `HeyClaude` (no admin rights
+needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on 127.0.0.1).
+They start 20 s after you sign in, run hidden, and are kept running by
+`scripts/windows_host.py`, which waits for the network, restarts the
+assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
+logs to `logs/host-wake.log` / `logs/host-web.log` (the assistant's own log
+is still `logs/assistant.log`). After a reboot they start when you sign in;
+for no sign-in at all, turn on automatic sign-in for your account.
+
+Then it shows the power plan and offers, after you type `y`, to set **never
+sleep** and **never hibernate** when plugged in and to turn off **USB
+selective suspend** (which can power down a USB mic). The display may still
+turn off. The preflight's `power` row warns if sleep comes back (Windows
+updates sometimes reset power plans).
+
 ## Preflight: check everything in one pass
 
 ```powershell
@@ -398,8 +426,8 @@ slow. On a Pi with no screen, set `[web] browser = false`.
 ./scripts/preflight.sh --hardware       # Linux / Raspberry Pi
 ```
 
-Each step prints `PASS`, `FAIL` or `SKIP` (with the reason), then a table and
-`GO` (no FAIL) or `NO-GO`. The full output is saved to
+Each step prints `PASS`, `FAIL`, `WARN` or `SKIP` (with the reason), then a
+table and `GO` (no FAIL; warnings don't block) or `NO-GO`. The full output is saved to
 `logs/preflight-<date>-<time>.txt` (gitignored). Values from `.env` are
 loaded into the preflight's own process only and are masked as `[REDACTED]`
 everywhere, in the console and the report.
@@ -415,6 +443,7 @@ everywhere, in the console and the report.
 | `web` | starts `--mode web` on 127.0.0.1, then the web checks below (including a voice-mode WebSocket turn) |
 | `tts-pyttsx3`, `tts-piper` | renders a sentence to a .wav with each engine |
 | `audio-devices`, `mic-level` | with `--hardware` only: lists devices, records 3 s and reports the level |
+| `power` | Windows only: `WARN` if the PC sleeps or hibernates on AC power (that stops the assistant) or USB selective suspend is on |
 
 `--skip pytest,web` skips steps; `--help` lists the options.
 
@@ -462,6 +491,7 @@ assistant/
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
+                install_windows_service.ps1, windows_host.py (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys);
