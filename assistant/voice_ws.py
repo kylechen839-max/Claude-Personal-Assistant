@@ -176,7 +176,8 @@ def add_voice_routes(app, assistant, token: str, allowed_origins=(),
                         ws.headers.get("origin"))
             await ws.close(code=1008)
             return
-        sid = read_cookie(token, ws.cookies.get(COOKIE))
+        web = getattr(app.state, "web", None)  # the web app's auth (WebAuth)
+        sid = web.sid(ws) if web is not None else read_cookie(token, ws.cookies.get(COOKIE))
         if not sid:
             await ws.close(code=1008)
             return

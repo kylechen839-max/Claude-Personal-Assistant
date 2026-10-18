@@ -71,9 +71,13 @@ def make_app(fake_client, tmp_path):
 
         assistant = webapp.WebAssistant(
             chat_factory, transcriber or FakeTranscriber(), tts or PrintTTS(),
-            tools=tools, clock=clock or Clock(), **kwargs)
-        app = webapp.create_app(assistant, TOKEN, limiter=webapp.LoginLimiter(
-            max_failures=3, window=300), reap_interval=3600)
+            tools=tools, clock=clock or Clock())
+        kwargs.setdefault("limiter", webapp.LoginLimiter(per_ip=3, global_max=50))
+        app_options = {k: kwargs.pop(k) for k in list(kwargs)
+                       if k in ("limiter", "trusted_proxy", "max_audio_seconds",
+                                "max_text_chars", "max_upload_bytes")}
+        assistant.__dict__.update(kwargs)  # e.g. conversation_timeout
+        app = webapp.create_app(assistant, TOKEN, reap_interval=3600, **app_options)
         return assistant, TestClient(app, base_url=BASE)
     return make
 
@@ -84,9 +88,11 @@ def login(client):
     return r
 
 
-def events(response):
+def events(response, deltas=False):
+    """The NDJSON events of a turn (text deltas left out unless asked)."""
     assert response.status_code == 200, response.text
-    return [json.loads(line) for line in response.text.splitlines() if line]
+    evs = [json.loads(line) for line in response.text.splitlines() if line]
+    return evs if deltas else [e for e in evs if e["type"] != "delta"]
 
 
 # --- auth -----------------------------------------------------------------------
@@ -122,7 +128,8 @@ def test_page_and_pwa_files_are_public(make_app):
 def test_wrong_token_is_rejected_and_rate_limited(make_app):
     _, client = make_app()
     for _ in range(3):
-        assert client.post("/api/login", json={"token": "nope"}).status_code == 401
+        r = client.post("/api/login", json={"token": "nope"})
+        assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
     # locked now, even for the right token
     assert client.post("/api/login", json={"token": TOKEN}).status_code == 429
     assert webapp.COOKIE not in client.cookies
@@ -141,13 +148,56 @@ def test_login_sets_a_strict_cookie(make_app):
     assert client.get("/api/state").status_code == 401
 
 
-def test_rate_limit_window_expires():
+def test_lockout_is_per_address_and_expires():
     clock = Clock()
-    limiter = webapp.LoginLimiter(max_failures=2, window=60, clock=clock)
-    limiter.fail(), limiter.fail()
-    assert limiter.blocked()
-    clock.now += 61
-    assert not limiter.blocked()
+    limiter = webapp.LoginLimiter(per_ip=2, global_max=10, window=60,
+                                  lockout=300, clock=clock)
+    limiter.fail("1.1.1.1"), limiter.fail("1.1.1.1")
+    assert limiter.blocked("1.1.1.1") and not limiter.blocked("2.2.2.2")
+    clock.now += 299
+    assert limiter.blocked("1.1.1.1")
+    clock.now += 2
+    assert not limiter.blocked("1.1.1.1")
+
+
+def test_global_lockout():
+    clock = Clock()
+    limiter = webapp.LoginLimiter(per_ip=5, global_max=4, window=60,
+                                  lockout=300, clock=clock)
+    for i in range(4):
+        limiter.fail(f"10.0.0.{i}")  # a different address each time
+    assert limiter.blocked("9.9.9.9")
+    clock.now += 301
+    assert not limiter.blocked("9.9.9.9")
+
+
+def test_per_address_lockout_behind_a_trusted_proxy(make_app):
+    _, client = make_app(trusted_proxy=1)
+    attacker = {"X-Forwarded-For": "6.6.6.6"}
+    for _ in range(3):
+        r = client.post("/api/login", json={"token": "nope"}, headers=attacker)
+        assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
+    assert client.post("/api/login", json={"token": TOKEN},
+                       headers=attacker).status_code == 429
+    # a forged left-hand entry doesn't dodge it: the proxy's entry counts
+    forged = {"X-Forwarded-For": "1.2.3.4, 6.6.6.6"}
+    assert client.post("/api/login", json={"token": TOKEN},
+                       headers=forged).status_code == 429
+    kyle = {"X-Forwarded-For": "5.5.5.5"}
+    assert client.post("/api/login", json={"token": TOKEN},
+                       headers=kyle).status_code == 200
+
+
+def test_client_ip():
+    conn = SimpleNamespace(headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1"},
+                           client=SimpleNamespace(host="127.0.0.1"))
+    assert webapp.client_ip(conn, 0) == "127.0.0.1"  # headers not trusted
+    assert webapp.client_ip(conn, 1) == "10.0.0.1"
+    assert webapp.client_ip(conn, 2) == "1.2.3.4"
+    assert webapp.client_ip(conn, 5) == "1.2.3.4"
+    for value, hops in (("", 0), ("0", 0), ("false", 0), (None, 0),
+                        ("true", 1), ("1", 1), ("2", 2), (True, 1), (3, 3)):
+        assert webapp.parse_trusted_proxy(value).hops == hops
 
 
 def test_cross_origin_requests_are_rejected(make_app):
@@ -219,9 +269,12 @@ def test_text_chat_round_trip(make_app, fake_client):
     fake_client.queue = [make_response(text_block("Hi Kyle."))]
     _, client = make_app()
     login(client)
-    evs = events(client.post("/api/turn", json={"text": "hello"}))
+    r = client.post("/api/turn", json={"text": "hello"})
+    evs = events(r)
     assert [e["type"] for e in evs] == ["reply", "done"]
     assert evs[0]["text"] == "Hi Kyle." and evs[0]["audio"].startswith("/api/audio/")
+    deltas = [e["text"] for e in events(r, deltas=True) if e["type"] == "delta"]
+    assert len(deltas) == 2 and "".join(deltas) == "Hi Kyle."
     assert fake_client.calls[0]["messages"][0] == {"role": "user", "content": "hello"}
     assert client.get("/api/state").json()["turns"] == 1
 
@@ -579,3 +632,346 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
     gate.set()
     evs = events(client.get("/api/events"))
     assert evs[-2]["text"] == "Done." and evs[-1]["type"] == "done"
+
+
+# --- public server hardening -------------------------------------------------------
+
+PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+          "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
+          "/silence.wav", "/healthz",
+          # voice conversation page files and the vendored VAD (voice_ws.py)
+          "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
+          "/static/vad/silero_vad_v5.onnx"]
+
+
+def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
+    assistant, client = make_app()
+    for path in PUBLIC:
+        assert client.get(path).status_code == 200, path
+    # every other route needs the session cookie
+    from fastapi.routing import APIRoute
+
+    private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
+               for m in r.methods if r.path not in PUBLIC
+               and not r.path.startswith("/icon-")
+               and r.path != "/static/vad/{name}"
+               and r.path not in ("/api/login", "/api/logout")]
+    assert len(private) >= 5
+    for path, method in private:
+        url = path.replace("{rid}", "1-x")
+        r = client.request(method, url, json={"text": "hi"})
+        assert r.status_code == 401, (method, path)
+    assert assistant.sessions == {}
+
+
+def test_healthz_says_nothing(make_app):
+    _, client = make_app()
+    r = client.get("/healthz")
+    assert r.json() == {"ok": True} and "set-cookie" not in r.headers
+
+
+def test_cookie_is_long_lived_and_renewed(make_app):
+    _, client = make_app()
+    login(client)
+    r = client.get("/api/state")
+    cookie = r.headers["set-cookie"].lower()
+    assert f"max-age={90 * 24 * 3600}" in cookie and "samesite=strict" in cookie
+    assert "set-cookie" not in client.get("/").headers  # only on the API
+
+
+def test_https_redirect_and_hsts_behind_a_trusted_proxy(make_app):
+    _, client = make_app(trusted_proxy=1)
+    r = client.get("/", headers={"X-Forwarded-Proto": "http",
+                                 "X-Forwarded-Host": "hey.example.com"},
+                   follow_redirects=False)
+    assert r.status_code == 308
+    assert r.headers["location"] == "https://hey.example.com/"
+    ok = client.get("/", headers={"X-Forwarded-Proto": "https"})
+    assert ok.status_code == 200 and "max-age" in ok.headers["strict-transport-security"]
+    # without a trusted proxy the header is ignored
+    _, plain = make_app()
+    assert plain.get("/", headers={"X-Forwarded-Proto": "http"},
+                     follow_redirects=False).status_code == 200
+
+
+def test_upload_limits(make_app):
+    _, client = make_app(max_audio_seconds=1, max_text_chars=50)
+    login(client)
+    long = client.post("/api/turn", files={"audio": ("a.wav", wav_bytes(1.5), "audio/wav")})
+    assert long.status_code == 413 and long.json() == {"error": "recording too long"}
+    assert client.post("/api/turn", json={"text": "x" * 51}).status_code == 413
+    big = client.post("/api/turn", content=b"{}",
+                      headers={"Content-Type": "application/json",
+                               "Content-Length": "999999999"})
+    assert big.status_code == 413
+
+
+def test_long_compressed_audio_is_cut_off_while_decoding():
+    av = pytest.importorskip("av")
+    buf = io.BytesIO()
+    with av.open(buf, mode="w", format="webm") as out:
+        stream = out.add_stream("libopus", rate=48000)
+        stream.layout = "mono"
+        silence = np.zeros((1, 960), dtype=np.float32)
+        for _ in range(50 * 5):  # 5 s of silence: compresses to almost nothing
+            frame = av.AudioFrame.from_ndarray(silence, format="fltp", layout="mono")
+            frame.rate = 48000
+            for packet in stream.encode(frame):
+                out.mux(packet)
+        for packet in stream.encode(None):
+            out.mux(packet)
+    with pytest.raises(webapp.AudioTooLong):
+        webapp.decode_upload(buf.getvalue(), max_seconds=2)
+    assert len(webapp.decode_upload(buf.getvalue(), max_seconds=10)) > 4 * 16000
+
+
+def test_errors_are_generic(make_app, monkeypatch):
+    assistant, client = make_app()
+    login(client)
+
+    def boom(sid):
+        raise RuntimeError("secret internals at /home/kyle")
+
+    monkeypatch.setattr(assistant, "session", boom)
+    client_no_raise = TestClient(client.app, base_url=BASE, raise_server_exceptions=False)
+    client_no_raise.cookies.update(client.cookies)
+    r = client_no_raise.get("/api/state")
+    assert r.status_code == 500 and r.json() == {"error": "something went wrong"}
+    assert client.get("/nope").json() == {"error": "not found"}
+    assert client.get("/api/").status_code == 404
+    assert client.get("/web/").status_code == 404  # no directory listing
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/icon-abc.png").json() == {"error": "bad request"}
+
+
+def test_post_without_length_is_refused(make_app):
+    _, client = make_app()
+
+    def body():
+        yield b'{"token": "x"}'
+
+    r = client.post("/api/login", content=body(),
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 411
+
+
+def test_public_host_needs_a_token_from_the_environment(monkeypatch, tmp_path):
+    from assistant.config import load_config
+
+    monkeypatch.delenv("WEB_TOKEN", raising=False)
+    cfg = load_config(None, None)
+    with pytest.raises(ValueError, match="WEB_TOKEN must be set"):
+        webapp.serve(cfg, host="0.0.0.0", env_file=tmp_path / ".env")
+    assert not (tmp_path / ".env").exists()
+
+
+def test_port_and_trusted_proxy_from_environment(monkeypatch):
+    from assistant.config import load_config
+
+    monkeypatch.setenv("PORT", "10000")
+    monkeypatch.setenv("TRUSTED_PROXY", "true")
+    cfg = load_config(None, None)
+    assert int(cfg["webapp"]["port"]) == 10000
+    assert webapp.parse_trusted_proxy(cfg["webapp"]["trusted_proxy"]).hops == 1
+
+
+def test_serve_behind_a_proxy(monkeypatch, tmp_path):
+    from assistant.config import load_config
+
+    monkeypatch.setenv("WEB_TOKEN", TOKEN)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)
+    cfg = load_config(None, None)
+    cfg["calendar"]["enabled"] = False
+    cfg["webapp"]["trusted_proxy"] = "1"
+    seen = {}
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw, app=app))
+    out = []
+    assert webapp.serve(cfg, host="0.0.0.0", port=10000, tts_name="print",
+                        output_fn=out.append) == 0
+    assert seen["host"] == "0.0.0.0" and seen["port"] == 10000
+    assert seen["app"].state.web.trusted_proxy.hops == 1
+    assert not any("WARNING" in line for line in out)
+    assert TOKEN not in "\n".join(out)
+
+
+def test_web_mode_does_not_load_audio_devices():
+    """The server has no sound card: building the web app must not import
+    sounddevice (PortAudio) or the wake-word stack."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, os\n"
+        "os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-test'\n"
+        "for k in ('PINECONE_API_KEY', 'NOTION_TOKEN'): os.environ.pop(k, None)\n"
+        "from assistant import cli, webapp\n"
+        "from assistant.config import load_config\n"
+        "cfg = load_config(None, None)\n"
+        "cfg['calendar']['enabled'] = False\n"
+        "a = webapp.build_assistant(cfg, 'print', output_fn=lambda m: None)\n"
+        "webapp.create_app(a, 'x' * 40)\n"
+        "bad = [m for m in ('sounddevice', 'openwakeword', 'pyttsx3') if m in sys.modules]\n"
+        "print(bad)\n"
+        "sys.exit(1 if bad else 0)\n")
+    root = __import__("pathlib").Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True,
+                       text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+# --- pieces for other routes (voice mode) ---------------------------------------------
+
+def test_chat_stream_yields_deltas(make_app, fake_client):
+    fake_client.queue = [make_response(text_block("Sure, it's at three."))]
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    assert "".join(assistant.chat_stream(s, "when?")) == "Sure, it's at three."
+    assert s.chat.history[-1]["role"] == "assistant"
+    assert not s.busy.locked()
+
+
+def test_chat_stream_can_be_cancelled(make_app, fake_client):
+    cancel = threading.Event()
+
+    class SlowStream:  # the second piece only comes after the barge-in
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        @property
+        def text_stream(self):
+            yield "One two t"
+            cancel.wait(5)
+            yield "hree four."
+
+    fake_client.messages.stream.side_effect = lambda **kw: SlowStream()
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    got = []
+    for delta in assistant.chat_stream(s, "count", cancel=cancel):
+        got.append(delta)
+        cancel.set()  # barge in after the first piece
+    assert got == ["One two t"]
+    assert s.chat.history == [{"role": "user", "content": "count"},
+                              {"role": "assistant", "content": "One two t"}]
+
+
+def test_chat_stream_error_is_a_sentence(make_app, fake_client):
+    import anthropic
+    import httpx
+
+    fake_client.messages.create.side_effect = anthropic.APIConnectionError(
+        request=httpx.Request("POST", "https://api.anthropic.com"))
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    assert list(assistant.chat_stream(s, "hi")) == [
+        "Sorry, I can't reach the internet right now."]
+
+
+def test_transcribe_upload_and_synthesize(make_app):
+    stt = FakeTranscriber("hello")
+    assistant, _ = make_app(transcriber=stt)
+    assert assistant.transcribe_upload(wav_bytes()) == "hello"
+    wav = assistant.synthesize("Hello there.")
+    assert wav[:4] == b"RIFF" and len(wav) > 44
+
+
+def test_require_session_on_http_and_websocket(make_app):
+    from fastapi import Depends, WebSocket
+    from starlette.websockets import WebSocketDisconnect
+
+    _, client = make_app()
+    app = client.app
+
+    @app.get("/api/whoami")
+    def whoami(session=Depends(webapp.require_session)):
+        return {"sid": session.sid[:4]}
+
+    @app.websocket("/api/ws")
+    async def ws(websocket: WebSocket, session=Depends(webapp.require_session)):
+        await websocket.accept()
+        await websocket.send_json({"sid": session.sid[:4]})
+        await websocket.close()
+
+    assert client.get("/api/whoami").status_code == 401
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect("/api/ws") as conn:
+            conn.receive_json()
+    assert closed.value.code == 1008
+    login(client)
+    assert client.get("/api/whoami").status_code == 200
+    # TestClient opens WebSockets as ws://, which won't carry a Secure cookie
+    cookie = {"cookie": f"{webapp.COOKIE}={client.cookies[webapp.COOKIE]}"}
+    with client.websocket_connect("/api/ws", headers=cookie) as conn:
+        assert "sid" in conn.receive_json()
+    # a page on another site can't open it, even with the cookie
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect(
+                "/api/ws", headers={**cookie, "origin": "https://evil.example"}) as conn:
+            conn.receive_json()
+    assert closed.value.code == 1008
+
+
+def test_bearer_token_for_other_clients(make_app, fake_client):
+    fake_client.queue = [make_response(text_block("Hi from the API."))]
+    _, client = make_app()
+    good = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/api/state", headers=good).status_code == 200
+    evs = events(client.post("/api/turn", json={"text": "hi"}, headers=good))
+    assert evs[0]["text"] == "Hi from the API."
+    assert "set-cookie" not in client.get("/api/state", headers=good).headers
+    bad = {"Authorization": "Bearer wrong"}
+    for _ in range(3):
+        assert client.get("/api/state", headers=bad).status_code == 401
+    # locked out now (per address), even with the right token
+    assert client.get("/api/state", headers=good).status_code == 401
+
+
+def test_trusted_proxy_by_address():
+    """tailscale serve on the same PC: trust forwarded headers only from it."""
+    trust = webapp.parse_trusted_proxy("127.0.0.1")
+    assert trust.hops == 1 and trust.addresses == {"127.0.0.1"}
+    both = webapp.parse_trusted_proxy("127.0.0.1, ::1")
+    assert both.addresses == {"127.0.0.1", "::1"}
+    assert webapp.parse_trusted_proxy(["127.0.0.1"]).addresses == {"127.0.0.1"}
+    headers = {"x-forwarded-for": "100.64.0.7"}
+    local = SimpleNamespace(headers=headers, client=SimpleNamespace(host="127.0.0.1"))
+    other = SimpleNamespace(headers=headers, client=SimpleNamespace(host="192.168.1.9"))
+    assert webapp.client_ip(local, trust) == "100.64.0.7"
+    assert webapp.client_ip(other, trust) == "192.168.1.9"  # not the proxy: ignored
+    with pytest.raises(ValueError, match="trusted_proxy"):
+        webapp.parse_trusted_proxy("localhost-ish")
+
+
+def test_redirect_only_from_the_trusted_address(make_app):
+    # TestClient's peer address is "testclient"
+    _, client = make_app(trusted_proxy="10.9.9.9")
+    r = client.get("/", headers={"X-Forwarded-Proto": "http"}, follow_redirects=False)
+    assert r.status_code == 200 and "strict-transport-security" not in r.headers
+
+
+def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
+    from assistant.config import load_config
+
+    monkeypatch.setenv("WEB_TOKEN", TOKEN)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)
+    cfg = load_config(None, None)
+    cfg["calendar"]["enabled"] = False
+    seen = {}
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw, app=app))
+    assert webapp.serve(cfg, tts_name="print", env_file=tmp_path / ".env",
+                        output_fn=lambda m: None) == 0
+    assert seen["host"] == "127.0.0.1"
+    assert seen["app"].state.web.trusted_proxy.addresses == {"127.0.0.1"}

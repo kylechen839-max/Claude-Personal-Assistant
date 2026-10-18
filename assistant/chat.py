@@ -85,13 +85,23 @@ class ClaudeChat:
                      f"{now:%A, %B %d, %Y, %I:%M %p} ({now:%Z}, UTC{now:%z}).")
         return "\n\n".join(parts)
 
-    def ask(self, user_text: str) -> str:
-        """Send one user turn, run any tool calls, and return the text reply."""
+    def ask(self, user_text: str, on_text=None, cancel=None) -> str:
+        """Send one user turn, run any tool calls, and return the text reply.
+
+        With `on_text`, replies are streamed and each text delta is passed to
+        it as it arrives. `cancel` (a threading.Event) stops the turn early
+        (barge-in): the words already received are kept in history and
+        returned."""
         notes = self.recall(user_text)
         start = len(self.history)
         self.history.append({"role": "user", "content": user_text})
         try:
-            reply = self._run(notes)
+            reply = self._run(notes, on_text, cancel)
+        except _Cancelled as c:
+            reply = c.partial.strip()
+            if self.history[-1]["role"] == "user":  # keep turns alternating
+                self.history.append({"role": "assistant", "content":
+                                     reply or "(interrupted)"})
         except Exception:
             del self.history[start:]  # keep history valid so the user can retry
             raise
@@ -196,14 +206,30 @@ class ClaudeChat:
             log.warning("Could not save conversation summary: %s", e)
             return None
 
-    def _run(self, notes: list[str] | None = None) -> str:
+    def _create(self, kwargs: dict, on_text=None, cancel=None):
+        if on_text is None and cancel is None:
+            return self.client.messages.create(**kwargs)
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled("")
+        partial = []
+        with self.client.messages.stream(**kwargs) as stream:
+            for delta in stream.text_stream:
+                if cancel is not None and cancel.is_set():
+                    raise _Cancelled("".join(partial))
+                partial.append(delta)
+                if on_text:
+                    on_text(delta)
+            return stream.get_final_message()
+
+    def _run(self, notes: list[str] | None = None, on_text=None,
+             cancel=None) -> str:
         system = self.build_system(notes)
         for _ in range(self.max_tool_rounds + 1):
             kwargs = dict(model=self.model, max_tokens=self.max_tokens,
                           system=system, messages=self.history)
             if self.tools:
                 kwargs["tools"] = self.tools.schemas()
-            response = self.client.messages.create(**kwargs)
+            response = self._create(kwargs, on_text, cancel)
             if response.stop_reason == "pause_turn":
                 # A long server-side search/fetch paused; send the partial
                 # turn back unchanged (no new user message) to resume it.
@@ -323,6 +349,14 @@ class ClaudeChat:
                                and isinstance(trimmed[0]["content"], str)):
             trimmed.pop(0)
         self.history = trimmed
+
+
+class _Cancelled(Exception):
+    """A streamed turn was stopped; `partial` is the text received so far."""
+
+    def __init__(self, partial: str):
+        super().__init__("cancelled")
+        self.partial = partial
 
 
 def has_web_content(history: list[dict]) -> bool:

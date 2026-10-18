@@ -70,10 +70,12 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def get_reply(chat: ClaudeChat, user_text: str, output_fn=print) -> str:
-    """Ask Claude; on failure return a short sentence that can be spoken."""
+def get_reply(chat: ClaudeChat, user_text: str, output_fn=print,
+              **ask_options) -> str:
+    """Ask Claude; on failure return a short sentence that can be spoken.
+    `ask_options` (on_text, cancel) go to ClaudeChat.ask."""
     try:
-        return chat.ask(user_text)
+        return chat.ask(user_text, **ask_options)
     except Exception as e:
         return friendly_error(e, user_text, output_fn)
 
