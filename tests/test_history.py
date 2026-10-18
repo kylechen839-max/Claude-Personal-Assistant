@@ -665,6 +665,19 @@ def test_incognito_saves_nothing(store, fake_client):
     assert store._con.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
 
 
+def test_deleted_active_conversation_starts_a_new_one(store, fake_client):
+    chat = recorded_chat(store, fake_client)
+    fake_client.queue = [make_response(text_block("One.")),
+                         make_response(text_block("Two."))]
+    chat.ask("first")
+    first = chat.conversation_id
+    store.delete(first)  # e.g. deleted on the phone mid-conversation
+    chat.ask("second")
+    assert chat.conversation_id != first
+    assert [m["text"] for m in store.get(chat.conversation_id)["messages"]] == [
+        "second", "Two."]
+
+
 def test_history_errors_never_break_a_reply(store, fake_client):
     chat = recorded_chat(store, fake_client)
     store.close()  # every write now fails

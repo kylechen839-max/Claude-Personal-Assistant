@@ -149,7 +149,8 @@ class ClaudeChat:
         if not self.recorder or not self.recorder.store:
             raise RuntimeError("conversation history is off")
         conv = self.recorder.store.get(conversation_id)
-        if self.history and conv["id"] != self.conversation_id:
+        if (self.history or self.conversation_id) and \
+                conv["id"] != self.conversation_id:
             self.end_conversation()
         self.history = rebuild_history(conv, self.max_history)
         self.recorder.resume(conversation_id)

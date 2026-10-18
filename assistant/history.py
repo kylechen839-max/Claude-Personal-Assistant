@@ -952,14 +952,22 @@ class Recorder:
             self.conversation_id = self.store.create(self.source)
         return self.conversation_id
 
+    def _append(self, role: str, text: str, **kwargs) -> None:
+        def write():
+            try:
+                self.store.append(self._ensure(), role, text, **kwargs)
+            except KeyError:  # deleted meanwhile (e.g. from the phone)
+                self.conversation_id = None
+                self.store.append(self._ensure(), role, text, **kwargs)
+        self._safe(write)
+
     def user(self, text: str, kind: str = "chat") -> None:
-        self._safe(lambda: self.store.append(self._ensure(), "user", text, kind=kind))
+        self._append("user", text, kind=kind)
 
     def assistant(self, text: str, tool_events: list[dict] | None = None,
                   kind: str = "chat", interrupted: bool = False) -> None:
-        self._safe(lambda: self.store.append(
-            self._ensure(), "assistant", text or "(no reply)", kind=kind,
-            tool_events=tool_events, interrupted=interrupted))
+        self._append("assistant", text or "(no reply)", kind=kind,
+                     tool_events=tool_events, interrupted=interrupted)
 
     def confirm(self, question: str, answer: str) -> None:
         self.assistant(question, kind="confirm")
