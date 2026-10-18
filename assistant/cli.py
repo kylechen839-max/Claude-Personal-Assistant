@@ -54,8 +54,8 @@ def parse_args(argv=None):
     parser.add_argument("--keyword-path",
                         help="openWakeWord .onnx model for the 'Hey Claude' wake word")
     parser.add_argument("--timings", action="store_true",
-                        help="wake mode: print each turn's latency summary to "
-                             "the console too (it is always in the log file)")
+                        help="wake and web voice mode: print each turn's latency "
+                             "summary to the console too (always in the log file)")
     parser.add_argument("--host",
                         help="web mode: address to listen on (default "
                              "127.0.0.1, this computer only)")
@@ -76,26 +76,32 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print,
     `ask_options` (on_text, cancel) go to ClaudeChat.ask."""
     try:
         return chat.ask(user_text, **ask_options)
-    except anthropic.APIConnectionError as e:  # includes timeouts
+    except Exception as e:
+        return friendly_error(e, user_text, output_fn)
+
+
+def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
+    """Log a failed request and return a short sentence to speak instead."""
+    if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
         return "Sorry, I can't reach the internet right now."
-    except anthropic.AuthenticationError as e:
+    if isinstance(e, anthropic.AuthenticationError):
         log.error("Authentication error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, my Anthropic API key isn't working. Please check it."
-    except anthropic.RateLimitError as e:
+    if isinstance(e, anthropic.RateLimitError):
         log.warning("Rate limited: %s", e)
         output_fn(f"API error: {e}")
         return "I'm getting too many requests right now. Try again in a minute."
-    except anthropic.APIError as e:
+    if isinstance(e, anthropic.APIError):
         log.error("API error: %s", e)
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
-    except Exception as e:  # anything else: keep the session alive
-        log.exception("Unexpected error answering %r", user_text)
-        output_fn(f"Error: {e}")
-        return "Sorry, something went wrong."
+    # anything else: keep the session alive
+    log.error("Unexpected error answering %r", user_text, exc_info=e)
+    output_fn(f"Error: {e}")
+    return "Sorry, something went wrong."
 
 
 def run_text(chat: ClaudeChat, input_fn=None, output_fn=print,
@@ -310,6 +316,23 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     return True
 
 
+def show_voice_timings(output_fn=print) -> logging.Handler:
+    """--timings in web mode: print each voice-conversation turn's latency
+    line (it is always in the log file)."""
+    class Timings(logging.Handler):
+        def emit(self, record):
+            message = record.getMessage()
+            if message.startswith("Turn timings"):
+                output_fn(f"({message})")
+
+    handler = Timings(logging.INFO)
+    voice_log = logging.getLogger("assistant.voice_session")
+    voice_log.addHandler(handler)
+    if voice_log.getEffectiveLevel() > logging.INFO:
+        voice_log.setLevel(logging.INFO)
+    return handler
+
+
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     """Register every service that is enabled and has credentials."""
     registry = ToolRegistry()
@@ -441,6 +464,9 @@ def main(argv=None) -> int:
             return cloud.serve(config, port=args.port, tts_name=tts_name)
         if args.mode == "web":
             from assistant import webapp
+
+            if args.timings:  # voice conversation turns: one line each
+                show_voice_timings()
 
             return webapp.serve(config, host=args.host, port=args.port,
                                 tts_name=tts_name, show_token=args.show_token)

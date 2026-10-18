@@ -40,6 +40,7 @@ test "$(docker exec hc awk '/^Uid:/ {print $2}' /proc/1/status)" = 10001
 test "$(docker exec hc stat -c %u /data)" = 10001
 docker exec -u 10001 hc sh -c 'echo ok > /data/probe && rm /data/probe'
 echo "user and /data checks passed"
+docker exec -u 10001 hc python scripts/ws_smoke.py      # the voice WebSocket
 
 docker exec -u 10001 hc python -m assistant --check
 [ "${SMOKE_ONLY:-}" = 1 ] && exit 0

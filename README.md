@@ -242,6 +242,48 @@ minutes (signed-in phones keep working). `GET /healthz` answers `{"ok":
 true}` without signing in. Scripts can send `Authorization: Bearer
 <WEB_TOKEN>` instead of the cookie.
 
+### Voice conversation (hands-free)
+
+Tap **Voice conversation** under the mic button and just talk, like voice
+mode in the Claude apps. A full-screen orb shows what it is doing: it moves
+with your voice while **listening**, pulses while **thinking**, and moves with
+the reply while **speaking**. When you stop talking for `[voice]
+silence_ms` (700 ms) it sends what you said, and the answer starts playing
+as soon as its first sentence is ready (the rest is still being written).
+Talk over it and it stops at once (barge-in, after `barge_in_ms` = 250 ms of
+speech); what you say next is the new question, and Claude remembers only
+the part of its answer you actually heard. The conversation keeps going
+turn after turn until you tap **End**, say "goodbye", or stay quiet for
+`idle_timeout` (2 minutes); then it is summarized to memory like the voice
+loop. Deletes still ask out loud; your next "yes" or "no" answers the
+question and is never sent to Claude as a new request.
+
+- Buttons: **End**, **Mute** (stops listening; the reply still plays),
+  **CC** (captions of what it heard and what it is saying, remembered on
+  this phone) and a stopwatch for the latency panel (also on by default with
+  `debug_panel = true`).
+- Hearing itself: the page asks the browser for echo cancellation, noise
+  suppression and auto gain, and needs a more confident detection while a
+  reply plays. If it still interrupts itself on the speaker, raise
+  `vad_threshold` (e.g. 0.7) or use earphones.
+- Voice detection runs on the phone: the Silero VAD neural model in
+  WebAssembly (onnxruntime-web, served by the app itself from
+  `assistant/web/vad/`, about 14 MB, cached after the first load). If it
+  can't load, or with `vad = "energy"`, a simpler loudness-based detector is
+  used. The latency panel says which one is active.
+- Backgrounding the app, a phone call or Siri pauses the conversation (the
+  current answer is cancelled); tap **Tap to continue** to go on. The screen
+  stays awake while it is open, where the browser allows it.
+- The connection is a WebSocket on the same address and sign-in as the rest
+  of the page (Tailscale or the hosted setup work unchanged). With
+  `--timings`, each turn's latency line is printed on the PC's console too.
+
+Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
+ignored), `max_utterance_s` (30), `max_session_minutes` (30),
+`confirm_timeout` (60 s to answer a yes/no question) and
+`utterances_per_minute` (30). For the most natural voice set `[tts] engine =
+"piper"`; with pyttsx3 on Linux it uses eSpeak directly.
+
 ## Run it in the cloud (Render)
 
 The phone web app can also run 24/7 on a small paid server at
@@ -443,6 +485,12 @@ assistant/
   webapp.py     private phone web app (FastAPI)  (--mode web)
   cloud.py      the web app on a public server (auth wall, lockout, /healthz)
   web/          the page: index.html, app.js, app.css, sw.js
+
+  voice_ws.py   voice conversation WebSocket (/api/voice)
+  voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
+  sentences.py  sentence splitter for streamed speech
+  web/          the page: index.html, app.js, app.css, sw.js; voice.js,
+                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
   tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi);
                 measure_memory.py, container_smoke.sh (cloud image)
@@ -451,6 +499,10 @@ deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
                               the Docker image, the Pinecone MCP connector
+
+tests/          pytest suite (offline; live tests skip without keys);
+                tests/js/ node:test unit tests (run by pytest if node is installed)
+.github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,

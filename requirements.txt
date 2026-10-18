@@ -27,6 +27,7 @@ python-dotenv>=1.0
 av>=11
 fastapi>=0.110
 uvicorn>=0.27
+websockets>=12  # voice conversation mode (WebSocket)
 python-multipart>=0.0.9
 httpx>=0.27  # FastAPI's TestClient in the tests
 tomli>=2.0; python_version < "3.11"

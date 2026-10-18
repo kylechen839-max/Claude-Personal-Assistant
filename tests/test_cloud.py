@@ -15,6 +15,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
+from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
 from assistant import cloud, doctor, webapp  # noqa: E402
 from assistant.chat import ClaudeChat  # noqa: E402
@@ -31,7 +32,7 @@ TRUSTED = DEFAULTS["cloud"]["trusted_proxies"]
 def at(peer, app):
     """The app as seen from `peer` (the TCP address the server reports)."""
     async def wrapped(scope, receive, send):
-        if scope["type"] == "http":
+        if scope["type"] in ("http", "websocket"):
             scope = {**scope, "client": (peer, 40000)}
         await app(scope, receive, send)
     return wrapped
@@ -385,3 +386,101 @@ def test_web_mode_never_imports_sounddevice_or_the_wake_word():
                          text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip().endswith("ok")
+
+
+# --- the voice WebSocket (/api/voice) -----------------------------------------
+
+ORIGIN = "https://testserver"
+
+
+def voice(client, ip=PUBLIC, origin=ORIGIN, cookie=True, path="/api/voice", **extra):
+    headers = {"X-Forwarded-For": ip, "X-Forwarded-Proto": "https", **extra}
+    if origin:
+        headers["Origin"] = origin
+    value = client.cookies.get(webapp.COOKIE)
+    if cookie and value:  # TestClient speaks ws://, which drops Secure cookies
+        headers["Cookie"] = f"{webapp.COOKIE}={value}"
+    return client.websocket_connect(path, headers=headers)
+
+
+def refused(ctx) -> int:
+    with pytest.raises(WebSocketDisconnect) as e:
+        with ctx:
+            pass
+    return e.value.code
+
+
+def test_voice_socket_opens_when_signed_in_from_this_site(make_cloud):
+    _, client = make_cloud()
+    login(client)
+    with voice(client):
+        pass
+
+
+@pytest.mark.parametrize("origin", [None, "https://evil.example", "null",
+                                    "https://testserver.evil.example"])
+def test_voice_socket_needs_this_sites_origin(make_cloud, origin):
+    _, client = make_cloud()
+    login(client)
+    assert refused(voice(client, origin=origin)) == 1008
+
+
+def test_voice_socket_needs_auth(make_cloud):
+    _, client = make_cloud()
+    assert refused(voice(client)) == 1008
+    login(client)
+    assert refused(voice(client, cookie=False)) == 1008
+    assert refused(voice(client, path="/api/other")) == 1008
+
+
+def test_voice_socket_bearer_and_lockout(make_cloud):
+    _, client = make_cloud()
+    with voice(client, cookie=False, Authorization=f"Bearer {TOKEN}"):
+        pass
+    for _ in range(5):
+        assert refused(voice(client, cookie=False, Authorization="Bearer wrong")) == 1008
+    assert refused(voice(client, cookie=False, Authorization=f"Bearer {TOKEN}")) == 1008
+    assert login(client).status_code == 429  # one lockout for both
+
+
+def test_forwarded_host_counts_only_from_the_proxy(make_cloud):
+    # Render's proxy may name the public host in X-Forwarded-Host
+    _, client = make_cloud()
+    login(client)
+    with voice(client, origin="https://hey.onrender.com",
+               **{"X-Forwarded-Host": "hey.onrender.com"}):
+        pass
+    # a direct caller can't vouch for an origin with it: the socket ...
+    _, direct = make_cloud(peer=PUBLIC)
+    login(direct)
+    assert refused(voice(direct, origin="https://evil.example",
+                         **{"X-Forwarded-Host": "evil.example"})) == 1008
+    # ... nor plain requests (the web app's own check never sees it)
+    r = direct.post("/api/turn", json={"text": "hi"}, headers={
+        "Origin": "https://evil.example", "X-Forwarded-Host": "evil.example"})
+    assert r.status_code == 403
+
+
+def test_voice_page_files_are_public(make_cloud):
+    _, client = make_cloud()
+    for path in ("/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
+                 "/static/vad/silero_vad_v5.onnx"):
+        assert client.get(path, headers=via_proxy(PUBLIC)).status_code == 200, path
+    assert client.get("/static/vad/NOTICE.md",
+                      headers=via_proxy(PUBLIC)).status_code == 401
+
+
+def test_cloud_server_caps_websocket_messages(monkeypatch, fake_client):
+    import uvicorn
+
+    seen = {}
+    monkeypatch.setenv("WEB_TOKEN", TOKEN)
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr(webapp, "build_assistant", lambda *a, **k: webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber(), PrintTTS()))
+    monkeypatch.setattr(cloud, "warm_up", lambda a: None)
+    cfg = load_config(None, None, profile="server")
+    assert cloud.serve(cfg, port=12345) == 0
+    assert seen["ws_max_size"] == 2_000_000 and seen["ws"] == "auto"
+    assert seen["proxy_headers"] is False and seen["port"] == 12345

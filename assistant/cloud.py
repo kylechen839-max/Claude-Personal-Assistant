@@ -18,6 +18,10 @@ for the public internet with no Tailscale in front:
   https and HSTS is sent. Cookies are always Secure, HttpOnly, SameSite=Strict.
 - Request bodies are capped: audio uploads at [webapp] max_upload_mb,
   everything else at [cloud] max_body_kb, chunked uploads included.
+- The voice WebSocket (/api/voice) gets the same checks before the
+  handshake: rate limit, cookie or Bearer token (wrong ones count toward the
+  lockout) and an Origin naming this site. X-Forwarded-Host, which the web
+  app's own same-site checks read, is removed unless the proxy sent it.
 - Errors never reach the client as stack traces.
 
 Secrets come from the environment only; nothing is written to disk.
@@ -39,12 +43,19 @@ from assistant import webapp
 log = logging.getLogger(__name__)
 
 # Reachable without signing in. "/" is the login page (and, once signed in,
-# the app); its script, style and service worker hold no secrets.
+# the app); its scripts, styles and service worker, and the voice view's
+# open-source VAD files (ONNX Runtime, Silero), hold no secrets.
 PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
-              "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png"}
+              "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
+              "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
+              "/static/vad/ort.wasm.min.js", "/static/vad/ort-wasm-simd-threaded.mjs",
+              "/static/vad/ort-wasm-simd-threaded.wasm",
+              "/static/vad/silero_vad_v5.onnx"}
 PUBLIC_POST = {"/api/login"}
 HEALTH = "/healthz"
 UPLOAD_PATHS = {"/api/turn", "/api/confirm"}
+WEBSOCKETS = {"/api/voice"}  # the hands-free voice conversation
+WS_MAX_SIZE = 2_000_000  # largest WebSocket message: a 30 s utterance is ~1 MB
 HSTS = "max-age=31536000; includeSubDomains"
 
 
@@ -172,9 +183,10 @@ class CloudGuard:
     def __init__(self, app, token: str, trusted_proxies=(),
                  max_upload_bytes=4_000_000, max_body_bytes=16_384,
                  lockout: LoginLockout | None = None,
-                 limiter: RateLimiter | None = None):
+                 limiter: RateLimiter | None = None, allowed_origins=()):
         self.app = app
         self.token = token
+        self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
         self.trusted = parse_networks(trusted_proxies)
         self.max_upload_bytes = max_upload_bytes
         self.max_body_bytes = max_body_bytes
@@ -199,9 +211,64 @@ class CloudGuard:
                 break
         return client, (proto or None)
 
+    def from_proxy(self, scope) -> bool:
+        return _in_networks((scope.get("client") or ("", 0))[0] or "", self.trusted)
+
+    def scrub(self, scope):
+        """Drop X-Forwarded-Host unless the proxy sent it: the web app's
+        same-site checks accept it as the site's own name."""
+        if self.from_proxy(scope):
+            return scope
+        return {**scope, "headers": [(k, v) for k, v in scope.get("headers", [])
+                                     if k.lower() != b"x-forwarded-host"]}
+
+    def same_site(self, scope) -> bool:
+        """The WebSocket's Origin names this site (browsers always send one)."""
+        headers = _headers(scope)
+        origin = headers.get("origin", "").rstrip("/")
+        if not origin:
+            return False
+        if origin in self.allowed_origins:
+            return True
+        scheme, _, host = origin.partition("://")
+        own = {headers.get("host", "").lower()}
+        if self.from_proxy(scope) and headers.get("x-forwarded-host"):
+            own.add(headers["x-forwarded-host"].split(",")[-1].strip().lower())
+        return scheme in ("https", "http") and host.lower() in own - {""}
+
+    async def websocket(self, scope, receive, send):
+        """Checks before the handshake; a refusal closes with 1008 (the
+        server answers the handshake with 403)."""
+        ip, _ = self.client(scope)
+
+        async def refuse(why: str):
+            log.warning("Refused voice socket from %s: %s", ip, why)
+            await send({"type": "websocket.close", "code": 1008})
+
+        if scope["path"] not in WEBSOCKETS:
+            return await refuse("unknown path")
+        if not self.limiter.allow(ip):
+            return await refuse("too many requests")
+        if not self.same_site(scope):
+            return await refuse("origin is not this site")
+        bearer = _bearer(scope)
+        if bearer is not None:
+            if self.lockout.retry_after(ip):
+                return await refuse("locked out")
+            if not webapp.tokens_match(bearer, self.token):
+                self.lockout.fail(ip)
+                return await refuse("wrong bearer token")
+            self.lockout.succeed(ip)
+        elif not self.signed_in(scope):
+            return await refuse("not signed in")
+        await self.app(self.scrub(scope), receive, send)
+
     async def __call__(self, scope, receive, send):
+        if scope["type"] == "websocket":
+            return await self.websocket(scope, receive, send)
         if scope["type"] != "http":
             return await self.app(scope, receive, send)  # lifespan
+        scope = self.scrub(scope)
         path, method = scope["path"], scope["method"]
         if path == HEALTH and method in ("GET", "HEAD"):
             return await _respond(send, 200, b"ok", "text/plain")
@@ -374,14 +441,16 @@ def build_app(config: dict, web_assistant, token: str):
                             allowed_origins=web["allowed_origins"],
                             max_upload_bytes=max_upload,
                             max_audio_seconds=float(web["max_audio_seconds"]),
-                            trusted_proxy=0, limiter=NeverBlock())
+                            trusted_proxy=0, limiter=NeverBlock(),
+                            voice=config.get("voice"))
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),
         lockout=LoginLockout(cloud["login_max_failures"], cloud["login_window"],
                              cloud["login_lockout"],
                              cloud["login_global_max_failures"]),
-        limiter=RateLimiter(cloud["requests_per_minute"]))
+        limiter=RateLimiter(cloud["requests_per_minute"]),
+        allowed_origins=web["allowed_origins"])
 
 
 def warm_up(web_assistant) -> None:
@@ -415,5 +484,6 @@ def serve(config: dict, port: int | None = None, tts_name: str | None = None,
     log.info("Cloud web app listening on %s:%s", host, port)
     # proxy_headers off: CloudGuard decides which forwarded headers to trust.
     uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
-                server_header=False, timeout_keep_alive=30, limit_concurrency=64)
+                server_header=False, timeout_keep_alive=30, limit_concurrency=64,
+                ws="auto", ws_max_size=WS_MAX_SIZE)
     return 0

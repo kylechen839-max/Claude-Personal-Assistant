@@ -42,7 +42,7 @@ RUN if [ "$FETCH_MODELS" = "1" ]; then \
 
 COPY config.toml ./
 COPY assistant ./assistant
-COPY scripts/measure_memory.py ./scripts/measure_memory.py
+COPY scripts/measure_memory.py scripts/ws_smoke.py ./scripts/
 
 # The app runs as an unprivileged user that can't modify the app or the
 # models. The entrypoint starts as root only to hand the persistent disk
