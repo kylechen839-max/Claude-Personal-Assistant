@@ -23,6 +23,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
 | `test_memory.py` | 12 | stage 6 |
+| `test_memory_tools.py` | 6 | stage 6 (memory tools) |
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
@@ -110,6 +111,11 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   writes a 1-3 sentence summary into the `voice-assistant` namespace (small
   talk is skipped). Other namespaces are only read. A memory failure is
   logged and the reply goes ahead without it.
+- Memory tools (`assistant/tools/memory_tools.py`, all modes): `search_memory`
+  lets Claude look notes up when asked ("what do my notes say about...");
+  `remember` saves a note to the `voice-assistant` namespace when asked
+  ("remember that..."), with a confirmation if web/email content is in the
+  conversation. Tests: `test_memory_tools.py` (mocked memory).
 - Tests: mocked Pinecone (score filter, namespaces, upsert shape, failure
   tolerance, summary/skip) and one real read-only query when
   `PINECONE_API_KEY` is set.
