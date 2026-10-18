@@ -66,6 +66,12 @@ top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 
+[webapp]                      # python -m assistant --mode web (phone page)
+host = "127.0.0.1"            # keep this: reach it through `tailscale serve`
+port = 8765
+confirm_timeout = 120         # seconds to wait for a yes before treating it as no
+max_upload_mb = 10
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

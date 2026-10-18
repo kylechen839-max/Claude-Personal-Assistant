@@ -63,6 +63,9 @@ which), so you can start with only the Anthropic key in text mode.
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 | `--check` | Check keys, files, audio devices and models, then exit |
+| `--mode web` | Private phone web app (see "Phone web app" below) |
+| `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
+| `--show-token` | Web mode: print the access token to the console once |
 
 **Follow-up mode:** after a reply, the assistant plays a soft, low blip
 and keeps listening for 5 seconds without the wake word, so you can just
@@ -153,6 +156,57 @@ pick a name from the voices repo (e.g. `en_US-amy-medium`,
 `en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
 on the command line tries Piper for one run without editing the config.
 `[tts] rate` and `voice` apply to pyttsx3 only.
+
+## Phone web app
+
+`python -m assistant --mode web` runs the same assistant (Calendar, Notion,
+memory, web search, delete confirmations) as a private web page for your
+phone. You talk into the phone's own mic; the PC transcribes with Whisper,
+asks Claude, and sends back the reply as text and audio (Piper if
+`[tts] engine = "piper"`, else pyttsx3; or tick "Use the phone's voice" in
+the page's settings). Hold the big mic button to talk (or tap once to start
+and again to stop), or type. When Claude wants to delete something, Yes/No
+buttons appear; saying "yes" into the mic works too. Each phone/browser
+gets its own conversation; after `[assistant] conversation_timeout` (5
+minutes) of quiet it ends and is summarized to memory, like the voice loop.
+Opening pages in the PC's browser is off in this mode.
+
+**It is private by design.** The server listens on 127.0.0.1 only, so nothing
+outside the PC can reach it. Every request needs a session cookie that you
+get only by entering the access token once (`WEB_TOKEN`, a 43-character
+random value that is created in `.env` the first time you start web mode and
+is never written to the log). Wrong tokens are rate-limited; requests from
+other sites are refused; the page sends strict security headers.
+
+The phone's mic only works over HTTPS, so reach the PC through
+[Tailscale](https://tailscale.com/download), which gives it a private
+HTTPS address that only your own devices can open:
+
+1. Install Tailscale on the PC and on the phone, and sign in to the same
+   account on both. In the Tailscale admin console (DNS page), make sure
+   MagicDNS and HTTPS certificates are enabled.
+2. On the PC, start the web app and print the token once:
+   ```powershell
+   python -m assistant --mode web --show-token
+   ```
+3. In a second PowerShell window, publish it to your tailnet (not the
+   internet; that would be `tailscale funnel`, don't use it):
+   ```powershell
+   tailscale serve --bg --https=443 http://127.0.0.1:8765
+   tailscale serve status    # shows https://<pc-name>.<tailnet>.ts.net
+   ```
+4. On the phone (Tailscale on), open that `https://...ts.net` address, paste
+   the token, and allow the microphone. Add it to the home screen (Safari:
+   Share -> Add to Home Screen; Chrome: menu -> Add to Home screen).
+
+`tailscale serve reset` stops publishing it. To sign a phone out everywhere,
+delete `WEB_TOKEN` from `.env` and restart: a new token is created and old
+cookies stop working. Settings live in `config.toml` `[webapp]`: `port`
+(8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
+(10), and `allowed_origins` (only needed if a proxy other than Tailscale
+rewrites the Host header). Keep `host` at "127.0.0.1"; `--check` reports
+whether the token is set. On the Pi it is the same: install Tailscale there
+and run the same two commands.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
@@ -275,6 +329,8 @@ assistant/
   memory.py     Pinecone recall + conversation summaries
   audio.py      wav I/O, resampling, chime
   timing.py     per-turn latency               (--timings)
+  webapp.py     private phone web app (FastAPI)  (--mode web)
+  web/          the page: index.html, app.js, app.css, sw.js
   tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
 deploy/         hey-claude.service                 (systemd user unit)
