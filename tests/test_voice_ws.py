@@ -268,8 +268,10 @@ def test_barge_in_over_the_socket(make_voice):
     assert second[-1]["content"] == "what's the weather"
 
 
-@pytest.mark.parametrize("answer, deleted", [("yes", ["Dentist"]), ("no", [])])
-def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted):
+@pytest.mark.parametrize("answer, deleted, barge_in", [
+    ("yes", ["Dentist"], False), ("no", [], False),
+    ("okay, and what about Friday?", [], False), ("yes", [], True)])
+def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted, barge_in):
     from assistant.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
 
@@ -294,8 +296,18 @@ def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted):
         question = [m for m in receive(ws, "audio") if m["type"] == "audio"]
         while not question[-1]["text"].endswith("Please say yes or no."):
             question += [m for m in receive(ws, "audio") if m["type"] == "audio"]
-        ws.send_bytes(utterance(2))
-        rest = receive(ws, "turn_done")
+        assert question[-1]["question"] is True
+        if barge_in:  # Kyle talks over the question: the delete is cancelled
+            ws.send_text(json.dumps({"type": "interrupt", "turn": 1,
+                                     "index": question[-1]["index"], "fraction": 0.4}))
+            rest = receive(ws, "turn_done")
+        else:
+            ws.send_text(json.dumps({"type": "played", "turn": 1,
+                                     "index": question[-1]["index"]}))
+            ws.send_bytes(utterance(2))
+            rest = receive(ws, "turn_done")
+    spoken = [m["text"] for m in question + rest if m["type"] == "audio"]
+    assert ("OK, I won't delete it." in spoken) is (not deleted)
     ans = next(m for m in rest if m["type"] == "confirm_answer")
     assert ans["yes"] == bool(deleted) and ans["turn"] == 1
     assert done == deleted

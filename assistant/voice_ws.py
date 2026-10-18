@@ -266,6 +266,8 @@ def add_voice_routes(app, assistant, allowed_origins=(),
                     conv.interrupt(int(data.get("turn", -1)),
                                    int(data.get("index", 0)),
                                    float(data.get("fraction", 0)))
+                elif kind == "played":
+                    conv.chunk_played(int(data.get("turn", -1)), int(data.get("index", -1)))
                 elif kind == "end":
                     await run_in_threadpool(conv.end, "user")
                 elif kind == "ping":

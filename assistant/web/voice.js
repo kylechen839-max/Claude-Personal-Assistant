@@ -63,6 +63,10 @@
         }
         node.onended = () => {
           this.sources = this.sources.filter((s) => s !== entry);
+          // A yes/no question only counts as asked once it was heard to the end.
+          if (header.question && ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "played", turn: header.turn, index: header.index }));
+          }
           if (!this.sources.length) controller.onPlaybackIdle();
         };
       });
