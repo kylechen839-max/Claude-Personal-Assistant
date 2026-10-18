@@ -188,20 +188,25 @@ def test_right_token_signs_in_after_a_flood_of_wrong_ones(make_app):
     assert client.get("/api/state", headers=bearer).status_code == 200
 
 
-def test_wrong_tokens_are_slowed_down_when_many_fail(make_app):
-    import time as _time
+def test_wrong_tokens_are_slowed_down_when_many_fail(make_app, monkeypatch):
+    waits = []
 
+    async def record(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(webapp, "_wait", record)
     _, client = make_app(limiter=webapp.LoginLimiter(per_ip=100, global_free=2,
                                                      global_delay=0.3))
-    times = []
     for _ in range(4):
-        start = _time.monotonic()
-        client.post("/api/login", json={"token": "nope"})
-        times.append(_time.monotonic() - start)
-    assert max(times[:2]) < 0.25 and min(times[2:]) >= 0.3
-    start = _time.monotonic()
+        assert client.post("/api/login", json={"token": "nope"}).status_code == 401
+    assert waits == [0.3, 0.3]  # only past the first two
+    bad = {"Authorization": "Bearer nope"}
+    assert client.get("/api/state", headers=bad).status_code == 401
+    assert waits == [0.3, 0.3, 0.3]  # wrong Bearer tokens too
     login(client)  # the right token isn't slowed down
-    assert _time.monotonic() - start < 0.25
+    assert client.get("/api/state", headers={"Authorization": f"Bearer {TOKEN}"}
+                      ).status_code == 200
+    assert len(waits) == 3
 
 
 def test_per_address_lockout_behind_a_trusted_proxy(make_app):

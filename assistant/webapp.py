@@ -981,7 +981,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             response = await call_next(request)
             delay = getattr(request.state, "auth_delay", 0)
             if delay:  # a wrong bearer token while many are failing
-                await asyncio.sleep(delay)
+                await _wait(delay)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
         if proxied:
@@ -1100,7 +1100,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             delay = limiter.fail(ip)
             log.warning("Web sign-in with a wrong token")
             if delay:
-                await asyncio.sleep(delay)
+                await _wait(delay)
             return error("sign-in failed", 401)
         sid = web.sid(request)
         if sid is None or sid == web.bearer_sid:
@@ -1233,6 +1233,11 @@ def _static_route(name: str, media_type: str):
         return FileResponse(STATIC / name, media_type=media_type)
     serve_file.__name__ = f"static_{name.replace('.', '_')}"
     return serve_file
+
+
+async def _wait(seconds: float) -> None:
+    """The slowdown on wrong tokens (a function so tests can record it)."""
+    await asyncio.sleep(seconds)
 
 
 def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
