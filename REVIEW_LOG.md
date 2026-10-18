@@ -82,3 +82,90 @@ fixes that were assigned earlier.
 | Mic index 0 falsy (pi-preflight) | NOT FIXED (`preflight.py:478`, and master `cli.py:424`) |
 
 Most fixes were assigned only minutes before this check, so I'll verify them again next cycle.
+
+## Cycle 2: 2026-10-18 ~20:50-21:10 UTC
+
+### Commits reviewed
+| Branch | Range |
+|---|---|
+| master | 7031232..ab27a4f (voice-mode, phone-web and pi-preflight merges; memory tools; shared event log) |
+| voice-mode | f111aff |
+| phone-web | 7a48f9c (same as master) |
+| pi-preflight | 0b6e4da |
+| cloud-host | fbf255a..5afc4cb |
+| failover | 9f4f53c..02eafbd |
+| features | ff0bffa..e6a5a96 |
+| history | b188c7b (unchanged) |
+
+### Tests
+| Branch | Result |
+|---|---|
+| master | 648 passed, 18 skipped |
+| cloud-host | 741 passed |
+| failover | 701 passed, node 33/33 |
+| features | 671 passed |
+| voice-mode | 329 passed (74c9e92) |
+
+Possibly flaky, passing on rerun:
+- `test_end_to_end.py:42` (15360 vs >16000 samples)
+- `test_wakeword.py::test_pipeline_on_audio_file` (FileNotFoundError from the TTS fixture)
+
+### New findings
+**HIGH**
+- master (pi-preflight `f618b83`): the auto-updater runs whatever is on `stable` with no signature, remote or CI check (`updater.py:190-212`). It runs pip install and `--check` from the new code. stable and master are unprotected, so anyone who can push gets code execution on the PC and Pi. The coordinator disabled updates. A fix is planned: a promotion workflow plus verify-commit, which I recommend making mandatory. Branch protection is a Kyle BLOCKER.
+
+**MED**
+- master/updater:
+  - A tracked `config.toml` edit stalls updates for good.
+  - Any HEAD move (a manual checkout) is treated as an update, and the rollback resets a feature branch.
+  - pip runs into the venv while the children are still running, and rollback can't restore the old dependencies.
+- master/phone-web: logout and logout-all don't close live voice WebSockets (`webapp.py:1146-1163`).
+- features: the untrusted-invite check needs `organizer.self is False`, but the API omits `self`, so it never fires. The test fakes the field (`calendar.py:69`, `test_gmail.py:547`).
+- features/master: the recalled-note untrusted mark is dead code (nothing writes `untrusted`). Memory can be poisoned through calendar content and then steer unconfirmed create/move/update.
+- cloud-host: an unauthenticated attacker with 16 IPv6 /64s can fill all 32 slow-body slots, and the owner's correct requests then get 429 (simulated).
+- failover:
+  - The `winner()` window is anchored on the earliest observed fire, so it can elect nobody.
+  - The branch is 41 commits behind master and still has the pre-fix login lockout (HIGH for merging).
+- Integration cloud-host × failover (plausible, HIGH once merged): `EdgeMiddleware` has no `.state`, so CloudGuard rejects every cookie, and `hc1.` tokens are counted as wrong tokens.
+- features: stale uploads are purged only at startup, and `UploadBusy` returns a 500.
+
+**LOW**
+- `answer()` is bound to `s.pending`, not to a specific confirmation.
+- The 4-conversation cap can be exceeded by simultaneous voice handshakes.
+- Tool inputs and memory queries are logged at INFO. `voice_session.py:449` still logs the summary on master; `f111aff` has the fix but isn't merged yet.
+- `all_failures` has no cap.
+- updater: the `--short=7` comparison, the lock stale time, and the idle-check gap.
+- `Test-InRepo` substring match. smoke follows redirects with the token.
+- `write_private` uses a PID-only temp name. A multi-address Reply-To shows an empty recipient.
+- cloud-host: 10/8 still covers other Render services. Lockout cap eviction order.
+- failover:
+  - Redacted text stays in the WAL and freed pages.
+  - A `delete_message` aimed at a tombstone makes the two stores diverge.
+  - Leader and runner aren't wired up.
+
+### Fix verification
+| Item | Status |
+|---|---|
+| Barge-in before tool call (HIGH) | FIXED on master (`chat.py:241-251`, `voice_session.py:456-463`) |
+| Concurrent turns / confirmation binding | MOSTLY FIXED (per-turn listener); `answer()` binding LOW remains |
+| STT backlog | FIXED (per-session limit, 4 conv cap, 1+1 queue, stop before Whisper) |
+| voice.js End during mic prompt | FIXED |
+| `is_cross_origin` XFH, malformed interrupt | FIXED |
+| Global lockout (phone-web / master) | FIXED, right token always accepted |
+| Global lockout (cloud-host) | FIXED, except the slot-exhaustion 429 above |
+| Global lockout (failover) | FIXED at the edge; branch webapp still old until master is merged |
+| Cookie revoked on logout | FIXED (persisted allowlist + epoch), except voice WS stays open |
+| Slow-upload DoS (cloud-host) | PARTLY: per-IP/global caps + deadlines, but global pool exhaustible from one /48 |
+| cloud-host trusted proxies / IPv6 / caps / docs | FIXED (residual: 10/8) |
+| Deleted text in sync log (failover) | FIXED (tombstone redaction, both orders); WAL residue LOW |
+| failover leader / stale-token lockout / dead_msgs / XFH | FIXED (leader logic not yet wired) |
+| Gmail send scope | PARTLY: code guard (`NoSendGmail`) + Gmail scopes only if enabled; token can still send (no narrower scope) |
+| Email in logs | MOSTLY FIXED; `remember`/`search_memory` not private, TTS error log |
+| Untrusted email → memory | PARTLY: user-only summaries; untrusted mark never written |
+| Duplicate lecture pages | FIXED |
+| Token files 0600 | FIXED (temp name race LOW) |
+| features cycle-1 items #4-#9 | FIXED |
+| Untrusted invites (features #3) | NOT EFFECTIVE (`organizer.self` omitted by API) |
+| Mic index 0 | FIXED (`audio.resolve_mic_device`) |
+| pi-preflight cycle-1 #1-#4 | FIXED (`72da662`) |
+| history cycle-1 items | no new commits |
