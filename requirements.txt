@@ -22,5 +22,7 @@ pinecone>=7.0
 tzlocal>=5.0
 tzdata
 python-dotenv>=1.0
+# Homework tutor photos: check the type, resize, strip EXIF
+pillow>=10
 tomli>=2.0; python_version < "3.11"
 pytest>=8.0
