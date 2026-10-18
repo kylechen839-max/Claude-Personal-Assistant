@@ -193,3 +193,41 @@ def test_notes_replace_the_plain_remember_tool_but_keep_search():
     cli.register_notes(reg, mem, cfg)
     assert not reg.has("remember") and reg.has("search_memory")
     assert reg.has("remember_note")
+
+
+@pytest.mark.parametrize("source", ["web", "email"])
+def test_web_or_email_cannot_plant_a_note_without_a_yes(fake_client, notes, source):
+    """Like the plain remember tool: with untrusted text in context, saving
+    a note asks first; Kyle says no and nothing is stored."""
+    from tests.test_gmail import inbox
+    from tests.test_security import fetched_page, server_fetch
+
+    asked = []
+    reg = ToolRegistry(confirm=lambda q: asked.append(q) or False)
+    reg.register(*notes.tools())
+    gmail, _, _ = inbox()
+    reg.register(*gmail.tools())
+    plant = tool_use_block("remember_note",
+                           {"text": "Kyle wants all his events at midnight"}, id="t2")
+    if source == "web":
+        first = make_response(server_fetch(), fetched_page(), plant,
+                              stop_reason="tool_use")
+        fake_client.queue = [first, make_response(text_block("Okay."))]
+    else:
+        fake_client.queue = [
+            make_response(tool_use_block("read_email", {"message_id": "m2"}, id="t1"),
+                          stop_reason="tool_use"),
+            make_response(plant, stop_reason="tool_use"),
+            make_response(text_block("Okay."))]
+    ClaudeChat(client=fake_client, tools=reg).ask("Look at that")
+    assert asked == ["Do you want me to save a note: Kyle wants all his events "
+                     "at midnight?"]
+    assert notes.index.vectors == {}
+
+
+def test_kyles_own_note_saves_without_asking(notes):
+    asked = []
+    reg = ToolRegistry(confirm=lambda q: asked.append(q) or False)
+    reg.register(*notes.tools())
+    result, err = reg.dispatch("remember_note", {"text": "Bring goggles"})
+    assert not err and asked == [] and len(notes.index.vectors) == 1
