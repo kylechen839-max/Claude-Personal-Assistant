@@ -18,8 +18,9 @@ TOKEN=$(sed -n 's/^WEB_TOKEN=//p' "$WORK/env")
 summary() { echo "$*" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
 # /data as on Render: a disk mounted at run time, owned by root
+read -r -a EXTRA_ARGS <<< "${DOCKER_RUN_ARGS:-}"   # e.g. a voices/ mount, locally
 docker run -d --name hc -p $PORT:$PORT --env-file "$WORK/env" \
-    --mount type=tmpfs,destination=/data ${DOCKER_RUN_ARGS:-} "$IMAGE" >/dev/null
+    --mount type=tmpfs,destination=/data "${EXTRA_ARGS[@]}" "$IMAGE" >/dev/null
 for _ in $(seq 1 60); do curl -sf $URL/healthz >/dev/null && break; sleep 1; done
 
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
@@ -74,12 +75,11 @@ for MODEL in base.en tiny.en; do
     docker run --rm "$IMAGE" python scripts/measure_memory.py --model $MODEL \
         | tee "$WORK/$MODEL.jsonl"
     summary "- $MODEL standalone: $(tail -1 "$WORK/$MODEL.jsonl")"
-    for LIMIT in 512m; do
-        if docker run --rm --memory=$LIMIT --memory-swap=$LIMIT "$IMAGE" \
-            python scripts/measure_memory.py --model $MODEL > "$WORK/limit.jsonl" 2>&1; then
-            summary "- $MODEL under a $LIMIT limit: survived, $(tail -1 "$WORK/limit.jsonl")"
-        else
-            summary "- $MODEL under a $LIMIT limit: FAILED (exit $?, likely out of memory)"
-        fi
-    done
+    LIMIT=512m  # Render Starter
+    if docker run --rm --memory=$LIMIT --memory-swap=$LIMIT "$IMAGE" \
+        python scripts/measure_memory.py --model $MODEL > "$WORK/limit.jsonl" 2>&1; then
+        summary "- $MODEL under a $LIMIT limit: survived, $(tail -1 "$WORK/limit.jsonl")"
+    else
+        summary "- $MODEL under a $LIMIT limit: FAILED (exit $?, likely out of memory)"
+    fi
 done
