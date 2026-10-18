@@ -378,3 +378,25 @@ def test_merge_is_order_and_duplicate_independent(seed):
         a.append(b.all())
         b.append(a.all())
         assert fingerprint(materialize(a.all())) == fingerprint(materialize(b.all())) == want
+
+
+def test_extra_data_fields_are_kept_through_sync():
+    """The history store adds fields (kind, tools, summary, archived...)
+    that materialize ignores; sync must carry them unchanged."""
+    stores, net = three()
+    extras = [
+        new_event("message", "c", {"role": "assistant", "text": "Done.", "kind": "confirm",
+                                   "interrupted": False, "tools": ["move_event"],
+                                   "source": "voice"}, origin="pi"),
+        new_event("rename", "c", {"title": "Dentist", "summary": "Moved the dentist",
+                                  "by": "auto", "ended": True}, origin="pi"),
+        new_event("pin", "c", {"pinned": True, "archived": False}, origin="pi"),
+    ]
+    stores["pi"].append(extras)
+    net.syncer("pi").sync_all()
+    net.syncer("pc").sync_all()
+    for role in ("cloud", "pc"):
+        got = {e.id: e.data for e in stores[role].all()}
+        assert got == {e.id: e.data for e in extras}, role
+    c = materialize(stores["pc"].all())["conversations"]["c"]
+    assert c.title == "Dentist" and c.pinned and c.messages[0]["text"] == "Done."

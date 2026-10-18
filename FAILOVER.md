@@ -272,7 +272,12 @@ the history database file without touching the history store's tables
 (seq is AUTOINCREMENT, never reused; ids 32-hex; ts in ms; redaction on
 insert). The history store records each change as an event in it and
 applies the events `append` returns from peers. The same contract tests
-run on it and on `MemoryEventLog`. **Storage API**: `log_id`, `append(events) -> inserted` (applying the
+run on it and on `MemoryEventLog`. The backends' `Syncer` and sync
+endpoints use the history store's `sync_log` (an EventLog wrapper whose
+`append` also projects the new events into the history tables), so
+pulled events show up at once. Extra data fields the history store adds
+(`kind`, `tools`, `summary`, `archived`...) travel unchanged; `materialize`
+ignores them. **Storage API**: `log_id`, `append(events) -> inserted` (applying the
 redactions above, see `covered_by` and `redacted`), `since(seq, limit)`,
 `by_conv(conv)`, `meta_get/meta_set`. The history store owns the schema;
 this module owns the protocol.
