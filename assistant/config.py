@@ -72,6 +72,8 @@ DEFAULTS: dict = {
         "confirm_timeout": 120,     # seconds to wait for a yes before "no"
         "max_upload_mb": 10,
         "max_audio_seconds": 60,    # longest recording accepted
+        "sessions_file": "data/web_sessions.json",  # signed-in browsers
+                                    # ("" = forget them on restart)
         "trusted_proxy": 0,         # proxies adding X-Forwarded-*: 0 = none,
                                     # a count (1 on Render), or the proxy's
                                     # address(es) (TRUSTED_PROXY)

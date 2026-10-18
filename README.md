@@ -219,9 +219,14 @@ Replies play through the phone's speaker even with the ringer switch on
 silent. The app shell (page, script, icons) is cached so it opens quickly;
 conversations and audio are never cached.
 
-`tailscale serve reset` stops publishing it. To sign a phone out everywhere,
-delete `WEB_TOKEN` from `.env` and restart: a new token is created and old
-cookies stop working. Settings live in `config.toml` `[webapp]`: `port`
+`tailscale serve reset` stops publishing it. "Sign out" in the gear menu
+revokes that phone's cookie on the server; "Sign out everywhere" (e.g. after
+losing a phone) revokes every browser's. Signed-in phones are listed in
+`[webapp] sessions_file` (`data/web_sessions.json`, ids only, no token) so
+they stay signed in across restarts; on a host without a persistent disk a
+redeploy signs everyone out. Scripts using the token as a Bearer token are
+cut off only by changing it: delete `WEB_TOKEN` from `.env` and restart, and
+a new one is created. Settings live in `config.toml` `[webapp]`: `port`
 (8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
 (10), `max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
 other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
@@ -237,8 +242,9 @@ also takes the proxy's address instead, e.g. `TRUSTED_PROXY=127.0.0.1` for
 run `python -m assistant --mode web --host 0.0.0.0` (it reads `PORT` from the
 environment). With a trusted proxy, plain-http requests are redirected to
 https and HSTS is sent. Five wrong tokens from one address lock that address
-out for 15 minutes; 50 from everyone together lock new sign-ins for 15
-minutes (signed-in phones keep working). `GET /healthz` answers `{"ok":
+out of further guesses for 15 minutes; past 20 wrong tokens from everyone
+together, each further wrong one is answered a second later. The right token
+always works, so nobody can lock you out by guessing. `GET /healthz` answers `{"ok":
 true}` without signing in. Scripts can send `Authorization: Bearer
 <WEB_TOKEN>` instead of the cookie.
 
