@@ -66,6 +66,12 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
+        "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
+        "app_origin": "",           # where the phone app is installed from
+        "backends": [],             # [{role, url}], highest priority first
+        "sync_interval": 30,        # seconds between history syncs
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 
@@ -77,6 +83,8 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "ASSISTANT_ROLE": ("failover", "role"),
+    "APP_ORIGIN": ("failover", "app_origin"),
 }
 
 

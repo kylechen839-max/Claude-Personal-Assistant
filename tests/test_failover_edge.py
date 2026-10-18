@@ -1,0 +1,341 @@
+"""Cross-origin, bearer-token and WebSocket auth middleware (failover/edge.py)."""
+
+import json
+
+import pytest
+
+from assistant.failover import API_VERSION
+from assistant.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZED,
+                                     EdgeMiddleware, FailureLimiter, connect_src)
+from assistant.failover.peers import parse_backends
+from assistant.failover.tokens import TokenAuthority, bearer_of
+from tests.asgi_harness import request, websocket
+
+SECRET = "s" * 43
+APP = "https://hey-claude.onrender.com"
+EVIL = "https://evil.example"
+PI = "https://pi.tail1234.ts.net"
+
+
+class Clock:
+    def __init__(self, t=1_800_000_000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+async def inner(scope, receive, send):
+    """Stands in for the web app: echoes who called."""
+    if scope["type"] == "websocket":
+        msg = await receive()
+        assert msg["type"] == "websocket.connect"
+        await send({"type": "websocket.accept"})  # swallowed by the middleware
+        while True:
+            msg = await receive()
+            if msg["type"] == "websocket.disconnect" or msg.get("text") == "bye":
+                await send({"type": "websocket.close", "code": 1000})
+                return
+            await send({"type": "websocket.send",
+                        "text": json.dumps({"echo": msg["text"], "sid": scope["auth"].sid})})
+    auth = scope.get("auth")
+    body = json.dumps({"path": scope["path"], "sid": auth.sid if auth else None}).encode()
+    await send({"type": "http.response.start", "status": 200,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"access-control-allow-credentials", b"true")]})
+    await send({"type": "http.response.body", "body": body})
+
+
+@pytest.fixture
+def setup():
+    clock = Clock()
+    authority = TokenAuthority(SECRET, clock=clock)
+    limiter = FailureLimiter(max_failures=5, window=300, clock=clock)
+    app = EdgeMiddleware(inner, authority=authority, role="pi", app_origins=[APP],
+                         backends=parse_backends([{"role": "pi", "url": PI},
+                                                  {"role": "cloud", "url": APP}]),
+                         limiter=limiter, ws_auth_timeout=0.3)
+    token, _ = authority.mint("app", sid="phone1")
+    return app, authority, token, clock
+
+
+def auth(token):
+    return {"authorization": f"Bearer {token}"}
+
+
+# --- tokens -----------------------------------------------------------------
+
+def test_tokens_roundtrip_expiry_and_scope():
+    clock = Clock()
+    a = TokenAuthority(SECRET, clock=clock)
+    token, claims = a.mint("app", sid="abc", ttl=60)
+    assert a.verify(token).sid == "abc"
+    assert a.verify(token, scope="sync") is None
+    assert SECRET not in token
+    clock.t += 61
+    assert a.verify(token) is None
+
+
+def test_tokens_from_another_secret_or_tampered_are_rejected():
+    a = TokenAuthority(SECRET)
+    b = TokenAuthority("t" * 43)
+    token, _ = b.mint("app", sid="abc")
+    assert a.verify(token) is None
+    good, _ = a.mint("app", sid="abc")
+    head, sig = good.rsplit(".", 1)
+    assert a.verify(good.replace(".abc.", ".abd.")) is None
+    assert a.verify(head + "." + sig[:-1] + ("A" if sig[-1] != "A" else "B")) is None
+    for junk in ("", "x", "hc1....", "hc1.app.abc.notanumber.sig", "a" * 1000, None):
+        assert a.verify(junk) is None
+
+
+def test_every_backend_accepts_a_token_minted_by_another():
+    pi, cloud = TokenAuthority(SECRET), TokenAuthority(SECRET)
+    token, _ = cloud.mint("app")
+    assert pi.verify(token) is not None
+
+
+def test_short_secret_refused():
+    with pytest.raises(ValueError):
+        TokenAuthority("short")
+
+
+def test_bearer_header_parsing():
+    assert bearer_of("Bearer abc") == "abc"
+    assert bearer_of("bearer  abc ") == "abc"
+    assert bearer_of("Basic abc") is None
+    assert bearer_of("Bearer") is None
+    assert bearer_of(None) is None
+
+
+# --- /healthz ------------------------------------------------------------------
+
+def test_healthz_reveals_only_ok_api_role(setup):
+    app, *_ = setup
+    r = request(app, "GET", "https://pi/healthz")
+    assert r.status == 200
+    assert r.json() == {"ok": True, "api": API_VERSION, "role": "pi"}
+    assert r.header("cache-control") == "no-store"
+
+
+def test_healthz_cors_for_app_origin_only(setup):
+    app, *_ = setup
+    r = request(app, "GET", "https://pi/healthz", {"origin": APP})
+    assert r.header("access-control-allow-origin") == APP
+    assert "access-control-allow-credentials" not in r.headers
+    r = request(app, "GET", "https://pi/healthz", {"origin": EVIL})
+    assert r.status == 403
+    assert "access-control-allow-origin" not in r.headers
+
+
+# --- CORS ------------------------------------------------------------------------
+
+def test_preflight_from_app_origin(setup):
+    app, *_ = setup
+    r = request(app, "OPTIONS", "https://pi/api/turn",
+                {"origin": APP, "access-control-request-method": "POST",
+                 "access-control-request-headers": "authorization, content-type"})
+    assert r.status == 204
+    assert r.header("access-control-allow-origin") == APP
+    assert r.header("access-control-allow-methods") == "GET, POST"
+    assert r.header("access-control-allow-headers") == "authorization, content-type"
+    assert "access-control-allow-credentials" not in r.headers
+    assert r.header("vary") == "Origin"
+
+
+@pytest.mark.parametrize("method,hdrs", [("DELETE", ""), ("PUT", ""),
+                                         ("POST", "x-custom"), ("POST", "cookie")])
+def test_preflight_refuses_unneeded_methods_and_headers(setup, method, hdrs):
+    app, *_ = setup
+    r = request(app, "OPTIONS", "https://pi/api/turn",
+                {"origin": APP, "access-control-request-method": method,
+                 "access-control-request-headers": hdrs})
+    assert r.status == 403
+
+
+@pytest.mark.parametrize("origin", [EVIL, "null", "http://hey-claude.onrender.com",
+                                    "https://hey-claude.onrender.com.evil.example",
+                                    "https://evil.example@hey-claude.onrender.com"])
+def test_foreign_origin_rejected_everywhere(setup, origin):
+    app, _, token, _ = setup
+    for method, path in [("OPTIONS", "/api/turn"), ("GET", "/api/state"),
+                         ("POST", "/api/turn"), ("POST", "/api/auth/token"),
+                         ("GET", "/healthz"), ("GET", "/")]:
+        hdrs = {"origin": origin, **auth(token)}
+        if method == "OPTIONS":
+            hdrs["access-control-request-method"] = "POST"
+        r = request(app, method, "https://pi.tail1234.ts.net" + path, hdrs)
+        assert r.status == 403, (origin, method, path)
+        assert "access-control-allow-origin" not in r.headers
+
+
+def test_same_origin_passes_without_cors_headers(setup):
+    app, _, token, _ = setup
+    r = request(app, "GET", "https://pi.tail1234.ts.net/api/state",
+                {"origin": PI, **auth(token)})
+    assert r.status == 200
+    assert "access-control-allow-origin" not in r.headers
+
+
+def test_cors_headers_added_and_credentials_stripped(setup):
+    app, _, token, _ = setup
+    r = request(app, "GET", "https://pi/api/state", {"origin": APP, **auth(token)})
+    assert r.status == 200
+    assert r.json() == {"path": "/api/state", "sid": "phone1"}
+    assert r.header("access-control-allow-origin") == APP
+    assert "access-control-allow-credentials" not in r.headers
+
+
+# --- bearer ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("hdrs", [{}, {"authorization": "Bearer nope"},
+                                  {"authorization": "Basic abc"},
+                                  {"cookie": "hc_session=whatever"}])
+def test_missing_or_wrong_token_is_401(setup, hdrs):
+    app, *_ = setup
+    for path in ("/api/state", "/api/turn", "/api/backends", "/api/sync/events",
+                 "/api/auth/refresh"):
+        r = request(app, "POST" if path.endswith(("turn", "refresh")) else "GET",
+                    "https://pi" + path, {"origin": APP, **hdrs})
+        assert r.status == 401, path
+        assert r.header("access-control-allow-origin") == APP  # so the app can read it
+
+
+def test_expired_token_is_401(setup):
+    app, authority, _, clock = setup
+    token, _ = authority.mint("app", ttl=10)
+    assert request(app, "GET", "https://pi/api/state", auth(token)).status == 200
+    clock.t += 11
+    assert request(app, "GET", "https://pi/api/state", auth(token)).status == 401
+
+
+def test_scopes_are_separate(setup):
+    app, authority, app_token, _ = setup
+    sync_token, _ = authority.mint("sync", sid="pc")
+    assert request(app, "GET", "https://pi/api/sync/events", auth(app_token)).status == 401
+    assert request(app, "GET", "https://pi/api/state", auth(sync_token)).status == 401
+    assert request(app, "GET", "https://pi/api/sync/events", auth(sync_token)).status == 200
+
+
+def test_static_app_shell_needs_no_token(setup):
+    app, *_ = setup
+    assert request(app, "GET", "https://pi/").status == 200
+
+
+def test_backends_list(setup):
+    app, _, token, _ = setup
+    r = request(app, "GET", "https://pi/api/backends", auth(token))
+    assert r.json() == {"role": "pi", "api": API_VERSION,
+                        "backends": [{"role": "pi", "url": PI}, {"role": "cloud", "url": APP}]}
+
+
+# --- token endpoint and lockout ----------------------------------------------------------
+
+def test_token_endpoint_trades_web_token_for_derived_token(setup):
+    app, authority, _, _ = setup
+    r = request(app, "POST", "https://pi/api/auth/token", {"origin": APP},
+                {"token": SECRET, "sid": "keepme"})
+    assert r.status == 200
+    data = r.json()
+    assert data["token_type"] == "Bearer" and data["sid"] == "keepme"
+    assert SECRET not in r.body.decode()
+    assert authority.verify(data["access_token"]).sid == "keepme"
+    assert r.header("cache-control") == "no-store"
+
+
+def test_refresh_keeps_sid(setup):
+    app, authority, token, clock = setup
+    clock.t += 100
+    r = request(app, "POST", "https://pi/api/auth/refresh", auth(token))
+    assert r.status == 200
+    new = r.json()["access_token"]
+    assert new != token and authority.verify(new).sid == "phone1"
+
+
+def test_wrong_web_token_locks_out_after_five(setup):
+    app, _, token, clock = setup
+    for _ in range(5):
+        assert request(app, "POST", "https://pi/api/auth/token", body={"token": "x" * 43}).status == 401
+    # even the right one is refused while locked out
+    assert request(app, "POST", "https://pi/api/auth/token", body={"token": SECRET}).status == 429
+    # bad bearer tokens are now answered 429; a valid token still works
+    assert request(app, "GET", "https://pi/api/state", auth("hc1.nope")).status == 429
+    assert request(app, "GET", "https://pi/api/state", auth(token)).status == 200
+    clock.t += 301
+    assert request(app, "POST", "https://pi/api/auth/token", body={"token": SECRET}).status == 200
+
+
+def test_oversized_token_request(setup):
+    app, *_ = setup
+    r = request(app, "POST", "https://pi/api/auth/token", body=b"{" + b" " * 5000 + b"}")
+    assert r.status == 413
+
+
+# --- WebSocket ------------------------------------------------------------------------------
+
+def _closes(sent):
+    return [m for m in sent if m["type"] == "websocket.close"]
+
+
+def test_ws_first_message_auth(setup):
+    app, _, token, _ = setup
+    sent = websocket(app, "/api/ws", [json.dumps({"type": "auth", "token": token}),
+                                      "hello", "bye"], {"origin": APP})
+    texts = [m["text"] for m in sent if m["type"] == "websocket.send"]
+    assert json.loads(texts[0]) == {"type": "auth_ok"}
+    assert json.loads(texts[1]) == {"echo": "hello", "sid": "phone1"}
+    assert [m["type"] for m in sent].count("websocket.accept") == 1
+
+
+@pytest.mark.parametrize("first", ["hello", json.dumps({"type": "auth", "token": "nope"}),
+                                   json.dumps({"type": "auth"}), json.dumps(["auth"]),
+                                   json.dumps({"type": "auth", "token": None})])
+def test_ws_wrong_or_missing_token_closed_4401(setup, first):
+    app, *_ = setup
+    sent = websocket(app, "/api/ws", [first, "hello"], {"origin": APP})
+    assert _closes(sent)[0]["code"] == WS_CLOSE_UNAUTHORIZED
+    assert not any(m["type"] == "websocket.send" for m in sent)
+
+
+def test_ws_sync_token_not_accepted(setup):
+    app, authority, *_ = setup
+    sync_token, _ = authority.mint("sync", sid="pc")
+    sent = websocket(app, "/api/ws", [json.dumps({"type": "auth", "token": sync_token})])
+    assert _closes(sent)[0]["code"] == WS_CLOSE_UNAUTHORIZED
+
+
+def test_ws_token_in_url_is_ignored(setup):
+    app, _, token, _ = setup
+    sent = websocket(app, f"/api/ws?token={token}", ["hello"], {"origin": APP})
+    assert _closes(sent)[0]["code"] == WS_CLOSE_UNAUTHORIZED
+
+
+def test_ws_closed_when_no_auth_arrives(setup):
+    app, *_ = setup
+    sent = websocket(app, "/api/ws", [], {"origin": APP})
+    assert _closes(sent)[0]["code"] == WS_CLOSE_AUTH_TIMEOUT
+
+
+def test_ws_foreign_origin_refused_at_handshake(setup):
+    app, _, token, _ = setup
+    sent = websocket(app, "/api/ws", [json.dumps({"type": "auth", "token": token})],
+                     {"origin": EVIL})
+    assert sent and sent[0]["type"] == "websocket.close"  # before accept: HTTP 403
+    assert not any(m["type"] == "websocket.accept" for m in sent)
+
+
+def test_connect_src_lists_backends():
+    backends = parse_backends([{"role": "pi", "url": PI}, {"role": "pc", "url": ""},
+                               {"role": "cloud", "url": APP}])
+    assert connect_src(backends) == (f"'self' {PI} wss://pi.tail1234.ts.net "
+                                     f"{APP} wss://hey-claude.onrender.com")
+
+
+def test_backend_urls_validated():
+    with pytest.raises(ValueError):
+        parse_backends([{"role": "pi", "url": "http://pi.tail1234.ts.net"}])
+    with pytest.raises(ValueError):
+        parse_backends([{"role": "mac", "url": PI}])
+    with pytest.raises(ValueError):
+        parse_backends([{"role": "pi", "url": PI + "/app"}])
+    assert parse_backends([{"role": "pi", "url": "https://PI.tail1234.ts.net/"}])[0].url == PI
