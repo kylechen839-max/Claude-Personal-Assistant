@@ -72,7 +72,8 @@ port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
 max_audio_seconds = 60        # longest recording accepted
-trusted_proxy = 0             # 1 behind a TLS proxy such as Render (or TRUSTED_PROXY=1)
+trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
+                              # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
 
 [logging]
 file = "logs/assistant.log"
