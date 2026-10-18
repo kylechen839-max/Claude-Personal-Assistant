@@ -395,6 +395,24 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   assistant's exit codes), `-Uninstall`; a power check that, after a typed
   `y`, sets never-sleep/never-hibernate on AC and turns off USB selective
   suspend. The preflight's `power` row WARNs on Windows when sleep is on.
+  The supervisor is `assistant/host.py` (`python -m assistant.host`), also
+  used by the Pi's systemd unit.
+- **Automatic updates** (`assistant/updater.py`, `assistant/host.py`,
+  `assistant/version.py`, `assistant/web/update-watch.js`): opt-in `[update]
+  enabled`, follows the `stable` branch (fast-forwarded only after master's
+  CI is green on all jobs). Fast-forward only; skips with local changes to
+  tracked files (config.toml excepted), local commits or a commit that
+  failed before; pip install when requirements.txt changed; smoke (import +
+  `--check`); restart when idle (loopback-only `busy` in /healthz) and
+  verify /healthz `version`; any failure -> `git reset --keep <old>`, old
+  requirements back, commit rejected, loud log. A lock file keeps the two
+  PC hosts and `--update` from updating at once; each host restarts its own
+  child when HEAD moves. The page reloads once when /healthz's version
+  changes, only when quiet. Tested with real git repos and a bare remote
+  (fast-forward, up to date, master-only push ignored, diverged, dirty,
+  config.toml edits kept, config conflict, failed smoke/pip -> rollback,
+  rejected commit, lock), the host's restart/verify/rollback with fakes,
+  /healthz version/busy, and update-watch.js in node.
   Tested: supervisor restart/back-off/network wait and the powercfg parsing
   in pytest; the .ps1 parses and is PSScriptAnalyzer-clean (checked with
   PowerShell 7 here and Windows PowerShell 5.1 in CI). Not run on a real

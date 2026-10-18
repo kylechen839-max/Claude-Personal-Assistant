@@ -13,7 +13,6 @@ foreach ($f in $functions) { . ([scriptblock]::Create($f.Extent.Text)) }
 
 $repoDir = 'C:\Users\kylec\Claude-Personal-Assistant'
 $taskPath = '\HeyClaude\'
-$hostScript = "$repoDir\scripts\windows_host.py"
 $Port = 8765
 
 function New-Action($Execute, $Arguments, $WorkingDirectory) {
@@ -84,7 +83,7 @@ Assert 'other folders are ignored' (@(Get-LegacyWebTask).Count -eq 0)
 
 # 6. our own \HeyClaude\Web is never "legacy"; repo found case-insensitively
 $script:tasks = @(
-    (New-Task '\HeyClaude\' 'Web' (New-Action "$repoDir\.venv\Scripts\pythonw.exe" "`"$hostScript`" web 8765" $repoDir)),
+    (New-Task '\HeyClaude\' 'Web' (New-Action "$repoDir\.venv\Scripts\pythonw.exe" "-m assistant.host web 8765" $repoDir)),
     (New-Task '\' 'Phone app' (New-Action 'C:\USERS\KYLEC\Claude-Personal-Assistant\.venv\Scripts\python.exe' '-m assistant --mode web' '')))
 $found = @(Get-LegacyWebTask)
 Assert 'only the hand-made one in this repo' ($found.Count -eq 1 -and $found[0].TaskName -eq 'Phone app')

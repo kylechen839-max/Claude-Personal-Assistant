@@ -67,6 +67,9 @@ def parse_args(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
+    parser.add_argument("--update", action="store_true",
+                        help="update now from the tested `stable` branch "
+                             "(fast-forward only; rolled back if checks fail)")
     return parser.parse_args(argv)
 
 
@@ -450,6 +453,10 @@ def main(argv=None) -> int:
         from assistant import doctor
 
         return doctor.report(doctor.run_checks(config, args.keyword_path))
+    if args.update:
+        from assistant import updater
+
+        return updater.main()
     log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")

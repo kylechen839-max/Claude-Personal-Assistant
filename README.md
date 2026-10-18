@@ -63,6 +63,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 | `--check` | Check keys, files, audio devices and models, then exit |
+| `--update` | Update now from the tested `stable` branch, then exit |
 | `--mode web` | Private phone web app (see "Phone web app" below) |
 | `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
 | `--show-token` | Web mode: print the access token to the console once |
@@ -124,6 +125,7 @@ you are most likely to tune:
 | `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
+| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested `stable` branch, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
 ### Better voice: Piper
@@ -425,7 +427,7 @@ It registers two Task Scheduler tasks under `HeyClaude` (no admin rights
 needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on
 127.0.0.1:8765, the address `tailscale serve` points at; `-Port` changes it).
 They start 20 s after you sign in, run hidden, and are kept running by
-`scripts/windows_host.py`, which waits for the network, restarts the
+`python -m assistant.host`, which waits for the network, restarts the
 assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
 logs to `logs/host-wake.log` / `logs/host-web.log` (the assistant's own log
 is still `logs/assistant.log`). After a reboot they start when you sign in;
@@ -446,6 +448,44 @@ sleep** and **never hibernate** when plugged in and to turn off **USB
 selective suspend** (which can power down a USB mic). The display may still
 turn off. The preflight's `power` row warns if sleep comes back (Windows
 updates sometimes reset power plans).
+
+### Automatic updates
+
+Changes reach the PC (and the phone app it serves) or the Pi by themselves
+once you set this in `config.toml`:
+
+```toml
+[update]
+enabled = true
+```
+
+The host supervisor (`python -m assistant.host`, which the `HeyClaude` tasks
+and the Pi's `hey-claude` service run) then checks every `check_minutes`
+(15) for a new commit on the `stable` branch, which only moves after master
+passed CI on every job, so nothing untested arrives. It updates only by
+fast-forward: with local edits to tracked files (other than your
+`config.toml` settings) or local commits it skips the update and logs why,
+and never resets or discards anything. After `git merge --ff-only` it
+installs `requirements.txt` if that changed, checks that the package
+imports and `--check` passes, then restarts the assistant: the web app only
+when no request or voice turn is running (at most ~2 minutes), and only
+counts the update as good once `/healthz` reports the new version. If any
+step fails it goes back to the previous commit (`git reset --keep`), restarts
+that, and won't retry the failed commit. Everything is logged to
+`logs/host-<mode>.log` (failures start with `!!!`); `logs/update-state.json`
+has the last result. The supervisor itself (`assistant/host.py`) keeps running its
+starting version until the task or service restarts (next sign-in or reboot,
+or `systemctl --user restart hey-claude` on the Pi).
+
+`python -m assistant --update` updates right away (it works even with
+`enabled = false`); a running host picks the new code up within a minute.
+The phone page notices the new version through `/healthz` and reloads
+itself once, never in the middle of a turn, a recording or the voice
+conversation.
+
+**Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
+so it never updates: switch to `.\scripts\install_windows_service.ps1`
+(it replaces that task for you, on the same port).
 
 ## Preflight: check everything in one pass
 
@@ -520,9 +560,12 @@ assistant/
                 voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
+  host.py       home host supervisor: restarts, updates (python -m assistant.host)
+  updater.py    safe update from the stable branch  (--update)
+  version.py    git short SHA for /healthz
   tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
-                install_windows_service.ps1, windows_host.py (PC as the always-on host)
+                install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys);

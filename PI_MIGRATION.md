@@ -195,6 +195,12 @@ Then start it at boot:
 ./scripts/install_service.sh
 ```
 
+The service runs `python -m assistant.host wake`, which also keeps the Pi
+up to date if you set `[update] enabled = true` in its `config.toml`: it
+follows the tested `stable` branch, restarts on the new version and rolls
+back if it doesn't come up (README, "Automatic updates"). Pi and PC can
+both have it on; each updates its own checkout.
+
 ## 6. Manual voice checks
 
 Do `MANUAL_TEST.md` **Part C** (wake word across the room, latency with

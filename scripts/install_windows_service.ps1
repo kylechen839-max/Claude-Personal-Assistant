@@ -8,8 +8,11 @@
       Wake  python -m assistant --mode wake   always listening for "Hey Claude"
       Web   python -m assistant --mode web    phone app on 127.0.0.1:8765 (skip: -NoWeb)
 
-    scripts\windows_host.py keeps each one running (restart after 10 s; after
-    5 crashes in 5 minutes it waits 5 minutes) and writes logs\host-<mode>.log.
+    `python -m assistant.host` keeps each one running (restart after 10 s;
+    after 5 crashes in 5 minutes it waits 5 minutes), writes
+    logs\host-<mode>.log and, with [update] enabled = true in config.toml,
+    keeps it on the tested `stable` branch (restarting when idle, rolling
+    back if the new version doesn't come up).
 
     An older hand-made task that runs the web app (e.g. "Hey Claude Web" in
     the Task Scheduler Library root) is detected; it offers to replace it,
@@ -47,7 +50,6 @@ $repoDir = Split-Path -Parent $PSScriptRoot
 $taskPath = '\HeyClaude\'
 $pythonw = Join-Path $repoDir '.venv\Scripts\pythonw.exe'
 $python = Join-Path $repoDir '.venv\Scripts\python.exe'
-$hostScript = Join-Path $repoDir 'scripts\windows_host.py'
 $user = "$env:USERDOMAIN\$env:USERNAME"
 
 # powercfg GUIDs: sleep after / hibernate after (SUB_SLEEP), USB selective suspend
@@ -221,12 +223,12 @@ function Test-PortFree {
 function Stop-HostProcess {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param()
-    # Our supervisors (windows_host.py) and the assistant each one started.
+    # Our supervisors (python -m assistant.host, run with this repo's venv)
+    # and the assistant each one started.
     $procs = @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
             Where-Object { $_.CommandLine })
     $supervisors = @($procs | Where-Object {
-            $_.CommandLine.Contains($hostScript) -or
-            ($_.CommandLine.Contains($repoDir) -and $_.CommandLine -match 'windows_host\.py') } |
+            $_.CommandLine.Contains($repoDir) -and $_.CommandLine -match '-m\s+assistant\.host\b' } |
             ForEach-Object { $_.ProcessId })
     $targets = $procs | Where-Object {
         $supervisors -contains $_.ProcessId -or $supervisors -contains $_.ParentProcessId
@@ -252,7 +254,7 @@ function Unregister-HostTask {
 
 function Register-HostTask {
     param([string]$Name, [string]$Mode, [string]$Description, [string]$Extra = '')
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$hostScript`" $Mode $Extra".Trim() `
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m assistant.host $Mode $Extra".Trim() `
         -WorkingDirectory $repoDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
     $trigger.Delay = 'PT20S'  # let audio devices and the network come up

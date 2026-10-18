@@ -116,7 +116,7 @@ phase "install_service.sh (systemd stubbed)"
 unit=~/.config/systemd/user/hey-claude.service
 [[ -f "$unit" ]] || fail "unit not written"
 grep -q "@REPO_DIR@" "$unit" && fail "unit still has @REPO_DIR@"
-grep -q "ExecStart=$HOME/hey-claude/.venv/bin/python -m assistant --mode wake" "$unit" \
+grep -q "ExecStart=$HOME/hey-claude/.venv/bin/python -m assistant.host wake" "$unit" \
     || fail "unexpected ExecStart in $unit"
 cat /var/lib/stub-systemd/calls.log
 grep -q "enable-linger pi" /var/lib/stub-systemd/calls.log || fail "linger not enabled"

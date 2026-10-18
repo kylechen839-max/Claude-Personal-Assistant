@@ -720,92 +720,9 @@ def test_a_warning_is_still_go(tmp_path, monkeypatch):
     assert code == 0 and "GO: 0 passed, 0 failed, 1 warning(s), 0 skipped" in lines[-1]
 
 
-# ---------- the Windows host supervisor (scripts/windows_host.py) ----------
-
-def load_host():
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("windows_host",
-                                                  ROOT / "scripts" / "windows_host.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_host_restarts_after_errors_and_stops_on_clean_exit():
-    import io
-
-    host = load_host()
-    codes, slept = [1, 1, 0], []
-    log = io.StringIO()
-    sup = host.Supervisor(["py", "-m", "assistant", "--mode", "wake"], log,
-                          run=lambda cmd: codes.pop(0), sleep=slept.append,
-                          clock=lambda: 0.0)
-    assert sup.loop() == 0
-    assert slept == [host.RESTART_DELAY] * 2
-    assert "exited cleanly" in log.getvalue()
-
-
-def test_host_backs_off_after_a_burst_of_crashes():
-    import io
-
-    host = load_host()
-    t = [0.0]
-    slept = []
-
-    def sleep(s):
-        slept.append(s)
-        t[0] += s
-
-    sup = host.Supervisor(["py"], io.StringIO(), run=lambda cmd: 3, sleep=sleep,
-                          clock=lambda: t[0], max_runs=host.BURST + 1)
-    sup.loop()
-    assert slept[:host.BURST] == [host.RESTART_DELAY] * (host.BURST - 1) + [host.BURST_PAUSE]
-
-
-def test_host_waits_for_the_network():
-    host = load_host()
-    t, calls = [0.0], []
-
-    def resolve(name):
-        calls.append(name)
-        if len(calls) < 3:
-            raise OSError("no DNS")
-        return "1.2.3.4"
-
-    def sleep(s):
-        t[0] += s
-
-    assert host.wait_for_network(resolve=resolve, sleep=sleep, clock=lambda: t[0])
-    assert host.wait_for_network(resolve=lambda n: (_ for _ in ()).throw(OSError()),
-                                 sleep=sleep, clock=lambda: t[0], timeout=5) is False
-
-
-def test_host_uses_console_python_and_a_log(tmp_path):
-    host = load_host()
-    exe = tmp_path / "pythonw.exe"
-    exe.write_text("")
-    (tmp_path / "python.exe").write_text("")
-    assert host.console_python(str(exe)) == str(tmp_path / "python.exe")
-    assert host.console_python("/usr/bin/python3") == "/usr/bin/python3"
-    assert host.log_path("wake", tmp_path) == tmp_path / "logs" / "host-wake.log"
-    assert host.main(["nope"]) == 2
-    assert host.main(["wake", "8765"]) == 2 and host.main(["web", "port"]) == 2
-
-
-def test_host_web_command_keeps_port_8765_on_localhost():
-    """`tailscale serve` on Kyle's PC points at 127.0.0.1:8765."""
-    host = load_host()
-    cmd = host.build_command("web")
-    assert cmd[1:] == ["-m", "assistant", "--mode", "web", "--host", "127.0.0.1",
-                       "--port", "8765"]
-    assert host.build_command("web", "9000")[-1] == "9000"
-    assert host.build_command("wake")[1:] == ["-m", "assistant", "--mode", "wake"]
-
-
 def test_windows_service_script_registers_both_tasks():
     text = (ROOT / "scripts" / "install_windows_service.ps1").read_text(encoding="utf-8")
-    assert "windows_host.py" in text and "-AtLogOn" in text
+    assert "-m assistant.host" in text and "-AtLogOn" in text
     for needle in ("standby-timeout-ac 0", "hibernate-timeout-ac 0",
                    preflight.USB_SUSPEND[1], "Read-Host", "-Uninstall",
                    "'Hey Claude Web'", "$Port = 8765", "Get-NetTCPConnection"):
