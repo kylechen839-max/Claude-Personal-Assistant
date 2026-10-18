@@ -80,6 +80,18 @@ DEFAULTS: dict = {
         "allowed_origins": [],      # extra https://... origins, if a proxy
                                     # rewrites the Host header
     },
+    "voice": {                      # hands-free voice conversation (web app)
+        "vad": "silero",            # "silero" (in the browser), or "energy"
+        "silence_ms": 700,          # this long a pause ends your turn
+        "min_utterance_ms": 300,    # shorter sounds are ignored
+        "max_utterance_s": 30,      # a turn is cut off after this long
+        "barge_in_ms": 250,         # talk this long over a reply to stop it
+        "vad_threshold": 0.5,       # Silero speech probability, 0-1
+        "idle_timeout": 120,        # seconds of quiet before it ends
+        "max_session_minutes": 30,
+        "utterances_per_minute": 30,  # per connection; more closes it
+        "debug_panel": False,       # show latency timings on the page
+    },
     "lecture": {
         "enabled": True,
         "model": "base.en",          # faster-whisper model: "tiny.en" is faster
