@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 308 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 309 passed, 9 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
@@ -31,7 +31,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_docs.py` | 11 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 22 | voice mode: turn pipeline, barge-in |
-| `test_voice_ws.py` | 23 | voice mode: WebSocket, limits, files |
+| `test_voice_ws.py` | 24 | voice mode: WebSocket, limits, files |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -311,8 +311,9 @@ Tested:
   yes / no / unrelated answer (never sent to Claude), timeout; goodbye and
   memory; idle/max-length; End during a turn; API error spoken; real eSpeak
   render.
-- `tests/test_voice_ws.py` (23): no/forged cookie and missing/foreign/`null`/
-  look-alike Origin rejected (1008); a whole streamed turn over the socket;
+- `tests/test_voice_ws.py` (24): no/forged cookie and missing/foreign/`null`/
+  look-alike Origin rejected (1008), X-Forwarded-Host only from a trusted
+  proxy; a whole streamed turn over the socket;
   barge-in over the socket and the next request's history; spoken yes/no
   through the web app's confirmation (answer never sent as a request);
   voice continuing a push-to-talk conversation; closing the

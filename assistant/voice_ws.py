@@ -77,9 +77,11 @@ def pcm16_to_float(data: bytes) -> np.ndarray:
 
 # --- checks --------------------------------------------------------------------
 
-def origin_allowed(headers, allowed_origins=()) -> bool:
+def origin_allowed(headers, allowed_origins=(), trust_forwarded: bool = False) -> bool:
     """A WebSocket handshake must come from this site's own page. Unlike
-    plain requests, a missing Origin is refused: browsers always send it."""
+    plain requests, a missing Origin is refused: browsers always send it.
+    X-Forwarded-Host counts only when the caller is a trusted proxy
+    (`[webapp] trusted_proxy`); anyone else could set it."""
     origin = (headers.get("origin") or "").rstrip("/")
     if not origin:
         return False
@@ -88,9 +90,10 @@ def origin_allowed(headers, allowed_origins=()) -> bool:
     parts = urlsplit(origin)
     if parts.scheme not in ("https", "http"):
         return False
-    own = {h.strip().lower() for h in (headers.get("host", ""),
-                                       headers.get("x-forwarded-host", ""))
-           if h.strip()}
+    hosts = [headers.get("host", "")]
+    if trust_forwarded:
+        hosts.append(headers.get("x-forwarded-host", ""))
+    own = {h.strip().lower() for h in hosts if h.strip()}
     return parts.netloc.lower() in own
 
 
@@ -169,7 +172,8 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         # require_session: signed in (cookie or Bearer, with the lockouts) and
         # not cross-site, else closed with 1008. A WebSocket from a browser
         # always has an Origin, so here a missing one is refused too.
-        if not origin_allowed(ws.headers, allowed):
+        web = ws.app.state.web
+        if not origin_allowed(ws.headers, allowed, web.trusted_proxy.trusts(ws)):
             log.warning("Rejected voice socket from origin %r",
                         ws.headers.get("origin"))
             await ws.close(code=1008)

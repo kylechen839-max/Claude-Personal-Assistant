@@ -276,6 +276,24 @@ question and is never sent to Claude as a new request.
   of the page (Tailscale or the hosted setup work unchanged). With
   `--timings`, each turn's latency line is printed on the PC's console too.
 
+**On an iPhone** (Safari, or the app added to the home screen):
+1. Open the page, tap **Voice conversation**, and tap **Allow** when iOS
+   asks for the microphone. That one tap also unlocks the speaker, so keep
+   the ringer switch off silent mode if you hear nothing.
+2. Talk normally and stop: the orb pulses while it thinks, then the answer
+   plays from the loudspeaker (or AirPods). The orb moving with the reply
+   means it is speaking; just talk to interrupt it.
+3. **Mute** keeps the conversation open without listening (handy while
+   someone else talks); **End** closes it.
+4. If it says the microphone is unavailable, or never asks: in Safari tap
+   **aA** -> **Website Settings** -> **Microphone** -> **Allow**; or go to
+   iPhone **Settings -> Apps -> Safari -> Microphone** -> Ask or Allow. For
+   the home-screen app, remove it and add it again after allowing. The page
+   must be opened over `https://` (the Tailscale or hosted address), never
+   `http://`.
+5. Locking the phone, switching apps, a call or Siri pauses it; tap **Tap to
+   continue** when you're back.
+
 Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
 ignored), `max_utterance_s` (30), `max_session_minutes` (30) and
 `utterances_per_minute` (30); a yes/no question waits `[webapp]

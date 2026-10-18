@@ -123,11 +123,27 @@ def test_socket_needs_same_origin(make_voice, headers):
     assert e.value.code == 1008
 
 
+def test_forwarded_host_needs_a_trusted_proxy(make_voice):
+    _, http = make_voice()
+    login(http)
+    spoofed = {"origin": "https://evil.example", "x-forwarded-host": "evil.example"}
+    with pytest.raises(WebSocketDisconnect) as e:
+        with connect(http, spoofed):
+            pass
+    assert e.value.code == 1008
+    http.app.state.web.trusted_proxy = webapp.parse_trusted_proxy(1)
+    with connect(http, {"origin": "https://app.example",
+                        "x-forwarded-host": "app.example"}) as ws:
+        assert json.loads(ws.receive_text())["type"] == "ready"
+
+
 def test_origin_rules():
     ok = voice_ws.origin_allowed
     assert ok({"origin": "https://pc.tail1234.ts.net", "host": "pc.tail1234.ts.net"})
-    assert ok({"origin": "https://app.onrender.com", "host": "10.0.0.5:8765",
-               "x-forwarded-host": "app.onrender.com"})
+    behind_proxy = {"origin": "https://app.onrender.com", "host": "10.0.0.5:8765",
+                    "x-forwarded-host": "app.onrender.com"}
+    assert ok(behind_proxy, trust_forwarded=True)
+    assert not ok(behind_proxy)  # X-Forwarded-Host from an untrusted caller
     assert ok({"origin": "https://phone.example/"}, ("https://phone.example",))
     assert not ok({"host": "x"})
     assert not ok({"origin": "file://", "host": ""})
