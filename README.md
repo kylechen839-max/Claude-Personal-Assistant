@@ -261,6 +261,53 @@ slow. On a Pi with no screen, set `[web] browser = false`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
 
+## Preflight: check everything in one pass
+
+```powershell
+.\scripts\preflight.ps1                 # Windows (PowerShell 5.1 or 7)
+```
+```bash
+./scripts/preflight.sh --hardware       # Linux / Raspberry Pi
+```
+
+Each step prints `PASS`, `FAIL` or `SKIP` (with the reason), then a table and
+`GO` (no FAIL) or `NO-GO`. The full output is saved to
+`logs/preflight-<date>-<time>.txt` (gitignored). Values from `.env` are
+loaded into the preflight's own process only and are masked as `[REDACTED]`
+everywhere, in the console and the report.
+
+| Step | What it checks |
+|---|---|
+| `git` | on `master`, no uncommitted changes (`config.toml` may differ per machine) |
+| `env` | `.env` exists and has `ANTHROPIC_API_KEY` (names only, never values) |
+| `check` | `python -m assistant --check` passes |
+| `pytest`, `pytest-live` | the full suite, then the live read-only Pinecone/Notion/Google tests, which must not skip |
+| `wake-e2e` | `--mode wake --audio-file tests/fixtures/hey_claude_calendar_tomorrow.wav --timings`: a wake, the transcript and a real reply |
+| `text-tools` | text mode answers a calendar and a Notion question, and the log shows both tools were called |
+| `web` | once `--mode web` exists: starts it on 127.0.0.1, then the web checks below |
+| `tts-pyttsx3`, `tts-piper` | renders a sentence to a .wav with each engine |
+| `audio-devices`, `mic-level` | with `--hardware` only: lists devices, records 3 s and reports the level |
+
+`--skip pytest,web` skips steps; `--help` lists the options.
+
+**Web smoke check** (after a deploy, or against the Pi):
+
+```powershell
+.\scripts\cloud_smoke.ps1 https://<your-service>.onrender.com
+```
+```bash
+./scripts/cloud_smoke.sh https://<your-service>.onrender.com
+```
+
+It checks `/healthz`, that a protected route refuses a request without a
+session, logs in with the token in the `WEB_TOKEN` environment variable (or
+`WEB_TOKEN` from `.env`; `--token-env` picks another variable), then runs
+one text turn and one audio turn. It never prints the token.
+
+**Moving to a Raspberry Pi:** follow [PI_MIGRATION.md](PI_MIGRATION.md).
+CI's **pi-arm64** job runs `install_pi.sh`, the tests and the preflight on
+Debian Bookworm arm64 with Python 3.11, i.e. a simulated Pi.
+
 ## Project layout
 
 ```
@@ -275,11 +322,15 @@ assistant/
   memory.py     Pinecone recall + conversation summaries
   audio.py      wav I/O, resampling, chime
   timing.py     per-turn latency               (--timings)
+  preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
+  smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   tools/        calendar.py, notion.py, web.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
+                preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)
+.github/workflows/pi-arm64.yml  CI: a simulated Pi (Debian Bookworm arm64, Python 3.11)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,

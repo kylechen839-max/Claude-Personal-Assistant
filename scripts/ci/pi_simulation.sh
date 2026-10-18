@@ -29,17 +29,19 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # What Raspberry Pi OS Lite already has: python3, sudo, git, ca-certificates.
 apt-get install -y -qq --no-install-recommends python3 sudo git ca-certificates \
-    procps >/dev/null
+    procps shellcheck >/dev/null  # the last one only for the script lint tests
 
 useradd --create-home --shell /bin/bash pi
 echo "pi ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/010_pi-nopasswd
 chown -R pi:pi "$CACHE" "$OUT"
 
-# systemd stubs: no init system in a container.
+# systemd stubs: no init system in a container. They log their calls to a
+# non-sticky directory (root can't append to pi's file in /tmp).
+mkdir -p /var/lib/stub-systemd && chmod 777 /var/lib/stub-systemd
 for tool in systemctl loginctl; do
     cat > "/usr/local/bin/$tool" <<STUB
 #!/bin/sh
-echo "$tool \$*" >> /tmp/systemd-calls.log
+echo "$tool \$*" >> /var/lib/stub-systemd/calls.log
 [ "\$1 \$2" = "show-user pi" ] && echo no
 exit 0
 STUB
@@ -114,9 +116,9 @@ unit=~/.config/systemd/user/hey-claude.service
 grep -q "@REPO_DIR@" "$unit" && fail "unit still has @REPO_DIR@"
 grep -q "ExecStart=$HOME/hey-claude/.venv/bin/python -m assistant --mode wake" "$unit" \
     || fail "unexpected ExecStart in $unit"
-cat /tmp/systemd-calls.log
-grep -q "enable-linger pi" /tmp/systemd-calls.log || fail "linger not enabled"
-grep -q -- "--user enable hey-claude.service" /tmp/systemd-calls.log || fail "not enabled"
+cat /var/lib/stub-systemd/calls.log
+grep -q "enable-linger pi" /var/lib/stub-systemd/calls.log || fail "linger not enabled"
+grep -q -- "--user enable hey-claude.service" /var/lib/stub-systemd/calls.log || fail "not enabled"
 
 phase "preflight.sh (Claude faked, no keys)"
 "$PY" scripts/ci/fake_claude.py 8999 &

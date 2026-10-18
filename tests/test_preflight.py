@@ -146,6 +146,8 @@ def test_env_step_loads_into_children_not_the_file(fake_env, tmp_path):
     ("master", "", PASS, "clean"),
     ("claude/x", "", FAIL, "not master"),
     ("master", " M README.md\n?? new.txt\n", FAIL, "2 uncommitted"),
+    ("master", " M config.toml\n", PASS, "local settings in config.toml"),
+    ("master", "?? config.toml\n", FAIL, "1 uncommitted"),
 ])
 def test_git_step(tmp_path, branch, status, code, want):
     run = FakeRun({r"--abbrev-ref": (0, branch + "\n"), r"status": (0, status),

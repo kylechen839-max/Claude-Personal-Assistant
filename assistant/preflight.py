@@ -39,6 +39,7 @@ PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 STEPS = ("git", "env", "check", "pytest", "pytest-live", "wake-e2e",
          "text-tools", "web", "tts-pyttsx3", "tts-piper", "audio-devices",
          "mic-level")
+LOCAL_FILES = {"config.toml"}  # may differ per machine without failing "git"
 MIN_SECRET_LENGTH = 4
 MIC_MIN_PEAK_DB = -35.0  # speech near the mic peaks around -20..-6 dBFS
 
@@ -209,15 +210,19 @@ def step_git(ctx: Context) -> Result:
     _, commit = ctx.run(["git", "rev-parse", "--short", "HEAD"], cwd=ctx.root,
                         env=ctx.env, timeout=60)
     changed = [line for line in status.splitlines() if line.strip()]
+    # Per-machine settings (mic, voice, Whisper size) live in config.toml.
+    local = [c for c in changed if c[3:].strip() in LOCAL_FILES and c[1] == "M"]
+    changed = [c for c in changed if c not in local]
     problems = []
     if branch != ctx.branch:
         problems.append(f"on {branch}, not {ctx.branch}")
     if changed:
         problems.append(f"{len(changed)} uncommitted change(s)")
     detail = f"{branch} @ {commit.strip()}"
+    note = (f" (local settings in {', '.join(c[3:] for c in local)})" if local else "")
     return Result("git", FAIL if problems else PASS,
-                  detail + ("; " + "; ".join(problems) if problems else ", clean"),
-                  status)
+                  detail + ("; " + "; ".join(problems) if problems else ", clean")
+                  + note, status)
 
 
 def step_env(ctx: Context) -> Result:

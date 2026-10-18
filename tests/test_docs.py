@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import cli, tts
+from assistant import cli, preflight, smoke, tts
 from assistant.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
@@ -17,11 +17,11 @@ else:
     import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
-DOCS = ["README.md", "MANUAL_TEST.md"]
+DOCS = ["README.md", "MANUAL_TEST.md", "PI_MIGRATION.md"]
 # Flags of other programs that the docs show (pip, systemctl, journalctl,
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
-               "--user", "--uninstall"}
+               "--user", "--uninstall", "--now"}
 OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
 
 
@@ -49,6 +49,8 @@ def code_flags(monkeypatch):
     monkeypatch.delitem(sys.modules, "assistant.tools.calendar", raising=False)
     return (_parser_flags(monkeypatch, lambda: cli.parse_args([]))
             | _parser_flags(monkeypatch, lambda: tts.main([]))
+            | _parser_flags(monkeypatch, lambda: preflight.parse_args([]))
+            | _parser_flags(monkeypatch, lambda: smoke.main([]))
             | _parser_flags(monkeypatch, lambda: runpy.run_module(
                 "assistant.tools.calendar", run_name="__main__")))
 
@@ -94,3 +96,33 @@ def test_no_stale_names(doc):
     for stale in ("porcupine", "picovoice", "claude-sonnet-4"):
         assert stale not in text
     assert DEFAULTS["assistant"]["model"] in _text("config.toml")
+
+
+@pytest.mark.parametrize("doc", DOCS)
+def test_every_script_in_docs_exists(doc):
+    for path in re.findall(r"scripts[/\\][\w/\\]+\.(?:sh|ps1|py)", _text(doc)):
+        assert (ROOT / path.replace("\\", "/")).exists(), path
+
+
+@pytest.mark.parametrize("doc", DOCS)
+def test_preflight_steps_in_docs_exist(doc):
+    """`--skip a,b` lists and the step names in backticks are real steps."""
+    text = _text(doc)
+    for names in re.findall(r"--skip ([\w,-]+)", text):
+        assert set(names.split(",")) <= set(preflight.STEPS), names
+    for step in re.findall(r"`((?:tts|pytest|audio|mic|wake|text)-[a-z0-9]+)`", text):
+        assert step in preflight.STEPS, step
+
+
+def test_readme_lists_every_preflight_step():
+    text = _text("README.md")
+    assert [s for s in preflight.STEPS if f"`{s}`" not in text] == []
+
+
+def test_pi_migration_go_no_go():
+    """The go/no-go list names all four gates."""
+    text = _text("PI_MIGRATION.md")
+    go = text[text.index("## 9. Go/no-go"):]
+    for gate in ("preflight.ps1", "pi-arm64", "cloud_smoke", "preflight.sh --hardware",
+                 "MANUAL_TEST.md"):
+        assert gate in go, gate
