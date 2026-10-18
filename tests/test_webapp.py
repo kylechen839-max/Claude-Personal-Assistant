@@ -72,9 +72,10 @@ def make_app(fake_client, tmp_path):
         assistant = webapp.WebAssistant(
             chat_factory, transcriber or FakeTranscriber(), tts or PrintTTS(),
             tools=tools, clock=clock or Clock())
-        kwargs.setdefault("limiter", webapp.LoginLimiter(per_ip=3, global_max=50))
+        kwargs.setdefault("limiter", webapp.LoginLimiter(per_ip=3, global_delay=0))
         app_options = {k: kwargs.pop(k) for k in list(kwargs)
                        if k in ("limiter", "trusted_proxy", "max_audio_seconds",
+                                "sessions_file",
                                 "max_text_chars", "max_upload_bytes")}
         assistant.__dict__.update(kwargs)  # e.g. conversation_timeout
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, **app_options)
@@ -130,9 +131,11 @@ def test_wrong_token_is_rejected_and_rate_limited(make_app):
     for _ in range(3):
         r = client.post("/api/login", json={"token": "nope"})
         assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
-    # locked now, even for the right token
-    assert client.post("/api/login", json={"token": TOKEN}).status_code == 429
+    # this address is locked out for wrong guesses...
+    assert client.post("/api/login", json={"token": "nope"}).status_code == 429
     assert webapp.COOKIE not in client.cookies
+    # ...but the right token always gets in
+    login(client)
 
 
 def test_login_sets_a_strict_cookie(make_app):
@@ -150,8 +153,7 @@ def test_login_sets_a_strict_cookie(make_app):
 
 def test_lockout_is_per_address_and_expires():
     clock = Clock()
-    limiter = webapp.LoginLimiter(per_ip=2, global_max=10, window=60,
-                                  lockout=300, clock=clock)
+    limiter = webapp.LoginLimiter(per_ip=2, window=60, lockout=300, clock=clock)
     limiter.fail("1.1.1.1"), limiter.fail("1.1.1.1")
     assert limiter.blocked("1.1.1.1") and not limiter.blocked("2.2.2.2")
     clock.now += 299
@@ -160,15 +162,51 @@ def test_lockout_is_per_address_and_expires():
     assert not limiter.blocked("1.1.1.1")
 
 
-def test_global_lockout():
+def test_many_wrong_tokens_slow_down_but_never_lock_everyone_out():
     clock = Clock()
-    limiter = webapp.LoginLimiter(per_ip=5, global_max=4, window=60,
-                                  lockout=300, clock=clock)
-    for i in range(4):
-        limiter.fail(f"10.0.0.{i}")  # a different address each time
-    assert limiter.blocked("9.9.9.9")
-    clock.now += 301
-    assert not limiter.blocked("9.9.9.9")
+    limiter = webapp.LoginLimiter(per_ip=5, global_free=4, global_delay=1.5,
+                                  window=60, clock=clock)
+    delays = [limiter.fail(f"10.0.0.{i}") for i in range(6)]  # many addresses
+    assert delays == [0, 0, 0, 0, 1.5, 1.5]
+    assert not limiter.blocked("9.9.9.9")  # nobody else is locked out
+    clock.now += 61
+    assert limiter.fail("10.0.1.1") == 0
+
+
+def test_right_token_signs_in_after_a_flood_of_wrong_ones(make_app):
+    """The review's case: 60 wrong tokens from many addresses must not
+    lock Kyle out."""
+    _, client = make_app(trusted_proxy=1)
+    for i in range(60):
+        r = client.post("/api/login", json={"token": f"guess-{i}"},
+                        headers={"X-Forwarded-For": f"203.0.113.{i}"})
+        assert r.status_code == 401
+    r = client.post("/api/login", json={"token": TOKEN},
+                    headers={"X-Forwarded-For": "198.51.100.7"})
+    assert r.status_code == 200
+    bearer = {"Authorization": f"Bearer {TOKEN}", "X-Forwarded-For": "198.51.100.8"}
+    assert client.get("/api/state", headers=bearer).status_code == 200
+
+
+def test_wrong_tokens_are_slowed_down_when_many_fail(make_app, monkeypatch):
+    waits = []
+
+    async def record(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(webapp, "_wait", record)
+    _, client = make_app(limiter=webapp.LoginLimiter(per_ip=100, global_free=2,
+                                                     global_delay=0.3))
+    for _ in range(4):
+        assert client.post("/api/login", json={"token": "nope"}).status_code == 401
+    assert waits == [0.3, 0.3]  # only past the first two
+    bad = {"Authorization": "Bearer nope"}
+    assert client.get("/api/state", headers=bad).status_code == 401
+    assert waits == [0.3, 0.3, 0.3]  # wrong Bearer tokens too
+    login(client)  # the right token isn't slowed down
+    assert client.get("/api/state", headers={"Authorization": f"Bearer {TOKEN}"}
+                      ).status_code == 200
+    assert len(waits) == 3
 
 
 def test_per_address_lockout_behind_a_trusted_proxy(make_app):
@@ -177,13 +215,15 @@ def test_per_address_lockout_behind_a_trusted_proxy(make_app):
     for _ in range(3):
         r = client.post("/api/login", json={"token": "nope"}, headers=attacker)
         assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
-    assert client.post("/api/login", json={"token": TOKEN},
+    assert client.post("/api/login", json={"token": "guess"},
                        headers=attacker).status_code == 429
     # a forged left-hand entry doesn't dodge it: the proxy's entry counts
     forged = {"X-Forwarded-For": "1.2.3.4, 6.6.6.6"}
-    assert client.post("/api/login", json={"token": TOKEN},
+    assert client.post("/api/login", json={"token": "guess"},
                        headers=forged).status_code == 429
     kyle = {"X-Forwarded-For": "5.5.5.5"}
+    assert client.post("/api/login", json={"token": "typo"},
+                       headers=kyle).status_code == 401  # not locked out
     assert client.post("/api/login", json={"token": TOKEN},
                        headers=kyle).status_code == 200
 
@@ -625,7 +665,8 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
                          make_response(text_block("Done."))]
     assistant, client = make_app(tools=reg)
     login(client)
-    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE])
+    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE],
+                             client.app.state.web.store.epoch)
     s = assistant.session(sid)
     assert assistant.start_turn(s, text="go")
     assert client.post("/api/turn", json={"text": "again"}).status_code == 409
@@ -643,7 +684,8 @@ PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
           # the voice view's earcons (assistant/earcons.py)
-          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav"]
+          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
+          "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -669,7 +711,9 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
 def test_healthz_says_nothing(make_app):
     _, client = make_app()
     r = client.get("/healthz")
-    assert r.json() == {"ok": True} and "set-cookie" not in r.headers
+    # only the code version (for the page's reload after an update)
+    assert set(r.json()) == {"ok", "version"} and r.json()["ok"] is True
+    assert "set-cookie" not in r.headers
 
 
 def test_cookie_is_long_lived_and_renewed(make_app):
@@ -930,10 +974,11 @@ def test_bearer_token_for_other_clients(make_app, fake_client):
     assert evs[0]["text"] == "Hi from the API."
     assert "set-cookie" not in client.get("/api/state", headers=good).headers
     bad = {"Authorization": "Bearer wrong"}
-    for _ in range(3):
+    for _ in range(4):
         assert client.get("/api/state", headers=bad).status_code == 401
-    # locked out now (per address), even with the right token
-    assert client.get("/api/state", headers=good).status_code == 401
+    assert client.app.state.web.limiter.blocked("testclient")  # counted
+    # the right token still works
+    assert client.get("/api/state", headers=good).status_code == 200
 
 
 def test_trusted_proxy_by_address():
@@ -977,3 +1022,68 @@ def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
                         output_fn=lambda m: None) == 0
     assert seen["host"] == "127.0.0.1"
     assert seen["app"].state.web.trusted_proxy.addresses == {"127.0.0.1"}
+
+
+
+# --- sign-out and revocation -----------------------------------------------------
+
+def test_logout_revokes_the_cookie(make_app):
+    _, client = make_app()
+    login(client)
+    stolen = client.cookies[webapp.COOKIE]
+    assert client.post("/api/logout").status_code == 200
+    thief = TestClient(client.app, base_url=BASE)
+    thief.cookies.set(webapp.COOKIE, stolen)
+    assert thief.get("/api/state").status_code == 401
+
+
+def test_sign_out_everywhere(make_app):
+    _, phone = make_app()
+    laptop = TestClient(phone.app, base_url=BASE)
+    login(phone), login(laptop)
+    old_epoch = phone.app.state.web.store.epoch
+    assert phone.post("/api/logout-all").status_code == 200
+    assert phone.app.state.web.store.epoch != old_epoch
+    assert laptop.get("/api/state").status_code == 401
+    assert phone.get("/api/state").status_code == 401
+    login(laptop)  # signing in again works
+    assert laptop.get("/api/state").status_code == 200
+    assert TestClient(phone.app, base_url=BASE).post("/api/logout-all").status_code == 401
+
+
+def test_a_cookie_for_an_unknown_session_is_refused(make_app):
+    """A correctly signed cookie isn't enough: the session must be listed."""
+    _, client = make_app()
+    store = client.app.state.web.store
+    client.cookies.set(webapp.COOKIE, webapp.make_cookie(TOKEN, "made-up", store.epoch))
+    assert client.get("/api/state").status_code == 401
+
+
+def test_sessions_survive_a_restart(make_app, tmp_path):
+    path = tmp_path / "data" / "web_sessions.json"
+    _, client = make_app(sessions_file=path)
+    login(client)
+    cookie = client.cookies[webapp.COOKIE]
+    assert TOKEN not in path.read_text()
+    _, restarted = make_app(sessions_file=path)
+    restarted.cookies.set(webapp.COOKIE, cookie)
+    assert restarted.get("/api/state").status_code == 200
+    restarted.post("/api/logout")
+    _, again = make_app(sessions_file=path)
+    again.cookies.set(webapp.COOKIE, cookie)
+    assert again.get("/api/state").status_code == 401
+
+
+def test_session_store_expiry_and_bad_file(tmp_path):
+    clock = Clock()
+    store = webapp.SessionStore(max_age=100, clock=clock)
+    sid = store.create()
+    clock.now += 90
+    assert store.valid(sid)  # use pushes the expiry back
+    clock.now += 90
+    assert store.valid(sid)
+    clock.now += 101
+    assert not store.valid(sid)
+    bad = tmp_path / "s.json"
+    bad.write_text("not json")
+    assert webapp.SessionStore(bad).sessions == {}

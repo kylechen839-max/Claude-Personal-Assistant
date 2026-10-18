@@ -268,8 +268,10 @@ def test_barge_in_over_the_socket(make_voice):
     assert second[-1]["content"] == "what's the weather"
 
 
-@pytest.mark.parametrize("answer, deleted", [("yes", ["Dentist"]), ("no", [])])
-def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted):
+@pytest.mark.parametrize("answer, deleted, barge_in", [
+    ("yes", ["Dentist"], False), ("no", [], False),
+    ("okay, and what about Friday?", [], False), ("yes", [], True)])
+def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted, barge_in):
     from assistant.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
 
@@ -294,8 +296,18 @@ def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted):
         question = [m for m in receive(ws, "audio") if m["type"] == "audio"]
         while not question[-1]["text"].endswith("Please say yes or no."):
             question += [m for m in receive(ws, "audio") if m["type"] == "audio"]
-        ws.send_bytes(utterance(2))
-        rest = receive(ws, "turn_done")
+        assert question[-1]["question"] is True
+        if barge_in:  # Kyle talks over the question: the delete is cancelled
+            ws.send_text(json.dumps({"type": "interrupt", "turn": 1,
+                                     "index": question[-1]["index"], "fraction": 0.4}))
+            rest = receive(ws, "turn_done")
+        else:
+            ws.send_text(json.dumps({"type": "played", "turn": 1,
+                                     "index": question[-1]["index"]}))
+            ws.send_bytes(utterance(2))
+            rest = receive(ws, "turn_done")
+    spoken = [m["text"] for m in question + rest if m["type"] == "audio"]
+    assert ("OK, I won't delete it." in spoken) is (not deleted)
     ans = next(m for m in rest if m["type"] == "confirm_answer")
     assert ans["yes"] == bool(deleted) and ans["turn"] == 1
     assert done == deleted
@@ -367,6 +379,48 @@ def test_text_message_limits(make_voice):
             ws.send_text(json.dumps({"type": "ping"}))
         msgs = [ws.receive() for _ in range(voice_ws.CONTROL_MESSAGES_PER_10S + 1)]
         assert msgs[-1]["type"] == "websocket.close" and msgs[-1]["code"] == 1008
+
+
+@pytest.mark.parametrize("msg", [{"type": "interrupt", "turn": "x"},
+                                 {"type": "interrupt", "turn": 1, "fraction": [1]},
+                                 {"type": "played", "turn": None}])
+def test_malformed_control_message_closes_with_1003(make_voice, msg):
+    _, http = make_voice()
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_text(json.dumps(msg))
+        assert ws.receive()["code"] == 1003
+
+
+def test_rate_limit_survives_reconnecting(make_voice):
+    _, http = make_voice(streamed("One."), heard=("a", "b"), utterances_per_minute=1)
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1, 0.2))
+        receive(ws, "turn_done")
+    with connect(http) as ws:  # a new socket doesn't get a fresh allowance
+        ws.receive_text()
+        ws.send_bytes(utterance(2, 0.2))
+        msg = ws.receive()
+        while msg["type"] != "websocket.close":
+            msg = ws.receive()
+        assert msg["code"] == 1008
+
+
+def test_server_wide_cap_on_voice_conversations(make_voice, monkeypatch):
+    monkeypatch.setattr(voice_ws, "MAX_CONVERSATIONS", 1)
+    _, http = make_voice()
+    login(http)
+    other = TestClient(http.app, base_url=BASE)
+    login(other)
+    with connect(http) as ws:
+        ws.receive_text()
+        with pytest.raises(WebSocketDisconnect) as e:
+            with connect(other):
+                pass
+        assert e.value.code == 1013
 
 
 def test_utterance_rate_limit(make_voice):

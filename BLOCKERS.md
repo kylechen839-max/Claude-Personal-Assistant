@@ -14,8 +14,10 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
       spoken delete, Notion, memory, web, Piper, network down, latency).
       Note anything that fails here.
-- [ ] **Raspberry Pi** (when you have one set up): the Pi section of
-      MANUAL_TEST.md.
+- [ ] **Raspberry Pi move:** follow PI_MIGRATION.md (go/no-go in its last
+      section). Before it, consider **publishing the Google OAuth app**
+      (consent screen -> Publish app): in "Testing" mode Google expires
+      `token.json` after 7 days, which an always-on Pi would hit.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

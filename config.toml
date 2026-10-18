@@ -83,6 +83,7 @@ port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
 max_audio_seconds = 60        # longest recording accepted
+sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
 
@@ -97,6 +98,11 @@ idle_timeout = 120            # seconds of quiet before the conversation ends
 max_session_minutes = 30
 utterances_per_minute = 30
 debug_panel = false           # latency timings on the voice screen
+
+[update]                      # automatic updates on the home host (PC tasks / Pi service)
+enabled = false               # true: follow the tested `stable` branch, restart when idle
+channel = "stable"
+check_minutes = 15
 
 [logging]
 file = "logs/assistant.log"

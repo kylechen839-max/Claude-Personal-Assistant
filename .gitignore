@@ -21,3 +21,6 @@ logs/
 *.wav
 !tests/fixtures/*.wav
 !assistant/web/earcons/*.wav
+
+# Web app sign-in sessions (python -m assistant --mode web)
+data/

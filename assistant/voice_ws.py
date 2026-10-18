@@ -48,6 +48,10 @@ PAGE_FILES = {
 }
 MAX_TEXT_MESSAGE = 4096
 CONTROL_MESSAGES_PER_10S = 60
+MAX_TRACKED_SESSIONS = 200
+# Voice conversations at once, server-wide (each queues at most one turn and
+# one confirmation answer for Whisper, so this bounds the STT backlog).
+MAX_CONVERSATIONS = 4
 SAMPLE_RATE = 16000
 
 
@@ -145,6 +149,7 @@ def add_voice_routes(app, assistant, allowed_origins=(),
     allowed = tuple(o.rstrip("/") for o in allowed_origins)
     max_utterance_bytes = int(v["max_utterance_s"] * SAMPLE_RATE * 2) + 4096
     live: dict[str, tuple[VoiceConversation, WebSocket]] = {}
+    limits: dict[str, tuple[RateLimit, RateLimit]] = {}
     gz_cache: dict[str, bytes] = {}
 
     for name, media in PAGE_FILES.items():
@@ -179,6 +184,10 @@ def add_voice_routes(app, assistant, allowed_origins=(),
             await ws.close(code=1008)
             return
         sid = session.sid
+        if sid not in live and len(live) >= MAX_CONVERSATIONS:
+            log.warning("Refused a voice socket: %d conversations already", len(live))
+            await ws.close(code=1013)  # try again later
+            return
         await ws.accept()
         loop = asyncio.get_running_loop()
         out: asyncio.Queue = asyncio.Queue()
@@ -217,8 +226,12 @@ def add_voice_routes(app, assistant, allowed_origins=(),
                     await run_in_threadpool(conv.end, reason)
                     return
 
-        utterances = RateLimit(v["utterances_per_minute"], 60, clock)
-        controls = RateLimit(CONTROL_MESSAGES_PER_10S, 10, clock)
+        # Per browser session, so reconnecting doesn't reset them.
+        utterances, controls = limits.setdefault(sid, (
+            RateLimit(v["utterances_per_minute"], 60, clock),
+            RateLimit(CONTROL_MESSAGES_PER_10S, 10, clock)))
+        while len(limits) > MAX_TRACKED_SESSIONS:
+            limits.pop(next(iter(limits)))
         tasks = [asyncio.create_task(writer()), asyncio.create_task(watchdog())]
 
         async def refuse(code: int, why: str):
@@ -262,11 +275,18 @@ def add_voice_routes(app, assistant, allowed_origins=(),
                 except (ValueError, AttributeError):
                     await refuse(1003, "bad message")
                     break
-                if kind == "interrupt":
-                    conv.interrupt(int(data.get("turn", -1)),
-                                   int(data.get("index", 0)),
-                                   float(data.get("fraction", 0)))
-                elif kind == "end":
+                try:
+                    if kind == "interrupt":
+                        conv.interrupt(int(data.get("turn", -1)),
+                                       int(data.get("index", 0)),
+                                       float(data.get("fraction", 0)))
+                    elif kind == "played":
+                        conv.chunk_played(int(data.get("turn", -1)),
+                                          int(data.get("index", -1)))
+                except (TypeError, ValueError, OverflowError):
+                    await refuse(1003, "bad message")
+                    break
+                if kind == "end":
                     await run_in_threadpool(conv.end, "user")
                 elif kind == "ping":
                     send({"type": "pong", "t": data.get("t")})

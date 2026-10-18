@@ -17,15 +17,19 @@ def make_response(*blocks, stop_reason="end_turn"):
     return SimpleNamespace(content=list(blocks), stop_reason=stop_reason)
 
 
-# Settings the web server reads from the environment. On a PC or server
-# that sets them (e.g. TRUSTED_PROXY=127.0.0.1 behind tailscale serve), they
-# would leak into tests that check defaults; tests that need them set them.
-WEB_ENV_VARS = ("PORT", "TRUSTED_PROXY", "WEB_TOKEN")
+# Settings read from the environment (assistant.config.ENV_OVERRIDES, e.g.
+# PINECONE_INDEX, TRUSTED_PROXY, PORT) plus WEB_TOKEN. On a PC or server that
+# sets them (often through .env) they would leak into tests that check
+# defaults; tests that need one set it themselves.
+def _env_vars() -> tuple[str, ...]:
+    from assistant.config import ENV_OVERRIDES
+
+    return (*ENV_OVERRIDES, "WEB_TOKEN")
 
 
 @pytest.fixture(autouse=True)
-def clear_web_env(monkeypatch):
-    for var in WEB_ENV_VARS:
+def clear_settings_env(monkeypatch):
+    for var in _env_vars():
         monkeypatch.delenv(var, raising=False)
 
 

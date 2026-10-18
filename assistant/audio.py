@@ -76,6 +76,31 @@ def make_follow_up_chime(sr: int = SAMPLE_RATE) -> np.ndarray:
     return earcons.thinking(sr)
 
 
+def resolve_mic_device(value):
+    """`[wake] mic_device` -> what sounddevice should open: None for the
+    default mic ("" or unset), an int index ("0", 0, "3"), or a name
+    fragment ("USB PnP"). Index 0 stays 0: it's a real device, not "unset"."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    return int(text) if text.isdigit() else text
+
+
+def mic_that_opens(value, sd=None) -> dict:
+    """The input device sounddevice will actually open for `value`
+    (its info dict, with 'index'); raises if it can't be opened."""
+    if sd is None:
+        import sounddevice as sd
+    device = resolve_mic_device(value)
+    if device is None:
+        return dict(sd.query_devices(kind="input"))
+    return dict(sd.query_devices(device, "input"))
+
+
 def play(samples: np.ndarray, sr: int = SAMPLE_RATE) -> None:
     import sounddevice as sd
 
