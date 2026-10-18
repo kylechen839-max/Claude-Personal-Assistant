@@ -256,8 +256,11 @@ class ClaudeChat:
                                     "content": "Not run: the user interrupted.",
                                     "is_error": True})
                     continue
-                log.info("Claude called %s %s%s", call.name, call.input,
+                # Names only at INFO: inputs hold event titles, notes, queries.
+                log.info("Claude called %s (%d input field(s))%s", call.name,
+                         len(call.input or {}),
                          " (web content in context)" if untrusted else "")
+                log.debug("Tool input for %s: %s", call.name, call.input)
                 content, is_error = self.tools.dispatch(call.name, dict(call.input),
                                                         untrusted=untrusted)
                 results.append({"type": "tool_result", "tool_use_id": call.id,

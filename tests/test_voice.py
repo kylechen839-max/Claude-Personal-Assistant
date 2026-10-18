@@ -509,3 +509,37 @@ def test_no_conversation_text_in_info_logs(caplog):
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert any("saved to memory" in m for m in info)
     assert not [m for m in info if "secret" in m]
+
+
+def test_tool_inputs_and_memory_queries_stay_out_of_info_logs(caplog):
+    import logging
+
+    reg = ToolRegistry()
+    reg.register(Tool(name="remember", description="Remember.",
+                      input_schema={"type": "object", "properties": {"note": {"type": "string"}}},
+                      handler=lambda note: "ok"))
+    memory = MagicMock()
+    memory.retrieve.return_value = []
+    client = stream_client(
+        streamed(extra=[tool_use_block("remember", {"note": "my locker code is 4512"})],
+                 stop_reason="tool_use"),
+        streamed("Got it."))
+    chat = ClaudeChat(client=client, model="m", tools=reg)
+    with caplog.at_level(logging.INFO, logger="assistant"):
+        chat.ask("remember my locker code is 4512", on_text=lambda d: None)
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert any(m.startswith("Claude called remember") for m in info)  # preflight reads this
+    assert not [m for m in info if "4512" in m]
+
+
+def test_memory_retrieve_logs_no_query_text(caplog):
+    import logging
+
+    from tests.test_memory import make_memory, match
+
+    memory, _, _ = make_memory([match(0.9, "Kyle likes tea")])
+    with caplog.at_level(logging.INFO, logger="assistant"):
+        memory.retrieve("what is my locker code 4512")
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert any("Memory:" in m for m in info)
+    assert not [m for m in info if "4512" in m]

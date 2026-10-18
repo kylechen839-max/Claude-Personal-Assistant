@@ -106,7 +106,8 @@ class PineconeMemory:
                         "").strip()
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
-        log.info("Memory: %d notes for %r", len(notes), query[:60])
+        log.info("Memory: %d notes for a %d-character query", len(notes), len(query))
+        log.debug("Memory query: %r", query[:60])
         return notes
 
     def store(self, summary: str, extra: dict | None = None) -> str:
