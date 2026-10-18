@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 444 passed, 10 skipped (Linux build sandbox,
+**Current test count:** 463 passed, 10 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
@@ -358,8 +358,12 @@ Four features on top of the seven stages (branch `claude/features`).
 - **Gmail** (`assistant/tools/gmail.py`, `google_auth.py`): `email_summary`
   (unread/important in the last N hours, capped, sender/subject/one-line
   gist), `read_email` (plain text, quoted thread and HTML stripped,
-  trimmed), `draft_reply` (a draft in the same thread, after a yes; no send
-  tool, no send scope). Sign-in moved to `google_auth.py` (one token for
+  trimmed), `draft_reply` (a draft in the same thread, after a yes). No send
+  tool; `gmail.compose` (needed for drafts) could send, so the service is
+  wrapped in `NoSendGmail` (send/delete/settings raise) and a test fails on
+  any send call; Gmail scopes are requested only when `[gmail]` is enabled.
+  Email text is never logged (any mode) and never stored in memory
+  (summaries of such conversations use Kyle's words only). Sign-in moved to `google_auth.py` (one token for
   Calendar + Gmail; `GOOGLE_TOKEN_JSON` for the cloud). An old token keeps
   Calendar working; Gmail stays off with a message naming
   `python -m assistant.tools.google_auth`, also in `--check`. Email results
@@ -381,7 +385,8 @@ Four features on top of the seven stages (branch `claude/features`).
   (faster-whisper's own file decoder fails with PyAV 19, and windows keep
   memory flat), transcribes with progress, summarizes with a forced Claude
   tool call, finds or creates "Lecture Notes" next to Assignments, and
-  files a page with inline/block equations. Assignment-like action items
+  files a page with inline/block equations, idempotently (Lecture ID
+  property + local page record; a retry appends only missing blocks). Assignment-like action items
   are offered with Add buttons. Tested: resume after a lost chunk,
   concurrent resends, pipeline with mocked Whisper/Claude/Notion, retry
   without re-transcribing, DB find/create/refused paths, real WebM/Opus and
@@ -394,16 +399,7 @@ Four features on top of the seven stages (branch `claude/features`).
   `/static/katex` and drawn with `katex.render` (CSP-safe), spoken replies
   with LaTeX read aloud. Tested: auth on every route, type/size rejection,
   EXIF removal, mocked vision call, 27 LaTeX-to-speech forms.
-- **Not wired into the phone app yet** (by request, until voice mode is on
-  master): `webapp.serve` must call `webfeatures.install(app,
-  Features(config, assistant))` and `features.pipeline.resume_pending()`,
-  `build_assistant` must call `cli.register_notes`, `index.html` must load
-  `/static/katex/katex.min.{css,js}` and `/static/features.{css,js}`, and
-  the CSP needs `font-src 'self'`. This was done and tested in commit
-  6b018e8 (and driven in headless Chromium), then backed out.
-- Waiting on other branches: voice mode (spoken tutor replies in the
-  hands-free mode can use `mathspeech.speakable` and the page's
-  `window.heyClaudeMath`), cloud host (`[lecture] upload_dir` on `/data`,
+- Waiting on other branches: cloud host (`[lecture] upload_dir` on `/data`,
   `GOOGLE_TOKEN_JSON`), history (notes via `on_saved`).
 
 ## Known issues

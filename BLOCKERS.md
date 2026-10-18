@@ -12,8 +12,11 @@ Only what is still open for Kyle. None of it blocks the code.
          `gmail.readonly` and `gmail.compose` is optional while the app is in
          Testing; Google still asks for them at sign-in.)
       3. On the PC: `python -m assistant.tools.google_auth` and accept
-         Calendar, "Read your email" and "Manage drafts". This replaces
-         `token.json`; nothing can send mail.
+         Calendar, "Read your email" and "Manage drafts and send emails".
+         Google words the drafts permission that way (there is no
+         drafts-only one); the assistant blocks sending in code. This
+         replaces `token.json`. (With `[gmail] enabled = false` it asks for
+         Calendar only.)
       4. Copy the new `token.json` to the Pi, or paste its contents into
          `GOOGLE_TOKEN_JSON` on the cloud host.
       `python -m assistant --check` shows "Gmail access: granted" afterwards.

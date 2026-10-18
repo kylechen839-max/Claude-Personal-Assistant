@@ -1,6 +1,8 @@
 """Gmail tools: a spoken inbox summary, reading one email, and saving a
-draft reply. There is deliberately no send tool, and the OAuth scopes
-(gmail.readonly + gmail.compose) don't include sending either.
+draft reply. There is deliberately no send tool. The gmail.compose scope
+(needed for drafts) would technically allow sending, so the Gmail service
+is wrapped in NoSendGmail: messages.send, drafts.send and the other
+mail-sending or mail-changing calls raise instead of running.
 
 Email text is written by other people, so results are marked as untrusted:
 while one is in the conversation, every tool that changes something asks
@@ -92,11 +94,62 @@ def plain_text(payload: dict) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+class SendingBlocked(PermissionError):
+    pass
+
+
+class _Guard:
+    """Wraps one Gmail API resource; listed methods raise, others pass."""
+
+    def __init__(self, resource, blocked: set[str], children: dict | None = None):
+        self._resource = resource
+        self._blocked = blocked
+        self._children = children or {}
+
+    def __getattr__(self, name):
+        if name in self._blocked:
+            def refuse(*args, **kwargs):
+                raise SendingBlocked(f"Gmail {name} is blocked: the assistant "
+                                     "only reads mail and saves drafts")
+            return refuse
+        attr = getattr(self._resource, name)
+        if name in self._children:
+            blocked = self._children[name]
+            return lambda *a, **k: _Guard(attr(*a, **k), blocked)
+        return attr
+
+
+# Everything the assistant must never do with the mail scopes it holds.
+_BLOCKED = {
+    "messages": {"send", "import_", "insert", "delete", "trash", "batchDelete",
+                 "batchModify", "modify", "untrash"},
+    "drafts": {"send", "delete", "update"},
+    "threads": {"delete", "trash", "modify", "untrash"},
+}
+
+
+class NoSendGmail:
+    """The Gmail service with sending (and deleting or altering mail)
+    blocked: users().messages()/drafts()/threads() are guarded, and
+    settings (forwarding, filters) and watch are unavailable. Reads and
+    drafts.create get through."""
+
+    def __init__(self, service):
+        self._service = service
+
+    def users(self):
+        return _Guard(self._service.users(), {"settings", "stop", "watch"},
+                      dict(_BLOCKED))
+
+    def __getattr__(self, name):
+        raise SendingBlocked(f"Gmail {name} is not available to the assistant")
+
+
 class GmailInbox:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", timezone: str | None = None,
                  max_summary: int = MAX_SUMMARY):
-        self._service = service
+        self._service = NoSendGmail(service) if service is not None else None
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.tz = local_zone(timezone)
@@ -110,8 +163,8 @@ class GmailInbox:
             # Raises MissingScopes (with the sign-in command) for an old token.
             creds = get_credentials(self.credentials_path, self.token_path,
                                     scopes=GMAIL_SCOPES)
-            self._service = build("gmail", "v1", credentials=creds,
-                                  cache_discovery=False)
+            self._service = NoSendGmail(build("gmail", "v1", credentials=creds,
+                                              cache_discovery=False))
         return self._service
 
     def _messages(self):
@@ -160,6 +213,7 @@ class GmailInbox:
                 "gist": gist, "unread": "UNREAD" in labels,
                 "important": "IMPORTANT" in labels})
         more = listing.get("resultSizeEstimate", len(refs)) > len(messages)
+        log.info("Email summary: %d messages (last %d hours)", len(messages), hours)
         return {"note": UNTRUSTED_NOTE, "hours": hours, "count": len(messages),
                 "more_not_shown": bool(more), "messages": messages}
 
@@ -168,6 +222,7 @@ class GmailInbox:
                                    format="full").execute()
         payload = msg.get("payload", {})
         headers = payload.get("headers", [])
+        log.info("Read email %s", message_id)
         body, truncated = _trim(plain_text(payload),
                                 max(200, min(int(max_chars), MAX_BODY)))
         return {"note": UNTRUSTED_NOTE, "id": msg["id"],

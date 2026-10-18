@@ -69,7 +69,7 @@ PC_ONLY_TOOLS = {"open_in_browser"}
 
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
-       "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+       "img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -500,7 +500,8 @@ class WebAssistant:
         try:
             summary = s.chat.end_conversation()
             if summary:
-                log.info("Web conversation saved to memory: %s", summary)
+                log.info("Web conversation saved to memory (%d characters)",
+                         len(summary))
             return summary
         except Exception:
             log.exception("Ending a web conversation failed")
@@ -550,7 +551,7 @@ class WebAssistant:
         return True
 
     def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit
+        from assistant.cli import get_reply, is_exit, loggable_reply
 
         try:
             if recording is not None:
@@ -569,7 +570,7 @@ class WebAssistant:
             reply = get_reply(  # it logs errors itself
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
-            log.info("Web replied: %r", reply)
+            log.info("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -594,7 +595,7 @@ class WebAssistant:
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
-            log.info("No answer to %r; treating it as no", question)
+            log.info("No answer to a confirmation; treating it as no")
             s.events.put({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
@@ -1114,7 +1115,7 @@ def set_session_cookie(response, token: str, sid: str) -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import build_memory, build_tools
+    from assistant.cli import build_memory, build_tools, register_notes
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1125,6 +1126,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
+    register_notes(tools, memory, config)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
@@ -1172,6 +1174,12 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      voice=config.get("voice"))
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
+    features = webfeatures.Features(config, assistant)
+    webfeatures.install(app, features)
+    if config["lecture"]["enabled"]:
+        features.pipeline.resume_pending()  # jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

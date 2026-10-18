@@ -37,7 +37,8 @@ from typing import Callable
 import numpy as np
 
 from assistant import audio
-from assistant.cli import get_reply, is_exit, is_yes, strip_wake_phrase
+from assistant.cli import (get_reply, is_exit, is_yes, loggable_reply,
+                           strip_wake_phrase)
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -123,6 +124,13 @@ def fast_wav(tts, text: str) -> bytes | None:
 
 
 # --- backends -------------------------------------------------------------------
+
+def _chat_of(backend):
+    """The ClaudeChat behind a backend (for keeping private replies out
+    of the log), or None."""
+    return getattr(backend, "chat", None) or getattr(
+        getattr(backend, "session", None), "chat", None)
+
 
 class ChatBackend:
     """A plain ClaudeChat. Its tools' confirm callback must be `self.confirm`
@@ -377,7 +385,8 @@ class VoiceConversation:
         try:
             summary = self.backend.end()
             if summary:
-                log.info("Voice conversation saved to memory: %s", summary)
+                log.info("Voice conversation saved to memory (%d characters)",
+                         len(summary))
         except Exception:
             log.exception("Ending the voice conversation failed")
         self._send({"type": "ended", "reason": reason, "saved": bool(summary)})
@@ -420,7 +429,8 @@ class VoiceConversation:
         turn.truncated = True
         spoken = turn.spoken_text()
         if self.backend.mark_interrupted(spoken):
-            log.info("Kept the spoken part of the interrupted reply: %r", spoken)
+            log.info("Kept the spoken part of the interrupted reply: %r",
+                     loggable_reply(_chat_of(self.backend), spoken))
 
     def _answer(self, turn_id: int, utterance_id: int, samples) -> None:
         try:
@@ -525,7 +535,8 @@ class VoiceConversation:
         if reply and not streamed:  # an error sentence (nothing was streamed)
             self._send({"type": "error", "turn": turn.id, "message": reply})
             turn.sentences.put(Chunk(reply, 0, reply=False))
-        log.info("Voice replied: %r", reply)
+        log.info("Voice replied: %r",
+                 loggable_reply(_chat_of(self.backend), reply))
         turn.flush()
         timer.mark("reply")
         return False

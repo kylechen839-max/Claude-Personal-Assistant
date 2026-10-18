@@ -194,7 +194,7 @@ def test_creates_lecture_notes_database_when_missing(tmp_path):
     assert kw["parent"] == {"type": "page_id", "page_id": "fall-page"}
     assert kw["title"][0]["text"]["content"] == "Lecture Notes"
     props = kw["initial_data_source"]["properties"]
-    assert set(props) == {"Title", "Course", "Date", "Duration"}
+    assert set(props) == {"Title", "Course", "Date", "Duration", "Lecture ID"}
     assert props["Title"] == {"title": {}} and props["Date"] == {"date": {}}
     assert props["Course"]["select"]["options"] == [
         {"name": "PHYS 141", "color": "blue"}, {"name": "CS II", "color": "red"}]
@@ -548,3 +548,54 @@ def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client):
     text = (d / "transcript.txt").read_text()
     assert rough_match(phrase, text), text
     assert job.duration_seconds and job.progress == 1.0
+
+
+# ---------- retries never file a second page ----------
+def test_retry_after_a_failed_append_resumes_the_same_page(tmp_path, fake_client):
+    fake_client.queue = [make_response(tool_use_block(
+        "save_lecture_notes", {**NOTES, "key_concepts": [f"c{i}" for i in range(250)]}),
+        stop_reason="tool_use")]
+    p, up, uid, notion, _, _ = pipeline(tmp_path, fake_client)
+    notion.data_sources.retrieve.return_value = {"properties": {"Lecture ID": {}}}
+    notion.blocks.children.append.side_effect = [None, RuntimeError("Notion 502")]
+    p.submit(uid)
+    p.wait(10)
+    assert p.job(uid).status == "failed"
+    assert notion.pages.create.call_count == 1
+    props = notion.pages.create.call_args.kwargs["properties"]
+    assert props["Lecture ID"]["rich_text"][0]["text"]["content"] == uid
+    notion.blocks.children.append.side_effect = None
+    p.submit(uid)
+    p.wait(10)
+    assert p.job(uid).status == "done"
+    assert notion.pages.create.call_count == 1          # no second page
+    assert notion.blocks.children.append.call_count == 3  # only the missing batch
+
+
+def test_page_created_before_a_crash_is_found_by_its_key(tmp_path, fake_client):
+    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
+                                       stop_reason="tool_use")]
+    p, up, uid, notion, _, _ = pipeline(tmp_path, fake_client)
+    notion.data_sources.retrieve.return_value = {"properties": {"Lecture ID": {}}}
+    notion.data_sources.query.return_value = {"results": [
+        {"id": "page-early", "url": "https://notion.so/early"}]}
+    p.submit(uid)
+    p.wait(10)
+    job = p.job(uid)
+    assert job.status == "done" and job.notion_url == "https://notion.so/early"
+    assert not notion.pages.create.called
+    flt = notion.data_sources.query.call_args.kwargs["filter"]
+    assert flt == {"property": "Lecture ID", "rich_text": {"equals": uid}}
+
+
+def test_old_database_gets_the_key_property_added(tmp_path):
+    assignments, client = assignments_mock()
+    client.data_sources.retrieve.side_effect = lambda data_source_id: (
+        {"properties": {}} if data_source_id == "ds-notes" else
+        {"properties": {"Course": {"select": {"options": []}}}})
+    client.data_sources.query.return_value = {"results": []}
+    db = LectureNotesDB(assignments)
+    db.create_page(NOTES, "", "2026-10-16", None, key="k" * 24)
+    client.data_sources.update.assert_called_once_with(
+        data_source_id="ds-notes", properties={"Lecture ID": {"rich_text": {}}})
+    assert "Lecture ID" in client.pages.create.call_args.kwargs["properties"]

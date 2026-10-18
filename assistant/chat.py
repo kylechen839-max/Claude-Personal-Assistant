@@ -67,6 +67,9 @@ class ClaudeChat:
         # True when the last ask() ran a private tool (email, notes): the
         # reply may quote that content, so callers keep it out of logs.
         self.private_turn = False
+        # True when a note recalled for this turn came from untrusted text
+        # (memory metadata untrusted=True): changes then need a yes too.
+        self.untrusted_memory = False
 
     @property
     def client(self):
@@ -164,10 +167,13 @@ class ClaudeChat:
         return True
 
     def recall(self, user_text: str) -> list[str]:
+        self.untrusted_memory = False
         if not self.memory:
             return []
         try:
-            return self.memory.retrieve(user_text)
+            notes = self.memory.retrieve(user_text)
+            self.untrusted_memory = getattr(self.memory, "last_untrusted", False) is True
+            return notes
         except Exception as e:  # memory is a bonus; never block a reply
             log.warning("Memory lookup failed: %s", e)
             return []
@@ -178,7 +184,12 @@ class ClaudeChat:
         Returns the stored summary, or None if nothing was stored."""
         from assistant.memory import SUMMARY_PROMPT, transcript
 
-        text = transcript(self.history)
+        # With email or web text in the conversation, Claude's side may repeat
+        # it (an injected instruction, say), so only Kyle's own words go into
+        # the summary: nothing untrusted reaches long-term memory.
+        untrusted = bool(self.tools) and has_untrusted_content(
+            self.history, self.tools.untrusted_names())
+        text = transcript(self.history, user_only=untrusted)
         self.reset()
         if not self.memory or not text:
             return None
@@ -192,7 +203,10 @@ class ClaudeChat:
                 return None
             stamp = datetime.now().astimezone().strftime("%Y-%m-%d")
             summary = f"{stamp}: {summary}"
-            self.memory.store(summary)
+            if untrusted:
+                self.memory.store(summary, {"from_user_only": True})
+            else:
+                self.memory.store(summary)
             return summary
         except Exception as e:
             log.warning("Could not save conversation summary: %s", e)
@@ -253,8 +267,8 @@ class ClaudeChat:
                     return text.strip() or "Sorry, I can't help with that one."
                 return text.strip()
             results = []
-            untrusted = has_untrusted_content(self.history,
-                                              self.tools.untrusted_names())
+            untrusted = self.untrusted_memory or has_untrusted_content(
+                self.history, self.tools.untrusted_names())
             for call in calls:
                 private = self.tools.is_private(call.name)
                 self.private_turn |= private

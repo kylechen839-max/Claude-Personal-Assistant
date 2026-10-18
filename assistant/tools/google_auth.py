@@ -20,11 +20,19 @@ log = logging.getLogger(__name__)
 
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
-# Drafts only. The assistant never asks for gmail.send.
+# Needed to create drafts. Google has no drafts-only scope: gmail.compose
+# also permits sending, so sending is blocked in code instead (gmail.py
+# wraps the service so send calls raise; a test checks there are none).
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 CALENDAR_SCOPES = [CALENDAR_SCOPE]
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE]
-SCOPES = CALENDAR_SCOPES + GMAIL_SCOPES  # what sign-in asks for
+SCOPES = CALENDAR_SCOPES + GMAIL_SCOPES  # everything, when Gmail is enabled
+
+
+def sign_in_scopes(gmail_enabled: bool = False) -> list[str]:
+    """What sign-in asks for: Gmail access only if [gmail] is enabled, so a
+    Calendar-only setup never grants mail access."""
+    return CALENDAR_SCOPES + (GMAIL_SCOPES if gmail_enabled else [])
 TOKEN_ENV = "GOOGLE_TOKEN_JSON"
 SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
@@ -74,8 +82,8 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
                     environ=os.environ):
     """Credentials covering `scopes`, refreshed as needed.
 
-    With no token at all, the first run opens a browser to sign in (asking
-    for every scope in SCOPES) and saves token.json. A token that lacks one
+    With no token at all, the first run opens a browser to sign in (for
+    `scopes` only) and saves token.json. A token that lacks one
     of `scopes` raises MissingScopes instead of silently signing in again."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -83,7 +91,8 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
     info = load_token_info(token_path, environ)
     from_env = bool(environ.get(TOKEN_ENV, "").strip())
     if info is None:
-        return sign_in(credentials_path, token_path, open_browser)
+        return sign_in(credentials_path, token_path, open_browser,
+                       scopes=sorted(set(CALENDAR_SCOPES) | set(scopes)))
     lacking = [s for s in scopes if s not in granted_scopes(info)]
     if lacking:
         raise MissingScopes(lacking)
@@ -102,15 +111,15 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
 
 
 def sign_in(credentials_path="credentials.json", token_path="token.json",
-            open_browser: bool = True):
-    """Interactive sign-in for every scope; saves token.json."""
+            open_browser: bool = True, scopes=CALENDAR_SCOPES):
+    """Interactive sign-in for `scopes`; saves token.json."""
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     if not Path(credentials_path).exists():
         raise FileNotFoundError(
             f"{credentials_path} not found. Create an OAuth client "
             "(Desktop app) in Google Cloud Console and download it.")
-    flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(credentials_path, list(scopes))
     creds = flow.run_local_server(port=0, open_browser=open_browser,
                                   prompt="consent")
     Path(token_path).write_text(creds.to_json())
@@ -118,17 +127,18 @@ def sign_in(credentials_path="credentials.json", token_path="token.json",
 
 
 def headless_start(credentials_path="credentials.json",
-                   state_path=".oauth_state.json") -> str:
+                   state_path=".oauth_state.json", scopes=CALENDAR_SCOPES) -> str:
     """Step 1 of sign-in without a local browser (Raspberry Pi over SSH, a
     cloud box): return the URL to open on any device. The PKCE verifier and
     state are saved so step 2 can run in a separate process."""
     from google_auth_oauthlib.flow import Flow
 
-    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
+    flow = Flow.from_client_secrets_file(credentials_path, list(scopes),
                                          redirect_uri=HEADLESS_REDIRECT)
     url, state = flow.authorization_url(access_type="offline", prompt="consent")
     Path(state_path).write_text(json.dumps(
-        {"state": state, "code_verifier": flow.code_verifier}))
+        {"state": state, "code_verifier": flow.code_verifier,
+         "scopes": list(scopes)}))
     return url
 
 
@@ -146,7 +156,8 @@ def headless_finish(redirected_url: str, credentials_path="credentials.json",
         raise RuntimeError(f"Google sign-in failed: {query['error'][0]}")
     if query.get("state", [None])[0] != saved["state"]:
         raise RuntimeError("State mismatch: use the URL from the latest sign-in link")
-    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
+    flow = Flow.from_client_secrets_file(credentials_path,
+                                         saved.get("scopes", CALENDAR_SCOPES),
                                          redirect_uri=HEADLESS_REDIRECT,
                                          state=saved["state"],
                                          code_verifier=saved["code_verifier"])
@@ -161,9 +172,12 @@ def main(prog: str = "python -m assistant.tools.google_auth") -> None:
 
     from dotenv import load_dotenv
 
+    from assistant.config import load_config
+
     load_dotenv()
     parser = argparse.ArgumentParser(
-        prog=prog, description="Sign in to Google (Calendar and Gmail drafts)")
+        prog=prog, description="Sign in to Google (Calendar, plus Gmail if "
+                               "[gmail] is enabled in config.toml)")
     parser.add_argument("--headless", action="store_true",
                         help="no local browser: print a link, then paste back "
                              "the localhost URL you land on")
@@ -172,22 +186,26 @@ def main(prog: str = "python -m assistant.tools.google_auth") -> None:
     parser.add_argument("--finish", metavar="URL",
                         help="headless step 2 only: the localhost URL")
     args = parser.parse_args()
-    creds = os.environ.get("GOOGLE_CREDENTIALS", "credentials.json")
-    token = os.environ.get("GOOGLE_TOKEN", "token.json")
+    config = load_config()
+    gmail = bool(config["gmail"]["enabled"])
+    scopes = sign_in_scopes(gmail)
+    creds = config["calendar"]["credentials"]
+    token = config["calendar"]["token"]
     if args.finish:
         headless_finish(args.finish, creds, token)
     elif args.headless or args.start:
         print("Open this link on any device and sign in:\n\n"
-              + headless_start(creds) + "\n\nAfterwards the browser shows "
+              + headless_start(creds, scopes=scopes) + "\n\nAfterwards the browser shows "
               "'This site can't be reached'. That's expected: copy the full "
               "address from the address bar.")
         if args.start:
             raise SystemExit(0)
         headless_finish(input("\nPaste that address here: "), creds, token)
     else:
-        sign_in(creds, token)
-    print("Google Calendar and Gmail (read + drafts) authorized; token saved to",
-          token)
+        sign_in(creds, token, scopes=scopes)
+    print(("Google Calendar and Gmail (read, drafts) authorized"
+           if gmail else "Google Calendar authorized ([gmail] is disabled, so "
+           "no mail access was requested)") + "; token saved to", token)
     print(f"For cloud hosting, put the contents of {token} in {TOKEN_ENV}.")
 
 

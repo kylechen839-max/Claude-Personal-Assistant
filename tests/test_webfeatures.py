@@ -211,6 +211,9 @@ def test_tutor_api_failure_is_generic(features_app, fake_client):
 # ---------- page code and KaTeX ----------
 def test_katex_is_vendored_and_served_without_a_cdn(features_app):
     client, _, _ = features_app()
+    page = client.get("/").text
+    assert "/static/katex/katex.min.js" in page and "/static/features.js" in page
+    assert not re.search(r"https?://", re.sub(r'xmlns="[^"]+"', "", page))
     js = client.get("/static/katex/katex.min.js")
     assert js.status_code == 200 and "katex" in js.text[:2000].lower()
     css = client.get("/static/katex/katex.min.css").text
@@ -218,6 +221,7 @@ def test_katex_is_vendored_and_served_without_a_cdn(features_app):
     assert fonts and all(f.endswith(".woff2") for f in fonts)
     for f in sorted(fonts)[:3]:
         assert client.get(f"/static/katex/{f}").status_code == 200
+    assert "font-src 'self'" in js.headers["content-security-policy"]
     assert client.get("/static/features.css").status_code == 200
     assert client.get("/static/../webapp.py").status_code == 404
 

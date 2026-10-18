@@ -308,10 +308,13 @@ Linux it uses eSpeak directly.
 "Reply that I'll add error bars." The assistant lists unread or important
 mail from the last day (sender, subject, a one-line gist, at most
 `[gmail] max_summary` messages), reads one message in plain text, and saves
-a reply as a **Gmail draft** after you say yes. It never sends email: there
-is no send tool, and the Google sign-in asks only for read access and
-drafts (`gmail.readonly`, `gmail.compose`). You review and send drafts in
-Gmail yourself.
+a reply as a **Gmail draft** after you say yes. You review and send drafts
+in Gmail yourself. The sign-in asks for `gmail.readonly` and
+`gmail.compose`. Google has no drafts-only permission, and `gmail.compose`
+would also allow sending, so the code blocks it instead: there is no send
+tool, and the Gmail connection refuses any send (or delete, or settings)
+call. Gmail access is requested only while `[gmail] enabled = true`; with
+it off, sign-in asks for Calendar alone.
 
 Gmail uses the same Google OAuth client as Calendar, but a `token.json`
 from before this feature only has the Calendar permission. Sign in once
@@ -338,12 +341,6 @@ Pinecone (your `voice-assistant` namespace, tagged as a note);
 "What did I need for the lab report?" finds it by meaning. You can also ask
 for your recent notes or to delete one (it asks first). Notes need
 `[memory]` (Pinecone); `[notes] enabled` turns them off.
-
-> **Status:** the Lecture and Tutor screens and their server routes are
-> built and tested (`assistant/webfeatures.py`, `assistant/web/static/`),
-> but are switched on in the phone app (two lines in `index.html`, one hook
-> in `webapp.serve`, `font-src 'self'` in the CSP) only after hands-free
-> voice mode lands, to keep those files stable meanwhile.
 
 ### Record a lecture (phone app)
 In the phone app, open the **Lecture** tab, pick the course (the options

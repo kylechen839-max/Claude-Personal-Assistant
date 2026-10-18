@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 UPLOAD_ID = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 AUDIO_FILE = "audio.bin"
 NOTES_TITLE = "Lecture Notes"
+KEY_PROP = "Lecture ID"  # the job id, so a retry never files a second page
 MAX_TRANSCRIPT_CHARS = 400_000  # ~5 hours of speech
 DONE, FAILED = "done", "failed"
 
@@ -405,29 +406,90 @@ class LectureNotesDB:
                     "Title": {"title": {}},
                     "Course": {"select": {"options": options}},
                     "Date": {"date": {}},
-                    "Duration": {"number": {"format": "number"}}}})
+                    "Duration": {"number": {"format": "number"}},
+                    KEY_PROP: {"rich_text": {}}}})
         except APIResponseError as e:
             raise NotionBlocked(f"Notion refused to create the {self.title} "
                                 f"database ({e.code}). " + BLOCKED_HELP) from None
         log.info("Created the %s database in Notion", self.title)
         return db["id"], db["data_sources"][0]["id"]
 
+    def _has_key_property(self) -> bool:
+        """Does the database have the "Lecture ID" property? Adds it to an
+        older or hand-made database if it can."""
+        if getattr(self, "_key_prop", None) is None:
+            ds_id = self.data_source_id()
+            try:
+                ds = self.client.data_sources.retrieve(data_source_id=ds_id)
+                self._key_prop = KEY_PROP in ds.get("properties", {})
+                if not self._key_prop:
+                    self.client.data_sources.update(
+                        data_source_id=ds_id,
+                        properties={KEY_PROP: {"rich_text": {}}})
+                    self._key_prop = True
+            except Exception as e:  # no permission to change the schema
+                log.warning("Lecture Notes has no %s property (%s); relying on "
+                            "the local record against duplicates", KEY_PROP,
+                            type(e).__name__)
+                self._key_prop = False
+        return self._key_prop
+
+    def find_page(self, key: str) -> dict | None:
+        """The page already filed for this lecture job, if any."""
+        if not key or not self._has_key_property():
+            return None
+        resp = self.client.data_sources.query(
+            data_source_id=self.data_source_id(),
+            filter={"property": KEY_PROP, "rich_text": {"equals": key}},
+            page_size=1)
+        pages = [p for p in resp.get("results", []) if not p.get("in_trash")]
+        return pages[0] if pages else None
+
     def create_page(self, notes: dict, course: str, lecture_date: str,
-                    duration_minutes: float | None) -> dict:
-        props = {"Title": {"title": rich_text((notes.get("title") or "Lecture")[:200])},
-                 "Date": {"date": {"start": lecture_date}}}
-        if course:
-            props["Course"] = {"select": {"name": course}}
-        if duration_minutes is not None:
-            props["Duration"] = {"number": round(duration_minutes)}
+                    duration_minutes: float | None, key: str = "",
+                    state: dict | None = None, save=None) -> dict:
+        """File the notes, at most once per `key` (the lecture job id).
+
+        `state` is the local record of a previous attempt ({id, url,
+        blocks_done}); `save(state)` is called after each step, so a retry
+        after a failure part-way only appends the blocks still missing.
+        Without a local record, the Lecture ID property finds a page whose
+        creation succeeded just before a crash."""
+        state = dict(state or {})
+        save = save or (lambda st: None)
         blocks = notes_blocks(notes)
-        page = self.client.pages.create(
-            parent={"type": "data_source_id", "data_source_id": self.data_source_id()},
-            properties=props, children=blocks[:100])
-        for start in range(100, len(blocks), 100):
-            self.client.blocks.children.append(block_id=page["id"],
+        if not state.get("id"):
+            existing = self.find_page(key)
+            if existing:
+                # Only the create can have happened: appends come after the
+                # local record is saved.
+                state = {"id": existing["id"], "url": existing.get("url", ""),
+                         "blocks_done": min(100, len(blocks))}
+                log.info("Lecture page already exists; not creating another")
+            else:
+                props = {"Title": {"title": rich_text(
+                             (notes.get("title") or "Lecture")[:200])},
+                         "Date": {"date": {"start": lecture_date}}}
+                if course:
+                    props["Course"] = {"select": {"name": course}}
+                if duration_minutes is not None:
+                    props["Duration"] = {"number": round(duration_minutes)}
+                if key and self._has_key_property():
+                    props[KEY_PROP] = {"rich_text": [
+                        {"type": "text", "text": {"content": key}}]}
+                page = self.client.pages.create(
+                    parent={"type": "data_source_id",
+                            "data_source_id": self.data_source_id()},
+                    properties=props, children=blocks[:100])
+                state = {"id": page["id"], "url": page.get("url", ""),
+                         "blocks_done": min(100, len(blocks))}
+            save(state)
+        for start in range(state["blocks_done"], len(blocks), 100):
+            self.client.blocks.children.append(block_id=state["id"],
                                                children=blocks[start:start + 100])
-        return {"id": page["id"], "url": page.get("url", "")}
+            state["blocks_done"] = min(start + 100, len(blocks))
+            save(state)
+        return {"id": state["id"], "url": state["url"]}
 
 
 # ---------------------------------------------------------------- the job
@@ -589,8 +651,12 @@ class LecturePipeline:
             job.status = "saving"
             self._save(job)
             minutes = (job.duration_seconds / 60) if job.duration_seconds else None
-            page = self.notes_db.create_page(notes, job.course, self._date(job),
-                                             minutes)
+            page_file = d / "page.json"
+            state = (json.loads(page_file.read_text()) if page_file.exists()
+                     else None)
+            page = self.notes_db.create_page(
+                notes, job.course, self._date(job), minutes, key=upload_id,
+                state=state, save=lambda st: _write_json(page_file, st))
             job.notion_url = page["url"]
             transcript_file.unlink(missing_ok=True)  # the page has the notes now
             job.status, job.error = DONE, ""

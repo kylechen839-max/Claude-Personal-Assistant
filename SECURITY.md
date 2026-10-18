@@ -72,12 +72,27 @@ marked `untrusted_output`, and `chat.has_untrusted_content` treats their
 results like web results: while one is in the conversation, every tool
 that changes something asks for a spoken yes first (calendar create/move,
 Notion status, `remember_note`), naming what it will do. Deletes always
-ask, and so does `draft_reply`. There is no way to send mail at all: no
-send tool, and the OAuth scopes are `gmail.readonly` + `gmail.compose`
-(drafts), never `gmail.send`. The system prompt tells Claude that email text
+ask, and so does `draft_reply`. Sending is blocked in code, because the
+scopes can't block it: drafts need `gmail.compose`, which Google also lets
+send mail (there is no drafts-only scope). So there is no send tool, the
+Gmail service is wrapped (`gmail.NoSendGmail`) so `messages.send`,
+`drafts.send`, deletes, label changes, settings (forwarding, filters) and
+watch raise `SendingBlocked`, and a test fails if any code calls a Gmail
+send. Gmail scopes are requested only when `[gmail] enabled` is true
+(sign-in asks for Calendar alone otherwise). The system prompt tells Claude that email text
 is information, not instructions. Email tools are also `private`: their
 inputs and results, and replies in a conversation that used them, are
-never written to `logs/assistant.log` (only the tool name is). Tests:
+never written to `logs/assistant.log` in any mode (text, wake, phone web
+app, hands-free voice): only tool names, message ids and counts are, and
+memory summaries and confirmation questions are logged by length only.
+
+Email (and web) text also stays out of long-term memory: when a
+conversation contained any, its summary is written from Kyle's own words
+only (`transcript(user_only=True)`, stored with `from_user_only`), so an
+injected instruction can't be laundered into a memory and come back later
+as trusted context. As a backstop, a recalled memory marked
+`untrusted: true` makes that turn confirm every change, like an email in
+context. Tests:
 `tests/test_gmail.py` (an injection email that tries to delete an event,
 move events, change Notion or create a draft must trigger a confirmation).
 
@@ -91,7 +106,9 @@ session, upload ids are random (144 bits) and checked against a strict
 pattern (no path tricks), each recording has a size cap (`max_upload_mb`)
 and each piece a chunk cap. The page reminds Kyle to ask permission before
 recording. Action items are only offered as Assignments, never added
-automatically.
+automatically. Retried jobs never file a second page: each page carries
+the job id in a "Lecture ID" property, the page id is saved locally right
+after creation, and a retry appends only the blocks still missing.
 
 ### Homework photos
 `/api/tutor` needs the session, accepts only JPEG, PNG or WebP (checked by
