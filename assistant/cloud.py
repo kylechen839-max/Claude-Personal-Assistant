@@ -85,11 +85,22 @@ class NeverBlock:
 
 
 class LoginLockout:
-    """Wrong-token lockouts per client address, plus a global cap."""
+    """Wrong-token limits per client address, plus a global brake.
+
+    The right token is always accepted, so nobody can lock Kyle out. An
+    address with `max_failures` wrong tokens in `window` seconds is locked
+    for `lockout` seconds (doubling each time, up to `max_lockout`): its
+    wrong tokens then get 429 after a `locked_delay` pause. When all
+    addresses together pass `global_max_failures`, every wrong token waits
+    `global_delay` seconds. With at most 2 requests per address in flight
+    (CloudGuard), that caps guessing at about one try per second per address.
+    """
 
     def __init__(self, max_failures=5, window=900, lockout=900,
                  global_max_failures=30, max_lockout=86400, clock=time.monotonic,
-                 max_tracked=10000):
+                 max_tracked=10000, locked_delay=2.0, global_delay=1.0):
+        self.locked_delay = locked_delay
+        self.global_delay = global_delay
         self.max_failures = max_failures
         self.window = window
         self.lockout = lockout
@@ -101,7 +112,7 @@ class LoginLockout:
         self.locked_until: dict[str, float] = {}
         self.strikes: dict[str, int] = {}  # lockouts so far, for doubling
         self.global_failures: deque = deque()
-        self.global_locked_until = 0.0
+        self.global_hot_until = 0.0
         self.lock = threading.Lock()
 
     def _prune(self, q: deque, now: float) -> None:
@@ -109,11 +120,17 @@ class LoginLockout:
             q.popleft()
 
     def retry_after(self, ip: str) -> int:
-        """Seconds until `ip` may try again; 0 if it may now."""
+        """Seconds until `ip`'s lockout ends; 0 if it isn't locked."""
+        with self.lock:
+            return max(0, math.ceil(self.locked_until.get(ip, 0.0) - self.clock()))
+
+    def penalty(self, ip: str) -> float:
+        """How long to hold a wrong token's answer."""
         with self.lock:
             now = self.clock()
-            until = max(self.locked_until.get(ip, 0.0), self.global_locked_until)
-            return max(0, math.ceil(until - now))
+            if self.locked_until.get(ip, 0.0) > now:
+                return self.locked_delay
+            return self.global_delay if self.global_hot_until > now else 0.0
 
     def fail(self, ip: str) -> None:
         with self.lock:
@@ -134,11 +151,10 @@ class LoginLockout:
             self._prune(self.global_failures, now)
             self.global_failures.append(now)
             if len(self.global_failures) >= self.global_max_failures:
-                self.global_locked_until = now + self.lockout
+                self.global_hot_until = now + self.lockout
                 self.global_failures.clear()
-                log.warning("All new logins locked for %d s: %d wrong tokens "
-                            "from all addresses", self.lockout,
-                            self.global_max_failures)
+                log.warning("Slowing down wrong tokens for %d s: %d from all "
+                            "addresses", self.lockout, self.global_max_failures)
 
     def succeed(self, ip: str) -> None:
         with self.lock:
@@ -196,9 +212,23 @@ class CloudGuard:
     def __init__(self, app, token: str, trusted_proxies=(),
                  max_upload_bytes=4_000_000, max_body_bytes=16_384,
                  lockout: LoginLockout | None = None,
-                 limiter: RateLimiter | None = None, allowed_origins=()):
+                 limiter: RateLimiter | None = None, allowed_origins=(),
+                 max_busy_per_ip=2, max_busy=32, body_timeout=10.0,
+                 min_upload_rate=65536, sleep=None):
+        import asyncio
+
         self.app = app
         self.token = token
+        # Requests reading a body (or held after a wrong token), per address
+        # and in all; a slow client can't tie up more than that.
+        self.max_busy_per_ip = max_busy_per_ip
+        self.max_busy = max_busy
+        self.busy: dict[str, int] = {}
+        self.busy_total = 0
+        # a body must arrive within body_timeout + size / min_upload_rate s
+        self.body_timeout = body_timeout
+        self.min_upload_rate = min_upload_rate
+        self.sleep = sleep or asyncio.sleep
         self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
         self.trusted = parse_networks(trusted_proxies)
         self.max_upload_bytes = max_upload_bytes
@@ -266,10 +296,13 @@ class CloudGuard:
             return await refuse("origin is not this site")
         bearer = _bearer(scope)
         if bearer is not None:
-            if self.lockout.retry_after(ip):
-                return await refuse("locked out")
             if not webapp.tokens_match(bearer, self.token):
-                self.lockout.fail(ip)
+                if not self.take(ip):
+                    return await refuse("too many requests at once")
+                try:
+                    await self.wrong_token(ip, "bearer token")
+                finally:
+                    self.release(ip)
                 return await refuse("wrong bearer token")
             self.lockout.succeed(ip)
         elif not self.signed_in(scope):
@@ -301,28 +334,36 @@ class CloudGuard:
         public = ((method in ("GET", "HEAD") and path in PUBLIC_GET)
                   or (method == "POST" and path in PUBLIC_POST))
         bearer = _bearer(scope)
-        login = (method == "POST" and path == "/api/login") or bearer is not None
-        if login:
-            wait = self.lockout.retry_after(ip)
-            if wait:
-                return await _json(send, 429, {"error": "too many attempts; "
-                                               "try again later"},
-                                   {"Retry-After": str(wait), **extra})
+        login = method == "POST" and path == "/api/login" and bearer is None
+        # Who it is comes first: nothing reads a body for an unknown caller
+        # except the login call (16 KB at most).
         if bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
-                self.lockout.fail(ip)
-                log.warning("Wrong bearer token from %s", ip)
-                return await _json(send, 401, {"error": "not signed in"}, extra)
+                return await self.refuse_token(send, ip, "bearer token", extra)
             self.lockout.succeed(ip)
-            login = False
         elif not public and not self.signed_in(scope):
             return await _json(send, 401, {"error": "not signed in"}, extra)
-        limit = (self.max_upload_bytes if path in UPLOAD_PATHS
-                 else self.max_body_bytes)
-        body, error = await _read_body(scope, receive, limit)
-        if error:
-            return await _json(send, *error, extra)
-        if method not in ("GET", "HEAD") or body:
+        has_body = method not in ("GET", "HEAD", "OPTIONS") or \
+            _headers(scope).get("content-length", "0") != "0"
+        if not has_body:
+            body = None  # nothing read: the app gets the server's receive
+        else:
+            if not self.take(ip):
+                return await _json(send, 429, {"error": "too many requests at once"},
+                                   {"Retry-After": "5", **extra})
+            try:
+                limit = (self.max_upload_bytes if path in UPLOAD_PATHS
+                         else self.max_body_bytes)
+                timeout = self.body_timeout + limit / self.min_upload_rate
+                body, error = await _read_body(scope, receive, limit, timeout)
+                if error:
+                    return await _json(send, *error, extra)
+                if login and not webapp.tokens_match(_login_token(body), self.token):
+                    return await self.refuse_token(send, ip, "token", extra,
+                                                   held=True)
+            finally:
+                self.release(ip)
+        if body is not None:
             # the body is complete now: pass it on with its real length
             # (a chunked upload under the cap is fine)
             headers = [(k, v) for k, v in scope.get("headers", [])
@@ -343,18 +384,56 @@ class CloudGuard:
             await send(message)
 
         try:
-            await self.app(scope, _replay(body, receive), send_wrapper)
+            await self.app(scope, receive if body is None else _replay(body, receive),
+                           send_wrapper)
         except Exception:
             log.exception("Unhandled error in %s %s", method, path)
             if "code" not in status:
                 return await _json(send, 500, {"error": "internal error"}, extra)
             return
-        if login:
-            if status.get("code") == 401:
-                self.lockout.fail(ip)
-                log.warning("Wrong web token from %s", ip)
-            elif status.get("code") == 200:
-                self.lockout.succeed(ip)
+        if login and status.get("code") == 200:
+            self.lockout.succeed(ip)
+
+    def take(self, ip: str) -> bool:
+        """Claim one of the in-flight slots for `ip`; False if none is free."""
+        if self.busy.get(ip, 0) >= self.max_busy_per_ip or self.busy_total >= self.max_busy:
+            return False
+        self.busy[ip] = self.busy.get(ip, 0) + 1
+        self.busy_total += 1
+        return True
+
+    def release(self, ip: str) -> None:
+        self.busy_total -= 1
+        if self.busy.get(ip, 0) <= 1:
+            self.busy.pop(ip, None)
+        else:
+            self.busy[ip] -= 1
+
+    async def wrong_token(self, ip: str, what: str) -> bool:
+        """Count a wrong token and hold the answer as the lockout says.
+        True if the address was already locked out."""
+        locked = self.lockout.retry_after(ip) > 0
+        delay = self.lockout.penalty(ip)
+        self.lockout.fail(ip)
+        log.warning("Wrong %s from %s", what, ip)
+        if delay:
+            await self.sleep(delay)
+        return locked
+
+    async def refuse_token(self, send, ip: str, what: str, extra, held=False):
+        if not held:
+            if not self.take(ip):
+                return await _json(send, 429, {"error": "too many requests at once"},
+                                   {"Retry-After": "5", **extra})
+        try:
+            locked = await self.wrong_token(ip, what)
+        finally:
+            if not held:
+                self.release(ip)
+        if locked:
+            return await _json(send, 429, {"error": "too many attempts; try again later"},
+                               {"Retry-After": str(self.lockout.retry_after(ip)), **extra})
+        return await _json(send, 401, {"error": "sign-in failed"}, extra)
 
     def signed_in(self, scope) -> bool:
         from http.cookies import CookieError, SimpleCookie
@@ -382,8 +461,27 @@ def _headers(scope) -> dict[str, str]:
     return out
 
 
-async def _read_body(scope, receive, limit: int):
-    """The whole body, or (status, payload) if it is too large/malformed."""
+def _login_token(body: bytes) -> str:
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        return ""
+    token = data.get("token", "") if isinstance(data, dict) else ""
+    return token if isinstance(token, str) else ""
+
+
+async def _read_body(scope, receive, limit: int, timeout: float | None = None):
+    """The whole body, or (status, payload) if it is too large, too slow
+    (408 after `timeout` seconds) or malformed."""
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(_read_all(scope, receive, limit), timeout)
+    except asyncio.TimeoutError:
+        return None, (408, {"error": "request took too long"})
+
+
+async def _read_all(scope, receive, limit: int):
     length = _headers(scope).get("content-length")
     if length is not None:
         try:
@@ -466,7 +564,9 @@ def build_app(config: dict, web_assistant, token: str):
                              cloud["login_lockout"],
                              cloud["login_global_max_failures"]),
         limiter=RateLimiter(cloud["requests_per_minute"]),
-        allowed_origins=web["allowed_origins"])
+        allowed_origins=web["allowed_origins"],
+        max_busy_per_ip=cloud["uploads_per_address"], max_busy=cloud["uploads_total"],
+        body_timeout=cloud["body_timeout"])
 
 
 def warm_up(web_assistant) -> None:
@@ -485,6 +585,13 @@ def warm_up(web_assistant) -> None:
     threading.Thread(target=run, name="warm-up", daemon=True).start()
 
 
+# No uvicorn limit_concurrency: it counts every open connection and answers
+# 503 to all, /healthz included, once a slow client holds enough of them.
+# CloudGuard limits what each address can hold instead.
+UVICORN_OPTIONS = {"proxy_headers": False, "server_header": False,
+                   "timeout_keep_alive": 30, "ws": "auto", "ws_max_size": WS_MAX_SIZE}
+
+
 def serve(config: dict, port: int | None = None, tts_name: str | None = None,
           output_fn=print) -> int:
     import uvicorn
@@ -499,7 +606,5 @@ def serve(config: dict, port: int | None = None, tts_name: str | None = None,
         lambda record: HEALTH not in record.getMessage())  # every few seconds
     log.info("Cloud web app listening on %s:%s", host, port)
     # proxy_headers off: CloudGuard decides which forwarded headers to trust.
-    uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
-                server_header=False, timeout_keep_alive=30, limit_concurrency=64,
-                ws="auto", ws_max_size=WS_MAX_SIZE)
+    uvicorn.run(app, host=host, port=port, log_config=None, **UVICORN_OPTIONS)
     return 0

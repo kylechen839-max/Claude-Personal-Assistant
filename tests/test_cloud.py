@@ -39,7 +39,13 @@ def at(peer, app):
 
 
 @pytest.fixture
-def make_cloud(fake_client):
+def slept():
+    """Delays CloudGuard held wrong tokens for (recorded, not waited)."""
+    return []
+
+
+@pytest.fixture
+def make_cloud(fake_client, slept):
     def make(peer=PROXY, clock=None, guard_kwargs=None, app=None):
         clock = clock or Clock()
         if app is None:
@@ -51,7 +57,10 @@ def make_cloud(fake_client):
             app = webapp.create_app(assistant, TOKEN, limiter=cloud.NeverBlock(),
                                     trusted_proxy=trust,
                                     reap_interval=3600)
-        kwargs = {"trusted_proxies": TRUSTED, "max_upload_bytes": 200_000,
+        async def sleep(seconds):
+            slept.append(seconds)
+
+        kwargs = {"sleep": sleep, "trusted_proxies": TRUSTED, "max_upload_bytes": 200_000,
                   "max_body_bytes": 16_384,
                   "lockout": cloud.LoginLockout(clock=clock),
                   "limiter": cloud.RateLimiter(clock=clock),
@@ -138,8 +147,11 @@ def test_bearer_token_works_and_wrong_ones_count_toward_the_lockout(make_cloud):
     bad = {**via_proxy(PUBLIC), "Authorization": "Bearer " + "x" * 43}
     for _ in range(5):
         assert client.get("/api/state", headers=bad).status_code == 401
-    assert client.get("/api/state", headers=ok).status_code == 429
-    assert login(client).status_code == 429  # same address, same lockout
+    assert client.get("/api/state", headers=bad).status_code == 429  # locked
+    assert login(client, "wrong-token").status_code == 429  # one lockout for both
+    # the right token is never locked out
+    assert client.get("/api/state", headers=ok).status_code == 200
+    assert login(client).status_code == 200
 
 
 def test_chunked_upload_under_the_cap_reaches_the_app(make_cloud, fake_client):
@@ -161,15 +173,25 @@ def test_session_cookie_is_secure_httponly_strict(make_cloud):
 
 # --- login lockout ------------------------------------------------------------
 
-def test_wrong_tokens_lock_out_that_address_only(make_cloud):
+def test_wrong_tokens_lock_out_that_address_only(make_cloud, slept):
     clock = Clock()
     _, client = make_cloud(clock=clock)
     for _ in range(5):
         assert login(client, "wrong" * 10).status_code == 401
-    r = login(client)  # even the right token: locked
+    assert slept == []  # no brake before the lockout
+    r = login(client, "wrong" * 10)
     assert r.status_code == 429 and int(r.headers["retry-after"]) == 900
-    assert login(client, ip="198.51.100.7").status_code == 200  # Kyle elsewhere
+    assert slept == [2.0]  # a locked address waits for each wrong answer
+    assert login(client, "x", ip="198.51.100.7").status_code == 401  # others: as usual
     clock.now += 901
+    assert login(client, "wrong" * 10).status_code == 401  # lockout over
+
+
+def test_the_right_token_is_never_locked_out(make_cloud):
+    """Otherwise anyone could keep Kyle from signing in."""
+    _, client = make_cloud()
+    for _ in range(12):
+        login(client, "bad-token")
     assert login(client).status_code == 200
 
 
@@ -190,17 +212,21 @@ def test_lockouts_double_and_success_resets(make_cloud):
 def test_signed_in_phone_keeps_working_during_a_lockout(make_cloud):
     _, client = make_cloud()
     assert login(client).status_code == 200
-    for _ in range(5):
+    for _ in range(6):
         client.post("/api/login", json={"token": "nope"}, headers=via_proxy(PUBLIC))
     assert client.get("/api/state", headers=via_proxy(PUBLIC)).status_code == 200
 
 
-def test_global_cap_across_many_addresses(make_cloud):
+def test_global_brake_slows_wrong_tokens_only(make_cloud, slept):
     _, client = make_cloud(guard_kwargs={"lockout": cloud.LoginLockout(
         max_failures=100, global_max_failures=10, clock=Clock())})
     for i in range(10):
         assert login(client, "bad", ip=f"198.51.100.{i}").status_code == 401
-    assert login(client, ip="192.0.2.1").status_code == 429
+    assert slept == []
+    assert login(client, "bad", ip="192.0.2.1").status_code == 401
+    assert slept == [1.0]  # wrong tokens from anyone now wait a second
+    assert login(client, ip="192.0.2.2").status_code == 200  # the right one doesn't
+    assert slept == [1.0]
 
 
 def test_the_web_apps_own_global_limiter_is_not_used(make_cloud):
@@ -214,7 +240,7 @@ def test_spoofed_forwarded_for_does_not_dodge_the_lockout(make_cloud):
     for i in range(5):
         client.post("/api/login", json={"token": "bad"},
                     headers=via_proxy(f"192.0.2.{i}, {PUBLIC}"))
-    assert client.post("/api/login", json={"token": TOKEN},
+    assert client.post("/api/login", json={"token": "bad"},
                        headers=via_proxy(f"192.0.2.99, {PUBLIC}")).status_code == 429
 
 
@@ -442,8 +468,9 @@ def test_voice_socket_bearer_and_lockout(make_cloud):
         pass
     for _ in range(5):
         assert refused(voice(client, cookie=False, Authorization="Bearer wrong")) == 1008
-    assert refused(voice(client, cookie=False, Authorization=f"Bearer {TOKEN}")) == 1008
-    assert login(client).status_code == 429  # one lockout for both
+    assert login(client, "wrong").status_code == 429  # one lockout for both
+    with voice(client, cookie=False, Authorization=f"Bearer {TOKEN}"):
+        pass  # the right token still works
 
 
 def test_forwarded_host_counts_only_from_the_proxy(make_cloud):
@@ -497,3 +524,65 @@ def test_cloud_server_caps_websocket_messages(monkeypatch, fake_client):
     assert cloud.serve(cfg, port=12345) == 0
     assert seen["ws_max_size"] == 2_000_000 and seen["ws"] == "auto"
     assert seen["proxy_headers"] is False and seen["port"] == 12345
+
+
+# --- slow clients (real uvicorn) ----------------------------------------------
+
+def test_slow_uploads_cannot_starve_the_server(make_cloud):
+    """One address holding many slow uploads: /healthz and everyone else keep
+    working, that address gets 429 beyond 2 at once, and stalled bodies end
+    with 408. (uvicorn's limit_concurrency used to answer 503 to all.)"""
+    import http.client
+    import socket
+    import threading
+    import time as _time
+
+    import uvicorn
+
+    guard, _ = make_cloud(guard_kwargs={"body_timeout": 1.0})
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(
+        guard, host="127.0.0.1", port=port, lifespan="off", log_level="critical",
+        **cloud.UVICORN_OPTIONS))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            _time.sleep(0.05)
+        attacker = []
+        for _ in range(70):
+            sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+            sock.sendall(b"POST /api/login HTTP/1.1\r\nHost: t\r\n"
+                         b"X-Forwarded-For: 203.0.113.66\r\nX-Forwarded-Proto: https\r\n"
+                         b"Content-Type: application/json\r\nContent-Length: 10000\r\n\r\n{")
+            attacker.append(sock)
+        _time.sleep(0.3)
+
+        def get(path, ip="198.51.100.20"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            conn.request("GET", path, headers={"X-Forwarded-For": ip,
+                                               "X-Forwarded-Proto": "https"})
+            r = conn.getresponse()
+            body = r.read()
+            conn.close()
+            return r.status, body
+
+        assert get("/healthz") == (200, b"ok")
+        status, page = get("/")
+        assert status == 200 and b"</html>" in page  # the whole page
+        assert get("/api/state")[0] == 401  # answered, not starved
+        # beyond 2 at once, that address is told off right away
+        assert b" 429 " in attacker[-1].recv(200)
+        # and its stalled bodies time out (1 s + 16 KB at 64 KB/s)
+        attacker[0].settimeout(5)
+        assert b" 408 " in attacker[0].recv(200)
+        assert get("/healthz") == (200, b"ok")
+    finally:
+        for sock in attacker:
+            sock.close()
+        server.should_exit = True
+        thread.join(timeout=5)

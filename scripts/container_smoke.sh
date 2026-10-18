@@ -27,6 +27,7 @@ test "$(curl -sf $URL/healthz)" = ok
 test "$(status $URL/api/state)" = 401                       # auth required
 test "$(status $URL/silence.wav)" = 401
 test "$(status $URL/)" = 200                                # login page
+curl -sf $URL/ | grep -q '</html>'                          # ... all of it
 test "$(status $URL/manifest.webmanifest)" = 200
 test "$(status -H 'Content-Type: application/json' -d '{"token":"wrong-token"}' $URL/api/login)" = 401
 test "$(status -c "$WORK/cookies" -H 'Content-Type: application/json' \

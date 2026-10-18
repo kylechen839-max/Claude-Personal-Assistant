@@ -97,6 +97,9 @@ DEFAULTS: dict = {
         "login_global_max_failures": 30,  # from all addresses per window
         "requests_per_minute": 120,     # per address, every route but /healthz
         "max_body_kb": 16,              # any request that isn't an audio upload
+        "uploads_per_address": 2,       # requests sending a body at once, per address
+        "uploads_total": 32,            # ... and from everyone
+        "body_timeout": 10,             # seconds (+1 s per 64 KB) to send a body
     },
     "voice": {                      # hands-free voice conversation (web app)
         "vad": "silero",            # "silero" (in the browser), or "energy"
