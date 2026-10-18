@@ -66,6 +66,17 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "webapp": {
+        "host": "127.0.0.1",        # only this computer; use tailscale serve
+        "port": 8765,
+        "confirm_timeout": 120,     # seconds to wait for a yes before "no"
+        "max_upload_mb": 10,
+        "max_audio_seconds": 60,    # longest recording accepted
+        "trusted_proxy": 0,         # proxies adding X-Forwarded-*; 0 = none,
+                                    # 1 on a host like Render (TRUSTED_PROXY)
+        "allowed_origins": [],      # extra https://... origins, if a proxy
+                                    # rewrites the Host header
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 
@@ -77,6 +88,8 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "PORT": ("webapp", "port"),                # set by hosts such as Render
+    "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
 }
 
 
@@ -106,7 +119,7 @@ def load_config(path: str | Path | None = "config.toml",
 
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
-                   "ELEVENLABS_API_KEY")
+                   "ELEVENLABS_API_KEY", "WEB_TOKEN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens

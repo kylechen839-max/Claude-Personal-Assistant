@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 190 passed, 7 skipped (Linux build sandbox,
+**Current test count:** 246 passed, 8 skipped (Linux build sandbox,
 Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
 sandbox skips are the tests that need something it can't reach: the Whisper
@@ -25,6 +25,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
+| `test_webapp.py` | 57 | phone web app (`--mode web`) |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 
@@ -135,6 +136,75 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   CI) and calendar code; only Anthropic and Google are mocked.
 - `tests/test_docs.py`: every `--flag` and `[section] key` in README.md and
   MANUAL_TEST.md exists in the code; no stale names (Porcupine, old models).
+
+## Phone web app ✅
+- `python -m assistant --mode web` (`assistant/webapp.py`, page in
+  `assistant/web/`): FastAPI + uvicorn serving one mobile-first PWA page
+  (manifest, SVG/PNG icons generated in code, apple-mobile-web-app tags, a
+  no-cache service worker) and a small JSON API. Reuses `ClaudeChat` (tools,
+  Pinecone recall and summaries), `Transcriber` and the configured TTS engine.
+- The phone records with getUserMedia + MediaRecorder (WebM/Opus on
+  Android/Chrome, MP4/AAC on iOS Safari); the server decodes any of them with
+  PyAV (faster-whisper's own `decode_audio` breaks on PyAV 19, so it isn't
+  used), transcribes, answers, and streams NDJSON events (transcript, tool,
+  confirm, reply, done). Reply audio is a WAV rendered on demand in one
+  dedicated TTS thread (COM initialized for SAPI on Windows); the page can use
+  the browser's speechSynthesis instead. The reply text arrives whole, not
+  token by token (ClaudeChat doesn't stream).
+- Delete confirmation: the tool's confirm callback blocks the turn's thread
+  and ends the stream with a "confirm" event; Yes/No buttons, a typed answer
+  or a spoken "yes" (same strict `is_yes`) answer it via `/api/confirm`, whose
+  response carries the rest of the turn. No answer in `confirm_timeout`
+  seconds means no.
+- One conversation per browser (signed session cookie); idle longer than
+  `conversation_timeout` -> summarized to memory and reset (background reaper,
+  also on "goodbye" and on server shutdown). The PC-only `open_in_browser`
+  tool is not offered.
+- Privacy: binds 127.0.0.1; `WEB_TOKEN` (256-bit) generated into `.env` on
+  first run, never logged (also added to log redaction), printed only with
+  `--show-token`; login sets an HttpOnly, Secure, SameSite=Strict cookie
+  holding an HMAC of a session id (not the token); 5 wrong tokens per 5
+  minutes locks login; cross-origin requests rejected (Sec-Fetch-Site /
+  Origin vs Host); strict CSP with no inline script, nosniff, DENY framing,
+  no-store on the API; 10 MB upload cap. HTTPS for the phone via
+  `tailscale serve` (README). `--check` reports `WEB_TOKEN` and the packages.
+- Tests (`test_webapp.py`, FastAPI TestClient): 401 without/with a forged
+  cookie, wrong token 401 then 429, cookie attributes, cross-origin 403,
+  security headers, token generation and redaction, text and voice round
+  trips (mocked Whisper), tool call round trip with mocked Anthropic, delete
+  confirmation by button yes/no, by voice, unclear voice = no and timeout =
+  no, concurrent turn refused, idle summary to memory, per-browser
+  conversations, reply audio is a non-empty WAV (PrintTTS and real pyttsx3),
+  MP4/AAC (iOS) and WAV decoding, the CLI starting the server, and a real
+  Whisper run on an uploaded TTS .wav (skipped without the model, as the
+  other STT tests are). Also driven by hand in headless Chromium with a fake
+  mic: sign-in, typed turn, Yes button, and a held-mic WebM upload.
+- Public-server hardening (for a host like Render): `PORT` and
+  `TRUSTED_PROXY` from the environment; X-Forwarded-For/Proto used only
+  behind a trusted proxy (rightmost entry); http -> https redirect and HSTS
+  there; per-address (5 per 15 min) and global (50) sign-in lockouts that also
+  cover wrong Bearer tokens; constant-time compare and generic errors (no
+  stack traces, no FastAPI docs, no directory listing); 411 without
+  Content-Length, 413 over `max_upload_mb`, over `max_audio_seconds` (checked
+  while decoding, so a small file can't expand) or over 4000 characters of
+  text; `/healthz`; refuses to listen beyond 127.0.0.1 without `WEB_TOKEN` in
+  the environment; uvicorn concurrency limit. Web mode never imports
+  sounddevice, openWakeWord or pyttsx3 unless pyttsx3 is the TTS (tested in a
+  subprocess).
+- Streaming: `ClaudeChat.ask(on_text=, cancel=)` streams replies with
+  `messages.stream`; the page shows the text as it arrives. Cancelling keeps
+  the words already said in history (for barge-in).
+- Reusable by other routes (the hands-free voice mode): `transcribe_upload`,
+  `chat_stream(session, text, cancel)`, `synthesize`, `require_session`
+  (HTTP 401 / WebSocket close 1008, rejects other sites) and
+  `app.state.web.session_for`. `Authorization: Bearer <WEB_TOKEN>` works
+  instead of the cookie.
+- iPhone: 90-day cookie renewed on use (home-screen apps have their own
+  cookie jar), mic requested straight from the tap and released after each
+  recording, help text when permission is denied, replies through one
+  unlocked `<audio>` element, a service worker that caches only the app shell
+  (network first).
+- Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
