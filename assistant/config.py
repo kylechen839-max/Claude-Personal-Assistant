@@ -66,6 +66,14 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "history": {
+        "enabled": True,
+        "path": "data/history.sqlite",  # HISTORY_PATH overrides (cloud: /data/...)
+        "retention_days": 0,            # delete unpinned conversations older than this; 0 = keep
+        "max_mb": 500,                  # size guard: oldest unpinned go first; 0 = no limit
+        "incognito": False,             # true = save nothing (no history, no memory summary)
+        "title_model": "claude-haiku-5-5",  # fast model for titles and summaries
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 
@@ -77,6 +85,7 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "HISTORY_PATH": ("history", "path"),
 }
 
 

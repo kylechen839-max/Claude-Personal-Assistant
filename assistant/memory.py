@@ -123,6 +123,34 @@ class PineconeMemory:
         return vector_id
 
 
+    def search_conversations(self, query: str, top_k: int = 5,
+                             min_score: float | None = None) -> list[dict]:
+        """Semantic search over the assistant's own conversation summaries
+        that link back to a saved conversation. Best first:
+        [{"conversation_id", "score", "text"}]."""
+        if not query.strip():
+            return []
+        result = self.index.query(
+            vector=self.embed(query, "query"), top_k=top_k,
+            namespace=self.namespace, include_metadata=True,
+            filter={"conversation_id": {"$exists": True}})
+        floor = self.min_score if min_score is None else min_score
+        hits = []
+        for match in result.matches:
+            meta = match.metadata or {}
+            if meta.get("conversation_id") and match.score >= floor:
+                hits.append({"conversation_id": str(meta["conversation_id"]),
+                             "score": float(match.score),
+                             "text": str(meta.get("text", ""))[: self.max_note_chars]})
+        return hits
+
+    def delete(self, vector_ids: list[str]) -> None:
+        """Delete summaries (by vector id) from the assistant's namespace."""
+        if vector_ids:
+            self.index.delete(ids=list(vector_ids), namespace=self.namespace)
+            log.info("Memory: deleted %d vectors", len(vector_ids))
+
+
 def transcript(history: list[dict]) -> str:
     """Plain-text transcript of user text and assistant text (no tool data)."""
     lines = []
