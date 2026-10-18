@@ -75,6 +75,24 @@ class WebClient:
         return parse_events(r.iter_lines(decode_unicode=True))
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def insecure_for_token(base_url: str) -> str | None:
+    """Why sending the token to `base_url` is unsafe, or None: plain http
+    is only for this machine (the preflight's 127.0.0.1 server)."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(base_url)
+    if parts.scheme == "https":
+        return None
+    if parts.scheme == "http" and (parts.hostname or "").lower() in LOCAL_HOSTS:
+        return None
+    return (f"refusing to send the token over {parts.scheme or 'no scheme'}:// to "
+            f"{parts.hostname or base_url}; use https:// (or --allow-http on a "
+            "network you trust, e.g. Tailscale)")
+
+
 def _cookie_from(response) -> str | None:
     header = response.headers.get("set-cookie", "")
     for part in header.split(";"):
@@ -222,7 +240,7 @@ def shorten(text: str, limit: int = 90) -> str:
 
 def run_smoke(base_url: str, token: str | None, wav: Path = FIXTURE,
               client: WebClient | None = None, health_path: str = "/healthz",
-              voice_ws=voice_turn) -> list[Outcome]:
+              voice_ws=voice_turn, allow_http: bool = False) -> list[Outcome]:
     """All checks against one base URL; never raises for HTTP problems."""
     import requests
 
@@ -252,6 +270,10 @@ def run_smoke(base_url: str, token: str | None, wav: Path = FIXTURE,
     attempt("auth required", refused)
     if not token:
         out.append(Outcome("login", "SKIP", "no token in the environment"))
+        return out
+    unsafe = None if allow_http else insecure_for_token(base_url)
+    if unsafe:
+        out.append(Outcome("login", "FAIL", unsafe))
         return out
 
     def login():
@@ -291,6 +313,9 @@ def main(argv=None) -> int:
                         help="environment variable holding the access token")
     parser.add_argument("--audio", default=str(FIXTURE),
                         help="the .wav sent for the audio turn")
+    parser.add_argument("--allow-http", action="store_true",
+                        help="allow sending the token over plain http:// to "
+                             "another machine (only on a network you trust)")
     parser.add_argument("--env-file", default=str(ROOT / ".env"),
                         help="read the token from here if the variable isn't set")
     args = parser.parse_args(argv)
@@ -302,7 +327,8 @@ def main(argv=None) -> int:
     from assistant.preflight import Redactor
 
     redact = Redactor([token or ""])
-    outcomes = run_smoke(args.base_url, token, Path(args.audio))
+    outcomes = run_smoke(args.base_url, token, Path(args.audio),
+                         allow_http=args.allow_http)
     print_table(outcomes, lambda line: print(redact(line)))
     failed = [o for o in outcomes if o.status == "FAIL"]
     print(f"\n{'FAIL' if failed else 'PASS'}: {len(failed)} failed, "

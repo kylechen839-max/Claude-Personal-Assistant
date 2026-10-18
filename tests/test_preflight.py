@@ -120,7 +120,7 @@ def test_redacts_before_env_step_too(fake_env, tmp_path, monkeypatch, capsys):
 def test_smoke_cli_never_prints_the_token(monkeypatch, capsys, fake_env):
     token = SECRETS["WEB_TOKEN"]
     monkeypatch.setenv("WEB_TOKEN", token)
-    monkeypatch.setattr(smoke, "run_smoke", lambda url, tok, wav: [
+    monkeypatch.setattr(smoke, "run_smoke", lambda url, tok, wav, allow_http=False: [
         smoke.Outcome("login", "FAIL", f"server said: bad token {tok}")])
     assert smoke.main(["http://127.0.0.1:1"]) == 1
     out = capsys.readouterr().out
@@ -437,11 +437,12 @@ class FakeHTTP:
         return FakeResponse(200, [e.decode() for e in events])
 
 
-def smoke_with(http, token="t" * 32, voice_ws=None):
+def smoke_with(http, token="t" * 32, voice_ws=None, url="http://127.0.0.1:8765/",
+               allow_http=False):
     return {o.name: o for o in smoke.run_smoke(
-        "http://pi:8765/", token, preflight.FIXTURE,
-        client=smoke.WebClient("http://pi:8765/", session=http),
-        voice_ws=voice_ws)}
+        url, token, preflight.FIXTURE,
+        client=smoke.WebClient(url, session=http),
+        voice_ws=voice_ws, allow_http=allow_http)}
 
 
 def test_smoke_all_pass():
@@ -846,3 +847,38 @@ def test_mic_level_snippet_opens_device_zero(monkeypatch, tmp_path, capsys):
     run = FakeRun({r"-c": (0, out)})
     r = preflight.step_mic_level(ctx_for(tmp_path / ".env", run, tmp_path, hardware=True))
     assert r.status == PASS and r.detail.startswith("[0] Front Mic: peak -20.0 dBFS")
+
+
+def test_windows_service_legacy_task_scenarios():
+    """The legacy web task flow of install_windows_service.ps1, run in
+    PowerShell with Task Scheduler, the port and processes faked."""
+    import shutil
+
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell not available")
+    p = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                        "-File", str(ROOT / "tests" / "ps" / "install_windows_service.tests.ps1"),
+                        "-Script", str(ROOT / "scripts" / "install_windows_service.ps1")],
+                       capture_output=True, text=True, timeout=180)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stdout.count("PASS ") == 7, p.stdout
+
+
+@pytest.mark.parametrize("url,unsafe", [
+    ("https://hey-claude.onrender.com", False), ("http://127.0.0.1:8765", False),
+    ("http://localhost:8765/", False), ("http://[::1]:8765", False),
+    ("http://raspberrypi.local:8765", True), ("http://100.64.1.2:8765", True),
+    ("ftp://example.com", True), ("hey-claude.onrender.com", True)])
+def test_token_only_over_https_or_to_this_machine(url, unsafe):
+    assert (smoke.insecure_for_token(url) is not None) is unsafe
+
+
+def test_smoke_never_posts_the_token_over_remote_http():
+    http = FakeHTTP("t" * 32)
+    got = smoke_with(http, url="http://raspberrypi.local:8765")
+    assert got["login"].status == FAIL and "refusing" in got["login"].detail
+    assert not any(u.endswith("/api/login") for _, u, _ in http.requests)
+    allowed = smoke_with(FakeHTTP("t" * 32), url="http://raspberrypi.local:8765",
+                         allow_http=True)
+    assert allowed["login"].status == PASS

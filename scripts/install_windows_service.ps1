@@ -118,18 +118,62 @@ function Invoke-PowerCheck {
     Write-Host '  Management -> untick "Allow the computer to turn off this device".'
 }
 
+function Test-InRepo {
+    # Does this task action belong to this checkout (path in the command or
+    # the working folder)?
+    param($Action)
+    $root = $repoDir.TrimEnd('\')
+    foreach ($text in @($Action.Execute, $Action.Arguments, $Action.WorkingDirectory)) {
+        if ($text -and $text.TrimEnd('\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-LegacyWebTask {
-    # Tasks outside \HeyClaude\ that start this repo's web app (made by hand).
+    # Tasks outside \HeyClaude\ that start THIS repo's web app (made by hand).
     Get-ScheduledTask -ErrorAction SilentlyContinue |
         Where-Object { $_.TaskPath -ne $taskPath } |
         Where-Object {
-            $_.TaskName -eq 'Hey Claude Web' -or
-            @($_.Actions | Where-Object { "$($_.Execute) $($_.Arguments)" -match '-m\s+assistant\b.*--mode\s+web' }).Count -gt 0
+            $task = $_
+            @($task.Actions | Where-Object {
+                    (Test-InRepo $_) -and ($task.TaskName -eq 'Hey Claude Web' -or
+                        "$($_.Execute) $($_.Arguments)" -match '-m\s+assistant\b.*--mode\s+web')
+                }).Count -gt 0
         }
 }
 
+function Get-PortOwner {
+    # The process listening on $Port, or $null.
+    $conn = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($conn.Count -eq 0) { return $null }
+    return Get-CimInstance Win32_Process -Filter "ProcessId = $($conn[0].OwningProcess)"
+}
+
+function Test-AssistantWeb {
+    # Is this process a `python -m assistant --mode web` (any folder)?
+    param($Process)
+    return $Process -and $Process.Name -like 'python*' -and
+        $Process.CommandLine -match '-m\s+assistant\b.*--mode\s+web'
+}
+
+function Wait-PortFree {
+    # Free the port from an old web app; $true once nothing listens on it.
+    for ($i = 0; $i -lt 10; $i++) {
+        $owner = Get-PortOwner
+        if (-not $owner) { return $true }
+        if (Test-AssistantWeb $owner) {
+            Stop-Process -Id $owner.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Seconds 1
+    }
+    return -not (Get-PortOwner)
+}
+
 function Resolve-LegacyWebTask {
-    # Returns $true when no other task will serve the web app any more.
+    # $true when the port is free for \HeyClaude\Web; the old task is removed
+    # only after its server is stopped and the port is really free.
     $legacy = @(Get-LegacyWebTask)
     if ($legacy.Count -eq 0) { return $true }
     Write-Host "`n== Existing web app task found =="
@@ -147,20 +191,27 @@ function Resolve-LegacyWebTask {
     }
     foreach ($t in $legacy) {
         Stop-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
+    }
+    if (-not (Wait-PortFree)) {
+        $owner = Get-PortOwner
+        Write-Warning ("Port $Port is still held by $($owner.Name) (PID $($owner.ProcessId)). " +
+            'Kept the old task and started it again; \HeyClaude\Web is not installed.')
+        foreach ($t in $legacy) {
+            Start-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
+        }
+        return $false
+    }
+    foreach ($t in $legacy) {
         Unregister-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -Confirm:$false
         Write-Host "  Removed $($t.TaskPath)$($t.TaskName)"
     }
-    Stop-HostProcess -LegacyWeb  # its python, if still running
-    Start-Sleep -Seconds 2  # let Windows release the port
     return $true
 }
 
 function Test-PortFree {
-    $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($busy) {
-        $procId = @($busy)[0].OwningProcess
-        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        Write-Warning ("Port $Port is already in use by $($proc.ProcessName) (PID $procId); " +
+    $owner = Get-PortOwner
+    if ($owner) {
+        Write-Warning ("Port $Port is already in use by $($owner.Name) (PID $($owner.ProcessId)); " +
             '\HeyClaude\Web not installed. Stop that program and run this again.')
         return $false
     }
@@ -169,16 +220,16 @@ function Test-PortFree {
 
 function Stop-HostProcess {
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param([switch]$LegacyWeb)
-    # Our supervisors (windows_host.py) and the assistant each one started;
-    # with -LegacyWeb also a web app started from this folder some other way.
+    param()
+    # Our supervisors (windows_host.py) and the assistant each one started.
     $procs = @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
-            Where-Object { $_.CommandLine -and $_.CommandLine.Contains($repoDir) })
-    $supervisors = @($procs | Where-Object { $_.CommandLine -match 'windows_host\.py' } |
+            Where-Object { $_.CommandLine })
+    $supervisors = @($procs | Where-Object {
+            $_.CommandLine.Contains($hostScript) -or
+            ($_.CommandLine.Contains($repoDir) -and $_.CommandLine -match 'windows_host\.py') } |
             ForEach-Object { $_.ProcessId })
     $targets = $procs | Where-Object {
-        $supervisors -contains $_.ProcessId -or $supervisors -contains $_.ParentProcessId -or
-        ($LegacyWeb -and $_.CommandLine -match '-m\s+assistant\s+--mode\s+web')
+        $supervisors -contains $_.ProcessId -or $supervisors -contains $_.ParentProcessId
     }
     foreach ($p in $targets) {
         if ($PSCmdlet.ShouldProcess("process $($p.ProcessId)", 'Stop')) {
@@ -231,7 +282,13 @@ if (-not $PowerOnly) {
         Write-Warning '.env is missing; the assistant will fail until you add your keys.'
     }
     $help = & $python -m assistant --help 2>&1 | Out-String
-    $hasWeb = $help -match '--mode \{[^}]*\bweb\b'
+    $helpOk = $LASTEXITCODE -eq 0
+    $hasWeb = $helpOk -and $help -match '--mode \{[^}]*\bweb\b'
+    if (-not $helpOk) {
+        Write-Warning ("'python -m assistant --help' failed, so the venv looks broken " +
+            '(run: .venv\Scripts\python.exe -m assistant --check). Nothing was changed.')
+        exit 1
+    }
 
     Write-Host '== Stopping any running copy started by this script =='
     Unregister-HostTask

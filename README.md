@@ -491,7 +491,8 @@ session, logs in with the token in the `WEB_TOKEN` environment variable (or
 `WEB_TOKEN` from `.env`; `--token-env` picks another variable), then runs
 one text turn, one audio turn and, where the server has voice conversation
 mode, one voice turn over the `/api/voice` WebSocket. It never prints the
-token.
+token. It sends the token only over `https://` (or plain http to this
+machine); `--allow-http` overrides that on a network you trust.
 
 **Moving to a Raspberry Pi:** follow [PI_MIGRATION.md](PI_MIGRATION.md).
 CI's **pi-arm64** job runs `install_pi.sh`, the tests and the preflight on
