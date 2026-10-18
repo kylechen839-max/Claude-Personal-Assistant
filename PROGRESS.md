@@ -23,7 +23,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
 | `test_memory.py` | 12 | stage 6 |
-| `test_memory_tools.py` | 6 | stage 6 (memory tools) |
+| `test_memory_tools.py` | 7 | stage 6 (memory tools) |
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |

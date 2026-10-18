@@ -59,3 +59,10 @@ def test_remember_rejects_empty_note():
     result, _ = tools.dispatch("remember", {"note": "   "})
     assert json.loads(result)["status"] == "error"
     memory.store.assert_not_called()
+
+
+def test_system_prompt_mentions_memory_only_when_on():
+    from assistant.chat import MEMORY_PROMPT, ClaudeChat
+
+    assert MEMORY_PROMPT in ClaudeChat(client=MagicMock(), memory=MagicMock()).build_system()
+    assert MEMORY_PROMPT not in ClaudeChat(client=MagicMock()).build_system()
