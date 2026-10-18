@@ -189,3 +189,20 @@ def test_speak_latex_never_hangs_on_odd_input():
     for junk in ["\\", "{", "}", "^", "_", "\\frac{", "\\sqrt[", "x^", "(", "|x",
                  "1.", "\\unknowncommand{x}", "$$", "\\left("]:
         assert isinstance(speak_latex(junk), str)
+
+
+def test_jpeg_comment_and_png_icc_profile_are_dropped():
+    img = Image.new("RGB", (50, 50), (10, 20, 30))
+    out = io.BytesIO()
+    img.save(out, "JPEG", comment=b"SECRET-COMMENT")
+    assert b"SECRET-COMMENT" in out.getvalue()
+    clean, _ = prepare_image(out.getvalue(), "image/jpeg")
+    assert b"SECRET-COMMENT" not in clean
+    from PIL import ImageCms
+    icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    png = io.BytesIO()
+    img.save(png, "PNG", icc_profile=icc)
+    clean, media = prepare_image(png.getvalue(), "image/png")
+    assert media == "image/png"
+    with Image.open(io.BytesIO(clean)) as cleaned:
+        assert "icc_profile" not in cleaned.info

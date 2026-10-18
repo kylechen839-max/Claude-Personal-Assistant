@@ -319,7 +319,18 @@ def has_untrusted_content(history: list[dict],
     """True if web content (see has_web_content) or the result of a tool
     in `untrusted_tools` (e.g. an email that was read) is in the history.
     Such text may be written to steer Claude, so changes need a yes."""
-    return has_web_content(history) or has_tool_results(history, untrusted_tools)
+    return (has_web_content(history) or has_tool_results(history, untrusted_tools)
+            or has_marked_results(history))
+
+
+def has_marked_results(history: list[dict]) -> bool:
+    """True if a tool result says it holds other people's text, e.g. a
+    calendar listing with invites from others ({"untrusted_content": true})."""
+    return any(b.get("type") == "tool_result"
+               and '"untrusted_content": true' in str(b.get("content", ""))
+               for m in history
+               if m["role"] == "user" and isinstance(m["content"], list)
+               for b in m["content"])
 
 
 def has_tool_results(history: list[dict], names) -> bool:

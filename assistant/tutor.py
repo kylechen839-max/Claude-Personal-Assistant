@@ -71,6 +71,7 @@ def prepare_image(data: bytes, declared_type: str | None = None,
             img = ImageOps.exif_transpose(img)
             if max(img.size) > max_side:
                 img.thumbnail((max_side, max_side), Image.LANCZOS)
+            img.info.clear()  # no comment, ICC profile, text or EXIF carried over
             out = io.BytesIO()
             if fmt == "PNG":  # screenshots stay sharp; no text chunks kept
                 img.save(out, "PNG", optimize=True)

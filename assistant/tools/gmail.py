@@ -238,13 +238,14 @@ class GmailInbox:
             metadataHeaders=["From", "Reply-To", "Subject", "Message-ID",
                              "References"]).execute()
         headers = msg.get("payload", {}).get("headers", [])
-        to = _header(headers, "Reply-To") or _header(headers, "From")
+        sender = _header(headers, "From")
+        to = _header(headers, "Reply-To") or sender
         subject = _header(headers, "Subject")
         if not re.match(r"(?i)re:", subject):
             subject = f"Re: {subject}".strip()
         msg_id = _header(headers, "Message-ID")
         refs = " ".join(x for x in (_header(headers, "References"), msg_id) if x)
-        return {"to": to, "subject": subject, "message_id": msg_id,
+        return {"to": to, "from": sender, "subject": subject, "message_id": msg_id,
                 "references": refs, "thread_id": msg.get("threadId")}
 
     def draft_reply(self, message_id: str, body: str) -> dict:
@@ -276,14 +277,22 @@ class GmailInbox:
                            "can review and send it himself."}
 
     def describe_for_draft(self, tool_input: dict) -> str:
-        to = "that email"
+        """Names the real address (a display name can say anything) and
+        warns when replies would go somewhere other than the sender."""
+        to, warning = "that email", ""
         try:
-            to = _sender(self._reply_headers(tool_input["message_id"])["to"])
+            info = self._reply_headers(tool_input["message_id"])
+            name, addr = parseaddr(info["to"])
+            to = f"{name.strip()} at {addr}" if name.strip() and addr else (addr or name)
+            from_addr = parseaddr(info["from"])[1]
+            if addr and from_addr and addr.lower() != from_addr.lower():
+                warning = (f" Careful: replies go to {addr}, not to the sender "
+                           f"{from_addr}.")
         except Exception:
             pass
         text, _ = _trim(_squash(tool_input.get("body", "")), 200)
         return (f"Do you want me to save a draft reply to {to}, saying: {text}? "
-                "It won't be sent.")
+                f"It won't be sent.{warning}")
 
     def tools(self) -> list[Tool]:
         return [

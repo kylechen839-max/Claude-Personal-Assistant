@@ -599,3 +599,70 @@ def test_old_database_gets_the_key_property_added(tmp_path):
     client.data_sources.update.assert_called_once_with(
         data_source_id="ds-notes", properties={"Lecture ID": {"rich_text": {}}})
     assert "Lecture ID" in client.pages.create.call_args.kwargs["properties"]
+
+
+
+# ---------- upload limits and cleanup ----------
+def test_active_upload_cap_and_disk_check(tmp_path):
+    from assistant.lecture import UploadBusy
+
+    up = ChunkedUploads(tmp_path / "u", max_bytes=1000, max_active=2,
+                        disk_usage=lambda p: SimpleNamespace(free=10**12))
+    a = up.start()
+    up.start()
+    with pytest.raises(UploadBusy) as e:
+        up.start()
+    assert e.value.status == 429
+    up.append(a, 0, b"x")
+    up.finish(a)
+    up.start()  # a finished one no longer counts
+    full = ChunkedUploads(tmp_path / "f", max_bytes=1000,
+                          disk_usage=lambda p: SimpleNamespace(free=5000))
+    with pytest.raises(UploadBusy, match="disk"):
+        full.start()
+
+
+def test_stale_uploads_and_old_failed_jobs_are_purged(tmp_path, fake_client):
+    import os
+
+    up = ChunkedUploads(tmp_path / "u")
+    old, fresh, done = up.start(), up.start(), up.start()
+    up.append(done, 0, b"x")
+    up.finish(done)
+    long_ago = time.time() - 3 * 86400
+    os.utime(up.directory(old) / "upload.json", (long_ago, long_ago))
+    assert up.purge_stale(max_age_hours=48) == 1
+    ids = {d.name for d in up.root.iterdir()}
+    assert ids == {fresh, done}
+    from assistant.lecture import LectureJob
+    assignments, _ = assignments_mock()
+    p = LecturePipeline(up, fake_client, LectureNotesDB(assignments))
+    p._save(LectureJob(id=done, status="failed"))
+    job_file = up.directory(done) / "job.json"
+    os.utime(job_file, (time.time() - 20 * 86400,) * 2)
+    os.utime(up.directory(done) / "upload.json", (long_ago, long_ago))
+    assert up.purge_stale() == 1 and not (up.root / done).exists()
+
+
+def test_add_taps_during_saving_are_kept_and_never_doubled(tmp_path, fake_client):
+    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
+                                       stop_reason="tool_use")]
+    p, up, uid, notion, _, assignments = pipeline(tmp_path, fake_client)
+    p.submit(uid)
+    p.wait(10)
+    notion.pages.create.side_effect = lambda **kw: {"id": "a1", "properties": {}}
+    job = p.job(uid)  # the worker's stale copy, from before the tap
+    p.add_candidate(uid, 0, assignments)
+    p._save(job)      # worker saves its copy afterwards
+    assert p.job(uid).added == [0]
+    before = notion.pages.create.call_count
+    import threading as th
+    results = []
+    threads = [th.Thread(target=lambda: results.append(
+        p.add_candidate(uid, 2, assignments)["status"])) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert notion.pages.create.call_count == before + 1
+    assert sorted(results) == ["already_added"] * 3 + ["created"]

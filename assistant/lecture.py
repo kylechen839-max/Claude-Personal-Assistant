@@ -59,23 +59,39 @@ class UploadTooLarge(UploadError):
     status = 413
 
 
+class UploadBusy(UploadError):
+    """Too many unfinished recordings, or the disk is nearly full."""
+    status = 429
+
+
 class NotionBlocked(RuntimeError):
     """The integration can't find or create the Lecture Notes database."""
 
 
 def _write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(data, indent=1))
-    os.replace(tmp, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:  # Windows: a reader has the file open
+            if attempt == 19:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05)
 
 
 class ChunkedUploads:
     def __init__(self, root: str | Path, max_bytes: int = 300_000_000,
-                 max_chunk_bytes: int = 8_000_000):
+                 max_chunk_bytes: int = 8_000_000, max_active: int = 3,
+                 disk_usage=shutil.disk_usage):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_bytes = max_bytes
         self.max_chunk_bytes = max_chunk_bytes
+        self.max_active = max_active  # unfinished recordings at once
+        self._disk_usage = disk_usage
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
 
@@ -94,7 +110,51 @@ class ChunkedUploads:
     def meta(self, upload_id: str) -> dict:
         return json.loads((self._dir(upload_id) / "upload.json").read_text())
 
+    def _unfinished(self) -> list[Path]:
+        out = []
+        for d in self.root.iterdir():
+            try:
+                if not json.loads((d / "upload.json").read_text())["finished"]:
+                    out.append(d)
+            except (OSError, ValueError, KeyError):
+                continue
+        return out
+
+    def purge_stale(self, max_age_hours: float = 48, failed_days: float = 14,
+                    now: float | None = None) -> int:
+        """Delete recordings abandoned mid-upload (older than
+        `max_age_hours`) and failed jobs nobody retried within
+        `failed_days`. Finished notes keep only their small job files."""
+        now = time.time() if now is None else now
+        removed = 0
+        for d in list(self.root.iterdir()):
+            meta_file, job_file = d / "upload.json", d / "job.json"
+            try:
+                meta = json.loads(meta_file.read_text())
+            except (OSError, ValueError):
+                continue
+            age = now - meta_file.stat().st_mtime
+            stale = not meta.get("finished") and age > max_age_hours * 3600
+            if job_file.exists():
+                try:
+                    job = json.loads(job_file.read_text())
+                except (OSError, ValueError):
+                    job = {}
+                stale = (job.get("status") == FAILED
+                         and now - job_file.stat().st_mtime > failed_days * 86400)
+            if stale:
+                shutil.rmtree(d, ignore_errors=True)
+                removed += 1
+        if removed:
+            log.info("Purged %d stale lecture uploads", removed)
+        return removed
+
     def start(self, course: str = "", mime: str = "", started_at: str = "") -> str:
+        if len(self._unfinished()) >= self.max_active:
+            raise UploadBusy("Too many unfinished recordings; finish or wait "
+                             "for one first")
+        if self._disk_usage(self.root).free < self.max_bytes + 100_000_000:
+            raise UploadBusy("The server's disk is nearly full")
         upload_id = secrets.token_urlsafe(18)
         d = self.root / upload_id
         d.mkdir(parents=True)
@@ -533,6 +593,7 @@ class LecturePipeline:
         self._queue: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._job_locks: dict[str, threading.Lock] = {}
 
     # ----- state -----
     def _job_path(self, upload_id: str) -> Path:
@@ -545,7 +606,18 @@ class LecturePipeline:
     def _save(self, job: LectureJob) -> None:
         job.updated_at = time.time()
         with self._lock:
-            _write_json(self._job_path(job.id), job.public())
+            path = self._job_path(job.id)
+            if path.exists():  # keep "Add" taps made while the worker ran
+                try:
+                    on_disk = json.loads(path.read_text()).get("added", [])
+                except (OSError, ValueError):
+                    on_disk = []
+                job.added = sorted(set(job.added) | set(on_disk))
+            _write_json(path, job.public())
+
+    def _job_lock(self, upload_id: str) -> threading.Lock:
+        with self._lock:
+            return self._job_locks.setdefault(upload_id, threading.Lock())
 
     def jobs(self) -> list[LectureJob]:
         out = []
@@ -716,18 +788,20 @@ class LecturePipeline:
     # ----- offering assignments -----
     def add_candidate(self, upload_id: str, index: int, assignments,
                       overrides: dict | None = None) -> dict:
-        """Kyle picked an action item: add it to the Assignments database."""
-        job = self.job(upload_id)
-        cand = next((c for c in job.candidates if c["index"] == index), None)
-        if cand is None:
-            raise UploadError("No such suggestion")
-        if index in job.added:
-            return {"status": "already_added"}
-        fields = {**cand, **{k: v for k, v in (overrides or {}).items()
-                             if k in ("name", "course", "due", "type")}}
-        result = assignments.create_assignment(
-            fields["name"], course=fields.get("course") or None,
-            due=fields.get("due") or None, type=fields.get("type") or None)
-        job.added.append(index)
-        self._save(job)
-        return result
+        """Kyle picked an action item: add it to the Assignments database
+        (once, even if the button is tapped twice)."""
+        with self._job_lock(upload_id):
+            job = self.job(upload_id)
+            cand = next((c for c in job.candidates if c["index"] == index), None)
+            if cand is None:
+                raise UploadError("No such suggestion")
+            if index in job.added:
+                return {"status": "already_added"}
+            fields = {**cand, **{k: v for k, v in (overrides or {}).items()
+                                 if k in ("name", "course", "due", "type")}}
+            result = assignments.create_assignment(
+                fields["name"], course=fields.get("course") or None,
+                due=fields.get("due") or None, type=fields.get("type") or None)
+            job.added.append(index)
+            self._save(job)
+            return result

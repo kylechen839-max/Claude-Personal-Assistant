@@ -85,6 +85,7 @@ class Features:
                 return WhisperModel(name, device=stt["device"],
                                     compute_type=stt["compute_type"])
 
+            uploads.purge_stale()
             self._pipeline = LecturePipeline(
                 uploads, self.client, notes_db,
                 model=self.config["assistant"]["model"], whisper_model=lec["model"],

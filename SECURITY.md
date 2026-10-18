@@ -86,6 +86,12 @@ never written to `logs/assistant.log` in any mode (text, wake, phone web
 app, hands-free voice): only tool names, message ids and counts are, and
 memory summaries and confirmation questions are logged by length only.
 
+The Google token (`token.json`, which can read all mail once Gmail is on)
+and the sign-in state file are written owner-only (0600 on Linux/Pi) via a
+temp file and rename. The draft question names the real reply address
+("Prof. Smith at smith@uni.edu") and warns when Reply-To differs from the
+sender, since a display name can say anything.
+
 Email (and web) text also stays out of long-term memory: when a
 conversation contained any, its summary is written from Kyle's own words
 only (`transcript(user_only=True)`, stored with `from_user_only`), so an
@@ -106,7 +112,11 @@ session, upload ids are random (144 bits) and checked against a strict
 pattern (no path tricks), each recording has a size cap (`max_upload_mb`)
 and each piece a chunk cap. The page reminds Kyle to ask permission before
 recording. Action items are only offered as Assignments, never added
-automatically. Retried jobs never file a second page: each page carries
+automatically (and a double tap on Add creates one row: a per-job lock,
+and taps made while the worker runs are merged, not overwritten). At most
+3 recordings can be unfinished at once, a new one needs the size cap plus
+100 MB of free disk, and abandoned uploads (48 h) and failed jobs nobody
+retried (14 days) are purged when the app starts. Retried jobs never file a second page: each page carries
 the job id in a "Lecture ID" property, the page id is saved locally right
 after creation, and a retry appends only the blocks still missing.
 
@@ -114,18 +124,23 @@ after creation, and a retry appends only the blocks still missing.
 `/api/tutor` needs the session, accepts only JPEG, PNG or WebP (checked by
 decoding the file, not by its declared type), caps size and pixel count
 (decompression bombs), and re-encodes the image before sending it to
-Claude, which drops EXIF (GPS location, device details). The phone also
+Claude with all metadata cleared, which drops EXIF (GPS location, device
+details), JPEG comments and embedded ICC profiles. The phone also
 re-encodes it while resizing. KaTeX is vendored under `/static` (no
 third-party script), drawn with `katex.render` so the CSP needs no
 `unsafe-inline`; the CSP adds only `font-src 'self'`.
 
 ## Not fixed, on purpose
 
-- **Calendar invites with hostile titles.** Anyone can send Kyle an invite,
-  and its title shows up in `list_calendar_events` results. Treating calendar
-  data like web content would make every move ask for confirmation (a move
-  always starts by listing), which defeats the point. Titles are short, the
-  description field is never sent to Claude, and deletes always ask.
+- **Calendar data from Kyle's own events.** Treating every calendar
+  listing like web content would make every move ask for confirmation (a
+  move always starts by listing), which defeats the point. Instead, only
+  events **organized by someone else** (invites, whose title and location
+  anyone can write) count: a listing that includes one carries
+  `"untrusted_content": true`, and from then on changes in that
+  conversation ask first (`chat.has_marked_results`). The description field
+  is never sent to Claude, and deletes always ask. Notion assignment titles
+  are written only by Kyle and the integration, so they stay trusted.
 - **Voice mode and nearby speech.** Hands-free mode listens continuously
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends

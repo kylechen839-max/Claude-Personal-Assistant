@@ -16,6 +16,8 @@ from assistant.tools.timeutil import (local_zone, parse_datetime, resolve_day,
 
 log = logging.getLogger(__name__)
 
+UNTRUSTED_MARK = "untrusted_content"  # see chat.has_untrusted_content
+
 
 def _is_date(value: str) -> bool:
     """True for a bare YYYY-MM-DD (an all-day value), not a date-time."""
@@ -64,6 +66,8 @@ class GoogleCalendar:
             info.update(date=spoken_date(start), all_day=True)
         if event.get("location"):
             info["location"] = event["location"]
+        if (event.get("organizer") or {}).get("self") is False:
+            info["from_others"] = True  # an invite: its title is someone else's text
         return info
 
     def _when(self, dt: datetime) -> dict:
@@ -82,9 +86,14 @@ class GoogleCalendar:
             timeMax=end.isoformat(), singleEvents=True, orderBy="startTime",
             maxResults=50).execute()
         events = [self._summarize(e) for e in result.get("items", [])]
-        return {"range": spoken_date(first) + (f" plus {days - 1} more days"
-                                               if days > 1 else ""),
-                "count": len(events), "events": events}
+        out = {"range": spoken_date(first) + (f" plus {days - 1} more days"
+                                              if days > 1 else ""),
+               "count": len(events), "events": events}
+        if any(e.get("from_others") for e in events):
+            # Invites from other people: their titles and locations are
+            # untrusted text, so changes this conversation need a yes.
+            out[UNTRUSTED_MARK] = True
+        return out
 
     def create_event(self, title: str, start: str, end: str | None = None,
                      duration_minutes: int = 60, location: str | None = None,

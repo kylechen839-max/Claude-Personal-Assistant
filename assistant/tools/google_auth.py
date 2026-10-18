@@ -38,6 +38,38 @@ SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
 
 
+def write_private(path: str | Path, text: str) -> None:
+    """Write a secret file readable only by its owner (0600 on Linux/Pi),
+    atomically: a temp file, then a rename, so concurrent Calendar and
+    Gmail refreshes never leave a half-written token."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def token_json(creds) -> str:
+    """The credentials as JSON, recording the scopes Google actually
+    granted (a box left unticked on the consent screen means fewer)."""
+    info = json.loads(creds.to_json())
+    granted = getattr(creds, "granted_scopes", None)
+    if isinstance(granted, (list, tuple, set, frozenset)) and granted:
+        info["scopes"] = sorted(granted)
+    return json.dumps(info)
+
+
+def _relax_scope_check() -> None:
+    # Without this, oauthlib aborts the whole sign-in ("Scope has changed")
+    # when one permission is unticked; we record what was granted instead.
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
+
 class MissingScopes(RuntimeError):
     """The saved token was granted fewer scopes than a tool needs."""
 
@@ -106,7 +138,7 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
                            f"{SIGN_IN_COMMAND} again.")
     creds.refresh(Request())
     if not from_env:
-        Path(token_path).write_text(creds.to_json())
+        write_private(token_path, creds.to_json())
     return creds
 
 
@@ -119,10 +151,11 @@ def sign_in(credentials_path="credentials.json", token_path="token.json",
         raise FileNotFoundError(
             f"{credentials_path} not found. Create an OAuth client "
             "(Desktop app) in Google Cloud Console and download it.")
+    _relax_scope_check()
     flow = InstalledAppFlow.from_client_secrets_file(credentials_path, list(scopes))
     creds = flow.run_local_server(port=0, open_browser=open_browser,
                                   prompt="consent")
-    Path(token_path).write_text(creds.to_json())
+    write_private(token_path, token_json(creds))
     return creds
 
 
@@ -136,7 +169,7 @@ def headless_start(credentials_path="credentials.json",
     flow = Flow.from_client_secrets_file(credentials_path, list(scopes),
                                          redirect_uri=HEADLESS_REDIRECT)
     url, state = flow.authorization_url(access_type="offline", prompt="consent")
-    Path(state_path).write_text(json.dumps(
+    write_private(state_path, json.dumps(
         {"state": state, "code_verifier": flow.code_verifier,
          "scopes": list(scopes)}))
     return url
@@ -161,8 +194,9 @@ def headless_finish(redirected_url: str, credentials_path="credentials.json",
                                          redirect_uri=HEADLESS_REDIRECT,
                                          state=saved["state"],
                                          code_verifier=saved["code_verifier"])
+    _relax_scope_check()
     flow.fetch_token(code=query["code"][0])
-    Path(token_path).write_text(flow.credentials.to_json())
+    write_private(token_path, token_json(flow.credentials))
     Path(state_path).unlink(missing_ok=True)
     return flow.credentials
 
