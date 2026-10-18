@@ -315,7 +315,8 @@ espeak-ng if the voice is missing), no "open in browser" tool, and logs go
 to Render's log viewer. Secrets live only in Render's settings, never in the
 image or on its disk. It is on the public internet, so it is hardened
 (SECURITY.md, "Cloud server"): only the login page, `/healthz` and the app
-icon work without the token, and wrong tokens lock the sender out.
+icon work without the token, and wrong tokens slow the sender down and lock
+it out (the right token always works).
 
 Cost: about $25.25 a month: the Standard plan (2 GB RAM, $25) plus a 1 GB
 persistent disk ($0.25/GB). Speech recognition with
