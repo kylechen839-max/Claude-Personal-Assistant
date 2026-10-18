@@ -63,6 +63,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
 | `--check` | Check keys, files, audio devices and models, then exit |
+| `--update` | Update now from the tested `stable` branch, then exit |
 | `--mode web` | Private phone web app (see "Phone web app" below) |
 | `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
 | `--show-token` | Web mode: print the access token to the console once |
@@ -120,10 +121,11 @@ you are most likely to tune:
 | `[wake] vad_min_threshold` | 0.015 | Minimum loudness counted as speech; raise in a noisy room |
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
-| `[wake] mic_device` | "" | Mic index or part of its name (`--check` lists them) |
+| `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
 | `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
+| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested `stable` branch, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
 ### Better voice: Piper
@@ -502,6 +504,134 @@ slow. On a Pi with no screen, set `[web] browser = false`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
 
+## Windows PC as the always-on home host
+
+No Pi needed if the PC stays on (see "Do I need a Pi?" in
+[PI_MIGRATION.md](PI_MIGRATION.md) for the trade-offs). In PowerShell, in the
+project folder:
+
+```powershell
+.\scripts\install_windows_service.ps1             # install and start
+.\scripts\install_windows_service.ps1 -NoWeb      # wake word only, no phone app
+.\scripts\install_windows_service.ps1 -PowerOnly  # just the power check
+.\scripts\install_windows_service.ps1 -Uninstall  # stop and remove
+```
+
+It registers two Task Scheduler tasks under `HeyClaude` (no admin rights
+needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on
+127.0.0.1:8765, the address `tailscale serve` points at; `-Port` changes it).
+They start 20 s after you sign in, run hidden, and are kept running by
+`python -m assistant.host`, which waits for the network, restarts the
+assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
+logs to `logs/host-wake.log` / `logs/host-web.log` (the assistant's own log
+is still `logs/assistant.log`). After a reboot they start when you sign in;
+for no sign-in at all, turn on automatic sign-in for your account.
+
+**Already have a hand-made task for the web app** (e.g. "Hey Claude Web" in
+the Task Scheduler Library, running `python -m assistant --mode web --host
+127.0.0.1 --port 8765`)? The script finds it, shows its command and asks
+before replacing it with `\HeyClaude\Web` (type `y`), so two servers never
+fight over port 8765. Your `tailscale serve` setup keeps working unchanged
+because the port is the same. If you answer no, only the wake-word task is
+installed. If something else holds the port, it says what and skips the web
+task. `-Uninstall` removes only the `HeyClaude` tasks and leaves `tailscale
+serve` and the power settings as they are.
+
+Then it shows the power plan and offers, after you type `y`, to set **never
+sleep** and **never hibernate** when plugged in and to turn off **USB
+selective suspend** (which can power down a USB mic). The display may still
+turn off. The preflight's `power` row warns if sleep comes back (Windows
+updates sometimes reset power plans).
+
+### Automatic updates
+
+Changes reach the PC (and the phone app it serves) or the Pi by themselves
+once you set this in `config.toml`:
+
+```toml
+[update]
+enabled = true
+```
+
+The host supervisor (`python -m assistant.host`, which the `HeyClaude` tasks
+and the Pi's `hey-claude` service run) then checks every `check_minutes`
+(15) for a new commit on the `stable` branch, which only moves after master
+passed CI on every job, so nothing untested arrives. It updates only by
+fast-forward: with local edits to tracked files (other than your
+`config.toml` settings) or local commits it skips the update and logs why,
+and never resets or discards anything. After `git merge --ff-only` it
+installs `requirements.txt` if that changed, checks that the package
+imports and `--check` passes, then restarts the assistant: the web app only
+when no request or voice turn is running (at most ~2 minutes), and only
+counts the update as good once `/healthz` reports the new version. If any
+step fails it goes back to the previous commit (`git reset --keep`), restarts
+that, and won't retry the failed commit. Everything is logged to
+`logs/host-<mode>.log` (failures start with `!!!`); `logs/update-state.json`
+has the last result. The supervisor itself (`assistant/host.py`) keeps running its
+starting version until the task or service restarts (next sign-in or reboot,
+or `systemctl --user restart hey-claude` on the Pi).
+
+`python -m assistant --update` updates right away (it works even with
+`enabled = false`); a running host picks the new code up within a minute.
+The phone page notices the new version through `/healthz` and reloads
+itself once, never in the middle of a turn, a recording or the voice
+conversation.
+
+**Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
+so it never updates: switch to `.\scripts\install_windows_service.ps1`
+(it replaces that task for you, on the same port).
+
+## Preflight: check everything in one pass
+
+```powershell
+.\scripts\preflight.ps1                 # Windows (PowerShell 5.1 or 7)
+```
+```bash
+./scripts/preflight.sh --hardware       # Linux / Raspberry Pi
+```
+
+Each step prints `PASS`, `FAIL`, `WARN` or `SKIP` (with the reason), then a
+table and `GO` (no FAIL; warnings don't block) or `NO-GO`. The full output is saved to
+`logs/preflight-<date>-<time>.txt` (gitignored). Values from `.env` are
+loaded into the preflight's own process only and are masked as `[REDACTED]`
+everywhere, in the console and the report.
+
+| Step | What it checks |
+|---|---|
+| `git` | on `master`, no uncommitted changes (`config.toml` may differ per machine) |
+| `env` | `.env` exists and has `ANTHROPIC_API_KEY` (names only, never values) |
+| `check` | `python -m assistant --check` passes |
+| `pytest`, `pytest-live` | the full suite, then the live read-only Pinecone/Notion/Google tests, which must not skip |
+| `wake-e2e` | `--mode wake --audio-file tests/fixtures/hey_claude_calendar_tomorrow.wav --timings`: a wake, the transcript and a real reply |
+| `text-tools` | text mode answers a calendar and a Notion question, and the log shows both tools were called |
+| `web` | starts `--mode web` on 127.0.0.1, then the web checks below (including a voice-mode WebSocket turn) |
+| `tts-pyttsx3`, `tts-piper` | renders a sentence to a .wav with each engine |
+| `audio-devices`, `mic-level` | with `--hardware` only: lists devices, records 3 s and reports the level |
+| `power` | Windows only: `WARN` if the PC sleeps or hibernates on AC power (that stops the assistant) or USB selective suspend is on |
+
+`--skip pytest,web` skips steps; `--help` lists the options.
+
+**Web smoke check** (after a deploy, or against the Pi):
+
+```powershell
+.\scripts\cloud_smoke.ps1 https://<your-service>.onrender.com
+```
+```bash
+./scripts/cloud_smoke.sh https://<your-service>.onrender.com
+```
+
+It checks `/healthz`, that a protected route refuses a request without a
+session, logs in with the token in the `WEB_TOKEN` environment variable (or
+`WEB_TOKEN` from `.env`; `--token-env` picks another variable), then runs
+one text turn, one audio turn and, where the server has voice conversation
+mode, one voice turn over the `/api/voice` WebSocket. It never prints the
+token. It sends the token only over `https://` (or plain http to this
+machine); `--allow-http` overrides that on a network you trust.
+
+**Moving to a Raspberry Pi:** follow [PI_MIGRATION.md](PI_MIGRATION.md).
+CI's **pi-arm64** job runs `install_pi.sh`, the tests and the preflight on
+Debian Bookworm arm64 with Python 3.11, i.e. a simulated Pi.
+
 ## Project layout
 
 ```
@@ -525,9 +655,16 @@ assistant/
   sentences.py  sentence splitter for streamed speech
   web/          the page: index.html, app.js, app.css, sw.js; voice.js,
                 voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
+  preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
+  smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
+  host.py       home host supervisor: restarts, updates (python -m assistant.host)
+  updater.py    safe update from the stable branch  (--update)
+  version.py    git short SHA for /healthz
   tools/        calendar.py, notion.py, web.py, tool registry
-scripts/        install_pi.sh, install_service.sh  (Raspberry Pi);
-                measure_memory.py, container_smoke.sh (cloud image)
+scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
+                install_windows_service.ps1               (PC as the always-on host)
+                preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
+                measure_memory.py, container_smoke.sh, ws_smoke.py (cloud image)
 Dockerfile      the cloud image; render.yaml deploys it on Render
 deploy/         hey-claude.service                 (systemd user unit)
 tests/          pytest suite (offline; live tests skip without keys)
@@ -537,6 +674,7 @@ tests/          pytest suite (offline; live tests skip without keys)
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)
+.github/workflows/pi-arm64.yml  CI: a simulated Pi (Debian Bookworm arm64, Python 3.11)
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,

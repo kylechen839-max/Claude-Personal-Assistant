@@ -23,7 +23,8 @@ docker run -d --name hc -p $PORT:$PORT --env-file "$WORK/env" \
 for _ in $(seq 1 60); do curl -sf $URL/healthz >/dev/null && break; sleep 1; done
 
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-test "$(curl -sf $URL/healthz)" = ok
+curl -sf $URL/healthz | python3 -c 'import json, sys
+d = json.load(sys.stdin); assert d["ok"] is True and set(d) == {"ok", "version"}, d'
 test "$(status $URL/api/state)" = 401                       # auth required
 test "$(status $URL/silence.wav)" = 401
 test "$(status $URL/)" = 200                                # login page

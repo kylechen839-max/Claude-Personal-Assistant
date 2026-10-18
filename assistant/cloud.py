@@ -5,7 +5,8 @@ on the PC (assistant/webapp.py, which has its own headers, generic errors,
 cross-site and size checks), wrapped in `CloudGuard`, an outer ASGI layer
 for the public internet with no Tailscale in front:
 
-- GET /healthz answers "ok" for the host's health check, and nothing else.
+- GET /healthz answers {"ok": true, "version": <commit>} for the host's
+  health check and the page's reload-after-deploy, and nothing else.
 - Every other route needs the session cookie (or `Authorization: Bearer
   <WEB_TOKEN>`), except the login page and its static files, the login call
   itself, and the PWA manifest and icons. Unknown paths answer 401 too.
@@ -49,7 +50,8 @@ log = logging.getLogger(__name__)
 # Reachable without signing in. "/" is the login page (and, once signed in,
 # the app); its scripts, styles and service worker, and the voice view's
 # open-source VAD files (ONNX Runtime, Silero), hold no secrets.
-PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
+              "/manifest.webmanifest",
               "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
               "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
               "/static/vad/ort.wasm.min.js", "/static/vad/ort-wasm-simd-threaded.mjs",
@@ -296,7 +298,12 @@ class CloudGuard:
         scope = self.scrub(scope)
         path, method = scope["path"], scope["method"]
         if path == HEALTH and method in ("GET", "HEAD"):
-            return await _respond(send, 200, b"ok", "text/plain")
+            # Before any limit. The version lets open pages reload after a
+            # deploy (update-watch.js); nothing else (no "busy": that is for
+            # a supervisor on the same machine, and there is none here).
+            from assistant.version import version
+
+            return await _json(send, 200, {"ok": True, "version": version()})
         ip, proto = self.client(scope)
         extra = {"Strict-Transport-Security": HSTS} if proto == "https" else {}
         if proto == "http":

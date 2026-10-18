@@ -86,7 +86,8 @@ def login(client, token=TOKEN, ip=PUBLIC):
 def test_healthz_is_unauthenticated_and_reveals_nothing(make_cloud):
     _, client = make_cloud()
     r = client.get("/healthz")
-    assert r.status_code == 200 and r.text == "ok"
+    assert r.status_code == 200 and set(r.json()) == {"ok", "version"}  # no "busy"
+    assert r.json()["ok"] is True
     assert "server" not in r.headers and "set-cookie" not in r.headers
     assert r.headers["cache-control"] == "no-store"
     # health checks come over plain http from inside Render: no redirect
@@ -386,7 +387,7 @@ def test_build_app_uses_the_cloud_settings(make_cloud, fake_client):
     assert guard.max_upload_bytes == 4_000_000 and guard.max_body_bytes == 16_384
     assert guard.lockout.per_ip == 5 and guard.limiter.per_minute == 120
     client = TestClient(at(PROXY, guard), base_url="https://testserver")
-    assert client.get("/healthz").text == "ok"
+    assert client.get("/healthz").json()["ok"] is True
 
 
 def test_cli_web_mode_on_a_server_runs_the_cloud_app(monkeypatch, tmp_path,
@@ -577,7 +578,7 @@ def test_slow_uploads_cannot_starve_the_server(make_cloud):
             conn.close()
             return r.status, body
 
-        assert get("/healthz") == (200, b"ok")
+        assert get("/healthz")[0] == 200
         status, page = get("/")
         assert status == 200 and b"</html>" in page  # the whole page
         assert get("/api/state")[0] == 401  # answered, not starved
@@ -586,7 +587,7 @@ def test_slow_uploads_cannot_starve_the_server(make_cloud):
         # and its stalled bodies time out (1 s + 16 KB at 64 KB/s)
         attacker[0].settimeout(5)
         assert b" 408 " in attacker[0].recv(200)
-        assert get("/healthz") == (200, b"ok")
+        assert get("/healthz")[0] == 200
     finally:
         for sock in attacker:
             sock.close()

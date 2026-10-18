@@ -77,7 +77,8 @@ calendar, Notion, Pinecone notes and Anthropic bill. What protects it
 in `tests/test_cloud.py`):
 
 - **One secret to get in.** Every route needs the session cookie except
-  `/healthz` (answers "ok", nothing else), the login page with its script,
+  `/healthz` (answers `{"ok": true, "version": "<commit>"}`, nothing else; the
+  page uses the version to reload after a deploy), the login page with its script,
   style and service worker (static, no data), the login call, and the PWA
   manifest and icons, and the voice view's open-source VAD files (ONNX
   Runtime, Silero model). Unknown paths answer 401 too, so routes can't be
