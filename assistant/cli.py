@@ -382,6 +382,14 @@ def build_memory(config: dict, output_fn=print):
                           text_fields=mem["text_fields"])
 
 
+def add_memory_tools(tools: ToolRegistry, memory) -> None:
+    """Let Claude search memory and save notes on request (memory on only)."""
+    if memory is not None:
+        from assistant.tools.memory_tools import memory_tools
+
+        tools.register(*memory_tools(memory))
+
+
 def text_confirm(input_fn=None):
     return lambda question: is_yes((input_fn or input)(f"{question} (yes/no): "))
 
@@ -471,7 +479,9 @@ def main(argv=None) -> int:
             return webapp.serve(config, host=args.host, port=args.port,
                                 tts_name=tts_name, show_token=args.show_token)
         tools = build_tools(config)
-        chat = build_chat(config, tools, build_memory(config))
+        memory = build_memory(config)
+        add_memory_tools(tools, memory)
+        chat = build_chat(config, tools, memory)
         if args.mode in ("text", "speak"):
             tools.confirm = text_confirm()
             tts = make_tts(tts_name, **tts_cfg) if args.mode == "speak" else None

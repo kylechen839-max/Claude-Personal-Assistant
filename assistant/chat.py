@@ -24,6 +24,14 @@ TOOLS_PROMPT = (
     "reading everything."
 )
 
+MEMORY_PROMPT = (
+    "You have long-term memory: Kyle's Pinecone database (his project notes "
+    "and summaries of past conversations). Relevant notes are looked up "
+    "automatically before each reply; use search_memory to look something up "
+    "on purpose and remember when he asks you to remember something. If "
+    "asked, say you do have access to his Pinecone memory."
+)
+
 WEB_PROMPT = (
     "You can search the web and read web pages. Use them for anything "
     "current or that you aren't sure of: news, weather, sports, prices, "
@@ -75,6 +83,8 @@ class ClaudeChat:
             parts.append(TOOLS_PROMPT)
             if self.tools.has("web_search") or self.tools.has("web_fetch"):
                 parts.append(WEB_PROMPT)
+        if self.memory:
+            parts.append(MEMORY_PROMPT)
         if notes:
             parts.append("Notes from long-term memory that may be relevant "
                          "(use only if they help):\n"
