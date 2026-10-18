@@ -446,7 +446,8 @@ class VoiceConversation:
         try:
             summary = self.backend.end()
             if summary:
-                log.info("Voice conversation saved to memory: %s", summary)
+                log.info("Voice conversation saved to memory (%d chars)", len(summary))
+                log.debug("Voice conversation summary: %s", summary)
         except Exception:
             log.exception("Ending the voice conversation failed")
         self._send({"type": "ended", "reason": reason, "saved": bool(summary)})
@@ -554,7 +555,7 @@ class VoiceConversation:
             try:
                 data = self.synthesize(chunk.text)
             except Exception:
-                log.exception("TTS failed for %r", chunk.text)
+                log.exception("TTS failed for a %d-character sentence", len(chunk.text))
                 continue
             if turn.stop.is_set() and chunk.reply:
                 continue
