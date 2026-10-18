@@ -4,7 +4,9 @@ Used after the cloud deploy, against the Pi, and by the preflight (which
 starts `--mode web` on 127.0.0.1 first). Checks /healthz, that a protected
 route refuses a request without a session, logs in with the token from an
 environment variable (WEB_TOKEN by default; never printed), then runs one
-text turn and one audio turn.
+text turn and one audio turn, plus, where the server has voice
+conversation mode (/api/voice), one hands-free voice turn over the
+WebSocket.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -120,6 +123,84 @@ def judge_turn(events: list[dict], want_transcript: bool) -> tuple[str, str]:
     return "PASS", f"{heard}replied {shorten(reply)!r}"
 
 
+def voice_turn(c: WebClient, wav: Path, timeout: float = 180,
+               connect=None) -> Outcome:
+    """One utterance over the voice WebSocket: expects a transcript, reply
+    text, at least one audio chunk and turn_done, with no error."""
+    import struct
+    from urllib.parse import urlsplit
+
+    import numpy as np
+
+    from assistant import audio
+
+    if connect is None:
+        from websockets.sync.client import connect
+    parts = urlsplit(c.base)
+    url = ("wss" if parts.scheme == "https" else "ws") + "://" + parts.netloc \
+        + parts.path.rstrip("/") + "/api/voice"
+    origin = f"{parts.scheme}://{parts.netloc}"
+    samples = np.clip(audio.load_audio(wav), -1, 1)
+    pcm = (samples * 32767).astype("<i2").tobytes()
+    head = json.dumps({"type": "utterance", "turn": 1,
+                       "sample_rate": 16000}).encode()
+    frame = struct.pack(">I", len(head)) + head + pcm
+    try:
+        ws = connect(url, origin=origin, open_timeout=30,
+                     additional_headers=c._headers())
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            return Outcome("voice turn", "SKIP", "no /api/voice on this server")
+        return Outcome("voice turn", "FAIL", f"handshake failed: {type(e).__name__}: {e}")
+    events, chunks = [], 0
+    try:
+        first = json.loads(ws.recv(timeout=30))
+        if first.get("type") != "ready":
+            return Outcome("voice turn", "FAIL", f"expected ready, got {first.get('type')}")
+        ws.send(frame)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            msg = ws.recv(timeout=max(1.0, deadline - time.monotonic()))
+            if isinstance(msg, bytes):
+                n = struct.unpack(">I", msg[:4])[0]
+                if json.loads(msg[4:4 + n]).get("type") == "audio" and len(msg) > 4 + n:
+                    chunks += 1
+                continue
+            event = json.loads(msg)
+            events.append(event)
+            if event.get("type") in ("turn_done", "ended"):
+                break
+        ws.send(json.dumps({"type": "end"}))
+    except Exception as e:
+        return Outcome("voice turn", "FAIL", f"{type(e).__name__}: {e}")
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+    return Outcome("voice turn", *judge_voice(events, chunks))
+
+
+def judge_voice(events: list[dict], audio_chunks: int) -> tuple[str, str]:
+    kinds = [e.get("type") for e in events]
+    errors = [e.get("message", "") for e in events if e.get("type") == "error"]
+    heard = next((e.get("text", "") for e in events if e.get("type") == "transcript"), "")
+    reply = "".join(e.get("delta", "") for e in events if e.get("type") == "text")
+    if errors:
+        return "FAIL", f"error event: {errors[0]}"
+    if "turn_done" not in kinds:
+        return "FAIL", f"no turn_done (events: {kinds[:8]})"
+    if not heard.strip():
+        return "FAIL", "no transcript"
+    if not reply.strip() or is_error_reply(reply):
+        return "FAIL", f"no usable reply ({reply!r})"
+    if not audio_chunks:
+        return "FAIL", "no audio chunks"
+    return "PASS", (f"heard {heard!r}; replied {shorten(reply, 60)!r}; "
+                    f"{audio_chunks} audio chunk(s)")
+
+
 # What cli.get_reply and the tool loop say when something broke.
 ERROR_REPLIES = (
     "Sorry, I can't reach the internet right now.",
@@ -141,7 +222,7 @@ def shorten(text: str, limit: int = 90) -> str:
 
 def run_smoke(base_url: str, token: str | None, wav: Path = FIXTURE,
               client: WebClient | None = None, health_path: str = "/healthz",
-              voice_ws=None) -> list[Outcome]:
+              voice_ws=voice_turn) -> list[Outcome]:
     """All checks against one base URL; never raises for HTTP problems."""
     import requests
 
@@ -192,7 +273,7 @@ def run_smoke(base_url: str, token: str | None, wav: Path = FIXTURE,
     attempt("text turn", text_turn)
     attempt("audio turn", audio_turn)
     if voice_ws is not None:
-        out.append(voice_ws(c, wav))
+        out.append(voice_ws(c, wav))  # SKIPs itself without /api/voice
     return out
 
 

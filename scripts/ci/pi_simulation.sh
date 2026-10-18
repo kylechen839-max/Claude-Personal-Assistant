@@ -128,8 +128,8 @@ fake=$!
 s=$(date +%s)
 # git: a CI checkout is detached; pytest ran above; text-tools and the live
 # tests need Kyle's Google/Notion accounts. Everything else runs for real:
-# the wake word, Whisper and TTS, and --mode web with a text and an audio
-# turn.
+# the wake word, Whisper and TTS, and --mode web with a text, an audio
+# and a WebSocket voice turn.
 ANTHROPIC_BASE_URL=http://127.0.0.1:8999 \
     ./scripts/preflight.sh --skip git,pytest,pytest-live,text-tools \
     | tee "$OUT/preflight-console.txt"
@@ -138,7 +138,7 @@ kill "$fake"
 cp logs/preflight-*.txt "$OUT/"
 grep -q "^PASS  wake-e2e" "$OUT/preflight-console.txt" || fail "wake-e2e did not pass"
 for row in tts-piper "web: healthz" "web: auth required" "web: login" \
-           "web: text turn" "web: audio turn"; do
+           "web: text turn" "web: audio turn" "web: voice turn"; do
     grep -q "^PASS  $row" "$OUT/preflight-console.txt" || fail "$row did not pass"
 done
 timing total "$t0"

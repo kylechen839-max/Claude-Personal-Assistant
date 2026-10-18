@@ -437,10 +437,11 @@ class FakeHTTP:
         return FakeResponse(200, [e.decode() for e in events])
 
 
-def smoke_with(http, token="t" * 32):
+def smoke_with(http, token="t" * 32, voice_ws=None):
     return {o.name: o for o in smoke.run_smoke(
         "http://pi:8765/", token, preflight.FIXTURE,
-        client=smoke.WebClient("http://pi:8765/", session=http))}
+        client=smoke.WebClient("http://pi:8765/", session=http),
+        voice_ws=voice_ws)}
 
 
 def test_smoke_all_pass():
@@ -451,6 +452,101 @@ def test_smoke_all_pass():
     # the session cookie went back by hand (it's Secure; plain http here)
     turn_headers = [h for m, u, h in http.requests if u.endswith("/api/turn")]
     assert turn_headers and all(h == {"Cookie": "hc_session=abc.def"} for h in turn_headers)
+
+
+def test_smoke_runs_the_voice_check_after_login():
+    seen = []
+
+    def voice(client, wav):
+        seen.append(client.cookie)
+        return smoke.Outcome("voice turn", PASS, "ok")
+
+    got = smoke_with(FakeHTTP("t" * 32), voice_ws=voice)
+    assert got["voice turn"].status == PASS and seen == ["abc.def"]
+
+
+def ws_frame(header, payload=b""):
+    import json
+    import struct
+
+    head = json.dumps(header).encode()
+    return struct.pack(">I", len(head)) + head + payload
+
+
+class FakeSocket:
+    """The server side of /api/voice for one turn."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.sent = []
+
+    def recv(self, timeout=None):
+        return self.replies.pop(0)
+
+    def send(self, data):
+        self.sent.append(data)
+
+    def close(self):
+        self.closed = True
+
+
+GOOD_TURN = ['{"type": "ready", "settings": {}}',
+             '{"type": "transcript", "turn": 1, "text": "Hey Claude, what\'s on my calendar tomorrow?"}',
+             '{"type": "text", "turn": 1, "delta": "Tomorrow you have "}',
+             '{"type": "text", "turn": 1, "delta": "Physics lab."}',
+             ws_frame({"type": "audio", "turn": 1, "index": 0}, b"RIFF....WAVE"),
+             '{"type": "turn_done", "turn": 1, "chunks": 1}']
+
+
+def test_voice_turn_over_the_socket():
+    import json
+    import struct
+
+    sock, opened = FakeSocket(GOOD_TURN), {}
+
+    def connect(url, origin, open_timeout, additional_headers):
+        opened.update(url=url, origin=origin, headers=additional_headers)
+        return sock
+
+    c = smoke.WebClient("https://hey.example.com/")
+    c.cookie = "abc.def"
+    got = smoke.voice_turn(c, preflight.FIXTURE, connect=connect)
+    assert got.status == PASS, got.detail
+    assert "1 audio chunk" in got.detail and "Physics lab" in got.detail
+    assert opened == {"url": "wss://hey.example.com/api/voice",
+                      "origin": "https://hey.example.com",
+                      "headers": {"Cookie": "hc_session=abc.def"}}
+    frame = sock.sent[0]
+    n = struct.unpack(">I", frame[:4])[0]
+    assert json.loads(frame[4:4 + n]) == {"type": "utterance", "turn": 1,
+                                          "sample_rate": 16000}
+    assert len(frame) - 4 - n > 16000 * 2 * 4  # > 4 s of 16 kHz PCM16
+    assert json.loads(sock.sent[-1]) == {"type": "end"}
+
+
+def test_voice_turn_skips_without_the_route():
+    class NotFound(Exception):
+        response = type("R", (), {"status_code": 404})()
+
+    def connect(*a, **k):
+        raise NotFound("404")
+
+    got = smoke.voice_turn(smoke.WebClient("http://pi:8765"), preflight.FIXTURE,
+                           connect=connect)
+    assert got.status == SKIP
+
+
+@pytest.mark.parametrize("events,chunks,why", [
+    ([{"type": "error", "message": "Sorry, something went wrong."}], 0, "error event"),
+    ([{"type": "transcript", "text": "hi"}, {"type": "text", "delta": "Hello."}], 1,
+     "no turn_done"),
+    ([{"type": "transcript", "text": ""}, {"type": "turn_done"}], 0, "no transcript"),
+    ([{"type": "transcript", "text": "hi"}, {"type": "text", "delta": "Hello."},
+      {"type": "turn_done"}], 0, "no audio"),
+])
+def test_judge_voice_failures(events, chunks, why):
+    status, detail = smoke.judge_voice(events, chunks)
+    assert status == FAIL and why in detail
 
 
 def test_smoke_unprotected_route_fails():

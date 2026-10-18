@@ -209,6 +209,47 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
+
+## Voice conversation on the phone (optional, ~12 min)
+In the phone web app, tap **Voice conversation**. Turn the latency panel on
+with the stopwatch button.
+- [ ] First tap: allow the microphone. Ask "What's on my calendar tomorrow?"
+      and then just stop talking.
+  - Should: the orb moves with your voice, pulses briefly, then the answer
+    starts within about 2 seconds of you stopping. The panel says
+    "silero VAD" and shows the times.
+- [ ] Natural turn-taking: have a 4-5 turn conversation without touching the
+      screen, with normal pauses mid-sentence ("Remind me... what's due this
+      week?").
+  - Should: a short thinking pause mid-sentence doesn't cut you off; a real
+    stop does. If it cuts you off, raise `[voice] silence_ms` (e.g. 900).
+- [ ] Interrupt it mid-sentence: ask "Tell me about the history of Rome",
+      and after its first sentence say "Stop, what time is it?"
+  - Should: it goes quiet at once and answers the time. Then ask "What were
+    you saying before?": it knows it was cut off and only what you heard.
+- [ ] Speaker vs. AirPods: ask a long question on the loudspeaker with the
+      phone on a table, and stay silent while it answers. Repeat with
+      AirPods.
+  - Should: it never interrupts itself. If it does on the speaker, set
+    `[voice] vad_threshold = 0.7` and try again; note which one you need.
+- [ ] Noisy room (TV or music on): a couple of turns.
+  - Should: it still notices when you stop; noise alone doesn't start turns.
+    If it keeps hearing the TV, note it (and try `vad_threshold = 0.7`).
+- [ ] Delete by voice: "Add a test event tomorrow at 3", then "Delete the
+      test event tomorrow". When it asks, say "yes".
+  - Should: it deletes it, and "yes" never shows up as its own question.
+    Repeat and say "no": the event stays.
+- [ ] Lock screen / interruption: mid-answer, lock the phone (or take a call
+      / say "Hey Siri"), then come back.
+  - Should: it stops talking, shows "Tap to continue", and carries on with
+    the same conversation after the tap.
+- [ ] Mute, CC and End: tap Mute and talk (nothing happens), unmute; toggle
+      CC; tap End.
+  - Should: End closes the view; `logs/assistant.log` has "Voice conversation
+    saved to memory" (if anything memorable was said).
+- [ ] Leave it open and silent for over 2 minutes.
+  - Should: it ends by itself ("Ended after a quiet stretch").
+
 ---
 
 ## Raspberry Pi (optional, ~15 min)
