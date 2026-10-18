@@ -789,11 +789,29 @@ def test_host_uses_console_python_and_a_log(tmp_path):
     assert host.console_python("/usr/bin/python3") == "/usr/bin/python3"
     assert host.log_path("wake", tmp_path) == tmp_path / "logs" / "host-wake.log"
     assert host.main(["nope"]) == 2
+    assert host.main(["wake", "8765"]) == 2 and host.main(["web", "port"]) == 2
+
+
+def test_host_web_command_keeps_port_8765_on_localhost():
+    """`tailscale serve` on Kyle's PC points at 127.0.0.1:8765."""
+    host = load_host()
+    cmd = host.build_command("web")
+    assert cmd[1:] == ["-m", "assistant", "--mode", "web", "--host", "127.0.0.1",
+                       "--port", "8765"]
+    assert host.build_command("web", "9000")[-1] == "9000"
+    assert host.build_command("wake")[1:] == ["-m", "assistant", "--mode", "wake"]
 
 
 def test_windows_service_script_registers_both_tasks():
     text = (ROOT / "scripts" / "install_windows_service.ps1").read_text(encoding="utf-8")
     assert "windows_host.py" in text and "-AtLogOn" in text
     for needle in ("standby-timeout-ac 0", "hibernate-timeout-ac 0",
-                   preflight.USB_SUSPEND[1], "Read-Host", "-Uninstall"):
+                   preflight.USB_SUSPEND[1], "Read-Host", "-Uninstall",
+                   "'Hey Claude Web'", "$Port = 8765", "Get-NetTCPConnection"):
         assert needle in text, needle
+    # -Uninstall leaves tailscale serve alone
+    uninstall = text[text.index("if ($Uninstall)"):]
+    uninstall = uninstall[:uninstall.index("exit 0")]
+    assert "tailscale serve" in uninstall
+    assert not re.search(r"&\s*tailscale|tailscale(\.exe)?\s+serve\s+(reset|off|--https=\d+\s+off)",
+                         text, re.IGNORECASE)

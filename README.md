@@ -403,13 +403,24 @@ project folder:
 ```
 
 It registers two Task Scheduler tasks under `HeyClaude` (no admin rights
-needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on 127.0.0.1).
+needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on
+127.0.0.1:8765, the address `tailscale serve` points at; `-Port` changes it).
 They start 20 s after you sign in, run hidden, and are kept running by
 `scripts/windows_host.py`, which waits for the network, restarts the
 assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
 logs to `logs/host-wake.log` / `logs/host-web.log` (the assistant's own log
 is still `logs/assistant.log`). After a reboot they start when you sign in;
 for no sign-in at all, turn on automatic sign-in for your account.
+
+**Already have a hand-made task for the web app** (e.g. "Hey Claude Web" in
+the Task Scheduler Library, running `python -m assistant --mode web --host
+127.0.0.1 --port 8765`)? The script finds it, shows its command and asks
+before replacing it with `\HeyClaude\Web` (type `y`), so two servers never
+fight over port 8765. Your `tailscale serve` setup keeps working unchanged
+because the port is the same. If you answer no, only the wake-word task is
+installed. If something else holds the port, it says what and skips the web
+task. `-Uninstall` removes only the `HeyClaude` tasks and leaves `tailscale
+serve` and the power settings as they are.
 
 Then it shows the power plan and offers, after you type `y`, to set **never
 sleep** and **never hibernate** when plugged in and to turn off **USB

@@ -23,6 +23,14 @@ and what has to stay on.
 | Conflicts | while you game or call, the wake word hears your voice chat and game audio (false wakes, or "Hey Claude" mid-call); Discord/Teams noise suppression may change what it hears; turn it off with Task Scheduler -> HeyClaude -> Wake -> Disable | none: its mic is its own | none |
 | Privacy | always-on mic in your PC | always-on mic in a box you control | the mic is on only while the app listens |
 
+**Choosing the PC, coming from a hand-made task:** if Task Scheduler
+already has a "Hey Claude Web" task that runs `--mode web` on
+127.0.0.1:8765, run `.\scripts\install_windows_service.ps1`; it asks before
+replacing that task with `\HeyClaude\Web` on the same port, so `tailscale
+serve` keeps working, and it adds `\HeyClaude\Wake` for the wake word. To
+go back, `-Uninstall` removes only the `HeyClaude` tasks (tailscale serve
+is untouched); re-create your old task by hand if you want it back.
+
 **Rule of thumb:** if the PC is already on most of the day in the room where
 you'd talk to it, start with the PC (it costs nothing extra and takes ten
 minutes), and run the preflight once to check the power settings. If it

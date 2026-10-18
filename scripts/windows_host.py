@@ -4,7 +4,7 @@ Started hidden (pythonw.exe) at logon by the Task Scheduler tasks that
 scripts/install_windows_service.ps1 registers:
 
     pythonw.exe scripts\\windows_host.py wake
-    pythonw.exe scripts\\windows_host.py web
+    pythonw.exe scripts\\windows_host.py web [PORT]    (default 8765)
 
 It waits for the network (up to 2 minutes, like the Pi's systemd unit),
 starts the assistant without a console window, writes its output to
@@ -27,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODES = ("wake", "web")
+DEFAULT_PORT = 8765  # what `tailscale serve` on Kyle's PC points at
 RESTART_DELAY = 10
 BURST, BURST_WINDOW, BURST_PAUSE = 5, 300, 300
 MAX_LOG_BYTES = 5_000_000
@@ -111,16 +112,23 @@ class Supervisor:
                 self.sleep(RESTART_DELAY)
 
 
+def build_command(mode: str, port: str = str(DEFAULT_PORT)) -> list[str]:
+    command = [console_python(), "-m", "assistant", "--mode", mode]
+    if mode == "web":  # this PC only; `tailscale serve` points at this port
+        command += ["--host", "127.0.0.1", "--port", port]
+    return command
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1 or argv[0] not in MODES:
-        print(f"usage: windows_host.py {{{','.join(MODES)}}}", file=sys.stderr)
+    mode = argv[0] if argv else ""
+    port = argv[1] if len(argv) == 2 else str(DEFAULT_PORT)
+    if mode not in MODES or len(argv) > 2 or not port.isdigit() \
+            or (mode == "wake" and len(argv) == 2):
+        print("usage: windows_host.py wake | web [PORT]", file=sys.stderr)
         return 2
-    mode = argv[0]
     os.chdir(ROOT)
-    command = [console_python(), "-m", "assistant", "--mode", mode]
-    if mode == "web":
-        command += ["--host", "127.0.0.1"]
+    command = build_command(mode, port)
     with open(log_path(mode), "a", encoding="utf-8", buffering=1) as log:
         sup = Supervisor(command, log)
         if not wait_for_network():
