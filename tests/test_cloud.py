@@ -127,6 +127,27 @@ def test_signed_in_routes_work_through_the_guard(make_cloud, fake_client):
     assert client.get(audio_url, headers=via_proxy(PUBLIC)).status_code == 200
 
 
+def test_bearer_token_works_and_wrong_ones_count_toward_the_lockout(make_cloud):
+    _, client = make_cloud()
+    ok = {**via_proxy(PUBLIC), "Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/api/state", headers=ok).status_code == 200
+    bad = {**via_proxy(PUBLIC), "Authorization": "Bearer " + "x" * 43}
+    for _ in range(5):
+        assert client.get("/api/state", headers=bad).status_code == 401
+    assert client.get("/api/state", headers=ok).status_code == 429
+    assert login(client).status_code == 429  # same address, same lockout
+
+
+def test_chunked_upload_under_the_cap_reaches_the_app(make_cloud, fake_client):
+    _, client = make_cloud()
+    login(client)
+    fake_client.queue.append(make_response(text_block("Hi.")))
+    body = json.dumps({"text": "hello"}).encode()
+    r = client.post("/api/turn", content=iter([body[:5], body[5:]]), headers={
+        **via_proxy(PUBLIC), "Content-Type": "application/json"})
+    assert r.status_code == 200 and "Hi." in r.text
+
+
 def test_session_cookie_is_secure_httponly_strict(make_cloud):
     _, client = make_cloud()
     cookie = login(client).headers["set-cookie"].lower()

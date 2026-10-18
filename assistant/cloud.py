@@ -1,12 +1,14 @@
 """The phone web app on a public cloud server (ASSISTANT_PROFILE=server).
 
 `python -m assistant --mode web` in the Docker image runs the same app as
-on the PC (assistant/webapp.py), wrapped in `CloudGuard`, an ASGI layer for
-the public internet with no Tailscale in front:
+on the PC (assistant/webapp.py, which has its own headers, generic errors,
+cross-site and size checks), wrapped in `CloudGuard`, an outer ASGI layer
+for the public internet with no Tailscale in front:
 
 - GET /healthz answers "ok" for the host's health check, and nothing else.
-- Every other route needs the session cookie, except the login page and
-  its static files, the login call itself, and the PWA manifest and icons.
+- Every other route needs the session cookie (or `Authorization: Bearer
+  <WEB_TOKEN>`), except the login page and its static files, the login call
+  itself, and the PWA manifest and icons. Unknown paths answer 401 too.
 - Wrong tokens lock out the address they came from (5 per 15 minutes, then
   15 minutes, doubling up to a day), with a global cap across addresses.
   Signed-in phones keep working during a lockout: it only stops new logins.
@@ -47,13 +49,14 @@ HSTS = "max-age=31536000; includeSubDomains"
 
 
 class NeverBlock:
-    """Hands login limiting to CloudGuard (per address): the web app's own
-    limiter is global, so on the internet anyone could lock Kyle out."""
+    """Hands login limiting to CloudGuard, which knows the real client
+    address (the web app runs with trusted_proxy = 0 behind it, so to it
+    every request comes from Render's proxy: one shared address)."""
 
-    def blocked(self) -> bool:
+    def blocked(self, ip: str = "") -> bool:
         return False
 
-    def fail(self) -> None:
+    def fail(self, ip: str = "") -> None:
         pass
 
 
@@ -217,20 +220,35 @@ class CloudGuard:
                                {"Retry-After": "60", **extra})
         public = ((method in ("GET", "HEAD") and path in PUBLIC_GET)
                   or (method == "POST" and path in PUBLIC_POST))
-        if not public and not self.signed_in(scope):
-            return await _json(send, 401, {"error": "not signed in"}, extra)
-        login = method == "POST" and path == "/api/login"
+        bearer = _bearer(scope)
+        login = (method == "POST" and path == "/api/login") or bearer is not None
         if login:
             wait = self.lockout.retry_after(ip)
             if wait:
                 return await _json(send, 429, {"error": "too many attempts; "
                                                "try again later"},
                                    {"Retry-After": str(wait), **extra})
+        if bearer is not None:
+            if not webapp.tokens_match(bearer, self.token):
+                self.lockout.fail(ip)
+                log.warning("Wrong bearer token from %s", ip)
+                return await _json(send, 401, {"error": "not signed in"}, extra)
+            self.lockout.succeed(ip)
+            login = False
+        elif not public and not self.signed_in(scope):
+            return await _json(send, 401, {"error": "not signed in"}, extra)
         limit = (self.max_upload_bytes if path in UPLOAD_PATHS
                  else self.max_body_bytes)
         body, error = await _read_body(scope, receive, limit)
         if error:
             return await _json(send, *error, extra)
+        if method not in ("GET", "HEAD") or body:
+            # the body is complete now: pass it on with its real length
+            # (a chunked upload under the cap is fine)
+            headers = [(k, v) for k, v in scope.get("headers", [])
+                       if k.lower() not in (b"content-length", b"transfer-encoding")]
+            scope = {**scope, "headers": headers + [
+                (b"content-length", str(len(body)).encode())]}
         status = {}
 
         async def send_wrapper(message):
@@ -268,6 +286,11 @@ class CloudGuard:
             return False
         morsel = jar.get(webapp.COOKIE)
         return webapp.read_cookie(self.token, morsel.value if morsel else None) is not None
+
+
+def _bearer(scope) -> str | None:
+    auth = _headers(scope).get("authorization", "")
+    return auth[7:] if auth[:7].lower() == "bearer " else None
 
 
 def _headers(scope) -> dict[str, str]:
@@ -346,9 +369,12 @@ def cloud_token(environ=os.environ) -> str:
 def build_app(config: dict, web_assistant, token: str):
     web, cloud = config["webapp"], config["cloud"]
     max_upload = int(web["max_upload_mb"] * 1_000_000)
+    # trusted_proxy 0: CloudGuard alone decides which forwarded headers count
     app = webapp.create_app(web_assistant, token,
                             allowed_origins=web["allowed_origins"],
-                            max_upload_bytes=max_upload, limiter=NeverBlock())
+                            max_upload_bytes=max_upload,
+                            max_audio_seconds=float(web["max_audio_seconds"]),
+                            trusted_proxy=0, limiter=NeverBlock())
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),

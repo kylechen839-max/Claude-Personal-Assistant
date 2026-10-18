@@ -28,8 +28,37 @@ def fake_client():
         client.calls.append({**kwargs, "messages": list(kwargs.get("messages", []))})
         return client.queue.pop(0)
 
+    class FakeStream:
+        """messages.stream(...): the queued reply, its text in two pieces."""
+
+        def __init__(self, response):
+            self.response = response
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        @property
+        def text_stream(self):
+            for block in self.response.content:
+                if block.type == "text" and block.text:
+                    half = len(block.text) // 2 or 1
+                    yield block.text[:half]
+                    if block.text[half:]:
+                        yield block.text[half:]
+
+        def get_final_message(self):
+            return self.response
+
+    def stream(**kwargs):
+        response = client.messages.create(**kwargs)  # same queue and errors
+        return FakeStream(response)
+
     client.calls = []
     client.messages.create.side_effect = create
+    client.messages.stream.side_effect = stream
     return client
 
 

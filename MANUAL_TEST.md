@@ -181,8 +181,17 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
       right one.
   - Should: "wrong token", then the chat page. Turn Tailscale off on the phone
     and reload: the page doesn't load at all (it's not on the internet).
-- [ ] Add it to the home screen and open it from there.
-  - Should: opens full screen with the Claude mic icon, still signed in.
+- [ ] iPhone install: in Safari, Share -> Add to Home Screen -> Add. Open it
+      from the new "Claude" icon and enter the token once (the home-screen
+      app has its own cookies, so it asks again even if Safari was signed in).
+  - Should: opens full screen (no Safari bars) with the Claude mic icon.
+    Close it, reopen from the icon: still signed in.
+- [ ] Tap the mic in the installed app and allow the microphone.
+  - Should: the orange mic dot in the status bar disappears after each
+    recording. If you tapped "Don't Allow", the page explains how to turn it
+    back on (Settings -> Safari -> Microphone).
+- [ ] Flip the ringer switch to silent and ask something.
+  - Should: the reply is still spoken.
 - [ ] Hold the mic: "What's on my calendar tomorrow?" (allow the mic the first
       time).
   - Should: your words appear, then the answer as text and spoken through the

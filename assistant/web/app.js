@@ -13,6 +13,7 @@ const els = {
 
 let busy = false;
 let confirming = false;
+let live = null;  // the reply bubble that streamed text is going into
 const player = new Audio();
 let audioUnlocked = false;
 
@@ -115,7 +116,13 @@ async function readEvents(res) {
 }
 
 function handleEvent(ev) {
+  if (ev.type !== "delta" && ev.type !== "reply") live = null;
   switch (ev.type) {
+    case "delta":
+      if (!live) { addMessage("claude", ""); live = els.log.lastElementChild; }
+      live.textContent += ev.text;
+      els.log.scrollTop = els.log.scrollHeight;
+      break;
     case "transcript":
       addMessage("me", ev.text || "(nothing heard)");
       setStatus("Thinking…");
@@ -134,7 +141,7 @@ function handleEvent(ev) {
       break;
     case "reply":
       setConfirm(null);
-      addMessage("claude", ev.text);
+      if (live) { live.textContent = ev.text; live = null; } else addMessage("claude", ev.text);
       setStatus("");
       speak(ev.text, ev.audio);
       if (ev.ended) addMessage("note", "Conversation ended.");
@@ -245,7 +252,7 @@ let chunks = [];
 let pressedAt = 0;
 let releaseStops = false;
 let maxTimer = null;
-let streamTimer = null;
+let starting = false;  // waiting for the mic permission / stream
 
 function pickMime() {
   const types = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"];
@@ -259,21 +266,26 @@ function extensionFor(mime) {
   return "webm";
 }
 
-async function getStream() {
-  clearTimeout(streamTimer);
-  if (stream && stream.getTracks().some((t) => t.readyState === "live")) return stream;
-  stream = await navigator.mediaDevices.getUserMedia({
+// Called straight from the button's tap handler (iOS only grants the mic
+// from a user gesture, also in a home-screen app).
+function getStream() {
+  return navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
-  return stream;
 }
 
-function releaseStreamLater() {
-  // Keep the mic open a minute so the next tap doesn't ask again, then let go.
-  clearTimeout(streamTimer);
-  streamTimer = setTimeout(() => {
-    if (stream && !recorder) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-  }, 60000);
+function releaseStream() {
+  // Stop the tracks after every recording so the mic indicator goes away.
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+function micHelp(e) {
+  if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+    return "Microphone access is blocked. On iPhone: Settings → Safari → Microphone → " +
+      "Allow (or in Safari, aA → Website Settings → Microphone), then reopen the app. " +
+      "On Android: tap the lock icon by the address → Permissions → Microphone.";
+  }
+  return `Microphone unavailable: ${(e && (e.message || e.name)) || e}`;
 }
 
 async function startRecording() {
@@ -281,14 +293,19 @@ async function startRecording() {
     addMessage("note", "This browser can't record. It needs HTTPS (see the README's Tailscale steps).");
     return;
   }
-  stopSpeaking();
   let s;
+  starting = true;
   try {
-    s = await getStream();
+    const pending = getStream();  // ask before any await: still inside the tap
+    stopSpeaking();
+    s = await pending;
   } catch (e) {
-    addMessage("note", `Microphone unavailable: ${e.message || e.name}`);
+    addMessage("note", micHelp(e));
     return;
+  } finally {
+    starting = false;
   }
+  stream = s;
   const mime = pickMime();
   chunks = [];
   recorder = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
@@ -299,7 +316,7 @@ async function startRecording() {
     recorder = null;
     els.mic.classList.remove("recording");
     els.micHint.textContent = "Hold to talk, or tap to start and stop";
-    releaseStreamLater();
+    releaseStream();
     if (blob.size < 1000) { setStatus("Too short. Try again."); return; }
     const form = new FormData();
     form.append("audio", blob, `speech.${extensionFor(type)}`);
@@ -323,6 +340,7 @@ els.mic.addEventListener("pointerdown", (e) => {
   if (els.mic.disabled) return;
   unlockAudio();
   if (recorder) { stopRecording(); return; }  // second tap of tap-to-toggle
+  if (starting) { releaseStops = true; return; }
   pressedAt = Date.now();
   releaseStops = false;
   startRecording();
