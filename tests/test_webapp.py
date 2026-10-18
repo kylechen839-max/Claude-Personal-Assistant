@@ -682,7 +682,8 @@ PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/silence.wav", "/healthz",
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
-          "/static/vad/silero_vad_v5.onnx"]
+          "/static/vad/silero_vad_v5.onnx",
+          "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -708,7 +709,9 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
 def test_healthz_says_nothing(make_app):
     _, client = make_app()
     r = client.get("/healthz")
-    assert r.json() == {"ok": True} and "set-cookie" not in r.headers
+    # only the code version (for the page's reload after an update)
+    assert set(r.json()) == {"ok", "version"} and r.json()["ok"] is True
+    assert "set-cookie" not in r.headers
 
 
 def test_cookie_is_long_lived_and_renewed(make_app):

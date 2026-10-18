@@ -42,8 +42,9 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments).strip()
 
 
-def record_push_to_talk(input_fn=input) -> np.ndarray | None:
-    """Record from the default mic between two Enter presses."""
+def record_push_to_talk(input_fn=input, device=None) -> np.ndarray | None:
+    """Record between two Enter presses from `device` (None: the default
+    mic; see audio.resolve_mic_device)."""
     import sounddevice as sd
 
     input_fn("\n[Press Enter to start talking]")
@@ -53,7 +54,7 @@ def record_push_to_talk(input_fn=input) -> np.ndarray | None:
         frames.append(indata.copy())
 
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                        callback=callback):
+                        device=device, callback=callback):
         input_fn("[Recording... press Enter to stop]")
     if not frames:
         return None

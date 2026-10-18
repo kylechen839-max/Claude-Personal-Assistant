@@ -3,21 +3,39 @@
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 from assistant import cli, doctor
 from assistant.config import load_config
 
 SECRET = "sk-ant-very-secret-value"
 
 
-def fake_sd(devices, query_error=None):
+def fake_sd(devices, query_error=None, default_input=None):
+    """Like sounddevice: a list with no arguments; one device's info (with
+    its 'index') for an index or name fragment; kind="input" alone is the
+    default input device."""
     sd = MagicMock()
+    inputs = [i for i, d in enumerate(devices) if d["max_input_channels"] > 0]
+
+    def info(i):
+        return {**devices[i], "index": i}
 
     def query_devices(device=None, kind=None):
-        if device is None:
+        if device is None and kind is None:
             return devices
         if query_error:
             raise query_error
-        return devices[device]
+        if device is None:
+            if not inputs:
+                raise ValueError("no default input device")
+            return info(inputs[0] if default_input is None else default_input)
+        if isinstance(device, int):
+            return info(device)
+        found = [i for i, d in enumerate(devices) if device.lower() in d["name"].lower()]
+        if not found:
+            raise ValueError(f"No input device matching {device!r}")
+        return info(found[0])
 
     sd.query_devices.side_effect = query_devices
     return sd
@@ -161,3 +179,84 @@ def test_cli_check_runs_without_api_key(monkeypatch, tmp_path):
     monkeypatch.setattr(doctor, "run_checks", fake_run_checks)
     assert cli.main(["--check", "--keyword-path", "k.onnx"]) == 0
     assert seen["keyword_path"] == "k.onnx"
+
+
+# ---------- mic_device = 0 is device 0, not "the default" ----------
+
+@pytest.mark.parametrize("value,want", [
+    ("", None), (None, None), ("   ", None), (0, 0), ("0", 0), (" 3 ", 3), (2, 2),
+    ("USB PnP", "USB PnP"), (" USB ", "USB")])
+def test_resolve_mic_device(value, want):
+    from assistant.audio import resolve_mic_device
+
+    assert resolve_mic_device(value) == want
+
+
+# Device 0 is an input that is NOT the default (the default is index 2).
+MICS = [{"name": "Front Mic", "max_input_channels": 2, "max_output_channels": 0},
+        {"name": "Speakers", "max_input_channels": 0, "max_output_channels": 2},
+        {"name": "Headset Mic", "max_input_channels": 1, "max_output_channels": 0}]
+
+
+@pytest.mark.parametrize("mic", [0, "0"])
+def test_check_mic_index_zero(tmp_path, mic):
+    checks = doctor.check_audio_devices(config(tmp_path, mic_device=mic),
+                                        fake_sd(MICS, default_input=2))
+    assert checks[-1].ok and checks[-1].detail == f"{mic!r} -> [0] Front Mic"
+
+
+def test_check_names_the_default_mic(tmp_path):
+    checks = doctor.check_audio_devices(config(tmp_path),
+                                        fake_sd(MICS, default_input=2))
+    assert checks[-1].name == "Mic that will open"
+    assert checks[-1].detail.startswith("[2] Headset Mic (the default")
+
+
+def test_check_fails_when_another_device_would_open(tmp_path):
+    sd = fake_sd(MICS)
+    sd.query_devices.side_effect = lambda device=None, kind=None: (
+        MICS if device is None and kind is None else {**MICS[2], "index": 2})
+    checks = doctor.check_audio_devices(config(tmp_path, mic_device=0), sd)
+    assert not checks[-1].ok and "asked for index 0" in checks[-1].detail
+
+
+def test_wake_mode_opens_device_zero(monkeypatch):
+    """The bug: `device or None` turned index 0 into the default mic."""
+    from types import SimpleNamespace
+
+    from assistant import cli, wakeword
+
+    opened = {}
+    monkeypatch.setattr(wakeword, "make_detector", lambda **_: SimpleNamespace(
+        frame_length=1280, phrase="hey claude", process=lambda f: False))
+    monkeypatch.setattr(wakeword, "MicSource",
+                        lambda frame_length, device=None: opened.setdefault("device", device))
+    cfg = load_config(None, None)
+    for value, want in ((0, 0), ("0", 0), ("", None), ("USB", "USB")):
+        opened.clear()
+        cfg["wake"]["mic_device"] = value
+        cli.build_wake_components(cli.parse_args([]), cfg)
+        assert opened["device"] == want, value
+
+
+def test_push_to_talk_uses_the_configured_mic(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from assistant import stt
+
+    seen = {}
+
+    class Stream:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(InputStream=Stream))
+    assert stt.record_push_to_talk(input_fn=lambda prompt: "", device=0) is None
+    assert seen["device"] == 0
