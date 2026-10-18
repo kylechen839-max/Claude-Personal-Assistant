@@ -30,6 +30,7 @@
 
         .\scripts\install_windows_service.ps1              # install and start
         .\scripts\install_windows_service.ps1 -NoWeb       # wake word only
+        .\scripts\install_windows_service.ps1 -NoWake      # phone web app only
         .\scripts\install_windows_service.ps1 -PowerOnly   # only the power check
         .\scripts\install_windows_service.ps1 -Uninstall   # stop and remove the tasks
 #>
@@ -38,6 +39,7 @@
 [CmdletBinding()]
 param(
     [switch]$NoWeb,
+    [switch]$NoWake,
     [ValidateRange(1, 65535)]
     [int]$Port = 8765,
     [switch]$PowerOnly,
@@ -294,7 +296,9 @@ if (-not $PowerOnly) {
 
     Write-Host '== Stopping any running copy started by this script =='
     Unregister-HostTask
-    Register-HostTask -Name 'Wake' -Mode 'wake' -Description 'Hey Claude: always-listening wake word (python -m assistant --mode wake)'
+    if (-not $NoWake) {
+        Register-HostTask -Name 'Wake' -Mode 'wake' -Description 'Hey Claude: always-listening wake word (python -m assistant --mode wake)'
+    }
     if ($hasWeb -and -not $NoWeb) {
         if ((Resolve-LegacyWebTask) -and (Test-PortFree)) {
             Register-HostTask -Name 'Web' -Mode 'web' -Extra "$Port" `

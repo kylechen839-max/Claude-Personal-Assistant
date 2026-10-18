@@ -492,8 +492,41 @@ itself once, never in the middle of a turn, a recording or the voice
 conversation.
 
 **Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
-so it never updates: switch to `.\scripts\install_windows_service.ps1`
-(it replaces that task for you, on the same port).
+so it never updates. Switch with this, in PowerShell (5.1 or 7):
+
+```powershell
+cd C:\Users\kylec\Claude-Personal-Assistant
+# 1. Up to date: no changes except config.toml in `git status`, then
+git status --short
+git checkout master
+git pull --ff-only
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 2. Turn on automatic updates ([update] enabled = true in config.toml;
+#    written as UTF-8 without a BOM, which the TOML reader needs)
+$cfg = Join-Path (Get-Location) 'config.toml'
+$text = [IO.File]::ReadAllText($cfg)
+$text = $text -replace '(?m)^enabled = false(\s+# true: follow the tested)', 'enabled = true $1'
+[IO.File]::WriteAllText($cfg, $text, (New-Object Text.UTF8Encoding $false))
+Select-String -Path config.toml -Pattern '^\[update\]' -Context 0,2   # shows enabled = true
+
+# 3. Replace the "Hey Claude Web" task (answer y), then the power check
+#    (answer y to stay awake when plugged in). Add -NoWake to install only
+#    the phone web app, without the always-listening wake word.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_windows_service.ps1
+
+# 4. Check: both tasks Running, the web app answers with its version
+Get-ScheduledTask -TaskPath '\HeyClaude\' | Format-Table TaskName, State
+Start-Sleep -Seconds 40
+Invoke-RestMethod http://127.0.0.1:8765/healthz        # ok: True, version: <sha>
+Get-Content logs\host-web.log -Tail 5
+.\.venv\Scripts\python.exe -m assistant --update       # "update up-to-date" (or updated)
+```
+
+The phone keeps working throughout, apart from a few seconds while the web
+app restarts on the same `127.0.0.1:8765` (`tailscale serve` is untouched).
+To undo: `.\scripts\install_windows_service.ps1 -Uninstall`, then
+re-create the old task by hand.
 
 ## Preflight: check everything in one pass
 
