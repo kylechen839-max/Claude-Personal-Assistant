@@ -51,11 +51,13 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Iterable, Protocol
+from typing import TYPE_CHECKING, Iterable, Protocol
 from urllib.parse import parse_qs
 
 from assistant.failover import ROLES
-from assistant.failover.peers import Backend
+
+if TYPE_CHECKING:
+    from assistant.failover.peers import Backend
 
 log = logging.getLogger(__name__)
 

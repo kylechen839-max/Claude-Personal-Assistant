@@ -9,6 +9,7 @@ from assistant.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZE
                                      EdgeMiddleware, connect_src)
 from assistant.failover.peers import parse_backends
 from assistant.failover.tokens import LEEWAY, TokenAuthority, bearer_of
+from assistant.failover.sync import MemoryEventLog, make_sync_app, new_event
 from tests.asgi_harness import request, websocket
 
 SECRET = "s" * 43
@@ -439,3 +440,31 @@ def test_backend_urls_validated():
     with pytest.raises(ValueError):
         parse_backends([{"role": "pi", "url": PI + "/app"}])
     assert parse_backends([{"role": "pi", "url": "https://PI.tail1234.ts.net/"}])[0].url == PI
+
+
+# --- the sync endpoints behind the middleware ---------------------------------
+
+def test_sync_app_behind_edge_middleware():
+    store = MemoryEventLog()
+    authority = TokenAuthority(SECRET)
+
+    async def nothing(scope, receive, send):
+        raise AssertionError("not reached")
+
+    app = EdgeMiddleware(nothing, authority=authority, role="cloud",
+                         app_origins=["https://hc.onrender.com"],
+                         routes={"/api/sync/": make_sync_app(store)})
+    token, _ = authority.mint("sync", sid="pi")
+    ev = new_event("message", "c", {"text": "x"}, origin="pi")
+    hdr = {"authorization": f"Bearer {token}"}
+    r = request(app, "POST", "https://hc/api/sync/events", hdr, {"events": [ev.to_json()]})
+    assert r.status == 200 and r.json()["accepted"] == 1
+    r = request(app, "GET", "https://hc/api/sync/events?after=0", hdr)
+    assert r.json()["events"] == [ev.to_json()] and r.json()["log"] == store.log_id
+    app_token, _ = authority.mint("app")
+    r = request(app, "GET", "https://hc/api/sync/events",
+                {"authorization": f"Bearer {app_token}"})
+    assert r.status == 401
+    # and the bare app refuses calls that skipped the middleware
+    r = request(make_sync_app(store), "GET", "https://hc/api/sync/events")
+    assert r.status == 401

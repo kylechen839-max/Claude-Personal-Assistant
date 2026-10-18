@@ -7,16 +7,14 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from assistant.failover.edge import EdgeMiddleware
 from assistant.failover.peers import Backend
 from assistant.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, covered_by,
                                      default_peers,
                                      fingerprint, handle_pull, handle_push,
-                                     make_sync_app, materialize, new_event, new_id,
+                                     materialize, new_event, new_id,
                                      parse_event)
 from assistant.failover.tokens import TokenAuthority, bearer_of
 from assistant.failover.eventlog import SqliteEventLog
-from tests.asgi_harness import request
 
 make_store = MemoryEventLog
 
@@ -282,32 +280,6 @@ def test_wrong_token_refused():
     stores["pi"].append([new_event("message", "c", {}, origin="pi")])
     assert other.sync_all()["cloud"].startswith("failed")
     assert stores["cloud"].all() == []
-
-
-def test_sync_app_behind_edge_middleware():
-    store = make_store()
-    authority = TokenAuthority(SECRET)
-
-    async def nothing(scope, receive, send):
-        raise AssertionError("not reached")
-
-    app = EdgeMiddleware(nothing, authority=authority, role="cloud",
-                         app_origins=[URLS["cloud"]],
-                         routes={"/api/sync/": make_sync_app(store)})
-    token, _ = authority.mint("sync", sid="pi")
-    ev = new_event("message", "c", {"text": "x"}, origin="pi")
-    hdr = {"authorization": f"Bearer {token}"}
-    r = request(app, "POST", "https://hc/api/sync/events", hdr, {"events": [ev.to_json()]})
-    assert r.status == 200 and r.json()["accepted"] == 1
-    r = request(app, "GET", "https://hc/api/sync/events?after=0", hdr)
-    assert r.json()["events"] == [ev.to_json()] and r.json()["log"] == store.log_id
-    app_token, _ = authority.mint("app")
-    r = request(app, "GET", "https://hc/api/sync/events",
-                {"authorization": f"Bearer {app_token}"})
-    assert r.status == 401
-    # and the bare app refuses calls that skipped the middleware
-    r = request(make_sync_app(store), "GET", "https://hc/api/sync/events")
-    assert r.status == 401
 
 
 # --- convergence (property-style: many random histories) -------------------------
