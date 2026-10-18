@@ -196,17 +196,47 @@ HTTPS address that only your own devices can open:
    tailscale serve status    # shows https://<pc-name>.<tailnet>.ts.net
    ```
 4. On the phone (Tailscale on), open that `https://...ts.net` address, paste
-   the token, and allow the microphone. Add it to the home screen (Safari:
-   Share -> Add to Home Screen; Chrome: menu -> Add to Home screen).
+   the token, and allow the microphone. Add it to the home screen (see
+   below; on Android, Chrome menu -> Add to Home screen).
+
+### Install on iPhone
+
+1. Install the Tailscale app on the iPhone and sign in to the same account
+   as the PC (leave it connected).
+2. Open the `https://<pc-name>.<tailnet>.ts.net` address in **Safari**.
+3. Share -> **Add to Home Screen** -> Add. A "Claude" icon appears.
+4. Open it **from the icon** and enter the token once. The home-screen app
+   keeps its own cookies, separate from Safari, so sign in inside the app
+   even if you already did in Safari. It stays signed in for 90 days, renewed
+   each time you use it.
+5. Tap the mic and allow the microphone. If you said no by mistake: Settings
+   -> Safari -> Microphone -> Allow (or in Safari, aA -> Website Settings ->
+   Microphone), then reopen the app.
+
+Replies play through the phone's speaker even with the ringer switch on
+silent. The app shell (page, script, icons) is cached so it opens quickly;
+conversations and audio are never cached.
 
 `tailscale serve reset` stops publishing it. To sign a phone out everywhere,
 delete `WEB_TOKEN` from `.env` and restart: a new token is created and old
 cookies stop working. Settings live in `config.toml` `[webapp]`: `port`
 (8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
-(10), and `allowed_origins` (only needed if a proxy other than Tailscale
-rewrites the Host header). Keep `host` at "127.0.0.1"; `--check` reports
-whether the token is set. On the Pi it is the same: install Tailscale there
-and run the same two commands.
+(10), `max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
+other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
+`--check` reports whether the token is set. On the Pi it is the same: install
+Tailscale there and run the same two commands.
+
+**On a public server** (e.g. Render, behind its HTTPS proxy): set `WEB_TOKEN`
+as a secret in the host's environment (the app refuses to listen on anything
+but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
+trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers, and
+run `python -m assistant --mode web --host 0.0.0.0` (it reads `PORT` from the
+environment). With a trusted proxy, plain-http requests are redirected to
+https and HSTS is sent. Five wrong tokens from one address lock that address
+out for 15 minutes; 50 from everyone together lock new sign-ins for 15
+minutes (signed-in phones keep working). `GET /healthz` answers `{"ok":
+true}` without signing in. Scripts can send `Authorization: Bearer
+<WEB_TOKEN>` instead of the cookie.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 

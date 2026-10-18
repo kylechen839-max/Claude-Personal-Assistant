@@ -15,7 +15,18 @@ response carries the rest of the turn.
 
 Privacy: binds to 127.0.0.1; every API call needs the session cookie, which
 is only given for the WEB_TOKEN from .env (generated on first run, never
-logged). Reach it from the phone through `tailscale serve` (see README).
+logged). Reach it from the phone through `tailscale serve` (see README). It
+is also hardened for a public server behind a TLS proxy (`trusted_proxy`):
+per-address and global login lockouts, upload size/length limits, generic
+errors, strict headers, and an unauthenticated /healthz that says nothing.
+
+Reusable pieces (for other routes, e.g. a WebSocket voice mode):
+  WebAssistant.transcribe_upload(bytes) -> text
+  WebAssistant.chat_stream(session, text, cancel) -> iterator of text deltas
+  WebAssistant.synthesize(text) -> WAV bytes
+  app.state.web.session_for(connection) -> Session | None (HTTP or WebSocket)
+  app.state.web.cross_origin(connection) -> bool
+  require_session (FastAPI dependency; 401, or close 1008 on a WebSocket)
 """
 
 import hashlib
@@ -41,6 +52,7 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 import numpy as np
+from starlette.requests import HTTPConnection
 
 from assistant import audio
 from assistant.tools import ToolRegistry
@@ -49,7 +61,7 @@ log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).resolve().parent / "web"
 COOKIE = "hc_session"
-COOKIE_MAX_AGE = 30 * 24 * 3600
+COOKIE_MAX_AGE = 90 * 24 * 3600  # renewed on every authenticated API call
 TOKEN_ENV = "WEB_TOKEN"
 MIN_TOKEN_LENGTH = 32
 # Tools that act on the PC itself make no sense from the phone.
@@ -122,32 +134,84 @@ def read_cookie(token: str, value: str | None) -> str | None:
 
 
 class LoginLimiter:
-    """At most `max_failures` wrong tokens per `window` seconds, in total.
+    """Wrong-token limits: per client address and in total.
 
-    Behind `tailscale serve` every request comes from 127.0.0.1, so a
-    per-address limit would mean nothing; one global limit is simpler."""
+    An address with `per_ip` failures within `window` seconds is locked out
+    for `lockout` seconds; `global_max` failures from everyone together lock
+    every new sign-in out for `lockout` seconds (already signed-in browsers
+    keep working). Behind `tailscale serve` all requests share one address,
+    so there the per-address limit is effectively global too."""
 
-    def __init__(self, max_failures: int = 5, window: float = 300,
+    def __init__(self, per_ip: int = 5, global_max: int = 50,
+                 window: float = 900, lockout: float = 900,
                  clock=time.monotonic):
-        self.max_failures = max_failures
+        self.per_ip = per_ip
+        self.global_max = global_max
         self.window = window
+        self.lockout = lockout
         self.clock = clock
-        self.failures: deque[float] = deque()
+        self.failures: dict[str, deque] = {}
+        self.all_failures: deque = deque()
+        self.locked_until: dict[str, float] = {}
         self.lock = threading.Lock()
 
-    def _prune(self) -> None:
-        cutoff = self.clock() - self.window
-        while self.failures and self.failures[0] <= cutoff:
-            self.failures.popleft()
+    def _prune(self, q: deque, now: float) -> None:
+        while q and q[0] <= now - self.window:
+            q.popleft()
 
-    def blocked(self) -> bool:
+    def blocked(self, ip: str = "") -> bool:
+        now = self.clock()
         with self.lock:
-            self._prune()
-            return len(self.failures) >= self.max_failures
+            return (self.locked_until.get(ip, 0) > now
+                    or self.locked_until.get("*", 0) > now)
 
-    def fail(self) -> None:
+    def fail(self, ip: str = "") -> None:
+        now = self.clock()
         with self.lock:
-            self.failures.append(self.clock())
+            q = self.failures.setdefault(ip, deque())
+            q.append(now)
+            self.all_failures.append(now)
+            self._prune(q, now)
+            self._prune(self.all_failures, now)
+            if len(q) >= self.per_ip:
+                self.locked_until[ip] = now + self.lockout
+                log.warning("Web sign-in locked for one address after %d "
+                            "wrong tokens", len(q))
+            if len(self.all_failures) >= self.global_max:
+                self.locked_until["*"] = now + self.lockout
+                log.warning("Web sign-in locked for everyone after %d wrong "
+                            "tokens", len(self.all_failures))
+            if len(self.failures) > 10_000:  # bound memory under a flood
+                for key in [k for k, v in self.failures.items()
+                            if not v or v[-1] <= now - self.window]:
+                    self.failures.pop(key, None)
+
+
+def parse_trusted_proxy(value) -> int:
+    """`trusted_proxy` / TRUSTED_PROXY: how many proxies in front of us add
+    X-Forwarded-* headers (0 = trust none; true/"yes" = 1)."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return max(0, value)
+    text = str(value or "").strip().lower()
+    if text in ("", "0", "false", "no", "off"):
+        return 0
+    if text in ("true", "yes", "on"):
+        return 1
+    return max(0, int(text))
+
+
+def client_ip(conn, trusted_proxy: int = 0) -> str:
+    """The caller's address. X-Forwarded-For is used only behind a trusted
+    proxy, and then the entry that proxy added (counting from the right),
+    since anything further left can be forged by the client."""
+    if trusted_proxy:
+        hops = [h.strip() for h in conn.headers.get("x-forwarded-for", "").split(",")
+                if h.strip()]
+        if hops:
+            return hops[-min(trusted_proxy, len(hops))]
+    return conn.client.host if conn.client else ""
 
 
 # --- request origin -----------------------------------------------------------
@@ -186,30 +250,43 @@ def is_loopback(host: str) -> bool:
 
 # --- uploaded audio -----------------------------------------------------------
 
-def decode_upload(data: bytes) -> np.ndarray:
+class AudioTooLong(ValueError):
+    pass
+
+
+def decode_upload(data: bytes, max_seconds: float | None = None) -> np.ndarray:
     """Any recording a browser makes (WAV, WebM/Opus, MP4/AAC from iOS) as
     16 kHz mono float32. Non-WAV goes through PyAV (installed with
-    faster-whisper, FFmpeg built in)."""
+    faster-whisper, FFmpeg built in). Raises AudioTooLong past `max_seconds`
+    (checked while decoding, so a tiny file can't expand into hours)."""
+    limit = int(max_seconds * audio.SAMPLE_RATE) if max_seconds else None
     if not data:
         return np.zeros(0, dtype=np.float32)
     if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
         try:
             samples, sr = audio.read_wav(io.BytesIO(data))
-            return audio.resample(samples, sr)
         except Exception:  # e.g. float WAV: let PyAV try
-            pass
+            samples = None
+        if samples is not None:
+            if limit and len(samples) > max_seconds * sr:
+                raise AudioTooLong("recording too long")
+            return audio.resample(samples, sr)
     import av  # faster-whisper's own decode_audio breaks on newer PyAV
 
     resampler = av.AudioResampler(format="s16", layout="mono",
                                   rate=audio.SAMPLE_RATE)
-    parts = []
+    parts, total = [], 0
     with av.open(io.BytesIO(data), mode="r") as container:
         stream = next((s for s in container.streams if s.type == "audio"), None)
         if stream is None:
             raise ValueError("no audio in the upload")
         for frame in container.decode(stream):
             frame.pts = None  # avoid resampler timestamp errors on odd files
-            parts.extend(r.to_ndarray().reshape(-1) for r in resampler.resample(frame))
+            for r in resampler.resample(frame):
+                parts.append(r.to_ndarray().reshape(-1))
+                total += len(parts[-1])
+            if limit and total > limit:
+                raise AudioTooLong("recording too long")
         parts.extend(r.to_ndarray().reshape(-1) for r in resampler.resample(None))
     if not parts:
         return np.zeros(0, dtype=np.float32)
@@ -447,7 +524,9 @@ class WebAssistant:
                 s.chat.end_conversation()
                 self._reply(s, "Goodbye!", ended=True)
                 return
-            reply = get_reply(s.chat, text, output_fn=lambda m: None)  # it logs
+            reply = get_reply(  # it logs errors itself
+                s.chat, text, output_fn=lambda m: None,
+                on_text=lambda d: s.events.put({"type": "delta", "text": d}))
             log.info("Web replied: %r", reply)
             self._reply(s, reply)
         except Exception:
@@ -502,10 +581,58 @@ class WebAssistant:
             if event["type"] in ("done", "confirm"):
                 return
 
+    def chat_stream(self, s: Session, text: str,
+                    cancel: threading.Event | None = None):
+        """Ask Claude in this session's conversation and yield the reply's
+        text deltas as they arrive. Setting `cancel` stops it (barge-in);
+        what was said so far stays in the conversation. Tool calls and
+        confirmations work as in a normal turn (a confirmation is answered
+        with `answer()`). Raises RuntimeError if a turn is already running."""
+        from assistant.cli import get_reply
+
+        if not s.busy.acquire(timeout=2):
+            raise RuntimeError("a turn is already running in this session")
+        deltas: queue.Queue = queue.Queue()
+        end = object()
+
+        def on_text(delta):
+            streamed.append(delta)
+            deltas.put(delta)
+
+        def run():
+            try:
+                reply = get_reply(s.chat, text, output_fn=lambda m: None,
+                                  on_text=on_text, cancel=cancel)
+                if not streamed and reply:  # an error sentence
+                    deltas.put(reply)
+            finally:
+                s.last_active = self.clock()
+                s.busy.release()
+                deltas.put(end)
+
+        streamed = []
+        s.last_active = self.clock()
+        threading.Thread(target=run, name=f"web-stream-{s.sid[:6]}",
+                         daemon=True).start()
+        while True:
+            item = deltas.get()
+            if item is end:
+                return
+            if cancel is None or not cancel.is_set():  # nothing after a barge-in
+                yield item
+
     # speech
     def transcribe(self, recording: np.ndarray) -> str:
         with self._stt_lock:
             return self.transcriber.transcribe(recording)
+
+    def transcribe_upload(self, data: bytes, max_seconds: float | None = 60) -> str:
+        """A browser recording (any format) to text."""
+        return self.transcribe(decode_upload(data, max_seconds))
+
+    def synthesize(self, text: str) -> bytes:
+        """`text` spoken by the configured TTS engine, as WAV bytes."""
+        return self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
 
     def remember(self, text: str) -> str:
         rid = f"{next(self._ids)}-{secrets.token_urlsafe(6)}"
@@ -522,7 +649,7 @@ class WebAssistant:
             text = self.replies.get(rid)
         if text is None:
             return None
-        data = self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
+        data = self.synthesize(text)
         with self.lock:
             self.audio_cache[rid] = data
             while len(self.audio_cache) > 10:
@@ -553,18 +680,83 @@ def render_wav(tts, text: str, attempts: int = 3) -> bytes:
 
 # --- HTTP ---------------------------------------------------------------------
 
+def tokens_match(given: str, token: str) -> bool:
+    """Constant-time comparison (hashing first hides the length too)."""
+    return hmac.compare_digest(hashlib.sha256(given.strip().encode()).digest(),
+                               hashlib.sha256(token.encode()).digest())
+
+
+class WebAuth:
+    """Who is calling: works for HTTP requests and WebSockets alike
+    (anything with .cookies and .headers). Kept on app.state.web.
+
+    Browsers use the session cookie. Other clients (scripts, a native
+    shortcut) may send `Authorization: Bearer <WEB_TOKEN>` instead; they
+    share one conversation, and wrong tokens count toward the lockouts."""
+
+    def __init__(self, assistant: WebAssistant, token: str, allowed_origins=(),
+                 trusted_proxy: int = 0, limiter: "LoginLimiter | None" = None):
+        self.assistant = assistant
+        self.token = token
+        self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
+        self.trusted_proxy = trusted_proxy
+        self.limiter = limiter or LoginLimiter()
+        self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
+
+    def sid(self, conn) -> str | None:
+        auth = conn.headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            ip = self.client_ip(conn)
+            if self.limiter.blocked(ip):
+                return None
+            if tokens_match(auth[7:], self.token):
+                return self.bearer_sid
+            self.limiter.fail(ip)
+            log.warning("Web request with a wrong bearer token")
+            return None
+        return read_cookie(self.token, conn.cookies.get(COOKIE))
+
+    def session_for(self, conn) -> Session | None:
+        sid = self.sid(conn)
+        return self.assistant.session(sid) if sid else None
+
+    def cross_origin(self, conn) -> bool:
+        return is_cross_origin(conn.headers, self.allowed_origins)
+
+    def client_ip(self, conn) -> str:
+        return client_ip(conn, self.trusted_proxy)
+
+
+def require_session(conn: HTTPConnection):
+    """FastAPI dependency: the caller's Session, or 401 (HTTP) / close with
+    1008 (WebSocket) if not signed in or from another site. Use as
+    `session: Session = Depends(require_session)` on HTTP or WebSocket routes."""
+    from fastapi import HTTPException, WebSocketException
+
+    web: WebAuth = conn.app.state.web
+    session = None if web.cross_origin(conn) else web.session_for(conn)
+    if session is None:
+        if conn.scope["type"] == "websocket":
+            raise WebSocketException(code=1008)
+        raise HTTPException(401, "not signed in")
+    return session
+
+
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
-               max_upload_bytes: int = 10_000_000,
+               max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
+               max_text_chars: int = 4000, trusted_proxy: int = 0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30):
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
-    from fastapi.responses import (FileResponse, JSONResponse, Response,
-                                   StreamingResponse)
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
+                                   Response, StreamingResponse)
     from starlette.concurrency import run_in_threadpool
 
     limiter = limiter or LoginLimiter()
-    allowed = tuple(o.rstrip("/") for o in allowed_origins)
+    web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -587,29 +779,60 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None,
                   openapi_url=None)
+    app.state.web = web
+
+    def error(message: str, status: int):
+        return JSONResponse({"error": message}, status)
+
+    # Generic errors only: no stack traces or validation details.
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request, exc):
+        messages = {401: "not signed in", 404: "not found",
+                    405: "not allowed", 413: "too large"}
+        return error(messages.get(exc.status_code, "request failed"),
+                     exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def bad_request(request, exc):
+        return error("bad request", 400)
+
+    @app.exception_handler(Exception)
+    async def crash(request, exc):
+        log.exception("Unhandled error in %s %s", request.method, request.url.path)
+        return error("something went wrong", 500)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        path = request.url.path
+        api = path.startswith("/api/")
         unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
-        if (unsafe or request.url.path.startswith("/api/")) and \
-                is_cross_origin(request.headers, allowed):
-            log.warning("Rejected cross-origin %s %s", request.method,
-                        request.url.path)
-            response = JSONResponse({"error": "cross-origin request"}, 403)
+        length = request.headers.get("content-length")
+        if trusted_proxy and request.headers.get("x-forwarded-proto") == "http":
+            url = request.url.replace(scheme="https", port=None)
+            if request.headers.get("x-forwarded-host"):
+                url = url.replace(netloc=request.headers["x-forwarded-host"])
+            response = RedirectResponse(str(url), 308)
+        elif (unsafe or api) and web.cross_origin(request):
+            log.warning("Rejected cross-origin %s %s", request.method, path)
+            response = error("cross-origin request", 403)
+        elif unsafe and length is None:
+            response = error("length required", 411)
+        elif length is not None and (not length.isdigit()
+                                     or int(length) > max_upload_bytes):
+            response = error("too large", 413)
         else:
             response = await call_next(request)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
-        if request.url.path.startswith("/api/"):
+        if trusted_proxy:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000")
+        if api:
             response.headers["Cache-Control"] = "no-store"
+            sid = None if "authorization" in request.headers else web.sid(request)
+            if sid and "set-cookie" not in response.headers:
+                set_session_cookie(response, token, sid)  # keep it fresh
         return response
-
-    def session_of(request: Request) -> Session | None:
-        sid = read_cookie(token, request.cookies.get(COOKIE))
-        return assistant.session(sid) if sid else None
-
-    def unauthorized():
-        return JSONResponse({"error": "not signed in"}, 401)
 
     def stream(s: Session):
         def lines():
@@ -619,49 +842,58 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                                  headers={"X-Accel-Buffering": "no"})
 
     async def read_upload(request: Request):
-        """(text, audio bytes) from a JSON body or a multipart form."""
-        if int(request.headers.get("content-length") or 0) > max_upload_bytes:
-            return None, None, JSONResponse({"error": "upload too large"}, 413)
+        """(fields, audio bytes, error response) from JSON or a multipart form."""
         ctype = request.headers.get("content-type", "")
         if ctype.startswith("application/json"):
             try:
                 body = await request.json()
             except ValueError:
-                return None, None, JSONResponse({"error": "bad JSON"}, 400)
-            return (body if isinstance(body, dict) else {}), None, None
-        if ctype.startswith("multipart/form-data"):
-            form = await request.form()
+                return None, None, error("bad request", 400)
+            fields = body if isinstance(body, dict) else {}
+            data = None
+        elif ctype.startswith("multipart/form-data"):
+            try:
+                form = await request.form(max_files=1, max_fields=5)
+            except Exception:
+                return None, None, error("bad request", 400)
             upload = form.get("audio")
             data = None
             if upload is not None and hasattr(upload, "read"):
                 data = await upload.read(max_upload_bytes + 1)
                 if len(data) > max_upload_bytes:
-                    return None, None, JSONResponse({"error": "upload too large"}, 413)
-            return {k: v for k, v in form.items() if isinstance(v, str)}, data, None
-        return None, None, JSONResponse({"error": "send JSON or a form"}, 415)
+                    return None, None, error("too large", 413)
+            fields = {k: v for k, v in form.items() if isinstance(v, str)}
+        else:
+            return None, None, error("send JSON or a form", 415)
+        for value in fields.values():
+            if isinstance(value, str) and len(value) > max_text_chars:
+                return None, None, error("too large", 413)
+        return fields, data, None
 
     async def decode(data: bytes):
         try:
-            return await run_in_threadpool(decode_upload, data), None
+            return await run_in_threadpool(decode_upload, data,
+                                           max_audio_seconds), None
+        except AudioTooLong:
+            return None, error("recording too long", 413)
         except Exception as e:
             log.warning("Could not decode uploaded audio: %s", e)
-            return None, JSONResponse({"error": "could not read that recording"}, 400)
+            return None, error("could not read that recording", 400)
 
+    def session_of(request) -> Session | None:
+        return web.session_for(request)
+
+    def unauthorized():
+        return error("not signed in", 401)
+
+    # --- public: the page, PWA files, health check ---
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
-    @app.get("/app.js")
-    def app_js():
-        return FileResponse(STATIC / "app.js", media_type="text/javascript")
-
-    @app.get("/app.css")
-    def app_css():
-        return FileResponse(STATIC / "app.css", media_type="text/css")
-
-    @app.get("/sw.js")
-    def service_worker():
-        return FileResponse(STATIC / "sw.js", media_type="text/javascript")
+    for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
+                        ("sw.js", "text/javascript")):
+        app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
     def manifest():
@@ -675,36 +907,48 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     @app.get("/icon-{size}.png")
     def icon(size: int):
-        if size not in (180, 192, 512):
-            return Response(status_code=404)
+        if size not in ICON_SIZES:
+            return error("not found", 404)
         if size not in icons:
             icons[size] = icon_png(size)
-        return Response(icons[size], media_type="image/png")
+        return Response(icons[size], media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.get("/silence.wav")
+    def silence():
+        """Played on the first tap so iOS lets the page play replies later."""
+        buf = io.BytesIO()
+        audio.write_wav(buf, audio.silence(0.05))
+        return Response(buf.getvalue(), media_type="audio/wav")
+
+    @app.get("/healthz")
+    def healthz():
+        return {"ok": True}
+
+    # --- sign-in ---
     @app.post("/api/login")
     async def login(request: Request):
-        if limiter.blocked():
-            return JSONResponse({"error": "too many attempts; wait a few minutes"},
-                                429)
+        ip = web.client_ip(request)
+        if limiter.blocked(ip):
+            return error("too many attempts; try again later", 429)
         try:
             body = await request.json()
         except ValueError:
             body = {}
         given = str(body.get("token", "")) if isinstance(body, dict) else ""
-        if not hmac.compare_digest(given.strip().encode(), token.encode()):
-            limiter.fail()
-            log.warning("Web login with a wrong token")
-            return JSONResponse({"error": "wrong token"}, 401)
-        sid = read_cookie(token, request.cookies.get(COOKIE)) or secrets.token_urlsafe(16)
+        if not tokens_match(given, token):
+            limiter.fail(ip)
+            log.warning("Web sign-in with a wrong token")
+            return error("sign-in failed", 401)
+        sid = web.sid(request) or secrets.token_urlsafe(16)
         response = JSONResponse({"ok": True})
-        response.set_cookie(COOKIE, make_cookie(token, sid), max_age=COOKIE_MAX_AGE,
-                            httponly=True, secure=True, samesite="strict", path="/")
-        log.info("Web login ok")
+        set_session_cookie(response, token, sid)
+        log.info("Web sign-in ok")
         return response
 
     @app.post("/api/logout")
     async def logout(request: Request):
-        sid = read_cookie(token, request.cookies.get(COOKIE))
+        sid = web.sid(request)
         if sid:
             await run_in_threadpool(assistant.end_session, sid)
         response = JSONResponse({"ok": True})
@@ -712,6 +956,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                                samesite="strict")
         return response
 
+    # --- signed in ---
     @app.get("/api/state")
     def state(request: Request):
         s = session_of(request)
@@ -727,20 +972,21 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         s = session_of(request)
         if s is None:
             return unauthorized()
-        fields, data, error = await read_upload(request)
-        if error:
-            return error
+        fields, data, err = await read_upload(request)
+        if err:
+            return err
         recording = None
         if data:
-            recording, error = await decode(data)
-            if error:
-                return error
+            recording, err = await decode(data)
+            if err:
+                return err
         text = fields.get("text")
         if recording is None and not (isinstance(text, str) and text.strip()):
-            return JSONResponse({"error": "send text or audio"}, 400)
-        if not assistant.start_turn(s, text=text if recording is None else None,
-                                    recording=recording):
-            return JSONResponse({"error": "still working on the last request"}, 409)
+            return error("send text or audio", 400)
+        if not await run_in_threadpool(
+                assistant.start_turn, s,
+                text if recording is None else None, recording):
+            return error("still working on the last request", 409)
         return stream(s)
 
     @app.post("/api/confirm")
@@ -752,21 +998,21 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if s is None:
             return unauthorized()
         if s.pending is None:
-            return JSONResponse({"error": "nothing to confirm"}, 409)
-        fields, data, error = await read_upload(request)
-        if error:
-            return error
+            return error("nothing to confirm", 409)
+        fields, data, err = await read_upload(request)
+        if err:
+            return err
         answer = str(fields.get("answer") or fields.get("text") or "")
         if data:
-            recording, error = await decode(data)
-            if error:
-                return error
+            recording, err = await decode(data)
+            if err:
+                return err
             answer = await run_in_threadpool(assistant.transcribe, recording)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation %r -> %s", answer, "yes" if yes else "no")
         if not assistant.answer(s, yes):
-            return JSONResponse({"error": "nothing to confirm"}, 409)
+            return error("nothing to confirm", 409)
         return stream(s)
 
     @app.get("/api/events")
@@ -785,19 +1031,29 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             data = await run_in_threadpool(assistant.audio_for, rid)
         except Exception:
             log.exception("Rendering reply audio failed")
-            return JSONResponse({"error": "could not make audio"}, 500)
+            return error("could not make audio", 500)
         if data is None:
-            return JSONResponse({"error": "unknown reply"}, 404)
+            return error("not found", 404)
         return Response(data, media_type="audio/wav")
 
-    @app.get("/silence.wav")
-    def silence():
-        """Played on the first tap so iOS lets the page play replies later."""
-        buf = io.BytesIO()
-        audio.write_wav(buf, audio.silence(0.05))
-        return Response(buf.getvalue(), media_type="audio/wav")
-
     return app
+
+
+ICON_SIZES = (180, 192, 512)
+
+
+def _static_route(name: str, media_type: str):
+    from fastapi.responses import FileResponse
+
+    def serve_file():
+        return FileResponse(STATIC / name, media_type=media_type)
+    serve_file.__name__ = f"static_{name.replace('.', '_')}"
+    return serve_file
+
+
+def set_session_cookie(response, token: str, sid: str) -> None:
+    response.set_cookie(COOKIE, make_cookie(token, sid), max_age=COOKIE_MAX_AGE,
+                        httponly=True, secure=True, samesite="strict", path="/")
 
 
 # --- startup ------------------------------------------------------------------
@@ -842,20 +1098,32 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     web = config["webapp"]
     host = host or web["host"]
     port = int(port or web["port"])
+    trusted_proxy = parse_trusted_proxy(web["trusted_proxy"])
+    local = is_loopback(host)
+    if not local and not os.environ.get(TOKEN_ENV):
+        # A token generated inside a server's container would be unknown to
+        # you (and lost on redeploy): require one from the environment.
+        raise ValueError(f"{TOKEN_ENV} must be set (32+ random characters) "
+                         f"to listen on {host}")
     token = ensure_web_token(env_file, output_fn=output_fn)
     if show_token:
         # On request only, to the console; never to the log file.
         output_fn(f"Web access token: {token}")
-    if not is_loopback(host):
-        output_fn(f"WARNING: listening on {host}, not just this computer. "
-                  "Anyone who can reach it can try to log in. The safe setup is "
-                  "the default 127.0.0.1 behind `tailscale serve` (README).")
+    if not local and not trusted_proxy:
+        output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
+                  "(trusted_proxy). The safe local setup is the default "
+                  "127.0.0.1 behind `tailscale serve` (README).")
     assistant = build_assistant(config, tts_name, output_fn)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
-                     max_upload_bytes=int(web["max_upload_mb"] * 1_000_000))
-    output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop). On your phone, "
-              f"use `tailscale serve --https=443 http://127.0.0.1:{port}`.")
-    log.info("Web app listening on %s:%s", host, port)
-    uvicorn.run(app, host=host, port=port, log_config=None,
-                proxy_headers=False, server_header=False)
+                     max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
+                     max_audio_seconds=float(web["max_audio_seconds"]),
+                     trusted_proxy=trusted_proxy)
+    output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
+              + (f" On your phone, use `tailscale serve --https=443 "
+                 f"http://127.0.0.1:{port}`." if local else ""))
+    log.info("Web app listening on %s:%s (trusted proxies: %d)", host, port,
+             trusted_proxy)
+    uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
+                server_header=False, limit_concurrency=64,
+                timeout_keep_alive=30)
     return 0
