@@ -87,10 +87,12 @@ DEFAULTS: dict = {
     },
     # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
     "cloud": {
-        # Only these peers may set X-Forwarded-For/-Proto (the hosting
-        # provider's TLS proxy reaches the container from a private address).
-        "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-                            "127.0.0.0/8", "::1/128", "fc00::/7"],
+        # Only peers in these networks may set X-Forwarded-For/-Proto/-Host.
+        # None by default: anyone else in a private network (a Docker bridge,
+        # the LAN) could otherwise make up client addresses. The server
+        # profile sets Render's; CLOUD_TRUSTED_PROXIES overrides it.
+        "trusted_proxies": [],
+        "client_ip_header": "",         # e.g. "cf-connecting-ip"; "" = X-Forwarded-For
         "login_max_failures": 5,        # wrong tokens per address ...
         "login_window": 900,            # ... in this many seconds -> locked out
         "login_lockout": 900,           # first lockout; doubles each time, max 1 day
@@ -128,6 +130,9 @@ SERVER_PROFILE: dict = {
     "calendar": {"save_token": False},
     "web": {"browser": False},
     "webapp": {"host": "0.0.0.0", "max_upload_mb": 4},
+    # Render's TLS proxy reaches the container from its 10.x private network
+    # (check the "Proxy check" lines in the log after the first deploy).
+    "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -142,6 +147,8 @@ ENV_OVERRIDES = {
     "PINECONE_INDEX": ("memory", "index"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
+    "CLOUD_TRUSTED_PROXIES": ("cloud", "trusted_proxies"),  # comma-separated
+    "CLOUD_CLIENT_IP_HEADER": ("cloud", "client_ip_header"),
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
 }

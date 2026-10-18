@@ -327,10 +327,12 @@ save money you can switch the service to Starter and set `WHISPER_MODEL` to
 `tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
 mishears more often).
 
-**Persistent disk.** The service has a 1 GB disk mounted at `/data`
-(`DATA_DIR`; conversation history goes to `HISTORY_PATH`,
-`/data/history.sqlite`); everything else in the container is wiped on each
-deploy. Render's free instance type can't have a disk, which is one more
+**Persistent disk.** The service has a 1 GB disk mounted at `/data`, and
+the image sets `DATA_DIR=/data` and `HISTORY_PATH=/data/history.sqlite` for
+the conversation-history and lecture features. Until those are merged
+nothing is written there yet: conversations live in memory and end with
+each deploy (long-term memory in Pinecone is unaffected). Everything outside
+`/data` is wiped on each deploy. Render's free instance type can't have a disk, which is one more
 reason the service is on a paid plan. Render takes daily snapshots of the
 disk, but that is the only backup: export your history now and then with
 the history export command (it arrives with the conversation-history
@@ -379,7 +381,11 @@ random characters) and save. `WHISPER_MODEL` picks the speech model:
 `base.en` (default, more accurate) or `tiny.en` (smaller, faster, more
 mistakes). Run the same image anywhere with Docker:
 `docker build -t hey-claude .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
--e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front).
+-e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front, and
+trusts forwarded headers only from 10.x addresses, Render's; set
+`CLOUD_TRUSTED_PROXIES` to your proxy's network, e.g. `172.18.0.0/16`, or to
+nothing). After the first Render deploy, the log's first five "Proxy check"
+lines show what Render's proxy sends; see BLOCKERS.md.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 

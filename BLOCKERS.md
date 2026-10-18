@@ -30,6 +30,13 @@ Only what is still open for Kyle. None of it blocks the code.
         update `GOOGLE_TOKEN_JSON`.
   - [ ] iPhone: open the onrender.com address in Safari, enter `WEB_TOKEN`
         once, Add to Home Screen.
+  - [ ] After the first deploy, copy the five "Proxy check" lines from the
+        Render log (they show addresses, no secrets) to a Claude session, or
+        check: the peer should be a 10.x address (else set
+        `CLOUD_TRUSTED_PROXIES` to its network), and the last
+        `X-Forwarded-For` entry should be your phone's public address. If it
+        is a Cloudflare address and `CF-Connecting-IP` holds yours, set
+        `CLOUD_CLIENT_IP_HEADER=cf-connecting-ip`.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

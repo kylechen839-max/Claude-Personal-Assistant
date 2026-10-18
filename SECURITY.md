@@ -89,12 +89,26 @@ in `tests/test_cloud.py`):
   about one try per second per address; guessing a 256-bit token isn't
   feasible anyway. The same rules apply to Bearer tokens and the voice
   WebSocket.
-- **Proxy headers trusted only from the proxy.** Render's TLS proxy reaches
-  the container from a private address; only then are `X-Forwarded-For` and
-  `X-Forwarded-Proto` read (`[cloud] trusted_proxies`), and the client is
-  the rightmost address the proxy didn't vouch for (a client can prepend fake
-  ones, not append). Plain http via the proxy is redirected to https; HSTS
-  is sent over https. uvicorn's own proxy handling is off.
+- **Proxy headers trusted only from the proxy.** By default no peer is
+  trusted. The server profile trusts 10.0.0.0/8, where Render's TLS proxy
+  reaches the container from (`[cloud] trusted_proxies`, or
+  `CLOUD_TRUSTED_PROXIES`). An earlier default trusted every private range,
+  so behind `docker run -p` (all callers come from the bridge gateway) or
+  from a LAN neighbour anyone could make up client addresses and dodge the
+  lockouts (found in review). Only from a trusted peer are
+  `X-Forwarded-For`, `-Proto` and `-Host` read, and the client is the
+  rightmost address the proxy didn't vouch for (a client can prepend fake
+  ones, not append), or `[cloud] client_ip_header` (e.g.
+  `cf-connecting-ip`) if set. IPv6 clients are counted per /64; the limit
+  tables are capped in size. Plain http via the proxy is redirected to
+  https; HSTS is sent over https. uvicorn's own proxy handling is off.
+  Not verified yet on Render itself: whether the proxy's address is always
+  in 10.0.0.0/8 and whether the rightmost hop is the client or a shared
+  edge (Cloudflare) address. The first five requests log what the proxy
+  sends ("Proxy check") to settle it; see BLOCKERS.md. Other services in
+  the same Render private network (e.g. `pinecone-mcp`) are also in 10.x
+  and could set these headers; at worst they could dodge the per-address
+  limits, not sign in.
 - **The voice WebSocket** (`/api/voice`) is checked by the same layer
   before the handshake: the per-address request budget, the cookie or a
   Bearer token (wrong ones count toward the same lockout), and an Origin

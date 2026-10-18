@@ -26,7 +26,7 @@ from tests.test_webapp import TOKEN, Clock, FakeTranscriber, wav_bytes  # noqa: 
 
 PROXY = "10.1.2.3"        # Render's TLS proxy reaches the container privately
 PUBLIC = "203.0.113.9"    # someone on the internet connecting directly
-TRUSTED = DEFAULTS["cloud"]["trusted_proxies"]
+TRUSTED = ["10.0.0.0/8", "127.0.0.0/8"]  # Render-like proxy + this machine
 
 
 def at(peer, app):
@@ -586,3 +586,67 @@ def test_slow_uploads_cannot_starve_the_server(make_cloud):
             sock.close()
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# --- who may vouch for the client address --------------------------------------
+
+def test_nobody_is_a_trusted_proxy_by_default(make_cloud):
+    """Behind `docker run -p` every caller arrives from the bridge gateway;
+    if private addresses were trusted, X-Forwarded-For would dodge lockouts."""
+    _, client = make_cloud(peer="172.17.0.1", guard_kwargs={
+        "trusted_proxies": DEFAULTS["cloud"]["trusted_proxies"]})
+    assert DEFAULTS["cloud"]["trusted_proxies"] == []
+    codes = [login(client, "wrong", ip=f"198.51.100.{i}").status_code for i in range(7)]
+    assert codes[:5] == [401] * 5 and codes[5:] == [429, 429]
+
+
+def test_server_profile_trusts_only_renders_private_network(monkeypatch):
+    cfg = load_config(None, None, profile="server")
+    assert cfg["cloud"]["trusted_proxies"] == ["10.0.0.0/8"]
+    monkeypatch.setenv("CLOUD_TRUSTED_PROXIES", "10.4.0.0/16, 10.5.0.0/16")
+    cfg = load_config(None, None, profile="server")
+    nets = cloud.parse_networks(cfg["cloud"]["trusted_proxies"])
+    assert [str(n) for n in nets] == ["10.4.0.0/16", "10.5.0.0/16"]
+
+
+def test_client_ip_header_only_from_the_proxy(make_cloud):
+    guard, _ = make_cloud(guard_kwargs={"client_ip_header": "CF-Connecting-IP"})
+
+    def scope(peer, **headers):
+        return {"client": (peer, 1), "headers": [
+            (k.lower().replace("_", "-").encode(), v.encode()) for k, v in headers.items()]}
+
+    assert guard.client(scope(PROXY, cf_connecting_ip="198.51.100.4",
+                              x_forwarded_for="203.0.113.5"))[0] == "198.51.100.4"
+    assert guard.client(scope(PROXY, x_forwarded_for="203.0.113.5"))[0] == "203.0.113.5"
+    assert guard.client(scope(PUBLIC, cf_connecting_ip="198.51.100.4"))[0] == PUBLIC
+
+
+def test_ipv6_addresses_count_per_64(make_cloud):
+    assert cloud.client_key("2001:db8:1:2:aaaa::1") == "2001:db8:1:2::/64"
+    assert cloud.client_key("::ffff:203.0.113.9") == "203.0.113.9"
+    _, client = make_cloud()
+    for i in range(5):
+        login(client, "wrong", ip=f"2001:db8:1:2::{i + 1:x}")
+    assert login(client, "wrong", ip="2001:db8:1:2::ffff").status_code == 429
+
+
+def test_limiter_memory_stays_bounded():
+    clock = Clock()
+    limiter = cloud.RateLimiter(max_tracked=10, clock=clock)
+    lockout = cloud.LoginLockout(max_tracked=10, max_failures=1, clock=clock)
+    for i in range(500):  # a flood of fresh addresses, all within a minute
+        limiter.allow(f"198.51.{i // 256}.{i % 256}")
+        lockout.fail(f"198.51.{i // 256}.{i % 256}")
+    assert len(limiter.hits) <= 10
+    assert max(len(lockout.failures), len(lockout.locked_until),
+               len(lockout.strikes)) <= 10
+
+
+def test_first_requests_log_what_the_proxy_sends(make_cloud, caplog):
+    _, client = make_cloud(guard_kwargs={"log_proxy_headers": 2})
+    with caplog.at_level(logging.INFO, logger="assistant.cloud"):
+        for _ in range(4):
+            client.get("/", headers=via_proxy(PUBLIC))
+    lines = [r.getMessage() for r in caplog.records if "Proxy check" in r.getMessage()]
+    assert len(lines) == 2 and PUBLIC in lines[0] and "trusted" in lines[0]

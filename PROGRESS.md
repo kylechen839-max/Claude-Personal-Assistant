@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 403 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 409 passed, 9 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -29,7 +29,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 60 | phone web app (`--mode web`) |
-| `test_cloud.py` | 65 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_cloud.py` | 71 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
@@ -246,7 +246,11 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   2 s), global brake after 30 (wrong tokens held 1 s), the right token
   always accepted; at most 2 body uploads per address / 32 in all, bodies
   due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
-  (it let one slow client 503 everything, `/healthz` included); forwarded
+  (it let one slow client 503 everything, `/healthz` included); no trusted
+  proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;
+  trusting all private ranges let a Docker-bridge or LAN peer forge client
+  addresses), optional `[cloud] client_ip_header`, IPv6 counted per /64,
+  limit tables capped, "Proxy check" log lines for the first 5 requests; forwarded
   headers only from a private-address peer (`[cloud] trusted_proxies`),
   rightmost untrusted `X-Forwarded-For` hop as the client; https redirect and
   HSTS; bodies buffered and capped (4 MB audio, 16 KB otherwise, chunked
@@ -267,7 +271,8 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   `pinecone-mcp`.
 - **Persistent disk**: 1 GB at `/data` (`DATA_DIR=/data`,
   `HISTORY_PATH=/data/history.sqlite`) for conversation history, lecture
-  audio and job state from the history/features branches. Disks need a paid
+  audio and job state from the history/features branches. Nothing on this
+  branch reads them yet: until those land, conversations stay in memory. Disks need a paid
   instance type (already the case) and cost $0.25/GB a month, so the total
   is about $25.25. `deploy/docker-entrypoint.sh` chowns the mounted disk to
   the app user and drops root with `setpriv --no-new-privs`; CI checks the

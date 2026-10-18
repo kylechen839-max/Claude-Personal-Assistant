@@ -137,6 +137,8 @@ class LoginLockout:
             now = self.clock()
             if len(self.failures) >= self.max_tracked and ip not in self.failures:
                 self._forget_idle(now)
+                for d in (self.failures, self.locked_until, self.strikes):
+                    _cap(d, self.max_tracked - 1)
             q = self.failures.setdefault(ip, deque())
             self._prune(q, now)
             q.append(now)
@@ -167,6 +169,28 @@ class LoginLockout:
                    and self.locked_until.get(ip, 0) <= now]:
             self.failures.pop(ip, None)
             self.locked_until.pop(ip, None)
+            self.strikes.pop(ip, None)
+
+
+def _cap(d: dict, size: int) -> None:
+    """Drop the oldest entries (insertion order) until `d` has `size` left:
+    memory stays bounded however many addresses a flood uses."""
+    for key in list(d)[:max(0, len(d) - size)]:
+        del d[key]
+
+
+def client_key(ip: str) -> str:
+    """What limits are counted by: the address, or its /64 for IPv6 (one
+    machine can rotate through a whole /64)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
 
 
 class RateLimiter:
@@ -185,6 +209,7 @@ class RateLimiter:
             if len(self.hits) >= self.max_tracked and ip not in self.hits:
                 for k in [k for k, q in self.hits.items() if not q or q[-1] <= now - 60]:
                     del self.hits[k]
+                _cap(self.hits, self.max_tracked - 1)
             q = self.hits.setdefault(ip, deque())
             while q and q[0] <= now - 60:
                 q.popleft()
@@ -195,6 +220,9 @@ class RateLimiter:
 
 
 def parse_networks(cidrs) -> list:
+    """Networks from a list, or a comma-separated string (env override)."""
+    if isinstance(cidrs, str):
+        cidrs = [c for c in cidrs.replace(" ", "").split(",") if c]
     return [ipaddress.ip_network(c, strict=False) for c in cidrs]
 
 
@@ -214,7 +242,8 @@ class CloudGuard:
                  lockout: LoginLockout | None = None,
                  limiter: RateLimiter | None = None, allowed_origins=(),
                  max_busy_per_ip=2, max_busy=32, body_timeout=10.0,
-                 min_upload_rate=65536, sleep=None):
+                 min_upload_rate=65536, sleep=None, client_ip_header="",
+                 log_proxy_headers=5):
         import asyncio
 
         self.app = app
@@ -229,6 +258,12 @@ class CloudGuard:
         self.body_timeout = body_timeout
         self.min_upload_rate = min_upload_rate
         self.sleep = sleep or asyncio.sleep
+        # e.g. "cf-connecting-ip" if the host's edge sets it; read only from
+        # a trusted proxy. "" = the rightmost untrusted X-Forwarded-For hop.
+        self.client_ip_header = client_ip_header.strip().lower()
+        # Log what the proxy sends on the first few requests, to check
+        # trusted_proxies / client_ip_header against the real host.
+        self.log_proxy_headers = log_proxy_headers
         self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
         self.trusted = parse_networks(trusted_proxies)
         self.max_upload_bytes = max_upload_bytes
@@ -238,21 +273,33 @@ class CloudGuard:
 
     # where the request really came from
     def client(self, scope) -> tuple[str, str | None]:
-        """(client address, scheme the proxy saw or None if not via proxy)."""
+        """(client key for limits, scheme the proxy saw or None if not via
+        a trusted proxy)."""
         peer = (scope.get("client") or ("", 0))[0] or ""
-        if not _in_networks(peer, self.trusted):
-            return peer, None  # direct connection: ignore forwarded headers
         headers = _headers(scope)
+        if self.log_proxy_headers > 0:
+            self.log_proxy_headers -= 1
+            log.info("Proxy check: peer %s (%s), X-Forwarded-For %r, -Proto %r, "
+                     "-Host %r, CF-Connecting-IP %r, True-Client-IP %r", peer,
+                     "trusted" if _in_networks(peer, self.trusted) else "not trusted",
+                     *(headers.get(h, "") for h in (
+                         "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host",
+                         "cf-connecting-ip", "true-client-ip")))
+        if not _in_networks(peer, self.trusted):
+            return client_key(peer), None  # not the proxy: ignore its headers
         proto = headers.get("x-forwarded-proto", "").split(",")[-1].strip().lower()
         client = peer
-        # The proxy appends the address it saw; anything to its left could
-        # be made up by the client. Take the rightmost untrusted entry.
-        for hop in reversed([h.strip() for h in
-                             headers.get("x-forwarded-for", "").split(",") if h.strip()]):
-            client = hop
-            if not _in_networks(hop, self.trusted):
-                break
-        return client, (proto or None)
+        if self.client_ip_header and headers.get(self.client_ip_header):
+            client = headers[self.client_ip_header].split(",")[-1].strip()
+        else:
+            # The proxy appends the address it saw; anything to its left
+            # could be made up by the client: take the rightmost untrusted.
+            for hop in reversed([h.strip() for h in
+                                 headers.get("x-forwarded-for", "").split(",") if h.strip()]):
+                client = hop
+                if not _in_networks(hop, self.trusted):
+                    break
+        return client_key(client), (proto or None)
 
     def from_proxy(self, scope) -> bool:
         return _in_networks((scope.get("client") or ("", 0))[0] or "", self.trusted)
@@ -566,7 +613,8 @@ def build_app(config: dict, web_assistant, token: str):
         limiter=RateLimiter(cloud["requests_per_minute"]),
         allowed_origins=web["allowed_origins"],
         max_busy_per_ip=cloud["uploads_per_address"], max_busy=cloud["uploads_total"],
-        body_timeout=cloud["body_timeout"])
+        body_timeout=cloud["body_timeout"],
+        client_ip_header=cloud["client_ip_header"])
 
 
 def warm_up(web_assistant) -> None:
