@@ -200,6 +200,39 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
+## Cloud server on Render (optional, ~30 min)
+Setup is in README.md ("Run it in the cloud (Render)"). Your PC can be off
+for all of this except the Google sign-in.
+- [ ] Render: New -> Blueprint -> this repo; paste `ANTHROPIC_API_KEY`,
+      `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+      `GOOGLE_TOKEN_JSON` (all of `token.json`) and `GOOGLE_CLIENT_JSON` (all
+      of `credentials.json`) yourself. Apply.
+  - Should: `hey-claude` turns "Live" after the build; Logs show "Speech
+    models loaded" and no tracebacks.
+- [ ] Google Cloud console -> OAuth consent screen -> **Publish app**. Then
+      sign in again on the PC (delete `token.json`, run
+      `python -m assistant.tools.calendar`; the "unverified app" screen is
+      expected: Advanced -> Go to Hey Claude) and paste the new `token.json`
+      into `GOOGLE_TOKEN_JSON` in Render.
+  - Should: a week later the calendar still works (in Testing mode it would
+    stop after 7 days).
+- [ ] Render Shell: `python -m assistant --check`.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
+    time zone, Whisper model and Piper voice OK.
+- [ ] In Safari on the iPhone (Wi-Fi off), open
+      `https://hey-claude.onrender.com`. Enter a wrong token, then the
+      `WEB_TOKEN` from Render -> Environment.
+  - Should: "wrong token", then the chat page.
+- [ ] Share -> Add to Home Screen; open it from the home screen; hold the mic:
+      "What's on my calendar tomorrow?"
+  - Should: full screen, your words appear, then the answer spoken within a
+    few seconds, with tomorrow in your time zone.
+- [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
+      by voice.
+  - Should: Yes/No buttons and a spoken question, as on the PC.
+- [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
+  - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok`.
+
 ---
 
 ## Raspberry Pi (optional, ~15 min)

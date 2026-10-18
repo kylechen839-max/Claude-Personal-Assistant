@@ -17,6 +17,20 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Raspberry Pi** (when you have one set up): the Pi section of
       MANUAL_TEST.md.
 
+- [ ] **Cloud server on Render** (only Kyle can do these; see README "Run it
+      in the cloud (Render)" and the Cloud section of MANUAL_TEST.md):
+  - [ ] Render account with a payment card; New -> Blueprint from this repo
+        (CLOUD_PLAN plan, CLOUD_COST a month).
+  - [ ] Paste the secrets into the Render dashboard: `ANTHROPIC_API_KEY`,
+        `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+        `GOOGLE_TOKEN_JSON` (contents of `token.json`), `GOOGLE_CLIENT_JSON`
+        (contents of `credentials.json`).
+  - [ ] Google Cloud console -> OAuth consent screen -> Publish app (Testing
+        mode expires refresh tokens after 7 days), then sign in once more and
+        update `GOOGLE_TOKEN_JSON`.
+  - [ ] iPhone: open the onrender.com address in Safari, enter `WEB_TOKEN`
+        once, Add to Home Screen.
+
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`
   (`claude-sonnet-4-5` now returns 404).
