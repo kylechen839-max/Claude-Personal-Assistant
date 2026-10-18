@@ -68,7 +68,7 @@ MIN_TOKEN_LENGTH = 32
 PC_ONLY_TOOLS = {"open_in_browser"}
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
-       "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+       "img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -1103,7 +1103,7 @@ def set_session_cookie(response, token: str, sid: str) -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import build_memory, build_tools
+    from assistant.cli import build_memory, build_tools, register_notes
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1114,6 +1114,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
+    register_notes(tools, memory, config)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
@@ -1160,6 +1161,12 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy)
+    from assistant import webfeatures
+
+    features = webfeatures.Features(config, assistant)
+    webfeatures.install(app, features)
+    if config["lecture"]["enabled"]:
+        features.pipeline.resume_pending()  # jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

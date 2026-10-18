@@ -88,6 +88,11 @@ chunk_mb = 4                  # upload piece size; a lost piece is simply resent
 keep_audio = false            # true = keep the audio after it is transcribed
 notes_database_id = ""        # "" = find or create "Lecture Notes" under Fall 2026 Assignments
 
+[tutor]
+enabled = true                # homework tutor in the phone app (photo + question)
+max_image_mb = 8              # the phone shrinks photos to 1600 px first
+max_tokens = 1200
+
 [notes]
 enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
 min_score = 0.3               # how close a note must be to count as a match

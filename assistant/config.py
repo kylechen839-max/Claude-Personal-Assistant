@@ -89,6 +89,9 @@ DEFAULTS: dict = {
         "keep_audio": False,         # delete audio once it is transcribed
         "notes_database_id": "",     # "" = find or create "Lecture Notes"
     },
+    "tutor": {"enabled": True,      # homework photos in the phone app
+              "max_image_mb": 8,
+              "max_tokens": 1200},
     "notes": {"enabled": True,      # remember_note / recall_notes (needs memory)
               "min_score": 0.3},
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
