@@ -248,6 +248,14 @@ def strip_wake_phrase(text: str, wake_phrase: str | None) -> str:
     return re.sub(rf"^\W*{words}\b\W*", "", text, flags=re.IGNORECASE)
 
 
+def loggable_reply(chat, reply: str) -> str:
+    """The reply for the log file, or a placeholder when it may quote
+    private content (an email, a personal note)."""
+    if getattr(chat, "private_turn", False) is True:
+        return f"<{len(reply)} characters; private tool content not logged>"
+    return reply
+
+
 def report_timings(timer: TurnTimer, output_fn=None) -> None:
     """One summary line per turn in the log, and on the console if asked."""
     line = timer.summary()
@@ -294,7 +302,7 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
-    log.info("Replied: %r", reply)
+    log.info("Replied: %r", loggable_reply(chat, reply))
     speak(tts, reply, timer)
     return True
 
@@ -307,7 +315,8 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     tz = config["assistant"]["timezone"] or None
     cal = config["calendar"]
     if cal["enabled"] and (Path(cal["credentials"]).exists()
-                           or Path(cal["token"]).exists()):
+                           or Path(cal["token"]).exists()
+                           or os.environ.get("GOOGLE_TOKEN_JSON")):
         from assistant.tools.calendar import GoogleCalendar
 
         registry.register(*GoogleCalendar(
@@ -315,6 +324,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
             calendar_id=cal["calendar_id"], timezone=tz).tools())
     elif cal["enabled"]:
         output_fn(f"(Calendar tools off: {cal['credentials']} not found)")
+    register_gmail(registry, config, output_fn)
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
@@ -331,6 +341,35 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         if web["browser"]:
             registry.register(*web_tools.browser_tools())
     return registry
+
+
+def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
+    """Gmail tools, if the Google token has the Gmail scopes. A token from
+    before Gmail support doesn't: say how to grant them and leave them off."""
+    from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
+                                             load_token_info, missing_scopes)
+
+    cal = config["calendar"]
+    if not config["gmail"]["enabled"] or not cal["enabled"]:
+        return False
+    try:
+        if load_token_info(cal["token"]) is None:
+            return False  # no Google sign-in at all (Calendar says so)
+        lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
+    except (OSError, ValueError) as e:
+        output_fn(f"(Gmail tools off: Google token unreadable: {e})")
+        return False
+    if lacking:
+        output_fn("(Gmail tools off: Gmail access not granted yet. Run "
+                  f"{SIGN_IN_COMMAND} once to sign in again.)")
+        return False
+    from assistant.tools.gmail import GmailInbox
+
+    registry.register(*GmailInbox(
+        credentials_path=cal["credentials"], token_path=cal["token"],
+        timezone=config["assistant"]["timezone"] or None,
+        max_summary=config["gmail"]["max_summary"]).tools())
+    return True
 
 
 def build_memory(config: dict, output_fn=print):

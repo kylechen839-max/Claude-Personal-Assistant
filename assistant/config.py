@@ -47,6 +47,8 @@ DEFAULTS: dict = {
     },
     "calendar": {"enabled": True, "credentials": "credentials.json",
                  "token": "token.json", "calendar_id": "primary"},
+    "gmail": {"enabled": True,  # uses the [calendar] credentials and token
+              "max_summary": 15},   # most emails in one summary
     "notion": {"enabled": True,
                "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
     "web": {

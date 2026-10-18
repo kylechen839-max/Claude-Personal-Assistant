@@ -39,6 +39,10 @@ credentials = "credentials.json"
 token = "token.json"
 calendar_id = "primary"
 
+[gmail]
+enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth
+max_summary = 15              # most emails in one spoken summary
+
 [notion]
 enabled = true
 database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments

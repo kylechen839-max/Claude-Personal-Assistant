@@ -3,88 +3,18 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
 from assistant.tools import Tool
+# Sign-in lives in google_auth (shared with Gmail); re-exported here so
+# `python -m assistant.tools.calendar` and older imports keep working.
+from assistant.tools.google_auth import (  # noqa: F401
+    CALENDAR_SCOPES, HEADLESS_REDIRECT, SCOPES, get_credentials,
+    headless_finish, headless_start)
 from assistant.tools.timeutil import (local_zone, parse_datetime, resolve_day,
                                       spoken_date, spoken_time, zone_name)
 
 log = logging.getLogger(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-
-
-def get_credentials(credentials_path="credentials.json", token_path="token.json",
-                    open_browser: bool = True):
-    """OAuth for an installed app. The first run opens a browser to sign in
-    and saves token.json; later runs refresh it silently."""
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-
-    creds = None
-    if Path(token_path).exists():
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    if creds and creds.valid:
-        return creds
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
-        if not Path(credentials_path).exists():
-            raise FileNotFoundError(
-                f"{credentials_path} not found. Create an OAuth client "
-                "(Desktop app) in Google Cloud Console and download it.")
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=open_browser)
-    Path(token_path).write_text(creds.to_json())
-    return creds
-
-
-HEADLESS_REDIRECT = "http://localhost:8765/"
-
-
-def headless_start(credentials_path="credentials.json",
-                   state_path=".oauth_state.json") -> str:
-    """Step 1 of sign-in without a local browser (Raspberry Pi over SSH, a
-    cloud box): return the URL to open on any device. The PKCE verifier and
-    state are saved so step 2 can run in a separate process."""
-    import json
-
-    from google_auth_oauthlib.flow import Flow
-
-    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
-                                         redirect_uri=HEADLESS_REDIRECT)
-    url, state = flow.authorization_url(access_type="offline", prompt="consent")
-    Path(state_path).write_text(json.dumps(
-        {"state": state, "code_verifier": flow.code_verifier}))
-    return url
-
-
-def headless_finish(redirected_url: str, credentials_path="credentials.json",
-                    token_path="token.json", state_path=".oauth_state.json"):
-    """Step 2: after signing in, the browser lands on a localhost page that
-    fails to load. Its full address (with ?code=...) is `redirected_url`."""
-    import json
-    from urllib.parse import parse_qs, urlparse
-
-    from google_auth_oauthlib.flow import Flow
-
-    saved = json.loads(Path(state_path).read_text())
-    query = parse_qs(urlparse(redirected_url.strip()).query)
-    if "error" in query:
-        raise RuntimeError(f"Google sign-in failed: {query['error'][0]}")
-    if query.get("state", [None])[0] != saved["state"]:
-        raise RuntimeError("State mismatch: use the URL from the latest sign-in link")
-    flow = Flow.from_client_secrets_file(credentials_path, SCOPES,
-                                         redirect_uri=HEADLESS_REDIRECT,
-                                         state=saved["state"],
-                                         code_verifier=saved["code_verifier"])
-    flow.fetch_token(code=query["code"][0])
-    Path(token_path).write_text(flow.credentials.to_json())
-    Path(state_path).unlink(missing_ok=True)
-    return flow.credentials
 
 
 def _is_date(value: str) -> bool:
@@ -296,33 +226,6 @@ class GoogleCalendar:
 
 
 if __name__ == "__main__":  # python -m assistant.tools.calendar  -> sign in once
-    import argparse
+    from assistant.tools.google_auth import main
 
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    parser = argparse.ArgumentParser(prog="python -m assistant.tools.calendar",
-                                     description="Sign in to Google Calendar")
-    parser.add_argument("--headless", action="store_true",
-                        help="no local browser: print a link, then paste back "
-                             "the localhost URL you land on")
-    parser.add_argument("--start", action="store_true",
-                        help="headless step 1 only: print the link and exit")
-    parser.add_argument("--finish", metavar="URL",
-                        help="headless step 2 only: the localhost URL")
-    args = parser.parse_args()
-    creds = os.environ.get("GOOGLE_CREDENTIALS", "credentials.json")
-    token = os.environ.get("GOOGLE_TOKEN", "token.json")
-    if args.finish:
-        headless_finish(args.finish, creds, token)
-    elif args.headless or args.start:
-        print("Open this link on any device and sign in:\n\n"
-              + headless_start(creds) + "\n\nAfterwards the browser shows "
-              "'This site can't be reached'. That's expected: copy the full "
-              "address from the address bar.")
-        if args.start:
-            raise SystemExit(0)
-        headless_finish(input("\nPaste that address here: "), creds, token)
-    else:
-        get_credentials(creds, token)
-    print("Google Calendar authorized; token saved to", token)
+    main("python -m assistant.tools.calendar")
