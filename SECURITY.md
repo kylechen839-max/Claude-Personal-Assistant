@@ -78,9 +78,18 @@ all three, which `assistant/failover/edge.py` closes the same way on each:
   a valid token within 5 s is closed.
 - **`/healthz`** is public and returns only `ok`, the API version number and
   the role: no hostnames, versions, load or errors.
-- **Lockout** stays per backend: 5 wrong `WEB_TOKEN`s or bad bearer tokens
-  in 5 minutes, then 429 for 5 minutes. Requests with a valid token are not
-  locked out, so hammering the public cloud URL can't lock Kyle out.
+- **Lockout** stays per backend and is the web app's own `LoginLimiter`
+  (per address plus a global limit). Wrong `WEB_TOKEN`s and bad bearer
+  tokens count; once an address is locked out its wrong attempts get 429.
+  The right `WEB_TOKEN` and valid bearer tokens are always accepted, so
+  hammering the public cloud URL can't lock Kyle out.
+- **Cookies keep working on the same origin.** A same-origin request with
+  no `Authorization` header goes to the web app's cookie check, as before;
+  cross-origin requests always need a bearer token.
+- **Deleted conversations are redacted from the synced log**, not just
+  hidden: the text of every event a delete covers is dropped from each
+  backend's store (and from what it sends to peers) once the delete
+  reaches it, whichever arrives first.
 - **History sync** between backends uses the same token scheme (sync scope)
   over HTTPS; pushed events are validated (id format, known kinds, size, a
   timestamp at most a day ahead) and taken all or nothing. A backend that

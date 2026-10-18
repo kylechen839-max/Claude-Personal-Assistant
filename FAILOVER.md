@@ -114,8 +114,9 @@ silently sent elsewhere), and there's no fail-back while forced.
 | `POST /api/auth/refresh` | app token | a new token for the same session |
 | `GET /api/backends` | app token | this backend's configured list, for the app to cache |
 | `/api/sync/...` | **sync** token | history sync (section 5) |
-| any other `/api/...` | **app** token | the web app; missing or wrong token → **401** |
-| WebSocket (any path) | token in the first message | see below |
+| any other `/api/...` | **app** token | the web app; a cross-origin request without a valid token → **401** |
+| `/api/...` from the same origin with no `Authorization` header | the session cookie | passed on to the web app's own cookie check (the page and scripts on the cloud origin keep working as before) |
+| WebSocket (any path) | token in the first message, or the cookie on the same origin | see below |
 | static files (app shell) | none | the app |
 
 **CORS:** only for the configured `app_origin`. Allowed methods `GET, POST`;
@@ -136,12 +137,16 @@ history). After the socket opens, the client's first message must be
 missing token closes it with code **4401**; nothing within 5 s closes it
 with **4408**.
 
-**Lockout:** each backend keeps its own wrong-token limit: 5 wrong
-`WEB_TOKEN`s or invalid bearer tokens in 5 minutes, and then token requests
-get 429 for 5 minutes (as the existing web login does), and further
-invalid bearer tokens get 429 instead of 401. Requests with a valid token
-keep working, so someone hammering the public cloud URL can't lock you out
-of your own app.
+A same-origin WebSocket that carries the session cookie goes straight to
+the web app's own `require_session` check, as without failover.
+
+**Lockout:** the edge uses the web app's own `LoginLimiter` and client
+address on each backend (per address, plus a global limit; the same one
+`/api/login` uses). Wrong `WEB_TOKEN`s and invalid bearer tokens count; a
+missing token doesn't (an app polling before sign-in). Once an address is
+locked out, its *wrong* attempts get 429. The right `WEB_TOKEN` and any
+valid bearer token are always accepted, so someone hammering the public
+cloud URL can't lock you out of your own app.
 
 **API version:** `assistant/failover/__init__.py` `API_VERSION` (now 1) is
 bumped on any breaking change to the client API. The app accepts the range
@@ -215,6 +220,16 @@ Every change to history is an event:
 | `delete_message` | `{target}` | permanent tombstone for one message |
 | `job` | `{key}` (conv `job:<key>`) | scheduled-job fires, section 5.3 |
 
+**Deletes redact.** Besides hiding things, a tombstone removes the text
+from the log itself: every event it covers (all events of the deleted
+conversation, or the one deleted message) is kept with its id, ts, origin,
+kind and conv but with empty data. This happens whichever arrives first:
+an event that arrives after its tombstone is stored already redacted. So
+once the delete has synced, the words are gone from every backend's log
+and from everything it sends to peers; the ids stay, so sync still knows
+those events exist and doesn't fetch them again. (Tombstones themselves
+hold only ids, never text.)
+
 The visible history is `materialize(events)`, a pure function of the
 **set** of events: the same id is the same event (duplicates are ignored),
 order doesn't matter, and a tombstone wins over anything, however late it
@@ -245,7 +260,8 @@ kind, size ≤ 64 KB, timestamp at most a day ahead) and a batch is accepted
 all or nothing.
 
 **Storage API** (what the SQLite store implements; `MemoryEventLog` is the
-reference): `log_id`, `append(events) -> inserted`, `since(seq, limit)`,
+reference): `log_id`, `append(events) -> inserted` (applying the
+redactions above, see `covered_by` and `redacted`), `since(seq, limit)`,
 `by_conv(conv)`, `meta_get/meta_set`. The history store owns the schema;
 this module owns the protocol.
 
@@ -306,10 +322,13 @@ environment variables and secret files on Render): `ANTHROPIC_API_KEY`,
   the full "unplug the Pi, turn the PC off, bring both back" run.
 - `tests/test_failover_edge.py`: `/healthz` contents, CORS preflight and
   rejection of foreign origins on every path, missing/wrong/expired token
-  → 401 on every API path, scopes, lockout, token endpoint and refresh
+  → 401 on every API path, scopes, cookie pass-through on the same origin,
+  per-address lockout that never refuses the right token, token endpoint and refresh
   limit, WebSocket first-message auth (4401, 4408, token in URL ignored,
   foreign origin refused at the handshake).
-- `tests/test_failover_sync.py`: merge rules, tombstones, validation,
+- `tests/test_failover_sync.py`: merge rules, tombstones and redaction (no
+  deleted text left in any store or in what it sends, in either arrival
+  order, across three synced stores), validation,
   cursors, a peer's database reset, and property-style convergence: three
   stores, random events, random interleavings, duplicates and outages
   (40 seeds), always ending identical.

@@ -6,7 +6,7 @@ import pytest
 
 from assistant.failover import API_VERSION
 from assistant.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZED,
-                                     EdgeMiddleware, FailureLimiter, connect_src)
+                                     EdgeMiddleware, connect_src)
 from assistant.failover.peers import parse_backends
 from assistant.failover.tokens import TokenAuthority, bearer_of
 from tests.asgi_harness import request, websocket
@@ -50,7 +50,9 @@ async def inner(scope, receive, send):
 def setup():
     clock = Clock()
     authority = TokenAuthority(SECRET, clock=clock)
-    limiter = FailureLimiter(max_failures=5, window=300, clock=clock)
+    from assistant.webapp import LoginLimiter
+
+    limiter = LoginLimiter(per_ip=5, global_max=50, window=900, lockout=900, clock=clock)
     app = EdgeMiddleware(inner, authority=authority, role="pi", app_origins=[APP],
                          backends=parse_backends([{"role": "pi", "url": PI},
                                                   {"role": "cloud", "url": APP}]),
@@ -192,6 +194,7 @@ def test_cors_headers_added_and_credentials_stripped(setup):
                                   {"authorization": "Basic abc"},
                                   {"cookie": "hc_session=whatever"}])
 def test_missing_or_wrong_token_is_401(setup, hdrs):
+    """From the app origin (cross-origin): a bearer token is required."""
     app, *_ = setup
     for path in ("/api/state", "/api/turn", "/api/backends", "/api/sync/events",
                  "/api/auth/refresh"):
@@ -215,6 +218,18 @@ def test_scopes_are_separate(setup):
     assert request(app, "GET", "https://pi/api/sync/events", auth(app_token)).status == 401
     assert request(app, "GET", "https://pi/api/state", auth(sync_token)).status == 401
     assert request(app, "GET", "https://pi/api/sync/events", auth(sync_token)).status == 200
+
+
+def test_same_origin_without_bearer_goes_to_the_app_cookie_check(setup):
+    app, *_ = setup
+    # no Origin (curl) or our own origin, no Authorization: the web app decides
+    r = request(app, "GET", "https://pi.tail1234.ts.net/api/state",
+                {"origin": PI, "cookie": "hc_session=x"})
+    assert r.status == 200 and r.json() == {"path": "/api/state", "sid": None}
+    assert request(app, "GET", "https://pi/api/state").json()["sid"] is None
+    # but never the sync API or the backends list
+    assert request(app, "GET", "https://pi/api/sync/events").status == 401
+    assert request(app, "GET", "https://pi/api/backends").status == 401
 
 
 def test_static_app_shell_needs_no_token(setup):
@@ -271,17 +286,51 @@ def test_refresh_stops_at_the_session_limit(setup):
     assert authority.verify(token) is None
 
 
-def test_wrong_web_token_locks_out_after_five(setup):
+def scoped(ip):
+    return {"x-test-ip": ip}
+
+
+def test_wrong_web_token_locks_out_that_address_but_never_the_right_token(setup):
     app, _, token, clock = setup
+    app.client_ip = lambda scope: dict(scope["headers"]).get(b"x-test-ip", b"").decode()
     for _ in range(5):
-        assert request(app, "POST", "https://pi/api/auth/token", body={"token": "x" * 43}).status == 401
-    # even the right one is refused while locked out
-    assert request(app, "POST", "https://pi/api/auth/token", body={"token": SECRET}).status == 429
-    # bad bearer tokens are now answered 429; a valid token still works
-    assert request(app, "GET", "https://pi/api/state", auth("hc1.nope")).status == 429
-    assert request(app, "GET", "https://pi/api/state", auth(token)).status == 200
-    clock.t += 301
-    assert request(app, "POST", "https://pi/api/auth/token", body={"token": SECRET}).status == 200
+        r = request(app, "POST", "https://pi/api/auth/token", scoped("1.1.1.1"),
+                    {"token": "x" * 43})
+        assert r.status == 401
+    # that address now gets 429 for wrong tokens...
+    assert request(app, "POST", "https://pi/api/auth/token", scoped("1.1.1.1"),
+                   {"token": "x" * 43}).status == 429
+    assert request(app, "GET", "https://pi/api/state",
+                   {**auth("hc1.nope"), **scoped("1.1.1.1")}).status == 429
+    # ...but the right WEB_TOKEN and a valid bearer token still work, even from it
+    assert request(app, "POST", "https://pi/api/auth/token", scoped("1.1.1.1"),
+                   {"token": SECRET}).status == 200
+    assert request(app, "GET", "https://pi/api/state",
+                   {**auth(token), **scoped("1.1.1.1")}).status == 200
+    # and other addresses are not affected
+    assert request(app, "POST", "https://pi/api/auth/token", scoped("2.2.2.2"),
+                   {"token": "x" * 43}).status == 401
+
+
+def test_missing_token_does_not_count_toward_lockout(setup):
+    app, _, token, _ = setup
+    for _ in range(20):  # e.g. an app polling before sign-in
+        assert request(app, "GET", "https://pi/api/state", {"origin": APP}).status == 401
+    assert request(app, "POST", "https://pi/api/auth/token", body={"token": "x" * 43}).status == 401
+
+
+def test_ws_same_origin_cookie_client_goes_to_the_app(setup):
+    app, *_ = setup
+    seen = []
+
+    async def cookie_app(scope, receive, send):
+        seen.append((await receive())["type"])  # the replayed connect
+        await send({"type": "websocket.close", "code": 1008})  # the app's own check
+
+    app.app = cookie_app
+    sent = websocket(app, "/api/ws", [], {"origin": PI, "cookie": "hc_session=x"},
+                     host="pi.tail1234.ts.net")
+    assert seen == ["websocket.connect"] and sent[0]["code"] == 1008
 
 
 def test_oversized_token_request(setup):

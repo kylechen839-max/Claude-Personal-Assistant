@@ -1101,19 +1101,25 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return Response(data, media_type="audio/wav")
 
     if failover:
-        return wrap_failover(app, token, failover, web.bearer_sid)
+        return wrap_failover(app, token, failover, web)
     return app
 
 
-def wrap_failover(app, token: str, failover, bearer_sid: str | None = None):
-    """EdgeMiddleware around the web app (FAILOVER.md section 3)."""
+def wrap_failover(app, token: str, failover, web: WebAuth):
+    """EdgeMiddleware around the web app (FAILOVER.md section 3). It uses
+    this app's LoginLimiter and client address, and cookie clients keep
+    working (same-origin requests without a bearer token pass through)."""
+    from starlette.requests import HTTPConnection
+
     from assistant.failover.edge import EdgeMiddleware
     from assistant.failover.tokens import TokenAuthority
 
     return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
                           app_origins=[o for o in (failover.app_origin,) if o],
                           backends=list(failover.backends),
-                          root_bearer_sid=bearer_sid)
+                          limiter=web.limiter,
+                          client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
+                          root_bearer_sid=web.bearer_sid)
 
 
 ICON_SIZES = (180, 192, 512)

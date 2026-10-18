@@ -8,7 +8,8 @@ import pytest
 
 from assistant.failover.edge import EdgeMiddleware
 from assistant.failover.peers import Backend
-from assistant.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, default_peers,
+from assistant.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, covered_by,
+                                     default_peers,
                                      fingerprint, handle_pull, handle_push,
                                      make_sync_app, materialize, new_event, new_id,
                                      parse_event)
@@ -124,6 +125,56 @@ def test_delete_one_message():
     d = new_event("delete_message", "c", {"target": m2.id}, origin="pc", ts=5)  # skewed clock
     c = materialize([d, m2, m1])["conversations"]["c"]
     assert [m["text"] for m in c.messages] == ["keep"]
+
+
+def all_text(store):
+    """Every string in every event's data, as stored and as sent on."""
+    events, _, _ = store.since(0, 10_000)
+    return json.dumps([e.data for e in store.all()]) + json.dumps([e.to_json()["data"] for e in events])
+
+
+@pytest.mark.parametrize("delete_first", [False, True])
+def test_delete_redacts_the_text_in_the_store(delete_first):
+    s = MemoryEventLog()
+    msgs = [new_event("message", "c", {"role": "user", "text": f"secret {i}"}, origin="pi",
+                      ts=10 + i) for i in range(3)]
+    ren = new_event("rename", "c", {"title": "Secret plans"}, origin="pc", ts=20)
+    other = new_event("message", "d", {"role": "user", "text": "keep me"}, origin="pi", ts=21)
+    dele = new_event("delete", "c", {}, origin="pc", ts=30)
+    for batch in ([dele], msgs + [ren, other]) if delete_first else (msgs + [ren, other], [dele]):
+        s.append(batch)
+    text = all_text(s)
+    assert "secret" not in text.lower() and "keep me" in text
+    kept = {e.id: e for e in s.all()}
+    for e in msgs + [ren]:  # ids, timestamps and kinds stay, so sync is unaffected
+        assert kept[e.id].ts == e.ts and kept[e.id].kind == e.kind and kept[e.id].data == {}
+
+
+@pytest.mark.parametrize("delete_first", [False, True])
+def test_delete_message_redacts_its_target(delete_first):
+    s = MemoryEventLog()
+    keep = new_event("message", "c", {"role": "user", "text": "fine"}, origin="pi", ts=1)
+    drop = new_event("message", "c", {"role": "user", "text": "oops my password"}, origin="pi", ts=2)
+    d = new_event("delete_message", "c", {"target": drop.id}, origin="pc", ts=3)
+    for batch in ([d], [keep, drop]) if delete_first else ([keep, drop], [d]):
+        s.append(batch)
+    assert "password" not in all_text(s) and "fine" in all_text(s)
+    assert [m["text"] for m in materialize(s.all())["conversations"]["c"].messages] == ["fine"]
+
+
+def test_redaction_reaches_every_peer():
+    stores, net = three()
+    msg = new_event("message", "c", {"role": "user", "text": "very private"}, origin="pi")
+    stores["pi"].append([msg])
+    for role in ("pi", "pc"):
+        net.syncer(role).sync_all()  # everyone has the text now
+    assert all("private" in all_text(s) for s in stores.values())
+    stores["pc"].append([new_event("delete", "c", {}, origin="pc")])
+    for _ in range(2):
+        for role in ("pc", "pi"):
+            net.syncer(role).sync_all()
+    for role, s in stores.items():
+        assert "private" not in all_text(s), role
 
 
 def test_store_append_is_idempotent_and_since_pages():
@@ -301,8 +352,12 @@ def test_three_stores_converge_under_random_interleavings(seed):
     assert ok, prints
     expected = fingerprint(materialize(everything))
     assert prints["cloud"] == expected
+    tombstones = [e for e in everything if e.kind in ("delete", "delete_message")]
     for s in stores.values():
         assert len(s.all()) == len({e.id for e in everything})  # no duplicates stored
+        for e in s.all():  # nothing a tombstone covers keeps its text
+            if any(covered_by(t, e) for t in tombstones):
+                assert e.data == {}, e
 
 
 @pytest.mark.parametrize("seed", range(20))

@@ -10,10 +10,15 @@ It owns everything that is the same on all three:
   nor this server's own origin is refused with 403. Requests with no Origin
   (other backends, curl) pass the origin check and still need a token.
 - POST /api/auth/token: trade WEB_TOKEN for a derived bearer token (see
-  tokens.py), with the global wrong-token lockout. POST /api/auth/refresh
+  tokens.py). Wrong tokens count toward the web app's LoginLimiter (per
+  address); the right one is always accepted. POST /api/auth/refresh
   renews a valid app token.
-- Bearer auth on every other /api/ path: missing or wrong -> 401. App
-  tokens can't use /api/sync/, sync tokens can only use /api/sync/.
+- Bearer auth on /api/ paths: a wrong token -> 401 (429 once that address
+  is locked out); a valid one is never locked out. App tokens can't use
+  /api/sync/, sync tokens can only use /api/sync/. A same-origin request
+  with no Authorization header goes on to the web app, whose session
+  cookie decides (cookie clients keep working); cross-origin requests
+  always need a bearer token (browsers send no cookies there).
 - GET /api/backends: this backend's configured list, for the app to cache.
 - WebSockets: the token comes in the first message after the socket opens,
   {"type": "auth", "token": "..."}, never in the URL. No valid token within
@@ -28,9 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
-import time
-from collections import deque
 from urllib.parse import urlsplit
 
 from assistant.failover import API_VERSION
@@ -48,32 +50,9 @@ WS_CLOSE_AUTH_TIMEOUT = 4408
 WS_CLOSE_FORBIDDEN_ORIGIN = 1008  # before accept: the server answers 403
 
 
-class FailureLimiter:
-    """At most `max_failures` wrong tokens per `window` seconds, in total
-    (behind `tailscale serve` or Render's proxy every caller has the same
-    address, so a per-address limit would mean nothing)."""
-
-    def __init__(self, max_failures: int = 5, window: float = 300,
-                 clock=time.monotonic):
-        self.max_failures = max_failures
-        self.window = window
-        self.clock = clock
-        self.failures: deque[float] = deque()
-        self.lock = threading.Lock()
-
-    def _prune(self) -> None:
-        cutoff = self.clock() - self.window
-        while self.failures and self.failures[0] <= cutoff:
-            self.failures.popleft()
-
-    def blocked(self) -> bool:
-        with self.lock:
-            self._prune()
-            return len(self.failures) >= self.max_failures
-
-    def fail(self) -> None:
-        with self.lock:
-            self.failures.append(self.clock())
+def default_client_ip(scope) -> str:
+    client = scope.get("client")
+    return client[0] if client else ""
 
 
 def _headers(scope) -> dict[str, str]:
@@ -103,7 +82,7 @@ class EdgeMiddleware:
     def __init__(self, app, *, authority: TokenAuthority, role: str,
                  app_origins=(), backends: list[Backend] = (),
                  routes: dict | None = None,
-                 limiter: FailureLimiter | None = None,
+                 limiter=None, client_ip=default_client_ip,
                  ws_auth_timeout: float = 5.0, protected_prefix: str = "/api/",
                  root_bearer_sid: str | None = None):
         self.app = app
@@ -114,7 +93,14 @@ class EdgeMiddleware:
         # extra ASGI apps by path prefix, e.g. {"/api/sync/": sync_app};
         # those under /api/sync/ need a sync-scope token
         self.routes = dict(routes or {})
-        self.limiter = limiter or FailureLimiter()
+        # The web app's own LoginLimiter (per address, plus a global limit
+        # that only slows wrong attempts); the right token is never refused.
+        if limiter is None:
+            from assistant.webapp import LoginLimiter
+
+            limiter = LoginLimiter()
+        self.limiter = limiter
+        self.client_ip = client_ip
         self.ws_auth_timeout = ws_auth_timeout
         self.protected_prefix = protected_prefix
         # Scripts may also send WEB_TOKEN itself as the bearer token (as the
@@ -199,16 +185,20 @@ class EdgeMiddleware:
         if path in ("/api/auth/token", "/api/auth/refresh"):
             if method != "POST":
                 return await _json(send, 405, {"error": "method not allowed"}, cors())
-            return await self._auth(path, headers, receive, send, cors)
+            return await self._auth(scope, path, headers, receive, send, cors)
 
-        if path.startswith(self.protected_prefix):
+        cookie_client = ("authorization" not in headers and not cors_origin
+                         and not path.startswith("/api/sync/")
+                         and path != "/api/backends")
+        if path.startswith(self.protected_prefix) and not cookie_client:
             claims = self.check_bearer(headers, path)
             if claims is None:
-                blocked = self.limiter.blocked()
-                self.limiter.fail()
-                if blocked:
+                ip = self.client_ip(scope)
+                if self.limiter.blocked(ip):
                     return await _json(send, 429, {"error": "too many attempts"},
-                                       cors([("retry-after", "300")]))
+                                       cors([("retry-after", "900")]))
+                if "authorization" in headers:
+                    self.limiter.fail(ip)  # a wrong token, not just a missing one
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
             scope = dict(scope, auth=claims)
@@ -236,7 +226,7 @@ class EdgeMiddleware:
 
         await target(scope, receive, send_with_cors)
 
-    async def _auth(self, path, headers, receive, send, cors):
+    async def _auth(self, scope, path, headers, receive, send, cors):
         body = await _read_body(receive)
         if body is None:
             return await _json(send, 413, {"error": "too large"}, cors())
@@ -244,7 +234,7 @@ class EdgeMiddleware:
             claims = self.authority.verify(bearer_of(headers.get("authorization")),
                                            scope="app")
             if claims is None:
-                self.limiter.fail()
+                self.limiter.fail(self.client_ip(scope))
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
             if claims.expires >= claims.signed_in + MAX_SESSION:
@@ -252,16 +242,17 @@ class EdgeMiddleware:
                 return await _json(send, 401, {"error": "sign in again"},
                                    cors([("www-authenticate", "Bearer")]))
             return await self._issue(send, cors, claims.sid, claims.signed_in)
-        if self.limiter.blocked():
-            return await _json(send, 429, {"error": "too many attempts, wait a few minutes"},
-                               cors([("retry-after", "300")]))
         try:
             data = json.loads(body or b"{}")
         except ValueError:
             data = None
         given = str(data.get("token", "")) if isinstance(data, dict) else ""
         if not given or not self.authority.check_root(given):
-            self.limiter.fail()
+            ip = self.client_ip(scope)
+            if self.limiter.blocked(ip):
+                return await _json(send, 429, {"error": "too many attempts, wait a few minutes"},
+                                   cors([("retry-after", "900")]))
+            self.limiter.fail(ip)
             log.warning("Token request with a wrong WEB_TOKEN")
             return await _json(send, 401, {"error": "wrong token"}, cors())
         sid = data.get("sid") if isinstance(data.get("sid"), str) else None
@@ -281,11 +272,21 @@ class EdgeMiddleware:
         first = await receive()
         if first["type"] != "websocket.connect":
             return
-        allowed, _ = self.origin_verdict(headers)
+        allowed, cors_origin = self.origin_verdict(headers)
         if not allowed:
             log.warning("Refused a WebSocket from another origin")
             return await send({"type": "websocket.close",
                                "code": WS_CLOSE_FORBIDDEN_ORIGIN})
+        if "cookie" in headers and not cors_origin:
+            # same-origin page with the session cookie: the web app's own
+            # check (require_session) decides, as without failover
+            async def replay():
+                nonlocal first
+                if first is not None:
+                    message, first = first, None
+                    return message
+                return await receive()
+            return await self.app(scope, replay, send)
         await send({"type": "websocket.accept"})
         try:
             msg = await asyncio.wait_for(receive(), self.ws_auth_timeout)
@@ -302,7 +303,7 @@ class EdgeMiddleware:
         except ValueError:
             pass
         if claims is None:
-            self.limiter.fail()
+            self.limiter.fail(self.client_ip(scope))
             return await send({"type": "websocket.close",
                                "code": WS_CLOSE_UNAUTHORIZED, "reason": "unauthorized"})
         await send({"type": "websocket.send", "text": json.dumps({"type": "auth_ok"})})

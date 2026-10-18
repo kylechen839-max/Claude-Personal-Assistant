@@ -18,7 +18,11 @@ kinds
 "Last writer" is the largest (ts, id) pair, so ties break the same way
 everywhere. A tombstone is permanent: once a delete is in the log, the
 conversation (or message) stays deleted, whatever arrives later and in
-whatever order. So the materialized state is a pure function of the *set*
+whatever order. Deleting also *redacts*: the store keeps the id, ts,
+origin, kind and conv of every event the tombstone covers but drops its
+data (the text), whether the tombstone arrives before or after them, so
+the words are gone from every backend's log and from what it sends on.
+So the materialized state is a pure function of the *set*
 of events: merging is idempotent (same id = same event, ignored) and
 order-independent, and stores that have seen the same events agree.
 
@@ -134,7 +138,10 @@ class EventLog(Protocol):
 
     def append(self, events: Iterable[Event]) -> list[Event]:
         """Insert events whose id is new; return the ones inserted.
-        Atomic per call; known ids are ignored (idempotent)."""
+        Atomic per call; known ids are ignored (idempotent). Must apply
+        redactions (see `covered_by` / `redacted`): an event under an
+        existing tombstone is stored redacted, and a new tombstone redacts
+        the stored events it covers."""
 
     def since(self, seq: int, limit: int) -> tuple[list[Event], int, bool]:
         """Events with local seq > `seq`, oldest first, at most `limit`:
@@ -148,11 +155,28 @@ class EventLog(Protocol):
     def meta_set(self, key: str, value: str) -> None: ...
 
 
+def redacted(e: Event) -> Event:
+    """The event without its data (text, title...): what is kept of an
+    event a tombstone covers."""
+    return Event(e.id, e.ts, e.origin, e.kind, e.conv, {}) if e.data else e
+
+
+def covered_by(tombstone: Event, e: Event) -> bool:
+    """Does this delete / delete_message tombstone cover event `e`?"""
+    if tombstone.kind == "delete":
+        # tombstones themselves hold no text (only ids) and must survive
+        return e.conv == tombstone.conv and e.kind not in ("delete", "delete_message", "job")
+    if tombstone.kind == "delete_message":
+        return e.id == tombstone.data.get("target")
+    return False
+
+
 class MemoryEventLog:
     def __init__(self, log_id: str | None = None):
         self.log_id = log_id or new_id()
         self._events: list[Event] = []      # index = seq - 1
-        self._by_id: dict[str, Event] = {}
+        self._seq: dict[str, int] = {}      # id -> index in _events
+        self._tombstones: list[Event] = []
         self._meta: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -160,11 +184,18 @@ class MemoryEventLog:
         added = []
         with self._lock:
             for e in events:
-                if e.id in self._by_id:
+                if e.id in self._seq:
                     continue
-                self._by_id[e.id] = e
+                if any(covered_by(t, e) for t in self._tombstones):
+                    e = redacted(e)
+                self._seq[e.id] = len(self._events)
                 self._events.append(e)
                 added.append(e)
+                if e.kind in ("delete", "delete_message"):
+                    self._tombstones.append(e)
+                    for i, old in enumerate(self._events):
+                        if old.data and covered_by(e, old):
+                            self._events[i] = redacted(old)
         return added
 
     def since(self, seq, limit):
@@ -218,6 +249,8 @@ def materialize(events: Iterable[Event]) -> dict:
             continue
         c = convs.setdefault(e.conv, Conversation(e.conv))
         c.updated = max(c.updated, e.ts)
+        if not e.data and e.kind in ("message", "rename", "pin"):
+            continue  # redacted by a tombstone that may not have arrived yet
         if e.kind == "message" and e.id not in dead_msgs:
             c.messages.append({"id": e.id, "ts": e.ts, "origin": e.origin,
                                "role": e.data.get("role"), "text": e.data.get("text", "")})
