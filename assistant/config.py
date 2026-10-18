@@ -68,6 +68,8 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "notes": {"enabled": True,      # remember_note / recall_notes (needs memory)
+              "min_score": 0.3},
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
 

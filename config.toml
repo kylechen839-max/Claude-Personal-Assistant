@@ -70,6 +70,10 @@ top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 
+[notes]
+enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
+min_score = 0.3               # how close a note must be to count as a match
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"
