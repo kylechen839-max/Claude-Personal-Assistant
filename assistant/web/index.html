@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1f1e1d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claude">
+<title>Hey Claude</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<main id="login" class="login" hidden>
+  <h1>Hey Claude</h1>
+  <p>Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
+     You only need to do this once on this phone.</p>
+  <form id="login-form" autocomplete="off">
+    <input id="token" type="password" placeholder="Access token" autocomplete="current-password"
+           autocapitalize="off" spellcheck="false" required>
+    <button type="submit">Sign in</button>
+  </form>
+  <p id="login-error" class="error" role="alert"></p>
+</main>
+
+<main id="app" class="app" hidden>
+  <header>
+    <h1>Hey Claude</h1>
+    <details class="menu">
+      <summary aria-label="Settings">&#9881;</summary>
+      <div class="menu-body">
+        <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
+        <label><input id="mute" type="checkbox"> Don't speak replies</label>
+        <button id="logout" type="button">Sign out</button>
+      </div>
+    </details>
+  </header>
+
+  <section id="log" class="log" aria-live="polite"></section>
+  <p id="status" class="status" aria-live="polite"></p>
+
+  <section id="confirm" class="confirm" hidden>
+    <p id="confirm-question"></p>
+    <div class="confirm-buttons">
+      <button id="yes" type="button" class="yes">Yes</button>
+      <button id="no" type="button" class="no">No</button>
+    </div>
+    <p class="hint">Or hold the mic and say "yes".</p>
+  </section>
+
+  <footer>
+    <form id="text-form" autocomplete="off">
+      <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
+      <button type="submit" aria-label="Send">&#10148;</button>
+    </form>
+    <button id="mic" class="mic" type="button" aria-label="Hold to talk, or tap to start and stop">
+      <img src="/icon.svg" alt="">
+    </button>
+    <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
+  </footer>
+</main>
+</body>
+</html>
