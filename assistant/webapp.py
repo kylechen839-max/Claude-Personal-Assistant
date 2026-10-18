@@ -187,30 +187,71 @@ class LoginLimiter:
                     self.failures.pop(key, None)
 
 
-def parse_trusted_proxy(value) -> int:
-    """`trusted_proxy` / TRUSTED_PROXY: how many proxies in front of us add
-    X-Forwarded-* headers (0 = trust none; true/"yes" = 1)."""
+@dataclass(frozen=True)
+class ProxyTrust:
+    """Which proxy in front of us may set X-Forwarded-* headers.
+
+    `hops`: how many proxies add an X-Forwarded-For entry (0 = trust none).
+    `addresses`: if given, the headers count only when the direct caller is
+    one of them (e.g. 127.0.0.1 for `tailscale serve` on the same PC)."""
+
+    hops: int = 0
+    addresses: frozenset = frozenset()
+
+    def __bool__(self) -> bool:
+        return self.hops > 0
+
+    def trusts(self, conn) -> bool:
+        if not self.hops:
+            return False
+        peer = conn.client.host if conn.client else ""
+        return not self.addresses or peer in self.addresses
+
+
+def parse_trusted_proxy(value) -> ProxyTrust:
+    """`trusted_proxy` / TRUSTED_PROXY: 0/false (none), true or a count of
+    proxies, or the proxy's address(es), e.g. "127.0.0.1" or "127.0.0.1, ::1"
+    (then one proxy, trusted only when the request comes from it)."""
+    if isinstance(value, ProxyTrust):
+        return value
     if isinstance(value, bool):
-        return int(value)
+        return ProxyTrust(int(value))
     if isinstance(value, int):
-        return max(0, value)
-    text = str(value or "").strip().lower()
-    if text in ("", "0", "false", "no", "off"):
-        return 0
-    if text in ("true", "yes", "on"):
-        return 1
-    return max(0, int(text))
+        return ProxyTrust(max(0, value))
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [str(v).strip() for v in value if str(v).strip()]
+    else:
+        items = [v.strip() for v in str(value or "").split(",") if v.strip()]
+    if not items:
+        return ProxyTrust()
+    if len(items) == 1:
+        text = items[0].lower()
+        if text in ("0", "false", "no", "off"):
+            return ProxyTrust()
+        if text in ("true", "yes", "on"):
+            return ProxyTrust(1)
+        if text.isdigit():
+            return ProxyTrust(int(text))
+    addresses = set()
+    for item in items:
+        try:
+            addresses.add(str(ipaddress.ip_address(item)))
+        except ValueError:
+            raise ValueError(f"trusted_proxy: {item!r} is not a number of proxies "
+                             "or an IP address") from None
+    return ProxyTrust(1, frozenset(addresses))
 
 
-def client_ip(conn, trusted_proxy: int = 0) -> str:
+def client_ip(conn, trusted_proxy=0) -> str:
     """The caller's address. X-Forwarded-For is used only behind a trusted
     proxy, and then the entry that proxy added (counting from the right),
     since anything further left can be forged by the client."""
-    if trusted_proxy:
+    trust = parse_trusted_proxy(trusted_proxy)
+    if trust.trusts(conn):
         hops = [h.strip() for h in conn.headers.get("x-forwarded-for", "").split(",")
                 if h.strip()]
         if hops:
-            return hops[-min(trusted_proxy, len(hops))]
+            return hops[-min(trust.hops, len(hops))]
     return conn.client.host if conn.client else ""
 
 
@@ -695,11 +736,11 @@ class WebAuth:
     share one conversation, and wrong tokens count toward the lockouts."""
 
     def __init__(self, assistant: WebAssistant, token: str, allowed_origins=(),
-                 trusted_proxy: int = 0, limiter: "LoginLimiter | None" = None):
+                 trusted_proxy=0, limiter: "LoginLimiter | None" = None):
         self.assistant = assistant
         self.token = token
         self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
-        self.trusted_proxy = trusted_proxy
+        self.trusted_proxy = parse_trusted_proxy(trusted_proxy)
         self.limiter = limiter or LoginLimiter()
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
@@ -744,7 +785,7 @@ def require_session(conn: HTTPConnection):
 
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
-               max_text_chars: int = 4000, trusted_proxy: int = 0,
+               max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30):
     from contextlib import asynccontextmanager
 
@@ -807,7 +848,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         api = path.startswith("/api/")
         unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
         length = request.headers.get("content-length")
-        if trusted_proxy and request.headers.get("x-forwarded-proto") == "http":
+        proxied = web.trusted_proxy.trusts(request)
+        if proxied and request.headers.get("x-forwarded-proto") == "http":
             url = request.url.replace(scheme="https", port=None)
             if request.headers.get("x-forwarded-host"):
                 url = url.replace(netloc=request.headers["x-forwarded-host"])
@@ -824,7 +866,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             response = await call_next(request)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
-        if trusted_proxy:
+        if proxied:
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000")
         if api:
@@ -1121,7 +1163,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))
-    log.info("Web app listening on %s:%s (trusted proxies: %d)", host, port,
+    log.info("Web app listening on %s:%s (trusted proxy: %s)", host, port,
              trusted_proxy)
     uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
                 server_header=False, limit_concurrency=64,
