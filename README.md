@@ -278,6 +278,12 @@ Pinecone (your `voice-assistant` namespace, tagged as a note);
 for your recent notes or to delete one (it asks first). Notes need
 `[memory]` (Pinecone); `[notes] enabled` turns them off.
 
+> **Status:** the Lecture and Tutor screens and their server routes are
+> built and tested (`assistant/webfeatures.py`, `assistant/web/static/`),
+> but are switched on in the phone app (two lines in `index.html`, one hook
+> in `webapp.serve`, `font-src 'self'` in the CSP) only after hands-free
+> voice mode lands, to keep those files stable meanwhile.
+
 ### Record a lecture (phone app)
 In the phone app, open the **Lecture** tab, pick the course (the options
 come from the Course property of your Notion Assignments database), and

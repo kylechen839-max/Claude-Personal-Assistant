@@ -255,6 +255,13 @@ Four features on top of the seven stages (branch `claude/features`).
   `/static/katex` and drawn with `katex.render` (CSP-safe), spoken replies
   with LaTeX read aloud. Tested: auth on every route, type/size rejection,
   EXIF removal, mocked vision call, 27 LaTeX-to-speech forms.
+- **Not wired into the phone app yet** (by request, until voice mode is on
+  master): `webapp.serve` must call `webfeatures.install(app,
+  Features(config, assistant))` and `features.pipeline.resume_pending()`,
+  `build_assistant` must call `cli.register_notes`, `index.html` must load
+  `/static/katex/katex.min.{css,js}` and `/static/features.{css,js}`, and
+  the CSP needs `font-src 'self'`. This was done and tested in commit
+  6b018e8 (and driven in headless Chromium), then backed out.
 - Waiting on other branches: voice mode (spoken tutor replies in the
   hands-free mode can use `mathspeech.speakable` and the page's
   `window.heyClaudeMath`), cloud host (`[lecture] upload_dir` on `/data`,
