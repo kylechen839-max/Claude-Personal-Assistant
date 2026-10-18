@@ -40,14 +40,14 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="python -m assistant",
                                      description="Hey Claude voice assistant")
     parser.add_argument("--mode", choices=["text", "speak", "voice", "wake", "web"],
-                        default="wake",
                         help="text: type/read; speak: type/listen; voice: "
                              "push-to-talk; wake: always listening (default); "
-                             "web: private phone web app")
+                             "web: private phone web app (the only mode, and "
+                             "the default, with ASSISTANT_PROFILE=server)")
     parser.add_argument("--audio-file",
                         help="wake mode: feed this .wav through the wake-word "
                              "pipeline instead of the live mic, then exit")
-    parser.add_argument("--tts", choices=["pyttsx3", "piper", "print"],
+    parser.add_argument("--tts", choices=["pyttsx3", "piper", "espeak", "print"],
                         help="override the TTS engine from config.toml")
     parser.add_argument("--config", default="config.toml",
                         help="settings file (default: config.toml)")
@@ -310,20 +310,19 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
 
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     """Register every service that is enabled and has credentials."""
-    from pathlib import Path
-
     registry = ToolRegistry()
     tz = config["assistant"]["timezone"] or None
     cal = config["calendar"]
-    if cal["enabled"] and (Path(cal["credentials"]).exists()
-                           or Path(cal["token"]).exists()):
-        from assistant.tools.calendar import GoogleCalendar
+    from assistant.tools.calendar import GoogleCalendar, has_credentials
 
+    if cal["enabled"] and has_credentials(cal["credentials"], cal["token"]):
         registry.register(*GoogleCalendar(
             credentials_path=cal["credentials"], token_path=cal["token"],
-            calendar_id=cal["calendar_id"], timezone=tz).tools())
+            calendar_id=cal["calendar_id"], timezone=tz,
+            save_token=cal["save_token"]).tools())
     elif cal["enabled"]:
-        output_fn(f"(Calendar tools off: {cal['credentials']} not found)")
+        output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
+                  "GOOGLE_TOKEN_JSON not set)")
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
@@ -415,10 +414,17 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     config = load_config(args.config)
     log_file = setup_logging(config)
+    server = config["profile"] == "server"
     if args.check:
         from assistant import doctor
 
         return doctor.report(doctor.run_checks(config, args.keyword_path))
+    args.mode = args.mode or ("web" if server else "wake")
+    if server and args.mode not in ("web", "text"):
+        # no microphone or speakers on a server
+        print(f"--mode {args.mode} needs audio devices; with "
+              "ASSISTANT_PROFILE=server use --mode web.")
+        return 1
     log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")
@@ -427,6 +433,10 @@ def main(argv=None) -> int:
     tts_name = args.tts or tts_cfg["engine"]
     stt_cfg = config["stt"]
     try:
+        if args.mode == "web" and server:
+            from assistant import cloud
+
+            return cloud.serve(config, port=args.port, tts_name=tts_name)
         if args.mode == "web":
             from assistant import webapp
 
@@ -457,6 +467,6 @@ def main(argv=None) -> int:
         print("Bye!")
     except Exception as e:  # startup problems: missing key, no mic, bad config
         log.exception("Fatal error")
-        print(f"Error: {e}\n(Details in {log_file})")
+        print(f"Error: {e}\n(Details in {log_file or 'the log above'})")
         return 1
     return 0

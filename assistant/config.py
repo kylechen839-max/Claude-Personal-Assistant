@@ -1,6 +1,9 @@
-"""Settings: built-in defaults <- config.toml <- environment variables.
+"""Settings: built-in defaults <- config.toml <- profile <- environment.
 
-Secrets live in .env (loaded here); everything else in config.toml.
+Secrets live in .env (loaded here) or, on a server, in the environment;
+everything else in config.toml. The "server" profile (ASSISTANT_PROFILE=server,
+set in the Docker image) adjusts the settings for a cloud box with no audio
+devices; see SERVER_PROFILE.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ else:  # Python 3.10
     import tomli as tomllib
 
 DEFAULTS: dict = {
+    "profile": "",  # set by load_config: "server" or "" (see active_profile)
     "assistant": {
         "model": "claude-sonnet-5-5",
         "max_tokens": 1500,  # room for thinking + web search; replies stay short
@@ -30,7 +34,8 @@ DEFAULTS: dict = {
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
     "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_voice": ""},  # .onnx path; its .onnx.json sits beside it
+            "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
+            "fallback": "pyttsx3"},  # used when the Piper voice is missing
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
@@ -46,7 +51,9 @@ DEFAULTS: dict = {
         "mic_device": "",  # sounddevice name or index; "" = default
     },
     "calendar": {"enabled": True, "credentials": "credentials.json",
-                 "token": "token.json", "calendar_id": "primary"},
+                 "token": "token.json", "calendar_id": "primary",
+                 # write refreshed tokens back to token.json (never on a server)
+                 "save_token": True},
     "notion": {"enabled": True,
                "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
     "web": {
@@ -74,8 +81,37 @@ DEFAULTS: dict = {
         "allowed_origins": [],      # extra https://... origins, if a proxy
                                     # rewrites the Host header
     },
-    "logging": {"file": "logs/assistant.log", "level": "INFO"},
+    # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
+    "cloud": {
+        # Only these peers may set X-Forwarded-For/-Proto (the hosting
+        # provider's TLS proxy reaches the container from a private address).
+        "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                            "127.0.0.0/8", "::1/128", "fc00::/7"],
+        "login_max_failures": 5,        # wrong tokens per address ...
+        "login_window": 900,            # ... in this many seconds -> locked out
+        "login_lockout": 900,           # first lockout; doubles each time, max 1 day
+        "login_global_max_failures": 30,  # from all addresses per window
+        "requests_per_minute": 120,     # per address, every route but /healthz
+        "max_body_kb": 16,              # any request that isn't an audio upload
+    },
+    "logging": {"file": "logs/assistant.log", "level": "INFO",
+                "console_level": "WARNING"},
 }
+
+# Settings for a headless cloud server (the Docker image): no speakers, mic
+# or wake word; Piper with the voice baked into the image, then espeak-ng;
+# nothing written to disk (Google tokens are refreshed in memory, logs go to
+# stdout for the host's log viewer); no PC-only tools.
+SERVER_PROFILE: dict = {
+    "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
+            "fallback": "espeak"},
+    "wake": {"chime": False, "follow_up_seconds": 0},
+    "calendar": {"save_token": False},
+    "web": {"browser": False},
+    "webapp": {"host": "0.0.0.0", "max_upload_mb": 4},
+    "logging": {"file": "", "console_level": "INFO"},
+}
+PROFILES = {"server": SERVER_PROFILE}
 
 # Environment variables that override config values.
 ENV_OVERRIDES = {
@@ -85,6 +121,8 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
+    "WHISPER_MODEL": ("stt", "model"),
 }
 
 
@@ -97,8 +135,18 @@ def _merge(base: dict, override: dict) -> dict:
     return base
 
 
+def active_profile(environ=os.environ) -> str:
+    """"server" in the cloud image (ASSISTANT_PROFILE), else "" (a PC or Pi)."""
+    profile = environ.get("ASSISTANT_PROFILE", "").strip().lower()
+    if profile and profile not in PROFILES:
+        raise ValueError(f"Unknown ASSISTANT_PROFILE {profile!r} "
+                         f"(choose from: {', '.join(PROFILES)})")
+    return profile
+
+
 def load_config(path: str | Path | None = "config.toml",
-                env_file: str | Path | None = ".env") -> dict:
+                env_file: str | Path | None = ".env",
+                profile: str | None = None) -> dict:
     if env_file and Path(env_file).exists():
         from dotenv import load_dotenv
 
@@ -107,6 +155,10 @@ def load_config(path: str | Path | None = "config.toml",
     if path and Path(path).exists():
         with open(path, "rb") as f:
             _merge(config, tomllib.load(f))
+    profile = active_profile() if profile is None else profile
+    if profile:
+        _merge(config, copy.deepcopy(PROFILES[profile]))
+    config["profile"] = profile
     for var, (section, key) in ENV_OVERRIDES.items():
         if os.environ.get(var):
             config[section][key] = os.environ[var]
@@ -114,7 +166,8 @@ def load_config(path: str | Path | None = "config.toml",
 
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
-                   "ELEVENLABS_API_KEY", "WEB_TOKEN")
+                   "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
+                   "GOOGLE_CLIENT_JSON")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens
@@ -149,23 +202,33 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record))
 
 
-def setup_logging(config: dict) -> Path:
-    """Detailed log to a rotating file; only warnings on the console."""
-    log_file = Path(config["logging"]["file"])
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+def setup_logging(config: dict) -> Path | None:
+    """Detailed log to a rotating file; only warnings on the console.
+
+    With no file (the server profile) everything at `level` goes to the
+    console instead, where the host's log viewer picks it up."""
+    cfg = config["logging"]
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     for h in list(root.handlers):
         root.removeHandler(h)
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-    file_handler.setLevel(config["logging"]["level"].upper())
-    file_handler.setFormatter(RedactingFormatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    log_file = Path(cfg["file"]) if cfg["file"] else None
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+        file_handler.setLevel(cfg["level"].upper())
+        file_handler.setFormatter(RedactingFormatter(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+        root.addHandler(file_handler)
     console = logging.StreamHandler()
-    console.setLevel(logging.WARNING)
-    console.setFormatter(RedactingFormatter("[%(levelname)s] %(message)s"))
-    root.addHandler(file_handler)
+    if log_file:
+        console.setLevel(cfg.get("console_level", "WARNING").upper())
+        console.setFormatter(RedactingFormatter("[%(levelname)s] %(message)s"))
+    else:
+        console.setLevel(cfg["level"].upper())
+        console.setFormatter(RedactingFormatter(
+            "%(levelname)-7s %(name)s: %(message)s"))
     root.addHandler(console)
     for noisy in ("httpx", "httpcore", "urllib3", "googleapiclient", "faster_whisper"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

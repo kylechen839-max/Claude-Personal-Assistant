@@ -166,9 +166,63 @@ def check_web(environ=os.environ, find_spec=None) -> list[Check]:
                        "requirements.txt)", required=False)]
 
 
+def check_google_env(config: dict, environ=os.environ) -> list[Check]:
+    """Server variant: the OAuth files come from GOOGLE_*_JSON secrets."""
+    from assistant.tools.calendar import CLIENT_ENV, TOKEN_ENV, token_info
+
+    if not config["calendar"]["enabled"]:
+        return [Check("Google Calendar", True, "disabled in config.toml",
+                      required=False)]
+    try:
+        info, from_env = token_info(config["calendar"]["token"],
+                                    config["calendar"]["credentials"], environ)
+    except ValueError as e:  # the message names the variable, not its value
+        return [Check(TOKEN_ENV, False, str(e), required=False)]
+    if not from_env:
+        return [Check(TOKEN_ENV, False, "not set (calendar tools will be off; "
+                      "paste the contents of token.json)", required=False)]
+    missing = [k for k in ("refresh_token", "client_id", "client_secret")
+               if not info.get(k)]
+    if missing:
+        hint = (f"; set {CLIENT_ENV} too" if "client_secret" in missing
+                or "client_id" in missing else "")
+        return [Check(TOKEN_ENV, False, f"set, but has no {', '.join(missing)}"
+                      f"{hint}", required=False)]
+    return [Check(TOKEN_ENV, True, "set (refreshed in memory, never saved)")]
+
+
+def check_server(config: dict, environ=os.environ) -> list[Check]:
+    """Things a public server needs that a PC doesn't."""
+    token = environ.get("WEB_TOKEN", "")
+    checks = [Check("WEB_TOKEN", len(token) >= 32,
+                    "set" if len(token) >= 32 else
+                    ("too short (32+ random characters)" if token else
+                     "not set (the Render Blueprint generates it)"))]
+    tz = config["assistant"]["timezone"]
+    checks.append(Check("Time zone", bool(tz), tz or "not set: \"today\" and "
+                        "\"tomorrow\" would be in UTC (set ASSISTANT_TIMEZONE, "
+                        "e.g. America/New_York)", required=False))
+    return checks
+
+
+def check_server_tts(config: dict, which=shutil.which) -> list[Check]:
+    checks = [check_tts(config, which)]
+    found = which("espeak-ng") or which("espeak")
+    checks.append(Check("TTS fallback (espeak-ng)", bool(found),
+                        "found" if found else "missing (apt-get install espeak-ng)",
+                        required=checks[0].ok is False))
+    return checks
+
+
 def run_checks(config: dict, keyword_path: str | None = None,
                environ=os.environ, sd=None, download_model=None,
                which=shutil.which) -> list[Check]:
+    if config.get("profile") == "server":
+        # No microphone, speakers or wake word on a server.
+        return [*check_keys(environ), *check_server(config, environ),
+                *check_google_env(config, environ),
+                check_whisper_model(config, download_model),
+                *check_server_tts(config, which), *check_web(environ)[1:]]
     return [*check_keys(environ), *check_google_files(config),
             check_wake_model(config, keyword_path),
             *check_audio_devices(config, sd),

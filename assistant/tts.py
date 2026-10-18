@@ -2,8 +2,9 @@
 
 Every engine implements `speak(text)` and `save_to_file(text, path)`.
 Pick one with `make_tts(name)`: "pyttsx3" (offline, default), "piper"
-(offline neural voice, great on a Raspberry Pi), or "print" (no audio).
-If Piper's voice file is missing, make_tts warns and falls back to pyttsx3.
+(offline neural voice, great on a Raspberry Pi), "espeak" (the espeak-ng
+command, for servers) or "print" (no audio). If Piper's voice file is
+missing, make_tts warns and falls back to `fallback` (pyttsx3 by default).
 
 Download a Piper voice: python -m assistant.tts --download-voice en_US-lessac-medium
 """
@@ -158,6 +159,43 @@ class PiperTTS:
             audio.play(samples, sr)
 
 
+class EspeakTTS:
+    """The espeak-ng command line: robotic, but always there on a Linux
+    server (the cloud image's fallback when the Piper voice is missing).
+    Renders files only; there are no speakers on a server."""
+
+    def __init__(self, rate: int = 175, voice: str | None = None,
+                 command: str | None = None):
+        import shutil
+
+        self.rate = rate
+        self.voice = voice or "en-us"
+        self.command = command or shutil.which("espeak-ng") or shutil.which("espeak")
+        if not self.command:
+            raise RuntimeError("espeak-ng is not installed "
+                               "(sudo apt-get install espeak-ng)")
+        self.on_audio_start = None
+
+    def save_to_file(self, text: str, path: str | Path) -> None:
+        import subprocess
+
+        # "--" so a reply starting with "-" isn't read as an option
+        subprocess.run([self.command, "-v", self.voice, "-s", str(int(self.rate)),
+                        "-w", str(path), "--", text], check=True, timeout=60,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def speak(self, text: str) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "say.wav"
+            self.save_to_file(text, path)
+            samples, sr = audio.read_wav(path)
+        if self.on_audio_start:
+            self.on_audio_start()
+        audio.play(samples, sr)
+
+
 class PrintTTS:
     """No audio: prints the text. Useful for tests and headless debugging."""
 
@@ -199,10 +237,14 @@ def make_tts(name: str = "pyttsx3", **options) -> TTS:
         problem = piper_voice_problem(voice)
         if problem is None:
             return PiperTTS(voice)
-        log.warning("Piper voice unavailable, using pyttsx3 instead: %s. "
+        name = (options.get("fallback") or "pyttsx3").lower()
+        if name == "piper":
+            name = "pyttsx3"
+        log.warning("Piper voice unavailable, using %s instead: %s. "
                     "Download one with: python -m assistant.tts "
-                    "--download-voice %s", problem, DEFAULT_PIPER_VOICE)
-        name = "pyttsx3"
+                    "--download-voice %s", name, problem, DEFAULT_PIPER_VOICE)
+    if name == "espeak":
+        return EspeakTTS()
     if name == "pyttsx3":
         return Pyttsx3TTS(rate=options.get("rate", 185), voice=options.get("voice"))
     if name == "print":
