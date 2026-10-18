@@ -1,6 +1,6 @@
 # Manual test checklist
 
-One sitting on the Windows PC, about 30 minutes. Do the steps in order; each
+One sitting on the Windows PC, about 35 minutes. Do the steps in order; each
 one says what to do, what should happen, and what to change in `config.toml`
 if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
 then run it again).
@@ -189,6 +189,27 @@ Ctrl+C to stop.
   - Should: it's gone. If Pinecone is set up, its memory summary is
     deleted too (the `voice-assistant` namespace in the Pinecone console
     has one vector fewer).
+
+## 13. History on the phone (4 min)
+Needs the phone app (`python -m assistant --mode web`, section on the phone
+app above).
+- [ ] Tap the clock button. Type "lab" in the search bar.
+  - Should: within a second, the lab report conversation from step 12 (if
+    not deleted yet; otherwise any conversation) with "lab" highlighted.
+    Rows are grouped under Today / Yesterday / ...
+- [ ] Swipe a row left; tap Pin. Tap the Pinned filter.
+  - Should: only pinned conversations, with a pin icon.
+- [ ] Tap a conversation, then **Continue this conversation**, then ask a
+      follow-up by voice or text ("and what about the conclusion?").
+  - Should: the answer uses the old context.
+- [ ] Open the voice conversation view and ask another follow-up.
+  - Should: still the same conversation (History shows it with the new turns).
+- [ ] Long-press a row, choose Delete..., confirm.
+  - Should: it disappears; Cancel instead keeps it.
+- [ ] Gear → Incognito on. Say something. Open History and search for it.
+  - Should: not found; the header shows "Incognito". Turn it off again.
+- [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
+      the back button and the dialogs work, light and dark mode both read well.
 
 Note anything that failed or any setting you changed in BLOCKERS.md.
 

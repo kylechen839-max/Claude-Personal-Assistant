@@ -144,6 +144,15 @@ class PineconeMemory:
                              "text": str(meta.get("text", ""))[: self.max_note_chars]})
         return hits
 
+    def vectors_for(self, conversation_id: str, top_k: int = 100) -> list[str]:
+        """Ids of this namespace's summaries of one saved conversation (by
+        their conversation_id metadata), wherever they were written."""
+        result = self.index.query(
+            vector=self.embed("conversation summary", "query"), top_k=top_k,
+            namespace=self.namespace, include_metadata=False,
+            filter={"conversation_id": {"$eq": conversation_id}})
+        return [m.id for m in result.matches]
+
     def delete(self, vector_ids: list[str]) -> None:
         """Delete summaries (by vector id) from the assistant's namespace."""
         if vector_ids:

@@ -102,6 +102,16 @@ compilation), still no inline script, eval or third-party hosts. Tests:
 Every conversation is saved to a SQLite file so it can be searched and
 continued (`assistant/history.py`). What that means for privacy:
 
+- **Events.** Every change is an event in the history sync log (failover's
+  `sync_events` table in the same file); the searchable tables are built
+  from it. Text is never edited in place: a cut-off reply is a
+  `delete_message` tombstone plus the spoken part, and a delete is a
+  tombstone. A tombstone wipes the covered events' text (`data = {}`) in
+  this log and in every backend it syncs to, also when the text arrives
+  after the delete, removes the rows and their search index entries, and
+  the file is written with `secure_delete` and the write-ahead log is
+  checkpointed, so the words don't linger in the file (a test checks the
+  raw file bytes).
 - **Where it lives.** One file, `[history] path` (default
   `data/history.sqlite`, plus `-wal`/`-shm` files next to it while the
   assistant runs): on the PC's disk, on the Pi's SD card, and on the Render
@@ -118,21 +128,29 @@ continued (`assistant/history.py`). What that means for privacy:
 - **Retention.** Unlimited by default. `[history] retention_days` deletes
   unpinned conversations older than that many days at each start;
   `[history] max_mb` (500) deletes the oldest unpinned ones when the file
-  grows past it. Pinned conversations are only deleted by hand. Deleted rows
-  are released with SQLite's incremental vacuum.
+  grows past it. Pinned conversations are only deleted by hand. These are
+  ordinary (synced) deletes, so with failover they apply on every backend.
 - **Deleting.** `--history delete ID` (and the phone app's delete) removes
   the conversation, its messages and its search index entries, and first
   deletes its summary vector(s) from Pinecone (the summary metadata stores
-  the conversation id). If Pinecone can't be reached, nothing is deleted and
+  the conversation id, so summaries written by another backend are found
+  too). If Pinecone can't be reached, nothing is deleted and
   you're told, so a retry can't leave an orphaned summary. Retention and the
   size guard delete local history only; long-term memory notes in Pinecone
   are kept, as they are a separate feature.
-- **Incognito.** `--incognito` or `[history] incognito = true` saves nothing:
+- **Incognito.** `--incognito`, `[history] incognito = true` or the phone
+  app's Incognito switch (per phone) saves nothing:
   no history rows and no Pinecone summary. Searching existing history still
   works; resuming a conversation is refused while incognito.
 - **Ids.** Conversations are addressed by 16 random URL-safe characters
   (96 bits from `secrets`), not row numbers, so ids in URLs can't be guessed
   or counted. Every query is also filtered by the store's owner.
+- **Phone API.** Every `/api/conversations...` and `/api/incognito` route
+  is behind the web app's sign-in (cookie or bearer token, cross-site
+  requests refused); an unknown id and another owner's id both give the
+  same 404. A test calls every route without the cookie and expects 401.
+  The page builds the list with `textContent` (no HTML from the server), and
+  highlights come as `[text, matched]` pairs.
 - **Export** contains only the transcript, title, summary, dates and
   source: no owner, Pinecone ids or other internal fields, and text is
   redacted again on the way out.

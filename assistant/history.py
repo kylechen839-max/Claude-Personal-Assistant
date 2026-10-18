@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 import sqlite3
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable
@@ -78,22 +80,29 @@ MIGRATIONS: list[str] = [
         summary TEXT NOT NULL DEFAULT '',
         title_by_user INTEGER NOT NULL DEFAULT 0,
         pinned INTEGER NOT NULL DEFAULT 0,
-        archived INTEGER NOT NULL DEFAULT 0
+        archived INTEGER NOT NULL DEFAULT 0,
+        -- (ts, event id) of the event that set each field: last writer wins
+        title_order TEXT NOT NULL DEFAULT '',
+        summary_order TEXT NOT NULL DEFAULT '',
+        pin_order TEXT NOT NULL DEFAULT '',
+        last_ts INTEGER NOT NULL DEFAULT 0  -- newest event ts (unix ms)
     );
     CREATE INDEX conversations_owner_updated ON conversations(owner, updated_at);
     CREATE TABLE messages (
         id INTEGER PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
         conversation_id TEXT NOT NULL
             REFERENCES conversations(id) ON DELETE CASCADE,
-        seq INTEGER NOT NULL,
+        ev_ts INTEGER NOT NULL,  -- messages are ordered by (ev_ts, event_id)
         role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
         kind TEXT NOT NULL DEFAULT 'chat',
         text TEXT NOT NULL,
         created_at REAL NOT NULL,
         interrupted INTEGER NOT NULL DEFAULT 0,
-        tool_events TEXT,
-        UNIQUE (conversation_id, seq)
+        tool_events TEXT
     );
+    CREATE INDEX messages_order ON messages(conversation_id, ev_ts, event_id);
+    CREATE TABLE history_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE memory_vectors (
         conversation_id TEXT NOT NULL
             REFERENCES conversations(id) ON DELETE CASCADE,
@@ -188,6 +197,68 @@ def _fts_query(terms: list[str], any_term: bool = False) -> str:
     return (" OR " if any_term else " ").join(quoted)
 
 
+MAX_TEXT = 8000  # characters per message (an event is at most 64 KB of JSON)
+
+
+@dataclass(frozen=True)
+class _LocalEvent:
+    """An event when failover's sync module isn't installed (same fields
+    as assistant.failover.sync.Event; nothing to sync it with)."""
+    id: str
+    ts: int
+    origin: str
+    kind: str
+    conv: str
+    data: dict = field(default_factory=dict, hash=False, compare=False)
+
+
+def _sync_module():
+    try:
+        from assistant.failover import sync
+    except ImportError:
+        return None
+    return sync
+
+
+def _open_eventlog(path: str):
+    """failover's SqliteEventLog on the same database file, if installed."""
+    try:
+        from assistant.failover.eventlog import SqliteEventLog
+    except ImportError:
+        return None
+    return SqliteEventLog(path)
+
+
+class _ProjectingLog:
+    """EventLog for the Syncer: SqliteEventLog, plus each newly inserted
+    event (as stored, i.e. redacted when a tombstone covers it) projected
+    into the history tables right away."""
+
+    def __init__(self, store: "HistoryStore"):
+        self._store = store
+        self._log = store.eventlog
+        self.log_id = self._log.log_id
+
+    def append(self, events):
+        with self._store._lock:
+            added = self._log.append(events)
+            for e in added:
+                self._store._apply(e)
+        return added
+
+    def since(self, seq, limit):
+        return self._log.since(seq, limit)
+
+    def by_conv(self, conv):
+        return self._log.by_conv(conv)
+
+    def meta_get(self, key):
+        return self._log.meta_get(key)
+
+    def meta_set(self, key, value):
+        self._log.meta_set(key, value)
+
+
 class HistoryStore:
     """SQLite store of conversations and their messages for one owner.
 
@@ -197,9 +268,15 @@ class HistoryStore:
     def __init__(self, path: str | Path = "data/history.sqlite", *,
                  owner: str = "default", retention_days: float = 0,
                  max_mb: float = 0, use_fts: bool | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 origin: str = "pc", eventlog=None):
+        """`origin`: this backend's role in events ("pi", "pc", "cloud").
+        `eventlog`: None = failover's SqliteEventLog in the same file when
+        that module is installed; False = none (history still works, it
+        just has nothing to sync); or an EventLog object."""
         self.path = str(path)
         self.owner = owner
+        self.origin = origin
         self.retention_days = retention_days or 0
         self.max_mb = max_mb or 0
         self.clock = clock
@@ -214,10 +291,15 @@ class HistoryStore:
             self._con.execute("PRAGMA journal_mode = WAL")
             # FULL: a committed turn survives a power cut too (Pi SD card).
             self._con.execute("PRAGMA synchronous = FULL")
+        # Deleted rows are overwritten with zeros, not just unlinked.
+        self._con.execute("PRAGMA secure_delete = ON")
         self._migrate()
         if use_fts is None:
             use_fts = fts5_available()
         self.fts = self._ensure_fts() if use_fts else self._drop_fts_triggers()
+        self.eventlog = _open_eventlog(self.path) if eventlog is None else (
+            eventlog or None)
+        self._catch_up()
         self.prune()
 
     # ---------- setup ----------
@@ -254,10 +336,21 @@ class HistoryStore:
                         VALUES ('rebuild');
                     INSERT INTO conversations_fts(conversations_fts, rank)
                         VALUES ('rank', 'bm25(4.0, 1.5)');""")
+                self._fts_secure_delete()
                 return True
             except sqlite3.Error as e:
                 log.warning("History: no FTS5 (%s); using LIKE search", e)
                 return False
+
+    def _fts_secure_delete(self) -> None:
+        """SQLite 3.42+: deleting from the index removes the words from its
+        segments right away (older versions: `_purge` optimizes instead)."""
+        for table in ("messages_fts", "conversations_fts"):
+            try:
+                self._con.execute(f"INSERT INTO {table}({table}, rank) "
+                                  "VALUES ('secure-delete', 1)")
+            except sqlite3.Error:
+                return
 
     def _drop_fts_triggers(self) -> bool:
         """Without FTS5 the index triggers would make every insert fail
@@ -287,9 +380,160 @@ class HistoryStore:
     def close(self) -> None:
         with self._lock:
             self._con.close()
+            if self.eventlog is not None and hasattr(self.eventlog, "close"):
+                self.eventlog.close()
+
+    # ---------- events ----------
+    # Every change to history is an event (assistant.failover.sync.Event)
+    # recorded in failover's SqliteEventLog, which lives in the same file
+    # (its own sync_events / sync_meta tables) and syncs between the Pi,
+    # the PC and the cloud. The conversations / messages / FTS tables here
+    # are a projection of those events: `_apply` is the only code that
+    # writes them, for local and synced events alike. Message and title
+    # text is never changed in place; a barge-in edit is a delete_message
+    # tombstone plus a new message, and a delete is a tombstone, which
+    # redacts the covered events' data in the log and removes the rows
+    # (and their search index entries) here.
+    def _event(self, kind: str, conv: str, data: dict, ts: int | None = None):
+        if ts is None:
+            # Never earlier than the conversation's newest event, so the
+            # order of a turn is kept even within one millisecond.
+            row = self._con.execute("SELECT last_ts FROM conversations WHERE id = ?",
+                                    (conv,)).fetchone()
+            ts = max(int(self.clock() * 1000), (row[0] + 1) if row else 0)
+        raw = {"id": secrets.token_hex(16), "ts": ts, "origin": self.origin,
+               "kind": kind, "conv": conv, "data": data}
+        sync = _sync_module()
+        return sync.parse_event(raw) if sync else _LocalEvent(**raw)
+
+    def _record(self, kind: str, conv: str, data: dict, ts: int | None = None):
+        """Make an event, add it to the event log, and project it."""
+        with self._lock:
+            event = self._event(kind, conv, data, ts)
+            if self.eventlog is not None:
+                event = self.eventlog.record(event)
+            self._apply(event)
+            return event
+
+    def _apply(self, e) -> None:
+        """Project one event (as stored in the log, so already redacted if
+        a tombstone covers it) into the tables. Idempotent: replaying an
+        event, or replaying events in another order, gives the same rows."""
+        if e.kind in ("message", "rename", "pin") and not e.data:
+            return  # redacted: its conversation or message was deleted
+        if e.kind == "job":
+            return
+        order = f"{e.ts:015d}:{e.id}"
+        d = e.data
+        with self._lock:
+            self._con.execute("BEGIN IMMEDIATE")
+            try:
+                if e.kind == "delete":
+                    self._con.execute("DELETE FROM conversations WHERE id = ?", (e.conv,))
+                elif e.kind == "delete_message":
+                    self._con.execute("DELETE FROM messages WHERE event_id = ?",
+                                      (str(d.get("target", "")),))
+                else:
+                    self._ensure_row(e.conv, d.get("source"), e.ts)
+                    if e.kind == "message":
+                        self._apply_message(e, d)
+                    elif e.kind == "rename":
+                        self._apply_rename(e, d, order)
+                    elif e.kind == "pin":
+                        self._con.execute(
+                            "UPDATE conversations SET pinned = ?, archived = "
+                            "coalesce(?, archived), pin_order = ? "
+                            "WHERE id = ? AND pin_order < ?",
+                            (int(bool(d.get("pinned"))),
+                             None if "archived" not in d else int(bool(d["archived"])),
+                             order, e.conv, order))
+                    self._con.execute(
+                        "UPDATE conversations SET last_ts = max(last_ts, ?) WHERE id = ?",
+                        (e.ts, e.conv))
+                self._con.execute("COMMIT")
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
+
+    def _ensure_row(self, conv: str, source, ts: int) -> None:
+        source = source if source in SOURCES else "web"
+        self._con.execute(
+            "INSERT OR IGNORE INTO conversations (id, owner, source, started_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?)",
+            (conv, self.owner, source, ts / 1000, ts / 1000))
+
+    def _apply_message(self, e, d: dict) -> None:
+        role = d.get("role")
+        if role not in ("user", "assistant"):
+            return
+        tools = d.get("tools") or None
+        inserted = self._con.execute(
+            "INSERT OR IGNORE INTO messages (event_id, conversation_id, ev_ts, role, "
+            "kind, text, created_at, interrupted, tool_events) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (e.id, e.conv, e.ts, role,
+             d.get("kind") if d.get("kind") in ("chat", "confirm") else "chat",
+             str(d.get("text", "")), e.ts / 1000, int(bool(d.get("interrupted"))),
+             json.dumps(tools, separators=(",", ":")) if tools else None)).rowcount
+        if inserted:
+            self._con.execute(
+                "UPDATE conversations SET started_at = min(started_at, ?), "
+                "updated_at = max(updated_at, ?) WHERE id = ?",
+                (e.ts / 1000, e.ts / 1000, e.conv))
+
+    def _apply_rename(self, e, d: dict, order: str) -> None:
+        if "title" in d:
+            self._con.execute(
+                "UPDATE conversations SET title = ?, title_by_user = ?, "
+                "title_order = ? WHERE id = ? AND title_order < ?",
+                (str(d["title"])[:200], int(d.get("by") == "user"), order,
+                 e.conv, order))
+        if "summary" in d:
+            self._con.execute(
+                "UPDATE conversations SET summary = ?, summary_order = ? "
+                "WHERE id = ? AND summary_order < ?",
+                (str(d["summary"])[:1000], order, e.conv, order))
+        if d.get("ended"):
+            self._con.execute(
+                "UPDATE conversations SET ended_at = max(coalesce(ended_at, 0), ?) "
+                "WHERE id = ?", (e.ts / 1000, e.conv))
+
+    def _catch_up(self) -> None:
+        """Project events the tables haven't seen yet (a crash between the
+        log and the projection, or a database whose tables were rebuilt).
+        Replaying is safe: `_apply` is idempotent."""
+        if self.eventlog is None:
+            return
+        with self._lock:
+            cursor = int(self._meta_get("projected_seq") or 0)
+            while True:
+                events, last, more = self.eventlog.since(cursor, 500)
+                for e in events:
+                    self._apply(e)
+                cursor = last
+                if not more:
+                    break
+            self._meta_set("projected_seq", str(cursor))
+
+    def _meta_get(self, key: str) -> str | None:
+        row = self._con.execute("SELECT value FROM history_meta WHERE key = ?",
+                                (key,)).fetchone()
+        return row[0] if row else None
+
+    def _meta_set(self, key: str, value: str) -> None:
+        self._con.execute("INSERT INTO history_meta VALUES (?, ?) ON CONFLICT(key) "
+                          "DO UPDATE SET value = excluded.value", (key, value))
+
+    @property
+    def sync_log(self):
+        """The EventLog to give failover's Syncer: the event log, plus
+        projection of every event a peer sends (so it shows up at once)."""
+        return None if self.eventlog is None else _ProjectingLog(self)
 
     # ---------- writing ----------
     def create(self, source: str, started_at: float | None = None) -> str:
+        """A new conversation id (the row exists locally; it becomes part
+        of the synced history with its first message)."""
         if source not in SOURCES:
             raise ValueError(f"source must be one of {SOURCES}")
         now = self.clock() if started_at is None else started_at
@@ -303,93 +547,97 @@ class HistoryStore:
 
     def append(self, conversation_id: str, role: str, text: str, *,
                kind: str = "chat", interrupted: bool = False,
-               tool_events: list[dict] | None = None,
-               created_at: float | None = None) -> int:
-        """Add one message (committed at once). Returns its seq number."""
-        now = self.clock() if created_at is None else created_at
-        events = json.dumps(tool_events, separators=(",", ":")) if tool_events else None
+               tool_events: list[dict] | None = None) -> int:
+        """Add one message (a "message" event, committed at once). Returns
+        its position in the conversation."""
+        if role not in ("user", "assistant"):
+            raise sqlite3.IntegrityError("role must be user or assistant")
         with self._lock:
             self._own(conversation_id)
-            self._con.execute("BEGIN IMMEDIATE")
-            try:
-                seq = self._con.execute(
-                    "SELECT coalesce(max(seq), 0) + 1 FROM messages "
-                    "WHERE conversation_id = ?", (conversation_id,)).fetchone()[0]
-                self._con.execute(
-                    "INSERT INTO messages (conversation_id, seq, role, kind, text, "
-                    "created_at, interrupted, tool_events) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (conversation_id, seq, role, kind, _clean(text), now,
-                     int(interrupted), events))
-                self._con.execute(
-                    "UPDATE conversations SET updated_at = ?, ended_at = NULL "
-                    "WHERE id = ?", (now, conversation_id))
-                self._con.execute("COMMIT")
-            except Exception:
-                self._con.execute("ROLLBACK")
-                raise
-        return seq
+            source = self._con.execute("SELECT source FROM conversations WHERE id = ?",
+                                       (conversation_id,)).fetchone()[0]
+            data = {"role": role, "text": _clean(text)[:MAX_TEXT], "source": source}
+            if kind != "chat":
+                data["kind"] = kind
+            if interrupted:
+                data["interrupted"] = True
+            if tool_events:
+                data["tools"] = tool_events
+            self._record("message", conversation_id, data)
+            return self._con.execute("SELECT count(*) FROM messages WHERE "
+                                     "conversation_id = ?",
+                                     (conversation_id,)).fetchone()[0]
 
     def mark_interrupted(self, conversation_id: str,
                          spoken_text: str | None = None) -> bool:
-        """Flag the last assistant message as cut off (barge-in). If what
-        was actually heard is known, keep only that."""
+        """Flag the last assistant message as cut off (barge-in), keeping
+        only what was actually said if that is known. Written as a
+        delete_message tombstone for the old message (which redacts its
+        unsaid text everywhere) plus a replacement at the same position."""
         with self._lock:
             self._own(conversation_id)
             row = self._con.execute(
-                "SELECT id FROM messages WHERE conversation_id = ? AND "
-                "role = 'assistant' ORDER BY seq DESC LIMIT 1",
+                "SELECT event_id, ev_ts, kind, text, tool_events FROM messages "
+                "WHERE conversation_id = ? AND role = 'assistant' "
+                "ORDER BY ev_ts DESC, event_id DESC LIMIT 1",
                 (conversation_id,)).fetchone()
             if not row:
                 return False
-            if spoken_text is not None:
-                spoken_text = spoken_text.strip() or "(interrupted)"
-                self._con.execute(
-                    "UPDATE messages SET interrupted = 1, text = ? WHERE id = ?",
-                    (_clean(spoken_text), row["id"]))
-            else:
-                self._con.execute(
-                    "UPDATE messages SET interrupted = 1 WHERE id = ?", (row["id"],))
+            text = row["text"] if spoken_text is None else \
+                (spoken_text.strip() or "(interrupted)")
+            data = {"role": "assistant", "text": _clean(text)[:MAX_TEXT],
+                    "interrupted": True}
+            if row["kind"] != "chat":
+                data["kind"] = row["kind"]
+            if row["tool_events"]:
+                data["tools"] = json.loads(row["tool_events"])
+            self._record("delete_message", conversation_id,
+                         {"target": row["event_id"]})
+            self._record("message", conversation_id, data, ts=row["ev_ts"])
         return True
 
     def finish(self, conversation_id: str, title: str | None = None,
                summary: str | None = None) -> None:
-        """Mark ended and set the generated title/summary (a title Kyle
-        typed himself is kept)."""
+        """Mark ended and set the generated title/summary (a "rename"
+        event; a title Kyle typed himself is kept)."""
         with self._lock:
             self._own(conversation_id)
-            self._con.execute(
-                "UPDATE conversations SET ended_at = coalesce(ended_at, updated_at), "
-                "title = CASE WHEN title_by_user = 1 OR ? IS NULL THEN title "
-                "ELSE ? END, summary = coalesce(?, summary) WHERE id = ?",
-                (title, _clean(title or ""), None if summary is None
-                 else _clean(summary), conversation_id))
+            row = self._con.execute(
+                "SELECT title, title_by_user FROM conversations WHERE id = ?",
+                (conversation_id,)).fetchone()
+            by_user = bool(row["title_by_user"])
+            if by_user or title is None:
+                title = row["title"]
+            # Always the full title: a rename sets it (last writer wins).
+            data = {"title": _clean(title)[:200], "by": "user" if by_user else "auto",
+                    "ended": True}
+            if summary is not None:
+                data["summary"] = _clean(summary)[:1000]
+            self._record("rename", conversation_id, data)
 
     def update(self, conversation_id: str, *, title: str | None = None,
                pinned: bool | None = None, archived: bool | None = None) -> dict:
         """Rename, pin/unpin, archive/unarchive. Returns the conversation."""
-        sets, params = [], []
         if title is not None:
             title = " ".join(_clean(title).split())[:120]
             if not title:
                 raise ValueError("title can't be empty")
-            sets += ["title = ?", "title_by_user = 1"]
-            params.append(title)
-        if pinned is not None:
-            sets.append("pinned = ?")
-            params.append(int(bool(pinned)))
-        if archived is not None:
-            sets.append("archived = ?")
-            params.append(int(bool(archived)))
         with self._lock:
             self._own(conversation_id)
-            if sets:
-                self._con.execute(
-                    f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
-                    (*params, conversation_id))
+            if title is not None:
+                self._record("rename", conversation_id, {"title": title, "by": "user"})
+            if pinned is not None or archived is not None:
+                row = self._con.execute(
+                    "SELECT pinned, archived FROM conversations WHERE id = ?",
+                    (conversation_id,)).fetchone()
+                self._record("pin", conversation_id, {
+                    "pinned": bool(row["pinned"] if pinned is None else pinned),
+                    "archived": bool(row["archived"] if archived is None else archived)})
             return self.get(conversation_id, messages=False)
 
     def add_memory_vector(self, conversation_id: str, vector_id: str) -> None:
+        """Remember a Pinecone summary's id (local bookkeeping, not synced:
+        deletes also find vectors by their conversation_id metadata)."""
         with self._lock:
             self._own(conversation_id)
             self._con.execute(
@@ -404,14 +652,32 @@ class HistoryStore:
                 (conversation_id,))]
 
     def delete(self, conversation_id: str) -> list[str]:
-        """Delete a conversation and its messages. Returns the Pinecone
-        vector ids of its memory summaries, for the caller to delete."""
+        """Delete a conversation (a "delete" tombstone, synced to the other
+        backends). Returns the Pinecone vector ids of its memory summaries
+        known here, for the caller to delete."""
         with self._lock:
             self._own(conversation_id)
             vectors = self.memory_vectors(conversation_id)
-            self._con.execute("DELETE FROM conversations WHERE id = ? AND owner = ?",
-                              (conversation_id, self.owner))
+            if self._con.execute("SELECT 1 FROM messages WHERE conversation_id = ?",
+                                 (conversation_id,)).fetchone() or \
+                    self._con.execute("SELECT title_order != '' OR pin_order != '' "
+                                      "FROM conversations WHERE id = ?",
+                                      (conversation_id,)).fetchone()[0]:
+                self._record("delete", conversation_id, {})
+            else:  # never had an event: nothing to tell the other backends
+                self._con.execute("DELETE FROM conversations WHERE id = ?",
+                                  (conversation_id,))
+            self._purge()
         return vectors
+
+    def _purge(self) -> None:
+        """After a delete: drop the deleted text from the search index's
+        segments and from the write-ahead log, not just from the tables."""
+        if self.fts:
+            for table in ("messages_fts", "conversations_fts"):
+                self._con.execute(f"INSERT INTO {table}({table}) VALUES ('optimize')")
+        if self.path != ":memory:":
+            self._con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def _own(self, conversation_id: str) -> None:
         """KeyError unless the id exists and belongs to this owner."""
@@ -429,21 +695,37 @@ class HistoryStore:
         with self._lock:
             if self.retention_days > 0:
                 cutoff = self.clock() - self.retention_days * 86400
-                removed += self._con.execute(
-                    "DELETE FROM conversations WHERE owner = ? AND pinned = 0 "
-                    "AND updated_at < ?", (self.owner, cutoff)).rowcount
+                old = [r[0] for r in self._con.execute(
+                    "SELECT id FROM conversations WHERE owner = ? AND pinned = 0 "
+                    "AND updated_at < ?", (self.owner, cutoff))]
+                for cid in old:
+                    self._tombstone(cid)
+                removed += len(old)
             if self.max_mb > 0:
                 removed += self._shrink(self.max_mb * 1024 * 1024)
             if removed:
+                self._purge()
                 self._con.execute("PRAGMA incremental_vacuum")
                 log.info("History: pruned %d old conversations", removed)
         return removed
 
+    def _tombstone(self, cid: str) -> None:
+        """Delete without the per-delete index compaction (prune does it
+        once at the end)."""
+        has_events = self._con.execute(
+            "SELECT 1 FROM messages WHERE conversation_id = ? UNION ALL "
+            "SELECT 1 FROM conversations WHERE id = ? AND "
+            "(title_order != '' OR pin_order != '')", (cid, cid)).fetchone()
+        if has_events:
+            self._record("delete", cid, {})
+        else:
+            self._con.execute("DELETE FROM conversations WHERE id = ?", (cid,))
+
     def _shrink(self, limit: float) -> int:
         """Delete the oldest unpinned conversations until the database is
         under `limit` bytes (aiming at 90%, so it doesn't run every time).
-        Deletes in proportion to the excess, then compacts the search
-        index (FTS5 only frees space for deleted rows when merged)."""
+        Deletes in proportion to the excess (as synced tombstones), then
+        compacts the search index and the file."""
         removed = 0
         for _ in range(20):
             used = self._used_bytes()
@@ -460,13 +742,13 @@ class HistoryStore:
             ids = [r[0] for r in self._con.execute(
                 "SELECT id FROM conversations WHERE owner = ? AND pinned = 0 "
                 "ORDER BY updated_at LIMIT ?", (self.owner, n))]
-            self._con.executemany("DELETE FROM conversations WHERE id = ?",
-                                  [(i,) for i in ids])
+            for cid in ids:
+                self._tombstone(cid)
             removed += len(ids)
-            if self.fts:
-                for table in ("messages_fts", "conversations_fts"):
-                    self._con.execute(
-                        f"INSERT INTO {table}({table}) VALUES ('optimize')")
+            self._purge()
+            # Redacted events and deleted rows leave free space inside
+            # pages, which only a rebuild gives back (rare: over the limit).
+            self._con.execute("VACUUM")
         return removed
 
     def _used_bytes(self) -> int:
@@ -480,8 +762,9 @@ class HistoryStore:
         skip = set(exclude)
         with self._lock:
             return [r[0] for r in self._con.execute(
-                "SELECT id FROM conversations WHERE owner = ? AND ended_at IS NULL "
-                "ORDER BY updated_at", (self.owner,)) if r[0] not in skip]
+                f"SELECT id FROM conversations c WHERE owner = ? AND {_LIVE} AND "
+                f"{_HAS_MESSAGES} ORDER BY updated_at", (self.owner,))
+                if r[0] not in skip]
 
     # ---------- reading ----------
     def get(self, conversation_id: str, messages: bool = True) -> dict:
@@ -492,10 +775,11 @@ class HistoryStore:
                 (conversation_id,)).fetchone()
             conv = _conv_dict(row)
             if messages:
-                conv["messages"] = [_msg_dict(r) for r in self._con.execute(
-                    "SELECT seq, role, kind, text, created_at, interrupted, "
-                    "tool_events FROM messages WHERE conversation_id = ? "
-                    "ORDER BY seq", (conversation_id,))]
+                conv["messages"] = [_msg_dict(r, n) for n, r in enumerate(
+                    self._con.execute(
+                        "SELECT event_id, role, kind, text, created_at, interrupted, "
+                        "tool_events FROM messages WHERE conversation_id = ? "
+                        "ORDER BY ev_ts, event_id", (conversation_id,)), 1)]
             return conv
 
     def list(self, *, limit: int = 20, offset: int = 0, source: str | None = None,
@@ -637,7 +921,7 @@ class HistoryStore:
                       key=lambda h: (-h[1], -updated.get(h[0], 0)))
 
     def _filters(self, source, pinned, archived, since, until, ids=None):
-        where, params = ["c.owner = ?"], [self.owner]
+        where, params = ["c.owner = ?", _HAS_MESSAGES], [self.owner]
         if ids is not None:
             ids = [i for i in ids if valid_id(i)] or [""]
             where.append(f"c.id IN ({','.join('?' * len(ids))})")
@@ -662,7 +946,11 @@ class HistoryStore:
 
 
 _FIRST_USER = ("SELECT text FROM messages WHERE conversation_id = c.id AND "
-               "role = 'user' AND kind = 'chat' ORDER BY seq LIMIT 1")
+               "role = 'user' AND kind = 'chat' ORDER BY ev_ts, event_id LIMIT 1")
+# Still going: no "ended" rename yet, or messages after it (continued).
+_LIVE = "(c.ended_at IS NULL OR c.ended_at < c.updated_at)"
+# Rows for a conversation created but never written to aren't shown.
+_HAS_MESSAGES = "EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)"
 _CONV_COLS = ("c.id, c.source, c.started_at, c.updated_at, c.ended_at, c.title, "
               "c.summary, c.pinned, c.archived, (SELECT count(*) FROM messages "
               f"WHERE conversation_id = c.id) AS message_count, ({_FIRST_USER}) "
@@ -674,17 +962,18 @@ def _limit(limit) -> int:
 
 
 def _conv_dict(row) -> dict:
+    ended = row["ended_at"]
     return {"id": row["id"], "source": row["source"],
             "started_at": row["started_at"], "updated_at": row["updated_at"],
-            "ended_at": row["ended_at"], "title": row["title"] or "",
+            "ended_at": ended if ended and ended >= row["updated_at"] else None, "title": row["title"] or "",
             "summary": row["summary"] or "", "pinned": bool(row["pinned"]),
             "archived": bool(row["archived"]),
             "message_count": row["message_count"],
             "preview": _truncate(row["preview"] or "", 200)}
 
 
-def _msg_dict(row) -> dict:
-    return {"seq": row["seq"], "role": row["role"], "kind": row["kind"],
+def _msg_dict(row, seq: int) -> dict:
+    return {"seq": seq, "id": row["event_id"], "role": row["role"], "kind": row["kind"],
             "text": row["text"], "created_at": row["created_at"],
             "interrupted": bool(row["interrupted"]),
             "tool_events": json.loads(row["tool_events"]) if row["tool_events"] else []}
@@ -1063,6 +1352,14 @@ class Recorder:
         self._futures = []
 
 
+def origin_of(config: dict) -> str:
+    """This backend's role for events: [failover] role / ASSISTANT_ROLE,
+    or "pc" when it runs on its own."""
+    role = (config.get("failover", {}).get("role")
+            or os.environ.get("ASSISTANT_ROLE") or "pc")
+    return role if role in ("pi", "pc", "cloud") else "pc"
+
+
 def open_store(config: dict) -> HistoryStore | None:
     """The configured store, or None if history is off or can't be opened."""
     h = config.get("history", {})
@@ -1071,7 +1368,7 @@ def open_store(config: dict) -> HistoryStore | None:
     path = h.get("path") or "data/history.sqlite"  # HISTORY_PATH via config
     try:
         return HistoryStore(path, retention_days=h.get("retention_days", 0),
-                            max_mb=h.get("max_mb", 0))
+                            max_mb=h.get("max_mb", 0), origin=origin_of(config))
     except Exception as e:
         log.exception("History: could not open %s", path)
         print(f"(History off: could not open {path}: {e})")
@@ -1119,8 +1416,11 @@ def delete_conversation(store: HistoryStore, conversation_id: str,
     goes first: if that fails, nothing is deleted and the error is raised,
     so a retry can't leave an orphaned summary behind."""
     vectors = store.memory_vectors(conversation_id)  # KeyError if not ours
-    if vectors and memory is not None:
-        memory.delete(vectors)
+    if memory is not None:
+        # Also summaries written by another backend (found by metadata).
+        vectors = sorted(set(vectors) | set(memory.vectors_for(conversation_id)))
+        if vectors:
+            memory.delete(vectors)
     elif vectors:
         log.warning("History: memory is off; %d summary vector(s) of %s were "
                     "left in Pinecone", len(vectors), conversation_id)

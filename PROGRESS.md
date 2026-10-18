@@ -33,7 +33,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 22 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 24 | voice mode: WebSocket, limits, files |
-| `test_history.py` | 65 | conversation history |
+| `test_history.py` | 67 | conversation history: store, search, resume, CLI |
+| `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
+| `test_history_events.py` | 18 | history as sync events (skips without failover) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -354,7 +356,7 @@ Tested:
   (typically 0.5-1 s) and the network: about 1.5-2 s after Kyle stops
   talking, within the ~2 s target on a decent connection.
 
-## Conversation history ✅ (phase A: PC/Pi and text mode)
+## Conversation history ✅
 - `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
   `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
   `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
@@ -399,8 +401,38 @@ Tested:
   conversations (50,000 messages), median search under 100 ms (about
   30-55 ms in the sandbox even on a tiny vocabulary where every word
   matches most messages).
-- Still to come (phase B, after phone-web and voice-mode are merged): the
-  authed JSON API, the History screen in the phone app, and voice-mode hooks.
+- Events: every change is a failover sync `Event` (message, rename with
+  the auto title/summary or Kyle's title, pin with archived, delete,
+  delete_message for barge-in edits) recorded in failover's
+  `SqliteEventLog` in the same file; the tables above are a projection of
+  the log, written only by one idempotent `_apply()` used for local and
+  synced events (`HistoryStore.sync_log` is the EventLog to give the
+  Syncer). Last writer wins on title/summary/pin by (ts, id); tombstones
+  redact and purge the search index. Startup replays events after a saved
+  cursor, so a crash between the log and the tables heals. Without the
+  failover modules it runs standalone (nothing to sync).
+- Phone app: `assistant/history_web.py` adds `GET /api/conversations`
+  (paginated, `q`, source/pinned/archived/date filters, highlight parts),
+  `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,
+  archive), `DELETE` (with the Pinecone cascade; also clears the
+  conversation from any open session), `GET .../export?format=md|json`, and
+  `GET/POST /api/incognito`, all behind the web sign-in. Push-to-talk turns
+  are saved as `web`, voice-mode turns (`chat_stream`) as `voice`, and a
+  barge-in keeps only the spoken part, flagged interrupted.
+  `assistant/web/history.js`: History screen (debounced search, day groups,
+  filter chips, swipe and long-press actions, transcript, Continue),
+  rename/delete dialogs, incognito switch and badge, light theme.
+- Tests: `test_history_web.py` (401 on every route, cross-site 403, id
+  guessing and other owners get 404, pagination, highlights, semantic hits,
+  filters, rename/pin/archive, delete cascade and failure, export, continue,
+  incognito, web and voice recording with barge-in) and
+  `test_history_events.py` (each change is an event, projection ==
+  `materialize(events)` over random operations, two-store sync in any
+  arrival order, late events under tombstones, last-writer-wins, startup
+  catch-up, no deleted text left in the database file). Driven in headless
+  Chromium at phone size, dark and light: search highlights, groups,
+  transcript, continue then a turn, pin filter, rename, delete dialog,
+  swipe, infinite scroll, incognito; no console errors.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

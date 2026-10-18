@@ -93,7 +93,8 @@ def test_create_append_get(store):
     conv = store.get(cid, messages=False)
     assert (conv["title"], conv["summary"]) == ("Calendar check",
                                                 "Kyle asked about tomorrow.")
-    assert conv["ended_at"] == NOW and "messages" not in conv
+    # events in one turn are a millisecond apart even on a frozen clock
+    assert conv["ended_at"] == pytest.approx(NOW, abs=0.01) and "messages" not in conv
 
 
 def test_update_rename_pin_archive_and_delete(store):
@@ -411,10 +412,10 @@ def _seed(s, n):
             if j % 3 == 0:
                 words += topic.split()
             rnd.shuffle(words)
-            con.execute("INSERT INTO messages (conversation_id, seq, role, text, "
-                        "created_at) VALUES (?,?,?,?,?)",
-                        (cid, j + 1, "user" if j % 2 == 0 else "assistant",
-                         " ".join(words), ts))
+            con.execute("INSERT INTO messages (event_id, conversation_id, ev_ts, role, "
+                        "text, created_at) VALUES (?,?,?,?,?,?)",
+                        (f"{i:016x}{j:016x}", cid, int(ts * 1000) + j,
+                         "user" if j % 2 == 0 else "assistant", " ".join(words), ts))
     con.execute("COMMIT")
 
 
@@ -903,13 +904,15 @@ def test_delete_cascades_to_pinecone(store):
     store.add_memory_vector(cid, "voice-1")
     store.add_memory_vector(cid, "voice-2")
     memory = MagicMock()
+    memory.vectors_for.return_value = ["voice-2", "voice-from-the-pi"]
     memory.delete.side_effect = RuntimeError("pinecone down")
     with pytest.raises(RuntimeError):
         history.delete_conversation(store, cid, memory)
     assert store.get(cid)  # nothing deleted, so a retry can finish the job
     memory.delete.side_effect = None
     history.delete_conversation(store, cid, memory)
-    memory.delete.assert_called_with(["voice-1", "voice-2"])
+    memory.delete.assert_called_with(["voice-1", "voice-2", "voice-from-the-pi"])
+    memory.vectors_for.assert_called_with(cid)
     with pytest.raises(KeyError):
         store.get(cid)
 
@@ -931,6 +934,9 @@ def test_pinecone_memory_search_and_delete():
     assert kwargs["filter"] == {"conversation_id": {"$exists": True}}
     mem.delete(["v1"])
     index.delete.assert_called_once_with(ids=["v1"], namespace="voice-assistant")
+    index.query.return_value = SimpleNamespace(matches=[SimpleNamespace(id="v9")])
+    assert mem.vectors_for("conv123") == ["v9"]
+    assert index.query.call_args.kwargs["filter"] == {"conversation_id": {"$eq": "conv123"}}
 
 
 # ---------- export ----------

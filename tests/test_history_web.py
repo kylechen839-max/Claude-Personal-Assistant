@@ -31,6 +31,7 @@ def web(fake_client, tmp_path):
     memory = MagicMock()
     memory.retrieve.return_value = []
     memory.search_conversations.return_value = []
+    memory.vectors_for.return_value = []
 
     def chat_factory(registry):
         rec = Recorder(store, "web", run_async=False, client_fn=lambda: fake_client)

@@ -108,8 +108,8 @@ which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
 ## Conversation history
 
 Every conversation is saved: wake word and push-to-talk on the PC or Pi,
-text mode, and (once those modes are merged) the phone app and its
-hands-free voice mode. You can search it and pick a conversation up later.
+text mode, the phone app's push-to-talk and its hands-free voice mode. You
+can search it and pick a conversation up later.
 
 **By voice or text:** "Hey Claude, what did we talk about yesterday?",
 "Find our conversation about the lab report", "Continue our conversation
@@ -117,6 +117,19 @@ about the lab report". Claude searches your history and asks *"Continue
 'Lab report error bars' from Tuesday?"*; say yes and the old conversation
 is loaded, so "and what about standard deviation?" is answered in context.
 This works mid-conversation too (the current one is saved first).
+
+**On the phone:** the clock button at the top of the app opens History:
+a search bar (results update as you type, matching words highlighted),
+filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
+grouped by Today / Yesterday / This week / Older with a source icon, time
+and snippet. Swipe a row left for Pin / Rename / Delete, or long-press it
+(or tap its "..." button) for all actions including Archive and Export.
+Tap a conversation to read it; **Continue this conversation** loads it and
+returns to the chat, and the voice view continues it too (it uses the same
+conversation). Delete always asks first. **Incognito** in the settings
+menu (gear) stops saving for this phone until you turn it off; the header
+shows an "Incognito" badge meanwhile. It follows the phone's light or dark
+setting and works as a home-screen app on iOS.
 
 **From the command line:**
 
@@ -166,6 +179,14 @@ environment variable points it at the persistent disk
 
 Deleting a conversation also deletes its memory summary in Pinecone.
 Privacy details are in SECURITY.md.
+
+**How it's stored:** every change (a message, a title, a pin, a delete) is
+an event in the history sync log (failover's event log, in the same file),
+and the searchable tables are built from those events. With the failover
+setup the Pi, the PC and the cloud exchange events, so all three show the
+same history, and a delete anywhere deletes everywhere (the deleted text is
+wiped from the log too). Retention and the size guard delete the same way,
+so they also apply on every backend.
 
 ## Settings
 
