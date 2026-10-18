@@ -244,7 +244,11 @@ def make_tts(name: str = "pyttsx3", **options) -> TTS:
                     "Download one with: python -m assistant.tts "
                     "--download-voice %s", name, problem, DEFAULT_PIPER_VOICE)
     if name == "espeak":
-        return EspeakTTS()
+        try:
+            return EspeakTTS()
+        except RuntimeError as e:  # keep the server up: replies still show as text
+            log.error("%s; replies will have no audio", e)
+            return PrintTTS()
     if name == "pyttsx3":
         return Pyttsx3TTS(rate=options.get("rate", 185), voice=options.get("voice"))
     if name == "print":

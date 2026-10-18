@@ -384,6 +384,8 @@ def serve(config: dict, port: int | None = None, tts_name: str | None = None,
     web_assistant = webapp.build_assistant(config, tts_name, output_fn)
     app = build_app(config, web_assistant, token)
     warm_up(web_assistant)
+    logging.getLogger("uvicorn.access").addFilter(
+        lambda record: HEALTH not in record.getMessage())  # every few seconds
     log.info("Cloud web app listening on %s:%s", host, port)
     # proxy_headers off: CloudGuard decides which forwarded headers to trust.
     uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,

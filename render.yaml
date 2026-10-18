@@ -1,6 +1,38 @@
-# Render Blueprint for the Pinecone MCP connector (pinecone-mcp/).
-# The voice assistant itself runs on Kyle's PC / Pi and is not deployed here.
+# Render Blueprint (render.com): Dashboard -> New -> Blueprint -> this repo.
+#  - hey-claude: the phone web app (python -m assistant --mode web) running
+#    24/7 from the Dockerfile, so it works with Kyle's PC off. Setup steps:
+#    README "Run it in the cloud (Render)".
+#  - pinecone-mcp: the Pinecone MCP connector (pinecone-mcp/).
 services:
+  - type: web
+    name: hey-claude
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Measured peak memory (PROGRESS.md, "Cloud hosting"): base.en + Piper
+    # does not fit Starter's 512 MB, so Standard (2 GB).
+    plan: standard
+    healthCheckPath: /healthz
+    envVars:
+      # Secrets: Render asks for each one when the Blueprint is created.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: NOTION_TOKEN
+        sync: false
+      - key: GOOGLE_TOKEN_JSON      # the whole contents of token.json
+        sync: false
+      - key: GOOGLE_CLIENT_JSON     # the whole contents of credentials.json
+        sync: false
+      - key: ASSISTANT_TIMEZONE     # e.g. America/New_York ("tomorrow" is in this zone)
+        sync: false
+      # The phone's sign-in token: Render makes a random one (256 bits).
+      - key: WEB_TOKEN
+        generateValue: true
+      - key: WHISPER_MODEL          # base.en (better) or tiny.en (smaller, faster)
+        value: base.en
+
   - type: web
     name: pinecone-mcp
     runtime: node

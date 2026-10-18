@@ -93,3 +93,23 @@ jobs:
           node dist/server.js &
           for i in $(seq 1 20); do curl -sf localhost:3999/ && break; sleep 0.5; done
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3999/mcp/wrong)" = 404
+
+  # The cloud image (Dockerfile, deployed by render.yaml): build it with the
+  # speech models baked in, start it like Render does, check /healthz and the
+  # auth wall, run one spoken turn, and measure peak memory (job summary).
+  docker:
+    name: Docker image (cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hey-claude:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test and memory
+        run: scripts/container_smoke.sh hey-claude:ci

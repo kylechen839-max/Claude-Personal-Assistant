@@ -115,6 +115,12 @@ def test_missing_piper_voice_falls_back_to_espeak(monkeypatch):
     assert isinstance(tts, EspeakTTS)
 
 
+def test_no_espeak_either_keeps_the_server_up_text_only(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    tts = make_tts("piper", piper_voice="nope.onnx", fallback="espeak")
+    assert isinstance(tts, PrintTTS)
+
+
 def test_default_fallback_is_still_pyttsx3():
     from assistant.tts import Pyttsx3TTS
 

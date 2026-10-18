@@ -1,0 +1,28 @@
+# Secrets: never in the image (they come from the host's environment)
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+.oauth_state.json
+*.ppn
+
+# Local state and downloads (the image fetches its own models)
+.venv/
+venv/
+logs/
+voices/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.wav
+
+# Not needed in the image
+.git/
+.github/
+tests/
+pinecone-mcp/
+deploy/
+keywords/
+*.md
+!README.md
