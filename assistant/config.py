@@ -79,6 +79,8 @@ DEFAULTS: dict = {
         "confirm_timeout": 120,     # seconds to wait for a yes before "no"
         "max_upload_mb": 10,
         "max_audio_seconds": 60,    # longest recording accepted
+        "sessions_file": "data/web_sessions.json",  # signed-in browsers
+                                    # ("" = forget them on restart)
         "trusted_proxy": 0,         # proxies adding X-Forwarded-*: 0 = none,
                                     # a count (1 on Render), or the proxy's
                                     # address(es) (TRUSTED_PROXY)
@@ -95,8 +97,9 @@ DEFAULTS: dict = {
         "client_ip_header": "",         # e.g. "cf-connecting-ip"; "" = X-Forwarded-For
         "login_max_failures": 5,        # wrong tokens per address ...
         "login_window": 900,            # ... in this many seconds -> locked out
-        "login_lockout": 900,           # first lockout; doubles each time, max 1 day
-        "login_global_max_failures": 30,  # from all addresses per window
+        "login_lockout": 900,           # seconds (the right token always works)
+        "login_global_free": 20,        # wrong tokens from everyone per window,
+        "login_global_delay": 1.0,      # then each further one waits this long
         "requests_per_minute": 120,     # per address, every route but /healthz
         "max_body_kb": 16,              # any request that isn't an audio upload
         "uploads_per_address": 2,       # requests sending a body at once, per address
@@ -129,7 +132,8 @@ SERVER_PROFILE: dict = {
     "wake": {"chime": False, "follow_up_seconds": 0},
     "calendar": {"save_token": False},
     "web": {"browser": False},
-    "webapp": {"host": "0.0.0.0", "max_upload_mb": 4},
+    "webapp": {"host": "0.0.0.0", "max_upload_mb": 4,
+               "sessions_file": "/data/web_sessions.json"},  # on the disk
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},

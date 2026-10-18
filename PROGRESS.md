@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 591 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 598 passed, 9 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -28,7 +28,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
-| `test_webapp.py` | 60 | phone web app (`--mode web`) |
+| `test_webapp.py` | 67 | phone web app (`--mode web`) |
 | `test_cloud.py` | 71 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
@@ -197,8 +197,13 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   behind a trusted proxy (rightmost entry; `trusted_proxy` is a count, or the
   proxy's address such as 127.0.0.1 for `tailscale serve`, and then the
   headers count only from that address); http -> https redirect and HSTS
-  there; per-address (5 per 15 min) and global (50) sign-in lockouts that also
-  cover wrong Bearer tokens; constant-time compare and generic errors (no
+  there; a per-address lockout for wrong tokens (5 per 15 min, also wrong
+  Bearer tokens) and, past 20 wrong tokens from everyone, a one-second delay
+  on each further wrong one. The right token is always accepted (a review
+  found the earlier global lockout let anyone lock Kyle out). Sessions are
+  listed server-side (`[webapp] sessions_file`): sign-out revokes the cookie,
+  "sign out everywhere" (`/api/logout-all`) revokes all and rotates the
+  signing epoch; constant-time compare and generic errors (no
   stack traces, no FastAPI docs, no directory listing); 411 without
   Content-Length, 413 over `max_upload_mb`, over `max_audio_seconds` (checked
   while decoding, so a small file can't expand) or over 4000 characters of
@@ -241,10 +246,11 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
 - **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
   itself is unchanged): `/healthz` -> `ok`; every other route needs the
   cookie or Bearer token except the login page, its static files, login, the
-  manifest and icons (unknown paths 401 too); per-address lockout 5 wrong
-  tokens / 15 min -> 15 min, doubling to a day (wrong tokens then 429 after
-  2 s), global brake after 30 (wrong tokens held 1 s), the right token
-  always accepted; at most 2 body uploads per address / 32 in all, bodies
+  manifest and icons (unknown paths 401 too); sign-in limits through the web
+  app's shared `LoginLimiter` (`BoundedLoginLimiter` caps its tables), keyed
+  by the guard's client address, the right token always accepted; cookies
+  checked against the web app's `SessionStore` (`sessions_file` on `/data`
+  in the server profile); at most 2 body uploads per address / 32 in all, bodies
   due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
   (it let one slow client 503 everything, `/healthz` included); no trusted
   proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;

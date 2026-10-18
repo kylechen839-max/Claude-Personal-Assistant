@@ -48,13 +48,14 @@ def slept():
 def make_cloud(fake_client, slept):
     def make(peer=PROXY, clock=None, guard_kwargs=None, app=None):
         clock = clock or Clock()
+        limiter = (guard_kwargs or {}).get("lockout") or cloud.BoundedLoginLimiter(clock=clock)
         if app is None:
             assistant = webapp.WebAssistant(
                 lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
                 FakeTranscriber("what's on my calendar"), PrintTTS(), clock=clock)
             trust = cloud.ProxyNetworks(hops=1, networks=tuple(
                 cloud.parse_networks(TRUSTED)))
-            app = webapp.create_app(assistant, TOKEN, limiter=cloud.NeverBlock(),
+            app = webapp.create_app(assistant, TOKEN, limiter=limiter,
                                     trusted_proxy=trust,
                                     reap_interval=3600)
         async def sleep(seconds):
@@ -62,7 +63,7 @@ def make_cloud(fake_client, slept):
 
         kwargs = {"sleep": sleep, "trusted_proxies": TRUSTED, "max_upload_bytes": 200_000,
                   "max_body_bytes": 16_384,
-                  "lockout": cloud.LoginLockout(clock=clock),
+                  "lockout": limiter,
                   "limiter": cloud.RateLimiter(clock=clock),
                   **(guard_kwargs or {})}
         guard = cloud.CloudGuard(app, TOKEN, **kwargs)
@@ -178,10 +179,9 @@ def test_wrong_tokens_lock_out_that_address_only(make_cloud, slept):
     _, client = make_cloud(clock=clock)
     for _ in range(5):
         assert login(client, "wrong" * 10).status_code == 401
-    assert slept == []  # no brake before the lockout
     r = login(client, "wrong" * 10)
     assert r.status_code == 429 and int(r.headers["retry-after"]) == 900
-    assert slept == [2.0]  # a locked address waits for each wrong answer
+    assert slept == []  # refused at once, not counted again
     assert login(client, "x", ip="198.51.100.7").status_code == 401  # others: as usual
     clock.now += 901
     assert login(client, "wrong" * 10).status_code == 401  # lockout over
@@ -195,20 +195,6 @@ def test_the_right_token_is_never_locked_out(make_cloud):
     assert login(client).status_code == 200
 
 
-def test_lockouts_double_and_success_resets(make_cloud):
-    clock = Clock()
-    guard, client = make_cloud(clock=clock)
-    for round_, expected in ((1, 900), (2, 1800), (3, 3600)):
-        for _ in range(5):
-            login(client, "bad-token")
-        assert guard.lockout.retry_after(PUBLIC) == expected, round_
-        clock.now += expected + 1
-    assert login(client).status_code == 200
-    for _ in range(5):
-        login(client, "bad-token")
-    assert guard.lockout.retry_after(PUBLIC) == 900  # back to the first step
-
-
 def test_signed_in_phone_keeps_working_during_a_lockout(make_cloud):
     _, client = make_cloud()
     assert login(client).status_code == 200
@@ -218,20 +204,37 @@ def test_signed_in_phone_keeps_working_during_a_lockout(make_cloud):
 
 
 def test_global_brake_slows_wrong_tokens_only(make_cloud, slept):
-    _, client = make_cloud(guard_kwargs={"lockout": cloud.LoginLockout(
-        max_failures=100, global_max_failures=10, clock=Clock())})
+    _, client = make_cloud(guard_kwargs={"lockout": cloud.BoundedLoginLimiter(
+        per_ip=100, global_free=10, clock=Clock())})
     for i in range(10):
         assert login(client, "bad", ip=f"198.51.100.{i}").status_code == 401
     assert slept == []
     assert login(client, "bad", ip="192.0.2.1").status_code == 401
-    assert slept == [1.0]  # wrong tokens from anyone now wait a second
+    assert slept == [1.0]  # past 10, wrong tokens from anyone wait a second
     assert login(client, ip="192.0.2.2").status_code == 200  # the right one doesn't
     assert slept == [1.0]
 
 
-def test_the_web_apps_own_global_limiter_is_not_used(make_cloud):
-    """Otherwise 5 wrong tokens from anyone would lock Kyle out too."""
-    assert cloud.NeverBlock().blocked() is False
+def test_guard_and_web_app_share_one_limiter_and_session_store(fake_client):
+    cfg = load_config(None, None, profile="server")
+    cfg["webapp"]["sessions_file"] = ""
+    assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
+                                                           model="m", tools=reg),
+                                    FakeTranscriber(), PrintTTS())
+    guard = cloud.build_app(cfg, assistant, TOKEN)
+    assert guard.web is guard.app.state.web
+    assert guard.lockout is guard.web.limiter
+    assert isinstance(guard.lockout, webapp.LoginLimiter)
+
+
+def test_signing_out_revokes_the_cookie_at_the_guard_too(make_cloud):
+    _, client = make_cloud()
+    login(client)
+    cookie = client.cookies.get(webapp.COOKIE)
+    assert client.post("/api/logout", headers=via_proxy(PUBLIC)).status_code == 200
+    r = client.get("/api/state", headers={**via_proxy(PUBLIC),
+                                         "Cookie": f"{webapp.COOKIE}={cookie}"})
+    assert r.status_code == 401
 
 
 def test_spoofed_forwarded_for_does_not_dodge_the_lockout(make_cloud):
@@ -373,13 +376,15 @@ def test_cloud_needs_a_web_token_from_the_environment(tmp_path, monkeypatch):
 
 def test_build_app_uses_the_cloud_settings(make_cloud, fake_client):
     cfg = load_config(None, None, profile="server")
+    assert cfg["webapp"]["sessions_file"] == "/data/web_sessions.json"  # the disk
+    cfg["webapp"]["sessions_file"] = ""
     assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
                                                            model="m", tools=reg),
                                     FakeTranscriber(), PrintTTS())
     guard = cloud.build_app(cfg, assistant, TOKEN)
     assert isinstance(guard, cloud.CloudGuard)
     assert guard.max_upload_bytes == 4_000_000 and guard.max_body_bytes == 16_384
-    assert guard.lockout.max_failures == 5 and guard.limiter.per_minute == 120
+    assert guard.lockout.per_ip == 5 and guard.limiter.per_minute == 120
     client = TestClient(at(PROXY, guard), base_url="https://testserver")
     assert client.get("/healthz").text == "ok"
 
@@ -521,6 +526,7 @@ def test_cloud_server_caps_websocket_messages(monkeypatch, fake_client):
         FakeTranscriber(), PrintTTS()))
     monkeypatch.setattr(cloud, "warm_up", lambda a: None)
     cfg = load_config(None, None, profile="server")
+    cfg["webapp"]["sessions_file"] = ""
     assert cloud.serve(cfg, port=12345) == 0
     assert seen["ws_max_size"] == 2_000_000 and seen["ws"] == "auto"
     assert seen["proxy_headers"] is False and seen["port"] == 12345
@@ -634,13 +640,12 @@ def test_ipv6_addresses_count_per_64(make_cloud):
 def test_limiter_memory_stays_bounded():
     clock = Clock()
     limiter = cloud.RateLimiter(max_tracked=10, clock=clock)
-    lockout = cloud.LoginLockout(max_tracked=10, max_failures=1, clock=clock)
+    lockout = cloud.BoundedLoginLimiter(max_tracked=10, per_ip=1, clock=clock)
     for i in range(500):  # a flood of fresh addresses, all within a minute
         limiter.allow(f"198.51.{i // 256}.{i % 256}")
         lockout.fail(f"198.51.{i // 256}.{i % 256}")
     assert len(limiter.hits) <= 10
-    assert max(len(lockout.failures), len(lockout.locked_until),
-               len(lockout.strikes)) <= 10
+    assert max(len(lockout.failures), len(lockout.locked_until)) <= 10
 
 
 def test_first_requests_log_what_the_proxy_sends(make_cloud, caplog):

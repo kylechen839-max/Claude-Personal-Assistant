@@ -40,6 +40,7 @@ echo "auth checks passed"
 test "$(docker exec hc awk '/^Uid:/ {print $2}' /proc/1/status)" = 10001
 test "$(docker exec hc stat -c %u /data)" = 10001
 docker exec -u 10001 hc sh -c 'echo ok > /data/probe && rm /data/probe'
+docker exec hc test -s /data/web_sessions.json        # sign-ins kept on the disk
 echo "user and /data checks passed"
 docker exec -u 10001 hc python scripts/ws_smoke.py      # the voice WebSocket
 

@@ -9,9 +9,12 @@ for the public internet with no Tailscale in front:
 - Every other route needs the session cookie (or `Authorization: Bearer
   <WEB_TOKEN>`), except the login page and its static files, the login call
   itself, and the PWA manifest and icons. Unknown paths answer 401 too.
-- Wrong tokens lock out the address they came from (5 per 15 minutes, then
-  15 minutes, doubling up to a day), with a global cap across addresses.
-  Signed-in phones keep working during a lockout: it only stops new logins.
+- Wrong tokens go through the web app's own LoginLimiter (one instance,
+  shared): the right token is always accepted; 5 wrong ones in 15 minutes
+  lock their address's wrong tokens out for 15 minutes; past 20 from
+  everyone, each wrong token waits a second. Login bodies are checked here,
+  keyed by the real client address, so the web app never sees wrong ones.
+  Cookies are checked against the web app's session store (revocable).
 - Each address gets a request budget per minute.
 - X-Forwarded-For / -Proto count only when the connection comes from the
   host's TLS proxy (a private address); then plain http is redirected to
@@ -73,103 +76,29 @@ class ProxyNetworks(webapp.ProxyTrust):
         return _in_networks(peer, self.networks)
 
 
-class NeverBlock:
-    """Hands login limiting to CloudGuard, whose lockouts escalate (15 min
-    doubling to a day) and also cover unknown paths and the WebSocket."""
+class BoundedLoginLimiter(webapp.LoginLimiter):
+    """The web app's sign-in limiter (the right token is always accepted;
+    wrong ones lock their address out, and past `global_free` everyone's
+    wrong tokens are slowed down), shared by CloudGuard and the web app,
+    with its tables hard-capped: a flood from fresh addresses (one per IPv6
+    /64 at most, see client_key) can't grow them without bound."""
 
-    def blocked(self, ip: str = "") -> bool:
-        return False
-
-    def fail(self, ip: str = "") -> None:
-        pass
-
-
-class LoginLockout:
-    """Wrong-token limits per client address, plus a global brake.
-
-    The right token is always accepted, so nobody can lock Kyle out. An
-    address with `max_failures` wrong tokens in `window` seconds is locked
-    for `lockout` seconds (doubling each time, up to `max_lockout`): its
-    wrong tokens then get 429 after a `locked_delay` pause. When all
-    addresses together pass `global_max_failures`, every wrong token waits
-    `global_delay` seconds. With at most 2 requests per address in flight
-    (CloudGuard), that caps guessing at about one try per second per address.
-    """
-
-    def __init__(self, max_failures=5, window=900, lockout=900,
-                 global_max_failures=30, max_lockout=86400, clock=time.monotonic,
-                 max_tracked=10000, locked_delay=2.0, global_delay=1.0):
-        self.locked_delay = locked_delay
-        self.global_delay = global_delay
-        self.max_failures = max_failures
-        self.window = window
-        self.lockout = lockout
-        self.max_lockout = max_lockout
-        self.global_max_failures = global_max_failures
-        self.clock = clock
+    def __init__(self, *args, max_tracked: int = 10000, **kwargs):
+        super().__init__(*args, **kwargs)
         self.max_tracked = max_tracked
-        self.failures: dict[str, deque] = {}
-        self.locked_until: dict[str, float] = {}
-        self.strikes: dict[str, int] = {}  # lockouts so far, for doubling
-        self.global_failures: deque = deque()
-        self.global_hot_until = 0.0
-        self.lock = threading.Lock()
 
-    def _prune(self, q: deque, now: float) -> None:
-        while q and q[0] <= now - self.window:
-            q.popleft()
+    def fail(self, ip: str = "") -> float:
+        delay = super().fail(ip)
+        with self.lock:
+            for table in (self.failures, self.locked_until):
+                if len(table) > self.max_tracked:
+                    _cap(table, self.max_tracked)
+        return delay
 
     def retry_after(self, ip: str) -> int:
         """Seconds until `ip`'s lockout ends; 0 if it isn't locked."""
         with self.lock:
             return max(0, math.ceil(self.locked_until.get(ip, 0.0) - self.clock()))
-
-    def penalty(self, ip: str) -> float:
-        """How long to hold a wrong token's answer."""
-        with self.lock:
-            now = self.clock()
-            if self.locked_until.get(ip, 0.0) > now:
-                return self.locked_delay
-            return self.global_delay if self.global_hot_until > now else 0.0
-
-    def fail(self, ip: str) -> None:
-        with self.lock:
-            now = self.clock()
-            if len(self.failures) >= self.max_tracked and ip not in self.failures:
-                self._forget_idle(now)
-                for d in (self.failures, self.locked_until, self.strikes):
-                    _cap(d, self.max_tracked - 1)
-            q = self.failures.setdefault(ip, deque())
-            self._prune(q, now)
-            q.append(now)
-            if len(q) >= self.max_failures:
-                strikes = self.strikes.get(ip, 0)
-                self.strikes[ip] = strikes + 1
-                duration = min(self.lockout * 2 ** strikes, self.max_lockout)
-                self.locked_until[ip] = now + duration
-                q.clear()
-                log.warning("Login locked for %s for %d s after %d wrong tokens",
-                            ip, duration, self.max_failures)
-            self._prune(self.global_failures, now)
-            self.global_failures.append(now)
-            if len(self.global_failures) >= self.global_max_failures:
-                self.global_hot_until = now + self.lockout
-                self.global_failures.clear()
-                log.warning("Slowing down wrong tokens for %d s: %d from all "
-                            "addresses", self.lockout, self.global_max_failures)
-
-    def succeed(self, ip: str) -> None:
-        with self.lock:
-            self.failures.pop(ip, None)
-            self.strikes.pop(ip, None)
-
-    def _forget_idle(self, now: float) -> None:
-        for ip in [ip for ip, q in self.failures.items()
-                   if (not q or q[-1] <= now - self.window)
-                   and self.locked_until.get(ip, 0) <= now]:
-            self.failures.pop(ip, None)
-            self.locked_until.pop(ip, None)
-            self.strikes.pop(ip, None)
 
 
 def _cap(d: dict, size: int) -> None:
@@ -239,11 +168,11 @@ class CloudGuard:
 
     def __init__(self, app, token: str, trusted_proxies=(),
                  max_upload_bytes=4_000_000, max_body_bytes=16_384,
-                 lockout: LoginLockout | None = None,
+                 lockout: webapp.LoginLimiter | None = None,
                  limiter: RateLimiter | None = None, allowed_origins=(),
                  max_busy_per_ip=2, max_busy=32, body_timeout=10.0,
                  min_upload_rate=65536, sleep=None, client_ip_header="",
-                 log_proxy_headers=5):
+                 log_proxy_headers=5, web=None):
         import asyncio
 
         self.app = app
@@ -258,6 +187,10 @@ class CloudGuard:
         self.body_timeout = body_timeout
         self.min_upload_rate = min_upload_rate
         self.sleep = sleep or asyncio.sleep
+        # The web app's WebAuth (app.state.web): its session store decides
+        # whether a cookie is still signed in.
+        self.web = web if web is not None else getattr(getattr(app, "state", None),
+                                                       "web", None)
         # e.g. "cf-connecting-ip" if the host's edge sets it; read only from
         # a trusted proxy. "" = the rightmost untrusted X-Forwarded-For hop.
         self.client_ip_header = client_ip_header.strip().lower()
@@ -268,7 +201,7 @@ class CloudGuard:
         self.trusted = parse_networks(trusted_proxies)
         self.max_upload_bytes = max_upload_bytes
         self.max_body_bytes = max_body_bytes
-        self.lockout = lockout or LoginLockout()
+        self.lockout = lockout or BoundedLoginLimiter()
         self.limiter = limiter or RateLimiter()
 
     # where the request really came from
@@ -351,7 +284,6 @@ class CloudGuard:
                 finally:
                     self.release(ip)
                 return await refuse("wrong bearer token")
-            self.lockout.succeed(ip)
         elif not self.signed_in(scope):
             return await refuse("not signed in")
         await self.app(self.scrub(scope), receive, send)
@@ -387,7 +319,6 @@ class CloudGuard:
         if bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
                 return await self.refuse_token(send, ip, "bearer token", extra)
-            self.lockout.succeed(ip)
         elif not public and not self.signed_in(scope):
             return await _json(send, 401, {"error": "not signed in"}, extra)
         has_body = method not in ("GET", "HEAD", "OPTIONS") or \
@@ -438,8 +369,6 @@ class CloudGuard:
             if "code" not in status:
                 return await _json(send, 500, {"error": "internal error"}, extra)
             return
-        if login and status.get("code") == 200:
-            self.lockout.succeed(ip)
 
     def take(self, ip: str) -> bool:
         """Claim one of the in-flight slots for `ip`; False if none is free."""
@@ -457,15 +386,16 @@ class CloudGuard:
             self.busy[ip] -= 1
 
     async def wrong_token(self, ip: str, what: str) -> bool:
-        """Count a wrong token and hold the answer as the lockout says.
-        True if the address was already locked out."""
-        locked = self.lockout.retry_after(ip) > 0
-        delay = self.lockout.penalty(ip)
-        self.lockout.fail(ip)
+        """A wrong token, as the web app treats it: from a locked-out
+        address it is refused at once (True), otherwise it is counted and
+        its answer held as long as the limiter says."""
         log.warning("Wrong %s from %s", what, ip)
+        if self.lockout.blocked(ip):
+            return True
+        delay = self.lockout.fail(ip)
         if delay:
             await self.sleep(delay)
-        return locked
+        return False
 
     async def refuse_token(self, send, ip: str, what: str, extra, held=False):
         if not held:
@@ -491,7 +421,11 @@ class CloudGuard:
         except CookieError:
             return False
         morsel = jar.get(webapp.COOKIE)
-        return webapp.read_cookie(self.token, morsel.value if morsel else None) is not None
+        value = morsel.value if morsel else None
+        store = getattr(self.web, "store", None)
+        if store is None:  # not the web app (tests)
+            return webapp.read_cookie(self.token, value) is not None
+        return store.valid(webapp.read_cookie(self.token, value, store.epoch))
 
 
 def _bearer(scope) -> str | None:
@@ -598,18 +532,22 @@ def build_app(config: dict, web_assistant, token: str):
     # guard, so its own checks (e.g. the voice socket's Origin against
     # X-Forwarded-Host) agree with it.
     trust = ProxyNetworks(hops=1, networks=tuple(parse_networks(cloud["trusted_proxies"])))
+    limiter = BoundedLoginLimiter(per_ip=cloud["login_max_failures"],
+                                  window=cloud["login_window"],
+                                  lockout=cloud["login_lockout"],
+                                  global_free=cloud["login_global_free"],
+                                  global_delay=cloud["login_global_delay"])
     app = webapp.create_app(web_assistant, token,
                             allowed_origins=web["allowed_origins"],
                             max_upload_bytes=max_upload,
                             max_audio_seconds=float(web["max_audio_seconds"]),
-                            trusted_proxy=trust, limiter=NeverBlock(),
+                            trusted_proxy=trust, limiter=limiter,
+                            sessions_file=web["sessions_file"] or None,
                             voice=config.get("voice"))
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),
-        lockout=LoginLockout(cloud["login_max_failures"], cloud["login_window"],
-                             cloud["login_lockout"],
-                             cloud["login_global_max_failures"]),
+        lockout=limiter,
         limiter=RateLimiter(cloud["requests_per_minute"]),
         allowed_origins=web["allowed_origins"],
         max_busy_per_ip=cloud["uploads_per_address"], max_busy=cloud["uploads_total"],
