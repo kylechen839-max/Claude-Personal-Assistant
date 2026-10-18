@@ -242,7 +242,9 @@ with the stopwatch button.
 - [ ] Delete by voice: "Add a test event tomorrow at 3", then "Delete the
       test event tomorrow". When it asks, say "yes".
   - Should: it deletes it, and "yes" never shows up as its own question.
-    Repeat and say "no": the event stays.
+    Repeat and say "no": the event stays. Repeat and talk over the question
+    ("okay, and what about Friday?"): it says "OK, I won't delete it", the
+    event stays, and it then answers about Friday.
 - [ ] Lock screen / interruption: mid-answer, lock the phone (or take a call
       / say "Hey Siri"), then come back.
   - Should: it stops talking, shows "Tap to continue", and carries on with
