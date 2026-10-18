@@ -443,3 +443,52 @@ def test_timings_flag_prints_voice_turn_lines():
     finally:
         log.removeHandler(handler)
     assert out == ["(Turn timings from utterance received: transcript +0.40 s)"]
+
+
+def test_no_tool_runs_after_a_barge_in_before_the_tool_call():
+    """Kyle says "stop" while "Okay, I'll add it." plays, after Claude asked
+    for the tool but before it ran: the tool must not run, and history
+    stays valid (every tool_use has a tool_result)."""
+    added = []
+    reg = ToolRegistry()
+    reg.register(Tool(name="create_event", description="Create.",
+                      input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+                      handler=lambda title: added.append(title) or "ok"))
+    client = stream_client(
+        streamed("Okay, I'll add it.", extra=[tool_use_block("create_event", {"title": "Gym"})],
+                 stop_reason="tool_use"))
+    chat = ClaudeChat(client=client, model="m", tools=reg)
+    cancel = threading.Event()
+
+    def on_text(delta):
+        cancel.set()  # the barge-in lands while the reply is streaming
+
+    reply = chat.ask("add gym tomorrow", on_text=on_text, cancel=cancel)
+    assert added == []
+    assert reply == "Okay, I'll add it."
+    roles = [m["role"] for m in chat.history]
+    assert roles == ["user", "assistant", "user", "assistant"]
+    assert chat.history[2]["content"][0]["is_error"] is True
+    assert chat.history[1]["content"][-1]["type"] == "tool_use"
+
+
+def test_web_chat_stream_sends_turn_events_to_its_caller_only():
+    from assistant import webapp
+    from assistant.tools import Tool as T
+
+    reg = ToolRegistry()
+    reg.register(T(name="list_events", description="List.",
+                   input_schema={"type": "object", "properties": {}},
+                   handler=lambda: "none"))
+    client = stream_client(
+        streamed(extra=[tool_use_block("list_events", {})], stop_reason="tool_use"),
+        streamed("Nothing tomorrow."))
+    wa = webapp.WebAssistant(lambda r: ClaudeChat(client=client, model="m", tools=r),
+                             FakeTranscriber(), FakeSynth(), tools=reg)
+    s = wa.session("sid-1")
+    seen = []
+    out = "".join(wa.chat_stream(s, "tomorrow?", on_event=seen.append))
+    assert out == "Nothing tomorrow."
+    assert seen == [{"type": "tool", "name": "list_events"}]
+    assert s.events.empty()  # a page reading /api/events gets nothing of it
+    assert s.listener is None

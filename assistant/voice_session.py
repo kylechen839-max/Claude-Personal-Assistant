@@ -195,7 +195,8 @@ class ChatBackend:
 class WebBackend:
     """The web app's session for this browser (webapp.WebAssistant), so the
     voice view continues the same conversation as push-to-talk. Tool and
-    confirmation events come from the session's event queue; a
+    confirmation events of a voice turn come straight to it (chat_stream's
+    on_event), so a page reading /api/events can't take them; a
     confirmation is answered with WebAssistant.answer()."""
 
     def __init__(self, assistant, session):
@@ -204,38 +205,24 @@ class WebBackend:
         self.conv: "VoiceConversation | None" = None
 
     def ask(self, text, on_text, on_tool, cancel) -> str:
-        s = self.session
-        while not s.events.empty():  # leftovers of an earlier turn
-            s.events.get_nowait()
-        done = threading.Event()
+        def on_event(ev):  # this turn's own events, never the page's queue
+            kind = ev.get("type")
+            if kind == "confirm":
+                self.conv.on_confirm(ev["question"])
+            elif kind == "tool":
+                on_tool(ev["name"])
+            elif kind == "status":
+                self.conv.on_status(ev.get("text", ""))
 
-        def watch():
-            while not done.is_set() or not s.events.empty():
-                try:
-                    ev = s.events.get(timeout=0.05)
-                except queue.Empty:
-                    continue
-                kind = ev.get("type")
-                if kind == "confirm":
-                    self.conv.on_confirm(ev["question"])
-                elif kind == "tool":
-                    on_tool(ev["name"])
-                elif kind == "status":
-                    self.conv.on_status(ev.get("text", ""))
-
-        watcher = threading.Thread(target=watch, name="voice-events", daemon=True)
-        watcher.start()
         parts = []
         try:
-            for delta in self.assistant.chat_stream(s, text, cancel=cancel):
+            for delta in self.assistant.chat_stream(self.session, text, cancel=cancel,
+                                                    on_event=on_event):
                 parts.append(delta)
                 on_text(delta)
         except RuntimeError:  # a push-to-talk turn is running in this session
             parts.append("I'm still working on your last request.")
             on_text(parts[-1])
-        finally:
-            done.set()
-            watcher.join(timeout=2)
         return "".join(parts)
 
     def answer(self, yes: bool) -> bool:
@@ -472,7 +459,7 @@ class VoiceConversation:
         with self.lock:
             turn = self.current
             if turn is None or turn.finished or turn.stop.is_set() or self.closed:
-                log.info("Declined %r: its turn was cancelled", question)
+                log.info("Declined a confirmation: its turn was cancelled")
                 self.backend.answer(False)
                 return
             self.pending = PendingConfirm(turn.id, question)
@@ -505,13 +492,14 @@ class VoiceConversation:
         turn.truncated = True
         spoken = turn.spoken_text()
         if self.backend.mark_interrupted(spoken):
-            log.info("Kept the spoken part of the interrupted reply: %r", spoken)
+            log.info("Kept the spoken part of the interrupted reply (%d chars)",
+                     len(spoken))
 
     def _decline(self, pending: PendingConfirm, why: str, text: str = "") -> None:
         """Answer `pending` with no and say so (call with the lock held)."""
         if self.pending is pending:
             self.pending = None
-        log.info("Confirmation %r declined (%s)", pending.question, why)
+        log.info("Confirmation of turn %s declined (%s)", pending.turn, why)
         self._send({"type": "confirm_answer", "turn": pending.turn, "text": text,
                     "yes": False, "reason": why})
         turn = self.current
@@ -526,7 +514,8 @@ class VoiceConversation:
             log.exception("Transcribing a confirmation failed")
             text = ""
         yes = is_explicit_yes(text)
-        log.info("Voice confirmation %r -> %s", text, "yes" if yes else "no")
+        log.info("Voice confirmation (%d chars) -> %s", len(text), "yes" if yes else "no")
+        log.debug("Voice confirmation text: %r", text)
         with self.lock:
             if self.pending is not pending:
                 return  # ended or declined meanwhile
@@ -623,7 +612,8 @@ class VoiceConversation:
         turn.samples = None
         timer.mark("transcript")
         text = strip_wake_phrase(heard, self.wake_phrase).strip()
-        log.info("Voice heard: %r", heard)
+        log.info("Voice turn %s: heard %d chars", turn.id, len(heard))
+        log.debug("Voice heard: %r", heard)
         self._send({"type": "transcript", "turn": turn.id, "text": heard})
         if not text or turn.stop.is_set():
             return False
@@ -648,7 +638,8 @@ class VoiceConversation:
         if reply and not streamed:  # an error sentence (nothing was streamed)
             self._send({"type": "error", "turn": turn.id, "message": reply})
             turn.sentences.put(Chunk(reply, 0, reply=False))
-        log.info("Voice replied: %r", reply)
+        log.info("Voice turn %s: replied %d chars", turn.id, len(reply or ""))
+        log.debug("Voice replied: %r", reply)
         turn.flush()
         timer.mark("reply")
         return False

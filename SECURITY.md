@@ -57,7 +57,8 @@ which blocks cross-site WebSocket hijacking. Each utterance is at most
 text messages at 4 KB; more than `utterances_per_minute` utterances or 60
 control messages per 10 s closes the socket; a conversation ends after
 `max_session_minutes` or `idle_timeout`; one voice conversation per signed-in
-browser. Closing the socket aborts the Claude stream and pending TTS and
+browser and at most 4 server-wide; the rate limits are kept per session, so
+reconnecting doesn't reset them. Transcripts are not logged at INFO. Closing the socket aborts the Claude stream and pending TTS and
 answers a pending confirmation with "no". A spoken confirmation counts only once the
 page reports the question finished playing, and only as a short explicit
 yes ("yes", "yeah, delete it"); talking over the question, answering before

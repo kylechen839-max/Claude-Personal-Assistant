@@ -238,6 +238,14 @@ class ClaudeChat:
             results = []
             untrusted = has_web_content(self.history)
             for call in calls:
+                if cancel is not None and cancel.is_set():
+                    # Kyle talked over it: run nothing more. Every tool_use
+                    # still needs a tool_result to keep history valid.
+                    log.info("Skipped %s: the turn was interrupted", call.name)
+                    results.append({"type": "tool_result", "tool_use_id": call.id,
+                                    "content": "Not run: the user interrupted.",
+                                    "is_error": True})
+                    continue
                 log.info("Claude called %s %s%s", call.name, call.input,
                          " (web content in context)" if untrusted else "")
                 content, is_error = self.tools.dispatch(call.name, dict(call.input),
@@ -245,6 +253,9 @@ class ClaudeChat:
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})
             self.history.append({"role": "user", "content": results})
+            if cancel is not None and cancel.is_set():
+                raise _Cancelled("".join(b.text for b in response.content
+                                         if b.type == "text"))
         return "Sorry, that took too many steps. Could you ask a simpler way?"
 
     def _trim_history(self) -> None:

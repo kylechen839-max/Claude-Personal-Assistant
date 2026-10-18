@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 322 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 329 passed, 9 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
@@ -30,8 +30,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
-| `test_voice.py` | 31 | voice mode: turn pipeline, barge-in |
-| `test_voice_ws.py` | 26 | voice mode: WebSocket, limits, files |
+| `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
+| `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -290,7 +290,14 @@ Design decisions:
   mid-call finishes first, then the turn stops before asking Claude again);
   a confirmation from a cancelled turn is declined, never attached to the
   next one. Only the newest waiting utterance is kept: older ones are
-  dropped before Whisper runs, so transcription work can't pile up.
+  dropped before Whisper runs, so transcription work can't pile up. A
+  barge-in after Claude asked for a tool but before it ran stops it: the
+  chat loop checks `cancel` before every tool call (skipped calls get an
+  error tool_result, so history stays valid). A voice turn's tool, confirm
+  and status events go straight to it (`chat_stream(on_event=...)`), never
+  through the session queue a page may be reading. Server-wide at most 4
+  voice conversations; rate limits are per browser session, so
+  reconnecting doesn't reset them. Transcripts are logged only at DEBUG.
 - **Conversation**: the phone's one web-app conversation (so push-to-talk
   and voice continue each other; tools and memory as in the web app); End,
   "goodbye", idle (2 min) or the 30 min cap ends it and stores the Pinecone
@@ -313,7 +320,7 @@ Design decisions:
 Tested:
 - `tests/test_sentences.py` (17): abbreviations, initials, decimals, times
   ("3:30 PM.", "p.m. tomorrow"), quotes, streaming token by token.
-- `tests/test_voice.py` (31, on a plain-ClaudeChat backend): streamed
+- `tests/test_voice.py` (33, on a plain-ClaudeChat backend): streamed
   tool rounds, `abort()` closing a stalled stream, `mark_interrupted`
   keeping web blocks; the chunker sends
   the first sentence's audio while the mocked Claude stream is still held
@@ -326,8 +333,10 @@ Tested:
   about Friday?"), barge-in over the question cancels the delete and says
   so, an answer before the question was heard is a no, turns never overlap
   and a cancelled turn's confirmation is declined, superseded utterances are
-  never transcribed.
-- `tests/test_voice_ws.py` (26): no/forged cookie and missing/foreign/`null`/
+  never transcribed; no tool runs after a barge-in that lands before the
+  tool call; `chat_stream(on_event)` keeps the turn's events off the shared
+  queue.
+- `tests/test_voice_ws.py` (31): no/forged cookie and missing/foreign/`null`/
   look-alike Origin rejected (1008), X-Forwarded-Host only from a trusted
   proxy; a whole streamed turn over the socket;
   barge-in over the socket and the next request's history; spoken yes/no
@@ -337,7 +346,8 @@ Tested:
   voice continuing a push-to-talk conversation; closing the
   socket aborts generation and saves the summary; oversize/wrong-rate/junk
   frames (1009/1003), long text and message floods, utterance rate limit
-  (1008), max session length; vendored files served byte-exact (SHA-256 in
+  (1008), and across a reconnect, malformed interrupt/played (1003), the
+  server-wide conversation cap (1013), max session length; vendored files served byte-exact (SHA-256 in
   NOTICE) and gzipped; CSP; first-audio latency (fake Whisper/Claude, real
   eSpeak) and, in CI, with real Whisper; the JS tests via node.
 - `tests/js/voice-core.test.js` (12, node:test, no packages): listening ->
@@ -355,7 +365,8 @@ Tested:
   ("Tomorrow you have the dentist at 3:30... [interrupted: ...]"); the
   energy fallback worked too; End closed the view; a delete confirmation
   was answered "yes" only after the page reported the question as played,
-  and the event was deleted.
+  and the event was deleted; tapping End 0-800 ms after Voice left no
+  socket (or mic) open.
 - **Measured first-audio latency** (mocked Claude streaming at ~50 ms per
   delta): server, utterance received -> first audio sent 0.13-0.15 s; page,
   end of turn (VAD) -> first audio playing 0.17-0.21 s, i.e. ~0.9 s after

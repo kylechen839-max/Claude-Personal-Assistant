@@ -381,6 +381,48 @@ def test_text_message_limits(make_voice):
         assert msgs[-1]["type"] == "websocket.close" and msgs[-1]["code"] == 1008
 
 
+@pytest.mark.parametrize("msg", [{"type": "interrupt", "turn": "x"},
+                                 {"type": "interrupt", "turn": 1, "fraction": [1]},
+                                 {"type": "played", "turn": None}])
+def test_malformed_control_message_closes_with_1003(make_voice, msg):
+    _, http = make_voice()
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_text(json.dumps(msg))
+        assert ws.receive()["code"] == 1003
+
+
+def test_rate_limit_survives_reconnecting(make_voice):
+    _, http = make_voice(streamed("One."), heard=("a", "b"), utterances_per_minute=1)
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1, 0.2))
+        receive(ws, "turn_done")
+    with connect(http) as ws:  # a new socket doesn't get a fresh allowance
+        ws.receive_text()
+        ws.send_bytes(utterance(2, 0.2))
+        msg = ws.receive()
+        while msg["type"] != "websocket.close":
+            msg = ws.receive()
+        assert msg["code"] == 1008
+
+
+def test_server_wide_cap_on_voice_conversations(make_voice, monkeypatch):
+    monkeypatch.setattr(voice_ws, "MAX_CONVERSATIONS", 1)
+    _, http = make_voice()
+    login(http)
+    other = TestClient(http.app, base_url=BASE)
+    login(other)
+    with connect(http) as ws:
+        ws.receive_text()
+        with pytest.raises(WebSocketDisconnect) as e:
+            with connect(other):
+                pass
+        assert e.value.code == 1013
+
+
 def test_utterance_rate_limit(make_voice):
     _, http = make_voice(streamed("One."), streamed("Two."),
                          heard=("a", "b", "c"), utterances_per_minute=2)
