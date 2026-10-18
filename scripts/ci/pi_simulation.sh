@@ -107,6 +107,8 @@ timing pytest "$s"
 phase "python -m assistant --check"
 # A placeholder key: --check only looks at whether it is set.
 sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=ci-placeholder-not-a-key/' .env
+# and a throwaway web token, so the preflight's web step runs
+echo "WEB_TOKEN=$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
 "$PY" -m assistant --check
 
 phase "install_service.sh (systemd stubbed)"
@@ -125,7 +127,9 @@ phase "preflight.sh (Claude faked, no keys)"
 fake=$!
 s=$(date +%s)
 # git: a CI checkout is detached; pytest ran above; text-tools and the live
-# tests need Kyle's Google/Notion accounts. Everything else runs for real.
+# tests need Kyle's Google/Notion accounts. Everything else runs for real:
+# the wake word, Whisper and TTS, and --mode web with a text and an audio
+# turn.
 ANTHROPIC_BASE_URL=http://127.0.0.1:8999 \
     ./scripts/preflight.sh --skip git,pytest,pytest-live,text-tools \
     | tee "$OUT/preflight-console.txt"
@@ -133,7 +137,10 @@ timing preflight "$s"
 kill "$fake"
 cp logs/preflight-*.txt "$OUT/"
 grep -q "^PASS  wake-e2e" "$OUT/preflight-console.txt" || fail "wake-e2e did not pass"
-grep -q "^PASS  tts-piper" "$OUT/preflight-console.txt" || fail "tts-piper did not pass"
+for row in tts-piper "web: healthz" "web: auth required" "web: login" \
+           "web: text turn" "web: audio turn"; do
+    grep -q "^PASS  $row" "$OUT/preflight-console.txt" || fail "$row did not pass"
+done
 timing total "$t0"
 AS_PI
 
