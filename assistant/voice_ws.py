@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 import numpy as np
 
 from assistant.config import DEFAULTS
-from assistant.voice_session import VoiceConversation, synthesize_wav
+from assistant.voice_session import VoiceConversation, WebBackend
 
 log = logging.getLogger(__name__)
 
@@ -77,9 +77,11 @@ def pcm16_to_float(data: bytes) -> np.ndarray:
 
 # --- checks --------------------------------------------------------------------
 
-def origin_allowed(headers, allowed_origins=()) -> bool:
+def origin_allowed(headers, allowed_origins=(), trust_forwarded: bool = False) -> bool:
     """A WebSocket handshake must come from this site's own page. Unlike
-    plain requests, a missing Origin is refused: browsers always send it."""
+    plain requests, a missing Origin is refused: browsers always send it.
+    X-Forwarded-Host counts only when the caller is a trusted proxy
+    (`[webapp] trusted_proxy`); anyone else could set it."""
     origin = (headers.get("origin") or "").rstrip("/")
     if not origin:
         return False
@@ -88,9 +90,10 @@ def origin_allowed(headers, allowed_origins=()) -> bool:
     parts = urlsplit(origin)
     if parts.scheme not in ("https", "http"):
         return False
-    own = {h.strip().lower() for h in (headers.get("host", ""),
-                                       headers.get("x-forwarded-host", ""))
-           if h.strip()}
+    hosts = [headers.get("host", "")]
+    if trust_forwarded:
+        hosts.append(headers.get("x-forwarded-host", ""))
+    own = {h.strip().lower() for h in hosts if h.strip()}
     return parts.netloc.lower() in own
 
 
@@ -127,16 +130,16 @@ def client_settings(v: dict) -> dict:
 
 # --- routes --------------------------------------------------------------------
 
-def add_voice_routes(app, assistant, token: str, allowed_origins=(),
+def add_voice_routes(app, assistant, allowed_origins=(),
                      voice: dict | None = None, clock=time.monotonic) -> dict:
     """Register /api/voice and the voice page files on the web app. Returns
     the live conversations by session id (for tests)."""
-    from fastapi import Request, WebSocket
+    from fastapi import Depends, Request, WebSocket
     from fastapi.responses import FileResponse, Response
     from starlette.concurrency import run_in_threadpool
     from starlette.websockets import WebSocketDisconnect
 
-    from assistant.webapp import COOKIE, SessionTools, read_cookie
+    from assistant.webapp import Session, require_session
 
     v = voice_settings(voice)
     allowed = tuple(o.rstrip("/") for o in allowed_origins)
@@ -164,23 +167,18 @@ def add_voice_routes(app, assistant, token: str, allowed_origins=(),
                                      "Vary": "Accept-Encoding"})
         return FileResponse(STATIC / "vad" / name, media_type=media, headers=headers)
 
-    def synthesize(text: str) -> bytes:
-        # The web app's single TTS thread (engines aren't thread-safe).
-        return assistant._tts_pool.submit(synthesize_wav, assistant.tts,
-                                          text).result(timeout=60)
-
     @app.websocket("/api/voice")
-    async def voice_socket(ws: WebSocket):
-        if not origin_allowed(ws.headers, allowed):
+    async def voice_socket(ws: WebSocket, session: Session = Depends(require_session)):
+        # require_session: signed in (cookie or Bearer, with the lockouts) and
+        # not cross-site, else closed with 1008. A WebSocket from a browser
+        # always has an Origin, so here a missing one is refused too.
+        web = ws.app.state.web
+        if not origin_allowed(ws.headers, allowed, web.trusted_proxy.trusts(ws)):
             log.warning("Rejected voice socket from origin %r",
                         ws.headers.get("origin"))
             await ws.close(code=1008)
             return
-        web = getattr(app.state, "web", None)  # the web app's auth (WebAuth)
-        sid = web.sid(ws) if web is not None else read_cookie(token, ws.cookies.get(COOKIE))
-        if not sid:
-            await ws.close(code=1008)
-            return
+        sid = session.sid
         await ws.accept()
         loop = asyncio.get_running_loop()
         out: asyncio.Queue = asyncio.Queue()
@@ -188,16 +186,10 @@ def add_voice_routes(app, assistant, token: str, allowed_origins=(),
         def send(event: dict, data: bytes | None = None) -> None:
             loop.call_soon_threadsafe(out.put_nowait, (event, data))
 
-        holder: dict = {}
-        registry = SessionTools(assistant.tools,
-                                confirm=lambda q: holder["conv"].confirm(q),
-                                emit=lambda e: None)
         conv = VoiceConversation(
-            assistant.chat_factory(registry), assistant.transcribe, synthesize,
+            WebBackend(assistant, session), assistant.transcribe, assistant.synthesize,
             send, clock=clock, idle_timeout=v["idle_timeout"],
-            max_session=v["max_session_minutes"] * 60,
-            confirm_timeout=v["confirm_timeout"])
-        holder["conv"] = conv
+            max_session=v["max_session_minutes"] * 60)
         old = live.pop(sid, None)
         live[sid] = (conv, ws)
         if old is not None:  # one voice conversation per browser

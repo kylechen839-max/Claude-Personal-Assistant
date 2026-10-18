@@ -711,6 +711,11 @@ def _init_com() -> None:
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
+    from assistant.voice_session import fast_wav
+
+    data = fast_wav(tts, text)  # Piper in memory / eSpeak directly
+    if data:
+        return data
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "reply.wav"
         for _ in range(attempts):
@@ -1083,7 +1088,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant.voice_ws import add_voice_routes
 
     app.state.voice_conversations = add_voice_routes(
-        app, assistant, token, allowed_origins=web.allowed_origins, voice=voice)
+        app, assistant, allowed_origins=web.allowed_origins, voice=voice)
     return app
 
 

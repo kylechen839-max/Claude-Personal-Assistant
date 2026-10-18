@@ -84,7 +84,6 @@ barge_in_ms = 250             # talk this long over a reply to interrupt it
 vad_threshold = 0.5           # raise (e.g. 0.7) if it hears itself on speaker
 idle_timeout = 120            # seconds of quiet before the conversation ends
 max_session_minutes = 30
-confirm_timeout = 60          # seconds to wait for a spoken yes before "no"
 utterances_per_minute = 30
 debug_panel = false           # latency timings on the voice screen
 
