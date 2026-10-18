@@ -603,7 +603,8 @@ class WebAssistant:
         try:
             summary = s.chat.end_conversation()
             if summary:
-                log.info("Web conversation saved to memory: %s", summary)
+                log.info("Web conversation saved to memory (%d chars)", len(summary))
+                log.debug("Saved summary: %s", summary)
             return summary
         except Exception:
             log.exception("Ending a web conversation failed")
@@ -659,7 +660,8 @@ class WebAssistant:
             if recording is not None:
                 text = self.transcribe(recording)
                 s.events.put({"type": "transcript", "text": text})
-                log.info("Web heard: %r", text)
+                log.info("Web heard %d chars", len(text))
+                log.debug("Web heard: %r", text)
             text = (text or "").strip()
             if not text:
                 s.events.put({"type": "error",
@@ -672,7 +674,8 @@ class WebAssistant:
             reply = get_reply(  # it logs errors itself
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
-            log.info("Web replied: %r", reply)
+            log.info("Web replied %d chars", len(reply))
+            log.debug("Web replied: %r", reply)
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -697,7 +700,8 @@ class WebAssistant:
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
-            log.info("No answer to %r; treating it as no", question)
+            log.info("No answer to a confirmation; treating it as no")
+            log.debug("Unanswered: %r", question)
             s.events.put({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
@@ -1190,7 +1194,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             answer = await run_in_threadpool(assistant.transcribe, recording)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
-        log.info("Web confirmation %r -> %s", answer, "yes" if yes else "no")
+        log.info("Web confirmation -> %s", "yes" if yes else "no")
+        log.debug("Confirmation answer: %r", answer)
         if not assistant.answer(s, yes):
             return error("nothing to confirm", 409)
         return stream(s)
