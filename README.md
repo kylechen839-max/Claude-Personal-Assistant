@@ -277,10 +277,11 @@ question and is never sent to Claude as a new request.
   `--timings`, each turn's latency line is printed on the PC's console too.
 
 Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
-ignored), `max_utterance_s` (30), `max_session_minutes` (30),
-`confirm_timeout` (60 s to answer a yes/no question) and
-`utterances_per_minute` (30). For the most natural voice set `[tts] engine =
-"piper"`; with pyttsx3 on Linux it uses eSpeak directly.
+ignored), `max_utterance_s` (30), `max_session_minutes` (30) and
+`utterances_per_minute` (30); a yes/no question waits `[webapp]
+confirm_timeout`. Voice and push-to-talk share this phone's conversation.
+For the most natural voice set `[tts] engine = "piper"`; with pyttsx3 on
+Linux it uses eSpeak directly.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 

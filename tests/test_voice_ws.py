@@ -41,7 +41,7 @@ class Transcriber:
 @pytest.fixture
 def make_voice(monkeypatch):
     def make(*streams, heard=("what's on my calendar tomorrow",), memory=None,
-             synth=None, transcriber=None, **voice):
+             synth=None, transcriber=None, tools=None, **voice):
         client = stream_client(*streams)
 
         def chat_factory(registry):
@@ -49,9 +49,9 @@ def make_voice(monkeypatch):
                               memory=memory)
 
         assistant = webapp.WebAssistant(chat_factory, transcriber or Transcriber(*heard),
-                                         PrintTTS())
+                                         PrintTTS(), tools=tools)
         if synth:
-            monkeypatch.setattr(voice_ws, "synthesize_wav", lambda tts, text: synth(text))
+            monkeypatch.setattr(assistant, "synthesize", synth)
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, voice=voice)
         http = TestClient(app, base_url=BASE)
         return client, http
@@ -167,7 +167,7 @@ def test_first_audio_latency(make_voice, capsys):
     Whisper/Claude and the real TTS route (eSpeak) when it is installed."""
     from assistant.tts import Pyttsx3TTS
 
-    real = voice_ws.synthesize_wav
+    real = webapp.render_wav
     tts = Pyttsx3TTS() if shutil.which("espeak-ng") else PrintTTS()
     _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
                                   "Then lunch with Sam at noon."),
@@ -208,7 +208,7 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
     speech = audio.load_audio(wav)
     if not len(speech):
         pytest.skip("the OS voice wrote an empty clip")
-    real = voice_ws.synthesize_wav
+    real = webapp.render_wav
     tts = Pyttsx3TTS()
     _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
                                   "Then lunch with Sam."),
@@ -250,6 +250,58 @@ def test_barge_in_over_the_socket(make_voice):
     second = client.stream_calls[1]["messages"]
     assert second[1]["content"][0]["text"].startswith("First one here. [interrupted")
     assert second[-1]["content"] == "what's the weather"
+
+
+@pytest.mark.parametrize("answer, deleted", [("yes", ["Dentist"]), ("no", [])])
+def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted):
+    from assistant.tools import Tool, ToolRegistry
+    from tests.conftest import tool_use_block
+
+    done = []
+    tools = ToolRegistry()
+    tools.register(Tool(
+        name="delete_event", description="Delete an event.",
+        input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+        handler=lambda title: done.append(title) or {"deleted": title},
+        confirm_prompt=lambda i: f"Do you want me to delete {i['title']}?"))
+    client, http = make_voice(
+        streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
+                 stop_reason="tool_use"),
+        streamed("All done." if deleted else "Okay, I kept it."),
+        heard=("delete my dentist appointment", answer), tools=tools)
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        msgs = receive(ws, "confirm")
+        assert msgs[-1]["question"] == "Do you want me to delete Dentist?"
+        question = [m for m in receive(ws, "audio") if m["type"] == "audio"]
+        while not question[-1]["text"].endswith("Please say yes or no."):
+            question += [m for m in receive(ws, "audio") if m["type"] == "audio"]
+        ws.send_bytes(utterance(2))
+        rest = receive(ws, "turn_done")
+    ans = next(m for m in rest if m["type"] == "confirm_answer")
+    assert ans["yes"] == bool(deleted) and ans["turn"] == 1
+    assert done == deleted
+    assert rest[-1]["turn"] == 1 and rest[-1]["interrupted"] is False
+    asked = [m["content"] for call in client.stream_calls for m in call["messages"]
+             if m["role"] == "user" and isinstance(m["content"], str)]
+    assert answer not in asked  # the answer never went to Claude as a request
+
+
+def test_voice_continues_the_push_to_talk_conversation(make_voice):
+    client, http = make_voice(streamed("Hi Kyle."), streamed("You said hello."),
+                              heard=("what did I just say",))
+    login(http)
+    r = http.post("/api/turn", json={"text": "hello"})
+    assert r.status_code == 200
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        receive(ws, "turn_done")
+    second = client.stream_calls[-1]["messages"]
+    assert [m["content"] for m in second if m["role"] == "user"] == \
+        ["hello", "what did I just say"]
 
 
 def test_closing_the_socket_cancels_and_saves(make_voice):
