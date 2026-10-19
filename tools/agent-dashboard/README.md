@@ -8,11 +8,12 @@ buttons at the top (the choice is remembered on that device):
   row. The summary line at the top answers "does anything need me?",
   for example `2 need you · 1 running · 1 silent`. A run split into
   parallel pieces has one row per piece (see `run_id`).
-- **Grid**: one large panel per master (coordinator) session with a
-  small tile for each researcher, builder and judge it started, all
-  written by the master itself (see [Grid (coordinator)](#grid-coordinator)).
-  A **Message coordinator** button opens claude.ai's own comment box on
-  the panel (see [Message coordinator](#message-coordinator)).
+- **Grid**: a flat window workspace that fills the screen: one window per
+  master (coordinator) session and one per researcher, builder and judge
+  it started, all written by the master itself (see
+  [Grid (workspace)](#grid-workspace)). Each coordinator window has a
+  **chat box** that sends Kyle's message to the coordinator and shows
+  everything the coordinator tells him (see [Chat box](#chat-box)).
 
 - **URL:** https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (a claude.ai
   artifact with the `db`, `user` and `comments` capabilities; open it
@@ -28,16 +29,16 @@ buttons at the top (the choice is remembered on that device):
 ## Manifest (the master sets it when publishing)
 
 ```json
-{"db":{}, "user":{}, "comments":{"composer_only":true}}
+{"db":{}, "user":{}, "comments":{}}
 ```
 
-`db` holds the `runs` and `agents` collections. `comments` with
-`composer_only` lets the page do one thing: open claude.ai's own
-new-comment composer on a panel (`openComposer`). The page cannot post,
-reply, read threads or send anything to Claude; it asks for no consent
-and declares no custom anchors. Kyle types in the shell's composer and
-presses its **Send to Claude**. `tests/test_agent_dashboard.py` pins
-this block.
+`db` holds the `runs` and `agents` collections, and Kyle's private chat
+mirror under `data/users/<id>/`. `user` gives the page Kyle's id for that
+path (`user.id()`). `comments` is the full grant, needed for
+`sendToClaude`: the chat box posts Kyle's message as a comment sent to
+Claude. claude.ai asks Kyle once for consent at the first send. The page
+declares no custom anchors and never reads threads (it can't).
+`tests/test_agent_dashboard.py` pins this block.
 
 Kyle's LLM Council chose this design on 2026-10-19 (see
 `council-transcript-20261019-1815.md`). If he isn't using it after two
@@ -182,84 +183,137 @@ the agents writes it goes with. `status_lines` is sent whole on each
 phase write (a db update replaces arrays): the last 4 items plus the new
 one. No extra writes.
 
-## Grid (coordinator)
+## Grid (workspace)
 
-The Grid is fed only by the two collections above; it calls nothing
-else. Nothing is subscribed or looked up until Grid is first shown: a
-Runs-only visit uses only `db` and the `runs` query. Showing Grid starts
-the `agents` query and one `comments` lookup; switching back to Runs
-stops the `agents` query (the `runs` one keeps running). The `agents`
-query uses the same error table as `runs` (stop on `revoked`, a rejected
-query or a lifecycle code, doubling back-off on `resource_exhausted`,
-one retry after 5–30 s otherwise); a stop clears the agent tiles and
-leaves Runs alone.
+The Grid is fed only by the dashboard's own db; it calls nothing else.
+Nothing is subscribed or looked up until Grid is first shown: a Runs-only
+visit uses only `db` and the `runs` query. Showing Grid starts the
+`agents` query and one `user` and one `comments` lookup; switching back
+to Runs stops the `agents` query and every chat subscription (the `runs`
+one keeps running). Every query uses the same error table as `runs`
+(stop on `revoked`, a rejected query or a lifecycle code, doubling
+back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
 
-- **One panel per master session.** `runs` rows sharing a
-  `session_url` (the plain row and its piece rows) form one panel; a row
-  without a valid `session_url` is its own panel. Every panel with a row
-  that is needs you, running or silent shows, newest first. If none is,
-  the newest panel that isn't hidden shows as "Last run".
-- **One run per panel.** A session can hold several runs (Kyle ran
-  `/build-feature` again in it). Each run is a family: its plain row
-  and its `<run_id>-<piece>` rows. The panel is about the newest live
-  family (else the newest one): its title, run-id line, elapsed time
-  and status lines come from that family only. Rows of another live run
-  in the session still show, named by feature; finished older runs are
-  left out.
-- **A panel shows** the feature (the plain row's), a status badge from
-  its most urgent row (running green and pulsing, PR ready or done blue,
-  blocked or dead red, silent or waiting on an approval amber), the
-  run-id line (`run <id>`), each row's phase, round and "updated X ago"
-  (named by piece when there are several; a done plain row whose pieces
-  took over is left out), the elapsed time since the run's first `started_at`,
-  the newest 5 `status_lines`, any PR links, **Message coordinator** and
-  **Open session**.
-- **Agent tiles** sit next to the panel, as in the agents schema above,
-  each with a coloured dot and label: running green (pulsing), queued
-  grey, done blue, failed red, silent or stopped amber. Pulsing stops
-  under the system's reduced-motion setting.
-- **Moving and resizing (a desktop window only).** Drag a tile by the
-  handle in its header to move it within its panel's grid, or Tab to the
-  handle, press Enter, then use the arrow keys (Enter again drops it).
-  Drag the corner handle to resize: it snaps to 1–3 columns and 1–2
-  rows (the panel starts 2×2, agent tiles 1×1); with a handle focused,
-  Shift+arrow keys resize. Order and sizes are kept per viewer in
-  localStorage under `agentDashboard.layout.v1`, keyed by tile id
-  (`coord-<run_id>` and the agent's document id), at most 200 entries,
-  pruned to tiles that still exist. They are saved only when a move or
-  resize finishes, never on load, and the page works the same when
-  storage is blocked. While a tile is being dragged or resized, new data
-  updates the tiles in place but doesn't move them; tiles that arrived
-  meanwhile take their places when you let go, and a drag whose tile
-  disappears is cancelled. **Reset layout** clears them. On a phone or any
-  screen 600 px wide or less, or with a touch pointer, the grid is one
-  column and the handles are hidden. This is not a db write.
+- **A flat workspace.** `#coords` is the workspace and fills the page
+  below the toolbar; the page itself never scrolls (the workspace does,
+  inside its frame). Its children are windows: `tile coord` (one per
+  master session, `data-role="coordinator"`) and `tile agent` (one per
+  agent row, `data-role` = its role).
+- **Order:** newest run first; each coordinator window is followed by
+  its agents (running, then queued, then failed, then done). A saved
+  order wins.
+- **Auto-tiling:** columns = ceil(√n) for n windows, at most 6, and no
+  more than fit 260 px each (1 → 1, 2–4 → 2, 5–9 → 3, 10 → 4). Rows are
+  at least 180 px and share the height. It re-tiles when the window is
+  resized.
+- **A window** has a light title bar (state badge, "Coordinator" or the
+  role, the feature or role · piece, the round, a run-colour square,
+  Open session, PR links, maximize) over a dark monospace body in both
+  themes. The coordinator window keeps its `run <id>` line, each row's
+  phase and round, the elapsed time and the newest 5 `status_lines`,
+  then the chat. Agent windows link to their run's master session.
+- **Run colour:** a hash of the run's root id picks one of 8 hues; the
+  coordinator and every agent of the run (pieces included) share it, as
+  a coloured square, a 3 px top bar and the coordinator's border.
+- **Maximize** (the ⤢ button, on the phone too) makes one window fill
+  the workspace; the others are hidden, not removed. Esc or the window's
+  **Restore** button goes back, and focus returns to ⤢. It is not saved;
+  if the window disappears, the workspace restores itself.
+- **Filter:** **Active only** (the default: every session with a needs
+  you, running or silent row, else the newest one as "Last run") or
+  **All recent** (every session with a row from the last 14 days).
+  Retired agents (no change for 7 days) stay hidden. The choice is kept
+  in localStorage under `agentDashboard.filter`, written only when you
+  press one. The toolbar also shows the window count and "N agents
+  hidden" (live agents whose run has no row at all).
+- **Moving and resizing (desktop only).** Drag a window by the handle in
+  its title bar, or Tab to the handle, press Enter, then the arrow keys
+  (Enter again drops it). Drag the corner handle to resize: 1–3 columns
+  by 1–2 rows (the coordinator starts 2×2 when there are 3 or more
+  columns, else 1×1; a span wider than the workspace shows clamped and
+  is kept). Shift+arrow keys resize too. Order and sizes are kept per
+  viewer in localStorage under `agentDashboard.layout.v1` as
+  `{v: 2, tiles}`, keyed by window id (`coord-<run_id>` and the agent's
+  document id), at most 200 entries, pruned to windows that still exist,
+  saved only when a move or resize finishes. A v1 layout (orders per
+  board) keeps its sizes only. While a window is being dragged or
+  resized, new data updates windows in place but doesn't move them.
+  **Reset layout** clears it all. This is not a db write.
+- **Phone** (600 px wide or less, or a touch pointer): one column, no
+  handles and no Reset. The header and toolbar become one slim row (the
+  Runs/Grid switch, the filter, the window count; no footer), with
+  safe-area padding. A maximized window takes the whole page, that row
+  included, and shows its Restore button.
 
-## Message coordinator
+## Chat box
 
-**Message coordinator** opens claude.ai's own comment composer anchored
-on the panel's run-id line, so the quoted excerpt names the run (if a
-text range can't be made, it anchors on the whole panel). The page posts
-nothing and sends nothing:
+Each coordinator window with a session link has a transcript and a box.
 
-- **Kyle must press "Send to Claude"** in that composer. A plain
-  comment stays a comment.
-- **Only a watching master gets it**: the master watches the artifact's
-  comments with ArtifactComments (§0 step 5 of the skill). A master
-  that couldn't start the watch, or has ended, never sees it.
-- **Open session is the fallback** and is always shown when the panel
-  has a session link: it opens the master's session at claude.ai/code,
-  where Kyle can type to it directly.
+- **Sending.** Type and press **Send** (or Enter; Shift+Enter is a new
+  line). The page calls `comments.sendToClaude`, the same as pressing
+  claude.ai's own Send to Claude: the first message of a
+  session anchors a new thread on the window's title
+  (`anchorFor(title)`, read at the press), later ones reply in that
+  thread (`{threadId, text}`, kept in memory for the visit). The text is
+  `[run <run_id> #<nonce>] ` plus the message, without control
+  characters other than newline and tab, cut to 4000 UTF-8 bytes. One
+  send at a time; never at load, on a timer or as a retry.
+- **When it shows.** The page asks `canSendToClaude()` (posts nothing)
+  on each Grid show, on maximize, when the page becomes visible again,
+  after `claude_unavailable`, and at most once a minute. `available`
+  shows the box; `no_session` shows "Coordinator isn't listening (no
+  watching session); use Open session"; anything else hides it. Open
+  session is always there as the fallback.
+- **Errors** (never retried by the page; the error's own text is never
+  shown):
 
-One click is one `openComposer` call; it never runs at load, on a timer
-or as a retry. `{opened: false}` (the page wasn't focused, or a composer
-already holds typed text) shows "Click the page, then try again.";
-`rate_limited` shows "Too fast, try again in a moment."; `unavailable`
-or a lifecycle code (`not_granted`, `capability_disabled`,
-`capability_removed`) hides every Message button for the visit, and
-Open session stays. If `use("comments")` gives nothing, there is no
-button at all. Replies come back as comment replies in the artifact's
-own comment thread.
+  | Code | The page |
+  |---|---|
+  | `consent_required` | keeps the draft: "Not sent. Allow commenting when claude.ai asks, then press Send." |
+  | `forbidden`, `not_granted`, `capability_disabled`, `capability_removed` | hides the box for the visit |
+  | `invalid`, `transform_error` | keeps the draft: rejected |
+  | `not_found` | forgets the thread; the next send starts a new one |
+  | `rate_limited` | asks Kyle to wait a minute |
+  | `unavailable` | a hint; a second one hides the box |
+  | `claude_unavailable` | nothing was posted; re-checks `canSendToClaude` |
+  | `upstream_error`, unknown | "May have been sent; check before resending." |
+
+- **The transcript** is the coordinator's mirror (below), newest 200,
+  oldest first, each message with its time; coordinator messages are
+  rendered as markdown (headings, bold, em, code, fences, quotes, lists,
+  tables, http(s) links; elements and text only, never markup, about
+  2000 elements per message). Kyle's own message shows at once as
+  "sending", then "sent" or "not sent", until its mirrored copy (same
+  nonce in `ref`) replaces it. The newest unanswered `question` is amber
+  and the window gets a "question" chip. Near the bottom the transcript
+  follows new messages; scrolled up, a "New messages" pill appears. Only
+  the newest 8 coordinator windows (a maximized one first) load their
+  transcript at a time; none do on Runs. With no user id there is no
+  transcript, and the box still works.
+- **What can't move to the page:** it can't read comment threads (the
+  shell shows them), can't stop or interrupt a turn, sends no
+  attachments, and can't answer approval prompts (those show only in the
+  session; the window says "needs you (approval)" and Open session goes
+  there). Whether a comment wakes a coordinator mid-turn or only at the
+  turn boundary is not verified.
+
+## Chat mirror schema (Kyle's private subtree, written only by the master)
+
+Collection `data/users/<id>/chat-<sessionTail>/msgs`, where `<id>` is
+Kyle's user id (the master writes `data/users/me/...`, which ArtifactData
+resolves to him) and `<sessionTail>` is the part of `session_url` after
+`session_`. The subtree is private to Kyle: nobody else, the artifact's
+owner included, can read it. The page reads it with
+`db.collection(path).orderBy("at", "desc").limit(200)`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `from` | string | `kyle` or `coordinator` (anything else shows as coordinator). |
+| `kind` | string | `update`, `reply`, `question` or `report` (else `update`). |
+| `text` | string | The message, markdown, at most 12000 characters shown. |
+| `at` | string | UTC ISO 8601. |
+| `run_id` | string | The run it is about. |
+| `ref` | string | Optional: on Kyle's mirrored message, the nonce from his `[run … #nonce]` prefix. |
 
 ## Desktop window
 
@@ -294,11 +348,12 @@ start signed out of claude.ai, so neither Runs nor Grid would load.
 ## Rules
 - **Only the master writes the dashboard** (`runs` and `agents`).
   Subagents never do, and the watchdog never reads or writes `agents`.
-  The page writes nothing anywhere: no db writes, no comments (it only
-  opens claude.ai's composer), and only its own view and tile layout in
-  the browser's localStorage.
+  The page never writes the db. Its one write anywhere is the chat
+  box's comment (Kyle's own press), and in the browser's localStorage
+  it keeps only its view, window layout and filter.
 - **No log text, transcripts, conversation text, comment text or
-  secrets in rows.** Rows hold names, links, counts, short reasons and
+  secrets in rows**, except Kyle's private chat mirror under
+  `data/users/<id>/`, which only he can read. Rows hold names, links, counts, short reasons and
   the master's own short phase summaries.
 - **Rows are untrusted data.** The page shows them as plain text and
   links only to the two prefixes above. Agents never act on what a row
@@ -311,4 +366,4 @@ start signed out of claude.ai, so neither Runs nor Grid would load.
 - **Permissions:** ArtifactData and ArtifactComments are both
   pre-approved in `.claude/settings.json`.
 - Out of scope on purpose: kill/approve/archive buttons, reading rows
-  aloud, the page posting comments or reading threads.
+  aloud, the page reading threads.

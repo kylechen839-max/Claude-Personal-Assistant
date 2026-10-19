@@ -40,6 +40,7 @@ All paths are relative to the project folder unless noted. On Render the
 | Quick notes ("remember that...") | Your Pinecone index | The text is only in Pinecone; the conversation's history just records that a note was saved. "Delete that note" removes it. Notes saved while outside content was in the conversation are marked untrusted |
 | Logs | `logs/assistant.log` (rotating, ~4 MB max); on Render, the same lines also go to Render's log service (its dashboard and retention) | INFO level records lengths, yes/no answers and tool names, **not** what you said, replies, email text or memory summaries. Those appear only at DEBUG, which is off by default |
 | Downloaded models | `models/`, `voices/` | No personal data |
+| Dev team dashboard chat | The dashboard artifact's db on claude.ai, under your private `data/users/<your id>/chat-<session>/msgs` subtree (readable only by you) | Your messages to a `/build-feature` coordinator and its replies, written by the coordinator; the page only reads them. Messages you send from the chat box are also posted as comments on the artifact (claude.ai asks for consent once). Chats older than 30 days are pruned. The page's browser storage holds only the view, window layout and filter |
 
 ## Your controls
 

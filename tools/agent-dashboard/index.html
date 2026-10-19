@@ -1,15 +1,18 @@
 <title>Hey Claude Agent Runs</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-/* A read-only glance view of /build-feature runs. Runs: one card per row
-   of the `runs` collection; the page works out "silent too long" itself
-   from updated_at. Grid: one coordinator panel per master session (built
-   from `runs` rows) with a small tile per researcher, builder and judge
-   (the `agents` collection, which only the master writes). Rows of both
-   are untrusted data: text only, links only to the two allowed prefixes.
-   The page never writes to the db. "Message coordinator" opens claude.ai's
-   own comment composer; only Kyle's own "Send to Claude" press sends
-   anything. Tile order and size are kept per viewer in localStorage. */
+/* A glance view of /build-feature runs. Runs: one card per row of the
+   `runs` collection; the page works out "silent too long" itself from
+   updated_at. Grid: a flat window workspace with one coordinator window
+   per master session (built from `runs` rows) and one window per
+   researcher, builder and judge (the `agents` collection, which only the
+   master writes). Rows are untrusted data: text only, links only to the
+   two allowed prefixes. The page never writes to the db. A coordinator
+   window's chat box posts Kyle's message as a comment sent to Claude
+   (comments.sendToClaude, only from his own click or Enter) and shows the
+   coordinator's private mirror of the conversation from Kyle's own
+   data/users/<id>/ subtree. Window order and size are kept per viewer in
+   localStorage. */
 :root{
   --bg:#f3f4f6;--card:#ffffff;--fg:#15181d;--muted:#5a636e;--line:#dde1e6;--accent:#2a5bc4;
   --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;
@@ -85,34 +88,71 @@ button{font:inherit;font-size:.85rem;font-weight:600;border:0;border-radius:7px;
 nav button[aria-pressed="true"]{color:var(--fg);background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.14)}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button:disabled{cursor:default;opacity:.6}
-.actions{display:flex;flex-wrap:wrap;gap:8px}
-.actions button{color:var(--accent);background:var(--card);border:1px solid var(--line)}
 main[data-view="grid"]{max-width:none}
+[hidden]{display:none!important}
+/* Grid: the page itself never scrolls; the workspace scrolls in its frame. */
+body:has(> main[data-view="grid"]){height:100dvh;overflow:hidden}
+main[data-view="grid"]{height:100%;gap:10px}
+#grid-view{flex:1;min-height:0;gap:10px}
+#grid-head{flex:none}
 #grid-summary{font-size:1.35rem;font-weight:650;margin:0;font-variant-numeric:tabular-nums}
-#grid-conn,#grid-hidden{font-size:.85rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
+#grid-conn,#grid-hidden,#grid-count{font-size:.85rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
 #grid-conn[data-level="bad"]{color:var(--silent)}
-#coords{display:flex;flex-direction:column;gap:22px;min-width:0}
-.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));grid-auto-rows:minmax(132px,auto);gap:10px;min-width:0}
-.tile{position:relative;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--done-edge);border-radius:10px;
-  padding:9px 12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0;overflow:hidden}
-.tile[data-badge="running"]{border-left-color:var(--run-edge)}
-.tile[data-badge="silent"]{border-left-color:var(--needs-edge)}
-.tile[data-badge="failed"]{border-left-color:var(--silent-edge)}
-.tile[data-badge="done"]{border-left-color:var(--accent)}
-.tile.coord{padding:12px 16px 16px;gap:7px}
+.toolbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;min-width:0}
+.seg{display:flex;gap:2px;padding:2px;background:var(--done-bg);border-radius:8px}
+.seg button{padding:3px 11px;font-size:.8rem}
+.seg button[aria-pressed="true"]{color:var(--fg);background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.14)}
+#grid-reset{margin-left:auto;color:var(--accent);background:var(--card);border:1px solid var(--line);font-size:.8rem;padding:3px 11px}
+#grid-view>footer{flex:none;margin:0}
+#coords{flex:1;min-height:0;overflow:auto;display:grid;gap:10px;grid-auto-rows:minmax(180px,1fr);grid-auto-flow:row dense;
+  grid-template-columns:repeat(1,minmax(0,1fr));min-width:0;padding:1px;overscroll-behavior:contain}
+#coords[data-cols="1"]{grid-template-columns:repeat(1,minmax(0,1fr))}
+#coords[data-cols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+#coords[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
+#coords[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr))}
+#coords[data-cols="5"]{grid-template-columns:repeat(5,minmax(0,1fr))}
+#coords[data-cols="6"]{grid-template-columns:repeat(6,minmax(0,1fr))}
+#coords[data-max]{display:flex;flex-direction:column}
+#coords[data-max]>.tile:not([data-max]){display:none}
+#coords[data-max]>.tile[data-max]{flex:1 1 auto}
+/* A window: a light title bar over a dark mono body, in both themes. */
+.tile{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:9px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.tile::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--hue,var(--line));z-index:1}
+.tile.coord{border-color:var(--hue,var(--line));box-shadow:0 0 0 1px var(--hue,var(--line)),0 1px 3px rgba(0,0,0,.12)}
 .tile[data-dragging]{opacity:.55}
 .tile[data-drop]{outline:2px dashed var(--accent);outline-offset:2px}
-.tile-head{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0}
-.tile-head h2{flex:1 1 7em;font-size:.95rem}
-.coord .tile-head h2{font-size:1.15rem}
-.tile-body{display:flex;flex-direction:column;gap:5px;min-width:0}
-.coord-body{display:flex;flex-direction:column;gap:5px;min-width:0}
-.kicker{font-size:.75rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0}
-.grip{flex:none;padding:2px 6px;color:var(--muted);cursor:grab;touch-action:none}
+.tile[data-cols="2"]{grid-column:span 2}.tile[data-cols="3"]{grid-column:span 3}.tile[data-rows="2"]{grid-row:span 2}
+[data-hue="0"]{--hue:#1d4ed8}[data-hue="1"]{--hue:#0f766e}[data-hue="2"]{--hue:#4d7c0f}[data-hue="3"]{--hue:#b45309}
+[data-hue="4"]{--hue:#be123c}[data-hue="5"]{--hue:#a21caf}[data-hue="6"]{--hue:#6d28d9}[data-hue="7"]{--hue:#0e7490}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) [data-hue="0"]{--hue:#7aa2ff}
+  :root:not([data-theme="light"]) [data-hue="1"]{--hue:#2dd4bf}:root:not([data-theme="light"]) [data-hue="2"]{--hue:#a3e635}
+  :root:not([data-theme="light"]) [data-hue="3"]{--hue:#fbbf24}:root:not([data-theme="light"]) [data-hue="4"]{--hue:#fb7185}
+  :root:not([data-theme="light"]) [data-hue="5"]{--hue:#e879f9}:root:not([data-theme="light"]) [data-hue="6"]{--hue:#c4b5fd}
+  :root:not([data-theme="light"]) [data-hue="7"]{--hue:#67e8f9}}
+:root[data-theme="dark"] [data-hue="0"]{--hue:#7aa2ff}:root[data-theme="dark"] [data-hue="1"]{--hue:#2dd4bf}
+:root[data-theme="dark"] [data-hue="2"]{--hue:#a3e635}:root[data-theme="dark"] [data-hue="3"]{--hue:#fbbf24}
+:root[data-theme="dark"] [data-hue="4"]{--hue:#fb7185}:root[data-theme="dark"] [data-hue="5"]{--hue:#e879f9}
+:root[data-theme="dark"] [data-hue="6"]{--hue:#c4b5fd}:root[data-theme="dark"] [data-hue="7"]{--hue:#67e8f9}
+.tile-head{position:relative;flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:3px 7px;min-width:0;padding:7px 8px 6px 4px}
+.tile[data-max] .tile-head{padding-right:92px}
+.title{flex:1 1 7em;min-width:0;display:flex;flex-direction:column}
+.tile-head h2{font-size:.9rem;line-height:1.25}
+.coord .tile-head h2{font-size:1rem}
+.kicker{font-size:.68rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0}
+.chip{flex:none;width:10px;height:10px;border-radius:2px;background:var(--hue,var(--muted))}
+.round{flex:none;font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.qchip{flex:none;font-size:.72rem;font-weight:700;padding:1px 8px;border-radius:999px;color:var(--needs);background:var(--needs-bg)}
+.wacts{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;font-size:.8rem}
+.wacts a{font-size:.8rem}
+.max{padding:1px 7px;font-size:.85rem;color:var(--muted);border:1px solid var(--line);background:var(--card)}
+.restore{position:absolute;top:6px;right:8px;z-index:2;padding:3px 12px;font-size:.8rem;color:var(--card);background:var(--accent);
+  border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.grip{flex:none;padding:2px 5px;color:var(--muted);cursor:grab;touch-action:none}
 .grip[aria-pressed="true"]{color:var(--accent);background:var(--done-bg)}
-.resize{position:absolute;right:2px;bottom:2px;width:22px;height:22px;padding:0;color:var(--muted);cursor:nwse-resize;
-  touch-action:none;font-size:.75rem;font-weight:400;line-height:22px}
-.badge{flex:none;display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-weight:600;padding:2px 9px;
+.resize{position:absolute;right:2px;bottom:2px;z-index:2;width:22px;height:22px;padding:0;color:#9aa4b0;cursor:nwse-resize;
+  touch-action:none;font-size:.75rem;font-weight:400;line-height:22px;background:transparent}
+.badge{flex:none;display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;padding:2px 8px;
   border-radius:999px;white-space:nowrap;color:var(--done);background:var(--done-bg)}
 .badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
 .badge-running{color:var(--run);background:var(--run-bg)}
@@ -121,21 +161,78 @@ main[data-view="grid"]{max-width:none}
 .badge-failed{color:var(--silent);background:var(--silent-bg)}
 .badge-silent{color:var(--needs);background:var(--needs-bg)}
 @media (prefers-reduced-motion: reduce){.badge-running .dot{animation:none}}
-.runid{font-family:var(--mono);font-size:.78rem;color:var(--muted);margin:0;overflow-wrap:anywhere}
-.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:.88rem}
+.tile-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:5px;padding:8px 11px 12px;
+  background:#12161b;color:#d7dde4;font-family:var(--mono);font-size:.78rem;line-height:1.45;color-scheme:dark;
+  --fg:#d7dde4;--muted:#9aa4b0;--line:#2a3038;--card:#181c21;--accent:#8db0f6;
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916;--silent-edge:#e2574b;
+  --run:#68d0bd;--run-bg:#122e29;--run-edge:#3aa894;--done:#9aa3ae;--done-bg:#23282e;--done-edge:#4a525c}
+.tile-body .when,.tile-body .status,.tile-body .blocker{font-size:inherit}
+.coord-body{flex:0 1 auto;min-height:2.6em;max-height:45%;overflow:auto;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tile[data-max] .coord-body,.tile[data-max] .runid{display:none}
+.runid{flex:none;font-family:var(--mono);font-size:.74rem;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
 .lines li{display:flex;gap:8px;min-width:0;overflow-wrap:anywhere}
 .lines .at{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
-.status{font-size:.88rem;margin:0;overflow-wrap:anywhere}
-.hint{font-size:.8rem;color:var(--muted);margin:0}
+.status{margin:0;overflow-wrap:anywhere}
+.hint{font-size:.76rem;color:var(--muted);margin:0}
 .hint[data-level="bad"]{color:var(--silent)}
-.actions a{align-self:center;font-size:.88rem}
+/* The coordinator chat: transcript, then the box. */
+.chat{flex:1 1 150px;display:flex;flex-direction:column;gap:6px;min-height:150px;border-top:1px solid var(--line);padding-top:6px}
+.logwrap{position:relative;flex:1;min-height:70px;display:flex}
+.log{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:7px;padding:2px 2px 4px;overscroll-behavior:contain}
+.log>.empty{color:var(--muted);margin:auto 0 0}
+.msg{align-self:flex-start;max-width:94%;min-width:0;padding:5px 9px 6px;border-radius:8px;background:#1a2027;border:1px solid var(--line);
+  overflow-wrap:anywhere}
+.msg[data-from="kyle"]{align-self:flex-end;background:#1c2a40;border-color:#2c4670}
+.msg[data-kind="question"]{background:var(--needs-bg);border-color:var(--needs-edge)}
+.msg .meta{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.msg[data-kind="question"] .who{color:var(--needs);font-weight:700}
+.msg .plain{white-space:pre-wrap}
+.md>*{margin:3px 0 0}.md>:first-child{margin-top:2px}
+.md h3,.md h4,.md h5,.md h6{font-size:inherit;font-weight:700}
+.md h3{font-size:1.08em}
+.md ul,.md ol{display:block;padding-left:1.5em}.md ul{list-style:disc}.md ol{list-style:decimal}.md li{display:list-item}
+.md pre{overflow:auto;background:#0b0e12;padding:5px 7px;border-radius:6px;white-space:pre}
+.md code{font-family:var(--mono);background:#0b0e12;border-radius:4px;padding:0 3px}
+.md pre code{padding:0;background:none}
+.md blockquote{margin-left:0;padding-left:8px;border-left:3px solid var(--line);color:var(--muted)}
+.md .tablewrap{overflow-x:auto}
+.md table{border-collapse:collapse;font-size:inherit;color:inherit}
+.md th,.md td{border:1px solid var(--line);padding:2px 6px;text-align:left;vertical-align:top}
+.md hr{border:0;border-top:1px solid var(--line)}
+.md-rest{white-space:pre-wrap}
+.newpill{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);padding:3px 12px;font-size:.74rem;color:#0b0e12;
+  background:var(--accent);border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.composer{flex:none;display:flex;gap:6px;align-items:flex-end}
+.composer textarea{flex:1;min-width:0;min-height:2.6em;max-height:9em;resize:vertical;font:inherit;color:var(--fg);background:#0b0e12;
+  border:1px solid var(--line);border-radius:7px;padding:5px 8px}
+.composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.composer button{color:#0b0e12;background:var(--accent);padding:5px 14px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media (min-width:601px){.tile[data-cols="2"]{grid-column:span 2}.tile[data-cols="3"]{grid-column:span 3}.tile[data-rows="2"]{grid-row:span 2}}
-@media (max-width:600px),(pointer:coarse){.board{grid-template-columns:1fr}.board .tile[data-cols]{grid-column:auto}
-  .board .tile[data-rows]{grid-row:auto}.grip,.resize,#grid-reset{display:none}}
+/* Phone (narrow or coarse pointer, set by the script as data-compact): one
+   slim row (view switch, filter, count) over the workspace; a maximized
+   window takes the whole page (data-bare) and shows its Restore button. */
+body:has(> main[data-compact]){padding:max(6px,env(safe-area-inset-top,0px)) max(6px,env(safe-area-inset-right,0px))
+  max(6px,env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px))}
+main[data-compact]{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:6px 8px;align-items:center}
+main[data-compact][data-bare]{row-gap:0}
+main[data-compact] #grid-view{display:contents}
+main[data-compact] nav{padding:2px}
+main[data-compact] nav button{padding:3px 9px;font-size:.76rem}
+main[data-compact] .toolbar{flex-wrap:nowrap;justify-content:flex-end;gap:8px}
+main[data-compact] .seg button{padding:3px 8px;font-size:.74rem}
+main[data-compact] #grid-count{font-size:.76rem;white-space:nowrap}
+main[data-compact] #grid-conn:not([data-level="bad"]),main[data-compact] #grid-hidden{display:none}
+main[data-compact] #coords{grid-column:1/-1;grid-row:2;align-self:stretch;height:100%;display:flex;flex-direction:column}
+main[data-compact] #coords>.tile{flex:none;min-height:220px}
+main[data-compact] #coords>.tile[data-max]{flex:1 1 auto}
+main[data-compact] .tile[data-cols]{grid-column:auto}
+main[data-compact] .tile[data-rows]{grid-row:auto}
+main[data-compact] #coords>.tile.coord{min-height:min(620px,74dvh)}
+main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-reset{display:none}
 </style>
 <main id="main" data-view="runs">
-<nav aria-label="View">
+<nav id="view-nav" aria-label="View">
 <button type="button" id="view-runs" aria-pressed="true">Runs</button>
 <button type="button" id="view-grid" aria-pressed="false">Grid</button>
 </nav>
@@ -150,16 +247,23 @@ main[data-view="grid"]{max-width:none}
 <footer>Rows are read-only. Silent means no update for longer than the phase allows. PR ready, blocked and dead runs with no change for 7 days count as done. Done runs older than 14 days are hidden.</footer>
 </section>
 <section id="grid-view" hidden>
-<header>
+<header id="grid-head">
 <h1>Coordinators and agents</h1>
 <p id="grid-summary" aria-live="polite">Loading…</p>
-<p id="grid-conn"></p>
 </header>
-<div class="actions"><button type="button" id="grid-reset">Reset layout</button></div>
-<div id="coords" aria-label="Coordinators"></div>
+<div class="toolbar" id="grid-toolbar">
+<div class="seg" role="group" aria-label="Show">
+<button type="button" id="grid-filter-active" aria-pressed="true">Active only</button>
+<button type="button" id="grid-filter-all" aria-pressed="false">All recent</button>
+</div>
+<p id="grid-count"></p>
+<p id="grid-conn"></p>
 <p id="grid-hidden" hidden></p>
+<button type="button" id="grid-reset">Reset layout</button>
+</div>
+<div id="coords" aria-label="Windows"></div>
 <p id="grid-live" class="sr" aria-live="polite"></p>
-<footer>Read-only: the master writes every panel and tile. Message coordinator opens claude.ai's comment box; press Send to Claude so the coordinator gets it, or use Open session. Drag a tile by its handle (or press Enter on it, then the arrow keys) to move it, and its corner (or Shift+arrows) to resize it; the layout stays on this device. Agents of runs older than 7 days are hidden.</footer>
+<footer id="grid-foot">Only the master writes the windows. The chat box sends your message to the coordinator as a comment sent to Claude; its replies show above the box. Maximize a window to focus on it (Esc or Restore goes back). Drag a window by its handle (or press Enter on it, then the arrow keys) to move it, and its corner (or Shift+arrows) to resize it; the layout stays on this device.</footer>
 </section>
 </main>
 <script>
@@ -194,12 +298,15 @@ main[data-view="grid"]{max-width:none}
   let view = "runs";
 
   // ---- coercion: every field may be missing, null or the wrong type ----
-  function text(v, max) {
+  // lines: keep newlines and tabs (chat text), other control characters
+  // still become spaces.
+  function text(v, max, lines) {
     let s = "";
     if (typeof v === "string") s = v.trim();
     else if (typeof v === "number" && Number.isFinite(v)) s = String(v);
     else if (typeof v === "boolean") s = String(v);
-    s = s.replace(/[\u0000-\u001f\u007f]+/g, " ");
+    s = lines ? s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, " ")
+      : s.replace(/[\u0000-\u001f\u007f]+/g, " ");
     return s.length > max ? s.slice(0, max - 1) + "…" : s;
   }
   function number(v) {
@@ -395,6 +502,7 @@ main[data-view="grid"]{max-width:none}
     let retryTimer = null;
     let stopped = false;    // a stop code or a rejected query: for good
     let gen = 0;            // bumped by pause(); an old listener's late calls are dropped
+    let busy = false;       // inside subscribe()
     let exhaustedBackoffMs = 60e3;
 
     function pause() {
@@ -410,8 +518,8 @@ main[data-view="grid"]{max-width:none}
     }
     function retryIn(ms, why) {
       clearTimeout(retryTimer);
+      retryTimer = setTimeout(subscribe, ms);  // set first: on.conn may call start() again
       on.conn(`${why} · retrying in ${Math.round(ms / 1000)} s`, true);
-      retryTimer = setTimeout(subscribe, ms);
     }
     function onError(e) {
       unsubscribe = null;  // a delivered error ends the listener
@@ -433,8 +541,9 @@ main[data-view="grid"]{max-width:none}
       if (stopped) return;
       if (unsubscribe) { unsubscribe(); unsubscribe = null; }
       const g = gen;
-      on.conn("connecting…");
+      busy = true;  // a callback that calls start() meanwhile must not subscribe twice
       try {
+        on.conn("connecting…");
         unsubscribe = query.onSnapshot((snap) => {
           if (g !== gen) return;
           exhaustedBackoffMs = 60e3;
@@ -442,13 +551,15 @@ main[data-view="grid"]{max-width:none}
         }, (e) => { if (g === gen) onError(e); });
       } catch (e) {
         onError(e);
+      } finally {
+        busy = false;
       }
     }
     return {
       // Returns false once the query has stopped for good.
       start(source) {
         if (stopped) return false;
-        if (unsubscribe || retryTimer !== null) return true;
+        if (unsubscribe || retryTimer !== null || busy) return true;
         if (!query) {
           try { query = build(source); } catch (_) { end(`Can't load ${on.what}`); return false; }
         }
@@ -483,16 +594,23 @@ main[data-view="grid"]{max-width:none}
     db = found;
     if (!runsLive.start(db)) return;
     if (view === "grid") agentsLive.start(db);
-    // Re-render from the cached rows so "silent" stays current. Never writes.
-    setInterval(renderView, 60e3);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) renderView(); });
+    // Re-render from the cached rows so "silent" stays current. Never writes;
+    // on Grid it also re-checks, at most once a minute, whether the chat box
+    // can send (that check posts nothing).
+    setInterval(() => { renderView(); if (view === "grid") checkSend(false); }, 60e3);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      renderView();
+      if (view === "grid") checkSend(true);
+    });
   }
 
   function renderView() {
     if (view === "grid") renderGrid(); else render();
   }
 
-  // ==== Grid: coordinator panels (runs rows) and agent tiles (agents rows) ====
+  // ==== Grid: a flat window workspace ====
+  // Coordinator windows come from runs rows, agent windows from agents rows.
   // Nothing here subscribes or looks anything up until Grid is first shown.
   const AGENT_PHASE = {researcher: "researching", builder: "building", judge: "judging"};
   const AGENT_STATES = ["queued", "running", "done", "failed"];
@@ -502,21 +620,56 @@ main[data-view="grid"]{max-width:none}
   const STATUS_TEXT_MAX = 100;
   const OUTCOME_MAX = 80;
   const PIECE_MAX = 40;
-  const SEND_HINT = "Press Send to Claude so the coordinator gets it.";
-  const OFF_HINT = "Messaging from this page is off here. Use Open session.";
-  const COMMENTS_OFF = ["unavailable", "not_granted", "capability_disabled", "capability_removed"];
   const LAYOUT_KEY = "agentDashboard.layout.v1";
   const LAYOUT_MAX = 200;
   const LAYOUT_RAW_MAX = 64e3;
+  const FILTER_KEY = "agentDashboard.filter";
   const NARROW = "(max-width:600px), (pointer:coarse)";
+  // Auto-tiling: about square, at most 6 columns, none narrower than MIN_W
+  // (the CSS rows are at least 180 px tall).
+  const MAX_COLS = 6;
+  const MIN_W = 260;
+  const GAP = 10;
+  const HUES = 8;
+  // The chat: Kyle's private mirror of the conversation and the send box.
+  const CHAT_MAX = 12000;   // characters of one mirrored message shown
+  const CHAT_LIMIT = 200;   // newest messages read per conversation
+  const CHAT_SUBS = 8;      // conversations subscribed at once
+  const PENDING_MAX = 20;   // Kyle's own unconfirmed messages kept per session
+  const SEND_MAX = 4000;    // UTF-8 bytes per comment (the shell allows 4 KiB)
+  const CHAT_KINDS = ["update", "reply", "question", "report"];
+  const USER_SEG = /^[A-Za-z0-9_.~:@+-]{1,200}$/;
+  const MD_BUDGET = 2000;   // elements per rendered message; the rest is plain text
+  const MD_DEPTH = 6;       // list nesting
+  const MD_QUOTE_DEPTH = 4;
+  const MD_COLS = 20;
+  const NO_LISTENER = "Coordinator isn't listening (no watching session); use Open session";
+  const SEND_OFF = "Sending from this page is off here. Use Open session.";
+  const SEND_COPY = {
+    consent_required: "Not sent. Allow commenting when claude.ai asks, then press Send.",
+    invalid: "Not sent: claude.ai rejected the message.",
+    not_found: "Not sent: that thread is gone. Press Send to start a new one.",
+    rate_limited: "Not sent: too many messages. Wait a minute, then press Send.",
+    unavailable: "Not sent: comments are unavailable right now. Try again in a moment.",
+    claude_unavailable: "Not sent: the coordinator can't receive it right now.",
+    upstream_error: "May have been sent; check before resending.",
+  };
+  const SEND_STOP = ["not_granted", "capability_disabled", "capability_removed", "forbidden"];
 
   const $main = document.getElementById("main");
+  const $viewNav = document.getElementById("view-nav");
   const $runsView = document.getElementById("runs-view");
   const $gridView = document.getElementById("grid-view");
   const $viewRuns = document.getElementById("view-runs");
   const $viewGrid = document.getElementById("view-grid");
+  const $gridHead = document.getElementById("grid-head");
+  const $gridToolbar = document.getElementById("grid-toolbar");
+  const $gridFoot = document.getElementById("grid-foot");
   const $gridSummary = document.getElementById("grid-summary");
   const $gridConn = document.getElementById("grid-conn");
+  const $gridCount = document.getElementById("grid-count");
+  const $filterActive = document.getElementById("grid-filter-active");
+  const $filterAll = document.getElementById("grid-filter-all");
   const $coords = document.getElementById("coords");
   const $gridHidden = document.getElementById("grid-hidden");
   const $gridReset = document.getElementById("grid-reset");
@@ -588,6 +741,18 @@ main[data-view="grid"]{max-width:none}
 
   function safeId(v) { return String(v).replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 190); }
 
+  // A run's colour: FNV-1a of its family root id, one of 8 hues. The
+  // coordinator window and every agent window of the run share it.
+  function runHue(id) {
+    const s = String(id);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h % HUES;
+  }
+
   // A panel's badge comes from its most urgent row's phase.
   function coordBadge(c) {
     if (c.state === "running") return ["running", "running"];
@@ -615,11 +780,13 @@ main[data-view="grid"]{max-width:none}
 
   // runs rows -> one panel per master session (rows sharing a session_url;
   // a row without one is its own group), active ones newest first, else the
-  // newest one as "Last run". A panel is about its newest live run family:
-  // its title, elapsed time and status lines come from that family only, and
-  // older finished runs of the same session are left out. Each agent sits in
-  // the panel holding its run's row.
-  function groupCoordinators(rowsIn, agentsIn, now) {
+  // newest one as "Last run". opts.all: every group that isn't hidden (a
+  // row within 14 days), newest first. A panel is about its newest live run
+  // family: its title, elapsed time and status lines come from that family
+  // only, and older finished runs of the same session are left out. Each
+  // agent sits in the panel holding its run's row.
+  function groupCoordinators(rowsIn, agentsIn, now, opts) {
+    const all = !!(opts && opts.all);
     const groups = [];
     const byKey = Object.create(null);
     const rowIds = Object.create(null);
@@ -644,12 +811,17 @@ main[data-view="grid"]{max-width:none}
       g.hidden = g.items.every(({c}) => c.state === "done" && c.updated !== null && now - c.updated > HIDE_DONE_MS);
       g.newest = g.families.length ? g.families[0].newest : -Infinity;
     }
-    let shown = groups.filter((g) => g.active).sort((a, b) => b.newest - a.newest);
+    let shown;
     let label = "";
-    if (shown.length === 0) {
-      const last = groups.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest)[0];
-      shown = last ? [last] : [];
-      label = "Last run";
+    if (all) {
+      shown = groups.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest);
+    } else {
+      shown = groups.filter((g) => g.active).sort((a, b) => b.newest - a.newest);
+      if (shown.length === 0) {
+        const last = groups.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest)[0];
+        shown = last ? [last] : [];
+        label = "Last run";
+      }
     }
     const owner = Object.create(null);
     const usedIds = Object.create(null);
@@ -686,10 +858,13 @@ main[data-view="grid"]{max-width:none}
       for (let n = 2; usedIds[id]; n += 1) id = "coord-" + safeId(runId) + "-" + n;
       usedIds[id] = true;
       const r0 = main.root.r;
+      const roundN = number(urgent.r.round);
       const panel = {
         id, runId, label, active: g.active, session: g.session, items, prs,
         title: text(r0.feature, 80) || text(r0.run_id, 80) || text(runId, 80) || "?",
         state: urgent.c.state, badge, badgeLabel,
+        round: roundN !== null && roundN >= 1 && (urgent.c.phase === "building" || urgent.c.phase === "judging")
+          ? Math.floor(roundN) : null,
         elapsedMs: main.start !== null && main.end !== null && main.end >= main.start ? main.end - main.start : null,
         lines: lines.slice(-STATUS_LINES_MAX), agents: [],
       };
@@ -709,7 +884,7 @@ main[data-view="grid"]{max-width:none}
         continue;
       }
       const c = classifyAgent(a, home.r, now);
-      if (!c.retired) home.panel.agents.push({a, c});
+      if (!c.retired) home.panel.agents.push({a, c, r: home.r});
     }
     for (const p of panels) {
       p.agents.sort((x, y) => (AGENT_RANK[x.c.state] - AGENT_RANK[y.c.state])
@@ -718,11 +893,25 @@ main[data-view="grid"]{max-width:none}
     return {panels, hidden};
   }
 
-  // ---- layout: tile order and size, per viewer, in localStorage ----
-  // id -> {o: order, c: columns 1-3, r: rows 1-2}. Read on the first Grid
-  // render, written only when a drag, a keyboard move or a resize finishes.
+  // Columns for n windows: about square, capped by MAX_COLS and by how many
+  // MIN_W columns fit the workspace width (0 or unreadable: no width cap).
+  // A phone gets one column.
+  function tileCols(n, width, isNarrow) {
+    if (isNarrow) return 1;
+    let cols = clampInt(Math.ceil(Math.sqrt(Math.max(1, Number(n) || 0))), 1, MAX_COLS);
+    if (typeof width === "number" && Number.isFinite(width) && width > 0) {
+      cols = Math.min(cols, Math.max(1, Math.floor((width + GAP) / (MIN_W + GAP))));
+    }
+    return cols;
+  }
+
+  // ---- layout: window order and size, per viewer, in localStorage ----
+  // id -> {o: order, c: columns 1-3, r: rows 1-2}, stored as {v: 2, tiles}.
+  // Read on the first Grid render, written only when a drag, a keyboard
+  // move or a resize finishes. A v1 layout (orders per board) keeps only
+  // its sizes.
   let layout = null;
-  let knownTiles = [];      // tile ids on screen, from the last render
+  let knownTiles = [];      // window ids on screen, from the last render
   let knownAll = null;      // every id the loaded data still has (null: not loaded)
 
   function cleanEntry(id, v) {
@@ -744,14 +933,16 @@ main[data-view="grid"]{max-width:none}
     if (typeof raw !== "string" || raw.length > LAYOUT_RAW_MAX) return out;
     let saved = null;
     try { saved = JSON.parse(raw); } catch (_) { return out; }
-    const tiles = saved && typeof saved === "object" && saved.v === 1 && saved.tiles
-      && typeof saved.tiles === "object" && !Array.isArray(saved.tiles) ? saved.tiles : null;
+    const v = saved && typeof saved === "object" ? saved.v : null;
+    const tiles = (v === 1 || v === 2) && saved.tiles && typeof saved.tiles === "object"
+      && !Array.isArray(saved.tiles) ? saved.tiles : null;
     if (!tiles) return out;
     let n = 0;
     for (const id of Object.keys(tiles)) {
       if (n >= LAYOUT_MAX) break;
       const e = cleanEntry(id, tiles[id]);
-      if (e) { out[id] = e; n += 1; }
+      if (e && v === 1) delete e.o;
+      if (e && Object.keys(e).length) { out[id] = e; n += 1; }
     }
     return out;
   }
@@ -767,25 +958,27 @@ main[data-view="grid"]{max-width:none}
       n += 1;
     }
     layout = tiles;
-    try { window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({v: 1, tiles})); } catch (_) { /* storage blocked */ }
+    try { window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({v: 2, tiles})); } catch (_) { /* storage blocked */ }
   }
 
   function entry(id) {
     if (!layout[id]) layout[id] = {};
     return layout[id];
   }
+  // The saved or default size, before the display clamp to the workspace.
+  // The coordinator starts 2x2 only when there are 3 or more columns.
   function sizeOf(t) {
     const e = layout[t.id];
-    const d = t.coord ? 2 : 1;
+    const d = t.coord && workCols >= 3 ? 2 : 1;
     return [e && e.c ? e.c : d, e && e.r ? e.r : d];
   }
-  // Tiles with a saved order keep it among themselves; new tiles keep their
-  // default place.
-  function arrange(ids) {
-    const saved = ids.filter((id) => layout[id] && layout[id].o !== undefined)
-      .sort((a, b) => layout[a].o - layout[b].o);
+  // Windows with a saved order keep it among themselves; new windows keep
+  // their default place.
+  function arrange(list) {
+    const placed = (t) => !!layout[t.id] && layout[t.id].o !== undefined;
+    const saved = list.filter(placed).sort((a, b) => layout[a.id].o - layout[b.id].o);
     let i = 0;
-    return ids.map((id) => (layout[id] && layout[id].o !== undefined ? saved[i++] : id));
+    return list.map((t) => (placed(t) ? saved[i++] : t));
   }
 
   function resetLayout() {
@@ -793,6 +986,21 @@ main[data-view="grid"]{max-width:none}
     try { window.localStorage.removeItem(LAYOUT_KEY); } catch (_) { /* storage blocked */ }
     renderGrid();
     announce("Layout reset.");
+  }
+
+  // ---- filter: Active only (default) or All recent; stored only on click ----
+  let filter = null;
+  function loadFilter() {
+    try { return window.localStorage.getItem(FILTER_KEY) === "all" ? "all" : "active"; } catch (_) { return "active"; }
+  }
+  function setFilter(v) {
+    if (filter === null) filter = loadFilter();
+    const next = v === "all" ? "all" : "active";
+    try { window.localStorage.setItem(FILTER_KEY, next); } catch (_) { /* storage blocked */ }
+    if (next === filter) return;
+    filter = next;
+    renderGrid();
+    announce(filter === "all" ? "Showing all recent runs." : "Showing active runs only.");
   }
 
   let mq = null;
@@ -809,45 +1017,90 @@ main[data-view="grid"]{max-width:none}
   }
 
   function announce(msg) { $gridLive.textContent = msg; }
+  function focusEl(e) { try { e.focus(); } catch (_) { /* not focusable */ } }
 
-  // ---- tiles: built once per id and updated in place ----
-  let tileEls = Object.create(null);   // cache key -> tile
-  let boardEls = Object.create(null);  // panel id -> board
+  // ---- windows: built once per id and updated in place ----
+  let tileEls = Object.create(null);   // cache key -> window
+  let workTiles = [];       // windows in workspace order, from the last render
+  let workCols = 1;
+  let maximized = null;     // cache key of the maximized window (in memory only)
   // A pointer drag or resize in progress: {t, pointerId, ...}. While one
-  // is, tiles are never re-parented (that would drop the pointer capture)
+  // is, windows are never re-parented (that would drop the pointer capture)
   // and its pointermove/up/cancel are heard on the window, so it always ends.
   let drag = null;
   let resizing = null;
-  let grabbed = null;       // tile id picked up with Enter or Space
+  let grabbed = null;       // window id picked up with Enter or Space
   let moving = false;
+  let rendering = false;    // renderGrid re-entered from a callback: run once more after
+  let renderAgain = false;
 
   function makeTile(id, coord) {
-    const t = {id, key: (coord ? "c " : "a ") + id, coord, board: null, el: el("article", coord ? "tile coord" : "tile agent"),
-      head: el("div", "tile-head"), grip: el("button", "grip", "⠿"), badge: el("span", "badge"), h2: el("h2"),
-      body: el("div", "tile-body"), resize: el("button", "resize", "◢"), hintText: "", hintBad: false};
+    const t = {id, key: (coord ? "c " : "a ") + id, coord, panel: null, el: el("article", coord ? "tile coord" : "tile agent"),
+      head: el("div", "tile-head"), grip: el("button", "grip", "⠿"), chip: el("span", "chip"), titleBox: el("div", "title"),
+      kicker: el("p", "kicker"), h2: el("h2"), badge: el("span", "badge"), round: el("span", "round"),
+      qchip: el("span", "qchip", "question"), acts: el("div", "wacts"), open: link("Open session", SESSION_PREFIX),
+      prBox: el("span", "wacts"), prKey: "", max: el("button", "max", "⤢"), restore: el("button", "restore", "Restore"),
+      body: el("div", "tile-body"), resize: el("button", "resize", "◢"), title: ""};
     t.el.id = coord ? id : "agent-" + safeId(id);
-    t.grip.type = "button";
-    t.resize.type = "button";
+    if (coord) t.el.dataset.role = "coordinator";
+    for (const b of [t.grip, t.max, t.restore, t.resize]) b.type = "button";
     t.grip.setAttribute("aria-pressed", "false");
-    t.head.append(t.grip, t.h2, t.badge);
+    t.max.setAttribute("aria-pressed", "false");
+    t.chip.setAttribute("aria-hidden", "true");
+    t.qchip.hidden = true;
+    t.restore.hidden = true;
+    t.titleBox.append(t.kicker, t.h2);
+    t.acts.append(t.open, t.prBox, t.max);
+    t.head.append(t.grip, t.chip, t.titleBox, t.badge, t.round, t.qchip, t.acts, t.restore);
     t.el.append(t.head, t.body, t.resize);
     t.grip.addEventListener("pointerdown", (e) => dragStart(t, e));
     t.grip.addEventListener("keydown", (e) => gripKey(t, e));
     t.grip.addEventListener("blur", () => { if (!moving && grabbed === t.id) setGrab(null); });
     t.resize.addEventListener("pointerdown", (e) => resizeStart(t, e));
     t.resize.addEventListener("keydown", (e) => sizeKey(t, e));
+    t.max.addEventListener("click", () => setMax(t));
+    t.restore.addEventListener("click", () => setMax(null));
     if (coord) {
       t.runLine = el("p", "runid");
       t.dyn = el("div", "coord-body");
-      t.actions = el("div", "actions");
-      t.msg = el("button", "", "Message coordinator");
-      t.msg.type = "button";
-      t.msg.addEventListener("click", () => messageCoordinator(t));
-      t.open = link("Open session", SESSION_PREFIX);
-      t.hint = el("p", "hint");
-      t.hint.setAttribute("aria-live", "polite");
-      t.actions.append(t.msg, t.open);
-      t.body.append(t.runLine, t.dyn, t.actions, t.hint);
+      t.chat = el("div", "chat");
+      t.chatNote = el("p", "hint");
+      t.logWrap = el("div", "logwrap");
+      t.log = el("div", "log");
+      t.log.setAttribute("role", "log");
+      t.log.setAttribute("aria-label", "Conversation with the coordinator");
+      t.logEmpty = el("p", "empty", "No messages yet. What the coordinator tells you shows up here.");
+      t.pill = el("button", "newpill", "New messages ↓");
+      t.pill.type = "button";
+      t.pill.hidden = true;
+      t.logWrap.append(t.log, t.pill);
+      t.form = el("div", "composer");
+      t.input = el("textarea");
+      t.input.rows = 2;
+      t.input.maxLength = SEND_MAX;
+      t.input.placeholder = "Message the coordinator (Enter sends, Shift+Enter: new line)";
+      t.input.setAttribute("aria-label", "Message the coordinator");
+      t.send = el("button", "send", "Send");
+      t.send.type = "button";
+      t.form.append(t.input, t.send);
+      t.form.hidden = true;
+      t.sendHint = el("p", "hint");
+      t.sendHint.setAttribute("aria-live", "polite");
+      t.chat.append(t.chatNote, t.logWrap, t.form, t.sendHint);
+      t.body.append(t.runLine, t.dyn, t.chat);
+      t.bubbles = Object.create(null);
+      t.hintText = "";
+      t.hintBad = false;
+      t.logSeen = false;
+      t.stick = false;
+      t.log.addEventListener("scroll", () => { if (nearBottom(t.log)) t.pill.hidden = true; });
+      t.pill.addEventListener("click", () => { scrollEnd(t.log); t.pill.hidden = true; });
+      t.input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+        if (e.preventDefault) e.preventDefault();
+        sendChat(t);
+      });
+      t.send.addEventListener("click", () => sendChat(t));
     }
     return t;
   }
@@ -860,21 +1113,39 @@ main[data-view="grid"]{max-width:none}
     t.badge.replaceChildren(el("span", "dot"), el("span", "label", label));
   }
 
-  function setHead(t, kind, label, title) {
-    setBadge(t, kind, label);
-    setText(t.h2, title);
-    t.grip.setAttribute("aria-label", `Move ${title}`);
+  // The title bar: badge, kicker, title, round, run colour, links, maximize.
+  function setHead(t, h) {
+    setBadge(t, h.kind, h.label);
+    setText(t.kicker, h.kicker);
+    setText(t.h2, h.title);
+    t.title = h.title;
+    setText(t.round, h.round === null ? "" : `round ${h.round}`);
+    t.round.hidden = h.round === null;
+    t.el.dataset.hue = String(h.hue);
+    t.open.hidden = !h.session;
+    if (h.session && t.open.href !== h.session) t.open.href = h.session;
+    const prKey = h.prs.join(" ");
+    if (t.prKey !== prKey) {
+      t.prKey = prKey;
+      t.prBox.replaceChildren(...h.prs.map((pr) => link("PR #" + pr.slice(PR_PREFIX.length), pr)));
+    }
+    t.prBox.hidden = !h.prs.length;
+    t.grip.setAttribute("aria-label", `Move ${h.title}`);
     t.grip.title = "Drag to move, or press Enter and use the arrow keys";
-    t.resize.setAttribute("aria-label", `Resize ${title}`);
+    t.resize.setAttribute("aria-label", `Resize ${h.title}`);
     t.resize.title = "Drag to resize, or Shift+arrow keys";
+    t.max.setAttribute("aria-label", `Maximize ${h.title}`);
+    t.max.title = "Maximize (Esc restores)";
+    t.restore.setAttribute("aria-label", `Restore ${h.title}`);
   }
 
-  function fillCoord(t, p, now) {
-    setHead(t, p.badge, p.badgeLabel, p.title);
+  function fillCoord(t, p, now, hue) {
+    t.panel = p;
+    setHead(t, {kind: p.badge, label: p.badgeLabel, title: p.title, kicker: "Coordinator" + (p.label ? ` · ${p.label}` : ""),
+      round: p.round, hue, session: p.session, prs: p.prs});
     t.el.dataset.state = p.state;
     setText(t.runLine, `run ${p.runId}`);
     const dyn = [];
-    if (p.label) dyn.push(el("p", "kicker", p.label));
     const multi = p.items.length > 1;
     for (const {r, c} of p.items) {
       const name = multi ? (text(r.feature, 60) || text(r._id, 60) || "?") + ": " : "";
@@ -893,27 +1164,17 @@ main[data-view="grid"]{max-width:none}
       }
       dyn.push(ul);
     }
-    if (p.prs.length) {
-      const links = el("div", "links");
-      for (const pr of p.prs) links.append(link("PR #" + pr.slice(PR_PREFIX.length), pr));
-      dyn.push(links);
-    }
     t.dyn.replaceChildren(...dyn);
-    const canMessage = !!comments && !commentsOff;
-    t.msg.hidden = !canMessage;
-    t.msg.disabled = composing;
-    t.open.hidden = !p.session;
-    if (p.session && t.open.href !== p.session) t.open.href = p.session;
-    const hint = commentsOff ? OFF_HINT : canMessage ? (t.hintText || SEND_HINT) : "";
-    setText(t.hint, hint);
-    t.hint.hidden = !hint;
-    if (t.hintBad && canMessage) t.hint.dataset.level = "bad"; else delete t.hint.dataset.level;
+    fillChat(t, p);
   }
 
-  function fillAgent(t, c) {
-    const title = c.role + (c.piece ? ` · ${c.piece}` : "");
-    setHead(t, c.badge, c.label, title);
+  function fillAgent(t, c, p, r, hue) {
+    t.panel = p;
+    const pr = r ? safeLink(r.pr_url, PR_PREFIX, PR_TAIL) : null;
+    setHead(t, {kind: c.badge, label: c.label, title: c.role + (c.piece ? ` · ${c.piece}` : ""), kicker: c.role,
+      round: c.round, hue, session: p.session, prs: pr ? [pr] : []});
     t.el.dataset.state = c.state;
+    t.el.dataset.role = c.role;
     const meta = [];
     if (c.round !== null) meta.push(`round ${c.round}`);
     meta.push(c.started === null ? "started ?" : `started ${clock(c.started)}`);
@@ -931,118 +1192,177 @@ main[data-view="grid"]{max-width:none}
     return true;
   }
 
+  // The phone's chrome: one slim row (view switch, filter, count) in Grid,
+  // and none at all while a window is maximized.
+  function setChrome() {
+    const compact = view === "grid" && narrow();
+    const bare = compact && maximized !== null;
+    if (compact) $main.dataset.compact = ""; else delete $main.dataset.compact;
+    if (bare) $main.dataset.bare = ""; else delete $main.dataset.bare;
+    $viewNav.hidden = bare;
+    $gridToolbar.hidden = bare;
+    $gridHead.hidden = compact;
+    $gridFoot.hidden = compact;
+  }
+
   function renderGrid() {
+    if (rendering) { renderAgain = true; return; }
+    rendering = true;
+    try {
+      do {
+        renderAgain = false;
+        drawGrid();
+      } while (renderAgain);
+    } finally {
+      rendering = false;
+    }
+  }
+
+  function drawGrid() {
+    if (filter === null) filter = loadFilter();
+    $filterActive.setAttribute("aria-pressed", String(filter === "active"));
+    $filterAll.setAttribute("aria-pressed", String(filter === "all"));
     if (rows === null) {
       endPointer();
+      maximized = null;
       $coords.replaceChildren();
+      delete $coords.dataset.max;
       tileEls = Object.create(null);
-      boardEls = Object.create(null);
+      workTiles = [];
+      syncChats([]);
       $gridSummary.textContent = $summary.textContent || "Loading…";
       $gridHidden.hidden = true;
+      $gridCount.textContent = "";
+      setChrome();
       return;
     }
     if (layout === null) layout = loadLayout();
     const now = Date.now();
-    const g = groupCoordinators(rows, agents, now);
+    const g = groupCoordinators(rows, agents, now, {all: filter === "all"});
     const off = narrow();
     const nextTiles = Object.create(null);
-    const nextBoards = Object.create(null);
-    const boards = [];
-    const onScreen = [];
+    const tiles = [];
     let running = 0;
     let queued = 0;
     let silent = 0;
     for (const p of g.panels) {
-      const board = boardEls[p.id] || {id: p.id, el: el("section", "board"), order: []};
-      board.el.setAttribute("aria-label", p.title);
-      nextBoards[p.id] = board;
-      const tiles = [];
+      const hue = runHue(p.runId);
       const coordKey = "c " + p.id;
       const coord = tileEls[coordKey] || makeTile(p.id, true);
       nextTiles[coordKey] = coord;
-      fillCoord(coord, p, now);
+      fillCoord(coord, p, now, hue);
       tiles.push(coord);
-      for (const {a, c} of p.agents) {
+      for (const {a, c, r} of p.agents) {
         const id = String(a._id);
         const key = "a " + id;
         if (nextTiles[key]) continue;
         const t = tileEls[key] || makeTile(id, false);
         nextTiles[key] = t;
-        fillAgent(t, c);
+        fillAgent(t, c, p, r, hue);
         tiles.push(t);
         if (c.state === "running") running += 1;
         else if (c.state === "queued") queued += 1;
         else if (c.state === "silent" || c.state === "stopped") silent += 1;
       }
-      const byId = Object.create(null);
-      for (const t of tiles) {
-        byId[t.id] = t;
-        t.board = board;
-        const [cols, rowsN] = sizeOf(t);
-        if (!(resizing && resizing.t === t)) {  // keep the live resize preview
-          t.el.dataset.cols = String(cols);
-          t.el.dataset.rows = String(rowsN);
-        }
-        t.grip.hidden = off;
-        t.resize.hidden = off;
-      }
-      board.order = arrange(tiles.map((t) => t.id));
-      onScreen.push(...board.order);
-      board.want = board.order.map((id) => byId[id].el);
-      boards.push(board.el);
     }
     tileEls = nextTiles;
-    boardEls = nextBoards;
-    // A drag or resize whose tile is gone ends here (cancelled).
+    workTiles = arrange(tiles);
+    // A maximized window that is gone restores the workspace.
+    if (maximized !== null && !tileEls[maximized]) { maximized = null; announce("Restored: that window closed."); }
+    let width = 0;
+    try { width = $coords.getBoundingClientRect().width; } catch (_) { width = 0; }
+    workCols = tileCols(workTiles.length, width, off);
+    $coords.dataset.cols = String(workCols);
+    if (maximized !== null) $coords.dataset.max = ""; else delete $coords.dataset.max;
+    for (const t of workTiles) {
+      const [cols, rowsN] = sizeOf(t);
+      if (!(resizing && resizing.t === t)) {  // keep the live resize preview
+        t.el.dataset.cols = String(off ? 1 : Math.min(cols, workCols));
+        t.el.dataset.rows = String(off ? 1 : rowsN);
+      }
+      const isMax = t.key === maximized;
+      if (isMax) t.el.dataset.max = ""; else delete t.el.dataset.max;
+      t.max.setAttribute("aria-pressed", String(isMax));
+      t.max.hidden = isMax;
+      t.restore.hidden = !isMax;
+      t.grip.hidden = off || maximized !== null;
+      t.resize.hidden = off || maximized !== null;
+    }
+    // A drag or resize whose window is gone ends here (cancelled).
     if ((drag && tileEls[drag.t.key] !== drag.t) || (resizing && tileEls[resizing.t.key] !== resizing.t)) endPointer();
-    // Re-parenting a tile mid-drag drops its pointer capture: the order on
+    // Re-parenting a window mid-drag drops its pointer capture: the order on
     // screen catches up when the drag or resize ends.
     if (!drag && !resizing) {
-      for (const id of Object.keys(nextBoards)) {
-        const b = nextBoards[id];
-        if (!sameChildren(b.el, b.want)) b.el.replaceChildren(...b.want);
-      }
-      if (!sameChildren($coords, boards)) $coords.replaceChildren(...boards);
+      const want = workTiles.map((t) => t.el);
+      if (!sameChildren($coords, want)) $coords.replaceChildren(...want);
     }
     $gridReset.hidden = off;
+    syncChats(g.panels);
+    setChrome();
 
-    knownTiles = onScreen;
+    knownTiles = workTiles.map((t) => t.id);
     knownAll = agents === null ? null
       : [...rows.map((r) => "coord-" + safeId(r._id)), ...agents.map((a) => String(a._id))];
 
     const active = g.panels.filter((p) => p.active).length;
     const parts = [];
     if (active) parts.push(`${active} active run${active === 1 ? "" : "s"}`);
-    else parts.push(g.panels.length ? "Nothing running · last run below" : "No runs yet");
+    else if (!g.panels.length) parts.push("No runs yet");
+    else parts.push(filter === "all" ? "Nothing running" : "Nothing running · last run below");
     if (running) parts.push(`${running} agent${running === 1 ? "" : "s"} running`);
     if (queued) parts.push(`${queued} queued`);
     if (silent) parts.push(`${silent} silent`);
     $gridSummary.textContent = parts.join(" · ");
+    const n = workTiles.length;
+    $gridCount.textContent = `${n} window${n === 1 ? "" : "s"}`;
     $gridHidden.textContent = g.hidden ? `${g.hidden} agent${g.hidden === 1 ? "" : "s"} hidden` : "";
     $gridHidden.hidden = !g.hidden;
   }
 
-  // ---- moving and resizing tiles (desktop only) ----
+  // ---- maximize: one window fills the workspace (in memory only) ----
+  function setMax(t) {
+    if (t && maximized === t.key) t = null;
+    const prev = maximized === null ? null : tileEls[maximized] || null;
+    setGrab(null);
+    endPointer();
+    maximized = t ? t.key : null;
+    renderGrid();
+    if (t) {
+      if (t.coord) t.stick = true;
+      focusEl(t.restore);
+      announce(`Maximized ${t.title}. Esc or Restore goes back.`);
+      checkSend(true);
+    } else if (prev) {
+      focusEl(prev.max);
+      announce("Restored.");
+    }
+  }
+
+  function onDocKey(e) {
+    if (!e || e.key !== "Escape" || maximized === null || view !== "grid" || e.defaultPrevented) return;
+    if (e.preventDefault) e.preventDefault();
+    setMax(null);
+  }
+
+  // ---- moving and resizing windows (desktop only) ----
   function moveTile(t, to) {
-    const order = t.board.order.slice();
-    const from = order.indexOf(t.id);
-    to = Math.max(0, Math.min(order.length - 1, to));
+    const list = workTiles.slice();
+    const from = list.indexOf(t);
+    to = Math.max(0, Math.min(list.length - 1, to));
     if (from < 0 || to === from) return false;
-    order.splice(from, 1);
-    order.splice(to, 0, t.id);
-    order.forEach((id, i) => { entry(id).o = i; });
+    list.splice(from, 1);
+    list.splice(to, 0, t);
+    list.forEach((x, i) => { entry(x.id).o = i; });
     saveLayout();
     moving = true;
     try { renderGrid(); } finally { moving = false; }
-    announce(`Moved to place ${to + 1} of ${order.length}.`);
+    announce(`Moved to place ${to + 1} of ${list.length}.`);
     return true;
   }
 
-  function tileAt(board, x, y) {
+  function tileAt(x, y) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    for (const id of board.order) {
-      const t = tileEls[(board.id === id ? "c " : "a ") + id];
-      if (!t) continue;
+    for (const t of workTiles) {
       let r = null;
       try { r = t.el.getBoundingClientRect(); } catch (_) { r = null; }
       if (r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return t;
@@ -1050,11 +1370,8 @@ main[data-view="grid"]{max-width:none}
     return null;
   }
 
-  function clearDrop(board) {
-    for (const id of board.order) {
-      const t = tileEls[(board.id === id ? "c " : "a ") + id];
-      if (t) delete t.el.dataset.drop;
-    }
+  function clearDrop() {
+    for (const t of workTiles) if ("drop" in t.el.dataset) delete t.el.dataset.drop;
   }
 
   function samePointer(e, active) {
@@ -1089,14 +1406,15 @@ main[data-view="grid"]{max-width:none}
     try { handle.releasePointerCapture(pointerId); } catch (_) { /* no capture */ }
   }
 
-  // Ends any drag or resize without saving (its tile is gone, or Runs
-  // stopped). Safe to call when nothing is in progress.
+  // Ends any drag or resize without saving (its window is gone, Runs
+  // stopped, or a window was maximized). Safe to call when nothing is in
+  // progress.
   function endPointer() {
     if (drag) {
       const {t, pointerId} = drag;
       drag = null;
       delete t.el.dataset.dragging;
-      if (t.board) clearDrop(t.board);
+      clearDrop();
       release(t.grip, pointerId);
     }
     if (resizing) {
@@ -1108,7 +1426,7 @@ main[data-view="grid"]{max-width:none}
   }
 
   function dragStart(t, e) {
-    if (narrow() || drag || resizing || !t.board) return;
+    if (narrow() || maximized !== null || drag || resizing || !workTiles.includes(t)) return;
     if (typeof e.button === "number" && e.button !== 0) return;
     if (e.preventDefault) e.preventDefault();
     drag = {t, pointerId: e.pointerId};
@@ -1119,8 +1437,8 @@ main[data-view="grid"]{max-width:none}
 
   function dragMove(e) {
     const t = drag.t;
-    const over = tileAt(t.board, e.clientX, e.clientY);
-    clearDrop(t.board);
+    const over = tileAt(e.clientX, e.clientY);
+    clearDrop();
     if (over && over !== t) over.el.dataset.drop = "";
   }
 
@@ -1129,10 +1447,10 @@ main[data-view="grid"]{max-width:none}
     drag = null;
     listenPointer(false);
     delete t.el.dataset.dragging;
-    clearDrop(t.board);
+    clearDrop();
     release(t.grip, e.pointerId);
-    const over = commit && !narrow() ? tileAt(t.board, e.clientX, e.clientY) : null;
-    if (over && over !== t && moveTile(t, t.board.order.indexOf(over.id))) return;
+    const over = commit && !narrow() ? tileAt(e.clientX, e.clientY) : null;
+    if (over && over !== t && moveTile(t, workTiles.indexOf(over))) return;
     renderGrid();  // catch up on anything that arrived during the drag
   }
 
@@ -1150,7 +1468,7 @@ main[data-view="grid"]{max-width:none}
   const ARROWS = {ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowDown: [0, 1]};
 
   function gripKey(t, e) {
-    if (narrow()) return;
+    if (narrow() || maximized !== null) return;
     const k = e.key;
     if (e.shiftKey && has(ARROWS, k)) { sizeKey(t, e); return; }
     if (k === "Enter" || k === " ") {
@@ -1158,11 +1476,15 @@ main[data-view="grid"]{max-width:none}
       setGrab(grabbed === t.id ? null : t);
       return;
     }
-    if (k === "Escape" && grabbed === t.id) { setGrab(null); return; }
+    if (k === "Escape" && grabbed === t.id) {
+      if (e.preventDefault) e.preventDefault();  // only drops: the page's Esc doesn't restore too
+      setGrab(null);
+      return;
+    }
     if (grabbed !== t.id || !has(ARROWS, k)) return;
     if (e.preventDefault) e.preventDefault();
     const [dx, dy] = ARROWS[k];
-    moveTile(t, t.board.order.indexOf(t.id) + (dx || dy));
+    moveTile(t, workTiles.indexOf(t) + (dx || dy));
     t.grip.focus();
   }
 
@@ -1170,7 +1492,7 @@ main[data-view="grid"]{max-width:none}
     const [c0, r0] = sizeOf(t);
     const c = clampInt(cols, 1, 3);
     const r = clampInt(rowsN, 1, 2);
-    if (c === c0 && r === r0) { t.el.dataset.cols = String(c0); t.el.dataset.rows = String(r0); return false; }
+    if (c === c0 && r === r0) { renderGrid(); return false; }
     const e = entry(t.id);
     e.c = c;
     e.r = r;
@@ -1181,7 +1503,7 @@ main[data-view="grid"]{max-width:none}
   }
 
   function sizeKey(t, e) {
-    if (narrow() || !e.shiftKey || !has(ARROWS, e.key)) return;
+    if (narrow() || maximized !== null || !e.shiftKey || !has(ARROWS, e.key)) return;
     if (e.preventDefault) e.preventDefault();
     const [dx, dy] = ARROWS[e.key];
     const [c, r] = sizeOf(t);
@@ -1189,14 +1511,15 @@ main[data-view="grid"]{max-width:none}
   }
 
   function resizeStart(t, e) {
-    if (narrow() || drag || resizing || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    if (narrow() || maximized !== null || drag || resizing || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
     if (typeof e.button === "number" && e.button !== 0) return;
     if (e.preventDefault) e.preventDefault();
     const [c, r] = sizeOf(t);
+    const shownC = Math.min(c, workCols);
     let rect = null;
     try { rect = t.el.getBoundingClientRect(); } catch (_) { rect = null; }
-    resizing = {t, pointerId: e.pointerId, x: e.clientX, y: e.clientY, c, r,
-      cw: rect && rect.width > 0 ? rect.width / c : 200, rh: rect && rect.height > 0 ? rect.height / r : 140};
+    resizing = {t, pointerId: e.pointerId, x: e.clientX, y: e.clientY, c: shownC, r,
+      cw: rect && rect.width > 0 ? rect.width / shownC : 200, rh: rect && rect.height > 0 ? rect.height / r : 140};
     try { t.resize.setPointerCapture(e.pointerId); } catch (_) { /* no capture */ }
     listenPointer(true);
   }
@@ -1211,7 +1534,7 @@ main[data-view="grid"]{max-width:none}
   function resizeMove(e) {
     const t = resizing.t;
     const [c, r] = snapped(e);
-    t.el.dataset.cols = String(c);  // a preview; saved only on release
+    t.el.dataset.cols = String(Math.min(c, workCols));  // a preview; saved only on release
     t.el.dataset.rows = String(r);
   }
 
@@ -1225,51 +1548,586 @@ main[data-view="grid"]{max-width:none}
     renderGrid();  // restores the size on screen and catches up on new data
   }
 
-  // ---- Message coordinator: claude.ai's own comment composer ----
-  // composer_only: the page can only open the shell's composer; Kyle types
-  // and presses Send to Claude there. Looked up on the first Grid show.
-  let commentsPromise = null;
+  // ==== the coordinator chat ====
+  // Sending: comments.sendToClaude, only from Kyle's click or Enter, one
+  // call at a time, never at load, on a timer or as a retry. Reading: the
+  // coordinator's mirror in Kyle's own private db subtree,
+  // data/users/<id>/chat-<session>/msgs. Both are looked up on the first
+  // Grid show only.
   let comments = null;
-  let commentsOff = false;  // unavailable or a lifecycle code: hidden for this visit
-  let composing = false;
+  let setupStarted = false;
+  let setupDone = false;
+  let uid = null;           // Kyle's user id (null: none, so no transcript)
+  let sendState = "unknown"; // the last canSendToClaude answer: available, no_session or hidden
+  let checking = false;
+  let lastCheck = -Infinity;
+  let sendOff = false;      // a lifecycle code, forbidden or a second unavailable: hidden for the visit
+  let unavailableSeen = 0;
+  let sending = false;
+  const threads = Object.create(null);   // session -> threadId, this visit only
+  const pendingBy = Object.create(null); // session -> Kyle's messages sent from this page
+  const chats = Object.create(null);     // session -> {live, docs, conn}
 
-  function getComments() {
-    if (!commentsPromise) {
-      commentsPromise = Promise.resolve().then(() => window.claude?.use?.("comments"))
-        .then((c) => c || null, () => null)
-        .then((c) => { comments = c; renderGrid(); return c; });
-    }
-    return commentsPromise;
+  function setupChat() {
+    if (setupStarted) { if (setupDone) checkSend(true); return; }
+    setupStarted = true;
+    (async () => {
+      let ns = null;
+      try { ns = await window.claude?.use?.("comments"); } catch (_) { ns = null; }
+      comments = ns || null;
+      let id = null;
+      try {
+        const user = await window.claude?.use?.("user");
+        id = user ? await user.id() : null;
+      } catch (_) { id = null; }
+      uid = typeof id === "string" && USER_SEG.test(id) && id !== "." && id !== ".." ? id : null;
+      setupDone = true;
+      checkSend(true);
+      if (view === "grid") renderGrid();
+    })();
   }
 
-  // Only the button's click listener calls this; never a timer, never a retry.
-  async function messageCoordinator(t) {
-    if (!comments || commentsOff || composing) return;
-    let target;
-    try {
-      const range = document.createRange();
-      range.selectNodeContents(t.runLine);  // the quoted excerpt names the run
-      target = {range};
-    } catch (_) {
-      target = {element: t.el};
+  // Whether the box can send right now. Posts nothing, never prompts.
+  function checkSend(force) {
+    if (!comments || sendOff || checking) return;
+    const now = Date.now();
+    if (!force && now - lastCheck < 60e3) return;
+    lastCheck = now;
+    checking = true;
+    (async () => {
+      let v = "hidden";
+      try { v = await comments.canSendToClaude(); } catch (_) { v = "hidden"; }
+      checking = false;
+      sendState = v === "available" || v === "no_session" ? v : "hidden";
+      if (view === "grid") renderGrid();
+    })();
+  }
+
+  // ---- the subscriptions: coordinator windows on screen, newest first
+  // (a maximized one before the rest), at most CHAT_SUBS; none on Runs ----
+  function syncChats(panels) {
+    const want = [];
+    if (view === "grid" && db && uid) {
+      const list = panels.filter((p) => p.session);
+      const top = maximized === null ? null : list.find((p) => "c " + p.id === maximized);
+      if (top) want.push(top);
+      for (const p of list) {
+        if (want.length >= CHAT_SUBS) break;
+        if (p !== top) want.push(p);
+      }
     }
-    composing = true;
-    t.msg.disabled = true;
-    let hint = SEND_HINT;
+    const keep = Object.create(null);
+    for (const p of want) keep[p.session] = true;
+    for (const key of Object.keys(chats)) {
+      if (keep[key]) continue;
+      chats[key].live.pause();
+      delete chats[key];
+    }
+    for (const p of want) {
+      if (!chats[p.session]) chats[p.session] = makeChat(p.session);
+      chats[p.session].live.start(db);
+    }
+  }
+
+  function makeChat(session) {
+    const tail = session.slice(SESSION_PREFIX.length);
+    const chat = {docs: null, conn: ""};
+    chat.live = liveQuery((d) => d.collection(`data/users/${uid}/chat-${tail}/msgs`).orderBy("at", "desc").limit(CHAT_LIMIT), {
+      what: "conversation", list: "conversation", noDb: "The conversation needs this page open on claude.ai.",
+      rows(list) { chat.docs = list; chat.conn = ""; renderGrid(); },
+      conn(msg, bad) { chat.conn = bad ? msg : ""; renderGrid(); },
+      stop(summary, conn) { chat.docs = null; chat.conn = [summary, conn].filter(Boolean).join(" · "); renderGrid(); },
+    });
+    return chat;
+  }
+
+  // One mirror doc -> a message. Every field may be missing or wrong.
+  function chatDoc(d) {
+    return {
+      key: "d " + String(d._id),
+      from: d.from === "kyle" ? "kyle" : "coordinator",
+      kind: CHAT_KINDS.includes(d.kind) ? d.kind : "update",
+      text: text(d.text, CHAT_MAX, true),
+      at: time(d.at),
+      ref: text(d.ref, 20),
+      state: "",
+    };
+  }
+
+  function nearBottom(e) { return e.scrollHeight - e.scrollTop - e.clientHeight <= 40; }
+  function scrollEnd(e) { e.scrollTop = e.scrollHeight; }
+
+  function fillChat(t, p) {
+    t.chat.hidden = !p.session;
+    if (!p.session) return;
+    const key = p.session;
+    const chat = chats[key];
+    // The box.
+    const show = !!comments && !sendOff && sendState === "available";
+    t.form.hidden = !show;
+    t.send.disabled = sending;
+    let hint = t.hintText;
+    let bad = t.hintBad;
+    if (sendOff) { hint = SEND_OFF; bad = false; }
+    else if (!show) { hint = comments && sendState === "no_session" ? NO_LISTENER : ""; bad = false; }
+    setText(t.sendHint, hint);
+    t.sendHint.hidden = !hint;
+    if (bad) t.sendHint.dataset.level = "bad"; else delete t.sendHint.dataset.level;
+    // The note over the transcript.
+    let note = "";
+    let noteBad = false;
+    if (!setupDone) note = "Loading the conversation…";
+    else if (uid === null) note = "No transcript here: claude.ai gave this page no user id. Sending still works.";
+    else if (!chat) note = `Conversation not loaded: only the newest ${CHAT_SUBS} runs load theirs. Maximize this one to load it.`;
+    else if (chat.conn) { note = chat.conn; noteBad = true; }
+    setText(t.chatNote, note);
+    t.chatNote.hidden = !note;
+    if (noteBad) t.chatNote.dataset.level = "bad"; else delete t.chatNote.dataset.level;
+    // The transcript: the mirror (newest CHAT_LIMIT, shown oldest first) and
+    // Kyle's own messages from this visit that the mirror hasn't caught up on.
+    const items = [];
+    const docs = chat && chat.docs ? chat.docs : [];
+    for (let i = docs.length - 1; i >= 0; i -= 1) items.push(chatDoc(docs[i]));
+    const mirrored = Object.create(null);
+    for (const m of items) if (m.from === "kyle" && m.ref) mirrored[m.ref] = true;
+    const mine = (pendingBy[key] || []).filter((m) => !mirrored[m.nonce]);
+    // The open question: the newest coordinator question with no later
+    // message from Kyle.
+    let open = null;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i].from === "kyle") break;
+      if (items[i].kind === "question") { open = items[i]; break; }
+    }
+    if (open && mine.some((m) => m.state !== "not sent" && (open.at === null || m.at >= open.at))) open = null;
+    for (const m of mine) {
+      items.push({key: "l " + m.nonce, from: "kyle", kind: "reply", text: m.text, at: m.at, ref: m.nonce, state: m.state});
+    }
+    if (open) t.el.dataset.question = ""; else delete t.el.dataset.question;
+    t.qchip.hidden = !open;
+    const next = Object.create(null);
+    const list = [];
+    for (const m of items) {
+      const kind = m.kind === "question" ? (m === open ? "question" : "asked") : m.kind;
+      const sig = [m.from, kind, m.at, m.state, m.text].join("\u0001");
+      let b = t.bubbles[m.key];
+      if (!b || b.sig !== sig) b = {sig, el: bubble(m, kind)};
+      next[m.key] = b;
+      list.push(b.el);
+    }
+    t.bubbles = next;
+    if (!list.length) list.push(t.logEmpty);
+    if (!sameChildren(t.log, list)) {
+      const stick = t.stick || !t.logSeen || nearBottom(t.log);
+      const before = t.log.children.length ? t.log.children[t.log.children.length - 1] : null;
+      t.log.replaceChildren(...list);
+      if (stick) { scrollEnd(t.log); t.pill.hidden = true; }
+      else if (list[list.length - 1] !== before) t.pill.hidden = false;
+    } else if (t.stick) {
+      scrollEnd(t.log);
+      t.pill.hidden = true;
+    }
+    t.logSeen = t.logSeen || !!(chat && chat.docs);
+    t.stick = false;
+  }
+
+  function bubble(m, kind) {
+    const b = el("div", "msg");
+    b.dataset.from = m.from;
+    b.dataset.kind = kind;
+    const meta = el("div", "meta");
+    const who = m.from === "kyle" ? "You" : "Coordinator" + (m.kind === "update" ? "" : ` · ${m.kind}`);
+    meta.append(el("span", "who", who), el("span", "at", m.at === null ? "?" : clock(m.at)));
+    if (m.state) meta.append(el("span", "state", m.state));
+    b.append(meta, m.from === "kyle" ? el("div", "plain", m.text) : renderMarkdown(m.text));
+    return b;
+  }
+
+  // ---- sending ----
+  // Comment text rules: no control characters but newline and tab, and no
+  // lone surrogates (they can't be UTF-8).
+  function cleanSend(s) {
+    let out = "";
+    s = String(s);
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charCodeAt(i);
+      if (c === 13) { out += "\n"; if (s.charCodeAt(i + 1) === 10) i += 1; continue; }
+      if (c === 9 || c === 10) { out += s[i]; continue; }
+      if (c < 32 || (c >= 0x7f && c <= 0x9f)) continue;
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const d = s.charCodeAt(i + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) { out += s[i] + s[i + 1]; i += 1; } else out += "\uFFFD";
+        continue;
+      }
+      out += c >= 0xdc00 && c <= 0xdfff ? "\uFFFD" : s[i];
+    }
+    return out;
+  }
+
+  // UTF-8 length, counted by hand (the test vm has no encoder).
+  function utf8Len(s) {
+    s = String(s);
+    let n = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i += 1; }
+      else n += 3;
+    }
+    return n;
+  }
+
+  // The longest prefix of s that fits max UTF-8 bytes, never splitting a pair.
+  function capUtf8(s, max) {
+    let n = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charCodeAt(i);
+      const pair = c >= 0xd800 && c <= 0xdbff && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00;
+      const w = c < 0x80 ? 1 : c < 0x800 ? 2 : pair ? 4 : 3;
+      if (n + w > max) return s.slice(0, i);
+      n += w;
+      if (pair) i += 1;
+    }
+    return s;
+  }
+
+  function nonce6() {
+    const abc = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let s = "";
+    for (let i = 0; i < 6; i += 1) s += abc[Math.floor(Math.random() * abc.length)];
+    return s;
+  }
+
+  // Only the Send button's click and the box's Enter call this.
+  async function sendChat(t) {
+    const p = t.panel;
+    if (!p || !p.session || !comments || sendOff || sending || sendState !== "available") return;
+    const draft = t.input.value;
+    const body = cleanSend(draft);
+    if (!body.trim()) return;
+    const key = p.session;
+    const nonce = nonce6();
+    const full = `[run ${p.runId} #${nonce}] ` + body;
+    const textOut = capUtf8(full, SEND_MAX);
+    const thread = threads[key];
+    sending = true;
+    // The anchor is read now, at the gesture, on the window's title.
+    let anchorP = null;
+    if (!thread) {
+      try { anchorP = comments.anchorFor(t.h2); } catch (e) { anchorP = Promise.reject(e); }
+    }
+    const mine = pendingBy[key] || (pendingBy[key] = []);
+    const msg = {nonce, text: textOut.slice(full.length - body.length), at: Date.now(), state: "sending"};
+    mine.push(msg);
+    if (mine.length > PENDING_MAX) mine.splice(0, mine.length - PENDING_MAX);
+    t.hintText = "";
+    t.hintBad = false;
+    t.stick = true;
+    renderGrid();
+    let hint = "";
     let bad = false;
     try {
-      const res = await comments.openComposer(target);
-      if (!res || res.opened !== true) { hint = "Click the page, then try again."; bad = true; }
+      const target = thread ? {threadId: thread, text: textOut} : {anchor: await anchorP, text: textOut};
+      const res = await comments.sendToClaude(target);
+      if (res && typeof res.threadId === "string" && res.threadId) threads[key] = res.threadId;
+      msg.state = "sent";
+      unavailableSeen = 0;
+      if (t.input.value === draft) t.input.value = "";
+      if (textOut.length < full.length) hint = "Sent, cut to fit 4 KB.";
     } catch (e) {
       const code = e && typeof e.code === "string" ? e.code : "upstream_error";
-      if (COMMENTS_OFF.includes(code)) commentsOff = true;
-      else if (code === "rate_limited") { hint = "Too fast, try again in a moment."; bad = true; }
-      else { hint = "Couldn't open the comment box. Use Open session."; bad = true; }
+      msg.state = "not sent";
+      if (SEND_STOP.includes(code)) sendOff = true;
+      else if (code === "unavailable") {
+        unavailableSeen += 1;
+        if (unavailableSeen >= 2) sendOff = true; else { hint = SEND_COPY.unavailable; bad = true; }
+      } else if (code === "invalid" || code === "transform_error") { hint = SEND_COPY.invalid; bad = true; }
+      else if (code === "not_found") { delete threads[key]; hint = SEND_COPY.not_found; bad = true; }
+      else if (code === "consent_required" || code === "rate_limited" || code === "claude_unavailable") {
+        hint = SEND_COPY[code]; bad = true;
+      } else { msg.state = "may have been sent"; hint = SEND_COPY.upstream_error; bad = true; }
+      if (code === "claude_unavailable") { sending = false; checkSend(true); }
     }
-    composing = false;
+    sending = false;
     t.hintText = hint;
     t.hintBad = bad;
     renderGrid();
+  }
+
+  // ---- markdown: a linear scanner; createElement and textContent only ----
+  // Blocks: headings (h3-h6), ``` fences, > quotes, -/*/+ and 1. lists
+  // nested by indent (up to MD_DEPTH), pipe tables (up to MD_COLS columns)
+  // and rules. Inline: `code`, **bold**, *em*/_em_ and [text](http(s) URL).
+  // Past MD_BUDGET elements the rest of the message is plain text.
+  const LIST_RE = /^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
+
+  function renderMarkdown(src) {
+    const root = el("div", "md");
+    const lines = text(src, CHAT_MAX, true).split("\n");
+    mdBlocks(lines, root, {n: 0}, 0);
+    return root;
+  }
+
+  function mk(st, tag, cls, content) { st.n += 1; return el(tag, cls, content); }
+
+  function indentOf(s) {
+    let w = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      if (s[i] === " ") w += 1; else if (s[i] === "\t") w += 4; else break;
+    }
+    return w;
+  }
+  function isRule(line) {
+    const s = line.replace(/[ \t]/g, "");
+    return s.length >= 3 && (/^-+$/.test(s) || /^\*+$/.test(s) || /^_+$/.test(s));
+  }
+  function isTableSep(line) { return line.includes("|") && line.includes("-") && /^[ \t|:-]+$/.test(line); }
+  function isFence(line) { return /^ {0,3}(`{3,}|~{3,})/.exec(line); }
+  function isHeading(line) { return /^ {0,3}(#{1,6})[ \t]+/.exec(line); }
+  function isQuote(line) { return /^ {0,3}>/.test(line); }
+  function startsBlock(lines, i) {
+    const line = lines[i];
+    return !!(isFence(line) || isHeading(line) || isQuote(line) || isRule(line) || LIST_RE.test(line)
+      || (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])));
+  }
+
+  function cellsOf(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+    const out = [];
+    let cur = "";
+    for (let i = 0; i < s.length; i += 1) {
+      if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i += 1; continue; }
+      if (s[i] === "|") {
+        if (out.length >= MD_COLS - 1) { cur += s.slice(i); break; }
+        out.push(cur.trim()); cur = ""; continue;
+      }
+      cur += s[i];
+    }
+    out.push(cur.trim());
+    return out.slice(0, MD_COLS);
+  }
+
+  function mdBlocks(lines, out, st, depth) {
+    let i = 0;
+    while (i < lines.length) {
+      if (st.n >= MD_BUDGET) { out.append(mk(st, "p", "md-rest", lines.slice(i).join("\n"))); return; }
+      const line = lines[i];
+      if (!line.trim()) { i += 1; continue; }
+      let m = isFence(line);
+      if (m) {
+        let j = i + 1;
+        while (j < lines.length && !lines[j].trimStart().startsWith(m[1])) j += 1;
+        const pre = mk(st, "pre");
+        pre.append(mk(st, "code", "", lines.slice(i + 1, j).join("\n")));
+        out.append(pre);
+        i = j + 1;
+        continue;
+      }
+      m = isHeading(line);
+      if (m) {
+        let body = line.slice(m[0].length);
+        let end = body.length;
+        while (end > 0 && (body[end - 1] === "#" || body[end - 1] === " " || body[end - 1] === "\t")) end -= 1;
+        body = body.slice(0, end);
+        const h = mk(st, "h" + Math.min(6, m[1].length + 2));
+        inline(body, h, st, 0);
+        out.append(h);
+        i += 1;
+        continue;
+      }
+      if (isRule(line)) { out.append(mk(st, "hr")); i += 1; continue; }
+      if (isQuote(line)) {
+        const inner = [];
+        while (i < lines.length && isQuote(lines[i])) {
+          inner.push(lines[i].replace(/^ {0,3}> ?/, ""));
+          i += 1;
+        }
+        const q = mk(st, "blockquote");
+        if (depth + 1 >= MD_QUOTE_DEPTH) q.append(mk(st, "p", "md-rest", inner.join("\n")));
+        else mdBlocks(inner, q, st, depth + 1);
+        out.append(q);
+        continue;
+      }
+      if (LIST_RE.test(line)) { i = mdList(lines, i, out, st); continue; }
+      if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) { i = mdTable(lines, i, out, st); continue; }
+      const p = mk(st, "p");
+      let first = true;
+      while (i < lines.length && lines[i].trim() && (first || !startsBlock(lines, i))) {
+        if (st.n >= MD_BUDGET) { out.append(p, mk(st, "p", "md-rest", lines.slice(i).join("\n"))); return; }
+        if (!first) p.append(mk(st, "br"));
+        inline(lines[i].trim(), p, st, 0);
+        first = false;
+        i += 1;
+      }
+      out.append(p);
+    }
+  }
+
+  function mdList(lines, i, out, st) {
+    const stack = [];  // {indent, ordered, list, li, parent}
+    const open = (parent, ordered, indent, m) => {
+      const list = mk(st, ordered ? "ol" : "ul");
+      const n = ordered ? parseInt(m[2], 10) : 1;
+      if (ordered && n !== 1 && Number.isFinite(n)) list.setAttribute("start", String(n));
+      parent.append(list);
+      return {indent, ordered, list, li: null, parent};
+    };
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) {
+        let j = i + 1;
+        while (j < lines.length && !lines[j].trim()) j += 1;
+        if (j < lines.length && !isRule(lines[j]) && (LIST_RE.test(lines[j]) || /^[ \t]{2,}\S/.test(lines[j]))) { i = j; continue; }
+        break;
+      }
+      const m = isRule(line) ? null : LIST_RE.exec(line);
+      if (!m) {
+        const top = stack[stack.length - 1];
+        if (!top || !top.li || !/^[ \t]{2,}\S/.test(line) || st.n >= MD_BUDGET) break;
+        top.li.append(mk(st, "br"));
+        inline(line.trim(), top.li, st, 0);
+        i += 1;
+        continue;
+      }
+      if (st.n >= MD_BUDGET) break;
+      const indent = indentOf(m[1]);
+      const ordered = /\d/.test(m[2]);
+      while (stack.length > 1 && indent < stack[stack.length - 1].indent) stack.pop();
+      let top = stack[stack.length - 1];
+      if (!top) stack.push(top = open(out, ordered, indent, m));
+      else if (indent > top.indent && top.li && stack.length < MD_DEPTH) stack.push(top = open(top.li, ordered, indent, m));
+      else if (top.ordered !== ordered && indent <= top.indent) {
+        stack.pop();
+        stack.push(top = open(top.parent, ordered, top.indent, m));
+      }
+      // Deeper than MD_DEPTH: the item joins the deepest list (flattened).
+      const li = mk(st, "li");
+      inline(m[3], li, st, 0);
+      top.list.append(li);
+      top.li = li;
+      i += 1;
+    }
+    return i;
+  }
+
+  function mdTable(lines, i, out, st) {
+    const head = cellsOf(lines[i]);
+    const wrap = mk(st, "div", "tablewrap");
+    const table = mk(st, "table");
+    const thead = mk(st, "thead");
+    const tr = mk(st, "tr");
+    for (const c of head) { const th = mk(st, "th"); inline(c, th, st, 0); tr.append(th); }
+    thead.append(tr);
+    table.append(thead);
+    const tbody = mk(st, "tbody");
+    i += 2;
+    while (i < lines.length && lines[i].trim() && lines[i].includes("|") && st.n < MD_BUDGET) {
+      const cells = cellsOf(lines[i]);
+      const row = mk(st, "tr");
+      for (let k = 0; k < head.length; k += 1) {
+        const td = mk(st, "td");
+        if (k < cells.length) inline(cells[k], td, st, 0);
+        row.append(td);
+      }
+      tbody.append(row);
+      i += 1;
+    }
+    table.append(tbody);
+    wrap.append(table);
+    out.append(wrap);
+    return i;
+  }
+
+  // indexOf with a memo per token: scanning left to right, each token's
+  // next occurrence is searched for once, so hostile input stays linear.
+  function finder(s) {
+    const memo = Object.create(null);
+    return (tok, from) => {
+      const m = memo[tok];
+      if (m && from >= m.from && (m.at === -1 || m.at >= from)) return m.at;
+      const at = s.indexOf(tok, from);
+      memo[tok] = {from, at};
+      return at;
+    };
+  }
+
+  function inline(s, out, st, depth) {
+    const find = finder(s);
+    let buf = "";
+    const flush = () => { if (buf) { out.append(mk(st, "span", "", buf)); buf = ""; } };
+    let i = 0;
+    while (i < s.length) {
+      if (st.n >= MD_BUDGET) { buf += s.slice(i); break; }
+      const ch = s[i];
+      if (ch === "\\" && i + 1 < s.length && "\\`*_[]()#>|~-".includes(s[i + 1])) { buf += s[i + 1]; i += 2; continue; }
+      if (ch === "`") {
+        let k = i;
+        while (s[k] === "`") k += 1;
+        const tick = s.slice(i, k);
+        const end = find(tick, k);
+        if (end < 0) { buf += tick; i = k; continue; }
+        flush();
+        out.append(mk(st, "code", "", s.slice(k, end)));
+        i = end + tick.length;
+        continue;
+      }
+      if (ch === "*" && s[i + 1] === "*") {
+        const end = depth < 3 ? find("**", i + 2) : -1;
+        if (end > i + 2) {
+          flush();
+          const b = mk(st, "strong");
+          inline(s.slice(i + 2, end), b, st, depth + 1);
+          out.append(b);
+          i = end + 2;
+          continue;
+        }
+        buf += "**";
+        i += 2;
+        continue;
+      }
+      if (ch === "*" || ch === "_") {
+        const opens = depth < 3 && i + 1 < s.length && !/\s/.test(s[i + 1])
+          && (ch === "*" || i === 0 || !/[A-Za-z0-9]/.test(s[i - 1]));
+        const end = opens ? find(ch, i + 1) : -1;
+        if (end > i + 1 && !/\s/.test(s[end - 1]) && (ch === "*" || !/[A-Za-z0-9]/.test(s[end + 1] || ""))) {
+          flush();
+          const em = mk(st, "em");
+          inline(s.slice(i + 1, end), em, st, depth + 1);
+          out.append(em);
+          i = end + 1;
+          continue;
+        }
+        buf += ch;
+        i += 1;
+        continue;
+      }
+      if (ch === "[") {
+        const close = find("]", i + 1);
+        const paren = close > i && s[close + 1] === "(" ? find(")", close + 2) : -1;
+        if (paren > close) {
+          const label = s.slice(i + 1, close);
+          const url = s.slice(close + 2, paren).trim();
+          if (/^https?:\/\//i.test(url) && url.length <= 2048 && !/\s/.test(url)) {
+            flush();
+            const a = mk(st, "a", "", label || url);
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            out.append(a);
+            i = paren + 1;
+            continue;
+          }
+        }
+        buf += ch;
+        i += 1;
+        continue;
+      }
+      buf += ch;
+      i += 1;
+    }
+    flush();
   }
 
   // ---- view switch: Runs stays the default ----
@@ -1282,11 +2140,13 @@ main[data-view="grid"]{max-width:none}
     $viewGrid.setAttribute("aria-pressed", String(view === "grid"));
     if (remember) { try { window.localStorage.setItem(VIEW_KEY, view); } catch (_) { /* storage blocked */ } }
     if (view === "grid") {
-      getComments();
+      setupChat();
       if (db) agentsLive.start(db);
       renderGrid();
     } else {
       agentsLive.pause();
+      syncChats([]);
+      setChrome();
       render();
     }
   }
@@ -1304,6 +2164,10 @@ main[data-view="grid"]{max-width:none}
   $viewRuns.addEventListener("click", () => setView("runs", true));
   $viewGrid.addEventListener("click", () => setView("grid", true));
   $gridReset.addEventListener("click", resetLayout);
+  $filterActive.addEventListener("click", () => setFilter("active"));
+  $filterAll.addEventListener("click", () => setFilter("all"));
+  document.addEventListener("keydown", onDocKey);
+  try { window.addEventListener("resize", () => { if (view === "grid") renderGrid(); }); } catch (_) { /* no window events */ }
 
   // Pure helpers for tests/js/agent-dashboard.test.mjs. Read-only.
   window.AgentDashboard = Object.freeze({
@@ -1312,6 +2176,7 @@ main[data-view="grid"]{max-width:none}
     FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX, VIEW_KEY,
     classifyAgent, groupCoordinators, STATUS_LINES_MAX, OUTCOME_MAX,
     AGENT_PHASE: Object.freeze({...AGENT_PHASE}), LAYOUT_KEY, LAYOUT_MAX,
+    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, CHAT_MAX, CHAT_LIMIT,
   });
 
   setView(initialView(), false);

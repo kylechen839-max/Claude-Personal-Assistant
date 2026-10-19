@@ -502,32 +502,40 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
   - Should: within a few minutes its card changes from "needs you" to
     "done" (the master's CI watch writes it).
 - [ ] During a `/build-feature` run, open the dashboard on a computer and
-      tap Grid.
-  - Should: one large panel for the run (feature, phase and round,
-    elapsed time, a few status lines, Message coordinator and Open
-    session) and a small tile for each researcher, builder and judge
-    with a coloured dot (running green and pulsing, done blue, failed
-    red). They match what the master's session at claude.ai/code says.
-- [ ] Tap Message coordinator, type "status?" in claude.ai's comment box
-      and press Send to Claude.
-  - Should: the box opens quoting the panel's "run <id>" line, and the
-    master replies in that comment thread within a minute or two (one
-    or two lines). A plain comment without Send to Claude gets no reply.
-- [ ] In the desktop window, drag an agent tile by its handle onto
-      another tile, then drag a tile's bottom-right corner to make it
-      wider and taller. Reload the page.
-  - Should: the tile moves and snaps to the new size (at most 3 columns
-    by 2 rows), and both survive the reload. Tab to a handle, press
-    Enter, then the arrow keys: the tile moves. Reset layout puts it all
-    back. A drag made while the master is starting or finishing an
-    agent still drops cleanly, and the next drag works.
+      tap Grid, in light mode and then dark mode.
+  - Should: windows fill the page edge to edge with no page scrollbar:
+    the coordinator window (larger, with its run's colour) and one per
+    researcher, builder and judge, each with a light title bar and a dark
+    monospace body that is easy to read in both modes. They match what the
+    master's session at claude.ai/code says. The artifact frame on
+    claude.ai does not keep growing taller.
+- [ ] Press ⤢ on the coordinator window, then Esc; then ⤢ and Restore.
+  - Should: the window fills the workspace with its conversation; Esc
+    and Restore both put every window back.
+- [ ] Tap All recent, then Active only, and reload.
+  - Should: All recent adds finished runs from the last two weeks; the
+    choice survives the reload.
+- [ ] Drag an agent window onto the coordinator window, then drag a
+      corner to make one wider and taller. Reload.
+  - Should: the windows swap places and snap to the new size (at most 3
+    columns by 2 rows), and both survive the reload. Reset layout puts it
+    all back.
+- [ ] Type "status?" in the coordinator window's box and press Enter.
+  - Should: the first time, claude.ai asks you to allow commenting;
+    allow it. The message shows as "sending", then "sent". Within a
+    minute or two the master's reply appears in the window (formatted:
+    bold, lists, code), and your message stays once.
+- [ ] When the master asks you something during a run you chatted in.
+  - Should: its message is amber and the window shows a "question"
+    chip, until you reply in the box.
 - [ ] Run `/build-feature` a second time in the same master session.
   - Should: the panel shows the new run's title, elapsed time and status
     lines only, not the earlier run's.
 - [ ] On the iPhone, open Grid.
-  - Should: one column, no drag or resize handles; Message coordinator
-    either opens claude.ai's comment box or is not shown at all, and
-    Open session opens the master's session.
+  - Should: one slim row at the top (Runs/Grid, the filter, the window
+    count) and one column of windows, no drag or resize handles. ⤢ makes
+    a window fill the whole screen, row included; Restore brings it back.
+    The box sends, and Open session opens the master's session.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
 - [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.

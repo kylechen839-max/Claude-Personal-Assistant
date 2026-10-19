@@ -3,10 +3,10 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1450 passed, 45 skipped (Linux build sandbox,
+**Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
 shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 82
+change, and the launcher shellcheck test skipped), plus 110
 JavaScript tests (node:test: `voice-core.test.js` and
 `agent-dashboard.test.mjs`, both also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
@@ -58,8 +58,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 44 | dev team dashboard page, manifest, no connector code, desktop launchers, skill writes (runs and agents), watchdog prompt |
-| `tests/js/agent-dashboard.test.mjs` | 70 | dev team dashboard: the page's own script in node:vm (run and agent states, coordinator panels, links, text only, error codes for both queries, Message coordinator, tile layout) |
+| `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `tests/js/agent-dashboard.test.mjs` | 98 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1177,6 +1177,63 @@ still the default; the desktop launchers stay.
   dragging in narrow mode is still blocked by the second check in
   `dragEnd`. The judge's three browser probes (drag, same session,
   hidden count) pass in Chromium.
+
+### Workspace grid and coordinator chat (2026-10-19)
+Kyle wanted the Grid to be a workspace of its own and to work with the
+coordinator from it instead of the session chat. Runs is unchanged and
+still the default.
+- **Part A, the workspace:** `#coords` is now a flat, Morphy-style window
+  workspace that fills the viewport (the page itself never scrolls). It
+  auto-tiles to ceil(√n) columns, at most 6, none narrower than 260 px,
+  and re-tiles on resize. Each window has a light title bar (badge,
+  kicker, title, round, a run-colour square, Open session, PR links,
+  maximize) over a dark monospace body. The coordinator is 2×2 only with
+  3+ columns, and spans are clamped to the columns for display. Maximize
+  works with Esc or a Restore button, and focus returns. There is an
+  Active only / All recent filter (`agentDashboard.filter`), 8 run hues,
+  and the layout is stored as `{v:2}` (a v1 layout keeps its sizes).
+  Drag, resize and keyboard moves are the existing code, with the boards
+  removed. On the phone, the header and toolbar collapse into one slim
+  row; a maximized window hides that row too and shows Restore;
+  safe-area padding.
+- **Part B, the chat:** the manifest is now
+  `{"db":{}, "user":{}, "comments":{}}`. Each coordinator window has a
+  box that sends with `comments.sendToClaude`: the first send anchors on
+  the window title, later ones go to the same `threadId`. The text gets a
+  `[run <id> #<nonce>]` prefix, control characters are removed and it is
+  cut to 4000 UTF-8 bytes. One send at a time, and only from Kyle's
+  click or Enter. The box shows only when `canSendToClaude` answers
+  `available`. Each error code has its own copy, and nothing is retried.
+  The transcript is the master's mirror in Kyle's private
+  `data/users/<id>/chat-<sessionTail>/msgs` (newest 200, read through
+  `liveQuery`; at most 8 subscriptions, none on Runs). Coordinator
+  messages render through a hand-written markdown scanner (elements and
+  text only, http(s) links only, about 2000 elements per message).
+  Kyle's own message goes pending, then sent, and is deduped by the
+  nonce. The open question is highlighted, the view sticks to the bottom
+  or shows a New messages pill. The skill now mirrors every message it
+  gives Kyle, asks as kind `question`, and prunes conversations older
+  than 30 days.
+- **Shared fix:** `liveQuery` now sets its retry timer before reporting
+  and ignores a `start()` made from inside its own subscribe, so a
+  `conn` callback that re-renders can't subscribe twice. A regression
+  test covers it and fails without the fix.
+- **Kyle's mid-run priority change** (work lean) asked to defer the
+  filter, hues, question highlight, New messages pill, markdown tables
+  and the full screenshot matrix. They were already built and tested by
+  then, so they stayed in.
+- **Tested:** `tests/js/agent-dashboard.test.mjs` went from 70 to 98. The
+  harness gained document listeners, scroll metrics, a fake `user` and a
+  full fake `comments`. Against the old page, 54 of the 98 fail (every
+  new-behaviour test) and the 44 unchanged Runs and agent tests pass.
+  `test_agent_dashboard.py` went from 44 to 48 (one sendToClaude call
+  site, three localStorage keys, the CSS pins, Runs markup unchanged,
+  the chat schema, the skill mirror rules). I also checked the page in
+  headless Chromium with a fake `window.claude` at 1400×900 and 390×844,
+  in light and dark, with no console errors. That check led to fixes for
+  markdown list bullets, table font size, the coordinator body fitting a
+  2×2 window, and the phone layout (a flex column). Not checked in the
+  real claude.ai shell; see MANUAL_TEST.md.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
