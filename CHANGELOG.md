@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Dev team: a read-only agent run dashboard (a private claude.ai page,
+  source in `tools/agent-dashboard/`). One row per `/build-feature` run;
+  the page itself flags runs that have gone quiet past their phase's limit.
+  PR-ready, blocked and dead runs untouched for 7 days count as done.
+- Dev team: `/build-feature` writes a status row at each phase, marks a run
+  done when its PR is merged or closed, and stops a phase that runs past
+  its time limit with a blocker note.
+- Dev team: an hourly watchdog marks runs whose session died and sends at
+  most one phone push per session, including "needs you (approval)" when a
+  run waits on a permission prompt.
+
 ## 1.0.2 (2026-10-19)
 
 - If the saved sign-in file can't be read, phone access tokens are refused

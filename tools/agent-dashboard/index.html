@@ -1,0 +1,363 @@
+<title>Hey Claude Agent Runs</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* A read-only glance view of /build-feature runs. One row per run; the page
+   works out "silent too long" itself from updated_at. Rows are untrusted
+   data: text only, links only to the two allowed prefixes. */
+:root{
+  --bg:#f3f4f6;--card:#ffffff;--fg:#15181d;--muted:#5a636e;--line:#dde1e6;--accent:#2a5bc4;
+  --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;
+  --silent:#a8261d;--silent-bg:#fbe4e1;--silent-edge:#d8443a;
+  --run:#14655a;--run-bg:#dff1ec;--run-edge:#2a9a87;
+  --done:#5d6672;--done-bg:#eaecef;--done-edge:#b5bcc5;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101317;--card:#181c21;--fg:#e5e8ec;--muted:#98a1ac;--line:#2a3038;--accent:#8db0f6;
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;
+  --silent:#ff8a7d;--silent-bg:#3a1916;--silent-edge:#e2574b;
+  --run:#68d0bd;--run-bg:#122e29;--run-edge:#3aa894;
+  --done:#9aa3ae;--done-bg:#23282e;--done-edge:#4a525c;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101317;--card:#181c21;--fg:#e5e8ec;--muted:#98a1ac;--line:#2a3038;--accent:#8db0f6;
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;
+  --silent:#ff8a7d;--silent-bg:#3a1916;--silent-edge:#e2574b;
+  --run:#68d0bd;--run-bg:#122e29;--run-edge:#3aa894;
+  --done:#9aa3ae;--done-bg:#23282e;--done-edge:#4a525c;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.4;
+  -webkit-text-size-adjust:100%;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:20px;padding-bottom:max(24px,env(safe-area-inset-bottom,0px))}
+main{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-direction:column;gap:4px}
+h1{font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+#summary{font-size:1.35rem;font-weight:650;margin:0;font-variant-numeric:tabular-nums}
+#conn{font-size:.85rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
+#conn[data-level="bad"]{color:var(--silent)}
+ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px}
+li.run{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--done-edge);border-radius:10px;
+  padding:11px 13px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}
+li.run[data-state="needs"]{border-left-color:var(--needs-edge)}
+li.run[data-state="silent"]{border-left-color:var(--silent-edge)}
+li.run[data-state="running"]{border-left-color:var(--run-edge)}
+.top{display:flex;align-items:flex-start;gap:10px;justify-content:space-between}
+h2{font-size:1rem;font-weight:600;margin:0;overflow-wrap:anywhere;min-width:0}
+.pill{flex:none;font-size:.75rem;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;
+  color:var(--done);background:var(--done-bg)}
+[data-state="needs"] .pill{color:var(--needs);background:var(--needs-bg)}
+[data-state="silent"] .pill{color:var(--silent);background:var(--silent-bg)}
+[data-state="running"] .pill{color:var(--run);background:var(--run-bg)}
+[data-state="running"] .pill::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:currentColor;margin-right:6px;vertical-align:1px;animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){[data-state="running"] .pill::before{animation:none}}
+.when{font-size:.88rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
+[data-state="silent"] .when{color:var(--silent)}
+.branch{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin:0;overflow-wrap:anywhere}
+dl{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0;font-size:.82rem;font-variant-numeric:tabular-nums}
+dl div{display:flex;gap:4px;min-width:0}
+dt{color:var(--muted)}
+dd{margin:0;overflow-wrap:anywhere}
+.blocker{font-size:.88rem;margin:0;color:var(--needs);overflow-wrap:anywhere}
+[data-state="silent"] .blocker{color:var(--silent)}
+.links{display:flex;gap:16px;font-size:.88rem}
+a{color:var(--accent);text-decoration:none;border-radius:4px}
+a:hover{text-decoration:underline}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#empty{color:var(--muted);margin:8px 0 0}
+footer{font-size:.78rem;color:var(--muted);margin-top:6px}
+</style>
+<main>
+<header>
+<h1>Hey Claude agent runs</h1>
+<p id="summary" aria-live="polite">Loading…</p>
+<p id="conn"></p>
+</header>
+<ul id="runs" aria-label="Runs"></ul>
+<p id="empty" hidden></p>
+<footer>Read-only. Silent means no update for longer than the phase allows. PR ready, blocked and dead runs with no change for 7 days count as done. Done runs older than 14 days are hidden.</footer>
+</main>
+<script>
+(() => {
+  "use strict";
+  const PHASES = ["started", "researching", "building", "judging", "pr_ready", "blocked", "done", "dead"];
+  const PHASE_LABEL = {started: "started", researching: "researching", building: "building", judging: "judging",
+    pr_ready: "PR ready", blocked: "blocked", done: "done", dead: "dead"};
+  // Page thresholds = the skill's time limit + 15 min, in minutes.
+  const SILENT_AFTER_MIN = {started: 25, researching: 45, building: 90, judging: 45};
+  const HIDE_DONE_MS = 14 * 24 * 3600e3;
+  // PR ready, blocked and dead rows that sit this long count as done: Kyle
+  // merges in the GitHub UI, and nothing else retires a blocked or dead row.
+  const PARKED = ["pr_ready", "blocked", "dead"];
+  const PARKED_DONE_MS = 7 * 24 * 3600e3;
+  const FUTURE_SLACK_MS = 10 * 60e3;
+  const SESSION_PREFIX = "https://claude.ai/code/session_";
+  const PR_PREFIX = "https://github.com/kylechen839-max/Claude-Personal-Assistant/pull/";
+  const NO_DB = "Open this page on claude.ai while signed in to see runs.";
+
+  const $summary = document.getElementById("summary");
+  const $conn = document.getElementById("conn");
+  const $list = document.getElementById("runs");
+  const $empty = document.getElementById("empty");
+
+  let rows = null;          // cloned rows from the last snapshot
+  let unsubscribe = null;
+  let retryTimer = null;
+  let stopped = false;
+  let exhaustedBackoffMs = 60e3;
+
+  // ---- coercion: every field may be missing, null or the wrong type ----
+  function text(v, max) {
+    let s = "";
+    if (typeof v === "string") s = v.trim();
+    else if (typeof v === "number" && Number.isFinite(v)) s = String(v);
+    else if (typeof v === "boolean") s = String(v);
+    s = s.replace(/[\u0000-\u001f\u007f]+/g, " ");
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+  function number(v) {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && /^\s*\d+(\.\d+)?\s*$/.test(v)) return Number(v);
+    return null;
+  }
+  function time(v) {
+    if (typeof v !== "string" || v.length > 40) return null;
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
+  }
+  function safeLink(v, prefix, tail) {
+    if (typeof v !== "string" || !v.startsWith(prefix)) return null;
+    return tail.test(v.slice(prefix.length)) ? v : null;
+  }
+
+  function classify(r, now) {
+    const phase = text(r.phase, 20).toLowerCase();
+    const updated = time(r.updated_at);
+    const out = {phase, updated, state: "silent", pill: "silent", note: ""};
+    if (phase === "done") { out.state = "done"; out.pill = "done"; return out; }
+    if (PARKED.includes(phase) && updated !== null && now - updated > PARKED_DONE_MS) {
+      out.state = "done"; out.pill = "done (no change 7 d)"; return out;
+    }
+    if (phase === "pr_ready" || phase === "blocked") { out.state = "needs"; out.pill = "needs you"; return out; }
+    if (phase === "dead") { out.pill = "dead (watchdog)"; return out; }
+    if (!PHASES.includes(phase)) { out.note = "unknown phase"; return out; }
+    // The watchdog saw the session waiting on an approval prompt after the
+    // master's last write. A newer master write clears it.
+    const watch = r.watch && typeof r.watch === "object" ? r.watch : {};
+    const checked = time(watch.checked_at);
+    if (text(watch.bucket, 40).toUpperCase() === "BLOCKED" && checked !== null
+        && (updated === null || checked > updated)) {
+      out.state = "needs"; out.pill = "needs you (approval)"; out.note = "waiting on an approval prompt";
+      return out;
+    }
+    const limit = SILENT_AFTER_MIN[phase];
+    if (updated === null || updated > now + FUTURE_SLACK_MS) { out.note = "last update unreadable"; return out; }
+    const mins = (now - updated) / 60e3;
+    if (mins > limit) { out.note = `no update for ${duration(now - updated)} (limit ${limit} min)`; return out; }
+    out.state = "running"; out.pill = "running";
+    return out;
+  }
+
+  function duration(ms) {
+    const m = Math.max(0, Math.floor(ms / 60e3));
+    if (m < 1) return "under a minute";
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 48) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+    return `${Math.floor(h / 24)} d`;
+  }
+  function ago(updated, now) {
+    if (updated === null) return "updated ?";
+    if (updated > now) return "updated just now";
+    const ms = now - updated;
+    return ms < 60e3 ? "updated just now" : `updated ${duration(ms)} ago`;
+  }
+  function compact(n) {
+    if (n === null) return "?";
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
+    return String(Math.round(n));
+  }
+
+  // ---- rendering (textContent only) ----
+  function el(tag, cls, content) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (content !== undefined) e.textContent = content;
+    return e;
+  }
+  function field(dl, name, value) {
+    const d = el("div");
+    d.append(el("dt", "", name), el("dd", "", value || "?"));
+    dl.append(d);
+  }
+  function link(label, url) {
+    const a = el("a", "", label);
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
+  }
+
+  function renderRow(r, c, now) {
+    const li = el("li", "run");
+    li.dataset.state = c.state;
+    const top = el("div", "top");
+    top.append(el("h2", "", text(r.feature, 80) || text(r.run_id, 80) || text(r._id, 80) || "?"),
+               el("span", "pill", c.pill));
+    li.append(top);
+
+    let when = PHASE_LABEL[c.phase] || (c.phase ? `phase ${c.phase}` : "phase ?");
+    const round = number(r.round);
+    if (round !== null && round >= 1 && (c.phase === "building" || c.phase === "judging")) when += ` · round ${Math.floor(round)}`;
+    when += " · " + ago(c.updated, now);
+    li.append(el("p", "when", when));
+
+    const branch = text(r.branch, 120);
+    li.append(el("p", "branch", branch || "branch ?"));
+
+    const dl = el("dl");
+    field(dl, "tests", text(r.tests, 60));
+    field(dl, "tokens", compact(number(r.tokens)));
+    const runs = number(r.agent_runs);
+    field(dl, "agent runs", runs === null ? "" : String(Math.round(runs)));
+    li.append(dl);
+
+    const blocker = text(r.blocker, 160);
+    const note = [c.note, blocker].filter(Boolean).join(" · ");
+    if (note) li.append(el("p", "blocker", note));
+
+    const session = safeLink(r.session_url, SESSION_PREFIX, /^[A-Za-z0-9_-]{1,120}$/);
+    const pr = safeLink(r.pr_url, PR_PREFIX, /^\d{1,7}$/);
+    if (session || pr) {
+      const links = el("div", "links");
+      if (session) links.append(link("Session", session));
+      if (pr) links.append(link("PR #" + pr.slice(PR_PREFIX.length), pr));
+      li.append(links);
+    }
+    return li;
+  }
+
+  const RANK = {needs: 0, silent: 0, running: 1, done: 2};
+
+  function render() {
+    if (rows === null) return;
+    const now = Date.now();
+    const items = [];
+    for (const r of rows) {
+      const c = classify(r, now);
+      if (c.state === "done" && c.updated !== null && now - c.updated > HIDE_DONE_MS) continue;
+      items.push({r, c});
+    }
+    items.sort((a, b) => (RANK[a.c.state] - RANK[b.c.state])
+      || ((b.c.updated ?? -Infinity) - (a.c.updated ?? -Infinity)));
+    $list.replaceChildren(...items.map(({r, c}) => renderRow(r, c, now)));
+
+    const n = {needs: 0, running: 0, silent: 0, done: 0};
+    for (const {c} of items) n[c.state] += 1;
+    const parts = [];
+    if (n.needs) parts.push(`${n.needs} need${n.needs === 1 ? "s" : ""} you`);
+    if (n.running) parts.push(`${n.running} running`);
+    if (n.silent) parts.push(`${n.silent} silent`);
+    if (n.done) parts.push(`${n.done} done`);
+    $summary.textContent = items.length === 0 ? "No runs yet"
+      : (n.needs || n.silent ? "" : "Nothing needs you · ") + parts.join(" · ");
+    $empty.hidden = items.length !== 0;
+    $empty.textContent = "Each /build-feature run shows up here when it starts.";
+  }
+
+  function setConn(msg, bad) {
+    $conn.textContent = msg;
+    if (bad) $conn.dataset.level = "bad"; else delete $conn.dataset.level;
+  }
+
+  function stop(summary, conn) {
+    stopped = true;
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    clearTimeout(retryTimer);
+    rows = null;
+    $list.replaceChildren();
+    $empty.hidden = true;
+    $summary.textContent = summary;
+    setConn(conn || "", true);
+  }
+
+  // ---- subscription: once, re-subscribed only from the error path ----
+  let query = null;
+
+  function onNext(snap) {
+    exhaustedBackoffMs = 60e3;
+    const next = [];
+    for (const d of snap.docs || []) {
+      let body;
+      try { body = d.data(); } catch (_) { body = undefined; }
+      const r = body && typeof body === "object" && !Array.isArray(body) ? {...body} : {};
+      r._id = d.id;
+      next.push(r);
+    }
+    rows = next;
+    setConn(snap.metadata && snap.metadata.fromCache ? "connecting…" : "live");
+    render();
+  }
+
+  function retryIn(ms, why) {
+    clearTimeout(retryTimer);
+    setConn(`${why} · retrying in ${Math.round(ms / 1000)} s`, true);
+    retryTimer = setTimeout(subscribe, ms);
+  }
+
+  function onError(e) {
+    unsubscribe = null;  // a delivered error ends the listener
+    if (stopped) return;
+    const code = e && typeof e.code === "string" ? e.code : "unavailable";
+    if (code === "revoked") { stop("No access", "This page no longer has access to the runs."); return; }
+    if (code === "invalid_argument" || code === "transform_error") { stop("Can't load runs", "The run list query was rejected."); return; }
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") { stop(NO_DB); return; }
+    if (code === "resource_exhausted") {
+      const ms = exhaustedBackoffMs * (0.75 + Math.random() * 0.5);
+      exhaustedBackoffMs = Math.min(exhaustedBackoffMs * 2, 15 * 60e3);
+      retryIn(ms, "Busy");
+      return;
+    }
+    retryIn(5e3 + Math.random() * 25e3, "Connection lost");  // unavailable and unknown codes
+  }
+
+  function subscribe() {
+    if (stopped) return;
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    setConn("connecting…");
+    try {
+      unsubscribe = query.onSnapshot(onNext, onError);
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  async function start() {
+    let db = null;
+    try { db = await window.claude?.use?.("db"); } catch (_) { db = null; }
+    if (!db) { $summary.textContent = NO_DB; setConn(""); return; }
+    try {
+      query = db.collection("runs").orderBy("started_at", "desc").limit(100);
+    } catch (_) { stop("Can't load runs"); return; }
+    subscribe();
+    // Re-render from the cached rows so "silent" stays current. Never writes.
+    setInterval(render, 60e3);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+  }
+
+  // Pure helpers for tests/js/agent-dashboard.test.mjs. Read-only.
+  window.AgentDashboard = Object.freeze({
+    classify, safeLink, text, number, time,
+    SILENT_AFTER_MIN: Object.freeze({...SILENT_AFTER_MIN}),
+    FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX,
+  });
+
+  start();
+})();
+</script>
