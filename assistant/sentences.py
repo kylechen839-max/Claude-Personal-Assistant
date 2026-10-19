@@ -141,9 +141,17 @@ class SentenceSplitter:
         return pos + 1 if pos >= floor else self.max_chars
 
 
+_URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿️‍]+")
+_BULLET = re.compile(r"^\s*(?:[-•]|\d+[.)])\s+")
+
+
 def _clean(sentence: str) -> str:
-    """Strip whitespace and markdown leftovers that would be read out."""
-    s = re.sub(r"[*_`#]+", "", sentence)
+    """Strip whitespace, markdown, URLs and emoji that would be read out."""
+    s = _URL.sub("", sentence)
+    s = _EMOJI.sub("", s)
+    s = _BULLET.sub("", s)
+    s = re.sub(r"[*_`#]+", "", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s if re.search(r"\w", s) else ""
 

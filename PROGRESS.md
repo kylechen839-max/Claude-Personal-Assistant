@@ -999,3 +999,26 @@ synced history list; Pinecone memory still works).
   switching apps during a lecture can stop the recording on iPhone.
 - **Gmail and lectures untested with real accounts** here (no keys in the
   sandbox): MANUAL_TEST.md "Email, notes, lectures, tutor".
+
+## Voice style (Kyle's VOICE_STYLE_PROMPT.md)
+
+- `assistant/chat.py` `SYSTEM_PROMPT` now carries the "VOICE STYLE" section
+  of Kyle's guide: one or two short sentences, answer first, contractions and
+  at most one natural reaction, follow-up questions only when useful, no
+  unspeakable formatting, lists over three items summarized, natural numbers,
+  a quick filler before slow lookups, plain-speech tool results. It is the
+  first part of the system prompt; the tool, memory, web and email prompts
+  are unchanged and still follow it. Two of the guide's three example
+  exchanges are included; the research one is left out, since its
+  specifics (J2312, MAST) could leak into real answers.
+- Pipeline tips: (1) natural TTS and (2) sentence-by-sentence streaming were
+  already done (Kokoro, voice mode). (3) The speech filter
+  (`assistant/sentences.py` `_clean`) now also drops URLs, emoji and list
+  markers, besides markdown. (4) max_tokens stays 1500: it is a ceiling that
+  must leave room for extended thinking and web search, and a 200 cap would
+  cut off tool calls; replies stay short through the prompt. (5) VAD and
+  barge-in were already done.
+- A filler said before a tool call is spoken in streamed modes (phone, voice
+  conversation); in the wake-word loop only the final answer is spoken.
+- Tests: `tests/test_sentences.py` (URL, emoji, bullet stripping),
+  `tests/test_chat.py` prompt check. Full suite: 1431 passed, 45 skipped.

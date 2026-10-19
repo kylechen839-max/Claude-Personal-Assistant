@@ -88,3 +88,14 @@ def test_first_piece_ends_at_a_clause_for_faster_first_audio():
     s = SentenceSplitter(first_clause_words=0)
     assert s.feed("Tomorrow you have the dentist at three thirty, and then. X") == [
         "Tomorrow you have the dentist at three thirty, and then."]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Here it is: https://example.com/a_b?x=1 so take a look.",
+     ["Here it is: so take a look."]),
+    ("Nice work \U0001F389\U0001F44D see you then.", ["Nice work see you then."]),
+    ("- **Gym** at six.", ["Gym at six."]),
+    ("✅", []),
+])
+def test_unspeakable_bits_are_stripped(text, expected):
+    assert split_sentences(text) == expected

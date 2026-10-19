@@ -20,7 +20,7 @@ def test_ask_keeps_history_and_sends_system_prompt(fake_client):
     assert chat.ask("again") == "Sure."
     call = fake_client.calls[-1]
     assert call["model"] == "m"
-    assert "read aloud" in call["system"]
+    assert "turned into speech" in call["system"]
     assert "Current local date" in call["system"]
     assert [m["role"] for m in chat.history] == ["user", "assistant"] * 2
 
