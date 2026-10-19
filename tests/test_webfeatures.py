@@ -213,7 +213,7 @@ def test_katex_is_vendored_and_served_without_a_cdn(features_app):
     client, _, _ = features_app()
     page = client.get("/").text
     assert "/static/katex/katex.min.js" in page and "/static/features.js" in page
-    assert not re.search(r"https?://", re.sub(r'xmlns="[^"]+"', "", page))
+    assert not re.search(r'(?:src|href)="https?://', page)  # nothing from a CDN
     js = client.get("/static/katex/katex.min.js")
     assert js.status_code == 200 and "katex" in js.text[:2000].lower()
     css = client.get("/static/katex/katex.min.css").text

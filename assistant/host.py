@@ -15,12 +15,15 @@ logs/host-<mode>.log, and:
   A clean exit (code 0) ends the host. Task Scheduler's own "restart on
   failure" can't see the assistant's exit codes, hence this.
 - with `[update] enabled = true`, updates from the `stable` branch every
-  `check_minutes` (assistant/updater.py), and whenever HEAD moves (its own
-  update, the other host's, or `python -m assistant --update`) restarts the
-  assistant on the new code: the web app only once no turn is running (at
-  most ~2 minutes), then it must answer /healthz with the new version (the
-  wake loop must stay up for 20 s). If it doesn't, the update is rolled
-  back and the old version restarted.
+  `check_minutes` (assistant/updater.py), and whenever HEAD moves restarts
+  the assistant on the new code, the web app only once no turn is running
+  (at most ~2 minutes). For a commit the updater applied (its own update,
+  the other host's, or `python -m assistant --update`) the new version must
+  then answer /healthz within `[update] health_seconds` (the wake loop must
+  stay up for 20 s), or the update is rolled back and the old version
+  restarted. A HEAD move made by hand (git checkout/pull) only restarts.
+- touches logs/host-<mode>.alive every second, so an update that needs
+  pip knows the assistant is running.
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ MAX_LOG_BYTES = 5_000_000
 CREATE_NO_WINDOW = 0x08000000  # Windows: no console window for the child
 HEAD_POLL = 30          # seconds between "did HEAD move?" checks
 IDLE_WAIT = 120         # at most this long for the web app to go quiet
-HEALTH_WAIT = 120       # for the new web app to answer /healthz
+HEALTH_WAIT = 180       # default for the new web app to answer /healthz
 WAKE_SETTLE = 20        # the new wake loop must still run after this
 
 
@@ -108,7 +111,8 @@ class Host:
 
     def __init__(self, mode: str, command: list[str], log, port: str = str(DEFAULT_PORT),
                  updater=None, settings=update_settings, popen=None,
-                 health=get_health, sleep=time.sleep, clock=time.monotonic):
+                 health=get_health, sleep=time.sleep, clock=time.monotonic,
+                 health_wait: float = HEALTH_WAIT, heartbeat: Path | None = None):
         self.mode = mode
         self.command = command
         self.log = log
@@ -122,6 +126,8 @@ class Host:
         self.child = None
         self.child_sha: str | None = None
         self.crashes: list[float] = []
+        self.health_wait = health_wait
+        self.heartbeat = heartbeat
 
     def say(self, text: str) -> None:
         self.log.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [host] {text}\n")
@@ -164,7 +170,7 @@ class Host:
     def healthy(self, sha: str | None) -> bool:
         """Did the new child come up on `sha`?"""
         if self.mode == "web":
-            deadline = self.clock() + HEALTH_WAIT
+            deadline = self.clock() + self.health_wait
             while self.clock() < deadline:
                 if self.child.poll() is not None:
                     return False
@@ -175,6 +181,14 @@ class Host:
             return False
         self.sleep(WAKE_SETTLE)
         return self.child.poll() is None
+
+    def restart_by_hand(self, new: str) -> None:
+        """HEAD moved without the updater (git checkout/pull): restart only."""
+        self.say(f"code changed by hand {(self.child_sha or '?')[:7]} -> {new[:7]}; "
+                 "restarting (no update checks, no rollback)")
+        self.wait_until_idle()
+        self.stop()
+        self.start()
 
     def restart_on(self, new: str) -> None:
         """HEAD moved to `new`: restart on it; roll back if it won't run."""
@@ -208,8 +222,17 @@ class Host:
             self.say(f"exited with {code}; restarting in {RESTART_DELAY} s")
             self.sleep(RESTART_DELAY)
 
+    def beat(self) -> None:
+        if self.heartbeat is None:
+            return
+        try:
+            self.heartbeat.touch()
+        except OSError:
+            pass
+
     def tick(self, now: float, state: dict) -> int | None:
         """One pass of the loop; an exit code once the host should stop."""
+        self.beat()
         code = self.child.poll()
         if code is not None:
             if code == 0:
@@ -225,7 +248,7 @@ class Host:
                 cfg = self.settings()
             except Exception as e:  # a broken config.toml mustn't stop it
                 self.say(f"can't read [update] settings: {e}")
-                cfg = {"enabled": False, "check_minutes": 15}
+                cfg = {"enabled": False, "check_minutes": 15}  # skip this round
             state["next_update"] = now + max(1, float(cfg["check_minutes"])) * 60
             if cfg["enabled"]:
                 self.updater.update()
@@ -234,7 +257,10 @@ class Host:
             head = self.updater.head()
             if head and self.child_sha and head != self.child_sha \
                     and not self.updater.locked():
-                self.restart_on(head)
+                if head == self.updater.applied():
+                    self.restart_on(head)
+                else:
+                    self.restart_by_hand(head)
         return None
 
     def loop(self, max_ticks: int | None = None) -> int:
@@ -270,14 +296,17 @@ def main(argv=None) -> int:
     os.chdir(ROOT)
     from assistant.updater import Updater
 
+    from assistant.config import DEFAULTS
+
+    try:
+        cfg = update_settings()
+    except Exception:  # a broken config.toml: defaults (updates off)
+        cfg = dict(DEFAULTS["update"])
     with open(log_path(mode), "a", encoding="utf-8", buffering=1) as log:
-        host = Host(mode, build_command(mode, port), log, port)
-        try:
-            channel = update_settings()["channel"]
-        except Exception:
-            channel = "stable"
-        host.updater = Updater(branch=channel, python=console_python(),
-                               say=host.say)
+        host = Host(mode, build_command(mode, port), log, port,
+                    health_wait=float(cfg["health_seconds"]),
+                    heartbeat=ROOT / "logs" / f"host-{mode}.alive")
+        host.updater = Updater.from_config(cfg, python=console_python(), say=host.say)
         if not wait_for_network():
             host.say("network not up after 120 s; starting anyway")
         try:

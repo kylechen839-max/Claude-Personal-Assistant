@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#1f1e1d">
+<meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f4ef" media="(prefers-color-scheme: light)">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,6 +22,7 @@
 <script src="/voice-core.js" defer></script>
 <script src="/voice.js" defer></script>
 <script src="/update-watch.js" defer></script>
+<script src="/history.js" defer></script>
 <script src="/static/katex/katex.min.js" defer></script>
 <script src="/static/features.js" defer></script>
 </head>
@@ -39,12 +41,37 @@
 
 <main id="app" class="app" hidden>
   <header>
-    <h1>Hey Claude</h1>
+    <h1>Hey Claude <span id="incognito-badge" class="badge" hidden>Incognito</span></h1>
+    <span id="badge" class="backend-badge" title="Backend in use" hidden></span>
+    <button id="open-history" class="icon-btn" type="button" aria-label="Conversation history" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
+    </button>
     <details class="menu">
       <summary aria-label="Settings">&#9881;</summary>
       <div class="menu-body">
         <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
         <label><input id="mute" type="checkbox"> Don't speak replies</label>
+        <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
+        <fieldset id="backends" class="backends" hidden>
+          <legend>Backends</legend>
+          <label>Use
+            <select id="backend-mode">
+              <option value="auto">Auto: Pi, then PC, then cloud</option>
+              <option value="pi">Pi only</option>
+              <option value="pc">PC only</option>
+              <option value="cloud">Cloud only</option>
+            </select>
+          </label>
+          <label>Pi (tailnet) <input id="url-pi" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://pi.your-tailnet.ts.net"></label>
+          <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
+          <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="this app's address"></label>
+          <p class="hint">Empty = the address the server suggests.</p>
+          <button id="backends-save" type="button">Save and check</button>
+          <ul id="backend-status" class="backend-status"></ul>
+        </fieldset>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>
@@ -94,5 +121,85 @@
     <button id="voice-timings" type="button" aria-pressed="false" aria-label="Latency timings">&#9201;</button>
   </div>
 </section>
+
+<main id="history-view" class="history" hidden aria-labelledby="history-title">
+  <header class="bar">
+    <button id="history-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="history-title" tabindex="-1">History</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <div class="search">
+    <input id="history-search" type="search" placeholder="Search conversations" aria-label="Search conversations"
+           autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <div id="history-filters" class="chips" role="radiogroup" aria-label="Filter">
+      <button type="button" role="radio" aria-checked="true" data-filter="">All</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="pinned">Pinned</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="web">Phone</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="voice">Voice</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="wake">PC</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="text">Typed</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="archived">Archived</button>
+    </div>
+  </div>
+  <section id="history-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
+  <p id="history-status" class="status center" role="status"></p>
+  <button id="history-more" class="more-btn" type="button" hidden>Load more</button>
+</main>
+
+<main id="transcript-view" class="transcript" hidden aria-labelledby="transcript-title">
+  <header class="bar">
+    <button id="transcript-back" class="icon-btn" type="button" aria-label="Back to history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="transcript-title" tabindex="-1"></h1>
+    <button id="transcript-actions" class="icon-btn" type="button" aria-label="More actions">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+    </button>
+  </header>
+  <p id="transcript-meta" class="meta"></p>
+  <p id="transcript-summary" class="summary"></p>
+  <section id="transcript-log" class="log"></section>
+  <footer class="transcript-footer">
+    <button id="continue" class="primary" type="button">Continue this conversation</button>
+    <p id="continue-hint" class="hint"></p>
+  </footer>
+</main>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <form method="dialog">
+    <h2 id="sheet-title"></h2>
+    <button value="open">Open</button>
+    <button value="pin" id="sheet-pin">Pin</button>
+    <button value="rename">Rename</button>
+    <button value="archive" id="sheet-archive">Archive</button>
+    <button value="export">Export as Markdown</button>
+    <button value="delete" class="danger">Delete…</button>
+    <button value="cancel" class="cancel">Cancel</button>
+  </form>
+</dialog>
+
+<dialog id="rename-dialog" class="sheet" aria-labelledby="rename-title">
+  <form method="dialog">
+    <h2 id="rename-title">Rename</h2>
+    <input id="rename-input" type="text" maxlength="120" required aria-labelledby="rename-title">
+    <div class="row">
+      <button value="cancel" class="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" class="sheet" aria-labelledby="delete-title" aria-describedby="delete-text">
+  <form method="dialog">
+    <h2 id="delete-title">Delete conversation?</h2>
+    <p id="delete-text"></p>
+    <div class="row">
+      <button value="cancel" class="cancel">Cancel</button>
+      <button value="delete" class="danger">Delete</button>
+    </div>
+  </form>
+</dialog>
 </body>
 </html>

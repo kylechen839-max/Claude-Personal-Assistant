@@ -78,6 +78,14 @@ jobs:
           path: voices
           key: piper-voice-en_US-lessac-medium
 
+      # The real Kokoro tests download the int8 model and voices into
+      # models/kokoro/ (checksum-verified) when they're missing.
+      - name: Cache Kokoro model
+        uses: actions/cache@v4
+        with:
+          path: models/kokoro
+          key: kokoro-v1.0-int8
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -92,6 +100,18 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -rs
+
+  # The phone app's backend router (Pi -> PC -> cloud failover, FAILOVER.md):
+  # node:test, no packages needed.
+  backend-router:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/js/*.test.mjs
 
   # The Pinecone MCP connector (deployed separately, see render.yaml):
   # type-check, build, and check the server starts and answers its health check.
@@ -119,3 +139,23 @@ jobs:
           node dist/server.js &
           for i in $(seq 1 20); do curl -sf localhost:3999/ && break; sleep 0.5; done
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3999/mcp/wrong)" = 404
+
+  # The cloud image (Dockerfile, deployed by render.yaml): build it with the
+  # speech models baked in, start it like Render does, check /healthz and the
+  # auth wall, run one spoken turn, and measure peak memory (job summary).
+  docker:
+    name: Docker image (cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hey-claude:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test and memory
+        run: scripts/container_smoke.sh hey-claude:ci

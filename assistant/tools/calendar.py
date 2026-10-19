@@ -9,8 +9,10 @@ from assistant.tools import UNTRUSTED_MARK, Tool
 # Sign-in lives in google_auth (shared with Gmail); re-exported here so
 # `python -m assistant.tools.calendar` and older imports keep working.
 from assistant.tools.google_auth import (  # noqa: F401
-    CALENDAR_SCOPES, HEADLESS_REDIRECT, SCOPES, get_credentials,
-    headless_finish, headless_start)
+    CALENDAR_SCOPES, CLIENT_ENV, HEADLESS_REDIRECT, REFRESH_FAILED, SCOPES,
+    TOKEN_ENV, GoogleSignInError, _warn_on_refresh_failure, client_config,
+    get_credentials, has_credentials, headless_finish, headless_start,
+    token_info)
 from assistant.tools.timeutil import (local_zone, parse_datetime, resolve_day,
                                       spoken_date, spoken_time, zone_name)
 
@@ -42,10 +44,11 @@ def _is_date(value: str) -> bool:
 class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
-                 timezone: str | None = None):
+                 timezone: str | None = None, save_token: bool = True):
         self._service = service
         self.credentials_path = credentials_path
         self.token_path = token_path
+        self.save_token = save_token
         self.calendar_id = calendar_id
         self.tz = local_zone(timezone)
 
@@ -54,7 +57,8 @@ class GoogleCalendar:
         if self._service is None:
             from googleapiclient.discovery import build
 
-            creds = get_credentials(self.credentials_path, self.token_path)
+            creds = get_credentials(self.credentials_path, self.token_path,
+                                    save_token=self.save_token)
             self._service = build("calendar", "v3", credentials=creds,
                                   cache_discovery=False)
         return self._service

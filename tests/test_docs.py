@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import cli, preflight, smoke, tts
+from assistant import cli, preflight, smoke, tts, tts_kokoro
 from assistant.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
@@ -22,11 +22,14 @@ DOCS = ["README.md", "MANUAL_TEST.md", "PI_MIGRATION.md"]
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--now", "--bg", "--https",  # + tailscale serve
-               "--keep", "--ff-only", "--short"}  # git (automatic updates)
-# Tool names, not settings.
-OTHER_IDENTIFIERS = {"open_in_browser", "email_summary", "read_email",
-                     "draft_reply", "remember_note", "recall_notes",
-                     "list_recent_notes", "delete_note"}
+               "--keep", "--ff-only", "--short", "--oneline",  # git (updates)
+               "--test"}  # node --test
+OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
+                     "resume_conversation",  # tool names, not settings
+                     "email_summary", "read_email", "draft_reply",
+                     "remember_note", "recall_notes", "list_recent_notes",
+                     "delete_note",
+                     *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 
 class _Captured(Exception):

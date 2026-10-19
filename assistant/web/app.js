@@ -9,6 +9,9 @@ const els = {
   confirm: $("confirm"), question: $("confirm-question"), yes: $("yes"), no: $("no"),
   textForm: $("text-form"), text: $("text"), mic: $("mic"), micHint: $("mic-hint"),
   phoneVoice: $("phone-voice"), mute: $("mute"), logout: $("logout"),
+  badge: $("badge"), backends: $("backends"), backendMode: $("backend-mode"),
+  urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
+  backendsSave: $("backends-save"), backendStatus: $("backend-status"),
 };
 
 let busy = false;
@@ -32,6 +35,10 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
+  for (const id of ["history-view", "transcript-view"]) {  // history.js
+    const el = $(id);
+    if (el) el.hidden = view !== id;
+  }
 }
 
 function addMessage(kind, text) {
@@ -79,15 +86,163 @@ function speakInBrowser(text) {
   speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 
+let audioUrl = null;  // object URL of the last reply fetched with a token
+
 function speak(text, url) {
   if (els.mute.checked) return;
   if (els.phoneVoice.checked || !url) { speakInBrowser(text); return; }
+  if (router) {
+    // another origin and a bearer token: fetch it, then play the blob
+    request(url)
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("no audio"))))
+      .then((blob) => {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        audioUrl = URL.createObjectURL(blob);
+        player.src = audioUrl;
+        return player.play();
+      })
+      .catch(() => speakInBrowser(text));
+    return;
+  }
   player.src = url;
   player.play().catch(() => speakInBrowser(text));
 }
 
+// --- failover: Pi, then PC, then cloud (FAILOVER.md) ---
+// Only when the server says it is part of a failover setup (/healthz has a
+// "role"). The app then holds a bearer token (IndexedDB) instead of a
+// cookie, and backend-router.js picks the backend for every request.
+let router = null;
+let routerMod = null;
+let tokens = null;
+
+function readJSON(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+}
+function writeJSON(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
+}
+
+async function detectFailover() {
+  let on = readJSON("failover", false);
+  try {
+    const res = await fetch("/healthz", { cache: "no-store", credentials: "omit" });
+    on = Boolean((await res.json()).role);
+    writeJSON("failover", on);
+  } catch (e) { /* the cloud is down: the cached answer decides */ }
+  if (!on) return;
+  routerMod = await import("/backend-router.js");
+  tokens = routerMod.tokenStore();
+  router = new routerMod.BackendRouter({
+    backends: currentBackends(),
+    getToken: async () => { const t = await tokens.get("token"); return t && t.access_token; },
+    override: readJSON("backendOverride", "auto"),
+    onChange: () => renderBackends(),
+  });
+  els.backends.hidden = false;
+  els.badge.hidden = false;
+  const user = readJSON("backendSettings", {});
+  els.urlPi.value = user.pi || "";
+  els.urlPc.value = user.pc || "";
+  els.urlCloud.value = user.cloud || "";
+  els.backendMode.value = router.override;
+  router.start();
+  window.addEventListener("online", () => router.select());
+  // for the voice view (voice.js): connect to the active backend, token first
+  window.heyClaudeFailover = {
+    wsUrl: (path) => router.wsUrl(path),
+    token: async () => { const t = await tokens.get("token"); return t && t.access_token; },
+    beginTurn: () => router.beginTurn(),
+    endTurn: () => router.endTurn(),
+  };
+}
+
+function currentBackends() {
+  return routerMod.mergeBackends(readJSON("backendsCache", []),
+    readJSON("backendSettings", {}), location.origin);
+}
+
+function renderBackends() {
+  if (!router) return;
+  const st = router.status();
+  els.badge.textContent = st.badge;
+  els.badge.dataset.role = st.active || "offline";
+  els.backendStatus.textContent = "";
+  for (const b of st.backends) {
+    const li = document.createElement("li");
+    let state = b.healthy ? "healthy" : (b.reason || "not checked");
+    if (!b.compatible) state = b.reason;
+    li.textContent = `${b.label}: ${state}${b.role === st.active ? " (in use)" : ""}`;
+    els.backendStatus.appendChild(li);
+  }
+}
+
+async function saveToken(data) {
+  await tokens.set("token", { access_token: data.access_token, expires_at: data.expires_at,
+                              sid: data.sid });
+}
+
+async function refreshTokenIfOld() {
+  const t = await tokens.get("token");
+  if (!t || t.expires_at * 1000 - Date.now() > 7 * 24 * 3600 * 1000) return;
+  try {
+    const res = await router.request("/api/auth/refresh", { method: "POST", idempotent: true });
+    if (res.ok) await saveToken(await res.json());
+  } catch (e) { /* next time */ }
+}
+
+async function updateBackendList() {
+  try {
+    const res = await router.request("/api/backends");
+    if (!res.ok) return;
+    const before = JSON.stringify(router.backends);
+    writeJSON("backendsCache", (await res.json()).backends || []);
+    router.setBackends(currentBackends());
+    if (JSON.stringify(router.backends) !== before) await router.select();  // e.g. first sign-in
+    renderBackends();
+  } catch (e) { /* keep the cached list */ }
+}
+
+els.backendMode.addEventListener("change", () => {
+  writeJSON("backendOverride", els.backendMode.value);
+  router.setOverride(els.backendMode.value);
+  renderBackends();
+});
+
+els.backendsSave.addEventListener("click", async () => {
+  const user = {};
+  for (const [role, input] of [["pi", els.urlPi], ["pc", els.urlPc], ["cloud", els.urlCloud]]) {
+    const v = input.value.trim();
+    if (!v) continue;
+    const url = routerMod.normalizeUrl(v);
+    if (!url) { addMessage("note", `${role.toUpperCase()}: use an https:// address with no path.`); return; }
+    user[role] = url;
+  }
+  writeJSON("backendSettings", user);
+  router.setBackends(currentBackends());
+  await router.select();
+  renderBackends();
+});
+
 // --- talking to the server ---
-async function request(url, options) {
+async function request(url, options = {}) {
+  if (router) {
+    let res;
+    try {
+      res = await router.request(url, options);
+    } catch (e) {
+      if (e.name === "NoBackend") throw new Error("Can't reach the Pi, the PC or the cloud right now.");
+      throw e;  // NeedsUserRetry: "Pi didn't answer; tap to try again"
+    } finally {
+      renderBackends();
+    }
+    if (res.status === 401) {
+      await tokens.delete("token");
+      show("login");
+      throw new Error("Please sign in.");
+    }
+    return res;
+  }
   const res = await fetch(url, { credentials: "same-origin", ...options });
   if (res.status === 401) { show("login"); throw new Error("Please sign in."); }
   return res;
@@ -172,6 +327,7 @@ async function send(body) {
   if (answering) els.confirm.hidden = true;
   setBusy(true);
   setStatus(body instanceof FormData ? "Listening back…" : "Thinking…");
+  if (router) router.beginTurn();  // no backend switch until the reply is done
   try {
     await readEvents(await request(url, options));
   } catch (e) {
@@ -179,15 +335,20 @@ async function send(body) {
     setStatus("");
     if (answering) els.confirm.hidden = false;
   } finally {
+    if (router) router.endTurn();
     setBusy(false);
   }
 }
 
 async function refreshState() {
+  if (router && !(await tokens.get("token"))) { show("login"); return; }
+  if (router) { refreshTokenIfOld(); updateBackendList(); }
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    show("app");
+    const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
+    if (!elsewhere) show("app");
+    if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
@@ -207,6 +368,34 @@ els.loginForm.addEventListener("submit", async (e) => {
 
 async function login(token) {
   els.loginError.textContent = "";
+  if (router) {
+    // trade WEB_TOKEN for an access token; WEB_TOKEN itself is not kept
+    try {
+      const old = await tokens.get("token");
+      const res = await router.request("/api/auth/token", {
+        method: "POST", idempotent: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim(), sid: old && old.sid }),
+      });
+      if (!res.ok) {
+        let message = "Sign-in failed.";
+        try { message = (await res.json()).error || message; } catch (err) { /* ignore */ }
+        els.loginError.textContent = message;
+        show("login");
+        return;
+      }
+      await saveToken(await res.json());
+      els.token.value = "";
+      show("app");
+      refreshState();
+    } catch (e) {
+      els.loginError.textContent = e.name === "NoBackend"
+        ? "Can't reach the Pi, the PC or the cloud right now." : (e.message || String(e));
+      show("login");
+    } finally {
+      renderBackends();
+    }
+    return;
+  }
   const res = await fetch("/api/login", {
     method: "POST", credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -225,6 +414,13 @@ async function login(token) {
 }
 
 async function signOut(path) {
+  if (router) {
+    try { await request(path, { method: "POST" }); } catch (e) { /* signed out anyway */ }
+    await tokens.delete("token");
+    els.log.textContent = "";
+    show("login");
+    return;
+  }
   await fetch(path, { method: "POST", credentials: "same-origin" });
   els.log.textContent = "";
   show("login");
@@ -362,15 +558,19 @@ els.mic.addEventListener("pointercancel", onRelease);
 els.mic.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // --- start ---
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && !els.app.hidden && !busy) refreshState();
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible") return;
+  if (router) { await router.select(); renderBackends(); }
+  if (!els.app.hidden && !busy) refreshState();
 });
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-(function start() {
+(async function start() {
+  try { await detectFailover(); } catch (e) { router = null; }
+  if (router) { await router.select(); renderBackends(); }
   // A sign-in link may carry the token after "#token=" (never sent to the server).
   const match = location.hash.match(/token=([^&]+)/);
   if (match) {

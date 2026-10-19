@@ -47,6 +47,37 @@ Only what is still open for Kyle. None of it blocks the code.
       section). Before it, consider **publishing the Google OAuth app**
       (consent screen -> Publish app): in "Testing" mode Google expires
       `token.json` after 7 days, which an always-on Pi would hit.
+- [ ] **Protect `master` and `stable` on GitHub** before turning on
+      automatic updates. GitHub -> the repo -> Settings -> Rules ->
+      Rulesets -> New branch ruleset: target `stable`, restrict updates and
+      deletions, block force pushes, bypass list: GitHub Actions only (the
+      promote-stable workflow moves it). A second ruleset for `master`:
+      block force pushes and deletions (and ideally require pull requests).
+      Until then keep `[update] enabled = false` (the default).
+- [ ] **Signing key for updates** (only if you want automatic updates):
+      README, "Automatic updates" -> "Setting up signing" (a GitHub secret
+      `STABLE_SIGNING_KEY` and an allowed_signers file on the PC/Pi).
+
+- [ ] **Cloud server on Render** (only Kyle can do these; see README "Run it
+      in the cloud (Render)" and the Cloud section of MANUAL_TEST.md):
+  - [ ] Render account with a payment card; New -> Blueprint from this repo
+        (Standard plan plus a 1 GB disk, about $25.25 a month).
+  - [ ] Paste the secrets into the Render dashboard: `ANTHROPIC_API_KEY`,
+        `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+        `GOOGLE_TOKEN_JSON` (contents of `token.json`), `GOOGLE_CLIENT_JSON`
+        (contents of `credentials.json`).
+  - [ ] Google Cloud console -> OAuth consent screen -> Publish app (Testing
+        mode expires refresh tokens after 7 days), then sign in once more and
+        update `GOOGLE_TOKEN_JSON`.
+  - [ ] iPhone: open the onrender.com address in Safari, enter `WEB_TOKEN`
+        once, Add to Home Screen.
+  - [ ] After the first deploy, copy the five "Proxy check" lines from the
+        Render log (they show addresses, no secrets) to a Claude session, or
+        check: the peer should be a 10.x address (else set
+        `CLOUD_TRUSTED_PROXIES` to its network), and the last
+        `X-Forwarded-For` entry should be your phone's public address. If it
+        is a Cloudflare address and `CF-Connecting-IP` holds yours, set
+        `CLOUD_CLIENT_IP_HEADER=cf-connecting-ip`.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

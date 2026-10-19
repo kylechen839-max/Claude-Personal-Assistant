@@ -8,7 +8,7 @@ conversations in Pinecone.
 ```
 mic -> openWakeWord wake word -> chime -> record until silence (VAD)
     -> faster-whisper (speech to text) -> Claude (+ tools, + memory)
-    -> pyttsx3 / Piper (text to speech) -> speaker
+    -> Kokoro / Piper / pyttsx3 (text to speech) -> speaker
 ```
 
 ## Quick start (Windows 11, PowerShell)
@@ -58,7 +58,8 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode speak` | Type, replies spoken |
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
 | `--audio-file f.wav` | Wake mode on a recording instead of the mic, then exit |
-| `--tts print` | No audio output (prints what it would say) |
+| `--tts print` | No audio output (prints what it would say); also `kokoro`, `piper`, `pyttsx3`, `elevenlabs`, `auto` |
+| `--download-voice kokoro` | Download a voice at setup time, then exit (see "Voices") |
 | `--timings` | Also print each turn's latency summary (always in the log) |
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
@@ -67,6 +68,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode web` | Private phone web app (see "Phone web app" below) |
 | `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
 | `--show-token` | Web mode: print the access token to the console once |
+| `--role pi` | Which backend this is in the phone app's Pi -> PC -> cloud failover (`pi`, `pc` or `cloud`; see FAILOVER.md) |
 
 **Follow-up mode:** after a reply, the assistant plays a soft, low blip
 and keeps listening for 5 seconds without the wake word, so you can just
@@ -92,7 +94,7 @@ talking and the `silence_ms` pause that tells it you're done; the last
 figure is the wait you notice. Run with `--timings` to see it on the
 console too.
 
-Things to try: "What's on my calendar tomorrow?", "Move my dentist
+Things to try: "What's on my calendar tomorrow?", "What did we talk about yesterday?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
 "Mark Homework 6 as done", "Delete the study group tomorrow",
 "What's the weather this afternoon?", "Who won the Braves game last night?",
@@ -105,6 +107,89 @@ your Anthropic account per search). "Open ..." requests open pages in this
 computer's default browser. Set `[web] location` in `config.toml` for local
 answers like the weather, and `allowed_domains` / `blocked_domains` to limit
 which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
+
+## Conversation history
+
+Every conversation is saved: wake word and push-to-talk on the PC or Pi,
+text mode, the phone app's push-to-talk and its hands-free voice mode. You
+can search it and pick a conversation up later.
+
+**By voice or text:** "Hey Claude, what did we talk about yesterday?",
+"Find our conversation about the lab report", "Continue our conversation
+about the lab report". Claude searches your history and asks *"Continue
+'Lab report error bars' from Tuesday?"*; say yes and the old conversation
+is loaded, so "and what about standard deviation?" is answered in context.
+This works mid-conversation too (the current one is saved first).
+
+**On the phone:** the clock button at the top of the app opens History:
+a search bar (results update as you type, matching words highlighted),
+filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
+grouped by Today / Yesterday / This week / Older with a source icon, time
+and snippet. Swipe a row left for Pin / Rename / Delete, or long-press it
+(or tap its "..." button) for all actions including Archive and Export.
+Tap a conversation to read it; **Continue this conversation** loads it and
+returns to the chat, and the voice view continues it too (it uses the same
+conversation). Delete always asks first. **Incognito** in the settings
+menu (gear) stops saving for this phone until you turn it off; the header
+shows an "Incognito" badge meanwhile. It follows the phone's light or dark
+setting and works as a home-screen app on iOS.
+
+**From the command line:**
+
+| Command | What it does |
+|---|---|
+| `python -m assistant --history list` | Newest 50 conversations (id, date, source, title); add `--source wake`, `--since 2026-10-01`, `--until 2026-10-14`, `--pinned` |
+| `python -m assistant --history search lab report` | Ranked keyword search with the matching words highlighted (same filters) |
+| `python -m assistant --history show ID` | The whole transcript |
+| `python -m assistant --history export ID --format json` | Export as Markdown (`--format md`, default) or JSON, to the console; redirect with `> file.md` |
+| `python -m assistant --history delete ID` | Delete (asks first; `--yes` skips the question) |
+| `python -m assistant --mode text --continue ID` | Continue a conversation in text mode (`--continue last` for the most recent) |
+| `python -m assistant --incognito` | Save nothing this session: no history and no memory summary |
+
+**What is saved:** what you said and what Claude replied, as text, turn by
+turn as it happens (a crash or power cut loses at most the turn in
+progress), including spoken "yes/no" confirmations and replies you cut off
+(marked "interrupted"). For tool use only the tool name, a few short
+arguments and whether it worked are kept (e.g. "list calendar events, day =
+tomorrow, ok"), never the results, so calendar details or web pages are not
+copied into history. API keys and tokens are masked before saving. When a
+conversation ends, a fast model (`[history] title_model`, Haiku) writes a
+title of up to six words and a one or two sentence summary in the
+background, so replies never wait for it; if the API is unreachable, the
+first thing you said becomes the title.
+
+**Search:** keyword search uses SQLite full-text search (FTS5) over messages,
+titles and summaries, ranked by relevance, with prefix matching (typing
+"chem" finds "chemistry"); if your Python's SQLite lacks FTS5 it falls back
+to simpler matching. When Pinecone memory is on, the conversation's memory
+summary carries the conversation id, so a semantic match ("that thing about
+uncertainty in graphs") also links back to the full conversation. Searching
+5,000 conversations takes well under 100 ms.
+
+**Where it lives:** one SQLite file, `data/history.sqlite` (gitignored) on
+the PC's disk or the Pi's SD card; on the Render deploy the `HISTORY_PATH`
+environment variable points it at the persistent disk
+(`/data/history.sqlite`). Settings in `config.toml` `[history]`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `[history] enabled` | true | Save and search conversations |
+| `[history] path` | "data/history.sqlite" | Where the database file goes (`HISTORY_PATH` overrides) |
+| `[history] retention_days` | 0 | Delete unpinned conversations older than this; 0 = keep forever |
+| `[history] max_mb` | 500 | Size guard: above this, the oldest unpinned conversations are deleted |
+| `[history] incognito` | false | Never save (same as always passing `--incognito`) |
+| `[history] title_model` | "claude-haiku-5-5" | Model for titles and summaries |
+
+Deleting a conversation also deletes its memory summary in Pinecone.
+Privacy details are in SECURITY.md.
+
+**How it's stored:** every change (a message, a title, a pin, a delete) is
+an event in the history sync log (failover's event log, in the same file),
+and the searchable tables are built from those events. With the failover
+setup the Pi, the PC and the cloud exchange events, so all three show the
+same history, and a delete anywhere deletes everywhere (the deleted text is
+wiped from the log too). Retention and the size guard delete the same way,
+so they also apply on every backend.
 
 ## Settings
 
@@ -122,51 +207,92 @@ you are most likely to tune:
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
 | `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
-| `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
+| `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
+| `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
+| `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
-| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested `stable` branch, see [Automatic updates](#automatic-updates) |
+| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
-### Better voice: Piper
+### Voices
 
-The default voice is pyttsx3 (the OS voice: SAPI5 on Windows, eSpeak on the
-Pi). [Piper](https://github.com/OHF-Voice/piper1-gpl) is an offline neural
-voice that sounds far more natural and is fast enough for a Pi 4/5. It is
-installed by `requirements.txt` (`piper-tts`); you only need to download a
-voice once (about 60 MB, from the official
-[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) repo):
+With `[tts] engine = "auto"` (the default) the assistant uses the best voice
+you have downloaded, and logs one line saying which and why:
+
+1. **Kokoro** (most natural; [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M),
+   Apache-2.0, run by the `kokoro-onnx` package). The default voice was
+   picked to be close to the calm, warm feel of the Claude app's voice
+   conversations (the app's own voices aren't available outside it). About
+   120 MB: the int8 model (88 MB) and the voice pack (28 MB). Needs Python
+   3.11+ (it relies on onnxruntime 1.25+, which has no 3.10 build); on 3.10
+   "auto" uses Piper.
+2. **Piper** (fast neural voice, the best choice on a Raspberry Pi; about 60 MB).
+3. **pyttsx3** (the OS voice: SAPI5 on Windows, eSpeak on Linux), always there.
+
+Download them once, at setup (never while answering). Each Kokoro file's
+SHA-256 is checked, and a bad download is deleted:
 
 ```powershell
-# Windows (PowerShell, venv active) - same command on the Pi
-python -m assistant.tts --download-voice en_US-lessac-medium
+python -m assistant --download-voice kokoro                # into models/kokoro/
+python -m assistant --download-voice en_US-lessac-medium   # Piper, into voices/
 python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
 ```
 
-That saves `voices/en_US-lessac-medium.onnx` and its `.onnx.json` (the
-`voices/` folder is not committed). Then switch the engine in `config.toml`:
+`models/` and `voices/` are not committed. On a Raspberry Pi, "auto"
+prefers Piper even if Kokoro is there, because Kokoro is several times
+slower on ARM (PROGRESS.md has the numbers). `--check` shows which voice
+is in use.
+
+**Switching voices.** In `config.toml`:
 
 ```toml
 [tts]
-engine = "piper"
-piper_voice = "voices/en_US-lessac-medium.onnx"
+engine = "auto"            # or "kokoro" / "piper" / "pyttsx3" to force one
+kokoro_voice = "af_heart"  # the default
+speed = 1.0                # 0.9 = a little slower and calmer
 ```
 
-To go back, set `engine = "pyttsx3"`. If the voice file is missing, the
-assistant logs a warning and uses pyttsx3 instead of crashing. Other voices:
-pick a name from the voices repo (e.g. `en_US-amy-medium`,
-`en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
-on the command line tries Piper for one run without editing the config.
-`[tts] rate` and `voice` apply to pyttsx3 only.
+| Kokoro voice | Sounds like |
+|---|---|
+| `af_heart` (default) | American, female: warm, calm, the most natural of the set |
+| `af_bella` | American, female: brighter and more animated |
+| `bf_emma` | British, female: soft and composed |
+| `am_michael` | American, male: relaxed, low |
+| `af_nicole`, `af_sarah`, `bm_george`, `bm_lewis`, ... | the rest of the voice pack (`am_`/`bm_` = male, `bf_` = British female) |
+
+A Kokoro voice name that doesn't exist logs a warning and uses `af_heart`.
+If a forced engine's files are missing, it falls back down the list (Kokoro
+-> Piper -> pyttsx3) with a warning instead of crashing. For Piper, set
+`piper_voice` to another voice from
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (e.g.
+`en_US-amy-medium`). `[tts] rate` and `voice` apply to pyttsx3 only. `--tts
+kokoro` on the command line tries an engine for one run.
+
+**Optional cloud voice: ElevenLabs (paid).** Put `ELEVENLABS_API_KEY=...` in
+`.env` and set `[tts] engine = "elevenlabs"` (optionally `elevenlabs_voice`,
+a voice ID from your ElevenLabs library; the default is the premade
+"Rachel", and `elevenlabs_model` is `eleven_flash_v2_5`, its fastest). Every
+sentence goes to ElevenLabs' servers and counts against your plan. Each one
+is streamed with a timeout; if the request fails (network, quota, a bad
+key) that sentence is spoken by the local voice above, and the cloud is
+skipped for a minute. Without the key the local voice is used. The key is
+never logged.
+
+**Sounds.** Voice mode on the phone plays three soft cues: a gentle two-note
+rise when it starts listening, a very quiet low note when your turn has
+been heard ("thinking"), and a falling pair when the conversation ends. The
+desktop wake chime uses the same listening sound. They are original
+sine-wave sounds generated by `assistant/earcons.py` (`python -m
+assistant.earcons` rewrites `assistant/web/earcons/*.wav`).
 
 ## Phone web app
 
 `python -m assistant --mode web` runs the same assistant (Calendar, Notion,
 memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
-asks Claude, and sends back the reply as text and audio (Piper if
-`[tts] engine = "piper"`, else pyttsx3; or tick "Use the phone's voice" in
-the page's settings). Hold the big mic button to talk (or tap once to start
+asks Claude, and sends back the reply as text and audio (in the voice from
+[Voices](#voices); or tick "Use the phone's voice" in the page's settings). Hold the big mic button to talk (or tap once to start
 and again to stop), or type. When Claude wants to delete something, Yes/No
 buttons appear; saying "yes" into the mic works too. Each phone/browser
 gets its own conversation; after `[assistant] conversation_timeout` (5
@@ -233,7 +359,9 @@ other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
 `--check` reports whether the token is set. On the Pi it is the same: install
 Tailscale there and run the same two commands.
 
-**On a public server** (e.g. Render, behind its HTTPS proxy): set `WEB_TOKEN`
+**On a public server** the ready-made way is the Docker image and Render
+Blueprint in the next section (it adds an auth wall in front of every route
+and escalating lockouts). By hand, behind an HTTPS proxy: set `WEB_TOKEN`
 as a secret in the host's environment (the app refuses to listen on anything
 but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
 trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
@@ -308,8 +436,93 @@ Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
 ignored), `max_utterance_s` (30), `max_session_minutes` (30) and
 `utterances_per_minute` (30); a yes/no question waits `[webapp]
 confirm_timeout`. Voice and push-to-talk share this phone's conversation.
-For the most natural voice set `[tts] engine = "piper"`; with pyttsx3 on
-Linux it uses eSpeak directly.
+Replies use the voice from [Voices](#voices) (Kokoro once downloaded),
+rendered sentence by sentence so the first one plays while the rest are
+made; the model is warmed up when the server starts.
+
+## Run it in the cloud (Render)
+
+The phone web app can also run 24/7 on a small paid server at
+[Render](https://render.com), so it works from your iPhone with the PC off.
+The repo has everything: a `Dockerfile` (Whisper and the Piper voice are
+baked into the image, so a restart downloads nothing) and a `render.yaml`
+Blueprint with a `hey-claude` service. In the cloud it runs with
+`ASSISTANT_PROFILE=server`: no mic, speakers or wake word, Piper voice (or
+espeak-ng if the voice is missing), no "open in browser" tool, and logs go
+to Render's log viewer. Secrets live only in Render's settings, never in the
+image or on its disk. It is on the public internet, so it is hardened
+(SECURITY.md, "Cloud server"): only the login page, `/healthz` and the app
+icon work without the token, and wrong tokens slow the sender down and lock
+it out (the right token always works).
+
+Cost: about $25.25 a month: the Standard plan (2 GB RAM, $25) plus a 1 GB
+persistent disk ($0.25/GB). Speech recognition with
+Whisper `base.en` plus the Piper voice was measured at up to 564 MB, which
+doesn't fit the $7 Starter plan's 512 MB (PROGRESS.md, "Cloud hosting").
+Render's free Hobby workspace is enough; you pay only for the service. To
+save money you can switch the service to Starter and set `WHISPER_MODEL` to
+`tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
+mishears more often).
+
+**Persistent disk.** The service has a 1 GB disk mounted at `/data`, and
+the image sets `DATA_DIR=/data` and `HISTORY_PATH=/data/history.sqlite` for
+the conversation-history and lecture features. Until those are merged
+nothing is written there yet: conversations live in memory and end with
+each deploy (long-term memory in Pinecone is unaffected). Everything outside
+`/data` is wiped on each deploy. Render's free instance type can't have a disk, which is one more
+reason the service is on a paid plan. Render takes daily snapshots of the
+disk, but that is the only backup: export your history now and then with
+the history export command (it arrives with the conversation-history
+feature) and keep the file somewhere else. With a disk, Render runs exactly
+one instance and a deploy has a short gap of downtime.
+
+1. **Push** this branch to GitHub (merged into master).
+2. **Create the service.** On render.com: sign up (GitHub login), add a
+   payment card, then **New -> Blueprint**, pick this repository and the
+   `master` branch. Render reads `render.yaml` and shows two services,
+   `hey-claude` and `pinecone-mcp`. It asks for each secret marked
+   `sync: false`; paste them in yourself (they are never in the repo):
+   - `ANTHROPIC_API_KEY`, `PINECONE_API_KEY`, `NOTION_TOKEN`: the same values
+     as in your `.env`.
+   - `GOOGLE_TOKEN_JSON`: open `token.json` (in the project folder on the PC)
+     in Notepad, select all, copy, paste. The whole file, braces included.
+   - `GOOGLE_CLIENT_JSON`: the same for `credentials.json`.
+   - `ASSISTANT_TIMEZONE`: your time zone, e.g. `America/New_York`, so
+     "tomorrow" means your tomorrow (the server runs on UTC).
+   - `WEB_TOKEN` is generated by Render; leave it.
+   Click **Apply**. The first build takes about 10 minutes.
+3. **Publish the Google app.** Google Cloud console -> APIs & Services ->
+   OAuth consent screen (Google Auth Platform -> Audience) -> **Publish
+   app**. In "Testing" mode Google expires refresh tokens after 7 days, which
+   would break the calendar every week. Google then shows an "unverified
+   app" warning when you sign in: that is expected for a personal app (click
+   Advanced -> Go to Hey Claude). After publishing, sign in once more on the
+   PC so the token is a long-lived one: delete `token.json`, run
+   `python -m assistant.tools.calendar`, and paste the new `token.json` into
+   `GOOGLE_TOKEN_JSON` in Render (Environment -> Save; it restarts).
+4. **Check it.** In Render -> hey-claude -> Shell, run
+   `python -m assistant --check` (no mic or speaker checks on a server).
+   The Logs tab should show "Speech models loaded".
+5. **On the iPhone.** Render -> hey-claude -> Environment -> `WEB_TOKEN` ->
+   reveal and copy it (e.g. AirDrop or a note to yourself). Open
+   `https://hey-claude.onrender.com` (the address at the top of the service
+   page; Render may add a suffix) in **Safari**, paste the token once,
+   allow the microphone, then Share -> **Add to Home Screen**. Open it from
+   the home screen from now on; it stays signed in (90 days, renewed
+   each time you use it).
+
+If Google stops working (Render logs say "Google Calendar sign-in could not
+be refreshed"), sign in again on the PC as in step 3 and paste the new
+`token.json`. To sign every phone out, change `WEB_TOKEN` in Render (any 32+
+random characters) and save. `WHISPER_MODEL` picks the speech model:
+`base.en` (default, more accurate) or `tiny.en` (smaller, faster, more
+mistakes). Run the same image anywhere with Docker:
+`docker build -t hey-claude .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
+-e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front, and
+trusts forwarded headers only from 10.x addresses, Render's; set
+`CLOUD_TRUSTED_PROXIES` to your proxy's network, e.g. `172.18.0.0/16`, or to
+nothing). After the first Render deploy, the log's first five "Proxy check"
+lines show what Render's proxy sends; see BLOCKERS.md.
 
 ## Email, notes, lectures and homework help
 
@@ -419,7 +632,7 @@ the Pi's host name or IP):
 
 ```powershell
 scp .env credentials.json token.json pi@raspberrypi:~/hey-claude/
-scp -r voices pi@raspberrypi:~/hey-claude/   # only if you use Piper
+scp -r voices pi@raspberrypi:~/hey-claude/   # the Piper voice, if you have it
 ```
 
 Or type the keys into `nano .env` on the Pi. The "Hey Claude" wake-word
@@ -444,7 +657,7 @@ fail to load; that's expected). This needs `credentials.json` on the Pi.
 `--check` prints which keys are set (never their values), whether
 `credentials.json`, `token.json` and the wake-word model exist, the audio
 devices with their index numbers, whether the Whisper model is cached, and,
-with `[tts] engine = "piper"`, whether the Piper voice is there.
+which voice will speak (Kokoro, Piper or pyttsx3).
 It exits with 1 if something required is missing.
 
 `install_service.sh` installs `deploy/hey-claude.service` as a systemd
@@ -462,10 +675,11 @@ systemctl --user restart hey-claude     # after changing .env or config.toml
 
 **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
 (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
-`.venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium` on
-the Pi (or copy `voices/` from your PC) and set `[tts] engine = "piper"`, as
-in [Better voice: Piper](#better-voice-piper). Without the voice file the
-assistant falls back to eSpeak.
+`.venv/bin/python -m assistant --download-voice en_US-lessac-medium` on
+the Pi (or copy `voices/` from your PC); `[tts] engine = "auto"` then uses
+it (see [Voices](#voices)). Kokoro also installs on a Pi but takes well over
+a second per sentence there, so "auto" keeps Piper on ARM. Without a voice
+file the assistant falls back to eSpeak.
 
 **Speed:** set `[stt] model = "tiny.en"` in `config.toml` if `base.en` feels
 slow. On a Pi with no screen, set `[web] browser = false`.
@@ -498,6 +712,39 @@ slow. On a Pi with no screen, set `[web] browser = false`.
   `systemctl --user restart hey-claude`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
+
+## Phone app failover: Pi, then PC, then cloud
+
+The phone app (installed from the cloud host) uses the Raspberry Pi when it
+can reach it, the PC when it can't, and the cloud host when neither
+answers, and moves back up when a better one returns (never mid-reply).
+FAILOVER.md has the whole protocol. To set it up:
+
+1. Run the web app on each machine you want in the list, with the same
+   `WEB_TOKEN` in every `.env` (or the Render environment), and expose the Pi
+   and PC with `tailscale serve`.
+2. In each machine's `config.toml`, fill in `[failover]`: `role` (or pass
+   `--role pi` / `--role pc` / `--role cloud`), `app_origin` (the cloud
+   URL the phone app is installed from) and the three `backends` URLs:
+   ```toml
+   [failover]
+   role = "pi"
+   app_origin = "https://hey-claude.onrender.com"
+   backends = [
+     { role = "pi", url = "https://pi.tail1234.ts.net" },
+     { role = "pc", url = "https://kyle-pc.tail1234.ts.net" },
+     { role = "cloud", url = "https://hey-claude.onrender.com" },
+   ]
+   ```
+3. Copy the same `.env`, `credentials.json` and `token.json` to each machine
+   (one Google sign-in works on all of them; see FAILOVER.md section 6).
+4. On the phone, open the app's Settings -> Backends to check the URLs and
+   the badge (Pi / PC / Cloud), or force one backend.
+
+Conversation history is synced between the machines every
+`sync_interval` seconds (30); memory is shared through Pinecone as before.
+Tests: `pytest` (server side) and `node --test tests/js/*.test.mjs` (the
+router; Node 18+).
 
 ## Windows PC as the always-on home host
 
@@ -540,56 +787,130 @@ updates sometimes reset power plans).
 
 ### Automatic updates
 
-Changes reach the PC (and the phone app it serves) or the Pi by themselves
-once you set this in `config.toml`:
+**Off by default, and it stays off until you set up signing (below).** With
+it on, changes reach the PC (and the phone app it serves) or the Pi by
+themselves. Turn it on in `config.local.toml`, a gitignored file next to
+`config.toml` for this machine's own settings (so `config.toml` stays
+unchanged and never blocks an update):
 
 ```toml
 [update]
 enabled = true
 ```
 
-The host supervisor (`python -m assistant.host`, which the `HeyClaude` tasks
-and the Pi's `hey-claude` service run) then checks every `check_minutes`
-(15) for a new commit on the `stable` branch, which only moves after master
-passed CI on every job, so nothing untested arrives. It updates only by
-fast-forward: with local edits to tracked files (other than your
-`config.toml` settings) or local commits it skips the update and logs why,
-and never resets or discards anything. After `git merge --ff-only` it
-installs `requirements.txt` if that changed, checks that the package
-imports and `--check` passes, then restarts the assistant: the web app only
-when no request or voice turn is running (at most ~2 minutes), and only
-counts the update as good once `/healthz` reports the new version. If any
-step fails it goes back to the previous commit (`git reset --keep`), restarts
-that, and won't retry the failed commit. Everything is logged to
-`logs/host-<mode>.log` (failures start with `!!!`); `logs/update-state.json`
-has the last result. The supervisor itself (`assistant/host.py`) keeps running its
-starting version until the task or service restarts (next sign-in or reboot,
-or `systemctl --user restart hey-claude` on the Pi).
+What it does: the host supervisor (`python -m assistant.host`, which the
+`HeyClaude` tasks and the Pi's `hey-claude` service run) checks every
+`check_minutes` (15) for a new commit on the `stable` branch. Only the
+**promote-stable** workflow moves `stable`, and only to a master commit on
+which both `tests` and `pi-arm64` passed. Before any new code runs here:
 
-`python -m assistant --update` updates right away (it works even with
-`enabled = false`); a running host picks the new code up within a minute.
-The phone page notices the new version through `/healthz` and reloads
-itself once, never in the middle of a turn, a recording or the voice
-conversation.
+- `origin` must be this GitHub repository (`[update] repo`);
+- the new commit, or a `stable-<sha>` tag on it, must carry a valid SSH
+  signature from a key in your **allowed_signers** file, which lives outside
+  the checkout so an update can't change whom you trust:
+  `%APPDATA%\HeyClaude\allowed_signers` on Windows,
+  `~/.config/hey-claude/allowed_signers` on Linux/the Pi. No file, no
+  valid signature: no update, and `logs/host-<mode>.log` says why;
+- HEAD must be on `master` with no local commits (fast-forward only), and no
+  local edits to tracked files. Nothing local is ever reset or discarded;
+  anything else is skipped and logged.
+
+Then `git merge --ff-only`, a smoke check (the package imports, `--check`
+passes) and a restart: the web app only when no request or voice turn is
+running (at most ~2 minutes), and the update only counts once `/healthz`
+reports the new version within `health_seconds` (180). If anything fails it
+goes back with `git reset --keep`, restarts the old version and never
+retries that commit. An update that **changes requirements.txt is never
+applied automatically** (pip would install new, unpinned dependency ranges
+into the venv the assistant is running from): stop the assistant, then run
+`python -m assistant --update`. Everything is logged to
+`logs/host-<mode>.log` (failures start with `!!!`), with the exact range
+(`old -> new`); `logs/update-state.json` has the last result. Moving HEAD
+yourself (`git checkout`, `git pull`) only restarts the assistant, never
+rolls back. The supervisor itself keeps running its starting version until
+the task or service restarts (next sign-in or reboot, or `systemctl --user
+restart hey-claude` on the Pi).
+
+`python -m assistant --update` updates right away (same checks, also with
+`enabled = false`). The phone page notices the new version through
+`/healthz` and reloads itself once, never in the middle of a turn, a
+recording or the voice conversation.
+
+**Setting up signing (once).** The promotion workflow signs each promotion
+with a key only GitHub Actions holds; your machines trust that key.
+
+1. On the PC, make a key just for this (no passphrase; it never leaves
+   GitHub):
+   ```powershell
+   ssh-keygen -t ed25519 -N '""' -C "hey-claude stable" -f "$env:TEMP\stable_signing"
+   ```
+2. GitHub -> the repo -> Settings -> Secrets and variables -> Actions -> New
+   repository secret: name `STABLE_SIGNING_KEY`, value: the whole content of
+   `$env:TEMP\stable_signing` (the private key).
+3. Trust the public half on each machine that updates:
+   ```powershell
+   $dir = "$env:APPDATA\HeyClaude"; New-Item -ItemType Directory -Force $dir | Out-Null
+   $pub = Get-Content "$env:TEMP\stable_signing.pub"
+   [IO.File]::WriteAllText("$dir\allowed_signers", "stable-promotion@users.noreply.github.com namespaces=`"git`" $pub`n")
+   ```
+   On the Pi: `mkdir -p ~/.config/hey-claude` and put the same line in
+   `~/.config/hey-claude/allowed_signers`.
+4. Delete both key files from `$env:TEMP`. From the next promotion on, the
+   workflow pushes a signed `stable-<sha>` tag that the hosts verify
+   (`git verify-tag`).
+
+A CI-signed tag only proves **"CI passed"**, not **"Kyle approved"**: the key
+sits in GitHub, so it guards against a bad push to `stable` or a changed
+`origin`, but not against someone who can change the workflow or the code
+on master (branch protection on `master` and `stable` narrows that,
+BLOCKERS.md).
+
+**Strongest setup: you approve each update.** Use a key that exists only on
+your PC, put only its public half in `allowed_signers` (on the PC and the
+Pi), and don't add the `STABLE_SIGNING_KEY` secret. The workflow still moves
+`stable` after green CI, but nothing installs until you sign that commit:
+
+```powershell
+# once: a key only on this PC (here with a passphrase), and git set up to sign with it
+ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
+git config gpg.format ssh
+git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
+# allowed_signers line (as in step 3 above, with this .pub file and your email)
+
+# each update you approve: look at what changed, then sign and push a tag
+git fetch origin stable
+git log --oneline HEAD..origin/stable
+$sha = git rev-parse origin/stable
+git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
+git push origin "stable-$($sha.Substring(0,7))"
+```
+
+The hosts update on their next check. You can use both keys (both lines in
+`allowed_signers`), but then either one is enough, so the CI key alone can
+still approve an update. The only way around signatures is `[update] trust_unsigned =
+true`: then **anyone who can push to master or stable can run code on this
+machine**. Use it only for a repository only you can push to.
 
 **Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
 so it never updates. Switch with this, in PowerShell (5.1 or 7):
 
 ```powershell
 cd C:\Users\kylec\Claude-Personal-Assistant
-# 1. Up to date: no changes except config.toml in `git status`, then
+# 1. Up to date: no changes in `git status` (config.toml edits: move them
+#    to config.local.toml first), then
 git status --short
 git checkout master
 git pull --ff-only
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 2. Turn on automatic updates ([update] enabled = true in config.toml;
-#    written as UTF-8 without a BOM, which the TOML reader needs)
-$cfg = Join-Path (Get-Location) 'config.toml'
-$text = [IO.File]::ReadAllText($cfg)
-$text = $text -replace '(?m)^enabled = false(\s+# true: follow the tested)', 'enabled = true $1'
-[IO.File]::WriteAllText($cfg, $text, (New-Object Text.UTF8Encoding $false))
-Select-String -Path config.toml -Pattern '^\[update\]' -Context 0,2   # shows enabled = true
+# 2. Turn on automatic updates in config.local.toml (UTF-8 without a BOM,
+#    which the TOML reader needs); it only updates once signing is set up
+$local = Join-Path (Get-Location) 'config.local.toml'
+if (Test-Path $local) { $text = [IO.File]::ReadAllText($local) } else { $text = '' }
+$nl = [Environment]::NewLine
+if ($text -notmatch '(?m)^\[update\]') { $text += $nl + '[update]' + $nl + 'enabled = true' + $nl }
+[IO.File]::WriteAllText($local, $text, (New-Object Text.UTF8Encoding $false))
+Get-Content config.local.toml
 
 # 3. Replace the "Hey Claude Web" task (answer y), then the power check
 #    (answer y to stay awake when plugged in). Add -NoWake to install only
@@ -601,7 +922,7 @@ Get-ScheduledTask -TaskPath '\HeyClaude\' | Format-Table TaskName, State
 Start-Sleep -Seconds 40
 Invoke-RestMethod http://127.0.0.1:8765/healthz        # ok: True, version: <sha>
 Get-Content logs\host-web.log -Tail 5
-.\.venv\Scripts\python.exe -m assistant --update       # "update up-to-date" (or updated)
+.\.venv\Scripts\python.exe -m assistant --update       # up-to-date, or why it skipped
 ```
 
 The phone keeps working throughout, apart from a few seconds while the web
@@ -668,25 +989,31 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface: pyttsx3, Piper, print; Piper voice download
+  tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
+  tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
+  tts_elevenlabs.py  optional ElevenLabs cloud voice
+  earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
-  audio.py      wav I/O, resampling, chime
+  history.py    conversation history: SQLite store, search, resume
+  history_cli.py  python -m assistant --history ...
+  audio.py      wav I/O, resampling, chimes
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
+  history_web.py  phone app history API (/api/conversations)
+  cloud.py      the web app on a public server (auth wall, lockout, /healthz)
   voice_ws.py   voice conversation WebSocket (/api/voice)
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
   web/          the page: index.html, app.js, app.css, sw.js; voice.js,
-                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
+                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored);
+                earcons/ (generated by earcons.py)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   host.py       home host supervisor: restarts, updates (python -m assistant.host)
   updater.py    safe update from the stable branch  (--update)
   version.py    git short SHA for /healthz
-  tools/        calendar.py, notion.py, web.py, tool registry
-
   webfeatures.py lecture recorder + tutor routes for the phone app
   lecture.py    chunked uploads, transcription job, Notion lecture notes
   tutor.py      homework photos: checks, EXIF removal, Socratic vision call
@@ -694,11 +1021,17 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, tool registry
+                notion.py, notes.py, web.py, history.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
+                measure_memory.py, container_smoke.sh, ws_smoke.py (cloud image)
+Dockerfile      the cloud image; render.yaml deploys it on Render
 deploy/         hey-claude.service                 (systemd user unit)
+tests/          pytest suite (offline; live tests skip without keys)
+.github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
+                              the Docker image, the Pinecone MCP connector
+
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)

@@ -35,7 +35,11 @@ def sign_in_scopes(gmail_enabled: bool = False) -> list[str]:
     """What sign-in asks for: Gmail access only if [gmail] is enabled, so a
     Calendar-only setup never grants mail access."""
     return CALENDAR_SCOPES + (GMAIL_SCOPES if gmail_enabled else [])
+# On a server the OAuth files come from the environment instead (no files
+# to upload, nothing written back): the contents of token.json and of
+# credentials.json, pasted into the host's secret settings.
 TOKEN_ENV = "GOOGLE_TOKEN_JSON"
+CLIENT_ENV = "GOOGLE_CLIENT_JSON"
 SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
 
@@ -86,6 +90,96 @@ def _relax_scope_check() -> None:
     os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 
+class GoogleSignInError(RuntimeError):
+    """Google refused to refresh the sign-in (revoked, or expired: in the
+    consent screen's Testing mode refresh tokens last only 7 days)."""
+
+
+REFRESH_FAILED = ("Google sign-in could not be refreshed (%s). Sign in "
+                  "again on your PC (python -m assistant.tools.google_auth) and "
+                  "update token.json, or the GOOGLE_TOKEN_JSON secret on the "
+                  "server. If this happens every week, publish the app on the "
+                  "Google OAuth consent screen (README).")
+
+
+def _json_env(name: str, environ) -> dict | None:
+    """Parsed JSON from an env var; errors never include the value."""
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise ValueError(f"{name} is set but is not valid JSON (paste the whole "
+                         "file contents)") from None
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a JSON object (the whole file)")
+    return value
+
+
+def client_config(credentials_path="credentials.json", environ=os.environ) -> dict | None:
+    """The OAuth client (credentials.json) from GOOGLE_CLIENT_JSON or the file."""
+    config = _json_env(CLIENT_ENV, environ)
+    if config is None and Path(credentials_path).exists():
+        config = json.loads(Path(credentials_path).read_text(encoding="utf-8"))
+    return config
+
+
+def token_info(token_path="token.json", credentials_path="credentials.json",
+               environ=os.environ) -> tuple[dict | None, bool]:
+    """(authorized-user info, came from the environment).
+
+    A token without client_id/client_secret (e.g. trimmed by hand) gets them
+    from the client config, which refreshing needs."""
+    info = _json_env(TOKEN_ENV, environ)
+    from_env = info is not None
+    if info is None and Path(token_path).exists():
+        info = json.loads(Path(token_path).read_text(encoding="utf-8"))
+    if info is not None and not (info.get("client_id") and info.get("client_secret")):
+        client = client_config(credentials_path, environ) or {}
+        client = client.get("installed") or client.get("web") or {}
+        for key in ("client_id", "client_secret"):
+            if client.get(key):
+                info.setdefault(key, client[key])
+    return info, from_env
+
+
+def has_credentials(credentials_path="credentials.json", token_path="token.json",
+                    environ=os.environ) -> bool:
+    return bool(environ.get(TOKEN_ENV, "").strip() or environ.get(CLIENT_ENV, "").strip()
+                or Path(credentials_path).exists() or Path(token_path).exists())
+
+
+def _warn_on_refresh_failure(creds):
+    """Make every later refresh (google-auth refreshes inside API calls)
+    log a clear warning, with the error code only, if Google refuses."""
+    from google.auth.exceptions import RefreshError
+
+    original = creds.refresh
+
+    def refresh(request):
+        try:
+            original(request)
+        except RefreshError as e:
+            reason = _refresh_reason(e)
+            log.warning(REFRESH_FAILED, reason)
+            raise GoogleSignInError(
+                f"Google sign-in expired or was revoked ({reason}); "
+                "Kyle needs to sign in again.") from None
+
+    creds.refresh = refresh
+    return creds
+
+
+def _refresh_reason(error) -> str:
+    """A short, secret-free reason: the OAuth error code, e.g. invalid_grant."""
+    import re
+
+    text = str(error.args[0]) if error.args else ""
+    m = re.match(r"\s*([a-z_]+)\b", text)
+    return m.group(1) if m else type(error).__name__
+
+
 class MissingScopes(RuntimeError):
     """The saved token was granted fewer scopes than a tool needs."""
 
@@ -101,12 +195,7 @@ class MissingScopes(RuntimeError):
 def load_token_info(token_path: str | Path = "token.json",
                     environ=os.environ) -> dict | None:
     """The saved token as a dict: GOOGLE_TOKEN_JSON first, then the file."""
-    raw = environ.get(TOKEN_ENV, "").strip()
-    if raw:
-        return json.loads(raw)
-    if Path(token_path).exists():
-        return json.loads(Path(token_path).read_text())
-    return None
+    return token_info(token_path, environ=environ)[0]
 
 
 def granted_scopes(info: dict | None) -> set[str]:
@@ -126,49 +215,67 @@ def missing_scopes(needed, token_path: str | Path = "token.json",
 
 
 def get_credentials(credentials_path="credentials.json", token_path="token.json",
-                    open_browser: bool = True, scopes=CALENDAR_SCOPES,
-                    environ=os.environ):
+                    open_browser: bool = True, save_token: bool = True,
+                    environ=os.environ, scopes=CALENDAR_SCOPES):
     """Credentials covering `scopes`, refreshed as needed.
 
-    With no token at all, the first run opens a browser to sign in (for
-    `scopes` only) and saves token.json. A token that lacks one
-    of `scopes` raises MissingScopes instead of silently signing in again."""
+    GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON, when set, replace token.json /
+    credentials.json. A token from the environment is refreshed in memory
+    only and never written to disk; nor is any token if `save_token` is off
+    (the server profile), and there is no interactive sign-in then. On a PC
+    with no token at all, the first run opens a browser to sign in (for
+    `scopes`). A token lacking one of `scopes` raises MissingScopes instead
+    of silently signing in again."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
-    info = load_token_info(token_path, environ)
-    from_env = bool(environ.get(TOKEN_ENV, "").strip())
-    if info is None:
-        return sign_in(credentials_path, token_path, open_browser,
-                       scopes=sorted(set(CALENDAR_SCOPES) | set(scopes)))
-    lacking = [s for s in scopes if s not in granted_scopes(info)]
-    if lacking:
-        raise MissingScopes(lacking)
-    # Load with the scopes the token was granted, so a refresh never asks
-    # for more than the user agreed to.
-    creds = Credentials.from_authorized_user_info(info)
-    if creds.valid:
+    info, from_env = token_info(token_path, credentials_path, environ)
+    persist = save_token and not from_env
+    creds = None
+    if info:
+        lacking = [s for s in scopes if s not in granted_scopes(info)]
+        if lacking:
+            raise MissingScopes(lacking)
+        try:
+            # With the scopes the token was granted: a refresh never asks
+            # for more than Kyle agreed to.
+            creds = Credentials.from_authorized_user_info(
+                info, None if info.get("scopes") else CALENDAR_SCOPES)
+        except ValueError as e:  # names the missing fields, not values
+            raise GoogleSignInError(f"Unusable Google token "
+                                    f"({TOKEN_ENV if from_env else token_path}): "
+                                    f"{e}") from None
+        _warn_on_refresh_failure(creds)
+    if creds and creds.valid:
         return creds
-    if not creds.refresh_token:
-        raise RuntimeError(f"The Google token can't be refreshed. Run "
-                           f"{SIGN_IN_COMMAND} again.")
-    creds.refresh(Request())
-    if not from_env:
+    if creds and creds.refresh_token:
+        creds.refresh(Request())  # GoogleSignInError (logged) if refused
+    elif from_env or not save_token:
+        raise GoogleSignInError(
+            f"No usable Google sign-in: set {TOKEN_ENV} to the contents of a "
+            f"token.json made on your PC ({SIGN_IN_COMMAND})")
+    else:
+        creds = _warn_on_refresh_failure(sign_in(
+            credentials_path, token_path, open_browser,
+            scopes=sorted(set(CALENDAR_SCOPES) | set(scopes)), environ=environ))
+        return creds
+    if persist:
         write_private(token_path, creds.to_json())
     return creds
 
 
 def sign_in(credentials_path="credentials.json", token_path="token.json",
-            open_browser: bool = True, scopes=CALENDAR_SCOPES):
+            open_browser: bool = True, scopes=CALENDAR_SCOPES, environ=os.environ):
     """Interactive sign-in for `scopes`; saves token.json."""
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    if not Path(credentials_path).exists():
+    client = client_config(credentials_path, environ)
+    if client is None:
         raise FileNotFoundError(
             f"{credentials_path} not found. Create an OAuth client "
             "(Desktop app) in Google Cloud Console and download it.")
     _relax_scope_check()
-    flow = InstalledAppFlow.from_client_secrets_file(credentials_path, list(scopes))
+    flow = InstalledAppFlow.from_client_config(client, list(scopes))
     creds = flow.run_local_server(port=0, open_browser=open_browser,
                                   prompt="consent")
     write_private(token_path, token_json(creds))
