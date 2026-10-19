@@ -214,3 +214,42 @@ Possibly flaky, passing on rerun:
 | features organizer.self | FIXED on branch (flag unless `self is True`, plus eventType/guestsCanModify) |
 | features untrusted note mark | PARTLY on branch (written and honored, but per-turn only; see MED) |
 | natural-voice: key handling, opt-in cloud, pinned Kokoro hashes, confirm question unsplit | OK |
+
+## Cycle 4: FINAL pre-release pass, 2026-10-19 ~02:30-02:50 UTC
+
+### Commit reviewed
+- **master 44b3aa6:** all branches merged, features included.
+- **Not on master:** voice-mode f111aff. Only its test is missing; the code changes are already on master.
+
+### Tests
+- **Python:** 1411 passed, 48 skipped, 0 failed.
+- **JS:** 45/45.
+
+### Verdict: NO-GO for v1.0.0 until B1-B4 land. No HIGH findings.
+
+### Blockers (MED on auth or privacy)
+- **B1 (auth):** with failover on, "Sign out everywhere" doesn't revoke hc1 phone tokens (`webapp.py:1282-1294`; confirmed by a probe). The UI (`app.js:432`) and `PRIVACY.md:49` promise it does. Minimum fix is to change the wording; the full fix is a revocation epoch. Sent to failover.
+- **B2 (privacy):** the voice CLI logs what you said and Claude's reply at INFO: `cli.py:369` and `:381`, plus ERROR at `:159`. This contradicts `PRIVACY.md:41`.
+- **B3 (privacy):** tool input values are logged at INFO for non-private tools (`chat.py:467`, `tools/__init__.py:107`).
+- **B4 (PRIVACY.md inaccurate):**
+  - Windows token/credentials file privacy.
+  - Quick notes are also in history and survive `delete_note`.
+  - Lecture `notes.json`/`page.json` are kept indefinitely; failed jobs keep the transcript for 14 days.
+  - "Checksum-verified" is true only for Kokoro.
+  - Notion "note pages" don't exist.
+  - Render log retention isn't mentioned.
+
+### Non-blocking (functional, fail closed)
+- Phone voice over hc1 is closed right after `auth_ok`: `WebAuth.signed_in` rejects hc1 sessions (`webapp.py:978`).
+- Cookie sign-in on the cloud host with failover returns 401: the app origin is treated as cross-origin (`edge.py:208-211`).
+
+### Verified
+| Area | Result |
+|---|---|
+| Route auth (local, local+failover, cloud, cloud+failover) | OK. Every /api route returns 401 without credentials. hc1 scopes are separated (sync vs app). Minting is rate-limited per address, and the right token is never locked out. CloudGuard sees `app.state.web` through EdgeMiddleware. Bad hc1 tokens aren't counted as WEB_TOKEN failures. No tokens in URLs. Non-loopback bind requires WEB_TOKEN. |
+| voice_ws logout race | FIXED (`voice_ws.py:203-206` re-check, watchdog `:233`) |
+| Updater trust chain | FIXED. The CI key is in the `stable-signing` Environment (master only, reviewer required), and Kyle's own signed tag is the documented default. PGP/X.509 are rejected (`updater.py:194-195,206-212`). Fail-closed, off by default. |
+| Gmail drafts-only | OK. `NoSendGmail` wraps both service builds, and there's no send path anywhere. |
+| Untrusted memory end to end | OK. Traced with real code: invite → tainted → untrusted summary → recall → move asks and is refused. |
+| Secrets in logs | OK (`RedactingFormatter`). |
+| PRIVACY.md | 15 claims accurate. Inaccurate claims are listed under B4. |
