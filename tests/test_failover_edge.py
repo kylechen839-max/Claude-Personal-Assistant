@@ -53,7 +53,7 @@ def setup():
     authority = TokenAuthority(SECRET, clock=clock)
     from assistant.webapp import LoginLimiter
 
-    limiter = LoginLimiter(per_ip=5, global_max=50, window=900, lockout=900, clock=clock)
+    limiter = LoginLimiter(per_ip=5, window=900, lockout=900, clock=clock)
     app = EdgeMiddleware(inner, authority=authority, role="pi", app_origins=[APP],
                          root_bearer_sid="script",
                          backends=parse_backends([{"role": "pi", "url": PI},

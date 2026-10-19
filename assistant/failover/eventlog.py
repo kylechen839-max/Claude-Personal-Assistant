@@ -46,6 +46,9 @@ class SqliteEventLog:
         self._db = sqlite3.connect(str(path), check_same_thread=False,
                                    isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
+        # Redaction rewrites rows in place; without this, SQLite (e.g. the
+        # Windows build) can leave the deleted text in free pages.
+        self._db.execute("PRAGMA secure_delete = ON")
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)

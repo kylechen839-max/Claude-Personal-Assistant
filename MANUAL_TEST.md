@@ -1,6 +1,6 @@
 # Manual test checklist
 
-One sitting on the Windows PC, about 25 minutes. Do the steps in order; each
+One sitting on the Windows PC, about 35 minutes. Do the steps in order; each
 one says what to do, what should happen, and what to change in `config.toml`
 if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
 then run it again).
@@ -25,7 +25,9 @@ Assignments database open in a browser to compare.
   - If not: fix whatever line says FAIL (missing key in `.env`, missing
     `credentials.json`/`token.json`). If the wrong mic is the default, note
     its `[index]` and set `[wake] mic_device = "<index>"` (or part of its
-    name), then re-run: "Configured mic: ... -> <your mic>".
+    name), then re-run: "Configured mic: '<index>' -> [<index>] <your mic>"
+    (without a setting the line is "Mic that will open: [i] ... (the
+    default)"). Index 0 is a real device too.
 
 ## 2. Speaker and mic (3 min)
 - [ ] **Speaker:** `python -m assistant --mode speak`, type "say a short
@@ -166,6 +168,51 @@ Ctrl+C to stop.
     "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
     `silence_ms` pause.
 
+## 12. Conversation history (4 min)
+- [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
+      lab report graph?" Let the follow-up window close. Wait ~10 s, then
+      `python -m assistant --history list` in a second PowerShell window.
+  - Should: a line with a short title like "Lab report error bars", source
+    `wake`, and today's time.
+- [ ] "Hey Claude, continue our conversation about the lab report."
+  - Should: it asks "Continue 'Lab report error bars' from today? Please say
+    yes or no." Say "yes", then "and what about standard deviation?"
+  - Should: the answer is clearly about error bars (it kept the context).
+    `--history show ID` shows both parts in one conversation.
+- [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
+  - Should: a one or two sentence answer naming the topics.
+- [ ] `python -m assistant --history search error bars`
+  - Should: the conversation, with "error" and "bars" highlighted.
+- [ ] Ctrl+C, run `python -m assistant --mode text --incognito`, type
+      "this is a secret test", then `quit`. Run `--history search secret`.
+  - Should: "No conversations match." (and no "Saved to memory" line).
+- [ ] `python -m assistant --history delete ID` with the lab report id,
+      answer `yes`, then `--history list`.
+  - Should: it's gone. If Pinecone is set up, its memory summary is
+    deleted too (the `voice-assistant` namespace in the Pinecone console
+    has one vector fewer).
+
+## 13. History on the phone (4 min)
+Needs the phone app (`python -m assistant --mode web`, section on the phone
+app above).
+- [ ] Tap the clock button. Type "lab" in the search bar.
+  - Should: within a second, the lab report conversation from step 12 (if
+    not deleted yet; otherwise any conversation) with "lab" highlighted.
+    Rows are grouped under Today / Yesterday / ...
+- [ ] Swipe a row left; tap Pin. Tap the Pinned filter.
+  - Should: only pinned conversations, with a pin icon.
+- [ ] Tap a conversation, then **Continue this conversation**, then ask a
+      follow-up by voice or text ("and what about the conclusion?").
+  - Should: the answer uses the old context.
+- [ ] Open the voice conversation view and ask another follow-up.
+  - Should: still the same conversation (History shows it with the new turns).
+- [ ] Long-press a row, choose Delete..., confirm.
+  - Should: it disappears; Cancel instead keeps it.
+- [ ] Gear → Incognito on. Say something. Open History and search for it.
+  - Should: not found; the header shows "Incognito". Turn it off again.
+- [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
+      the back button and the dialogs work, light and dark mode both read well.
+
 Note anything that failed or any setting you changed in BLOCKERS.md.
 
 ---
@@ -208,6 +255,87 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
       about?"
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
+
+## Voice conversation on the phone (optional, ~12 min)
+In the phone web app, tap **Voice conversation**. Turn the latency panel on
+with the stopwatch button.
+- [ ] iPhone permission: from the home-screen app, tap Voice conversation.
+      Deny the microphone the first time, then fix it as the README's
+      "On an iPhone" step 4 says, and try again.
+  - Should: a clear "Voice mode couldn't start" message on deny; after
+    allowing, it starts listening.
+- [ ] First tap: allow the microphone. Ask "What's on my calendar tomorrow?"
+      and then just stop talking.
+  - Should: the orb moves with your voice, pulses briefly, then the answer
+    starts within about 2 seconds of you stopping. The panel says
+    "silero VAD" and shows the times.
+- [ ] Natural turn-taking: have a 4-5 turn conversation without touching the
+      screen, with normal pauses mid-sentence ("Remind me... what's due this
+      week?").
+  - Should: a short thinking pause mid-sentence doesn't cut you off; a real
+    stop does. If it cuts you off, raise `[voice] silence_ms` (e.g. 900).
+- [ ] Interrupt it mid-sentence: ask "Tell me about the history of Rome",
+      and after its first sentence say "Stop, what time is it?"
+  - Should: it goes quiet at once and answers the time. Then ask "What were
+    you saying before?": it knows it was cut off and only what you heard.
+- [ ] Speaker vs. AirPods: ask a long question on the loudspeaker with the
+      phone on a table, and stay silent while it answers. Repeat with
+      AirPods.
+  - Should: it never interrupts itself. If it does on the speaker, set
+    `[voice] vad_threshold = 0.7` and try again; note which one you need.
+- [ ] Noisy room (TV or music on): a couple of turns.
+  - Should: it still notices when you stop; noise alone doesn't start turns.
+    If it keeps hearing the TV, note it (and try `vad_threshold = 0.7`).
+- [ ] Delete by voice: "Add a test event tomorrow at 3", then "Delete the
+      test event tomorrow". When it asks, say "yes".
+  - Should: it deletes it, and "yes" never shows up as its own question.
+    Repeat and say "no": the event stays. Repeat and talk over the question
+    ("okay, and what about Friday?"): it says "OK, I won't delete it", the
+    event stays, and it then answers about Friday.
+- [ ] Lock screen / interruption: mid-answer, lock the phone (or take a call
+      / say "Hey Siri"), then come back.
+  - Should: it stops talking, shows "Tap to continue", and carries on with
+    the same conversation after the tap.
+- [ ] Mute, CC and End: tap Mute and talk (nothing happens), unmute; toggle
+      CC; tap End.
+  - Should: End closes the view; `logs/assistant.log` has "Voice conversation
+    saved to memory" (if anything memorable was said).
+- [ ] Leave it open and silent for over 2 minutes.
+  - Should: it ends by itself ("Ended after a quiet stretch").
+
+## Cloud server on Render (optional, ~30 min)
+Setup is in README.md ("Run it in the cloud (Render)"). Your PC can be off
+for all of this except the Google sign-in.
+- [ ] Render: New -> Blueprint -> this repo; paste `ANTHROPIC_API_KEY`,
+      `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+      `GOOGLE_TOKEN_JSON` (all of `token.json`) and `GOOGLE_CLIENT_JSON` (all
+      of `credentials.json`) yourself. Apply.
+  - Should: `hey-claude` turns "Live" after the build; Logs show "Speech
+    models loaded" and no tracebacks.
+- [ ] Google Cloud console -> OAuth consent screen -> **Publish app**. Then
+      sign in again on the PC (delete `token.json`, run
+      `python -m assistant.tools.calendar`; the "unverified app" screen is
+      expected: Advanced -> Go to Hey Claude) and paste the new `token.json`
+      into `GOOGLE_TOKEN_JSON` in Render.
+  - Should: a week later the calendar still works (in Testing mode it would
+    stop after 7 days).
+- [ ] Render Shell: `python -m assistant --check`.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
+    time zone, Whisper model and Piper voice OK.
+- [ ] In Safari on the iPhone (Wi-Fi off), open
+      `https://hey-claude.onrender.com`. Enter a wrong token, then the
+      `WEB_TOKEN` from Render -> Environment.
+  - Should: "wrong token", then the chat page.
+- [ ] Share -> Add to Home Screen; open it from the home screen; hold the mic:
+      "What's on my calendar tomorrow?"
+  - Should: full screen, your words appear, then the answer spoken within a
+    few seconds, with tomorrow in your time zone.
+- [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
+      by voice.
+  - Should: Yes/No buttons and a spoken question, as on the PC.
+- [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
+- [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
+  - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 
 ---
 

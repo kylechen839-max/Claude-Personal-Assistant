@@ -66,7 +66,7 @@ def bearer(token, **extra):
 
 def test_without_a_role_nothing_changes(make):
     _, client = make(role=None)
-    assert client.get("/healthz").json() == {"ok": True}
+    assert "role" not in client.get("/healthz").json()
     assert client.post("/api/auth/token", json={"token": TOKEN}).status_code == 404
 
 
@@ -149,7 +149,7 @@ def test_csp_allows_exactly_the_backends(make):
     _, client = make("cloud")
     csp = client.get("/").headers["content-security-policy"]
     assert f"connect-src 'self' {PI} wss://pi.tail1234.ts.net {PC} " in csp
-    assert "script-src 'self';" in csp
+    assert "script-src 'self'" in csp and "unsafe-inline" not in csp
     assert "evil" not in csp
 
 

@@ -72,8 +72,36 @@ port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
 max_audio_seconds = 60        # longest recording accepted
+sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
+
+[voice]                       # hands-free voice conversation in the phone web app
+vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)
+silence_ms = 700              # this long a pause ends your turn
+min_utterance_ms = 300        # shorter sounds are ignored
+max_utterance_s = 30
+barge_in_ms = 250             # talk this long over a reply to interrupt it
+vad_threshold = 0.5           # raise (e.g. 0.7) if it hears itself on speaker
+idle_timeout = 120            # seconds of quiet before the conversation ends
+max_session_minutes = 30
+utterances_per_minute = 30
+debug_panel = false           # latency timings on the voice screen
+
+[update]                      # automatic updates on the home host (PC tasks / Pi service)
+enabled = false               # set true in config.local.toml, after signing is set up (README)
+channel = "stable"
+check_minutes = 15
+
+[history]
+# Every conversation (wake word, text, phone) is saved here and can be
+# searched and continued: python -m assistant --history list
+enabled = true
+path = "data/history.sqlite"  # HISTORY_PATH in the environment overrides (Render: /data/history.sqlite)
+retention_days = 0            # delete unpinned conversations older than this many days; 0 = keep forever
+max_mb = 500                  # size guard: the oldest unpinned conversations are deleted above this
+incognito = false             # true = save nothing (also no Pinecone summary); or run with --incognito
+title_model = "claude-haiku-5-5"  # fast model that writes each conversation's title and summary
 
 [failover]                    # Pi -> PC -> cloud for the phone app (see FAILOVER.md)
 role = ""                     # "pi", "pc" or "cloud" (--role overrides); "" = not in a failover setup

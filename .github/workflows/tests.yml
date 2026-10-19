@@ -37,7 +37,33 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y espeak-ng libespeak1 libportaudio2
+          sudo apt-get install -y espeak-ng libespeak1 libportaudio2 ffmpeg shellcheck
+
+      - name: Lint shell scripts (Linux)
+        if: runner.os == 'Linux'
+        run: shellcheck scripts/*.sh scripts/ci/*.sh
+
+      # Windows PowerShell 5.1 (what Kyle's PC runs the preflight with):
+      # parse every .ps1, then PSScriptAnalyzer when the image has it.
+      - name: Check PowerShell scripts (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($f in Get-ChildItem scripts -Filter *.ps1 -Recurse) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $errs | ForEach-Object { "$($f.Name): $_" }; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+          if (Get-Module -ListAvailable PSScriptAnalyzer) {
+            $found = Invoke-ScriptAnalyzer -Path scripts -Recurse -Severity Warning,Error
+            $found | Format-Table -AutoSize | Out-String -Width 200
+            if ($found) { exit 1 }
+            "PSScriptAnalyzer: no warnings"
+          } else {
+            "PSScriptAnalyzer not installed on this image; parse check only"
+          }
 
       - name: Cache Whisper model
         uses: actions/cache@v4
@@ -105,3 +131,23 @@ jobs:
           node dist/server.js &
           for i in $(seq 1 20); do curl -sf localhost:3999/ && break; sleep 0.5; done
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3999/mcp/wrong)" = 404
+
+  # The cloud image (Dockerfile, deployed by render.yaml): build it with the
+  # speech models baked in, start it like Render does, check /healthz and the
+  # auth wall, run one spoken turn, and measure peak memory (job summary).
+  docker:
+    name: Docker image (cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hey-claude:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test and memory
+        run: scripts/container_smoke.sh hey-claude:ci

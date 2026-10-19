@@ -72,9 +72,10 @@ def make_app(fake_client, tmp_path):
         assistant = webapp.WebAssistant(
             chat_factory, transcriber or FakeTranscriber(), tts or PrintTTS(),
             tools=tools, clock=clock or Clock())
-        kwargs.setdefault("limiter", webapp.LoginLimiter(per_ip=3, global_max=50))
+        kwargs.setdefault("limiter", webapp.LoginLimiter(per_ip=3, global_delay=0))
         app_options = {k: kwargs.pop(k) for k in list(kwargs)
                        if k in ("limiter", "trusted_proxy", "max_audio_seconds",
+                                "sessions_file",
                                 "max_text_chars", "max_upload_bytes")}
         assistant.__dict__.update(kwargs)  # e.g. conversation_timeout
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, **app_options)
@@ -130,9 +131,11 @@ def test_wrong_token_is_rejected_and_rate_limited(make_app):
     for _ in range(3):
         r = client.post("/api/login", json={"token": "nope"})
         assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
-    # locked now, even for the right token
-    assert client.post("/api/login", json={"token": TOKEN}).status_code == 429
+    # this address is locked out for wrong guesses...
+    assert client.post("/api/login", json={"token": "nope"}).status_code == 429
     assert webapp.COOKIE not in client.cookies
+    # ...but the right token always gets in
+    login(client)
 
 
 def test_login_sets_a_strict_cookie(make_app):
@@ -142,16 +145,16 @@ def test_login_sets_a_strict_cookie(make_app):
     for attr in ("httponly", "secure", "samesite=strict", "path=/"):
         assert attr in cookie
     assert TOKEN.lower() not in cookie  # the cookie is signed, not the token
-    assert client.get("/api/state").json() == {"busy": False, "confirm": None,
-                                                "turns": 0}
+    assert client.get("/api/state").json() == {
+        "busy": False, "confirm": None, "turns": 0, "incognito": False,
+        "history": False, "conversation": None}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
 
 def test_lockout_is_per_address_and_expires():
     clock = Clock()
-    limiter = webapp.LoginLimiter(per_ip=2, global_max=10, window=60,
-                                  lockout=300, clock=clock)
+    limiter = webapp.LoginLimiter(per_ip=2, window=60, lockout=300, clock=clock)
     limiter.fail("1.1.1.1"), limiter.fail("1.1.1.1")
     assert limiter.blocked("1.1.1.1") and not limiter.blocked("2.2.2.2")
     clock.now += 299
@@ -160,15 +163,51 @@ def test_lockout_is_per_address_and_expires():
     assert not limiter.blocked("1.1.1.1")
 
 
-def test_global_lockout():
+def test_many_wrong_tokens_slow_down_but_never_lock_everyone_out():
     clock = Clock()
-    limiter = webapp.LoginLimiter(per_ip=5, global_max=4, window=60,
-                                  lockout=300, clock=clock)
-    for i in range(4):
-        limiter.fail(f"10.0.0.{i}")  # a different address each time
-    assert limiter.blocked("9.9.9.9")
-    clock.now += 301
-    assert not limiter.blocked("9.9.9.9")
+    limiter = webapp.LoginLimiter(per_ip=5, global_free=4, global_delay=1.5,
+                                  window=60, clock=clock)
+    delays = [limiter.fail(f"10.0.0.{i}") for i in range(6)]  # many addresses
+    assert delays == [0, 0, 0, 0, 1.5, 1.5]
+    assert not limiter.blocked("9.9.9.9")  # nobody else is locked out
+    clock.now += 61
+    assert limiter.fail("10.0.1.1") == 0
+
+
+def test_right_token_signs_in_after_a_flood_of_wrong_ones(make_app):
+    """The review's case: 60 wrong tokens from many addresses must not
+    lock Kyle out."""
+    _, client = make_app(trusted_proxy=1)
+    for i in range(60):
+        r = client.post("/api/login", json={"token": f"guess-{i}"},
+                        headers={"X-Forwarded-For": f"203.0.113.{i}"})
+        assert r.status_code == 401
+    r = client.post("/api/login", json={"token": TOKEN},
+                    headers={"X-Forwarded-For": "198.51.100.7"})
+    assert r.status_code == 200
+    bearer = {"Authorization": f"Bearer {TOKEN}", "X-Forwarded-For": "198.51.100.8"}
+    assert client.get("/api/state", headers=bearer).status_code == 200
+
+
+def test_wrong_tokens_are_slowed_down_when_many_fail(make_app, monkeypatch):
+    waits = []
+
+    async def record(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(webapp, "_wait", record)
+    _, client = make_app(limiter=webapp.LoginLimiter(per_ip=100, global_free=2,
+                                                     global_delay=0.3))
+    for _ in range(4):
+        assert client.post("/api/login", json={"token": "nope"}).status_code == 401
+    assert waits == [0.3, 0.3]  # only past the first two
+    bad = {"Authorization": "Bearer nope"}
+    assert client.get("/api/state", headers=bad).status_code == 401
+    assert waits == [0.3, 0.3, 0.3]  # wrong Bearer tokens too
+    login(client)  # the right token isn't slowed down
+    assert client.get("/api/state", headers={"Authorization": f"Bearer {TOKEN}"}
+                      ).status_code == 200
+    assert len(waits) == 3
 
 
 def test_per_address_lockout_behind_a_trusted_proxy(make_app):
@@ -177,13 +216,15 @@ def test_per_address_lockout_behind_a_trusted_proxy(make_app):
     for _ in range(3):
         r = client.post("/api/login", json={"token": "nope"}, headers=attacker)
         assert r.status_code == 401 and r.json() == {"error": "sign-in failed"}
-    assert client.post("/api/login", json={"token": TOKEN},
+    assert client.post("/api/login", json={"token": "guess"},
                        headers=attacker).status_code == 429
     # a forged left-hand entry doesn't dodge it: the proxy's entry counts
     forged = {"X-Forwarded-For": "1.2.3.4, 6.6.6.6"}
-    assert client.post("/api/login", json={"token": TOKEN},
+    assert client.post("/api/login", json={"token": "guess"},
                        headers=forged).status_code == 429
     kyle = {"X-Forwarded-For": "5.5.5.5"}
+    assert client.post("/api/login", json={"token": "typo"},
+                       headers=kyle).status_code == 401  # not locked out
     assert client.post("/api/login", json={"token": TOKEN},
                        headers=kyle).status_code == 200
 
@@ -625,7 +666,8 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
                          make_response(text_block("Done."))]
     assistant, client = make_app(tools=reg)
     login(client)
-    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE])
+    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE],
+                             client.app.state.web.store.epoch)
     s = assistant.session(sid)
     assert assistant.start_turn(s, text="go")
     assert client.post("/api/turn", json={"text": "again"}).status_code == 409
@@ -636,9 +678,13 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 # --- public server hardening -------------------------------------------------------
 
-PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz", "/backend-router.js"]
+          "/silence.wav", "/healthz", "/backend-router.js",
+          # voice conversation page files and the vendored VAD (voice_ws.py)
+          "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
+          "/static/vad/silero_vad_v5.onnx",
+          "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -651,6 +697,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
+               and r.path != "/static/vad/{name}"
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:
@@ -663,7 +710,9 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
 def test_healthz_says_nothing(make_app):
     _, client = make_app()
     r = client.get("/healthz")
-    assert r.json() == {"ok": True} and "set-cookie" not in r.headers
+    # only the code version (for the page's reload after an update)
+    assert set(r.json()) == {"ok", "version"} and r.json()["ok"] is True
+    assert "set-cookie" not in r.headers
 
 
 def test_cookie_is_long_lived_and_renewed(make_app):
@@ -924,10 +973,11 @@ def test_bearer_token_for_other_clients(make_app, fake_client):
     assert evs[0]["text"] == "Hi from the API."
     assert "set-cookie" not in client.get("/api/state", headers=good).headers
     bad = {"Authorization": "Bearer wrong"}
-    for _ in range(3):
+    for _ in range(4):
         assert client.get("/api/state", headers=bad).status_code == 401
-    # locked out now (per address), even with the right token
-    assert client.get("/api/state", headers=good).status_code == 401
+    assert client.app.state.web.limiter.blocked("testclient")  # counted
+    # the right token still works
+    assert client.get("/api/state", headers=good).status_code == 200
 
 
 def test_trusted_proxy_by_address():
@@ -971,3 +1021,222 @@ def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
                         output_fn=lambda m: None) == 0
     assert seen["host"] == "127.0.0.1"
     assert seen["app"].state.web.trusted_proxy.addresses == {"127.0.0.1"}
+
+
+
+# --- sign-out and revocation -----------------------------------------------------
+
+def test_logout_revokes_the_cookie(make_app):
+    _, client = make_app()
+    login(client)
+    stolen = client.cookies[webapp.COOKIE]
+    assert client.post("/api/logout").status_code == 200
+    thief = TestClient(client.app, base_url=BASE)
+    thief.cookies.set(webapp.COOKIE, stolen)
+    assert thief.get("/api/state").status_code == 401
+
+
+def test_sign_out_everywhere(make_app):
+    _, phone = make_app()
+    laptop = TestClient(phone.app, base_url=BASE)
+    login(phone), login(laptop)
+    old_epoch = phone.app.state.web.store.epoch
+    assert phone.post("/api/logout-all").status_code == 200
+    assert phone.app.state.web.store.epoch != old_epoch
+    assert laptop.get("/api/state").status_code == 401
+    assert phone.get("/api/state").status_code == 401
+    login(laptop)  # signing in again works
+    assert laptop.get("/api/state").status_code == 200
+    assert TestClient(phone.app, base_url=BASE).post("/api/logout-all").status_code == 401
+
+
+def test_a_cookie_for_an_unknown_session_is_refused(make_app):
+    """A correctly signed cookie isn't enough: the session must be listed."""
+    _, client = make_app()
+    store = client.app.state.web.store
+    client.cookies.set(webapp.COOKIE, webapp.make_cookie(TOKEN, "made-up", store.epoch))
+    assert client.get("/api/state").status_code == 401
+
+
+def test_sessions_survive_a_restart(make_app, tmp_path):
+    path = tmp_path / "data" / "web_sessions.json"
+    _, client = make_app(sessions_file=path)
+    login(client)
+    cookie = client.cookies[webapp.COOKIE]
+    assert TOKEN not in path.read_text()
+    _, restarted = make_app(sessions_file=path)
+    restarted.cookies.set(webapp.COOKIE, cookie)
+    assert restarted.get("/api/state").status_code == 200
+    restarted.post("/api/logout")
+    _, again = make_app(sessions_file=path)
+    again.cookies.set(webapp.COOKIE, cookie)
+    assert again.get("/api/state").status_code == 401
+
+
+def test_session_store_expiry_and_bad_file(tmp_path):
+    clock = Clock()
+    store = webapp.SessionStore(max_age=100, clock=clock)
+    sid = store.create()
+    clock.now += 90
+    assert store.valid(sid)  # use pushes the expiry back
+    clock.now += 90
+    assert store.valid(sid)
+    clock.now += 101
+    assert not store.valid(sid)
+    bad = tmp_path / "s.json"
+    bad.write_text("not json")
+    assert webapp.SessionStore(bad).sessions == {}
+
+
+# --- review cycle 2 ------------------------------------------------------------
+
+class FakeVoiceConversation:
+    def __init__(self):
+        self.ended = []
+
+    def end(self, reason="user"):
+        self.ended.append(reason)
+
+
+def test_logout_hangs_up_that_browsers_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)  # TestClient has .cookies/.headers
+    mine, other = FakeVoiceConversation(), FakeVoiceConversation()
+    client.app.state.voice_conversations.update({sid: (mine, None),
+                                                 "someone-else": (other, None)})
+    client.post("/api/logout")
+    assert mine.ended == ["signed_out"] and other.ended == []
+
+
+def test_sign_out_everywhere_hangs_up_every_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    convs = [FakeVoiceConversation() for _ in range(3)]
+    client.app.state.voice_conversations.update(
+        {f"sid{i}": (c, None) for i, c in enumerate(convs)})
+    assert client.post("/api/logout-all").status_code == 200
+    assert all(c.ended == ["signed_out"] for c in convs)
+
+
+def test_answers_are_bound_to_their_question(make_app):
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    page_q = webapp.PendingConfirm("Delete the dentist?")
+    s.pending = page_q
+    # a late "no" from the voice view (no id) must not answer the page's question
+    assert not assistant.answer(s, False)
+    assert not assistant.answer(s, True, confirm_id="wrong")
+    assert not page_q.answered.is_set()
+    assert assistant.answer(s, True, confirm_id=page_q.id)
+    assert page_q.answered.is_set() and page_q.answer
+    voice_q = webapp.PendingConfirm("Delete lunch?", stream=True)
+    s.pending = voice_q
+    assert assistant.answer(s, False) and voice_q.answered.is_set()
+
+
+def test_page_cannot_answer_the_voice_views_question(make_app):
+    assistant, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)
+    s = assistant.session(sid)
+    s.pending = webapp.PendingConfirm("Delete lunch?", stream=True)
+    assert client.post("/api/confirm", json={"answer": "yes"}).status_code == 409
+    assert client.get("/api/state").json()["confirm"] is None
+    assert not s.pending.answered.is_set()
+
+
+def test_confirm_events_carry_an_id(make_app, fake_client):
+    deleted = []
+    fake_client.queue = [
+        make_response(tool_use_block("delete_event", {"title": "Dentist"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Okay.")),
+    ]
+    assistant, client = make_app(tools=delete_registry(deleted))
+    login(client)
+    first = events(client.post("/api/turn", json={"text": "delete the dentist"}))
+    sid = client.app.state.web.sid(client)
+    assert first[-1]["id"] == assistant.session(sid).pending.id
+    events(client.post("/api/confirm", json={"answer": "yes"}))
+    assert deleted == ["Dentist"]
+
+
+def test_limiter_memory_is_bounded_under_a_flood():
+    clock = Clock()
+    limiter = webapp.LoginLimiter(per_ip=3, global_free=20, window=900, clock=clock)
+    for i in range(25_000):
+        limiter.fail(f"10.{i // 65536}.{(i // 256) % 256}.{i % 256}")
+        clock.now += 0.01
+    assert len(limiter.all_failures) <= 21
+    assert limiter.fail("1.1.1.1") > 0  # still slowing down
+    for _ in range(10):
+        limiter.fail("2.2.2.2")
+    assert len(limiter.failures["2.2.2.2"]) == 3
+    clock.now += 1000  # everything is old now: the next sweep drops it
+    limiter._sweep_at = 0
+    limiter.fail("3.3.3.3")
+    assert len(limiter.failures) == 1
+
+
+def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
+    from pathlib import Path
+
+    path = tmp_path / "sessions.json"
+    store = webapp.SessionStore(path)
+    keep, gone = store.create(), store.create()
+    real_replace = Path.replace
+    broken = {"on": True}
+
+    def flaky_replace(self, target):
+        if broken["on"]:
+            raise OSError("disk full")
+        return real_replace(self, target)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "replace", flaky_replace)
+        with caplog.at_level("ERROR"):
+            store.revoke(gone)
+        assert "sign-out may be undone" in caplog.text
+        assert gone in json.loads(path.read_text())["sessions"]  # not on disk yet
+        broken["on"] = False
+        assert store.valid(keep)  # the next request retries the save
+    assert gone not in json.loads(path.read_text())["sessions"]
+    assert not webapp.SessionStore(path).valid(gone)
+
+
+@pytest.mark.parametrize("path", ["/api/logout", "/api/logout-all"])
+def test_sign_out_closes_an_open_voice_socket(path, monkeypatch):
+    """The real /api/voice socket: signing out ends it at once, and the
+    revoked cookie can't open a new one."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    make = make_voice.__wrapped__(monkeypatch)
+    _, http = make()
+    voice_login(http)
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        cookie = http.cookies.get(webapp.COOKIE)
+        assert http.post(path).status_code == 200
+        got = {}
+
+        def read():  # in a thread, so a missing "ended" fails instead of hanging
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+                ws.receive_text()
+            except WebSocketDisconnect as e:
+                got["closed"] = e.code
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+        assert "closed" in got
+    http.cookies.set(webapp.COOKIE, cookie)  # the stolen-cookie case
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with connect(http) as ws:
+            ws.receive_text()
+    assert closed.value.code == 1008

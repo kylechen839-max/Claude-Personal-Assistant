@@ -35,6 +35,10 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
+  for (const id of ["history-view", "transcript-view"]) {  // history.js
+    const el = $(id);
+    if (el) el.hidden = view !== id;
+  }
 }
 
 function addMessage(kind, text) {
@@ -335,7 +339,9 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    show("app");
+    const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
+    if (!elsewhere) show("app");
+    if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
@@ -400,17 +406,21 @@ async function login(token) {
   }
 }
 
-els.logout.addEventListener("click", async () => {
+async function signOut(path) {
   if (router) {
-    try { await request("/api/logout", { method: "POST" }); } catch (e) { /* signed out anyway */ }
+    try { await request(path, { method: "POST" }); } catch (e) { /* signed out anyway */ }
     await tokens.delete("token");
     els.log.textContent = "";
     show("login");
     return;
   }
-  await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+  await fetch(path, { method: "POST", credentials: "same-origin" });
   els.log.textContent = "";
   show("login");
+}
+els.logout.addEventListener("click", () => signOut("/api/logout"));
+$("logout-all").addEventListener("click", () => {
+  if (confirm("Sign out on every phone and browser?")) signOut("/api/logout-all");
 });
 
 // --- text ---

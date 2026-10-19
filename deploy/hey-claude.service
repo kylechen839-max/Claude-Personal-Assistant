@@ -27,7 +27,9 @@ WorkingDirectory=@REPO_DIR@
 # User managers can't order against the system's network-online.target, so
 # wait (up to 2 minutes) until DNS for the Anthropic API resolves.
 ExecStartPre=/bin/sh -c 'for i in $(seq 60); do getent hosts api.anthropic.com >/dev/null && exit 0; sleep 2; done; echo "network not up after 120s; starting anyway"'
-ExecStart=@REPO_DIR@/.venv/bin/python -m assistant --mode wake
+# assistant.host runs `python -m assistant --mode wake`, restarts it after a
+# crash and, with [update] enabled = true, keeps it on the `stable` branch.
+ExecStart=@REPO_DIR@/.venv/bin/python -m assistant.host wake
 Restart=on-failure
 RestartSec=10
 # Console output (warnings and errors) goes to the journal:

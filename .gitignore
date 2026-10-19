@@ -1,5 +1,7 @@
 # Secrets
 .env
+# This machine's own settings (on top of config.toml)
+config.local.toml
 credentials.json
 token.json
 .oauth_state.json
@@ -16,5 +18,13 @@ voices/
 
 # Runtime output
 logs/
+# Conversation history (personal data; see SECURITY.md)
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.wav
 !tests/fixtures/*.wav
+
+# Web app sign-in sessions (python -m assistant --mode web)
+data/

@@ -3,9 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 700 passed, 8 skipped (plus 33 node tests) (Linux build sandbox,
-Python 3.13). CI (`.github/workflows/tests.yml`) runs the same suite on every
-push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
+**Current test count:** 751 passed, 13 skipped (Linux build sandbox,
+Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
+CI (`.github/workflows/tests.yml`) runs the same suite on every
+push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
+builds and smoke-tests the cloud Docker image. The
 sandbox skips are the tests that need something it can't reach: the Whisper
 model and Piper voice downloads (Hugging Face is blocked; CI downloads both
 and runs those tests), and the live Notion and Google calls (no keys). On
@@ -22,12 +24,21 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
 | `test_memory.py` | 12 | stage 6 |
+| `test_memory_tools.py` | 7 | stage 6 (memory tools) |
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
-| `test_webapp.py` | 60 | phone web app (`--mode web`) |
+| `test_webapp.py` | 67 | phone web app (`--mode web`) |
+| `test_cloud.py` | 76 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
+| `test_sentences.py` | 17 | voice mode: sentence splitter |
+| `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
+| `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
+| `test_history.py` | 67 | conversation history: store, search, resume, CLI |
+| `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
+| `test_history_events.py` | 18 | history as sync events (skips without failover) |
 | `test_failover_edge.py` | 49 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
 | `test_failover_sync.py` | 160 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
 | `test_failover_leader.py` | 213 | failover: leader check for scheduled jobs (incl. the real network topology) |
@@ -113,6 +124,11 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   writes a 1-3 sentence summary into the `voice-assistant` namespace (small
   talk is skipped). Other namespaces are only read. A memory failure is
   logged and the reply goes ahead without it.
+- Memory tools (`assistant/tools/memory_tools.py`, all modes): `search_memory`
+  lets Claude look notes up when asked ("what do my notes say about...");
+  `remember` saves a note to the `voice-assistant` namespace when asked
+  ("remember that..."), with a confirmation if web/email content is in the
+  conversation. Tests: `test_memory_tools.py` (mocked memory).
 - Tests: mocked Pinecone (score filter, namespaces, upsert shape, failure
   tolerance, summary/skip) and one real read-only query when
   `PINECONE_API_KEY` is set.
@@ -191,8 +207,13 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   behind a trusted proxy (rightmost entry; `trusted_proxy` is a count, or the
   proxy's address such as 127.0.0.1 for `tailscale serve`, and then the
   headers count only from that address); http -> https redirect and HSTS
-  there; per-address (5 per 15 min) and global (50) sign-in lockouts that also
-  cover wrong Bearer tokens; constant-time compare and generic errors (no
+  there; a per-address lockout for wrong tokens (5 per 15 min, also wrong
+  Bearer tokens) and, past 20 wrong tokens from everyone, a one-second delay
+  on each further wrong one. The right token is always accepted (a review
+  found the earlier global lockout let anyone lock Kyle out). Sessions are
+  listed server-side (`[webapp] sessions_file`): sign-out revokes the cookie,
+  "sign out everywhere" (`/api/logout-all`) revokes all and rotates the
+  signing epoch; constant-time compare and generic errors (no
   stack traces, no FastAPI docs, no directory listing); 411 without
   Content-Length, 413 over `max_upload_mb`, over `max_audio_seconds` (checked
   while decoding, so a small file can't expand) or over 4000 characters of
@@ -215,6 +236,440 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
 
+## Cloud hosting (Render) ✅
+Runs the phone web app 24/7 on Render so it works with the PC off.
+- **Secrets from the environment.** `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON`
+  (the contents of `token.json` / `credentials.json`) replace the files when
+  set; a token from the environment is refreshed in memory and never written
+  to disk (nor any token with `[calendar] save_token = false`). A refused
+  refresh logs one clear warning with only the OAuth error code (e.g.
+  `invalid_grant`) and tells Claude the sign-in expired. The JSON values are
+  in log redaction too. No interactive sign-in on a server.
+- **Server profile** (`ASSISTANT_PROFILE=server`, set in the image; config
+  `SERVER_PROFILE`): Piper with the voice baked in, then espeak-ng (new
+  `EspeakTTS`, the `espeak-ng` command), then text only; no browser tool, no
+  wake word or chimes, logs to stdout only, listens on 0.0.0.0:`$PORT`; web
+  is the default and only audio-free mode. `--check` has a server variant: no
+  mic/speaker/wake-word checks; `WEB_TOKEN` required; time zone,
+  `GOOGLE_TOKEN_JSON` contents, Whisper cache, Piper and espeak-ng checked.
+  New env overrides: `ASSISTANT_TIMEZONE`, `WHISPER_MODEL`.
+- **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
+  itself is unchanged): `/healthz` -> `{"ok": true, "version": ...}` (no `busy`); every other route needs the
+  cookie or Bearer token except the login page, its static files, login, the
+  manifest and icons (unknown paths 401 too); sign-in limits through the web
+  app's shared `LoginLimiter` (`BoundedLoginLimiter` caps its tables), keyed
+  by the guard's client address, the right token always accepted; cookies
+  checked against the web app's `SessionStore` (`sessions_file` on `/data`
+  in the server profile); at most 2 body uploads per address / 32 in all, bodies
+  due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
+  (it let one slow client 503 everything, `/healthz` included); sign-ins
+  and wrong Bearer tokens in a separate pool (8, 2 s deadline) so they can't
+  take signed-in slots, IPv6 slots per /56; no trusted
+  proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;
+  trusting all private ranges let a Docker-bridge or LAN peer forge client
+  addresses), optional `[cloud] client_ip_header`, IPv6 counted per /64,
+  limit tables capped, "Proxy check" log lines for the first 5 requests; forwarded
+  headers only from a private-address peer (`[cloud] trusted_proxies`),
+  rightmost untrusted `X-Forwarded-For` hop as the client; https redirect and
+  HSTS; bodies buffered and capped (4 MB audio, 16 KB otherwise, chunked
+  included); 120 requests/min per address; generic 500s. Whisper and the
+  voice load at startup in the background. The voice WebSocket
+  (`/api/voice`) passes the same checks before its handshake (rate limit,
+  cookie or Bearer with lockout, same-site Origin); `X-Forwarded-Host` is
+  dropped unless the proxy sent it. The web app inside trusts forwarded
+  headers from the same networks (`ProxyNetworks`, a `ProxyTrust` by CIDR),
+  so its own proxy-aware checks agree with the guard. uvicorn runs with `ws="auto"` (the
+  `websockets` sans-I/O implementation) and `ws_max_size` 2 MB.
+- **Docker image** (`Dockerfile`, python:3.11-slim + espeak-ng + ffmpeg):
+  Whisper `base.en` and `tiny.en` and the Piper `en_US-lessac-medium` voice
+  downloaded at build time (`HF_HUB_OFFLINE=1` at run time), non-root user,
+  no openWakeWord. `.dockerignore` keeps secrets, logs, voices and the venv
+  out. `render.yaml` adds the `hey-claude` service (docker, `standard`,
+  `/healthz`, secrets `sync: false`, `WEB_TOKEN` generated) next to
+  `pinecone-mcp`.
+- **Persistent disk**: 1 GB at `/data` (`DATA_DIR=/data`,
+  `HISTORY_PATH=/data/history.sqlite`) for conversation history, lecture
+  audio and job state from the history/features branches. Nothing on this
+  branch reads them yet: until those land, conversations stay in memory. Disks need a paid
+  instance type (already the case) and cost $0.25/GB a month, so the total
+  is about $25.25. `deploy/docker-entrypoint.sh` chowns the mounted disk to
+  the app user and drops root with `setpriv --no-new-privs`; CI checks the
+  server's uid is 10001 and that it owns and can write a root-mounted `/data`.
+- **Memory, measured** in CI (`scripts/container_smoke.sh` +
+  `scripts/measure_memory.py`, GitHub runner, 4 CPUs, image built from this
+  branch), 5 s Piper clip of "Hey Claude, what's on my calendar tomorrow? And
+  do I have any assignments due this week?":
+
+  | Run | Peak RSS | Container (cgroup) peak | Transcribe 5 s |
+  |---|---|---|---|
+  | Server after one spoken turn, base.en + Piper | 465 MB | 395 MB | - |
+  | Script: imports + Piper + base.en + Piper reply | 564 MB | 507 MB | 0.71 s |
+  | Same, capped at 512 MB | 569 MB | 511 MB (at the cap) | - |
+  | Script with tiny.en | 467 MB | 410 MB | 0.43 s |
+
+  The imports alone are about 120 MB, the Piper voice adds about 160 MB, and
+  loading base.en briefly peaks about 150 MB above its steady size. Both
+  models transcribed the clip correctly ("...assignments to this week").
+  **Plan: Render Standard (2 GB, 1 CPU, $25/month; $25.25 with the disk)**: base.en needs up to
+  about 565 MB, more than Starter's 512 MB (it only stayed under the cap by
+  the kernel reclaiming file cache, with nothing left for a second session).
+  Starter ($7, 512 MB, 0.5 CPU) would work with `WHISPER_MODEL=tiny.en` at
+  about 410-470 MB, but with under 100 MB to spare and more misheard words;
+  documented in README as the cheaper option. Prices from Render's pricing
+  as listed in October 2026 (render.com itself was unreachable from the build
+  sandbox; check it when signing up).
+- **CI**: new `Docker image (cloud)` job builds the image, starts it as
+  Render would, checks `/healthz`, 401 on `/api/state` and `/silence.wav`,
+  wrong and right logins, a signed-in `/api/state`, a 413 upload, the
+  server's uid and `/data` owner, the voice WebSocket (`scripts/ws_smoke.py`:
+  opens with cookie + Origin, 1009 over 2 MB, refused without the cookie or
+  from another site), `--check`,
+  one real spoken turn (Whisper + Piper inside the container) and prints the
+  memory table to the job summary.
+- Tests: `test_cloud.py`, `test_server_profile.py` (offline, fake Google
+  credentials, mocked refresh). Not yet run on Render itself: README "Run it
+  in the cloud (Render)" and MANUAL_TEST.md "Cloud server on Render".
+
+## Voice conversation mode (phone web app) ✅
+Hands-free, turn-by-turn conversation in the phone page, like voice mode in
+the Claude apps. Tap "Voice conversation" once; End, "goodbye" or 2 minutes
+of quiet ends it.
+- Files: `assistant/voice_ws.py` (WebSocket route, limits, static files),
+  `assistant/voice_session.py` (turn pipeline), `assistant/sentences.py`,
+  `ClaudeChat.abort / mark_interrupted` in `chat.py`;
+  `assistant/web/voice.js` (mic, playback, socket, UI),
+  `voice-core.js` (DOM-free: endpointer, energy VAD, turn state machine,
+  framing), `voice-worklet.js` (16 kHz capture), `voice.css`, and the
+  vendored `web/vad/` (onnxruntime-web 1.22.0 + Silero v5, see its NOTICE).
+  It is built on the web app's own pieces: auth through `require_session`
+  (cookie or Bearer, lockouts, cross-site check), the browser's session and
+  conversation through `WebAssistant.chat_stream(session, text, cancel)` and
+  `answer(session, yes)`, and `transcribe` / `synthesize`. Edits to the
+  phone-web files are additive: CSP `'wasm-unsafe-eval'`, a `voice=`
+  argument and one `add_voice_routes()` call in `create_app`, `ws_max_size`
+  in `serve`, eSpeak/Piper fast paths at the top of `render_wav`, and the
+  button + view in `index.html`.
+
+Design decisions:
+- **Capture**: `getUserMedia` with echo cancellation, noise suppression and
+  auto gain; one AudioContext for mic and playback, created and resumed
+  inside the tap (iOS unlock), `navigator.audioSession = "play-and-record"`
+  where supported. An AudioWorklet downsamples to 16 kHz 512-sample frames.
+- **VAD**: Silero v5 in onnxruntime-web (single-threaded WASM, no
+  cross-origin isolation needed), a ~20-line wrapper following
+  @ricky0123/vad-web's (so its whole bundle isn't needed); everything served
+  from `/static/vad/`, wasm/onnx gzipped on the fly and cached a week. If it
+  fails to load, an adaptive energy VAD (noise floor x3) feeds the same
+  endpointer. The endpointer: speech above `vad_threshold`, end of turn after
+  `silence_ms` (700) below threshold-0.15, `min_utterance_ms` (300) or it's
+  a misfire, `max_utterance_s` (30) cut, 320 ms of pre-roll kept. While a
+  reply plays the threshold is raised by 0.25 so the speaker's echo doesn't
+  count.
+- **Transport: one WebSocket** rather than SSE + chunk fetches: both sides
+  talk at any time (utterances and barge-ins up; transcript, text deltas
+  and audio down), chunks go out the moment they're rendered with no
+  per-chunk round trip (a phone on mobile data pays ~100+ ms per request),
+  and a closed socket is an unambiguous cancel. Binary frames carry a small
+  JSON header + payload (16 kHz PCM16 up, one WAV per sentence down).
+- **Pipeline**: Whisper (shared, locked) -> `chat_stream` (Claude's
+  `messages.stream`) -> sentence
+  splitter (waits one character past a period, so "3:30 p.m. tomorrow",
+  "Dr. Lee", "e.g.", "U.S.", "$3.50" stay whole, and "at 3 PM. Then"
+  splits; long runs are cut at a comma) -> a per-turn TTS thread (through
+  `WebAssistant.synthesize`, the web app's single TTS thread: Piper in
+  memory, eSpeak directly on Linux for the pyttsx3 engine, SAPI to a file on
+  Windows) -> WAV chunks. The page
+  schedules chunks back to back in Web Audio. Text before a tool call ("Let
+  me check.") is spoken while the tool runs.
+- **Barge-in**: ~250 ms of confident speech while thinking or speaking stops
+  playback immediately and sends `interrupt` with how much was heard (whole
+  chunks + fraction of the current one). The server sets the turn's
+  `cancel` event and closes the Claude stream at once (`ClaudeChat.abort()`,
+  rather than waiting for its next delta), skips remaining TTS, and
+  rewrites the turn's assistant text to just the heard part plus
+  "[interrupted: Kyle started talking, so the rest of this reply was not
+  said]"; tool calls/results and web-result blocks are kept, so the
+  web-content confirmation rule still applies. Late chunks of a cancelled
+  turn are dropped on the page by turn id.
+- **Confirmations** (tightened after a code review found that talking over
+  a delete question left it pending, so the next "okay, and what about
+  Friday?" deleted the event): the session's "confirm" event makes the
+  voice view speak the question, bound to the turn that asked. It can only
+  be answered after the page reports that the question's audio played to
+  the end (`played` message). Talking over the question, or saying anything
+  before it was heard, is a **no**, and it says "OK, I won't delete it."
+  Only a short explicit yes counts (`is_explicit_yes`: "yes", "yeah, delete
+  it", "go ahead"); anything with other content ("okay, and what about
+  Friday?", "yes but not that one", a new question) is a no, spoken the
+  same way. The answer goes through `answer(session, yes)` and is never sent
+  to Claude. No answer within `[webapp] confirm_timeout` is "no".
+- **One turn at a time**: turns run on one worker thread per conversation.
+  A new utterance cancels the running turn and waits for it (a tool that is
+  mid-call finishes first, then the turn stops before asking Claude again);
+  a confirmation from a cancelled turn is declined, never attached to the
+  next one. Only the newest waiting utterance is kept: older ones are
+  dropped before Whisper runs, so transcription work can't pile up. A
+  barge-in after Claude asked for a tool but before it ran stops it: the
+  chat loop checks `cancel` before every tool call (skipped calls get an
+  error tool_result, so history stays valid). A voice turn's tool, confirm
+  and status events go straight to it (`chat_stream(on_event=...)`), never
+  through the session queue a page may be reading. Server-wide at most 4
+  voice conversations; rate limits are per browser session, so
+  reconnecting doesn't reset them. Transcripts are logged only at DEBUG.
+- **Conversation**: the phone's one web-app conversation (so push-to-talk
+  and voice continue each other; tools and memory as in the web app); End,
+  "goodbye", idle (2 min) or the 30 min cap ends it and stores the Pinecone
+  summary; so does closing the socket. One voice socket per browser.
+- **iOS**: start from the tap, Wake Lock (rejections ignored, re-requested
+  when visible), pause on `visibilitychange`, AudioContext "interrupted"
+  (calls, Siri) and mic track mute; "Tap to continue" resumes.
+- **UI**: one orb (CSS radial gradient scaled by the live mic or output
+  level), state label, captions (toggle remembered), Mute, End, latency
+  panel. `prefers-reduced-motion` turns the scaling/pulse off; colors follow
+  the light/dark preference.
+- **Timings**: server `TurnTimer` stages from "utterance received"
+  (transcript, first words, first sentence, first audio sent, whole reply;
+  `TurnTimer` now takes custom stages and orders steps by time), logged
+  always and printed with `--timings` in web mode; the page's panel adds
+  its own clock (end of turn -> transcript -> first words -> first audio
+  playing, and "after you stopped talking" = + `silence_ms`) and reports it
+  back to the log.
+
+Tested:
+- `tests/test_sentences.py` (17): abbreviations, initials, decimals, times
+  ("3:30 PM.", "p.m. tomorrow"), quotes, streaming token by token.
+- `tests/test_voice.py` (33, on a plain-ClaudeChat backend): streamed
+  tool rounds, `abort()` closing a stalled stream, `mark_interrupted`
+  keeping web blocks; the chunker sends
+  the first sentence's audio while the mocked Claude stream is still held
+  open; barge-in mid-reply aborts the stream, skips unsynthesized sentences
+  and truncates history to "First sentence here. Second one..."; barge-in
+  after the reply finished; interrupt before any audio; spoken confirmation
+  yes / no / unrelated answer (never sent to Claude), timeout; goodbye and
+  memory; idle/max-length; End during a turn; API error spoken; real eSpeak
+  render; only an explicit yes confirms (10 answers incl. "okay, and what
+  about Friday?"), barge-in over the question cancels the delete and says
+  so, an answer before the question was heard is a no, turns never overlap
+  and a cancelled turn's confirmation is declined, superseded utterances are
+  never transcribed; no tool runs after a barge-in that lands before the
+  tool call; `chat_stream(on_event)` keeps the turn's events off the shared
+  queue.
+- `tests/test_voice_ws.py` (31): no/forged cookie and missing/foreign/`null`/
+  look-alike Origin rejected (1008), X-Forwarded-Host only from a trusted
+  proxy; a whole streamed turn over the socket;
+  barge-in over the socket and the next request's history; spoken yes/no
+  through the web app's confirmation (yes, no, "okay, and what about
+  Friday?", barge-in over the question; the answer is never sent as a
+  request);
+  voice continuing a push-to-talk conversation; closing the
+  socket aborts generation and saves the summary; oversize/wrong-rate/junk
+  frames (1009/1003), long text and message floods, utterance rate limit
+  (1008), and across a reconnect, malformed interrupt/played (1003), the
+  server-wide conversation cap (1013), max session length; vendored files served byte-exact (SHA-256 in
+  NOTICE) and gzipped; CSP; first-audio latency (fake Whisper/Claude, real
+  eSpeak) and, in CI, with real Whisper; the JS tests via node.
+- `tests/js/voice-core.test.js` (12, node:test, no packages): listening ->
+  thinking -> speaking -> listening; barge-in (stop, position report, late
+  chunks dropped, next turn); talking while it thinks; confirmation turn and
+  cutting the question short; mute/pause/resume/end; endpointer silence,
+  misfire, max length, strict mode; energy VAD in steady noise; framing.
+  pytest runs them when `node` is on PATH (GitHub's Ubuntu and Windows
+  runners have it), so CI needs no extra step.
+- Browser smoke test (headless Chromium with a fake mic playing an eSpeak
+  question, real page/CSP/WebSocket/Silero, fake Whisper and Claude, real
+  eSpeak): states went listening -> thinking -> speaking -> listening for
+  each turn; Silero loaded; with a mic clip that talks again over the reply,
+  playback stopped and the next request's history held only the heard part
+  ("Tomorrow you have the dentist at 3:30... [interrupted: ...]"); the
+  energy fallback worked too; End closed the view; a delete confirmation
+  was answered "yes" only after the page reported the question as played,
+  and the event was deleted; tapping End 0-800 ms after Voice left no
+  socket (or mic) open.
+- **Measured first-audio latency** (mocked Claude streaming at ~50 ms per
+  delta): server, utterance received -> first audio sent 0.13-0.15 s; page,
+  end of turn (VAD) -> first audio playing 0.17-0.21 s, i.e. ~0.9 s after
+  the speech actually stopped (700 ms of that is the end-of-turn silence).
+  pytest WebSocket round trip with real eSpeak: 27-74 ms. With **real
+  Whisper** (base.en, CPU int8, GitHub Ubuntu runner, CI
+  `test_first_audio_latency_with_real_whisper`): utterance -> first audio
+  sent **0.60 s** (transcript 0.58 s). Add Claude's time to first token
+  (typically 0.5-1 s) and the network: about 1.5-2 s after Kyle stops
+  talking, within the ~2 s target on a decent connection.
+
+## Pi preflight ✅
+Everything testable before the move to a Raspberry Pi, in one pass per
+machine, with a go/no-go (`PI_MIGRATION.md`).
+
+- **Simulated Pi in CI** (`.github/workflows/pi-arm64.yml`,
+  `scripts/ci/pi_simulation.sh`): Debian Bookworm linux/arm64 with Python
+  3.11.2 (what 64-bit Raspberry Pi OS is) on GitHub's native
+  `ubuntu-24.04-arm` runner, in a `debian:bookworm` container, as a normal
+  user `pi` with sudo. It runs `install_pi.sh` end to end (apt, venv, pip,
+  openWakeWord `--no-deps`, models), then again (must be a no-op), checks
+  the aarch64 wheels import (onnxruntime, ctranslate2, piper, openwakeword,
+  sounddevice), downloads the Piper voice, runs the **full pytest suite**,
+  `python -m assistant --check`, `install_service.sh` (systemctl/loginctl
+  stubbed and their calls checked) and `preflight.sh`, which runs the real
+  wake word -> VAD -> Whisper -> reply on the committed fixture, both TTS
+  engines, and `--mode web` with a text and an audio turn. Stubbed only:
+  systemd, the sound card (an ALSA `null` device) and Claude
+  (`scripts/ci/fake_claude.py`, no key in CI). Runs on every push to
+  master, on pushes that touch the Pi files, and by hand (with a QEMU
+  option). First green run: about 1.5 minutes in total (install 42 s,
+  pytest 17 s, preflight 8 s) with downloads cached.
+- **Preflight** (`assistant/preflight.py`, `scripts/preflight.ps1` for
+  Windows PowerShell 5.1+, `scripts/preflight.sh`): git, .env, `--check`,
+  pytest offline and live (live skips are a FAIL), the wake-word end to end
+  on `tests/fixtures/hey_claude_calendar_tomorrow.wav` (asserts a wake, a
+  transcript matching the phrase and a non-error reply), text-mode calendar
+  and Notion questions (the log must show both tools called), web mode on
+  127.0.0.1 (healthz, auth refusal, login with `WEB_TOKEN`, text and audio
+  turn), pyttsx3 and Piper renders, and with `--hardware` the audio device
+  list and a 3 s mic level. Table + `logs/preflight-<timestamp>.txt`.
+  Every `.env` value is masked in the console and the report.
+- **Smoke check** (`assistant/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
+  the same web checks against any base URL (Render, or the Pi), plus a
+  hands-free turn over the voice WebSocket where the server has it.
+- **The PC as the always-on host** (`scripts/install_windows_service.ps1`,
+  `scripts/windows_host.py`): Task Scheduler tasks `\HeyClaude\Wake` and
+  `\HeyClaude\Web` at sign-in, hidden (pythonw), kept running by a small
+  supervisor (network wait, restart after 10 s, 5-minute pause after 5
+  crashes in 5 minutes; Task Scheduler's restart-on-failure doesn't see the
+  assistant's exit codes), `-Uninstall`; a power check that, after a typed
+  `y`, sets never-sleep/never-hibernate on AC and turns off USB selective
+  suspend. The preflight's `power` row WARNs on Windows when sleep is on.
+  The supervisor is `assistant/host.py` (`python -m assistant.host`), also
+  used by the Pi's systemd unit.
+- **Automatic updates** (`assistant/updater.py`, `assistant/host.py`,
+  `assistant/version.py`, `assistant/web/update-watch.js`): opt-in `[update]
+  enabled`, follows the `stable` branch (fast-forwarded only after master's
+  CI is green on all jobs). Fast-forward only; skips with local changes to
+  tracked files (config.toml excepted), local commits or a commit that
+  failed before; pip install when requirements.txt changed; smoke (import +
+  `--check`); restart when idle (loopback-only `busy` in /healthz) and
+  verify /healthz `version`; any failure -> `git reset --keep <old>`, old
+  requirements back, commit rejected, loud log. A lock file keeps the two
+  PC hosts and `--update` from updating at once; each host restarts its own
+  child when HEAD moves. The page reloads once when /healthz's version
+  changes, only when quiet. Tested with real git repos and a bare remote
+  (fast-forward, up to date, master-only push ignored, diverged, dirty,
+  config.toml edits kept, config conflict, failed smoke/pip -> rollback,
+  rejected commit, lock), the host's restart/verify/rollback with fakes,
+  /healthz version/busy, and update-watch.js in node.
+- **Update hardening (review cycle 2)**: fail-closed signatures (the new
+  stable commit or a `stable-<sha>` tag must verify against an
+  allowed_signers file outside the checkout; only `trust_unsigned = true`
+  skips it), origin URL check, only `local_branch` is updated, no automatic
+  pip (a requirements change needs `--update` by hand with the assistant
+  stopped, detected via `logs/host-*.alive`), failed rollback pip = FAILED,
+  HEAD moves made by hand only restart, `config.local.toml` (gitignored)
+  for per-machine settings, `.github/workflows/promote-stable.yml` moves
+  `stable` only when `tests` and `pi-arm64` both passed on that commit
+  (signed tag with the `STABLE_SIGNING_KEY` secret). Tests sign with a real
+  SSH key: unsigned, unknown key, signed tag, non-stable tag, missing
+  allowed_signers, trust_unsigned, wrong origin, other branch. Not done:
+  hash-pinned requirements (no single lock fits Windows x64, Linux x86_64
+  and aarch64 with this dependency set); mitigated by never running pip
+  automatically.
+  Tested: supervisor restart/back-off/network wait and the powercfg parsing
+  in pytest; the .ps1 parses and is PSScriptAnalyzer-clean (checked with
+  PowerShell 7 here and Windows PowerShell 5.1 in CI). Not run on a real
+  Windows Task Scheduler yet: MANUAL_TEST.md.
+- **Tests** (`tests/test_preflight.py`): result parsing (junit, wake and
+  text output, mic levels), verdicts, every step's PASS/FAIL/SKIP rules with
+  faked commands, the smoke HTTP flow against a fake app, and redaction: a
+  fake `.env` whose values are echoed by every command never appears in the
+  console or the report. shellcheck and `bash -n` on every .sh; the .ps1
+  files are parsed by Windows PowerShell 5.1 and PSScriptAnalyzer in the
+  Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
+  preflight/smoke flags, step names and script paths.
+
+## Conversation history ✅
+- `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
+  `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
+  `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
+  source wake/text/web/voice, timestamps, title, summary, pinned, archived),
+  `messages` (seq, role, kind chat/confirm, text, interrupted, compact
+  `tool_events` JSON) and `memory_vectors` (Pinecone ids). FTS5 index over
+  messages, titles and summaries kept in sync by triggers, bm25 ranking
+  (titles weigh more), snippets with highlights, prefix matching, filler
+  words dropped, any-word fallback; LIKE search if FTS5 is missing.
+  Retention (`retention_days`) and a size guard (`max_mb`) skip pinned
+  conversations.
+- Recording: `ClaudeChat(recorder=...)` saves the user turn before calling
+  the API and the reply after, with spoken/typed delete confirmations
+  (question and the heard answer) and `mark_interrupted()` for barge-in.
+  `end_conversation()` hands the conversation to a background thread that
+  asks `[history] title_model` for a title (<= 6 words) and summary, with the
+  first user message as the fallback. Conversations left open by a crash are
+  titled at the next start. The Pinecone summary now stores
+  `conversation_id` in its metadata, and its vector id is kept for deletes.
+- Search: FTS ranked keyword hits, then Pinecone semantic hits that link to
+  a conversation; filters by date range, source, pinned, archived.
+- Continue: `rebuild_history()` turns stored messages into plain-text turns
+  (tool events and confirmations as text, interrupted replies noted),
+  trimmed to `max_history` with a summary of older turns first.
+  `ClaudeChat.resume(id)`; tools `search_conversations` (titles, dates,
+  snippets) and `resume_conversation` (asks "Continue '...' from Tuesday?",
+  switches after the reply; a conversation that was only the "continue..."
+  request is dropped, a real one is saved first).
+- CLI: `--history list|search|show|export|delete`, `--format md|json`,
+  filters `--source/--since/--until/--pinned`, `--yes`, `--continue ID|last`,
+  `--incognito`.
+- Tests (`test_history.py`): CRUD, owner scoping, id randomness, migrations
+  (upgrade, rollback, newer schema refused, FTS built later), a real crash
+  in a subprocess then reopen, FTS and LIKE ranking/snippets/filters (each
+  test runs on both), retention and size guard, titles with a mocked API and
+  the fallback, off-the-hot-path titling, recording through ClaudeChat
+  (tool events, confirmations, errors, interruptions, incognito), resume
+  rebuilding and trimming, the tools via mocked Claude tool calls (search,
+  resume yes/no, mid-conversation, unknown id), semantic merge, delete
+  cascading to a mocked Pinecone (and not deleting when Pinecone fails),
+  export redaction, and the CLI commands. Performance: 5,000 seeded
+  conversations (50,000 messages), median search under 100 ms (about
+  30-55 ms in the sandbox even on a tiny vocabulary where every word
+  matches most messages).
+- Events: every change is a failover sync `Event` (message, rename with
+  the auto title/summary or Kyle's title, pin with archived, delete,
+  delete_message for barge-in edits) recorded in failover's
+  `SqliteEventLog` in the same file; the tables above are a projection of
+  the log, written only by one idempotent `_apply()` used for local and
+  synced events (`HistoryStore.sync_log` is the EventLog to give the
+  Syncer). Last writer wins on title/summary/pin by (ts, id); tombstones
+  redact and purge the search index. Startup replays events after a saved
+  cursor, so a crash between the log and the tables heals. Without the
+  failover modules it runs standalone (nothing to sync).
+- Review fixes: resumed text and history tool results count as untrusted
+  (changes ask first); a turn whose API call fails takes its saved user
+  message back (a retry isn't saved twice); a title written in the
+  background after the conversation was resumed doesn't mark it ended.
+- For other features: `history.current_conversation_id()` (inside a turn)
+  and `history.record_event(conversation_id, kind, text)` add a note (e.g. a
+  lecture summary or quick capture) to a conversation, shown in its
+  transcript and search and passed to Claude when it's continued.
+- Phone app: `assistant/history_web.py` adds `GET /api/conversations`
+  (paginated, `q`, source/pinned/archived/date filters, highlight parts),
+  `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,
+  archive), `DELETE` (with the Pinecone cascade; also clears the
+  conversation from any open session), `GET .../export?format=md|json`, and
+  `GET/POST /api/incognito`, all behind the web sign-in. Push-to-talk turns
+  are saved as `web`, voice-mode turns (`chat_stream`) as `voice`, and a
+  barge-in keeps only the spoken part, flagged interrupted.
+  `assistant/web/history.js`: History screen (debounced search, day groups,
+  filter chips, swipe and long-press actions, transcript, Continue),
+  rename/delete dialogs, incognito switch and badge, light theme.
+- Tests: `test_history_web.py` (401 on every route, cross-site 403, id
+  guessing and other owners get 404, pagination, highlights, semantic hits,
+  filters, rename/pin/archive, delete cascade and failure, export, continue,
+  incognito, web and voice recording with barge-in) and
+  `test_history_events.py` (each change is an event, projection ==
+  `materialize(events)` over random operations, two-store sync in any
+  arrival order, late events under tombstones, last-writer-wins, startup
+  catch-up, no deleted text left in the database file). Driven in headless
+  Chromium at phone size, dark and light: search highlights, groups,
+  transcript, continue then a turn, pin filter, rename, delete dialog,
+  swipe, infinite scroll, incognito; no console errors.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -228,8 +683,16 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 - **pyttsx3/eSpeak flakiness in tests** (Linux): about 1 run in 10 the eSpeak
   driver writes an empty .wav or crashes. The tests re-render empty clips up
   to 3 times; a crash means re-running.
-- **Real Pi not tested:** systemd lingering, real audio devices and Pi
-  latency are in MANUAL_TEST.md's Raspberry Pi section.
+- **Real Pi not tested:** the arm64 CI job proves the install, packages,
+  models and pipeline on Bookworm arm64, but not real audio devices,
+  systemd lingering or Pi latency; those are `preflight.sh --hardware` and
+  MANUAL_TEST.md's Pi part.
+- **Fixed (2026-10-18): `[wake] mic_device = 0`** silently opened the
+  default mic (`device or None`), and push-to-talk ignored `mic_device`
+  altogether, while `--check` reported the configured device as fine. Now
+  one resolver (`audio.resolve_mic_device`) is used by wake mode,
+  push-to-talk, `--check` and the preflight; `--check` shows the device
+  that will actually open and fails if an index resolves to another one.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.
@@ -280,3 +743,13 @@ The phone app's backend failover, documented in FAILOVER.md.
 Known issue until the history store lands: each backend has its own
 in-memory conversation, so after a failover Claude doesn't see the earlier
 turns of that conversation (memory from Pinecone still works).
+- **Voice mode on a real phone is untested** (no iPhone in the sandbox):
+  iOS audio routing with the mic open (speaker vs. earpiece), echo
+  cancellation of the reply on the loudspeaker, and the interruption
+  handling are in MANUAL_TEST.md. Chrome on desktop only cancels echo of
+  WebRTC audio on some platforms, so there use earphones or a higher
+  `[voice] vad_threshold`.
+- Whisper sometimes "hears" a short phrase in noise; such a turn just gets a
+  short answer. `min_utterance_ms` filters the shortest blips.
+- Voice replies are sent as WAV (~44 KB per second of Piper speech); fine
+  on Tailscale or LTE, could be Opus later.

@@ -29,6 +29,7 @@ Reusable pieces (for other routes, e.g. a WebSocket voice mode):
   require_session (FastAPI dependency; 401, or close 1008 on a WebSocket)
 """
 
+import asyncio
 import hashlib
 import hmac
 import io
@@ -67,7 +68,8 @@ MIN_TOKEN_LENGTH = 32
 # Tools that act on the PC itself make no sense from the phone.
 PC_ONLY_TOOLS = {"open_in_browser"}
 
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+# 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
@@ -119,72 +121,189 @@ def _sign(token: str, sid: str) -> str:
                     hashlib.sha256).hexdigest()
 
 
-def make_cookie(token: str, sid: str) -> str:
-    return f"{sid}.{_sign(token, sid)}"
+def make_cookie(token: str, sid: str, epoch: str = "") -> str:
+    return f"{sid}.{_sign(token, f'{epoch}:{sid}')}"
 
 
-def read_cookie(token: str, value: str | None) -> str | None:
-    """The session id in a valid cookie, else None."""
+def read_cookie(token: str, value: str | None, epoch: str = "") -> str | None:
+    """The session id in a correctly signed cookie, else None. (Whether that
+    session is still signed in is SessionStore's call.)"""
     if not value or "." not in value:
         return None
     sid, sig = value.rsplit(".", 1)
-    if sid and hmac.compare_digest(sig, _sign(token, sid)):
+    if sid and hmac.compare_digest(sig, _sign(token, f"{epoch}:{sid}")):
         return sid
     return None
 
 
+class SessionStore:
+    """Signed-in browsers, kept on the server so a cookie can be revoked.
+
+    A cookie is valid only while its session id is listed here: signing out
+    removes that one, "sign out everywhere" clears the list and rotates the
+    epoch that every cookie signature includes. Sessions unused for
+    `max_age` seconds expire. With `path` the list survives restarts (a small
+    JSON file, rewritten on sign-in/out and at most daily on use); without it
+    a restart signs everyone out."""
+
+    def __init__(self, path: str | Path | None = None,
+                 max_age: float = COOKIE_MAX_AGE, max_sessions: int = 100,
+                 clock=time.time):
+        self.path = Path(path) if path else None
+        self.max_age = max_age
+        self.max_sessions = max_sessions
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.epoch = secrets.token_hex(8)
+        self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
+        self._saved_at: dict[str, float] = {}
+        self._unsaved = False  # a save failed; retry before trusting the file
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path or not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.epoch = str(data["epoch"])
+            self.sessions = {str(k): float(v) for k, v in data["sessions"].items()}
+            self._saved_at = dict(self.sessions)
+        except Exception as e:  # unreadable: start over (everyone signs in again)
+            log.warning("Ignoring unreadable web session file %s: %s", self.path, e)
+
+    def _save(self) -> None:
+        if not self.path:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            tmp.write_text(json.dumps({"epoch": self.epoch,
+                                       "sessions": self.sessions}), encoding="utf-8")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            tmp.replace(self.path)
+            self._saved_at = dict(self.sessions)
+            if self._unsaved:
+                log.warning("Web sessions saved to %s again", self.path)
+            self._unsaved = False
+        except OSError as e:
+            # A sign-out not on disk would come back after a restart: say so
+            # loudly and retry on every request until it is saved.
+            log.error("Could not save web sessions to %s (%s); a sign-out may "
+                      "be undone by a restart until this works", self.path, e)
+            self._unsaved = True
+
+    def create(self) -> str:
+        sid = secrets.token_urlsafe(16)
+        with self.lock:
+            self.sessions[sid] = self.clock()
+            while len(self.sessions) > self.max_sessions:
+                oldest = min(self.sessions, key=self.sessions.get)
+                del self.sessions[oldest]
+            self._save()
+        return sid
+
+    def valid(self, sid: str | None) -> bool:
+        """Is this session signed in? Counts as use (pushes back expiry)."""
+        if not sid:
+            return False
+        now = self.clock()
+        with self.lock:
+            if self._unsaved:
+                self._save()
+            last = self.sessions.get(sid)
+            if last is None:
+                return False
+            if now - last > self.max_age:
+                del self.sessions[sid]
+                self._save()
+                return False
+            self.sessions[sid] = now
+            if now - self._saved_at.get(sid, 0) > 86400:
+                self._save()
+            return True
+
+    def revoke(self, sid: str) -> None:
+        with self.lock:
+            if self.sessions.pop(sid, None) is not None:
+                self._save()
+
+    def revoke_all(self) -> list[str]:
+        """Sign out every browser; returns the ids that were signed in."""
+        with self.lock:
+            sids = list(self.sessions)
+            self.sessions.clear()
+            self.epoch = secrets.token_hex(8)
+            self._save()
+        return sids
+
+
 class LoginLimiter:
-    """Wrong-token limits: per client address and in total.
+    """Limits on WRONG tokens (the right token is always accepted, so
+    nobody can lock Kyle out by guessing).
 
-    An address with `per_ip` failures within `window` seconds is locked out
-    for `lockout` seconds; `global_max` failures from everyone together lock
-    every new sign-in out for `lockout` seconds (already signed-in browsers
-    keep working). Behind `tailscale serve` all requests share one address,
-    so there the per-address limit is effectively global too."""
+    - Per client address: `per_ip` wrong tokens within `window` seconds lock
+      that address's further wrong guesses out for `lockout` seconds.
+    - Everyone together: past `global_free` wrong tokens within `window`,
+      each further wrong guess waits `global_delay` seconds before its answer
+      (a slowdown, not a lockout). WEB_TOKEN is 256 random bits, so guessing
+      is hopeless anyway; this only keeps a flood cheap to serve.
 
-    def __init__(self, per_ip: int = 5, global_max: int = 50,
-                 window: float = 900, lockout: float = 900,
-                 clock=time.monotonic):
+    Behind `tailscale serve` without `trusted_proxy`, all requests share one
+    address, so there the per-address limit covers everyone."""
+
+    def __init__(self, per_ip: int = 5, window: float = 900,
+                 lockout: float = 900, global_free: int = 20,
+                 global_delay: float = 1.0, clock=time.monotonic):
         self.per_ip = per_ip
-        self.global_max = global_max
         self.window = window
         self.lockout = lockout
+        self.global_free = global_free
+        self.global_delay = global_delay
         self.clock = clock
         self.failures: dict[str, deque] = {}
-        self.all_failures: deque = deque()
+        # Only the newest global_free + 1 times matter: more than global_free
+        # within the window means all of those are inside it.
+        self.all_failures: deque = deque(maxlen=global_free + 1)
         self.locked_until: dict[str, float] = {}
         self.lock = threading.Lock()
+        self._sweep_at = 10_000  # tracked addresses before the next cleanup
 
     def _prune(self, q: deque, now: float) -> None:
         while q and q[0] <= now - self.window:
             q.popleft()
 
     def blocked(self, ip: str = "") -> bool:
-        now = self.clock()
+        """Should a wrong token from this address get "too many attempts"?"""
         with self.lock:
-            return (self.locked_until.get(ip, 0) > now
-                    or self.locked_until.get("*", 0) > now)
+            return self.locked_until.get(ip, 0) > self.clock()
 
-    def fail(self, ip: str = "") -> None:
+    def fail(self, ip: str = "") -> float:
+        """Record a wrong token; returns how long to wait before answering."""
         now = self.clock()
         with self.lock:
-            q = self.failures.setdefault(ip, deque())
+            q = self.failures.setdefault(ip, deque(maxlen=self.per_ip))
             q.append(now)
             self.all_failures.append(now)
             self._prune(q, now)
             self._prune(self.all_failures, now)
-            if len(q) >= self.per_ip:
+            if len(q) >= self.per_ip and self.locked_until.get(ip, 0) <= now:
                 self.locked_until[ip] = now + self.lockout
-                log.warning("Web sign-in locked for one address after %d "
+                log.warning("Web sign-in: one address locked out after %d "
                             "wrong tokens", len(q))
-            if len(self.all_failures) >= self.global_max:
-                self.locked_until["*"] = now + self.lockout
-                log.warning("Web sign-in locked for everyone after %d wrong "
-                            "tokens", len(self.all_failures))
-            if len(self.failures) > 10_000:  # bound memory under a flood
+            if len(self.failures) > self._sweep_at:  # bound memory under a flood
                 for key in [k for k, v in self.failures.items()
                             if not v or v[-1] <= now - self.window]:
                     self.failures.pop(key, None)
+                for key in [k for k, t in self.locked_until.items() if t <= now]:
+                    self.locked_until.pop(key, None)
+                # sweep again only once it has doubled: amortized O(1)
+                self._sweep_at = max(10_000, 2 * len(self.failures))
+            if len(self.all_failures) > self.global_free:
+                return self.global_delay
+            return 0.0
 
 
 @dataclass(frozen=True)
@@ -257,13 +376,14 @@ def client_ip(conn, trusted_proxy=0) -> str:
 
 # --- request origin -----------------------------------------------------------
 
-def is_cross_origin(headers, allowed_origins=()) -> bool:
+def is_cross_origin(headers, allowed_origins=(), trust_forwarded: bool = True) -> bool:
     """True for a browser request made by another site.
 
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
-    the Host (or X-Forwarded-Host, as set by a proxy). Requests with neither
-    header (curl, tests) pass; they still need the session cookie. An Origin
-    in `allowed_origins` (e.g. the failover app origin) is never cross-origin."""
+    the Host (or X-Forwarded-Host, as set by a proxy, if `trust_forwarded`).
+    Requests with neither header (curl, tests) pass; they still need the
+    session cookie. An Origin in `allowed_origins` (e.g. the failover app
+    origin) is never cross-origin."""
     if headers.get("origin") and headers.get("origin") in allowed_origins:
         return False
     site = headers.get("sec-fetch-site")
@@ -277,9 +397,10 @@ def is_cross_origin(headers, allowed_origins=()) -> bool:
     if origin in allowed_origins:
         return False
     host = urlsplit(origin).netloc.lower()
-    own = {h.strip().lower() for h in (headers.get("host", ""),
-                                       headers.get("x-forwarded-host", ""))
-           if h.strip()}
+    hosts = [headers.get("host", "")]
+    if trust_forwarded:
+        hosts.append(headers.get("x-forwarded-host", ""))
+    own = {h.strip().lower() for h in hosts if h.strip()}
     return host not in own
 
 
@@ -399,6 +520,10 @@ MANIFEST = {
 @dataclass
 class PendingConfirm:
     question: str
+    # True when asked during chat_stream(on_event=...) (the voice view):
+    # only that caller may answer it, not the page's /api/confirm.
+    stream: bool = False
+    id: str = field(default_factory=lambda: secrets.token_urlsafe(8))
     answered: threading.Event = field(default_factory=threading.Event)
     answer: bool = False
 
@@ -415,6 +540,12 @@ class Session:
         self.busy = threading.Lock()
         self.pending: PendingConfirm | None = None
         self.thread: threading.Thread | None = None
+        # While chat_stream(on_event=...) runs, that caller gets this turn's
+        # tool/confirm/status events instead of the shared queue.
+        self.listener: Callable[[dict], None] | None = None
+
+    def emit(self, event: dict) -> None:
+        (self.listener or self.events.put)(event)
 
 
 class SessionTools(ToolRegistry):
@@ -438,8 +569,11 @@ class WebAssistant:
     def __init__(self, chat_factory: Callable[[ToolRegistry], object],
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
-                 max_sessions: int = 20, clock=time.monotonic):
+                 max_sessions: int = 20, clock=time.monotonic,
+                 history=None, memory=None):
         self.chat_factory = chat_factory
+        self.history = history  # a HistoryStore (conversation history) or None
+        self.memory = memory    # PineconeMemory, for semantic search and deletes
         self.transcriber = transcriber
         self.tts = tts
         self.tools = tools or ToolRegistry()
@@ -480,7 +614,7 @@ class WebAssistant:
         holder: dict = {}
         registry = SessionTools(self.tools,
                                 confirm=lambda q: self._confirm(holder["s"], q),
-                                emit=lambda e: holder["s"].events.put(e))
+                                emit=lambda e: holder["s"].emit(e))
         s = Session(sid, self.chat_factory(registry), registry, self.clock())
         holder["s"] = s
         return s
@@ -502,7 +636,8 @@ class WebAssistant:
         try:
             summary = s.chat.end_conversation()
             if summary:
-                log.info("Web conversation saved to memory: %s", summary)
+                log.info("Web conversation saved to memory (%d chars)", len(summary))
+                log.debug("Saved summary: %s", summary)
             return summary
         except Exception:
             log.exception("Ending a web conversation failed")
@@ -515,6 +650,33 @@ class WebAssistant:
             s = self.sessions.pop(sid, None)
         if s is not None:
             self._end(s)
+
+    # conversation history
+    def forget_conversation(self, cid: str) -> None:
+        """A conversation was deleted: drop it from any browser that has it
+        open, so it isn't summarized into memory or saved again."""
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for s in sessions:
+            if s.chat.recorder and s.chat.conversation_id == cid:
+                s.chat.reset()
+                s.chat.recorder.conversation_id = None
+
+    def set_incognito(self, s: Session, on: bool) -> bool:
+        """Switch this browser's incognito mode. The current conversation
+        ends first (saved if it was being saved), so nothing said while
+        incognito ends up in history or memory. False if a turn is running."""
+        if s.chat.recorder is None or s.chat.incognito == on:
+            return True
+        if not s.busy.acquire(timeout=2):
+            return False
+        try:
+            if s.chat.history or s.chat.conversation_id:
+                s.chat.end_conversation()
+            s.chat.recorder.incognito = on
+        finally:
+            s.busy.release()
+        return True
 
     def shutdown(self) -> None:
         with self.lock:
@@ -554,11 +716,15 @@ class WebAssistant:
     def _run_turn(self, s: Session, text, recording) -> None:
         from assistant.cli import get_reply, is_exit
 
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "web"  # a new conversation started with push-to-talk
         try:
             if recording is not None:
                 text = self.transcribe(recording)
                 s.events.put({"type": "transcript", "text": text})
-                log.info("Web heard: %r", text)
+                log.info("Web heard %d chars", len(text))
+                log.debug("Web heard: %r", text)
             text = (text or "").strip()
             if not text:
                 s.events.put({"type": "error",
@@ -571,7 +737,8 @@ class WebAssistant:
             reply = get_reply(  # it logs errors itself
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
-            log.info("Web replied: %r", reply)
+            log.info("Web replied %d chars", len(reply))
+            log.debug("Web replied: %r", reply)
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -589,21 +756,28 @@ class WebAssistant:
 
     def _confirm(self, s: Session, question: str) -> bool:
         """Called in the turn's thread: ask the page and wait for the answer."""
-        pending = PendingConfirm(question)
+        pending = PendingConfirm(question, stream=s.listener is not None)
         s.pending = pending
-        s.events.put({"type": "confirm", "question": question,
-                      "audio": f"/api/audio/{self.remember(question)}"})
+        s.emit({"type": "confirm", "question": question, "id": pending.id,
+                "audio": f"/api/audio/{self.remember(question)}"})
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
-            log.info("No answer to %r; treating it as no", question)
-            s.events.put({"type": "status", "text": "No answer, so I didn't do it."})
+            log.info("No answer to a confirmation; treating it as no")
+            log.debug("Unanswered: %r", question)
+            s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
-    def answer(self, s: Session, yes: bool) -> bool:
-        """Answer the pending question. False if there is none."""
+    def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
+        """Answer the pending question; False if there is none, or it isn't
+        the one meant. With `confirm_id` (from the "confirm" event) only that
+        question is answered. Without it, only a question asked during
+        chat_stream(on_event=...) is: a late answer from the voice view must
+        never answer a newer push-to-talk question."""
         pending = s.pending
         if pending is None:
+            return False
+        if (pending.id != confirm_id) if confirm_id is not None else not pending.stream:
             return False
         pending.answer = yes
         s.last_active = self.clock()
@@ -626,16 +800,22 @@ class WebAssistant:
                 return
 
     def chat_stream(self, s: Session, text: str,
-                    cancel: threading.Event | None = None):
+                    cancel: threading.Event | None = None, on_event=None):
         """Ask Claude in this session's conversation and yield the reply's
         text deltas as they arrive. Setting `cancel` stops it (barge-in);
         what was said so far stays in the conversation. Tool calls and
         confirmations work as in a normal turn (a confirmation is answered
-        with `answer()`). Raises RuntimeError if a turn is already running."""
+        with `answer()`). With `on_event`, this turn's tool, confirm and status
+        events go to it rather than to the session's queue (which a page may
+        be reading). Raises RuntimeError if a turn is already running."""
         from assistant.cli import get_reply
 
         if not s.busy.acquire(timeout=2):
             raise RuntimeError("a turn is already running in this session")
+        s.listener = on_event
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "voice"  # a new conversation started in voice mode
         deltas: queue.Queue = queue.Queue()
         end = object()
 
@@ -651,6 +831,7 @@ class WebAssistant:
                     deltas.put(reply)
             finally:
                 s.last_active = self.clock()
+                s.listener = None
                 s.busy.release()
                 deltas.put(end)
 
@@ -713,6 +894,11 @@ def _init_com() -> None:
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
+    from assistant.voice_session import fast_wav
+
+    data = fast_wav(tts, text)  # Piper in memory / eSpeak directly
+    if data:
+        return data
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "reply.wav"
         for _ in range(attempts):
@@ -739,36 +925,40 @@ class WebAuth:
     share one conversation, and wrong tokens count toward the lockouts."""
 
     def __init__(self, assistant: WebAssistant, token: str, allowed_origins=(),
-                 trusted_proxy=0, limiter: "LoginLimiter | None" = None):
+                 trusted_proxy=0, limiter: "LoginLimiter | None" = None,
+                 store: "SessionStore | None" = None):
         self.assistant = assistant
         self.token = token
         self.allowed_origins = tuple(o.rstrip("/") for o in allowed_origins)
         self.trusted_proxy = parse_trusted_proxy(trusted_proxy)
         self.limiter = limiter or LoginLimiter()
+        self.store = store or SessionStore()
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
     def sid(self, conn) -> str | None:
-        claims = conn.scope.get("auth")  # set by failover.edge.EdgeMiddleware
+        claims = getattr(conn, "scope", {}).get("auth")  # set by failover.edge.EdgeMiddleware
         if claims is not None:
             return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
-            ip = self.client_ip(conn)
-            if self.limiter.blocked(ip):
-                return None
             if tokens_match(auth[7:], self.token):
                 return self.bearer_sid
-            self.limiter.fail(ip)
+            ip = self.client_ip(conn)
+            if not self.limiter.blocked(ip):
+                # the HTTP middleware waits this long before answering
+                conn.state.auth_delay = self.limiter.fail(ip)
             log.warning("Web request with a wrong bearer token")
             return None
-        return read_cookie(self.token, conn.cookies.get(COOKIE))
+        sid = read_cookie(self.token, conn.cookies.get(COOKIE), self.store.epoch)
+        return sid if self.store.valid(sid) else None
 
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
         return self.assistant.session(sid) if sid else None
 
     def cross_origin(self, conn) -> bool:
-        return is_cross_origin(conn.headers, self.allowed_origins)
+        return is_cross_origin(conn.headers, self.allowed_origins,
+                               trust_forwarded=self.trusted_proxy.trusts(conn))
 
     def client_ip(self, conn) -> str:
         return client_ip(conn, self.trusted_proxy)
@@ -793,10 +983,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
-               failover=None):
+               sessions_file: str | Path | None = None,
+               voice: dict | None = None, failover=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
-    tokens instead of cookies, CORS for the app origin (FAILOVER.md)."""
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -818,7 +1009,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             "connect-src 'self'", "connect-src " + connect_src(list(failover.backends)))
         # the phone app reads replies cross-origin from the Pi and PC
         security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-    web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter)
+    store = SessionStore(sessions_file)
+    web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -885,6 +1077,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             response = error("too large", 413)
         else:
             response = await call_next(request)
+            delay = getattr(request.state, "auth_delay", 0)
+            if delay:  # a wrong bearer token while many are failing
+                await _wait(delay)
         for k, v in security_headers.items():
             response.headers.setdefault(k, v)
         if proxied:
@@ -894,7 +1089,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             response.headers["Cache-Control"] = "no-store"
             sid = None if "authorization" in request.headers else web.sid(request)
             if sid and "set-cookie" not in response.headers:
-                set_session_cookie(response, token, sid)  # keep it fresh
+                set_session_cookie(response, token, sid, store.epoch)  # keep it fresh
         return response
 
     def stream(s: Session):
@@ -954,8 +1149,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     def index():
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
-    for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript"),
+    for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
+                        ("app.css", "text/css"), ("sw.js", "text/javascript"),
+                        ("update-watch.js", "text/javascript"),
                         ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -985,40 +1181,81 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
 
+    from assistant.version import version
+
     @app.get("/healthz")
-    def healthz():
-        return {"ok": True}
+    def healthz(request: Request):
+        # The version lets the page reload after an update. Only a request
+        # from this machine itself (the host supervisor waiting to restart,
+        # not one relayed by a proxy) also learns whether a turn is running.
+        body = {"ok": True, "version": version()}
+        client = request.client.host if request.client else ""
+        if is_loopback(client) and "x-forwarded-for" not in request.headers:
+            body["busy"] = assistant_busy(assistant, app)
+        return body
 
     # --- sign-in ---
     @app.post("/api/login")
     async def login(request: Request):
-        ip = web.client_ip(request)
-        if limiter.blocked(ip):
-            return error("too many attempts; try again later", 429)
         try:
             body = await request.json()
         except ValueError:
             body = {}
         given = str(body.get("token", "")) if isinstance(body, dict) else ""
-        if not tokens_match(given, token):
-            limiter.fail(ip)
+        if not tokens_match(given, token):  # the right token always works
+            ip = web.client_ip(request)
+            if limiter.blocked(ip):
+                return error("too many attempts; try again later", 429)
+            delay = limiter.fail(ip)
             log.warning("Web sign-in with a wrong token")
+            if delay:
+                await _wait(delay)
             return error("sign-in failed", 401)
-        sid = web.sid(request) or secrets.token_urlsafe(16)
+        sid = web.sid(request)
+        if sid is None or sid == web.bearer_sid:
+            sid = store.create()
         response = JSONResponse({"ok": True})
-        set_session_cookie(response, token, sid)
+        set_session_cookie(response, token, sid, store.epoch)
         log.info("Web sign-in ok")
         return response
 
-    @app.post("/api/logout")
-    async def logout(request: Request):
-        sid = web.sid(request)
-        if sid:
-            await run_in_threadpool(assistant.end_session, sid)
+    def signed_out():
         response = JSONResponse({"ok": True})
         response.delete_cookie(COOKIE, path="/", secure=True, httponly=True,
                                samesite="strict")
         return response
+
+    async def end_voice(sids) -> None:
+        """Hang up the voice conversations of signed-out sessions (their
+        WebSockets close when the conversation ends)."""
+        live = getattr(app.state, "voice_conversations", {})
+        for sid in list(sids):
+            entry = live.get(sid)
+            if entry is not None:
+                await run_in_threadpool(entry[0].end, "signed_out")
+
+    @app.post("/api/logout")
+    async def logout(request: Request):
+        """Sign this browser out; its cookie stops working everywhere."""
+        sid = web.sid(request)
+        if sid:
+            store.revoke(sid)
+            await end_voice([sid])
+            await run_in_threadpool(assistant.end_session, sid)
+        return signed_out()
+
+    @app.post("/api/logout-all")
+    async def logout_all(request: Request):
+        """Sign out every browser (e.g. a lost phone). Bearer clients use the
+        token itself: change WEB_TOKEN to cut those off."""
+        if web.sid(request) is None:
+            return unauthorized()
+        revoked = store.revoke_all()
+        await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
+        for sid in revoked:
+            await run_in_threadpool(assistant.end_session, sid)
+        log.warning("Web: signed out everywhere")
+        return signed_out()
 
     # --- signed in ---
     @app.get("/api/state")
@@ -1027,7 +1264,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if s is None:
             return unauthorized()
         return {"busy": s.busy.locked(),
-                "confirm": s.pending.question if s.pending else None,
+                "confirm": (s.pending.question if s.pending
+                            and not s.pending.stream else None),
+                "incognito": s.chat.incognito,
+                "history": assistant.history is not None,
+                "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
 
@@ -1061,7 +1302,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         s = session_of(request)
         if s is None:
             return unauthorized()
-        if s.pending is None:
+        pending = s.pending
+        if pending is None or pending.stream:  # the voice view's question
             return error("nothing to confirm", 409)
         fields, data, err = await read_upload(request)
         if err:
@@ -1074,8 +1316,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             answer = await run_in_threadpool(assistant.transcribe, recording)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
-        log.info("Web confirmation %r -> %s", answer, "yes" if yes else "no")
-        if not assistant.answer(s, yes):
+        log.info("Web confirmation -> %s", "yes" if yes else "no")
+        log.debug("Confirmation answer: %r", answer)
+        if not assistant.answer(s, yes, confirm_id=pending.id):
             return error("nothing to confirm", 409)
         return stream(s)
 
@@ -1100,6 +1343,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return error("not found", 404)
         return Response(data, media_type="audio/wav")
 
+    from assistant.voice_ws import add_voice_routes
+
+    app.state.voice_conversations = add_voice_routes(
+        app, assistant, allowed_origins=web.allowed_origins, voice=voice)
+
+    from assistant import history_web
+
+    history_web.register(app, assistant, session_of, error)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -1124,6 +1375,21 @@ def wrap_failover(app, token: str, failover, web: WebAuth):
                           root_bearer_sid=web.bearer_sid)
 
 
+def assistant_busy(assistant: "WebAssistant", app) -> bool:
+    """Is any web turn, pending confirmation or voice turn in progress?"""
+    with assistant.lock:
+        sessions = list(assistant.sessions.values())
+    if any(s.busy.locked() or s.pending is not None for s in sessions):
+        return True
+    for conv, _ in list(getattr(app.state, "voice_conversations", {}).values()):
+        with conv.lock:
+            if (conv.current is not None and not conv.current.finished) \
+                    or getattr(conv, "waiting", None) is not None \
+                    or conv.pending is not None:
+                return True
+    return False
+
+
 ICON_SIZES = (180, 192, 512)
 
 
@@ -1136,8 +1402,13 @@ def _static_route(name: str, media_type: str):
     return serve_file
 
 
-def set_session_cookie(response, token: str, sid: str) -> None:
-    response.set_cookie(COOKIE, make_cookie(token, sid), max_age=COOKIE_MAX_AGE,
+async def _wait(seconds: float) -> None:
+    """The slowdown on wrong tokens (a function so tests can record it)."""
+    await asyncio.sleep(seconds)
+
+
+def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
+    response.set_cookie(COOKIE, make_cookie(token, sid, epoch), max_age=COOKIE_MAX_AGE,
                         httponly=True, secure=True, samesite="strict", path="/")
 
 
@@ -1146,7 +1417,9 @@ def set_session_cookie(response, token: str, sid: str) -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import build_memory, build_tools
+    from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
+                               build_tools)
+    from assistant.history import Recorder, open_store
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1157,13 +1430,20 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
+    add_memory_tools(tools, memory)
+    store = open_store(config)  # conversation history (None if off)
+    add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
     def chat_factory(registry):
+        recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
+                            client_fn=lambda: client,
+                            title_model=config["history"]["title_model"])
         return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
-                          max_tool_rounds=a["max_tool_rounds"], memory=memory)
+                          max_tool_rounds=a["max_tool_rounds"], memory=memory,
+                          recorder=recorder)
 
     stt = config["stt"]
     tts_cfg = config["tts"]
@@ -1172,7 +1452,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"])
+                        confirm_timeout=config["webapp"]["confirm_timeout"],
+                        history=store, memory=memory)
 
 
 def serve(config: dict, host: str | None = None, port: int | None = None,
@@ -1205,7 +1486,9 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
-                     trusted_proxy=trusted_proxy, failover=failover)
+                     trusted_proxy=trusted_proxy,
+                     sessions_file=web["sessions_file"] or None,
+                     voice=config.get("voice"), failover=failover)
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
@@ -1216,5 +1499,6 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
              trusted_proxy)
     uvicorn.run(app, host=host, port=port, log_config=None, proxy_headers=False,
                 server_header=False, limit_concurrency=64,
-                timeout_keep_alive=30)
+                timeout_keep_alive=30,
+                ws_max_size=2_000_000)  # a 30 s voice utterance is ~1 MB
     return 0

@@ -5,6 +5,20 @@ from unittest.mock import MagicMock
 import pytest
 
 
+def pytest_configure(config):
+    """Windows: import comtypes on the main thread first. Importing it sets up
+    COM for the importing thread only; if a web-app TTS worker thread were
+    first (test_cloud.py renders reply audio), the main-thread SAPI tests
+    would fail with "CoInitialize has not been called"."""
+    import sys
+
+    if sys.platform == "win32":
+        try:
+            import comtypes  # noqa: F401
+        except ImportError:
+            pass
+
+
 def text_block(text):
     return SimpleNamespace(type="text", text=text)
 
@@ -15,6 +29,22 @@ def tool_use_block(name, input, id="toolu_1"):
 
 def make_response(*blocks, stop_reason="end_turn"):
     return SimpleNamespace(content=list(blocks), stop_reason=stop_reason)
+
+
+# Settings read from the environment (assistant.config.ENV_OVERRIDES, e.g.
+# PINECONE_INDEX, TRUSTED_PROXY, PORT) plus WEB_TOKEN. On a PC or server that
+# sets them (often through .env) they would leak into tests that check
+# defaults; tests that need one set it themselves.
+def _env_vars() -> tuple[str, ...]:
+    from assistant.config import ENV_OVERRIDES
+
+    return (*ENV_OVERRIDES, "WEB_TOKEN")
+
+
+@pytest.fixture(autouse=True)
+def clear_settings_env(monkeypatch):
+    for var in _env_vars():
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture

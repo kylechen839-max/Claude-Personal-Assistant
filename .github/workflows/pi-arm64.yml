@@ -1,0 +1,92 @@
+name: pi-arm64
+
+# A simulated Raspberry Pi: Debian Bookworm on linux/arm64 with Python 3.11,
+# which is what 64-bit Raspberry Pi OS is. Runs scripts/ci/pi_simulation.sh:
+# install_pi.sh end to end, the full pytest suite, `--check`,
+# install_service.sh (systemd stubbed) and preflight.sh (wake word ->
+# Whisper -> reply on the committed fixture, Claude faked).
+#
+# On GitHub's native arm64 runner (free for public repos) it needs no
+# emulation. Runs on every push to master, on pushes elsewhere that touch
+# the Pi files, and by hand (Actions -> pi-arm64 -> Run workflow; tick
+# "qemu" to run it emulated on x64 instead, ~5x slower).
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      qemu:
+        description: "Emulate arm64 with QEMU on an x64 runner"
+        type: boolean
+        default: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      pi: ${{ steps.diff.outputs.pi }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_REF" = refs/heads/master ] || [ "$GITHUB_EVENT_NAME" != push ]; then
+            echo "pi=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # a new branch has no "before": compare with master instead
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] \
+              || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            BEFORE=$(git merge-base origin/master HEAD)
+          fi
+          files=$(git diff --name-only "$BEFORE" HEAD)
+          echo "$files"
+          if echo "$files" | grep -qE '^(scripts/|deploy/|requirements\.txt|\.github/workflows/pi-arm64\.yml|assistant/(preflight|smoke|doctor)\.py)'; then
+            echo "pi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pi=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  pi-simulation:
+    needs: changes
+    if: needs.changes.outputs.pi == 'true'
+    name: Debian Bookworm arm64 / Python 3.11${{ inputs.qemu && ' (QEMU)' || '' }}
+    runs-on: ${{ inputs.qemu && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: ${{ inputs.qemu && 240 || 60 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: QEMU (emulated arm64 only)
+        if: inputs.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # pip wheels, the Whisper/openWakeWord models and the Piper voice
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pi-sim
+          key: pi-sim-${{ hashFiles('requirements.txt') }}
+          restore-keys: pi-sim-
+
+      - name: Run the Pi simulation
+        run: |
+          mkdir -p ~/.cache/pi-sim "$RUNNER_TEMP/pi-out"
+          start=$(date +%s)
+          docker run --rm --platform linux/arm64 \
+            -v "$GITHUB_WORKSPACE:/src:ro" \
+            -v "$HOME/.cache/pi-sim:/cache" \
+            -v "$RUNNER_TEMP/pi-out:/out" \
+            debian:bookworm bash /src/scripts/ci/pi_simulation.sh
+          echo "Pi simulation took $(( $(date +%s) - start )) s" | tee -a "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/pi-out/timings.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-simulation-report
+          path: ${{ runner.temp }}/pi-out
+          if-no-files-found: ignore
