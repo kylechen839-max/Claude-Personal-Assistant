@@ -507,11 +507,15 @@ def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
 
 
 def note_to_history(note: dict) -> bool:
-    """Show a saved note in the current conversation's history (through
-    the history module's public function; nothing if history is off)."""
+    """Mark in the current conversation's history that a note was saved
+    (through the history module's public function; nothing if history is
+    off). The note's text stays only in Pinecone, so delete_note removes it
+    completely."""
     from assistant import history
 
-    return history.record_event(None, "note", f"Saved a note: {note['text']}")
+    tags = f" (tags: {', '.join(note['tags'])})" if note.get("tags") else ""
+    return history.record_event(None, "note",
+                                f"Saved a note to long-term memory{tags}.")
 
 
 def text_confirm(input_fn=None):

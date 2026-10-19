@@ -185,7 +185,9 @@ def test_saved_note_shows_in_the_conversation(store, fake_client):
     chat.ask("Remember that the lab report needs error bars")
     msgs = store.get(chat.conversation_id)["messages"]
     assert [m["kind"] for m in msgs] == ["chat", "note", "chat"]
-    assert msgs[1]["text"] == "[note] Saved a note: Lab report needs error bars"
+    assert msgs[1]["text"] == "[note] Saved a note to long-term memory."
+    # the note's text lives only in Pinecone, so delete_note removes it fully
+    assert all("error bars" not in m["text"] for m in msgs if m["kind"] == "note")
 
 
 def test_filed_lecture_is_added_to_its_conversation(store, fake_client, tmp_path):

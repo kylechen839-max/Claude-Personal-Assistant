@@ -737,7 +737,10 @@ class LecturePipeline:
                 notes, job.course, self._date(job), minutes, key=upload_id,
                 state=state, save=lambda st: _write_json(page_file, st))
             job.notion_url = page["url"]
-            transcript_file.unlink(missing_ok=True)  # the page has the notes now
+            # The page has the notes now: keep no local copy of the
+            # transcript or the notes (page.json holds only the page id/url).
+            transcript_file.unlink(missing_ok=True)
+            notes_file.unlink(missing_ok=True)
             job.status, job.error = DONE, ""
             log.info("Lecture %s filed in Notion", upload_id)
             if self.on_filed:
