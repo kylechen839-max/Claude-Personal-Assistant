@@ -5,6 +5,10 @@ something, and it answers out loud. It can read and change your Google
 Calendar, check and update your Notion assignments, and remembers past
 conversations in Pinecone.
 
+Version 1.0.0: see CHANGELOG.md for what's included and PRIVACY.md for what
+is stored and sent where. On your phone, it runs as a home-screen web app
+("Install on iPhone" below).
+
 ```
 mic -> openWakeWord wake word -> chime -> record until silence (VAD)
     -> faster-whisper (speech to text) -> Claude (+ tools, + memory)
@@ -13,7 +17,8 @@ mic -> openWakeWord wake word -> chime -> record until silence (VAD)
 
 ## Quick start (Windows 11, PowerShell)
 
-1. Install **Python 3.10+** from python.org (tick "Add python.exe to PATH").
+1. Install **Python 3.12** from python.org (tick "Add python.exe to PATH").
+   3.10+ works, but the natural Kokoro voice needs 3.11+.
 2. In the project folder:
    ```powershell
    python -m venv .venv
