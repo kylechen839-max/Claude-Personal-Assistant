@@ -209,3 +209,18 @@ def test_sign_out_everywhere_survives_a_restart_without_history(fake_client, tmp
     assert client.post("/api/logout-all", headers=bearer(token, **CROSS)).status_code == 200
     client = boot()  # restart
     assert client.get("/api/state", headers=bearer(token, **CROSS)).status_code == 401
+
+
+def test_unreadable_sessions_file_signs_out_access_tokens_too(fake_client, tmp_path):
+    sessions = tmp_path / "web_sessions.json"
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg), None, PrintTTS())
+    client = TestClient(webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                                          sessions_file=sessions, failover=settings("pi")),
+                        base_url=PI)
+    token = sign_in(client)
+    sessions.write_text("{not json", encoding="utf-8")  # corrupted
+    client = TestClient(webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                                          sessions_file=sessions, failover=settings("pi")),
+                        base_url=PI)
+    assert client.get("/api/state", headers=bearer(token, **CROSS)).status_code == 401

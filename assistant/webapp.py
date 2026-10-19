@@ -175,6 +175,9 @@ class SessionStore:
             self.tokens_not_before = int(data.get("tokens_not_before", 0))
         except Exception as e:  # unreadable: start over (everyone signs in again)
             log.warning("Ignoring unreadable web session file %s: %s", self.path, e)
+            # fail closed for access tokens too: a lost "Sign out everywhere"
+            # must not bring revoked phones back
+            self.tokens_not_before = int(time.time())
 
     def _save(self) -> None:
         if not self.path:
