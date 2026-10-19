@@ -226,6 +226,12 @@ class SessionStore:
                 self._save()
             return True
 
+    def listed(self, sid: str) -> bool:
+        """Still signed in? (A read-only check, e.g. for a live WebSocket.)"""
+        with self.lock:
+            last = self.sessions.get(sid)
+        return last is not None and self.clock() - last <= self.max_age
+
     def revoke(self, sid: str) -> None:
         with self.lock:
             if self.sessions.pop(sid, None) is not None:
@@ -965,6 +971,12 @@ class WebAuth:
             return None
         sid = read_cookie(self.token, conn.cookies.get(COOKIE), self.store.epoch)
         return sid if self.store.valid(sid) else None
+
+    def signed_in(self, sid: str) -> bool:
+        """Is this session still allowed in? For connections that outlive the
+        request that checked them (voice WebSockets): a sign-out revokes the
+        cookie session; a Bearer session lasts as long as the token."""
+        return sid == self.bearer_sid or self.store.listed(sid)
 
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
