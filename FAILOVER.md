@@ -204,12 +204,20 @@ hc1.<scope>.<sid>.<expires>.<signed_in>.<HMAC-SHA256(WEB_TOKEN, ...)>
   backends mint for themselves, valid 5 min) only on `/api/sync/`. A stolen
   phone token can't push history events or mint tokens.
 
+**Sign out everywhere** (the gear menu, `POST /api/logout-all`) also cuts
+off access tokens: the backend records the time in the synced history log
+(a `job:auth-revoke` event, which history and older backends ignore), and
+every backend refuses app tokens signed in at or before the latest such
+time, including their refresh and open voice sockets. A backend that was
+off picks it up on its next sync; without history (no log to sync) only
+the backend that did it knows, so then rotate `WEB_TOKEN` everywhere.
+
 Trade-offs:
 
 | | Store WEB_TOKEN on the phone | Derived token (chosen) |
 |---|---|---|
 | A script injected into the app (XSS) steals... | the root secret, valid forever, on every backend | a token valid for at most 90 days |
-| Revoke a phone | change WEB_TOKEN everywhere | change WEB_TOKEN everywhere (no per-device revocation: tokens are stateless) |
+| Revoke a phone | change WEB_TOKEN everywhere | "Sign out everywhere" (all phones, synced), or change WEB_TOKEN everywhere |
 | Backends need | WEB_TOKEN | WEB_TOKEN (to check signatures) |
 | Complexity | none | one token endpoint, one refresh |
 
