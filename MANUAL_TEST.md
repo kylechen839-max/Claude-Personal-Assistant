@@ -486,7 +486,7 @@ phone app installed from the cloud URL with Tailscale on.
       `https://<pi>.<tailnet>.ts.net/healthz`.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
 
-## Agent run dashboard (optional, ~3 min)
+## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
 (see tools/agent-dashboard/README.md).
 - [ ] Open it on the iPhone in Safari, signed in to claude.ai.
@@ -501,3 +501,30 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
       GitHub UI while that session is still open.
   - Should: within a few minutes its card changes from "needs you" to
     "done" (the master's CI watch writes it).
+- [ ] On a computer, tap Grid for the first time.
+  - Should: claude.ai asks once whether the page may use Claude Code
+    Remote. After Allow, one tile per session, side by side.
+- [ ] Compare the tiles with the session list at claude.ai/code.
+  - Should: the same sessions (minus archived ones), with matching
+    states: a session waiting on you shows "needs you", a running one
+    "working".
+- [ ] Tap Open in claude.ai on a tile.
+  - Should: that session opens in a new tab.
+- [ ] Switch to Grid, reload the page, then switch to Runs and reload.
+  - Should: each reload opens the view you left it on.
+- [ ] Tap Chat on a tile of a session you don't mind messaging, type
+      "hi" and tap Send.
+  - Should: the panel shows that session's recent messages as text;
+    after Send, "Sent — the agent will reply in its next turn", and "hi"
+    arrives in that session at claude.ai/code (marked as sent from
+    another session). Enter alone adds a line and does not send.
+- [ ] On the iPhone, tap Chat on a tile.
+  - Should: the chat fills the screen; Close brings the grid back.
+- [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
+  - Should: the dashboard opens in its own Chrome or Edge window with no
+    address bar, already signed in to claude.ai, and can be pinned to the
+    taskbar.
+- [ ] On a Mac, double-click tools/agent-dashboard/desktop/open-dashboard.command
+      (the first time, right-click it and choose Open).
+  - Should: the same, in its own Chrome or Edge window, already signed
+    in, and no Finder window opens.

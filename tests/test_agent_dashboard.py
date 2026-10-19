@@ -59,7 +59,8 @@ def test_page_never_renders_rows_as_markup(banned):
 
 
 def test_page_never_writes():
-    # The page only reads: no set/update/delete/add/acquire calls.
+    # The page never writes rows: no set/update/delete/add/acquire calls.
+    # (Its only write anywhere is the chat panel's send_message, below.)
     assert not re.search(r"\.(?:set|update|delete|add|acquire)\(", _page())
 
 
@@ -205,3 +206,130 @@ def test_watchdog_prompt_is_one_fenced_block():
         assert needed in prompt, needed
     # The watchdog never touches a terminal row.
     assert "pr_ready, blocked, done or dead" in prompt
+
+
+# ---- Grid view, chat panel and desktop launchers ----
+
+DASHBOARD_URL = "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
+DESKTOP = DASH / "desktop"
+MANIFEST = ('{"db":{}, "user":{}, "mcp":{"servers":[{"server":"Claude Code Remote",'
+            '"tools":["list_sessions","list_events","send_message"]}]}}')
+TOOLS = {"list_sessions", "list_events", "send_message"}
+
+
+def test_readme_pins_the_manifest():
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)```", readme, re.S)
+    assert [b.strip() for b in blocks] == [MANIFEST]
+    import json
+    servers = json.loads(MANIFEST)["mcp"]["servers"]
+    assert servers == [{"server": "Claude Code Remote", "tools": sorted(TOOLS, key=MANIFEST.index)}]
+
+
+def test_page_names_only_the_manifest_tools():
+    page = _page()
+    assert '"Claude Code Remote"' in page
+    for banned in ("archive_session", "unarchive_session", "interrupt_session", "create_session",
+                   "set_session_", "_trigger", "get_session", "mine:", '"mine"'):
+        assert banned not in page, banned
+    # Every connector call goes through the TOOLS table, which names exactly
+    # the manifest's tools, and no tool name appears anywhere else.
+    table = re.search(r"const TOOLS = Object\.freeze\(\{([^}]*)\}\)", page)
+    assert table and set(re.findall(r'"([a-z_]+)"', table.group(1))) == TOOLS
+    for tool in TOOLS:
+        assert page.count(f'"{tool}"') == 1, tool
+    calls = re.findall(r"\.(callTool|watchTool|invalidate)\(\s*([^,)]*),\s*([^,)]*)", page)
+    assert calls
+    for _, server, tool in calls:
+        assert server == "MCP_SERVER", server
+        assert re.fullmatch(r"TOOLS\.(sessions|events|send)", tool), tool
+    assert 'window.claude?.use?.("mcp")' in page
+
+
+def test_page_never_logs_and_sends_only_on_click():
+    page = _page()
+    assert "console." not in page
+    assert page.count("TOOLS.send") == 1
+    # The send happens in sendChat only, which only a click, Ctrl/Cmd+Enter
+    # or the approval button calls; never a timer.
+    send_fn = page.split("function sendChat()", 1)[1].split("\n  }\n", 1)[0]
+    assert "TOOLS.send" in send_fn
+    assert not re.search(r"set(?:Timeout|Interval)\([^)]*sendChat", page)
+    assert 'maxlength="4000"' in page
+    assert "localStorage.setItem(VIEW_KEY, view)" in page  # the only thing stored
+
+
+def test_grid_layout_rules():
+    page = _page()
+    assert "repeat(auto-fill,minmax(260px,1fr))" in page
+    assert 'main[data-view="grid"]{max-width:none}' in page
+    for needed in ('id="view-runs"', 'id="view-grid"', 'aria-pressed', 'id="grid-view" hidden',
+                   'id="grid-summary"', 'id="grid-conn"', 'id="grid"', 'id="chat" hidden'):
+        assert needed in page, needed
+    # Runs keeps its ids.
+    for kept in ('id="summary"', 'id="conn"', 'id="runs"', 'id="empty"'):
+        assert kept in page, kept
+
+
+def test_launchers_open_the_dashboard_as_an_app_window():
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    assert DASHBOARD_URL in readme
+    for name in ("open-dashboard.cmd", "open-dashboard.command"):
+        text = (DESKTOP / name).read_text(encoding="utf-8")
+        urls = set(re.findall(r"https://[^\s\"']+", text))
+        assert urls == {DASHBOARD_URL}, (name, urls)
+        assert "--app=" in text, name
+        assert "--user-data-dir" not in text, name
+
+
+def test_windows_launcher_is_crlf_with_a_default_browser_fallback():
+    raw = (DESKTOP / "open-dashboard.cmd").read_bytes()
+    assert b"\r\n" in raw and b"\n" not in raw.replace(b"\r\n", b"")
+    text = raw.decode("ascii")
+    lines = text.splitlines()
+    browsers = [line for line in lines if line.startswith("if exist ")]
+    assert len(browsers) == 5
+    for line in browsers:
+        # Quoted paths: an unquoted (x86) would close the ( ... ) block early.
+        path = re.match(r'if exist "([^"]+)" \(start "" "([^"]+)" --app=%URL% & exit /b 0\)$', line)
+        assert path and path.group(1) == path.group(2), line
+    # After the browsers, the first command is the default-browser fallback.
+    after = [line for line in lines[lines.index(browsers[-1]) + 1:] if not line.startswith("rem ")]
+    assert after[0] == 'start "" "%URL%"'
+    gitattributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.cmd text eol=crlf" in gitattributes
+
+
+def test_mac_launcher_tries_chrome_then_edge_then_default():
+    text = (DESKTOP / "open-dashboard.command").read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "\r" not in text
+    assert 'for app in "Google Chrome" "Microsoft Edge"' in text
+    # A silent check for the app: `open -R` reveals it in Finder each launch.
+    assert "open -R" not in text
+    assert '[ -d "/Applications/$app.app" ] || [ -d "$HOME/Applications/$app.app" ]' in text
+    assert 'open -na "$app" --args --app="$URL"' in text
+    assert text.rstrip().endswith('exec open "$URL"')
+
+
+def test_shell_scripts_are_pinned_to_lf():
+    # core.autocrlf=true (Git for Windows' default) would check them out
+    # with CRLF, and bash then fails on "bash\r" in the shebang.
+    rules = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "*.command text eol=lf" in rules
+    assert "*.sh text eol=lf" in rules
+
+
+def test_mac_launcher_parses():
+    bash = shutil.which("bash")
+    if not bash or os.name == "nt":
+        pytest.skip("bash not available")
+    subprocess.run([bash, "-n", str(DESKTOP / "open-dashboard.command")], check=True)
+
+
+def test_mac_launcher_shellcheck():
+    if not shutil.which("shellcheck"):
+        pytest.skip("shellcheck not installed")
+    p = subprocess.run(["shellcheck", str(DESKTOP / "open-dashboard.command")],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout

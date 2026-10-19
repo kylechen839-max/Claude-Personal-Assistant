@@ -379,6 +379,23 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
+- **The dev-team dashboard can message sessions.** Its chat panel
+  (tools/agent-dashboard) calls the Claude Code Remote connector's
+  send_message as the signed-in viewer. Kept on purpose, Kyle asked for
+  it, with these limits: the published manifest lists only list_sessions,
+  list_events and send_message (no archive, interrupt, create, settings
+  or triggers; a test pins the list and checks the page names no other
+  tool); a send is one call per explicit click, never on load, a timer or
+  a reload, at most 4000 characters, and an ambiguous failure is never
+  retried by the page; the message arrives as a cross-session message,
+  which the target treats as data from a peer and won't use on its own
+  to change permissions or take a new destructive step. Session titles,
+  summaries and messages are shown as plain text only, never as links or
+  markup, and never logged. Unsent drafts and the last send result are
+  kept per session in the page's memory only (never in storage, at most
+  50 sessions) and dropped when another account signs in. Anyone who can
+  open the artifact signed in as Kyle can send; the artifact is not
+  shared.
 
 ## Conversation history
 

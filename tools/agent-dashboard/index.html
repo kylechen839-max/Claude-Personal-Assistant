@@ -3,7 +3,11 @@
 <style>
 /* A read-only glance view of /build-feature runs. One row per run; the page
    works out "silent too long" itself from updated_at. Rows are untrusted
-   data: text only, links only to the two allowed prefixes. */
+   data: text only, links only to the two allowed prefixes. The Grid view
+   shows every Claude Code session as a tile, read through the viewer's own
+   Claude Code Remote connector. The chat panel reads a session's recent
+   text (list_events) and sends a message only on an explicit Send click
+   (send_message). Sessions and messages are untrusted the same way. */
 :root{
   --bg:#f3f4f6;--card:#ffffff;--fg:#15181d;--muted:#5a636e;--line:#dde1e6;--accent:#2a5bc4;
   --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;
@@ -71,8 +75,53 @@ a:hover{text-decoration:underline}
 a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #empty{color:var(--muted);margin:8px 0 0}
 footer{font-size:.78rem;color:var(--muted);margin-top:6px}
+section{display:flex;flex-direction:column;gap:14px;min-width:0}
+section[hidden]{display:none}
+nav{display:flex;gap:4px;padding:3px;align-self:flex-start;background:var(--done-bg);border-radius:9px}
+button{font:inherit;font-size:.85rem;font-weight:600;border:0;border-radius:7px;padding:5px 14px;cursor:pointer;
+  color:var(--muted);background:transparent}
+nav button[aria-pressed="true"]{color:var(--fg);background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.14)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:disabled{cursor:default;opacity:.6}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.actions button{color:var(--accent);background:var(--card);border:1px solid var(--line)}
+main[data-view="grid"]{max-width:none}
+#grid-summary{font-size:1.35rem;font-weight:650;margin:0;font-variant-numeric:tabular-nums}
+#grid-conn,#grid-hidden{font-size:.85rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
+#grid-conn[data-level="bad"]{color:var(--silent)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-items:start}
+@media (max-width:560px){#grid{grid-template-columns:1fr}}
+.status{font-size:.88rem;margin:0;overflow-wrap:anywhere}
+.links button{padding:0;color:var(--accent);font-size:.88rem;font-weight:400}
+#chat{position:fixed;top:0;right:0;bottom:0;z-index:10;width:min(440px,100vw);display:flex;flex-direction:column;gap:8px;
+  background:var(--card);border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(0,0,0,.18);
+  padding:max(14px,env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) max(14px,env(safe-area-inset-bottom,0px)) 14px}
+#chat[hidden]{display:none}
+@media (max-width:560px){#chat{width:100vw;border-left:0;box-shadow:none;padding-left:max(14px,env(safe-area-inset-left,0px))}}
+.chat-top{display:flex;align-items:flex-start;gap:10px;justify-content:space-between}
+#chat-title{font-size:1rem}
+#chat-conn,#chat-status,#chat-count{font-size:.82rem;color:var(--muted);margin:0;font-variant-numeric:tabular-nums}
+#chat-conn[data-level="bad"],#chat-status[data-level="bad"]{color:var(--silent)}
+#chat-log{flex:1;min-height:0;overflow-y:auto;list-style:none;margin:0;padding:4px 0;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:88%;padding:7px 11px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.92rem;
+  background:var(--done-bg);align-self:flex-start}
+.msg[data-who="you"]{align-self:flex-end;background:var(--run-bg)}
+.msg button{display:block;padding:2px 0 0;color:var(--accent);font-size:.82rem;font-weight:600}
+#chat-input{font:inherit;font-size:16px;width:100%;resize:vertical;min-height:64px;max-height:40vh;padding:8px 10px;
+  border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+#chat-input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chat-row{display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.chat-row #chat-count{margin-right:auto}
+#chat-send{color:var(--bg);background:var(--accent)}
+.local{font-size:.72rem;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;
+  margin-left:6px;vertical-align:1px}
 </style>
-<main>
+<main id="main" data-view="runs">
+<nav aria-label="View">
+<button type="button" id="view-runs" aria-pressed="true">Runs</button>
+<button type="button" id="view-grid" aria-pressed="false">Grid</button>
+</nav>
+<section id="runs-view">
 <header>
 <h1>Hey Claude agent runs</h1>
 <p id="summary" aria-live="polite">Loading…</p>
@@ -80,8 +129,32 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
 </header>
 <ul id="runs" aria-label="Runs"></ul>
 <p id="empty" hidden></p>
-<footer>Read-only. Silent means no update for longer than the phase allows. PR ready, blocked and dead runs with no change for 7 days count as done. Done runs older than 14 days are hidden.</footer>
+<footer>Rows are read-only. Silent means no update for longer than the phase allows. PR ready, blocked and dead runs with no change for 7 days count as done. Done runs older than 14 days are hidden.</footer>
+</section>
+<section id="grid-view" hidden>
+<header>
+<h1>Claude Code sessions</h1>
+<p id="grid-summary" aria-live="polite">Loading…</p>
+<p id="grid-conn"></p>
+</header>
+<div class="actions"><button type="button" id="grid-refresh">Refresh</button><span id="grid-action"></span></div>
+<ul id="grid" aria-label="Sessions"></ul>
+<p id="grid-hidden" hidden></p>
+<footer>Through your own Claude Code Remote connector. Chat sends a message only when you press Send. Archived sessions, and done or idle ones with no change for 7 days, are hidden.</footer>
+</section>
 </main>
+<aside id="chat" hidden role="dialog" aria-labelledby="chat-title">
+<div class="chat-top">
+<h2 id="chat-title">Chat</h2>
+<button type="button" id="chat-close">Close</button>
+</div>
+<div class="links"><a id="chat-open" hidden target="_blank" rel="noopener noreferrer">Open in claude.ai</a></div>
+<p id="chat-conn"></p>
+<ol id="chat-log" aria-label="Conversation" aria-live="polite"></ol>
+<textarea id="chat-input" maxlength="4000" rows="3" aria-label="Message to this session" placeholder="Message this session"></textarea>
+<div class="chat-row"><span id="chat-count"></span><span id="chat-action"></span><button type="button" id="chat-send">Send</button></div>
+<p id="chat-status" aria-live="polite"></p>
+</aside>
 <script>
 (() => {
   "use strict";
@@ -238,6 +311,7 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
       const links = el("div", "links");
       if (session) links.append(link("Session", session));
       if (pr) links.append(link("PR #" + pr.slice(PR_PREFIX.length), pr));
+      if (session) links.append(chatButton("session_" + session.slice(SESSION_PREFIX.length), text(r.feature, 80)));
       li.append(links);
     }
     return li;
@@ -351,13 +425,625 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
     document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
   }
 
+  // ==== Grid view and chat panel: the viewer's own Claude Code Remote ====
+  // Nothing here runs until Grid is shown or a Chat button is clicked, so a
+  // Runs-only visit never asks for the connector or calls it.
+  const MCP_SERVER = "Claude Code Remote";
+  // The only tools the page names (the manifest lists exactly these).
+  const TOOLS = Object.freeze({sessions: "list_sessions", events: "list_events", send: "send_message"});
+  const LIST_ARGS = Object.freeze({limit: 50});
+  const WATCH_OPTS = {refetchInterval: 30e3, cache: {staleTime: 15e3, gcTime: 300e3}};
+  const EVENTS_LIMIT = 40;
+  const MAX_MESSAGE = 4000;
+  const BUBBLE_CLAMP = 600;
+  const HIDE_IDLE_MS = 7 * 24 * 3600e3;
+  const SESSION_ID = /^session_[A-Za-z0-9_-]{1,120}$/;
+  const VIEW_KEY = "agent-dashboard-view";
+  const NO_MCP = "The grid needs this page open on claude.ai";
+  const NO_MCP_CHAT = "Chat needs this page open on claude.ai";
+  const BUCKETS = ["WORKING", "BLOCKED", "REVIEW_READY", "COMPLETED", "FAILED"];
+  // Codes from the mcp contract. Unknown codes are read as upstream_error.
+  const MCP_CODES = ["needs_reauth", "server_not_connected", "selection_required", "server_not_found",
+    "server_unavailable", "not_in_manifest", "blocked_by_policy", "self_only", "approval_required",
+    "tool_error", "bad_request", "cancelled", "rate_limited", "upstream_error", "not_granted",
+    "capability_disabled", "capability_removed", "transform_error", "consent_required", "user_changed"];
+
+  const $main = document.getElementById("main");
+  const $runsView = document.getElementById("runs-view");
+  const $gridView = document.getElementById("grid-view");
+  const $viewRuns = document.getElementById("view-runs");
+  const $viewGrid = document.getElementById("view-grid");
+  const $gridSummary = document.getElementById("grid-summary");
+  const $gridConn = document.getElementById("grid-conn");
+  const $grid = document.getElementById("grid");
+  const $gridHidden = document.getElementById("grid-hidden");
+  const $gridAction = document.getElementById("grid-action");
+  const $gridRefresh = document.getElementById("grid-refresh");
+  const $chat = document.getElementById("chat");
+  const $chatTitle = document.getElementById("chat-title");
+  const $chatOpen = document.getElementById("chat-open");
+  const $chatClose = document.getElementById("chat-close");
+  const $chatConn = document.getElementById("chat-conn");
+  const $chatLog = document.getElementById("chat-log");
+  const $chatInput = document.getElementById("chat-input");
+  const $chatCount = document.getElementById("chat-count");
+  const $chatAction = document.getElementById("chat-action");
+  const $chatSend = document.getElementById("chat-send");
+  const $chatStatus = document.getElementById("chat-status");
+
+  let view = "runs";
+  let mcpPromise = null;
+  let mcpGone = false;        // user_changed: no further calls, ever
+  let gridMcp = null;
+  let gridUnsub = null;
+  let gridOff = false;        // a lifecycle or request error ended the grid
+  let sessions = null;        // last good normalized list
+  let sessionsAt = null;      // when that list was produced
+  let gridStale = "";
+
+  function obj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
+
+  // Microsecond ISO times: keep 3 fractional digits so every engine parses them.
+  function isoTime(v) {
+    return typeof v === "string" ? time(v.replace(/(\.\d{3})\d+/, "$1")) : null;
+  }
+
+  // A list payload: p.ccr.data, p.data, a bare array, or JSON text of one.
+  function listOf(p) {
+    if (typeof p === "string") {
+      if (p.length > 4e6) return null;
+      try { p = JSON.parse(p); } catch (_) { return null; }
+    }
+    if (Array.isArray(p)) return p;
+    const o = obj(p);
+    if (Array.isArray(obj(o.ccr).data)) return o.ccr.data;
+    if (Array.isArray(o.data)) return o.data;
+    return null;
+  }
+
+  function normalizeSessions(p) {
+    const list = listOf(p);
+    if (!list) return null;
+    return list.slice(0, 200).filter((s) => s && typeof s === "object" && !Array.isArray(s)).map((s) => ({...s}));
+  }
+
+  function filled(v) { return v === true || (typeof v === "string" && v.trim() !== ""); }
+
+  function classifySession(s, now) {
+    s = obj(s);
+    const status = text(s.session_status, 60).toUpperCase().replace(/^SESSION_STATUS_/, "");
+    const bucket = text(s.status_bucket, 60).toUpperCase().replace(/^SESSION_STATUS_BUCKET_/, "");
+    const pts = obj(s.post_turn_summary);
+    const ext = obj(obj(s.external_metadata).post_turn_summary);
+    const needsAction = filled(pts.needs_action) ? pts.needs_action : filled(ext.needs_action) ? ext.needs_action : "";
+    const category = (text(pts.status_category, 40) || text(ext.status_category, 40)).toLowerCase();
+    const updated = isoTime(s.updated_at) ?? isoTime(s.created_at);
+    const out = {state: "idle", pill: "idle", note: "", updated, needsAction: needsAction === true ? "" : text(needsAction, 160)};
+    if (status === "ARCHIVED") { out.state = "archived"; out.pill = "archived"; return out; }
+    if (bucket === "FAILED") { out.state = "failed"; out.pill = "failed"; return out; }
+    if (bucket === "BLOCKED" || needsAction || category === "need_input") { out.state = "needs"; out.pill = "needs you"; return out; }
+    if (bucket === "WORKING" || (!BUCKETS.includes(bucket) && status === "RUNNING")) { out.state = "working"; out.pill = "working"; return out; }
+    if (bucket === "REVIEW_READY") { out.pill = "review ready"; return out; }
+    if (bucket === "COMPLETED") { out.state = "done"; out.pill = "done"; return out; }
+    out.note = "unknown status";
+    return out;
+  }
+
+  // Tiles reuse the Runs card colours.
+  const TILE_STYLE = {needs: "needs", failed: "silent", working: "running", idle: "done", done: "done"};
+  const SESSION_RANK = {needs: 0, failed: 1, working: 2, idle: 3, done: 4};
+
+  function chatButton(id, title) {
+    const b = el("button", "", "Chat");
+    b.type = "button";
+    b.addEventListener("click", () => openChat(id, title));
+    return b;
+  }
+
+  function renderTile(s, c, now) {
+    const li = el("li", "run tile");
+    li.dataset.state = TILE_STYLE[c.state];
+    li.dataset.status = c.state;
+    const top = el("div", "top");
+    top.append(el("h2", "", text(s.title, 120) || "Untitled session"), el("span", "pill", c.pill));
+    li.append(top);
+    const when = el("p", "when", ago(c.updated, now));
+    if (text(s.environment_kind, 40).toLowerCase() === "bridge") when.append(el("span", "local", "local"));
+    li.append(when);
+    const pts = obj(s.post_turn_summary);
+    const ext = obj(obj(s.external_metadata).post_turn_summary);
+    const status = text(pts.status_detail, 160) || text(ext.status_detail, 160) || text(pts.recent_action, 160)
+      || text(ext.recent_action, 160) || text(s.task_summary, 160);
+    if (status) li.append(el("p", "status", status));
+    const note = [c.note, c.needsAction].filter(Boolean).join(" · ");
+    if (note) li.append(el("p", "blocker", note));
+    const id = typeof s.id === "string" && SESSION_ID.test(s.id) ? s.id : null;
+    const url = id && safeLink(SESSION_PREFIX + id.slice(8), SESSION_PREFIX, /^[A-Za-z0-9_-]{1,120}$/);
+    if (url) {
+      const links = el("div", "links");
+      links.append(chatButton(id, text(s.title, 120)), link("Open in claude.ai", url));
+      li.append(links);
+    }
+    return li;
+  }
+
+  function setGridConn(msg, bad) {
+    $gridConn.textContent = msg;
+    if (bad) $gridConn.dataset.level = "bad"; else delete $gridConn.dataset.level;
+  }
+
+  function renderGrid() {
+    if (sessions === null) return;
+    const now = Date.now();
+    const items = [];
+    let archived = 0;
+    let older = 0;
+    for (const s of sessions) {
+      const c = classifySession(s, now);
+      if (c.state === "archived") { archived += 1; continue; }
+      if ((c.state === "done" || c.state === "idle") && c.updated !== null && now - c.updated > HIDE_IDLE_MS) { older += 1; continue; }
+      items.push({s, c});
+    }
+    items.sort((a, b) => (SESSION_RANK[a.c.state] - SESSION_RANK[b.c.state])
+      || ((b.c.updated ?? -Infinity) - (a.c.updated ?? -Infinity)));
+    $grid.replaceChildren(...items.map(({s, c}) => renderTile(s, c, now)));
+
+    const n = {needs: 0, failed: 0, working: 0, idle: 0, done: 0};
+    for (const {c} of items) n[c.state] += 1;
+    const parts = [];
+    if (n.needs) parts.push(`${n.needs} need${n.needs === 1 ? "s" : ""} you`);
+    if (n.failed) parts.push(`${n.failed} failed`);
+    if (n.working) parts.push(`${n.working} working`);
+    if (n.idle) parts.push(`${n.idle} idle`);
+    if (n.done) parts.push(`${n.done} done`);
+    $gridSummary.textContent = items.length === 0 ? "No sessions"
+      : (n.needs || n.failed ? "" : "Nothing needs you · ") + parts.join(" · ");
+    const hidden = [archived ? `${archived} archived hidden` : "", older ? `${older} older hidden` : ""].filter(Boolean);
+    $gridHidden.textContent = hidden.join(" · ");
+    $gridHidden.hidden = hidden.length === 0;
+    const updated = ago(sessionsAt, now);
+    if (gridStale) setGridConn(`Stale (${gridStale}) · ${updated} · refreshes by itself`, true);
+    else setGridConn(`live · ${updated}`);
+  }
+
+  // ---- mcp: one lookup, made on first need ----
+  function getMcp() {
+    if (!mcpPromise) {
+      mcpPromise = Promise.resolve().then(() => window.claude?.use?.("mcp")).then((m) => m || null, () => null);
+    }
+    return mcpPromise;
+  }
+
+  function errorCode(e) {
+    const code = e && typeof e.code === "string" ? e.code : "upstream_error";
+    return MCP_CODES.includes(code) ? code : "upstream_error";
+  }
+
+  // What each code means for a read; the copy never includes .message.
+  const RECONNECT = "Reconnect Claude Code Remote in claude.ai Settings → Connectors";
+  const ADD = "Add Claude Code Remote in claude.ai Settings → Connectors";
+  const NOT_ALLOWED = "Claude Code Remote is not allowed for this view.";
+  function readOutcome(code) {
+    if (code === "cancelled") return {kind: "ignore"};
+    if (code === "user_changed") return {kind: "gone"};
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") return {kind: "off"};
+    if (code === "bad_request" || code === "transform_error") return {kind: "rejected"};
+    if (code === "needs_reauth") return {kind: "retract", copy: RECONNECT};
+    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") return {kind: "retract", copy: ADD};
+    if (code === "not_in_manifest" || code === "blocked_by_policy" || code === "consent_required") return {kind: "retract", copy: NOT_ALLOWED};
+    if (code === "approval_required") return {kind: "approval"};
+    return {kind: "stale"};  // server_unavailable, rate_limited, upstream_error, tool_error, self_only
+  }
+
+  function stopGridWatch() {
+    if (gridUnsub) { gridUnsub(); gridUnsub = null; }
+  }
+
+  function retractGrid(summary, conn) {
+    sessions = null;
+    sessionsAt = null;
+    gridStale = "";
+    $grid.replaceChildren();
+    $gridHidden.hidden = true;
+    $gridAction.replaceChildren();
+    $gridSummary.textContent = summary;
+    setGridConn(conn || "", true);
+  }
+
+  function endGrid(summary, conn) {
+    gridOff = true;
+    stopGridWatch();
+    retractGrid(summary, conn);
+  }
+
+  function onGridEvent(ev) {
+    if (!ev || gridOff || mcpGone) return;
+    if (ev.type === "data") {
+      const result = obj(ev.result);
+      const list = normalizeSessions(result.payload);
+      if (list === null) { onGridEvent({type: "error", error: {code: "upstream_error"}}); return; }
+      const stored = obj(result.cache).storedAt;
+      sessions = list;
+      sessionsAt = typeof stored === "number" && Number.isFinite(stored) ? stored : Date.now();
+      gridStale = "";
+      $gridAction.replaceChildren();
+      renderGrid();
+      return;
+    }
+    if (ev.type !== "error") return;
+    const code = errorCode(ev.error);
+    const o = readOutcome(code);
+    if (o.kind === "ignore") return;
+    if (o.kind === "gone") { goneForGood(); return; }
+    if (o.kind === "off") { endGrid(NO_MCP); return; }
+    if (o.kind === "rejected") { endGrid("Can't load sessions", "The session list request was rejected."); return; }
+    if (o.kind === "retract") { retractGrid(o.copy); return; }
+    if (o.kind === "approval") {
+      retractGrid("Showing sessions needs your approval.");
+      $gridAction.replaceChildren(approveButton("Allow and show sessions", () => gridMcp
+        .callTool(MCP_SERVER, TOOLS.sessions, LIST_ARGS)
+        .then((result) => onGridEvent({type: "data", result}), (error) => onGridEvent({type: "error", error}))));
+      return;
+    }
+    // Transient: keep the last good tiles; the watch's own refetch recovers.
+    gridStale = code;
+    if (sessions !== null) { renderGrid(); return; }
+    $gridSummary.textContent = "Can't reach Claude Code Remote right now";
+    setGridConn(`(${code}) · refreshes by itself`, true);
+  }
+
+  // One call per click; the button stays disabled until that call settles.
+  function approveButton(label, call) {
+    const b = el("button", "", label);
+    b.type = "button";
+    b.addEventListener("click", () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      Promise.resolve().then(call).catch(() => {}).finally(() => { b.disabled = false; });
+    });
+    return b;
+  }
+
+  async function startGrid() {
+    if (gridUnsub || gridOff || mcpGone) return;
+    const mcp = await getMcp();
+    if (view !== "grid" || gridUnsub || gridOff || mcpGone) return;  // switched away meanwhile
+    if (!mcp) { $gridSummary.textContent = NO_MCP; setGridConn(""); return; }
+    gridMcp = mcp;
+    if (sessions === null) setGridConn("connecting…");
+    try {
+      gridUnsub = mcp.watchTool(MCP_SERVER, TOOLS.sessions, LIST_ARGS, onGridEvent, WATCH_OPTS);
+    } catch (_) {
+      endGrid("Can't load sessions");
+    }
+  }
+
+  function refreshGrid() {
+    if (!gridMcp || !gridUnsub) return;
+    Promise.resolve().then(() => gridMcp.invalidate(MCP_SERVER, TOOLS.sessions, LIST_ARGS)).catch(() => {});
+  }
+
+  // ---- chat panel ----
+  let chatId = null;          // the open session's id
+  let chatGen = 0;            // bumps on every open/close; stale replies are dropped
+  let chatMcp = null;
+  let chatUnsub = null;
+  let chatSending = false;
+  let chatEvents = null;
+  // Per-session draft and last send outcome, in memory only (never stored),
+  // so closing the panel or opening another session loses neither.
+  const KEEP_SESSIONS = 50;
+  const chatDrafts = [];      // [id, draft text], newest last
+  const chatOutcomes = [];    // [id, {msg, bad}], newest last
+
+  function keptFor(list, id) {
+    const pair = list.find((p) => p[0] === id);
+    return pair ? pair[1] : undefined;
+  }
+  function keepFor(list, id, value) {
+    const i = list.findIndex((p) => p[0] === id);
+    if (i >= 0) list.splice(i, 1);
+    if (value === null) return;
+    list.push([id, value]);
+    if (list.length > KEEP_SESSIONS) list.shift();
+  }
+
+  function saveDraft() {
+    if (chatId) keepFor(chatDrafts, chatId, $chatInput.value ? $chatInput.value : null);
+  }
+
+  // A send's outcome belongs to its session: kept for when that panel is
+  // opened again, and named in the status line if another one is open.
+  function reportSend(id, title, msg, bad) {
+    keepFor(chatOutcomes, id, msg ? {msg, bad: !!bad} : null);
+    if (chatId === id) setChatStatus(msg, bad);
+    else if (chatId !== null && msg) setChatStatus(`Message to “${title}”: ${msg}`, bad);
+  }
+
+  function eventArgs(id) { return {session_id: id, kinds: ["user", "assistant"], limit: EVENTS_LIMIT}; }
+
+  // Message text keeps its line breaks; other control characters go.
+  function bodyText(v, max) {
+    const s = String(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, " ").trim();
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+
+  // list_events -> [{who, text, at}]: user and assistant text only. Tool
+  // calls, tool results, thinking, synthetic, meta or replayed turns,
+  // background task notifications (a user turn whose origin is not a
+  // human) and subagent traffic are skipped.
+  function parseEvents(p) {
+    const list = listOf(p);
+    if (!list) return null;
+    const out = [];
+    const seen = Object.create(null);
+    for (const ev of list.slice(-200)) {
+      const e = obj(ev);
+      const kind = e.user && typeof e.user === "object" ? "user"
+        : e.assistant && typeof e.assistant === "object" ? "assistant" : null;
+      if (!kind) continue;
+      const body = obj(e[kind]);
+      const inner = body.internal_anthropic_catchall && typeof body.internal_anthropic_catchall === "object"
+        ? obj(body.internal_anthropic_catchall) : body;
+      if (inner.isSynthetic === true || inner.isMeta === true || inner.isCompactSummary === true
+          || inner.is_api_error_message === true || filled(inner.parent_tool_use_id)) continue;
+      if (kind === "user") {
+        const origin = obj(inner.origin);
+        if (inner.isReplay === true || (origin.kind != null && origin.kind !== "human")) continue;
+      }
+      const content = obj(inner.message).content;
+      let t = "";
+      if (typeof content === "string") t = content;
+      else if (Array.isArray(content)) {
+        if (content.some((b) => obj(b).type === "tool_result")) continue;
+        t = content.filter((b) => obj(b).type === "text" && typeof b.text === "string").map((b) => b.text).join("\n\n");
+      }
+      t = bodyText(t, 20000);
+      if (!t) continue;
+      const uuid = typeof body.uuid === "string" ? body.uuid : "";
+      if (uuid) { if (seen[uuid]) continue; seen[uuid] = true; }
+      out.push({who: kind === "user" ? "you" : "agent", text: t, at: isoTime(e.created_at) ?? isoTime(inner.timestamp)});
+    }
+    return out;
+  }
+
+  function bubble(m) {
+    const li = el("li", "msg");
+    li.dataset.who = m.who;
+    if (m.text.length <= BUBBLE_CLAMP) { li.textContent = m.text; return li; }
+    const span = el("span", "", m.text.slice(0, BUBBLE_CLAMP - 1) + "…");
+    const more = el("button", "", "Show more");
+    more.type = "button";
+    more.addEventListener("click", () => { span.textContent = m.text; more.hidden = true; });
+    li.append(span, more);
+    return li;
+  }
+
+  function setChatConn(msg, bad) {
+    $chatConn.textContent = msg;
+    if (bad) $chatConn.dataset.level = "bad"; else delete $chatConn.dataset.level;
+  }
+  function setChatStatus(msg, bad) {
+    $chatStatus.textContent = msg;
+    if (bad) $chatStatus.dataset.level = "bad"; else delete $chatStatus.dataset.level;
+  }
+
+  function renderChat(atBottom) {
+    if (chatEvents === null) return;
+    $chatLog.replaceChildren(...chatEvents.map(bubble));
+    if (chatEvents.length === 0) $chatLog.append(el("li", "msg", "No messages yet."));
+    if (atBottom) $chatLog.scrollTop = $chatLog.scrollHeight;
+  }
+
+  function onChatEvent(gen, ev) {
+    if (gen !== chatGen || !ev || mcpGone) return;
+    if (ev.type === "data") {
+      const list = parseEvents(obj(ev.result).payload);
+      if (list === null) { onChatEvent(gen, {type: "error", error: {code: "upstream_error"}}); return; }
+      // Follow new messages only when the reader is already at the bottom.
+      const gap = $chatLog.scrollHeight - $chatLog.scrollTop - $chatLog.clientHeight;
+      const atBottom = chatEvents === null || !(gap > 40);
+      chatEvents = list;
+      $chatAction.replaceChildren();
+      setChatConn("live");
+      renderChat(atBottom);
+      return;
+    }
+    if (ev.type !== "error") return;
+    const code = errorCode(ev.error);
+    const o = readOutcome(code);
+    if (o.kind === "ignore") return;
+    if (o.kind === "gone") { goneForGood(); return; }
+    if (o.kind === "off" || o.kind === "rejected") {
+      if (chatUnsub) { chatUnsub(); chatUnsub = null; }
+      chatEvents = null;
+      $chatLog.replaceChildren();
+      setChatConn(o.kind === "off" ? NO_MCP_CHAT : "Can't load this conversation.", true);
+      return;
+    }
+    if (o.kind === "retract" || o.kind === "approval") {
+      chatEvents = null;
+      $chatLog.replaceChildren();
+      if (o.kind === "retract") { setChatConn(o.copy, true); return; }
+      setChatConn("Showing this conversation needs your approval.", true);
+      const id = chatId;
+      $chatAction.replaceChildren(approveButton("Allow and show", () => chatMcp
+        .callTool(MCP_SERVER, TOOLS.events, eventArgs(id), {cache: WATCH_OPTS.cache})
+        .then((result) => onChatEvent(gen, {type: "data", result}), (error) => onChatEvent(gen, {type: "error", error}))));
+      return;
+    }
+    setChatConn(`Stale (${code}) · refreshes by itself`, true);
+  }
+
+  function updateCount() {
+    const n = $chatInput.value.length;
+    $chatCount.textContent = n ? `${n}/${MAX_MESSAGE}` : "";
+  }
+
+  async function openChat(id, title) {
+    if (typeof id !== "string" || !SESSION_ID.test(id) || mcpGone) return;
+    if (chatId !== id) {
+      saveDraft();
+      $chatInput.value = keptFor(chatDrafts, id) ?? "";
+      const o = keptFor(chatOutcomes, id);
+      setChatStatus(o ? o.msg : "", o && o.bad);
+    }
+    stopChat();
+    const gen = chatGen;
+    chatId = id;
+    chatEvents = null;
+    $chatTitle.textContent = title || "Session";
+    const url = safeLink(SESSION_PREFIX + id.slice(8), SESSION_PREFIX, /^[A-Za-z0-9_-]{1,120}$/);
+    $chatOpen.hidden = !url;
+    if (url) $chatOpen.href = url;
+    $chatLog.replaceChildren();
+    $chatAction.replaceChildren();
+    $chatSend.disabled = chatSending;
+    updateCount();
+    setChatConn("Loading…");
+    $chat.hidden = false;
+    $chatClose.focus();
+    const mcp = await getMcp();
+    if (gen !== chatGen) return;  // closed or reopened meanwhile
+    if (!mcp) { setChatConn(NO_MCP_CHAT, true); $chatSend.disabled = true; return; }
+    chatMcp = mcp;
+    const args = eventArgs(id);
+    // The first read and the watch share one cache entry, so they coalesce.
+    mcp.callTool(MCP_SERVER, TOOLS.events, args, {cache: WATCH_OPTS.cache})
+      .then((result) => onChatEvent(gen, {type: "data", result}), (error) => onChatEvent(gen, {type: "error", error}));
+    try {
+      chatUnsub = mcp.watchTool(MCP_SERVER, TOOLS.events, args, (ev) => onChatEvent(gen, ev), WATCH_OPTS);
+    } catch (_) {
+      setChatConn("Can't load this conversation.", true);
+    }
+  }
+
+  function stopChat() {
+    chatGen += 1;
+    if (chatUnsub) { chatUnsub(); chatUnsub = null; }
+  }
+
+  function closeChat() {
+    stopChat();
+    saveDraft();
+    chatId = null;
+    chatEvents = null;
+    $chatLog.replaceChildren();
+    $chatAction.replaceChildren();
+    $chat.hidden = true;
+  }
+
+  // What a failed send means. A send is a write: an ambiguous failure is
+  // never retried for you, and the draft is always kept (per session, also
+  // across closing the panel or opening another session).
+  function sendFailed(code) {
+    if (code === "needs_reauth") return RECONNECT;
+    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") return ADD;
+    if (code === "not_in_manifest" || code === "blocked_by_policy" || code === "consent_required") return "Sending is not allowed for this view.";
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") return NO_MCP_CHAT;
+    if (code === "bad_request" || code === "transform_error") return `The message was rejected (${code}). Your draft is kept.`;
+    if (code === "tool_error") return "Not sent (tool_error). Your draft is kept.";
+    return `It may or may not have arrived (${code}). Check the conversation before sending again.`;
+  }
+
+  function sendChat() {
+    if (chatSending || !chatId || !chatMcp || mcpGone) return;
+    const id = chatId;
+    const message = $chatInput.value.trim();
+    if (!message) { reportSend(id, "", "Type a message first.", true); return; }
+    if (message.length > MAX_MESSAGE) { reportSend(id, "", `Too long: ${MAX_MESSAGE} characters at most.`, true); return; }
+    const title = $chatTitle.textContent;
+    const mcp = chatMcp;
+    chatSending = true;
+    $chatSend.disabled = true;
+    $chatAction.replaceChildren();
+    reportSend(id, title, "Sending…", false);
+    mcp.callTool(MCP_SERVER, TOOLS.send, {session_id: id, message}, {cache: false}).then(() => {
+      chatSending = false;
+      $chatSend.disabled = false;
+      if (mcpGone) return;
+      // Clear the draft only if it is still the text that was sent.
+      if (chatId === id) {
+        if ($chatInput.value.trim() === message) { $chatInput.value = ""; updateCount(); }
+      } else if ((keptFor(chatDrafts, id) ?? "").trim() === message) keepFor(chatDrafts, id, null);
+      reportSend(id, title, "Sent — the agent will reply in its next turn", false);
+      Promise.resolve().then(() => mcp.invalidate(MCP_SERVER, TOOLS.events, eventArgs(id))).catch(() => {});
+    }, (error) => {
+      chatSending = false;
+      $chatSend.disabled = false;
+      if (mcpGone) return;
+      const code = errorCode(error);
+      if (code === "user_changed") { goneForGood(); return; }
+      if (code === "approval_required") {
+        reportSend(id, title, "Sending needs your approval. Your draft is kept.", true);
+        if (chatId === id) $chatAction.replaceChildren(approveButton("Approve and send", sendChat));
+        return;
+      }
+      reportSend(id, title, sendFailed(code), true);
+    });
+  }
+
+  // user_changed: another account is signed in. Render nothing, call nothing.
+  function goneForGood() {
+    mcpGone = true;
+    gridOff = true;
+    stopGridWatch();
+    retractGrid("", "");
+    closeChat();
+    chatDrafts.length = 0;
+    chatOutcomes.length = 0;
+    $chatInput.value = "";
+    setChatStatus("");
+  }
+
+  // ---- view switch: Runs stays the default ----
+  function setView(v, remember) {
+    view = v === "grid" ? "grid" : "runs";
+    $main.dataset.view = view;
+    $runsView.hidden = view !== "runs";
+    $gridView.hidden = view !== "grid";
+    $viewRuns.setAttribute("aria-pressed", String(view === "runs"));
+    $viewGrid.setAttribute("aria-pressed", String(view === "grid"));
+    if (remember) { try { window.localStorage.setItem(VIEW_KEY, view); } catch (_) { /* storage blocked */ } }
+    if (view === "grid") { renderGrid(); startGrid(); } else stopGridWatch();
+  }
+
+  function initialView() {
+    let v = "runs";
+    try { if (window.localStorage.getItem(VIEW_KEY) === "grid") v = "grid"; } catch (_) { /* storage blocked */ }
+    try {
+      const hash = window.location.hash;
+      if (hash === "#grid") v = "grid"; else if (hash === "#runs") v = "runs";
+    } catch (_) { /* no location */ }
+    return v;
+  }
+
+  $viewRuns.addEventListener("click", () => setView("runs", true));
+  $viewGrid.addEventListener("click", () => setView("grid", true));
+  $gridRefresh.addEventListener("click", refreshGrid);
+  $chatClose.addEventListener("click", closeChat);
+  $chatSend.addEventListener("click", sendChat);
+  $chatInput.addEventListener("input", updateCount);
+  // Enter adds a line; Ctrl/Cmd+Enter sends (desktop only, never on its own).
+  $chatInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    if (e.repeat || e.isComposing) return;  // a held key or an IME commit never sends
+    sendChat();
+  });
+  $chat.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChat(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && view === "grid") renderGrid(); });
+
   // Pure helpers for tests/js/agent-dashboard.test.mjs. Read-only.
   window.AgentDashboard = Object.freeze({
     classify, safeLink, text, number, time,
     SILENT_AFTER_MIN: Object.freeze({...SILENT_AFTER_MIN}),
     FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX,
+    classifySession, normalizeSessions, parseEvents, isoTime,
+    MCP_SERVER, TOOLS, LIST_ARGS: Object.freeze({...LIST_ARGS}), HIDE_IDLE_MS, VIEW_KEY, MAX_MESSAGE, EVENTS_LIMIT,
   });
 
+  setView(initialView(), false);
   start();
 })();
 </script>

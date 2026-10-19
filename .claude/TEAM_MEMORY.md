@@ -162,7 +162,16 @@ as the work. Never put secrets, tokens or personal data in this file.
     agent acts on what a row says.
   - The page's logic is tested by running its own script in node:vm
     (`tests/js/agent-dashboard.test.mjs`); string checks on the HTML alone
-    let real regressions through.
+    let real regressions through. Arrays made inside the vm are from another realm:
+    spread them (`[...x]`) before `assert.deepEqual`.
+  - The page also has a Grid view and a chat panel over the viewer's own
+    Claude Code Remote connector. Its manifest lists only `list_sessions`,
+    `list_events` and `send_message` (pinned by a test); nothing calls the
+    connector until Grid or Chat is clicked, and a send is one call per
+    click. Desktop launchers are in `tools/agent-dashboard/desktop/`.
+  - `test_page_never_writes` rejects any `.set(`/`.update(`/`.delete(`/
+    `.add(` in the page, Map and Set included; keep page state in arrays
+    or plain objects.
 
 ## Repo map (where things live)
 - `assistant/` package, entry point `python -m assistant`.

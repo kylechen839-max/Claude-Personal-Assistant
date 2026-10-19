@@ -3,3 +3,10 @@ assistant/web/vad/*.js -text
 assistant/web/vad/*.mjs -text
 assistant/web/vad/*.wasm binary
 assistant/web/vad/*.onnx binary
+
+# Windows batch files must keep CRLF line endings
+*.cmd text eol=crlf
+
+# Shell scripts must keep LF (bash reads a CRLF shebang as "bash\r")
+*.sh text eol=lf
+*.command text eol=lf
