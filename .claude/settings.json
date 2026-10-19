@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest*)",
+      "Bash(pytest*)",
+      "Bash(.venv/bin/python -m pytest*)",
+      "Bash(node --test*)",
+      "Bash(pip install -r requirements.txt)",
+      "Bash(python -m assistant --check*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git fetch*)",
+      "Bash(git branch*)",
+      "Bash(git worktree*)",
+      "Bash(git merge-tree*)",
+      "Bash(git merge-base*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git merge *)",
+      "Bash(git push -u origin claude/*)",
+      "Bash(git push origin claude/*)"
+    ],
+    "ask": [
+      "Bash(git push origin master*)",
+      "Bash(git push origin HEAD:master*)",
+      "Bash(git push origin stable*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./credentials.json)",
+      "Read(./token.json)",
+      "Read(./.oauth_state.json)",
+      "Bash(cat .env)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git reset --hard*)"
+    ]
+  }
+}

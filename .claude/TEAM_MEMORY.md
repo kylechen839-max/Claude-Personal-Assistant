@@ -36,7 +36,14 @@ as the work. Never put secrets, tokens or personal data in this file.
   secret is ever committed, put that first in your report and tell him to
   rotate it.
 - No force-push, no `reset --hard` on shared work, no rebasing someone
-  else's branch, no destructive deletes, no PRs unless Kyle asks.
+  else's branch, no destructive deletes.
+- **PRs:** `/build-feature` runs end in a draft PR for Kyle to merge (he
+  decided this on 2026-10-19). Open other PRs only when he asks.
+- Nothing reaches master except through a PR Kyle merges. Master is
+  protected.
+- **Live services:** agents never write to Kyle's real Calendar, Notion,
+  Gmail or Pinecone while building; a git revert can't undo those. Use
+  mocks.
 - Never skip, disable, quarantine or weaken a test to get green.
 - Gmail is drafts only; no code path may send. Deletes always ask first.
 - No third-party CDN scripts, fonts or styles. Vendored files keep their
@@ -126,8 +133,15 @@ as the work. Never put secrets, tokens or personal data in this file.
     WAVs do), so `test_real_hey_claude_model` fails on Linux.
 - Chromium/Playwright are preinstalled; never run `playwright install`.
 - The usage limit is shared by every session and agent; nine at once used
-  it up in about 90 minutes. Run at most about 4 builders at once and work
-  lean.
+  it up in about 90 minutes.
+  - Run at most 2–3 builders at once and work lean.
+  - Each `/build-feature` run has a budget: 3 rounds per piece, about 25
+    agent runs.
+  - Each PR reports what it cost.
+- **Permissions:** `.claude/settings.json` pre-approves the routine test and
+  git commands, asks before any push to master or stable, and denies
+  reading `.env` and the Google token files, force-pushes and
+  `reset --hard`.
 
 ## Repo map (where things live)
 - `assistant/` package, entry point `python -m assistant`.
@@ -162,8 +176,10 @@ as the work. Never put secrets, tokens or personal data in this file.
     `pi-arm64` are green on that exact SHA. Updates are signed, and
     `[update]` is off by default.
   - Each piece of work gets a `claude/<feature>` branch.
-- **Merges:** `git merge --no-ff origin/master`; never rebase. A merge
-  commit per feature lets Kyle undo one piece with `git revert -m 1`.
+- **Merges:** bring master in with `git merge --no-ff origin/master`;
+  never rebase.
+- Features reach master as PRs merged with a merge commit, so Kyle can undo
+  one piece with `git revert -m 1`.
 - **CI** (`tests.yml`):
   - Ubuntu 3.10 and 3.12, Windows 3.12;
   - pinecone-mcp, the Docker image smoke test and the JS router tests;
