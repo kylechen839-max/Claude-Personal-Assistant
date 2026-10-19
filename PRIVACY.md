@@ -48,8 +48,11 @@ All paths are relative to the project folder unless noted. On Render the
   backend that syncs with this one.
 - **Sign out a lost phone:** gear menu, "Sign out everywhere", or change
   `WEB_TOKEN` in `.env` (that also cuts off Shortcuts and other bearer clients).
-  With failover on, change `WEB_TOKEN` on every backend (Pi, PC and cloud):
-  that is the one step that signs a phone out of all of them.
+  With failover on, "Sign out everywhere" also signs out every phone's
+  access token on all backends that sync history; one that is off applies it
+  on its next sync. A backend with history turned off only signs out itself,
+  so there change `WEB_TOKEN`. Clients that use `WEB_TOKEN` itself are cut
+  off only by changing it.
 - **Stop Gmail access:** set `[gmail] enabled = false` and revoke the app at
   myaccount.google.com/permissions.
 - **Wipe everything local:** delete `data/`, `logs/`, `token.json`, and the
