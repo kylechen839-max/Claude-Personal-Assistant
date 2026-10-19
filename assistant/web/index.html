@@ -103,6 +103,7 @@
     <button id="mic" class="mic" type="button" aria-label="Hold to talk, or tap to start and stop">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
     </button>
+    <div id="mic-meter" class="mic-meter" hidden aria-hidden="true"><span></span></div>
     <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
     <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
   </footer>
@@ -110,6 +111,7 @@
 
 <section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
   <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>
+  <div id="voice-meter" class="mic-meter voice-meter" aria-hidden="true"><span></span></div>
   <div class="voice-orb-wrap">
     <button id="voice-orb" class="voice-orb" type="button" aria-label="Voice orb (tap to resume when paused)"></button>
   </div>

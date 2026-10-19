@@ -338,3 +338,13 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
   .mic.recording::after { opacity: 0; }
   .msg.claude:empty::before { opacity: .7; }
 }
+
+/* Mic level meter (push-to-talk and voice conversation): how much sound is
+   coming in; the bar turns the accent colour while it hears speech. */
+.mic-meter { width: 9rem; height: 6px; margin: .7rem auto 0; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, currentColor 14%, transparent); }
+.mic-meter[hidden] { display: none; }
+.mic-meter span { display: block; height: 100%; width: calc(var(--mic, 0) * 100%); border-radius: inherit;
+  background: color-mix(in srgb, currentColor 45%, transparent); transition: width 60ms linear; }
+.mic-meter.hearing span { background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .mic-meter span { transition: none; } }

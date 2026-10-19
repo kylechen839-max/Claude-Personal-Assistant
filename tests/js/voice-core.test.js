@@ -224,3 +224,29 @@ test("binary framing round-trips and PCM16 clips", () => {
   assert.deepEqual(header, { type: "utterance", turn: 3, sample_rate: 16000 });
   assert.deepEqual(new Uint8Array(payload), pcm);
 });
+
+test("endpointer: unsure frames (noise) still end the turn, at half speed", () => {
+  const ep = new VC.Endpointer({ threshold: 0.5, silenceMs: 640, minUtteranceMs: 100, maxUtteranceMs: 30000 });
+  const f = frame(0.1);
+  ep.process(f, 0.9);
+  for (let i = 0; i < 10; i++) ep.process(f, 0.9);  // ~350 ms of speech
+  let events = [];
+  let n = 0;
+  while (!events.length && n < 200) { events = ep.process(f, 0.45); n++; }  // between the thresholds
+  assert.equal(events[0].type, "speechEnd");
+  assert.equal(n, 40);  // 640 ms at half weight = 40 frames of 32 ms, not the 30 s cap
+  // clear silence still ends after silenceMs
+  ep.process(f, 0.9);
+  for (let i = 0; i < 10; i++) ep.process(f, 0.9);
+  n = 0; events = [];
+  while (!events.length) { events = ep.process(f, 0.1); n++; }
+  assert.equal(n, 20);
+});
+
+test("audio chunk text reaches the subtitles", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0, text: "Pretty light today." });
+  assert.deepEqual(log.captions.at(-1), { who: "audio", text: "Pretty light today.", append: true });
+});

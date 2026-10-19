@@ -7,7 +7,7 @@ const els = {
   login: $("login"), app: $("app"), loginForm: $("login-form"), token: $("token"),
   loginError: $("login-error"), log: $("log"), status: $("status"),
   confirm: $("confirm"), question: $("confirm-question"), yes: $("yes"), no: $("no"),
-  textForm: $("text-form"), text: $("text"), mic: $("mic"), micHint: $("mic-hint"),
+  textForm: $("text-form"), text: $("text"), mic: $("mic"), micHint: $("mic-hint"), micMeter: $("mic-meter"),
   phoneVoice: $("phone-voice"), mute: $("mute"), logout: $("logout"),
   badge: $("badge"), backends: $("backends"), backendMode: $("backend-mode"),
   urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
@@ -481,6 +481,57 @@ function releaseStream() {
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
 }
 
+// Level meter while recording, so you can see it picking up sound. Its own
+// small context at the mic's sample rate (Safari gives a context at another
+// rate silence); purely visual, so any failure just hides it.
+let meter = null;
+function startMeter(s) {
+  if (!els.micMeter) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const rate = (s.getAudioTracks()[0]?.getSettings?.() || {}).sampleRate;
+    let ac;
+    try { ac = rate ? new Ctx({ sampleRate: rate }) : new Ctx(); } catch (e) { ac = new Ctx(); }
+    ac.resume().catch(() => {});
+    const analyser = ac.createAnalyser();
+    analyser.fftSize = 512;
+    const silent = ac.createGain();
+    silent.gain.value = 0; // Safari only runs a graph that reaches the output
+    ac.createMediaStreamSource(s).connect(analyser);
+    analyser.connect(silent);
+    silent.connect(ac.destination);
+    const data = new Uint8Array(analyser.fftSize);
+    meter = { ac, raf: 0 };
+    els.micMeter.hidden = false;
+    const tick = () => {
+      if (!meter) return;
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+      const level = Math.min(1, Math.sqrt(sum / data.length) * 4);
+      els.micMeter.style.setProperty("--mic", level.toFixed(3));
+      els.micMeter.classList.toggle("hearing", level > 0.12);
+      meter.raf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {
+    stopMeter();
+  }
+}
+
+function stopMeter() {
+  if (meter) {
+    cancelAnimationFrame(meter.raf);
+    meter.ac.close().catch(() => {});
+    meter = null;
+  }
+  if (els.micMeter) {
+    els.micMeter.hidden = true;
+    els.micMeter.classList.remove("hearing");
+    els.micMeter.style.setProperty("--mic", "0");
+  }
+}
+
 function micHelp(e) {
   if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
     return "Microphone access is blocked. On iPhone: Settings → Safari → Microphone → " +
@@ -516,6 +567,7 @@ async function startRecording() {
     const type = recorder.mimeType || mime || "audio/webm";
     const blob = new Blob(chunks, { type });
     recorder = null;
+    stopMeter();
     els.mic.classList.remove("recording");
     els.micHint.textContent = "Hold to talk, or tap to start and stop";
     releaseStream();
@@ -525,6 +577,7 @@ async function startRecording() {
     send(form);
   });
   recorder.start();
+  startMeter(s);
   els.mic.classList.add("recording");
   els.micHint.textContent = "Listening… release or tap to send";
   maxTimer = setTimeout(stopRecording, MAX_RECORD_MS);
