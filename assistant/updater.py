@@ -52,6 +52,9 @@ LOCAL_FILES = {"config.toml"}  # may differ per machine (as in the preflight)
 LOCK_STALE_SECONDS = 3 * 3600  # longer than any fetch + merge + pip + smoke
 HOST_ALIVE_SECONDS = 15        # a host touches logs/host-<mode>.alive every second
 TAG_PATTERN = "stable-*"
+SSH_SIG = "-----BEGIN SSH SIGNATURE-----"
+OTHER_SIGS = ("-----BEGIN PGP SIGNATURE-----", "-----BEGIN SIGNED MESSAGE-----",
+              "-----BEGIN PGP MESSAGE-----")
 
 # statuses
 UP_TO_DATE, UPDATED, SKIPPED, FAILED, ROLLED_BACK, LOCKED = (
@@ -181,17 +184,31 @@ class Updater:
         if not self.allowed_signers.is_file():
             return (f"updates must be signed and {self.allowed_signers} doesn't exist: "
                     "add your signing key there (README, Automatic updates)")
-        # ssh-keygen (git's default) pinned, so a user setting can't swap in
-        # another verifier; trusted keys only from allowed_signers
+        # SSH signatures only: git picks the verifier from the signature's
+        # type, so an OpenPGP/X.509 signature would be checked against a
+        # keyring instead of allowed_signers. Such objects are refused before
+        # verifying, and those verifiers are disabled outright. ssh-keygen
+        # (git's default) is pinned so a user setting can't swap it.
         trust = ["-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen",
-                 "-c", f"gpg.ssh.allowedSignersFile={self.allowed_signers}"]
-        if self.git(*trust, "verify-commit", target, timeout=60)[0] == 0:
+                 "-c", f"gpg.ssh.allowedSignersFile={self.allowed_signers}",
+                 "-c", "gpg.openpgp.program=hey-claude-no-openpgp",
+                 "-c", "gpg.x509.program=hey-claude-no-x509"]
+        if self.ssh_signed("commit", target) and \
+                self.git(*trust, "verify-commit", target, timeout=60)[0] == 0:
             return None
         _, tags = self.git("tag", "--list", TAG_PATTERN, "--points-at", target, timeout=30)
         for tag in tags.split():
-            if self.git(*trust, "verify-tag", tag, timeout=60)[0] == 0:
+            if self.ssh_signed("tag", tag) and \
+                    self.git(*trust, "verify-tag", tag, timeout=60)[0] == 0:
                 return None
         return f"{short(target)} has no valid signature from a key in {self.allowed_signers}"
+
+    def ssh_signed(self, kind: str, ref: str) -> bool:
+        """Does this commit/tag object carry an SSH signature (and no other)?"""
+        code, raw = self.git("cat-file", kind, ref, timeout=30)
+        if code != 0:
+            return False
+        return SSH_SIG in raw and not any(m in raw for m in OTHER_SIGS)
 
     # --- state ---
     def _state(self) -> dict:

@@ -4,12 +4,14 @@ name: promote-stable
 # to a master commit once BOTH `tests` and `pi-arm64` passed on that exact
 # commit. Fast-forward only. Nobody pushes `stable` by hand.
 #
-# Signing (optional, for the updater's signature check): add the private half
-# of an SSH signing key as the repository secret STABLE_SIGNING_KEY; each
-# promotion then also pushes a signed tag `stable-<sha7>`. A host trusts it
-# when the public key is in its allowed_signers file (README, Automatic
-# updates). Without the secret no tag is made, and hosts that require
-# signatures don't update.
+# Hosts only install a stable commit that is signed (assistant/updater.py).
+# The recommended way: Kyle signs a `stable-<sha7>` tag himself with a key
+# that lives only on his PC (README, Automatic updates). Optional and weaker:
+# the `sign` job below signs it, with STABLE_SIGNING_KEY stored ONLY in the
+# GitHub Environment `stable-signing` (deployments from master only, Kyle as
+# required reviewer), never as a repository secret: a repository secret is
+# readable by a workflow pushed on any branch, which could sign its own code.
+# The `promote` job never sees the key.
 on:
   workflow_run:
     workflows: [tests, pi-arm64]
@@ -28,6 +30,8 @@ jobs:
   promote:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      promoted: ${{ steps.push.outputs.promoted }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,10 +65,10 @@ jobs:
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
 
       - name: Fast-forward stable
+        id: push
         if: steps.green.outputs.ok == 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
-          SIGNING_KEY: ${{ secrets.STABLE_SIGNING_KEY }}
         run: |
           git fetch origin stable || true
           if git rev-parse -q --verify origin/stable >/dev/null; then
@@ -75,18 +79,39 @@ jobs:
               echo "::error::$SHA is not a fast-forward of stable; not promoting"; exit 1
             fi
           fi
-          if [ -n "$SIGNING_KEY" ]; then
-            key="$RUNNER_TEMP/stable_signing_key"
-            umask 077
-            printf '%s\n' "$SIGNING_KEY" > "$key"
-            git config user.name "stable promotion"
-            git config user.email "stable-promotion@users.noreply.github.com"
-            git config gpg.format ssh
-            git config user.signingkey "$key"
-            tag="stable-${SHA:0:7}"
-            git tag -s -m "Promoted to stable after green CI" "$tag" "$SHA"
-            git push origin "refs/tags/$tag"
-            rm -f "$key"
-          fi
           git push origin "$SHA:refs/heads/stable"
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
           echo "stable -> $SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  # Optional CI signing. Waits for Kyle's approval in the stable-signing
+  # Environment; without that Environment (or its secret) it does nothing
+  # and hosts wait for a tag Kyle signs himself.
+  sign:
+    needs: promote
+    if: needs.promote.outputs.promoted == 'true'
+    runs-on: ubuntu-latest
+    environment: stable-signing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Sign stable-<sha7>
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          SIGNING_KEY: ${{ secrets.STABLE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "No STABLE_SIGNING_KEY in the stable-signing environment; not signing."; exit 0
+          fi
+          key="$RUNNER_TEMP/stable_signing_key"
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          git config user.name "stable promotion"
+          git config user.email "stable-promotion@users.noreply.github.com"
+          git config gpg.format ssh
+          git config user.signingkey "$key"
+          tag="stable-${SHA:0:7}"
+          git tag -s -m "Promoted to stable after green CI" "$tag" "$SHA"
+          git push origin "refs/tags/$tag"
+          rm -f "$key"

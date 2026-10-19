@@ -755,60 +755,56 @@ restart hey-claude` on the Pi).
 `/healthz` and reloads itself once, never in the middle of a turn, a
 recording or the voice conversation.
 
-**Setting up signing (once).** The promotion workflow signs each promotion
-with a key only GitHub Actions holds; your machines trust that key.
+**Setting up signing (once). Recommended: you approve each update** with
+a key that exists only on your PC. The workflow moves `stable` after green
+CI; nothing installs until you sign that commit.
 
-1. On the PC, make a key just for this (no passphrase; it never leaves
-   GitHub):
+1. Make the key and let git sign with it (choose a passphrase):
    ```powershell
-   ssh-keygen -t ed25519 -N '""' -C "hey-claude stable" -f "$env:TEMP\stable_signing"
+   ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
+   git config gpg.format ssh
+   git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
    ```
-2. GitHub -> the repo -> Settings -> Secrets and variables -> Actions -> New
-   repository secret: name `STABLE_SIGNING_KEY`, value: the whole content of
-   `$env:TEMP\stable_signing` (the private key).
-3. Trust the public half on each machine that updates:
+2. Trust its public half on each machine that updates:
    ```powershell
    $dir = "$env:APPDATA\HeyClaude"; New-Item -ItemType Directory -Force $dir | Out-Null
-   $pub = Get-Content "$env:TEMP\stable_signing.pub"
-   [IO.File]::WriteAllText("$dir\allowed_signers", "stable-promotion@users.noreply.github.com namespaces=`"git`" $pub`n")
+   $pub = Get-Content "$env:USERPROFILE\.ssh\hey_claude_approve.pub"
+   [IO.File]::WriteAllText("$dir\allowed_signers", "kylechen839@gmail.com namespaces=`"git`" $pub`n")
    ```
    On the Pi: `mkdir -p ~/.config/hey-claude` and put the same line in
-   `~/.config/hey-claude/allowed_signers`.
-4. Delete both key files from `$env:TEMP`. From the next promotion on, the
-   workflow pushes a signed `stable-<sha>` tag that the hosts verify
-   (`git verify-tag`).
+   `~/.config/hey-claude/allowed_signers` (only the public key goes there).
+3. Each update you approve: look at what changed, then sign and push a tag:
+   ```powershell
+   git fetch origin stable
+   git log --oneline HEAD..origin/stable
+   $sha = git rev-parse origin/stable
+   git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
+   git push origin "stable-$($sha.Substring(0,7))"
+   ```
+   The hosts update on their next check (`git verify-tag` against
+   allowed_signers; only SSH signatures count, never OpenPGP).
 
-A CI-signed tag only proves **"CI passed"**, not **"Kyle approved"**: the key
-sits in GitHub, so it guards against a bad push to `stable` or a changed
-`origin`, but not against someone who can change the workflow or the code
-on master (branch protection on `master` and `stable` narrows that,
-BLOCKERS.md).
+**Optional, weaker: CI signs for you.** A CI-signed tag only proves **"CI
+passed"**, not **"Kyle approved"**. If you want it anyway, the key must live
+in a GitHub **Environment**, never as a repository secret (a repository
+secret can be read by a workflow pushed on any branch, which could sign its
+own code):
 
-**Strongest setup: you approve each update.** Use a key that exists only on
-your PC, put only its public half in `allowed_signers` (on the PC and the
-Pi), and don't add the `STABLE_SIGNING_KEY` secret. The workflow still moves
-`stable` after green CI, but nothing installs until you sign that commit:
+1. GitHub -> the repo -> Settings -> Environments -> New environment
+   `stable-signing`: Deployment branches and tags -> Selected -> `master`
+   only; Required reviewers -> you.
+2. Make a key without a passphrase (`ssh-keygen -t ed25519 -N '""' -C
+   "hey-claude stable" -f "$env:TEMP\stable_signing"`), add the private
+   key as the environment secret `STABLE_SIGNING_KEY` of `stable-signing`,
+   add the `.pub` line to allowed_signers as in step 2 above (with
+   `stable-promotion@users.noreply.github.com`), then delete both files.
+3. Each promotion then waits for your approval in GitHub (Actions ->
+   promote-stable -> Review deployments) before the `sign` job signs
+   `stable-<sha>`. With both keys trusted, either one is enough.
 
-```powershell
-# once: a key only on this PC (here with a passphrase), and git set up to sign with it
-ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
-git config gpg.format ssh
-git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
-# allowed_signers line (as in step 3 above, with this .pub file and your email)
-
-# each update you approve: look at what changed, then sign and push a tag
-git fetch origin stable
-git log --oneline HEAD..origin/stable
-$sha = git rev-parse origin/stable
-git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
-git push origin "stable-$($sha.Substring(0,7))"
-```
-
-The hosts update on their next check. You can use both keys (both lines in
-`allowed_signers`), but then either one is enough, so the CI key alone can
-still approve an update. The only way around signatures is `[update] trust_unsigned =
-true`: then **anyone who can push to master or stable can run code on this
-machine**. Use it only for a repository only you can push to.
+The only way around signatures is `[update] trust_unsigned = true`: then
+**anyone who can push to master or stable can run code on this machine**.
+Use it only for a repository only you can push to.
 
 **Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
 so it never updates. Switch with this, in PowerShell (5.1 or 7):

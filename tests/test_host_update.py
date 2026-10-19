@@ -676,3 +676,58 @@ def test_head_moved_by_hand_restarts_without_rollback():
     h.tick(100, {"next_update": 1e9, "next_head": 0})  # updater.made is None
     assert len(started) == 2 and h.updater.rollbacks == []
     assert "by hand" in h.log.getvalue()
+
+
+def pgp_commit(repo, parent, message="pgp-signed"):
+    """A commit object carrying an OpenPGP signature block (not SSH)."""
+    tree = git(repo, "rev-parse", f"{parent}^{{tree}}")
+    body = (f"tree {tree}\nparent {parent}\n"
+            "author Eve <eve@example.com> 1700000000 +0000\n"
+            "committer Eve <eve@example.com> 1700000000 +0000\n"
+            "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n"
+            " -----END PGP SIGNATURE-----\n\n" + message + "\n")
+    p = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin"], cwd=repo,
+                       input=body, capture_output=True, text=True, check=True)
+    return p.stdout.strip()
+
+
+class VerifierSaysYes(Recorder):
+    """As if a keyring verified anything: verify-commit/verify-tag exit 0."""
+
+    def __call__(self, cmd, cwd, timeout=0):
+        if cmd[0] == "git" and any(c in ("verify-commit", "verify-tag") for c in cmd):
+            return 0, "gpg: Good signature"
+        return super().__call__(cmd, cwd, timeout)
+
+
+def test_openpgp_signatures_never_count(repos):
+    """Only SSH signatures are checked against allowed_signers; an OpenPGP
+    one (that a gpg keyring might accept) is refused before verifying."""
+    dev, home, _ = repos
+    old = git(home, "rev-parse", "HEAD")
+    bad = pgp_commit(dev, git(dev, "rev-parse", "HEAD"))
+    git(dev, "push", "-q", "origin", f"{bad}:refs/heads/stable")
+    up, _ = make(repos, VerifierSaysYes())
+    r = up.update()
+    assert r.status == SKIPPED and "no valid signature" in r.detail
+    assert git(home, "rev-parse", "HEAD") == old
+    # and a stable-* tag whose signature is PGP doesn't count either
+    tag_body = (f"object {bad}\ntype commit\ntag stable-{bad[:7]}\n"
+                "tagger Eve <eve@example.com> 1700000000 +0000\n\nok\n"
+                "-----BEGIN PGP SIGNATURE-----\n\niQEz\n-----END PGP SIGNATURE-----\n")
+    p = subprocess.run(["git", "mktag"], cwd=dev, input=tag_body, capture_output=True,
+                       text=True)
+    if p.returncode == 0:  # newer git validates; the PGP block is fine for mktag
+        git(dev, "update-ref", f"refs/tags/stable-{bad[:7]}", p.stdout.strip())
+        git(dev, "push", "-q", "origin", "--tags")
+        assert up.update().status == SKIPPED
+
+
+def test_ssh_signed_detection(repos):
+    dev, _, _ = repos
+    up, _ = make(repos)
+    up.root = dev
+    assert up.ssh_signed("commit", "HEAD")
+    unsigned = commit(dev, "x.txt", "x\n", sign=False)
+    assert not up.ssh_signed("commit", unsigned)
+    assert not up.ssh_signed("commit", pgp_commit(dev, unsigned))
