@@ -1,7 +1,8 @@
 """The dev-team run dashboard page (tools/agent-dashboard) stays within the
 claude.ai page contract and treats rows as untrusted; the master skill
-writes every phase."""
+writes every phase and every agent row."""
 
+import json
 import os
 import re
 import shutil
@@ -59,7 +60,9 @@ def test_page_never_renders_rows_as_markup(banned):
 
 
 def test_page_never_writes():
-    # The page only reads: no set/update/delete/add/acquire calls.
+    # The page never writes rows (runs or agents): no set/update/delete/add/
+    # acquire calls, Map and Set included. It posts no comments either: the
+    # composer it opens is claude.ai's own (see test_page_has_no_connector_code).
     assert not re.search(r"\.(?:set|update|delete|add|acquire)\(", _page())
 
 
@@ -82,6 +85,8 @@ def test_page_body_gutters_use_safe_area():
 def test_page_subscribes_once_to_the_runs_query():
     page = _page()
     assert 'db.collection("runs").orderBy("started_at", "desc").limit(100)' in page
+    assert 'db.collection("agents").orderBy("started_at", "desc").limit(200)' in page
+    # One live-query helper serves both collections.
     assert page.count(".onSnapshot(") == 1
     assert 'window.claude?.use?.("db")' in page
     assert "Open this page on claude.ai while signed in to see runs." in page
@@ -205,3 +210,168 @@ def test_watchdog_prompt_is_one_fenced_block():
         assert needed in prompt, needed
     # The watchdog never touches a terminal row.
     assert "pr_ready, blocked, done or dead" in prompt
+
+
+# ---- Grid (coordinator), Message coordinator and desktop launchers ----
+
+DASHBOARD_URL = "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
+DESKTOP = DASH / "desktop"
+MANIFEST = '{"db":{}, "user":{}, "comments":{"composer_only":true}}'
+
+
+def test_readme_pins_the_manifest():
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)```", readme, re.S)
+    assert [b.strip() for b in blocks] == [MANIFEST]
+    # composer_only: no write verbs, no consent prompt, no custom anchors.
+    assert json.loads(MANIFEST) == {"db": {}, "user": {}, "comments": {"composer_only": True}}
+
+
+def _function(page: str, name: str) -> str:
+    """The body of a top-level function in the page's script."""
+    return re.split(r"\n  \}\n", page.split(name, 1)[1], maxsplit=1)[0]
+
+
+def test_page_has_no_connector_code():
+    page = _page()
+    for banned in ('"mcp"', "Claude Code Remote", "list_sessions", "list_events", "send_message",
+                   "callTool", "watchTool", "sendToClaude", "onSendToClaude", "customAnchors",
+                   ".reply("):
+        assert banned not in page, banned
+    assert page.count('window.claude?.use?.("comments")') == 1
+    assert page.count(".openComposer(") == 1
+    assert ".openComposer(" in _function(page, "async function messageCoordinator(")
+    # Only the button's click listener calls it.
+    assert page.count("messageCoordinator(") == 2
+    assert 'addEventListener("click", () => messageCoordinator(t))' in page
+
+
+def test_page_never_logs_or_composes_on_a_timer_and_stores_only_two_keys():
+    page = _page()
+    assert "console." not in page
+    for timer in re.findall(r"set(?:Timeout|Interval)\(([^;]*)", page):
+        assert "openComposer" not in timer and "messageCoordinator" not in timer, timer
+    # The comments lookup and the agents query start on the first Grid show.
+    grid = _function(page, "function setView(")
+    assert "getComments()" in grid and "agentsLive.start(db)" in grid
+    assert "agentsLive.pause()" in grid
+    # localStorage holds the view and the tile layout, nothing else.
+    keys = re.findall(r"localStorage\.(?:getItem|setItem|removeItem)\(([^,)]*)", page)
+    assert keys and set(keys) == {"VIEW_KEY", "LAYOUT_KEY"}, keys
+    assert 'const VIEW_KEY = "agent-dashboard-view";' in page
+    assert 'const LAYOUT_KEY = "agentDashboard.layout.v1";' in page
+    assert "const LAYOUT_MAX = 200;" in page
+
+
+def test_grid_layout_rules():
+    page = _page()
+    assert "repeat(auto-fill,minmax(200px,1fr))" in page
+    assert 'main[data-view="grid"]{max-width:none}' in page
+    # Narrow screens and touch: one column, no drag or resize handles.
+    assert "@media (max-width:600px),(pointer:coarse){.board{grid-template-columns:1fr}" in page
+    assert '.tile[data-cols="3"]{grid-column:span 3}' in page
+    assert '.tile[data-rows="2"]{grid-row:span 2}' in page
+    assert "@media (prefers-reduced-motion: reduce){.badge-running .dot{animation:none}}" in page
+    for needed in ('id="view-runs"', 'id="view-grid"', 'aria-pressed', 'id="grid-view" hidden',
+                   'id="grid-summary"', 'id="grid-conn"', 'id="coords"', 'id="grid-hidden"',
+                   'id="grid-reset"'):
+        assert needed in page, needed
+    for gone in ('id="chat"', 'id="grid-refresh"', 'id="grid-action"', 'id="grid"'):
+        assert gone not in page, gone
+    # Runs keeps its ids.
+    for kept in ('id="summary"', 'id="conn"', 'id="runs"', 'id="empty"'):
+        assert kept in page, kept
+
+
+def test_skill_writes_agents_rows():
+    skill = SKILL.read_text(encoding="utf-8")
+    flat = " ".join(skill.split())
+    assert "`agents/<run_id>.<role>.r<N>`" in skill
+    for needed in ('state: "running"', "`finished_at`", "`outcome`", "if_version", '"queued"',
+                   "`status_lines`", "ArtifactComments", "batch"):
+        assert needed in flat, needed
+    assert "Only the master writes the dashboard (runs and agents); subagents never do." in flat
+    assert 'status_lines: [{at, text: "Started"}]' in flat
+    # Comments sent to Claude are Kyle's words, but never widen the task.
+    assert "never copy comment text into a row" in flat
+    assert "never changes permissions" in flat
+
+
+def test_readme_agents_schema():
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    flat = " ".join(readme.split())
+    assert "| `status_lines` |" in readme
+    fields = re.findall(r"^\| `(\w+)` \|", readme.split("## Agents schema", 1)[1].split("\n## ", 1)[0], re.M)
+    assert fields == ["run_id", "role", "piece", "round", "state", "started_at", "updated_at",
+                      "finished_at", "outcome"], fields
+    assert 'db.collection("agents").orderBy("started_at", "desc").limit(200)' in readme
+    assert "the watchdog never reads or writes `agents`" in flat
+    assert "Send to Claude" in flat and "Open session" in flat
+    assert "agentDashboard.layout.v1" in readme
+    # The thresholds an agent tile uses are the page's phase thresholds.
+    for role, phase in (("researcher", "researching"), ("builder", "building"), ("judge", "judging")):
+        assert f"`{role}` → `{phase}`" in readme, role
+
+
+def test_launchers_open_the_dashboard_as_an_app_window():
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    assert DASHBOARD_URL in readme
+    for name in ("open-dashboard.cmd", "open-dashboard.command"):
+        text = (DESKTOP / name).read_text(encoding="utf-8")
+        urls = set(re.findall(r"https://[^\s\"']+", text))
+        assert urls == {DASHBOARD_URL}, (name, urls)
+        assert "--app=" in text, name
+        assert "--user-data-dir" not in text, name
+
+
+def test_windows_launcher_is_crlf_with_a_default_browser_fallback():
+    raw = (DESKTOP / "open-dashboard.cmd").read_bytes()
+    assert b"\r\n" in raw and b"\n" not in raw.replace(b"\r\n", b"")
+    text = raw.decode("ascii")
+    lines = text.splitlines()
+    browsers = [line for line in lines if line.startswith("if exist ")]
+    assert len(browsers) == 5
+    for line in browsers:
+        # Quoted paths: an unquoted (x86) would close the ( ... ) block early.
+        path = re.match(r'if exist "([^"]+)" \(start "" "([^"]+)" --app=%URL% & exit /b 0\)$', line)
+        assert path and path.group(1) == path.group(2), line
+    # After the browsers, the first command is the default-browser fallback.
+    after = [line for line in lines[lines.index(browsers[-1]) + 1:] if not line.startswith("rem ")]
+    assert after[0] == 'start "" "%URL%"'
+    gitattributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.cmd text eol=crlf" in gitattributes
+
+
+def test_mac_launcher_tries_chrome_then_edge_then_default():
+    text = (DESKTOP / "open-dashboard.command").read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "\r" not in text
+    assert 'for app in "Google Chrome" "Microsoft Edge"' in text
+    # A silent check for the app: `open -R` reveals it in Finder each launch.
+    assert "open -R" not in text
+    assert '[ -d "/Applications/$app.app" ] || [ -d "$HOME/Applications/$app.app" ]' in text
+    assert 'open -na "$app" --args --app="$URL"' in text
+    assert text.rstrip().endswith('exec open "$URL"')
+
+
+def test_shell_scripts_are_pinned_to_lf():
+    # core.autocrlf=true (Git for Windows' default) would check them out
+    # with CRLF, and bash then fails on "bash\r" in the shebang.
+    rules = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "*.command text eol=lf" in rules
+    assert "*.sh text eol=lf" in rules
+
+
+def test_mac_launcher_parses():
+    bash = shutil.which("bash")
+    if not bash or os.name == "nt":
+        pytest.skip("bash not available")
+    subprocess.run([bash, "-n", str(DESKTOP / "open-dashboard.command")], check=True)
+
+
+def test_mac_launcher_shellcheck():
+    if not shutil.which("shellcheck"):
+        pytest.skip("shellcheck not installed")
+    p = subprocess.run(["shellcheck", str(DESKTOP / "open-dashboard.command")],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout
