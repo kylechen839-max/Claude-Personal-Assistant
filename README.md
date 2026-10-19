@@ -1041,7 +1041,7 @@ tests/          pytest suite (offline; live tests skip without keys)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
                               the Docker image, the Pinecone MCP connector
 
-tools/agent-dashboard/  dev-team run dashboard + session grid and chat (claude.ai page), watchdog,
+tools/agent-dashboard/  dev-team run dashboard + coordinator grid (claude.ai page), watchdog,
                         desktop launchers
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)

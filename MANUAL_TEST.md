@@ -501,25 +501,35 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
       GitHub UI while that session is still open.
   - Should: within a few minutes its card changes from "needs you" to
     "done" (the master's CI watch writes it).
-- [ ] On a computer, tap Grid for the first time.
-  - Should: claude.ai asks once whether the page may use Claude Code
-    Remote. After Allow, one tile per session, side by side.
-- [ ] Compare the tiles with the session list at claude.ai/code.
-  - Should: the same sessions (minus archived ones), with matching
-    states: a session waiting on you shows "needs you", a running one
-    "working".
-- [ ] Tap Open in claude.ai on a tile.
-  - Should: that session opens in a new tab.
+- [ ] During a `/build-feature` run, open the dashboard on a computer and
+      tap Grid.
+  - Should: one large panel for the run (feature, phase and round,
+    elapsed time, a few status lines, Message coordinator and Open
+    session) and a small tile for each researcher, builder and judge
+    with a coloured dot (running green and pulsing, done blue, failed
+    red). They match what the master's session at claude.ai/code says.
+- [ ] Tap Message coordinator, type "status?" in claude.ai's comment box
+      and press Send to Claude.
+  - Should: the box opens quoting the panel's "run <id>" line, and the
+    master replies in that comment thread within a minute or two (one
+    or two lines). A plain comment without Send to Claude gets no reply.
+- [ ] In the desktop window, drag an agent tile by its handle onto
+      another tile, then drag a tile's bottom-right corner to make it
+      wider and taller. Reload the page.
+  - Should: the tile moves and snaps to the new size (at most 3 columns
+    by 2 rows), and both survive the reload. Tab to a handle, press
+    Enter, then the arrow keys: the tile moves. Reset layout puts it all
+    back. A drag made while the master is starting or finishing an
+    agent still drops cleanly, and the next drag works.
+- [ ] Run `/build-feature` a second time in the same master session.
+  - Should: the panel shows the new run's title, elapsed time and status
+    lines only, not the earlier run's.
+- [ ] On the iPhone, open Grid.
+  - Should: one column, no drag or resize handles; Message coordinator
+    either opens claude.ai's comment box or is not shown at all, and
+    Open session opens the master's session.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
-- [ ] Tap Chat on a tile of a session you don't mind messaging, type
-      "hi" and tap Send.
-  - Should: the panel shows that session's recent messages as text;
-    after Send, "Sent — the agent will reply in its next turn", and "hi"
-    arrives in that session at claude.ai/code (marked as sent from
-    another session). Enter alone adds a line and does not send.
-- [ ] On the iPhone, tap Chat on a tile.
-  - Should: the chat fills the screen; Close brings the grid back.
 - [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
   - Should: the dashboard opens in its own Chrome or Edge window with no
     address bar, already signed in to claude.ai, and can be pinned to the

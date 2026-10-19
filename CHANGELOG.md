@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-- Dev team dashboard: a Grid view shows every Claude Code session as a
-  live status tile (working, needs you, idle, done, failed), next to the
-  Runs view. A Chat panel reads a session's recent messages and sends it
-  one message per press of Send; unsent drafts stay per session in the
-  open page only.
+- Dev team dashboard: the Grid view shows one panel per `/build-feature`
+  coordinator (phase, round, elapsed time and its latest status lines)
+  with a tile for each researcher, builder and judge, all written by the
+  master. Tiles can be dragged and resized on a desktop, each with a
+  status badge, and the layout is remembered on that device; a panel
+  shows only its newest run when a session ran several. Message
+  coordinator opens claude.ai's own comment box (press Send to Claude);
+  Open session is the fallback.
+- Dev team: `/build-feature` masters may watch the dashboard for
+  comments (ArtifactComments is pre-approved in `.claude/settings.json`).
 - Dev team dashboard: desktop launchers open it in its own Chrome or Edge
   window on Windows and macOS (`tools/agent-dashboard/desktop/`).
 - Dev team: a read-only agent run dashboard (a private claude.ai page,

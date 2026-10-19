@@ -3,10 +3,10 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1448 passed, 45 skipped (Linux build sandbox,
+**Current test count:** 1450 passed, 45 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
 shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 93
+change, and the launcher shellcheck test skipped), plus 82
 JavaScript tests (node:test: `voice-core.test.js` and
 `agent-dashboard.test.mjs`, both also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
@@ -58,8 +58,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 42 | dev team dashboard page, manifest, desktop launchers, skill writes, watchdog prompt |
-| `tests/js/agent-dashboard.test.mjs` | 81 | dev team dashboard: the page's own script in node:vm (run and session states, links, text only, error codes, grid watch, chat panel) |
+| `test_agent_dashboard.py` | 44 | dev team dashboard page, manifest, no connector code, desktop launchers, skill writes (runs and agents), watchdog prompt |
+| `tests/js/agent-dashboard.test.mjs` | 70 | dev team dashboard: the page's own script in node:vm (run and agent states, coordinator panels, links, text only, error codes for both queries, Message coordinator, tile layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -958,7 +958,11 @@ is not part of the assistant and loads nothing from it.
   mutations (staleness flipped, link tail dropped, `startsWith` to
   `includes`, raw row bodies, `createContextualFragment`) turns it red.
 
-### Session grid, chat panel and desktop window (2026-10-19)
+### Session grid, chat panel and desktop window (2026-10-19, replaced)
+*Replaced the same day by the coordinator grid below: the Grid and the
+chat panel needed a "Claude Code Remote" connector that doesn't exist on
+Kyle's account, so they never worked. The desktop launchers stay.*
+
 Kyle wanted every Claude Code session on one screen, a way to talk to a
 session from there, and the dashboard in its own window on a PC.
 - `index.html` has Runs / Grid buttons at the top. Runs is the default
@@ -1042,6 +1046,137 @@ session from there, and the dashboard in its own window on a PC.
   launchers (URL, `--app=`, no `--user-data-dir`, CRLF, quoted paths,
   default-browser fallback, the silent Mac app check, `*.sh` and
   `*.command` pinned to LF, `bash -n`, shellcheck when installed).
+
+### Coordinator grid (2026-10-19)
+Replaced the connector Grid and the Chat panel with a Grid fed only by
+the dashboard's own db, which the master writes. Runs is unchanged and
+still the default; the desktop launchers stay.
+- **Manifest:** `{"db":{}, "user":{}, "comments":{"composer_only":true}}`.
+  All connector and chat code is gone (no `mcp`, no session list, no
+  messages, no send).
+- **Coordinator panels:** one per master session, from `runs` rows
+  grouped by `session_url` (a plain row and its piece rows share one; a
+  row without a session is its own). Every panel with a needs you,
+  running or silent row shows, newest first, else the newest one as
+  "Last run". A panel shows the feature, a status badge, the run-id
+  line, each row's phase, round and last update, the elapsed time, the
+  newest 5 `status_lines` (a new optional `runs` field, merged across
+  the run's plain and piece rows by time, 100 characters each), PR links,
+  **Message coordinator** and **Open session**.
+- **Agent tiles:** a new `agents` collection (newest 200, subscribed
+  only while Grid is shown) with one row per researcher, builder or
+  judge, written only by the master: role, piece, round, a state badge,
+  start time, duration and an outcome of at most 80 characters. Running
+  tiles turn silent past their role's phase threshold (researcher 45,
+  builder 90, judge 45 min), queued or running tiles under a finished
+  run show "stopped (run <phase>)", tiles older than 7 days are hidden,
+  and live agents whose run has no row at all are counted as hidden
+  (round 2).
+- **One live-query helper** now serves `runs` and `agents` with the
+  same error table (stop, doubling back-off, one 5–30 s retry); Runs'
+  behaviour and copy are unchanged.
+- **Message coordinator** opens claude.ai's own comment composer on a
+  Range over the panel's run-id line (the whole panel if a range can't
+  be made). One click is one `openComposer`, never at load, on a timer
+  or as a retry. `{opened:false}` asks for a click on the page;
+  `rate_limited` says to slow down; `unavailable` or a lifecycle code
+  hides every Message button for the visit. Kyle presses Send to Claude
+  in the composer; the master watches with ArtifactComments
+  (pre-approved, like ArtifactData) and answers in the thread.
+- **Tile layout (Morphy-like):** drag a tile by its header handle to
+  reorder it within its panel's grid, or Enter plus the arrow keys;
+  resize it from its corner (or Shift+arrows) to 1–3 columns and 1–2
+  rows (panel 2×2, agents 1×1 by default). Each tile has a coloured
+  badge dot (running pulses, except under reduced motion). Order and
+  sizes are kept per viewer in localStorage
+  (`agentDashboard.layout.v1`, at most 200 entries, pruned to tiles
+  that still exist, written only when a move or resize finishes, every
+  access in try/catch), with a Reset layout button. A phone, a coarse
+  pointer or a screen 600 px wide or less gets one column and no
+  handles.
+- `.claude/skills/build-feature/SKILL.md`: the master writes an agents
+  row before and after every researcher, builder and judge (`set` with
+  `state: "running"`, then `update` with `if_version`, `state`,
+  `finished_at` and `outcome`), preferably in one `batch` with the runs
+  phase write; appends one `status_lines` item per phase write; watches
+  the artifact's comments (§0 step 5); and treats a comment sent to
+  Claude as Kyle's message about the run, within scope, never copying
+  it into a row. The watchdog prompt is unchanged and never touches
+  `agents`.
+- Checked in headless Chromium (Playwright, from a fake `window.claude`
+  with made-up rows): 1400×900 light and 390×844 dark, a coordinator
+  panel with five agent tiles; a real mouse drag, a keyboard move
+  (focus and the picked-up state survive the re-render), a corner
+  resize to 3×2, the layout restored after a reload, the Range's quoted
+  text being the run-id line, one column with no handles on the phone,
+  and no console errors. That check led to one fix: the title now comes
+  before the badge in a tile header, which wraps, so a long badge no
+  longer hides the title. Not checked against the real claude.ai shell
+  (the sandbox has no session); see MANUAL_TEST.md.
+- Tests: `tests/js/agent-dashboard.test.mjs` went from 81 to 63: the
+  25 Runs tests are unchanged, the 56 grid and chat tests are gone, and
+  38 are new. The fake db now has one query per collection, and there
+  is a fake `use("comments")` plus a Range fake with throwing variants.
+  The new tests cover Runs as the default (only `db` and the runs
+  query, no Chat button); the agents query and comments lookup starting
+  on Grid, pausing on Runs and resuming once; the panel fields,
+  merging and clamping; grouping, "Last run" and the hidden count;
+  `classifyAgent` at each limit, stopped, duration, clamps, unknown
+  values and retiring; text-only tiles and every badge class; Message
+  coordinator (one call, the Range or element target, opened:false,
+  rate_limited, the four codes that hide it, a null namespace); the
+  agents error table; and drag, resize clamping, keyboard move and
+  resize, corrupt, oversized or out-of-range saved layouts, throwing
+  storage, narrow mode and Reset.
+  All 38 fail on the old page. With the strict harness, the old page
+  throws at load because of its removed ids, so every test fails. With
+  a temporary lenient-ids harness, the 25 Runs tests pass and all 38
+  new ones fail. Targeted mutations of the new page each turn at least
+  one test red: no pause on Runs, a 4-column clamp, no "off" guard, no
+  retire, 6 status lines, only `unavailable` hiding the button, no
+  order-value check, no 200 bound on read, duration from now, and no
+  Range.
+  `test_agent_dashboard.py` went from 42 to 44: the manifest, the agents
+  query string with `.onSnapshot(` still once, no connector code,
+  `openComposer` once and only from the click listener, no console or
+  timer-driven composer, the only two localStorage keys, the new layout
+  ids and CSS, and the skill and README agents schema. Its 5 page tests
+  fail on the old page; the skill and README tests failed before the
+  doc changes.
+- **Round 2 (judge findings):**
+  1. A drag or resize no longer gets stuck when a snapshot arrives
+     mid-gesture. Previously the re-render re-parented the tiles, which
+     dropped the pointer capture, so the drop never arrived and every
+     later drag was refused until a reload. Now, while a gesture is on,
+     the page listens for its pointermove, pointerup and pointercancel
+     on the window (removed when it ends) and doesn't move tiles; the
+     order catches up on release, and a gesture whose tile disappears
+     is cancelled.
+  2. A master session that ran `/build-feature` twice now shows only
+     the newest live run family (the plain row plus its pieces): its
+     title, elapsed time and status lines. Earlier finished runs are
+     left out. The panel used to show "New" with a 27 h elapsed time
+     and yesterday's lines.
+  3. "N agents hidden" now counts only live agents whose run has no row
+     at all. Before, 40 agents of a month-old run showed as permanent
+     noise.
+  4. New assertions kill the mutations that survived round 1:
+     inverted urgency, elapsed time taken from the latest start, no
+     200-tile cap on write, no in-flight composer guard, no layout
+     version check, the far-future start, and the Escape drop. Further
+     assertions cover a paused listener's late snapshot and safe panel
+     ids.
+
+  Seven new JS tests (63 → 70) plus extra assertions. The harness now
+  has a fake window that hears pointer events, as a captured pointer's
+  events bubble there. On the round-1 page, 9 tests fail: the 6 new
+  tests for findings 1–3, plus 3 existing drag/resize tests that now
+  dispatch pointer events on the window. The judge's mutation runner,
+  plus 16 mutations aimed at these fixes, leaves only two survivors.
+  Clearing the retry timer at subscribe is equivalent in practice, and
+  dragging in narrow mode is still blocked by the second check in
+  `dragEnd`. The judge's three browser probes (drag, same session,
+  hidden count) pass in Chromium.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

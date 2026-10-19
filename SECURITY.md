@@ -379,23 +379,23 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
-- **The dev-team dashboard can message sessions.** Its chat panel
-  (tools/agent-dashboard) calls the Claude Code Remote connector's
-  send_message as the signed-in viewer. Kept on purpose, Kyle asked for
-  it, with these limits: the published manifest lists only list_sessions,
-  list_events and send_message (no archive, interrupt, create, settings
-  or triggers; a test pins the list and checks the page names no other
-  tool); a send is one call per explicit click, never on load, a timer or
-  a reload, at most 4000 characters, and an ambiguous failure is never
-  retried by the page; the message arrives as a cross-session message,
-  which the target treats as data from a peer and won't use on its own
-  to change permissions or take a new destructive step. Session titles,
-  summaries and messages are shown as plain text only, never as links or
-  markup, and never logged. Unsent drafts and the last send result are
-  kept per session in the page's memory only (never in storage, at most
-  50 sessions) and dropped when another account signs in. Anyone who can
-  open the artifact signed in as Kyle can send; the artifact is not
-  shared.
+- **The dev-team dashboard can open a comment box, nothing more.** The
+  page (tools/agent-dashboard) declares `comments` as `composer_only`:
+  it can only open claude.ai's own new-comment composer on a panel
+  (`openComposer`, one call per click, never at load, on a timer or as a
+  retry). It cannot post, reply, read threads or send anything to
+  Claude, and asks for no consent. The composer is the shell's own, and
+  only Kyle can press its Send to Claude. A master that receives such a
+  comment treats it as Kyle's words about its own run, within that
+  run's scope only: it may re-order or stop work, but never changes
+  permissions, touches secrets or routes around a denial, and never
+  copies comment text into a row. Replies live in the artifact's comment
+  store. The connector Grid and chat panel that came before were removed
+  (the connector didn't exist on Kyle's account), so the page no longer
+  messages sessions at all. ArtifactComments is pre-approved in
+  `.claude/settings.json`, like ArtifactData; Kyle approved that. The
+  page keeps only its view and tile layout in the browser's
+  localStorage (no row text), and still never writes to the db.
 
 ## Conversation history
 
