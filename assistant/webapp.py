@@ -71,7 +71,7 @@ PC_ONLY_TOOLS = {"open_in_browser"}
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
 EARCONS = ("listening", "thinking", "ended")  # assistant/earcons.py
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
-       "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+       "img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -724,7 +724,7 @@ class WebAssistant:
         return True
 
     def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit
+        from assistant.cli import get_reply, is_exit, loggable_reply
 
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
@@ -748,7 +748,7 @@ class WebAssistant:
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
             log.info("Web replied %d chars", len(reply))
-            log.debug("Web replied: %r", reply)
+            log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -774,7 +774,6 @@ class WebAssistant:
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            log.debug("Unanswered: %r", question)
             s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
@@ -1010,10 +1009,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None, failover=None):
+               voice: dict | None = None, failover=None, features=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
-    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md).
+    `features`: a webfeatures.Features (lecture recorder, tutor), whose
+    routes are added before any wrapping, so they get the same auth."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1385,6 +1386,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    if features is not None:
+        from assistant import webfeatures
+
+        webfeatures.install(app, features)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -1483,7 +1488,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
     from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
-                               build_tools)
+                               build_tools, register_notes)
     from assistant.history import Recorder, open_store
     import anthropic
 
@@ -1496,6 +1501,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
+    register_notes(tools, memory, config)
     store = open_store(config)  # conversation history (None if off)
     add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1548,16 +1554,21 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
 
     failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
+    features = webfeatures.Features(config, assistant)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"), failover=failover)
+                     voice=config.get("voice"), failover=failover,
+                     features=features)
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
         start_history_sync(config, assistant, token, failover)
+    features.resume_jobs()  # lecture jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

@@ -64,14 +64,25 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
               "/static/vad/ort.wasm.min.js", "/static/vad/ort-wasm-simd-threaded.mjs",
               "/static/vad/ort-wasm-simd-threaded.wasm",
-              "/static/vad/silero_vad_v5.onnx"}
+              "/static/vad/silero_vad_v5.onnx",
+              # lecture recorder / tutor page code and the vendored KaTeX
+              "/static/features.js", "/static/features.css",
+              "/static/katex/katex.min.js", "/static/katex/katex.min.css"}
 PUBLIC_POST = {"/api/login"}
 # with failover on: the router module (loaded before sign-in) and the token
 # trade, whose body (WEB_TOKEN) is checked here like /api/login's
 FAILOVER_PUBLIC_GET = {"/backend-router.js"}
 FAILOVER_PUBLIC_POST = {"/api/auth/token"}
 HEALTH = "/healthz"
-UPLOAD_PATHS = {"/api/turn", "/api/confirm"}
+UPLOAD_PATHS = {"/api/turn", "/api/confirm", "/api/tutor"}
+# Lecture recordings arrive in pieces at /api/lecture/<id>/chunk.
+UPLOAD_PREFIX, UPLOAD_SUFFIX = "/api/lecture/", "/chunk"
+
+
+def is_upload(path: str) -> bool:
+    """Requests whose body may be as big as [webapp] max_upload_mb."""
+    return path in UPLOAD_PATHS or (path.startswith(UPLOAD_PREFIX)
+                                    and path.endswith(UPLOAD_SUFFIX))
 WEBSOCKETS = {"/api/voice"}  # the hands-free voice conversation
 WS_MAX_SIZE = 2_000_000  # largest WebSocket message: a 30 s utterance is ~1 MB
 HSTS = "max-age=31536000; includeSubDomains"
@@ -454,7 +465,7 @@ class CloudGuard:
                 return await _json(send, 429, {"error": "too many requests at once"},
                                    {"Retry-After": "5", **extra})
             try:
-                limit = (self.max_upload_bytes if path in UPLOAD_PATHS
+                limit = (self.max_upload_bytes if is_upload(path)
                          else self.max_body_bytes)
                 timeout = (self.login_timeout if login else
                            self.body_timeout + limit / self.min_upload_rate)
@@ -650,14 +661,19 @@ def build_app(config: dict, web_assistant, token: str):
     from assistant.failover.peers import settings_from_config
     from assistant.failover.tokens import TokenAuthority
 
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
     failover = settings_from_config(config)
+    features = webfeatures.Features(config, web_assistant)
     app = webapp.create_app(web_assistant, token,
                             allowed_origins=web["allowed_origins"],
                             max_upload_bytes=max_upload,
                             max_audio_seconds=float(web["max_audio_seconds"]),
                             trusted_proxy=trust, limiter=limiter,
                             sessions_file=web["sessions_file"] or None,
-                            voice=config.get("voice"), failover=failover)
+                            voice=config.get("voice"), failover=failover,
+                            features=features)
+    features.resume_jobs()  # lecture jobs cut off by a redeploy
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),

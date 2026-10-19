@@ -26,6 +26,9 @@ OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--test"}  # node --test
 OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "resume_conversation",  # tool names, not settings
+                     "email_summary", "read_email", "draft_reply",
+                     "remember_note", "recall_notes", "list_recent_notes",
+                     "delete_note",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

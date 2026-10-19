@@ -154,6 +154,8 @@ async function detectFailover() {
     token: async () => { const t = await tokens.get("token"); return t && t.access_token; },
     beginTurn: () => router.beginTurn(),
     endTurn: () => router.endTurn(),
+    // for the lecture and tutor screens (static/features.js)
+    request: (path, opts) => router.request(path, opts),
   };
 }
 

@@ -50,6 +50,10 @@ credentials = "credentials.json"
 token = "token.json"
 calendar_id = "primary"
 
+[gmail]
+enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth
+max_summary = 15              # most emails in one spoken summary
+
 [notion]
 enabled = true
 database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments
@@ -124,6 +128,24 @@ backends = [
   { role = "pc", url = "" },     # e.g. "https://kyle-pc.tail1234.ts.net"
   { role = "cloud", url = "" },  # e.g. "https://hey-claude.onrender.com"
 ]
+
+[lecture]
+enabled = true                # "Record lecture" in the phone app
+model = "base.en"             # faster-whisper model for lectures; "tiny.en" is faster
+upload_dir = "data/lectures"  # recordings and job state (use the /data disk in the cloud)
+max_upload_mb = 300           # per recording
+chunk_mb = 4                  # upload piece size; a lost piece is simply resent
+keep_audio = false            # true = keep the audio after it is transcribed
+notes_database_id = ""        # "" = find or create "Lecture Notes" under Fall 2026 Assignments
+
+[tutor]
+enabled = true                # homework tutor in the phone app (photo + question)
+max_image_mb = 8              # the phone shrinks photos to 1600 px first
+max_tokens = 1200
+
+[notes]
+enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
+min_score = 0.3               # how close a note must be to count as a match
 
 [logging]
 file = "logs/assistant.log"

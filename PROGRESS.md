@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1174 passed, 41 skipped (Linux build sandbox,
+**Current test count:** 1410 passed, 43 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -48,6 +48,12 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_failover_cloud.py` | 13 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
+| `test_gmail.py` | 28 | Gmail tools, scopes, email as untrusted input |
+| `test_notes.py` | 9 | quick-capture notes |
+| `test_lecture.py` | 28 | lecture uploads, pipeline, Notion database |
+| `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
+| `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
+| `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -498,6 +504,69 @@ Tested:
   (typically 0.5-1 s) and the network: about 1.5-2 s after Kyle stops
   talking, within the ~2 s target on a decent connection.
 
+## Email, notes, lectures and homework tutor ✅
+Four features on top of the seven stages (branch `claude/features`).
+
+- **Gmail** (`assistant/tools/gmail.py`, `google_auth.py`): `email_summary`
+  (unread/important in the last N hours, capped, sender/subject/one-line
+  gist), `read_email` (plain text, quoted thread and HTML stripped,
+  trimmed), `draft_reply` (a draft in the same thread, after a yes). No send
+  tool; `gmail.compose` (needed for drafts) could send, so the service is
+  wrapped in `NoSendGmail` (send/delete/settings raise) and a test fails on
+  any send call; Gmail scopes are requested only when `[gmail]` is enabled.
+  Email text is never logged (any mode) and never stored in memory
+  (summaries of such conversations use Kyle's words only). Sign-in moved to `google_auth.py` (one token for
+  Calendar + Gmail; `GOOGLE_TOKEN_JSON` for the cloud). An old token keeps
+  Calendar working; Gmail stays off with a message naming
+  `python -m assistant.tools.google_auth`, also in `--check`. Email results
+  count as untrusted content (`Tool.untrusted_output`,
+  `chat.has_untrusted_content`), so changes ask first; `Tool.private`
+  keeps email text and replies out of the log.
+  Tested: mocked Gmail service, prompt-injection emails x 5 actions x 2
+  readers, scope detection, cloud token, log check.
+- **Quick notes** (`assistant/tools/notes.py`): `remember_note`,
+  `recall_notes`, `list_recent_notes`, `delete_note` in Pinecone
+  (`voice-assistant`, `kind=note`, `created_at`, tags). When notes are on
+  they replace the plain `remember` memory tool; `search_memory` stays.
+  Deletes ask and
+  only touch `note-` ids. `QuickNotes.on_saved` is the hook for showing
+  notes in conversation history once that lands (via the history module's
+  public functions, not its store). Tested with an in-memory fake index.
+- **Lecture recorder** (`assistant/lecture.py`, `webfeatures.py`, Lecture
+  tab): offset-based resumable uploads (gap -> 409 with the server's
+  offset, repeats ignored, size caps), a background job (one at a time,
+  resumes after restart) that decodes with PyAV in 10-minute windows
+  (faster-whisper's own file decoder fails with PyAV 19, and windows keep
+  memory flat), transcribes with progress, summarizes with a forced Claude
+  tool call, finds or creates "Lecture Notes" next to Assignments, and
+  files a page with inline/block equations, idempotently (Lecture ID
+  property + local page record; a retry appends only missing blocks). Assignment-like action items
+  are offered with Add buttons. Tested: resume after a lost chunk,
+  concurrent resends, pipeline with mocked Whisper/Claude/Notion, retry
+  without re-transcribing, DB find/create/refused paths, real WebM/Opus and
+  MP4/AAC decoding, and (CI) real Whisper on a generated WebM lecture.
+  The page was also driven in headless Chromium with a fake microphone.
+- **Homework tutor** (`assistant/tutor.py`, `mathspeech.py`, Tutor tab):
+  client-side resize to 1600 px, server allowlist (JPEG/PNG/WebP by
+  content), size and pixel caps, EXIF stripped by re-encoding, Socratic
+  prompt with full solutions only on request, KaTeX vendored under
+  `/static/katex` and drawn with `katex.render` (CSP-safe), spoken replies
+  with LaTeX read aloud. Tested: auth on every route, type/size rejection,
+  EXIF removal, mocked vision call, 27 LaTeX-to-speech forms.
+- Integration (after history, cloud-host and failover landed): a saved
+  note is added to the current conversation's history and a filed lecture's
+  summary to the phone conversation it was recorded from, both through
+  `history.record_event` only. The lecture/tutor routes are installed inside
+  `webapp.create_app` (before the failover wrapper), so they need the same
+  sign-in on the local web app, a failover backend (bearer token, CORS from
+  the app origin; chunks are POSTs) and the cloud server (CloudGuard: page
+  code public, API not; lecture chunks and tutor photos get the upload size
+  cap, and `chunk_mb`/`max_image_mb` are lowered to fit `[webapp]
+  max_upload_mb`). With failover the page pins the backend while a
+  recording uploads. Google sign-in from cloud-host and this branch now
+  live together in `tools/google_auth.py`. Tests:
+  `tests/test_features_deploy.py`.
+
 ## Pi preflight ✅
 Everything testable before the move to a Raspberry Pi, in one pass per
 machine, with a go/no-go (`PI_MIGRATION.md`).
@@ -924,3 +993,9 @@ synced history list; Pinecone memory still works).
   short answer. `min_utterance_ms` filters the shortest blips.
 - Voice replies are sent as WAV (~44 KB per second of Piper speech); fine
   on Tailscale or LTE, could be Opus later.
+
+- **Lectures need the app in the foreground.** Phones pause web pages that
+  are in the background or locked; the page holds a screen wake lock, but
+  switching apps during a lecture can stop the recording on iPhone.
+- **Gmail and lectures untested with real accounts** here (no keys in the
+  sandbox): MANUAL_TEST.md "Email, notes, lectures, tutor".

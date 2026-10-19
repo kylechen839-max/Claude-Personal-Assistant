@@ -48,7 +48,24 @@ def check_google_files(config: dict) -> list[Check]:
         Check(str(token), token.exists(), "found" if token.exists() else
               "missing (copy it from your PC, or run "
               "`python -m assistant.tools.calendar --headless`)", required=False),
-    ]
+    ] + check_gmail_scopes(config)
+
+
+def check_gmail_scopes(config: dict) -> list[Check]:
+    """An older token.json has only the Calendar scope; Gmail needs more."""
+    from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
+                                             missing_scopes)
+
+    if not config.get("gmail", {}).get("enabled", True):
+        return []
+    try:
+        lacking = missing_scopes(GMAIL_SCOPES, config["calendar"]["token"])
+    except (OSError, ValueError) as e:
+        return [Check("Gmail access", False, f"token unreadable: {e}",
+                      required=False)]
+    return [Check("Gmail access", not lacking, "granted (read + drafts)"
+                  if not lacking else "not granted yet (re-run the Google "
+                  f"sign-in: `{SIGN_IN_COMMAND}`)", required=False)]
 
 
 def check_wake_model(config: dict, keyword_path: str | None = None) -> Check:

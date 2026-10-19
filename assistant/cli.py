@@ -324,6 +324,14 @@ def strip_wake_phrase(text: str, wake_phrase: str | None) -> str:
     return re.sub(rf"^\W*{words}\b\W*", "", text, flags=re.IGNORECASE)
 
 
+def loggable_reply(chat, reply: str) -> str:
+    """The reply for the log file, or a placeholder when it may quote
+    private content (an email, a personal note)."""
+    if getattr(chat, "private_turn", False) is True:
+        return f"<{len(reply)} characters; private tool content not logged>"
+    return reply
+
+
 def report_timings(timer: TurnTimer, output_fn=None) -> None:
     """One summary line per turn in the log, and on the console if asked."""
     line = timer.summary()
@@ -370,7 +378,7 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
-    log.info("Replied: %r", reply)
+    log.info("Replied: %r", loggable_reply(chat, reply))
     speak(tts, reply, timer)
     return True
 
@@ -407,6 +415,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     elif cal["enabled"]:
         output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
                   "GOOGLE_TOKEN_JSON not set)")
+    register_gmail(registry, config, output_fn)
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
@@ -423,6 +432,35 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         if web["browser"]:
             registry.register(*web_tools.browser_tools())
     return registry
+
+
+def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
+    """Gmail tools, if the Google token has the Gmail scopes. A token from
+    before Gmail support doesn't: say how to grant them and leave them off."""
+    from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
+                                             load_token_info, missing_scopes)
+
+    cal = config["calendar"]
+    if not config["gmail"]["enabled"] or not cal["enabled"]:
+        return False
+    try:
+        if load_token_info(cal["token"]) is None:
+            return False  # no Google sign-in at all (Calendar says so)
+        lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
+    except (OSError, ValueError) as e:
+        output_fn(f"(Gmail tools off: Google token unreadable: {e})")
+        return False
+    if lacking:
+        output_fn("(Gmail tools off: Gmail access not granted yet. Run "
+                  f"{SIGN_IN_COMMAND} once to sign in again.)")
+        return False
+    from assistant.tools.gmail import GmailInbox
+
+    registry.register(*GmailInbox(
+        credentials_path=cal["credentials"], token_path=cal["token"],
+        timezone=config["assistant"]["timezone"] or None,
+        max_summary=config["gmail"]["max_summary"]).tools())
+    return True
 
 
 def build_memory(config: dict, output_fn=print):
@@ -447,6 +485,30 @@ def add_memory_tools(tools: ToolRegistry, memory) -> None:
         from assistant.tools.memory_tools import memory_tools
 
         tools.register(*memory_tools(memory))
+
+
+def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
+    """Quick-capture note tools; they need Pinecone memory. They replace
+    the plain `remember` memory tool (same job, plus tags, listing and
+    deleting); `search_memory` stays for searching all of memory."""
+    if memory is None or not config["notes"]["enabled"]:
+        return False
+    from assistant.tools.notes import QuickNotes
+
+    registry.tools.pop("remember", None)
+    registry.register(*QuickNotes(memory,
+                                  timezone=config["assistant"]["timezone"] or None,
+                                  min_score=config["notes"]["min_score"],
+                                  on_saved=note_to_history).tools())
+    return True
+
+
+def note_to_history(note: dict) -> bool:
+    """Show a saved note in the current conversation's history (through
+    the history module's public function; nothing if history is off)."""
+    from assistant import history
+
+    return history.record_event(None, "note", f"Saved a note: {note['text']}")
 
 
 def text_confirm(input_fn=None):
@@ -608,6 +670,7 @@ def main(argv=None) -> int:
         tools = build_tools(config)
         memory = build_memory(config)
         add_memory_tools(tools, memory)
+        register_notes(tools, memory, config)
         store = open_store(config)
         add_history_tools(tools, config, store, memory)
         recorder = build_recorder(config, store, args.mode, args.incognito)

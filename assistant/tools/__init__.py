@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+
+# True while a tool runs in a conversation that holds untrusted (web, email,
+# outside-invite) content. Tools that write to long-term memory read it and
+# mark what they store, so a recalled note can't later pass as trusted.
+UNTRUSTED_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "untrusted_context", default=False)
+UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
+
+
+def mark_untrusted(result: dict, untrusted: bool) -> dict:
+    if untrusted:
+        result[UNTRUSTED_MARK] = True
+    return result
 
 
 @dataclass
@@ -21,6 +35,11 @@ class Tool:
     # Same, but asked only when untrusted web content is in the conversation
     # (a fetched page could be trying to steer Claude into this action).
     confirm_if_untrusted: Callable[[dict], str] | None = None
+    # The result holds text written by someone else (an email): once it is
+    # in the conversation, confirm_if_untrusted questions are asked too.
+    untrusted_output: bool = False
+    # Inputs and results stay out of the log (email text, personal notes).
+    private: bool = False
 
     def schema(self) -> dict:
         return {"name": self.name, "description": self.description,
@@ -50,6 +69,14 @@ class ToolRegistry:
         return name in self.tools or any(t["name"] == name
                                          for t in self.server_tools)
 
+    def untrusted_names(self) -> set[str]:
+        """Tools whose results count as untrusted content (see Tool)."""
+        return {t.name for t in self.tools.values() if t.untrusted_output}
+
+    def is_private(self, name: str) -> bool:
+        tool = self.tools.get(name)
+        return bool(tool and tool.private)
+
     def schemas(self) -> list[dict]:
         return [t.schema() for t in self.tools.values()] + self.server_tools
 
@@ -57,8 +84,8 @@ class ToolRegistry:
                  untrusted: bool = False) -> tuple[str, bool]:
         """Run a tool. Returns (result text for Claude, is_error).
 
-        `untrusted`: web content the user didn't write is in the context, so
-        actions that change things need a spoken yes too."""
+        `untrusted`: web or email content the user didn't write is in the
+        context, so actions that change things need a spoken yes too."""
         tool = self.tools.get(name)
         if tool is None:
             return f"Unknown tool: {name}", True
@@ -72,8 +99,13 @@ class ToolRegistry:
                     return json.dumps({"status": "cancelled",
                                        "message": "The user said no, so nothing "
                                                   "was changed."}), False
-            result = tool.handler(**tool_input)
-            log.info("Tool %s(%s) ok", name, tool_input)
+            token = UNTRUSTED_CONTEXT.set(bool(untrusted))
+            try:
+                result = tool.handler(**tool_input)
+            finally:
+                UNTRUSTED_CONTEXT.reset(token)
+            log.info("Tool %s(%s) ok", name,
+                     "<private>" if tool.private else tool_input)
             return (result if isinstance(result, str)
                     else json.dumps(result, default=str)), False
         except Exception as e:  # report the error to Claude, don't crash
