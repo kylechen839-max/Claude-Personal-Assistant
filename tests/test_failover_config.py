@@ -72,3 +72,12 @@ def test_failover_tokens_are_redacted_in_logs(monkeypatch):
     token, _ = TokenAuthority(secret).mint("app")
     line = redact(f"login with {secret}, got {token} in a message body")
     assert secret not in line and token not in line
+
+
+def test_backends_from_the_environment(monkeypatch):
+    monkeypatch.setenv("FAILOVER_BACKENDS",
+                       "pi=https://pi.t.ts.net, pc=https://pc.t.ts.net")
+    s = settings_from_config(cfg(role="cloud", app_origin="https://hc.onrender.com"))
+    assert [(b.role, b.url) for b in s.backends] == [
+        ("pi", "https://pi.t.ts.net"), ("pc", "https://pc.t.ts.net"),
+        ("cloud", "https://hc.onrender.com")]

@@ -168,8 +168,9 @@ def covered_by(tombstone: Event, e: Event) -> bool:
     if tombstone.kind == "delete":
         # tombstones themselves hold no text (only ids) and must survive
         return e.conv == tombstone.conv and e.kind not in ("delete", "delete_message", "job")
-    if tombstone.kind == "delete_message":  # only within its own conversation
-        return e.id == tombstone.data.get("target") and e.conv == tombstone.conv
+    if tombstone.kind == "delete_message":  # one message of its own conversation
+        return (e.id == tombstone.data.get("target") and e.conv == tombstone.conv
+                and e.kind not in ("delete", "delete_message", "job"))
     return False
 
 

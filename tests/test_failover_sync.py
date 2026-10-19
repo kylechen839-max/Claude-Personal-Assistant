@@ -184,6 +184,19 @@ def test_delete_message_only_applies_in_its_own_conversation():
     assert [m["text"] for m in materialize(s.all())["conversations"]["c"].messages] == ["stays"]
 
 
+def test_delete_message_cannot_target_a_tombstone_or_a_job():
+    s1, s2 = make_store(), make_store()
+    dele = new_event("delete", "c", {}, origin="pc", ts=5)
+    late = new_event("message", "c", {"role": "user", "text": "late secret"}, origin="pi", ts=1)
+    bogus = new_event("delete_message", "c", {"target": dele.id}, origin="pi", ts=6)
+    s1.append([dele, bogus])
+    s2.append([bogus, dele])
+    for s in (s1, s2):  # the tombstone keeps working in both stores
+        s.append([late])
+        assert "late secret" not in all_text(s)
+        assert next(e for e in s.all() if e.id == dele.id).kind == "delete"
+
+
 def test_redaction_reaches_every_peer():
     stores, net = three()
     msg = new_event("message", "c", {"role": "user", "text": "very private"}, origin="pi")

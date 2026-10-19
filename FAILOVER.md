@@ -51,6 +51,26 @@ The Pi and PC are reached through `tailscale serve` (HTTPS with a real
 certificate for `*.ts.net`), so the phone must be on the tailnet (Tailscale
 app on). The cloud is public.
 
+**On Render** (render.yaml) set `ASSISTANT_ROLE=cloud`,
+`APP_ORIGIN=https://<service>.onrender.com` and
+`FAILOVER_BACKENDS=pi=https://<pi>.<tailnet>.ts.net,pc=https://<pc>.<tailnet>.ts.net`
+(the environment replaces `backends` there), and copy the service's
+`WEB_TOKEN` into the Pi's and PC's `.env`. Leave `ASSISTANT_ROLE` empty
+and nothing changes. There, `CloudGuard` (assistant/cloud.py) sits in front
+of the failover layer: it accepts the derived `hc1.` tokens (bad ones are
+401 and never count toward its lockout), keeps `POST /api/auth/token`
+public like `/api/login` (it checks the WEB_TOKEN in the body itself, so
+wrong ones count), serves the router module before sign-in, adds `api` and
+`role` to its `/healthz` (which also carries the deploy `version`), and
+lets a same-site voice socket without a cookie through so its first
+message can carry the token.
+
+**History sync runs by itself:** on the Pi and PC a background thread syncs
+the history store's `sync_log` with the other backends every
+`sync_interval` seconds; every backend (the cloud included) serves
+`/api/sync/events` on its `sync_log`, so pushed and pulled events show up
+in its history at once.
+
 The app's **Settings** screen has a *Backends* section: the Pi, PC and
 cloud URLs (pre-filled from the server's `/api/backends` list, which the app
 caches), a mode switch **Auto / Pi / PC / Cloud**, and each backend's
@@ -296,11 +316,17 @@ this module owns the protocol.
    minutes (the sync endpoint records each caller), and it re-checks after
    more than one sync interval before firing, so a fire the Pi already
    recorded has time to arrive.
-3. Record a `job` event, sync, and look again: if another backend's fire
-   wins, ours is a duplicate and is **suppressed**. The winner is the
-   earliest fire, except that among fires less than a minute apart (clock
-   skew) the highest-priority role wins, so skewed clocks can't make two
-   backends each think they were first.
+3. Record a claim (a `job` event), sync, and look again: if another
+   backend's claim wins, ours is a duplicate and is **suppressed**. The
+   winner is the highest-priority role's claim; if the job passes its due
+   time (`due_ms`), claims made within a minute of it beat late ones. The
+   rule depends only on the set of claims (and the fixed due time), so
+   backends that see the same claims elect the same one, the Pi elects
+   itself whenever it has claimed, and someone is always elected, whatever
+   the clocks say.
+4. After the action, record a `done` marker. A claim with no `done` that
+   is older than 10 minutes (its backend crashed mid-job) stops counting,
+   so another backend can still run the job.
 
 Across a real partition (the PC can't reach the Pi, the Pi is up but can't
 reach anyone) both may act; both fires are then in the merged log, so the
@@ -367,11 +393,12 @@ environment variables and secret files on Render): `ANTHROPIC_API_KEY`,
 
 ## 8. Known limits
 
-- Until the SQLite history store (claude/history) is on master and wired to
-  the sync, each backend keeps its own conversation in memory: after a
-  failover, Claude on the new backend doesn't see the earlier turns of the
-  conversation (Pinecone memory still works).
-
+- History syncs every 30 s, but a conversation in progress lives in each
+  backend's memory: after a failover mid-conversation, Claude on the new
+  backend starts that conversation fresh (the earlier turns are in the
+  history list, and Pinecone memory still works).
+- The leader check and job runner are ready, but no scheduled jobs exist
+  yet, so nothing calls them.
 - The phone must be on the tailnet to use the Pi or PC; on cellular without
   Tailscale it uses the cloud.
 - Tokens can't be revoked one device at a time (rotate `WEB_TOKEN`).

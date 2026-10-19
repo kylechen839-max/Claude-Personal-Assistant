@@ -468,3 +468,14 @@ def test_sync_app_behind_edge_middleware():
     # and the bare app refuses calls that skipped the middleware
     r = request(make_sync_app(store), "GET", "https://hc/api/sync/events")
     assert r.status == 401
+
+
+def test_ws_auth_first_flag_uses_first_message_auth_even_with_a_cookie(setup):
+    """The voice page in failover mode asks for first-message auth
+    (?auth=first), so a leftover cookie can't change the protocol."""
+    app, _, token, _ = setup
+    sent = websocket(app, "/api/ws", [json.dumps({"type": "auth", "token": token}), "bye"],
+                     {"origin": PI, "cookie": "hc_session=x"}, host="pi.tail1234.ts.net",
+                     query=b"auth=first")
+    texts = [m["text"] for m in sent if m["type"] == "websocket.send"]
+    assert json.loads(texts[0]) == {"type": "auth_ok"}

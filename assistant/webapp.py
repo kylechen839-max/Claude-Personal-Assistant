@@ -1365,14 +1365,45 @@ def wrap_failover(app, token: str, failover, web: WebAuth):
     from assistant.failover.edge import EdgeMiddleware
     from assistant.failover.tokens import TokenAuthority
 
+    routes = {}
+    history = getattr(web.assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    if sync_log is not None:
+        from assistant.failover.sync import make_sync_app
+
+        # pulled/pushed events are projected into the history tables at once
+        routes["/api/sync/"] = make_sync_app(sync_log)
     return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
                           app_origins=[o for o in (failover.app_origin,) if o],
-                          backends=list(failover.backends),
+                          backends=list(failover.backends), routes=routes,
                           limiter=web.limiter,
                           client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
                           trusts_proxy=lambda scope: web.trusted_proxy.trusts(
                               HTTPConnection(scope)),
                           root_bearer_sid=web.bearer_sid)
+
+
+def start_history_sync(config: dict, assistant, token: str, failover):
+    """Pi and PC: push/pull history with the other backends every
+    [failover] sync_interval seconds, in a daemon thread. The cloud only
+    answers (it can't reach the tailnet). Returns the thread or None."""
+    from assistant.failover.sync import Syncer, default_peers
+    from assistant.failover.tokens import TokenAuthority
+
+    history = getattr(assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    peers = default_peers(failover.role, list(failover.backends))
+    if sync_log is None or not peers:
+        return None
+    syncer = Syncer(sync_log, peers, TokenAuthority(token), failover.role)
+    stop = threading.Event()
+    interval = float(config["failover"]["sync_interval"])
+    thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
+                              name="history-sync", daemon=True)
+    thread.start()
+    log.info("History sync with %s every %.0f s",
+             ", ".join(p.role for p in peers), interval)
+    return thread
 
 
 def assistant_busy(assistant: "WebAssistant", app) -> bool:
@@ -1492,6 +1523,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
+        start_history_sync(config, assistant, token, failover)
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

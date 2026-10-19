@@ -52,13 +52,14 @@ def request(app, method, url, headers=None, body=None):
     return Response(start["status"], headers, body)
 
 
-def websocket(app, path, client_messages, headers=None, gap=0.0, host="testserver"):
+def websocket(app, path, client_messages, headers=None, gap=0.0, host="testserver",
+              query=b""):
     """Run a WebSocket session: the client sends `client_messages` (text)
     after the socket is accepted, `gap` seconds apart, then waits for the
     server to close. Returns everything the server sent."""
     hdrs = {"host": host}
     hdrs.update({k.lower(): v for k, v in (headers or {}).items()})
-    scope = {"type": "websocket", "path": path, "query_string": b"",
+    scope = {"type": "websocket", "path": path, "query_string": query,
              "headers": [(k.encode(), v.encode()) for k, v in hdrs.items()]}
     sent = []
 

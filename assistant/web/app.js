@@ -148,6 +148,13 @@ async function detectFailover() {
   els.backendMode.value = router.override;
   router.start();
   window.addEventListener("online", () => router.select());
+  // for the voice view (voice.js): connect to the active backend, token first
+  window.heyClaudeFailover = {
+    wsUrl: (path) => router.wsUrl(path),
+    token: async () => { const t = await tokens.get("token"); return t && t.access_token; },
+    beginTurn: () => router.beginTurn(),
+    endTurn: () => router.endTurn(),
+  };
 }
 
 function currentBackends() {

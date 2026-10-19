@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 751 passed, 13 skipped (Linux build sandbox,
+**Current test count:** 1174 passed, 41 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -39,11 +39,12 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_history.py` | 67 | conversation history: store, search, resume, CLI |
 | `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
 | `test_history_events.py` | 18 | history as sync events (skips without failover) |
-| `test_failover_edge.py` | 49 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
-| `test_failover_sync.py` | 160 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
-| `test_failover_leader.py` | 213 | failover: leader check for scheduled jobs (incl. the real network topology) |
-| `test_failover_eventlog.py` | 4 | failover: the SQLite event log |
-| `test_failover_config.py` | 7 | failover: `[failover]` settings, `--role` |
+| `test_failover_edge.py` | 51 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
+| `test_failover_sync.py` | 162 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
+| `test_failover_leader.py` | 216 | failover: leader check for scheduled jobs (incl. the real network topology) |
+| `test_failover_eventlog.py` | 6 | failover: the SQLite event log |
+| `test_failover_config.py` | 8 | failover: `[failover]` settings, `--role` |
+| `test_failover_cloud.py` | 13 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 
@@ -734,15 +735,23 @@ The phone app's backend failover, documented in FAILOVER.md.
   answer; tap to try again" (not replayed) -> the tap goes to the PC; PC
   killed -> Cloud; Pi back -> Pi. That run found a real bug the node tests
   couldn't (window.fetch called as a method), now fixed and tested.
-- Phase B still to do as the branches land on master: the SQLite history
-  store (`claude/history`: run `Syncer` and mount the sync endpoints on it),
-  voice mode's WebSocket (`claude/voice-mode`: first-message auth, and
-  `beginTurn`/`endTurn` around a voice turn) and the cloud host
-  (`claude/cloud-host`: `ASSISTANT_ROLE=cloud`, `APP_ORIGIN`).
+- Phase B, the rest (done): history sync runs on the Pi and PC against
+  the history store's `sync_log`, and every backend serves the sync
+  endpoints on it; the voice view connects to the active backend and sends
+  the token as its first message (`?auth=first`), with no backend switch
+  during a voice session; on Render, `CloudGuard` accepts the derived tokens, keeps the
+  token trade public and passes first-message sockets through
+  (`ASSISTANT_ROLE`, `APP_ORIGIN`, `FAILOVER_BACKENDS` in render.yaml,
+  empty = off). Tests: `test_failover_cloud.py`, incl. a real Pi
+  HistoryStore syncing into the cloud's over HTTP through the guard.
+- Review fixes: jobs elect the highest-priority claim (optionally preferring
+  on-time ones), always someone; a claim without `done` expires after 10
+  minutes; a `delete_message` can't hit a tombstone or job; the SQLite log
+  checkpoints its WAL after a delete and waits on a busy database.
 
-Known issue until the history store lands: each backend has its own
-in-memory conversation, so after a failover Claude doesn't see the earlier
-turns of that conversation (memory from Pinecone still works).
+Known issue: a conversation in progress lives in each backend's memory, so
+after a failover mid-conversation Claude starts it fresh (it is in the
+synced history list; Pinecone memory still works).
 - **Voice mode on a real phone is untested** (no iPhone in the sandbox):
   iOS audio routing with the mic open (speaker vs. earpiece), echo
   cancellation of the reply on the loudspeaker, and the interruption

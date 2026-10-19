@@ -7,7 +7,7 @@ import pytest
 
 from assistant.failover.leader import (FIRED, FIRE_TOLERANCE_MS, SKIPPED_DONE,
                                        SKIPPED_NOT_LEADER, SUPPRESSED, JobRunner,
-                                       LeaderCheck, fires, store_heard_from, winner)
+                                       LeaderCheck, claims, fires, store_heard_from, winner)
 from assistant.failover.peers import Backend, Health, parse_health
 from assistant.failover.sync import MemoryEventLog
 from assistant.failover import API_VERSION
@@ -61,7 +61,7 @@ def test_runner_skips_a_job_already_fired():
     r = JobRunner(store, LeaderCheck("pc", [PI, CLOUD], prober({"pi": False})))
     assert r.run("brief-2026-10-19", lambda: ran.append(1)) == FIRED
     assert r.run("brief-2026-10-19", lambda: ran.append(1)) == SKIPPED_DONE
-    assert ran == [1] and len(fires(store, "brief-2026-10-19")) == 1
+    assert ran == [1] and len(claims(fires(store, "brief-2026-10-19"))) == 1
 
 
 def test_runner_stands_down_then_takes_over_when_leader_stays_away():
@@ -126,7 +126,7 @@ def run_cluster(seed, sync_loss):
     c.sync_loss = 0.0  # the network heals; logs converge
     for role in roles:
         c.sync(role)()
-    fired = {e.id: e for s in c.stores.values() for e in fires(s, "reminder-42")}
+    fired = {e.id: e for s in c.stores.values() for e in claims(fires(s, "reminder-42"))}
     return c, alive, outcomes, sorted(fired.values(), key=lambda e: e.order)
 
 
@@ -286,16 +286,52 @@ def test_real_topology_reminder_goes_out_once(seed):
     assert t.ran == [top], (alive, outcomes)
 
 
-def test_winner_prefers_priority_within_clock_skew():
+def fire(origin, ts, id_, **extra):
     from assistant.failover.sync import parse_event
 
-    def fire(origin, ts, id_):
-        return parse_event({"id": id_ * 32, "ts": ts, "origin": origin, "kind": "job",
-                            "conv": "job:k", "data": {"key": "k"}})
+    return parse_event({"id": id_ * 32, "ts": ts, "origin": origin, "kind": "job",
+                        "conv": "job:k", "data": {"key": "k", **extra}})
 
+
+def test_winner_is_the_highest_priority_claim_whatever_the_clocks():
     pc_early = fire("pc", 1_000, "a")
-    pi_late = fire("pi", 3_000, "b")  # the Pi's clock is 2 s behind... or ahead
+    pi_late = fire("pi", 3_000, "b")  # the Pi's clock is a bit off
     assert winner([pc_early, pi_late]) == pi_late
     assert winner([pi_late, pc_early]) == pi_late
-    far = fire("pi", 1_000 + FIRE_TOLERANCE_MS + 1, "c")
-    assert winner([pc_early, far]) == pc_early  # far apart: the earlier one
+
+
+def test_winner_always_elects_someone_whatever_each_backend_has_seen():
+    """Review case: cloud at -50 s, PC at 0, Pi at +55 s. Anchoring the
+    window on the earliest claim seen let every backend elect another one."""
+    cloud, pc, pi = fire("cloud", -50_000 + 10**6, "c"), fire("pc", 10**6, "a"), \
+        fire("pi", 55_000 + 10**6, "b")
+    views = {"pc": [pc, pi], "pi": [cloud, pc, pi], "cloud": [cloud, pc]}
+    elected = {who: winner(seen).origin for who, seen in views.items()}
+    acting = [who for who, w in elected.items() if w == who]
+    assert acting == ["pi"]  # the Pi elects itself; only the cloud's view lacks it
+    assert elected["cloud"] == "pc"  # (and the cloud doesn't act either)
+
+
+def test_due_time_prefers_on_time_claims():
+    due = 10**6
+    late_pi = fire("pi", due + FIRE_TOLERANCE_MS + 1, "b", due=due)  # Pi came back late
+    pc = fire("pc", due + 1_000, "a", due=due)
+    assert winner([late_pi, pc]) == pc
+    assert winner([fire("pi", due + 5_000, "c", due=due), pc]).origin == "pi"
+
+
+def test_a_backend_that_crashed_after_claiming_does_not_block_the_job():
+    store = MemoryEventLog()
+    now = [10**12]
+    # the Pi claimed it and died before acting (no "done")
+    store.append([fire("pi", now[0], "d")])
+    pc = JobRunner(store, LeaderCheck("pc", [PI, CLOUD], prober({})),
+                   clock_ms=lambda: now[0])
+    ran = []
+    assert pc.run("k", lambda: ran.append(1)) == SKIPPED_DONE  # maybe still running
+    now[0] += 11 * 60_000  # past the claim TTL
+    assert pc.run("k", lambda: ran.append(1)) == FIRED
+    assert ran == [1]
+    # and after that it's done for everyone
+    assert JobRunner(store, LeaderCheck("cloud", [PI, PC], prober({})),
+                     clock_ms=lambda: now[0]).run("k", lambda: 1 / 0) == SKIPPED_DONE

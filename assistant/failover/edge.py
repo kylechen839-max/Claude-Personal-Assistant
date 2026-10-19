@@ -111,6 +111,11 @@ class EdgeMiddleware:
         # web app allows without failover); they share this one session.
         self.root_bearer_sid = root_bearer_sid
 
+    @property
+    def state(self):
+        """The wrapped app's state (e.g. app.state.web for CloudGuard)."""
+        return getattr(self.app, "state", None)
+
     # --- origin -------------------------------------------------------------
 
     def origin_verdict(self, headers: dict[str, str],
@@ -294,7 +299,8 @@ class EdgeMiddleware:
             log.warning("Refused a WebSocket from another origin")
             return await send({"type": "websocket.close",
                                "code": WS_CLOSE_FORBIDDEN_ORIGIN})
-        if "cookie" in headers and not cors_origin:
+        first_message = b"auth=first" in scope.get("query_string", b"")
+        if "cookie" in headers and not cors_origin and not first_message:
             # same-origin page with the session cookie: the web app's own
             # check (require_session) decides, as without failover
             async def replay():
