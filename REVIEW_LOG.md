@@ -312,3 +312,10 @@ LOW (sent to failover): an unreadable sessions file resets `tokens_not_before` t
   - Each full run hits 1-10 setup errors in different TTS-fixture tests (eSpeak/pyttsx3 sometimes doesn't write its `.wav`, e.g. `wake0/cmd.wav`, `out.wav`).
   - `test_follow_up.py` passes 14/14 when run alone (3 runs).
   - This is an environment flake, unrelated to the diff. LOW: add a retry or a file-exists wait in the TTS render fixture.
+
+## Stopped, 2026-10-19 ~09:07 UTC
+
+At the coordinator's request, review cycles have ended: 1.0.2 is final and nothing more is planned until Kyle is back. The pending check is cancelled, and no further checks are scheduled.
+
+- **Last reviewed master:** 3e873c8 (1.0.2).
+- **Open issues:** none at HIGH or MED. The one known item is the local TTS-fixture flake, which doesn't appear on CI.
