@@ -267,3 +267,19 @@ Possibly flaky, passing on rerun:
 | B1 | OPEN: PRIVACY.md wording is fixed, but the UI confirm (`app.js:432`) still promises "every phone" while failover hc1 tokens aren't revoked. Clears with the revocation epoch or corrected confirm text. |
 
 Verdict: GO once B1 lands.
+
+## Cycle 4c: release verdict, 2026-10-19 ~02:55 UTC
+
+- **Commit:** master 8685701.
+- **Tests:** 1422 passed, 48 skipped; JS 45/45.
+
+### Verdict: GO for v1.0.0
+| Item | Status |
+|---|---|
+| B1: failover sign-out everywhere | FIXED (`4e52277`). A synced not-before revocation in the event log. Probe on cloud plus failover: an hc1 token gets 200 on logout-all, then 401 on `/api/state`. Refresh keeps `signed_in`. |
+| hc1 phone voice | FIXED (reaches `ready`) |
+| Cloud plus failover cookie origin | FIXED (`/api/state` with the app Origin returns 200; cross-site POST returns 401) |
+| B2, B3, B4 | FIXED (fcdc8db; voice-mode b97fac1 merged) |
+
+### LOW, non-blocking
+- With failover on and `[history]` disabled, there is no `sync_log`. The revocation not-before is then in memory only (`webapp.py:1003-1020`), so a restart forgets "sign out everywhere". Persist it locally, or require history when failover is on.
