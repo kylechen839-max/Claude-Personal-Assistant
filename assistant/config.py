@@ -33,9 +33,18 @@ DEFAULTS: dict = {
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
-    "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
-            "fallback": "pyttsx3"},  # used when the Piper voice is missing
+    "tts": {
+        "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
+        "rate": 185, "voice": "",  # pyttsx3
+        "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
+        "fallback": "pyttsx3",  # used when no neural voice is there
+        "kokoro_voice": "af_heart",
+        "speed": 1.0,  # Kokoro and ElevenLabs
+        "kokoro_model": "models/kokoro/kokoro-v1.0.int8.onnx",
+        "kokoro_voices": "models/kokoro/voices-v1.0.bin",
+        "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
+        "elevenlabs_model": "eleven_flash_v2_5",
+    },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
@@ -54,6 +63,8 @@ DEFAULTS: dict = {
                  "token": "token.json", "calendar_id": "primary",
                  # write refreshed tokens back to token.json (never on a server)
                  "save_token": True},
+    "gmail": {"enabled": True,  # uses the [calendar] credentials and token
+              "max_summary": 15},   # most emails in one summary
     "notion": {"enabled": True,
                "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
     "web": {
@@ -146,6 +157,20 @@ DEFAULTS: dict = {
         "trust_unsigned": False,
         "health_seconds": 180,  # for the restarted web app to answer /healthz
     },
+    "lecture": {
+        "enabled": True,
+        "model": "base.en",          # faster-whisper model: "tiny.en" is faster
+        "upload_dir": "data/lectures",
+        "max_upload_mb": 300,        # per recording (75 min of AAC is ~70 MB)
+        "chunk_mb": 4,               # the phone uploads in pieces this big
+        "keep_audio": False,         # delete audio once it is transcribed
+        "notes_database_id": "",     # "" = find or create "Lecture Notes"
+    },
+    "tutor": {"enabled": True,      # homework photos in the phone app
+              "max_image_mb": 8,
+              "max_tokens": 1200},
+    "notes": {"enabled": True,      # remember_note / recall_notes (needs memory)
+              "min_score": 0.3},
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }

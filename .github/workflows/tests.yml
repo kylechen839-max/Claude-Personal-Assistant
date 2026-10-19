@@ -78,6 +78,14 @@ jobs:
           path: voices
           key: piper-voice-en_US-lessac-medium
 
+      # The real Kokoro tests download the int8 model and voices into
+      # models/kokoro/ (checksum-verified) when they're missing.
+      - name: Cache Kokoro model
+        uses: actions/cache@v4
+        with:
+          path: models/kokoro
+          key: kokoro-v1.0-int8
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

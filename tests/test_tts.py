@@ -84,7 +84,8 @@ def test_engine_selection_from_config(tmp_path, fake_voice_files, fake_piper):
     from assistant.config import load_config
 
     cfg = load_config(tmp_path / "none.toml", env_file=None)
-    assert cfg["tts"]["engine"] == "pyttsx3"  # default stays pyttsx3
+    assert cfg["tts"]["engine"] == "auto"
+    cfg["tts"]["kokoro_model"] = str(tmp_path / "missing.onnx")  # no Kokoro, no Piper
     assert isinstance(make_tts(cfg["tts"]["engine"], **cfg["tts"]), Pyttsx3TTS)
     toml = tmp_path / "config.toml"
     voice = fake_voice_files.as_posix()

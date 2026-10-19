@@ -52,3 +52,13 @@ def test_transcribe_piper_speech(tmp_path, piper_voice, whisper):
     PiperTTS(piper_voice).save_to_file(PHRASE, wav)
     text = whisper.transcribe(audio.load_audio(wav))
     assert rough_match(PHRASE, text), text
+
+
+@pytest.mark.slow
+def test_transcribe_kokoro_speech(tmp_path, kokoro_files, whisper):
+    from tests.test_voices import render_kokoro  # in a child process
+
+    wav = tmp_path / "kokoro_phrase.wav"
+    render_kokoro(kokoro_files, wav, PHRASE)
+    text = whisper.transcribe(audio.load_audio(wav))
+    assert rough_match(PHRASE, text), text

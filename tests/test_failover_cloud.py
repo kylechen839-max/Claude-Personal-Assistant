@@ -199,3 +199,26 @@ def test_history_sync_thread_starts_on_the_pi_not_the_cloud(tmp_path, monkeypatc
     config["failover"]["role"] = "cloud"
     assert webapp.start_history_sync(config, assistant, TOKEN,
                                      settings_from_config(config)) is None
+
+
+def test_unauthenticated_voice_sockets_are_capped_until_their_first_message(cloud_app):
+    """A cookieless socket may open before its first-message token, but only
+    a few at a time per address: they can't pile up waiting for the timeout."""
+    guard, client, _ = cloud_app()
+    token = sign_in(client)
+    with client.websocket_connect("/api/voice", headers=hdr(Origin=APP)) as a, \
+            client.websocket_connect("/api/voice", headers=hdr(Origin=APP)):
+        assert guard.preauth_slots.count == 2  # both waiting for a token
+        with pytest.raises(WebSocketDisconnect) as e:
+            with client.websocket_connect("/api/voice", headers=hdr(Origin=APP)):
+                pass
+        assert e.value.code == 1008  # a third from the same address: refused
+        a.send_text(json.dumps({"type": "auth", "token": token}))
+        assert json.loads(a.receive_text()) == {"type": "auth_ok"}
+        assert guard.preauth_slots.count == 1  # the first message freed its slot
+    assert guard.preauth_slots.count == 0
+    # another address is not affected by this one's waiting sockets
+    with client.websocket_connect("/api/voice", headers=hdr("198.51.100.30",
+                                                            Origin=APP)) as ws:
+        ws.send_text(json.dumps({"type": "auth", "token": token}))
+        assert json.loads(ws.receive_text()) == {"type": "auth_ok"}

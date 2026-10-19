@@ -8,13 +8,24 @@ conversation_timeout = 300    # seconds of quiet before a new conversation start
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 
 [tts]
-engine = "pyttsx3"            # "pyttsx3" (offline OS voice), "piper" (better offline voice), "print"
+# "auto" (default): Kokoro if its files are downloaded, else Piper, else pyttsx3.
+# Or pick one: "kokoro" (most natural), "piper" (fast, best on a Raspberry Pi),
+# "pyttsx3" (OS voice), "elevenlabs" (optional, paid cloud voice), "print".
+# A missing voice falls back down that list, with one log line saying why.
+engine = "auto"
+# Kokoro: get it with  python -m assistant --download-voice kokoro
+kokoro_voice = "af_heart"     # warm and calm; also af_bella, bf_emma, am_michael (README)
+speed = 1.0                   # Kokoro 0.5-2.0, ElevenLabs 0.7-1.2
+kokoro_model = "models/kokoro/kokoro-v1.0.int8.onnx"
+kokoro_voices = "models/kokoro/voices-v1.0.bin"
+# Piper voice (.onnx, with its .onnx.json next to it).
+# Get one with: python -m assistant --download-voice en_US-lessac-medium
+piper_voice = "voices/en_US-lessac-medium.onnx"
 rate = 185                    # pyttsx3 only
 voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" on Windows
-# Piper voice (.onnx, with its .onnx.json next to it), used when engine = "piper".
-# Get one with: python -m assistant.tts --download-voice en_US-lessac-medium
-# If the file is missing, the assistant warns and uses pyttsx3 instead.
-piper_voice = "voices/en_US-lessac-medium.onnx"
+# ElevenLabs: only with engine = "elevenlabs" and ELEVENLABS_API_KEY in .env.
+elevenlabs_voice = ""         # a voice ID from your ElevenLabs library; "" = Rachel
+elevenlabs_model = "eleven_flash_v2_5"
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
@@ -38,6 +49,10 @@ enabled = true
 credentials = "credentials.json"
 token = "token.json"
 calendar_id = "primary"
+
+[gmail]
+enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth
+max_summary = 15              # most emails in one spoken summary
 
 [notion]
 enabled = true
@@ -113,6 +128,24 @@ backends = [
   { role = "pc", url = "" },     # e.g. "https://kyle-pc.tail1234.ts.net"
   { role = "cloud", url = "" },  # e.g. "https://hey-claude.onrender.com"
 ]
+
+[lecture]
+enabled = true                # "Record lecture" in the phone app
+model = "base.en"             # faster-whisper model for lectures; "tiny.en" is faster
+upload_dir = "data/lectures"  # recordings and job state (use the /data disk in the cloud)
+max_upload_mb = 300           # per recording
+chunk_mb = 4                  # upload piece size; a lost piece is simply resent
+keep_audio = false            # true = keep the audio after it is transcribed
+notes_database_id = ""        # "" = find or create "Lecture Notes" under Fall 2026 Assignments
+
+[tutor]
+enabled = true                # homework tutor in the phone app (photo + question)
+max_image_mb = 8              # the phone shrinks photos to 1600 px first
+max_tokens = 1200
+
+[notes]
+enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
+min_score = 0.3               # how close a note must be to count as a match
 
 [logging]
 file = "logs/assistant.log"

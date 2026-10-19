@@ -5,15 +5,20 @@ something, and it answers out loud. It can read and change your Google
 Calendar, check and update your Notion assignments, and remembers past
 conversations in Pinecone.
 
+Version 1.0.0: see CHANGELOG.md for what's included and PRIVACY.md for what
+is stored and sent where. On your phone, it runs as a home-screen web app
+("Install on iPhone" below).
+
 ```
 mic -> openWakeWord wake word -> chime -> record until silence (VAD)
     -> faster-whisper (speech to text) -> Claude (+ tools, + memory)
-    -> pyttsx3 / Piper (text to speech) -> speaker
+    -> Kokoro / Piper / pyttsx3 (text to speech) -> speaker
 ```
 
 ## Quick start (Windows 11, PowerShell)
 
-1. Install **Python 3.10+** from python.org (tick "Add python.exe to PATH").
+1. Install **Python 3.12** from python.org (tick "Add python.exe to PATH").
+   3.10+ works, but the natural Kokoro voice needs 3.11+.
 2. In the project folder:
    ```powershell
    python -m venv .venv
@@ -58,7 +63,8 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode speak` | Type, replies spoken |
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
 | `--audio-file f.wav` | Wake mode on a recording instead of the mic, then exit |
-| `--tts print` | No audio output (prints what it would say) |
+| `--tts print` | No audio output (prints what it would say); also `kokoro`, `piper`, `pyttsx3`, `elevenlabs`, `auto` |
+| `--download-voice kokoro` | Download a voice at setup time, then exit (see "Voices") |
 | `--timings` | Also print each turn's latency summary (always in the log) |
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
@@ -206,51 +212,92 @@ you are most likely to tune:
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
 | `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
-| `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
+| `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
+| `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
+| `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
-### Better voice: Piper
+### Voices
 
-The default voice is pyttsx3 (the OS voice: SAPI5 on Windows, eSpeak on the
-Pi). [Piper](https://github.com/OHF-Voice/piper1-gpl) is an offline neural
-voice that sounds far more natural and is fast enough for a Pi 4/5. It is
-installed by `requirements.txt` (`piper-tts`); you only need to download a
-voice once (about 60 MB, from the official
-[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) repo):
+With `[tts] engine = "auto"` (the default) the assistant uses the best voice
+you have downloaded, and logs one line saying which and why:
+
+1. **Kokoro** (most natural; [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M),
+   Apache-2.0, run by the `kokoro-onnx` package). The default voice was
+   picked to be close to the calm, warm feel of the Claude app's voice
+   conversations (the app's own voices aren't available outside it). About
+   120 MB: the int8 model (88 MB) and the voice pack (28 MB). Needs Python
+   3.11+ (it relies on onnxruntime 1.25+, which has no 3.10 build); on 3.10
+   "auto" uses Piper.
+2. **Piper** (fast neural voice, the best choice on a Raspberry Pi; about 60 MB).
+3. **pyttsx3** (the OS voice: SAPI5 on Windows, eSpeak on Linux), always there.
+
+Download them once, at setup (never while answering). Each Kokoro file's
+SHA-256 is checked, and a bad download is deleted:
 
 ```powershell
-# Windows (PowerShell, venv active) - same command on the Pi
-python -m assistant.tts --download-voice en_US-lessac-medium
+python -m assistant --download-voice kokoro                # into models/kokoro/
+python -m assistant --download-voice en_US-lessac-medium   # Piper, into voices/
 python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
 ```
 
-That saves `voices/en_US-lessac-medium.onnx` and its `.onnx.json` (the
-`voices/` folder is not committed). Then switch the engine in `config.toml`:
+`models/` and `voices/` are not committed. On a Raspberry Pi, "auto"
+prefers Piper even if Kokoro is there, because Kokoro is several times
+slower on ARM (PROGRESS.md has the numbers). `--check` shows which voice
+is in use.
+
+**Switching voices.** In `config.toml`:
 
 ```toml
 [tts]
-engine = "piper"
-piper_voice = "voices/en_US-lessac-medium.onnx"
+engine = "auto"            # or "kokoro" / "piper" / "pyttsx3" to force one
+kokoro_voice = "af_heart"  # the default
+speed = 1.0                # 0.9 = a little slower and calmer
 ```
 
-To go back, set `engine = "pyttsx3"`. If the voice file is missing, the
-assistant logs a warning and uses pyttsx3 instead of crashing. Other voices:
-pick a name from the voices repo (e.g. `en_US-amy-medium`,
-`en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
-on the command line tries Piper for one run without editing the config.
-`[tts] rate` and `voice` apply to pyttsx3 only.
+| Kokoro voice | Sounds like |
+|---|---|
+| `af_heart` (default) | American, female: warm, calm, the most natural of the set |
+| `af_bella` | American, female: brighter and more animated |
+| `bf_emma` | British, female: soft and composed |
+| `am_michael` | American, male: relaxed, low |
+| `af_nicole`, `af_sarah`, `bm_george`, `bm_lewis`, ... | the rest of the voice pack (`am_`/`bm_` = male, `bf_` = British female) |
+
+A Kokoro voice name that doesn't exist logs a warning and uses `af_heart`.
+If a forced engine's files are missing, it falls back down the list (Kokoro
+-> Piper -> pyttsx3) with a warning instead of crashing. For Piper, set
+`piper_voice` to another voice from
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (e.g.
+`en_US-amy-medium`). `[tts] rate` and `voice` apply to pyttsx3 only. `--tts
+kokoro` on the command line tries an engine for one run.
+
+**Optional cloud voice: ElevenLabs (paid).** Put `ELEVENLABS_API_KEY=...` in
+`.env` and set `[tts] engine = "elevenlabs"` (optionally `elevenlabs_voice`,
+a voice ID from your ElevenLabs library; the default is the premade
+"Rachel", and `elevenlabs_model` is `eleven_flash_v2_5`, its fastest). Every
+sentence goes to ElevenLabs' servers and counts against your plan. Each one
+is streamed with a timeout; if the request fails (network, quota, a bad
+key) that sentence is spoken by the local voice above, and the cloud is
+skipped for a minute. Without the key the local voice is used. The key is
+never logged.
+
+**Sounds.** Voice mode on the phone plays three soft cues: a gentle two-note
+rise when it starts listening, a very quiet low note when your turn has
+been heard ("thinking"), and a falling pair when the conversation ends. The
+desktop wake chime uses the same listening sound. They are original
+sine-wave sounds generated by `assistant/earcons.py` (`python -m
+assistant.earcons` rewrites `assistant/web/earcons/*.wav`).
 
 ## Phone web app
 
 `python -m assistant --mode web` runs the same assistant (Calendar, Notion,
 memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
-asks Claude, and sends back the reply as text and audio (Piper if
-`[tts] engine = "piper"`, else pyttsx3; or tick "Use the phone's voice" in
-the page's settings). Hold the big mic button to talk (or tap once to start
+asks Claude, and sends back the reply as text and audio (in the voice from
+[Voices](#voices); or tick "Use the phone's voice" in the page's settings). Hold the big mic button to talk (or tap once to start
 and again to stop), or type. When Claude wants to delete something, Yes/No
 buttons appear; saying "yes" into the mic works too. Each phone/browser
 gets its own conversation; after `[assistant] conversation_timeout` (5
@@ -394,8 +441,9 @@ Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
 ignored), `max_utterance_s` (30), `max_session_minutes` (30) and
 `utterances_per_minute` (30); a yes/no question waits `[webapp]
 confirm_timeout`. Voice and push-to-talk share this phone's conversation.
-For the most natural voice set `[tts] engine = "piper"`; with pyttsx3 on
-Linux it uses eSpeak directly.
+Replies use the voice from [Voices](#voices) (Kokoro once downloaded),
+rendered sentence by sentence so the first one plays while the rest are
+made; the model is warmed up when the server starts.
 
 ## Run it in the cloud (Render)
 
@@ -481,6 +529,94 @@ trusts forwarded headers only from 10.x addresses, Render's; set
 nothing). After the first Render deploy, the log's first five "Proxy check"
 lines show what Render's proxy sends; see BLOCKERS.md.
 
+## Email, notes, lectures and homework help
+
+### Email triage by voice (Gmail)
+"Anything important in my email?", "Read the one from Professor Smith",
+"Reply that I'll add error bars." The assistant lists unread or important
+mail from the last day (sender, subject, a one-line gist, at most
+`[gmail] max_summary` messages), reads one message in plain text, and saves
+a reply as a **Gmail draft** after you say yes. You review and send drafts
+in Gmail yourself. The sign-in asks for `gmail.readonly` and
+`gmail.compose`. Google has no drafts-only permission, and `gmail.compose`
+would also allow sending, so the code blocks it instead: there is no send
+tool, and the Gmail connection refuses any send (or delete, or settings)
+call. Gmail access is requested only while `[gmail] enabled = true`; with
+it off, sign-in asks for Calendar alone.
+
+Gmail uses the same Google OAuth client as Calendar, but a `token.json`
+from before this feature only has the Calendar permission. Sign in once
+more so Google can ask for the new ones (Calendar keeps working until you
+do; the startup line and `--check` remind you):
+
+```powershell
+python -m assistant.tools.google_auth            # or add --headless without a browser
+```
+
+In the Google Cloud console the Gmail API must be enabled for the
+"Hey Claude" project (APIs & Services -> Library -> Gmail API -> Enable).
+For a cloud host, put the whole contents of `token.json` in the
+`GOOGLE_TOKEN_JSON` secret instead of copying the file.
+
+Email is written by other people, so it is treated like web pages: while
+an email is in the conversation, anything that changes something
+(calendar, Notion, notes, drafts) asks for a spoken yes first, and email
+text never goes into the log file (see SECURITY.md).
+
+### Quick notes
+"Remember that the lab report needs error bars" saves a short note in
+Pinecone (your `voice-assistant` namespace, tagged as a note);
+"What did I need for the lab report?" finds it by meaning. You can also ask
+for your recent notes or to delete one (it asks first). With conversation
+history on, a saved note also shows up in that conversation. Notes need
+`[memory]` (Pinecone); `[notes] enabled` turns them off.
+
+### Record a lecture (phone app)
+In the phone app, open the **Lecture** tab, pick the course (the options
+come from the Course property of your Notion Assignments database), and
+tap Start. Ask the professor first: the screen shows a reminder. The page
+keeps the screen awake, shows the elapsed time, and uploads the audio every
+10 seconds in small pieces; if the network drops, it keeps recording and
+resends from where the PC left off, so a 75-minute lecture survives Wi-Fi
+blips (keep the app open in the foreground). Tap Stop when the lecture ends.
+
+The PC then transcribes the recording with faster-whisper (`[lecture]
+model`: "base.en", or "tiny.en" for speed; progress shows in the app),
+asks Claude for notes (Summary, Key concepts, Equations in LaTeX, Action
+items, Questions to ask), and creates a page in a **Lecture Notes**
+database inside your Fall 2026 Assignments page, with Title, Course, Date
+and Duration. The database is created automatically the first time (with
+the same Course options); if the integration isn't allowed to, the job says
+so and BLOCKERS.md has the two-minute fix. Action items that look like
+assignments are listed under the lecture with an **Add** button; nothing is
+added to Assignments unless you tap it. A failed job can be retried without
+transcribing again.
+
+With conversation history on, the summary and the Notion link are also
+added to the phone conversation you were in when you started recording.
+With failover (FAILOVER.md) a recording stays on the backend it started
+on; if that backend goes away mid-lecture, the page says the recording
+stopped there.
+
+The audio is deleted as soon as it is transcribed (`[lecture] keep_audio =
+true` keeps it) and the transcript once the Notion page exists. Recordings
+and job state live in `[lecture] upload_dir` (`data/lectures`; point it at
+the `/data` disk on a cloud host). Other settings: `max_upload_mb` (300 per
+recording), `chunk_mb` (4), `notes_database_id` (use an existing database
+instead of finding/creating one).
+
+### Homework tutor (phone app)
+In the **Tutor** tab, take or choose a photo of a problem, add a question
+("I got x = -3, where did I go wrong?") or just tap Ask. Claude looks at
+the photo and tutors Socratically: hints and questions, checking your
+reasoning step by step. It gives the full worked solution only when you tick
+"Show the full solution" or ask for it. Equations are drawn with KaTeX
+(bundled with the app, no CDN); with "Read explanations aloud" on, the
+reply is spoken with the maths read naturally ("x squared over 2"). The
+phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
+PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
+metadata (EXIF, including location) before sending it to Claude.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
@@ -508,7 +644,7 @@ the Pi's host name or IP):
 
 ```powershell
 scp .env credentials.json token.json pi@raspberrypi:~/hey-claude/
-scp -r voices pi@raspberrypi:~/hey-claude/   # only if you use Piper
+scp -r voices pi@raspberrypi:~/hey-claude/   # the Piper voice, if you have it
 ```
 
 Or type the keys into `nano .env` on the Pi. The "Hey Claude" wake-word
@@ -533,7 +669,7 @@ fail to load; that's expected). This needs `credentials.json` on the Pi.
 `--check` prints which keys are set (never their values), whether
 `credentials.json`, `token.json` and the wake-word model exist, the audio
 devices with their index numbers, whether the Whisper model is cached, and,
-with `[tts] engine = "piper"`, whether the Piper voice is there.
+which voice will speak (Kokoro, Piper or pyttsx3).
 It exits with 1 if something required is missing.
 
 `install_service.sh` installs `deploy/hey-claude.service` as a systemd
@@ -551,10 +687,11 @@ systemctl --user restart hey-claude     # after changing .env or config.toml
 
 **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
 (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
-`.venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium` on
-the Pi (or copy `voices/` from your PC) and set `[tts] engine = "piper"`, as
-in [Better voice: Piper](#better-voice-piper). Without the voice file the
-assistant falls back to eSpeak.
+`.venv/bin/python -m assistant --download-voice en_US-lessac-medium` on
+the Pi (or copy `voices/` from your PC); `[tts] engine = "auto"` then uses
+it (see [Voices](#voices)). Kokoro also installs on a Pi but takes well over
+a second per sentence there, so "auto" keeps Piper on ARM. Without a voice
+file the assistant falls back to eSpeak.
 
 **Speed:** set `[stt] model = "tiny.en"` in `config.toml` if `base.en` feels
 slow. On a Pi with no screen, set `[web] browser = false`.
@@ -711,60 +848,56 @@ restart hey-claude` on the Pi).
 `/healthz` and reloads itself once, never in the middle of a turn, a
 recording or the voice conversation.
 
-**Setting up signing (once).** The promotion workflow signs each promotion
-with a key only GitHub Actions holds; your machines trust that key.
+**Setting up signing (once). Recommended: you approve each update** with
+a key that exists only on your PC. The workflow moves `stable` after green
+CI; nothing installs until you sign that commit.
 
-1. On the PC, make a key just for this (no passphrase; it never leaves
-   GitHub):
+1. Make the key and let git sign with it (choose a passphrase):
    ```powershell
-   ssh-keygen -t ed25519 -N '""' -C "hey-claude stable" -f "$env:TEMP\stable_signing"
+   ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
+   git config gpg.format ssh
+   git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
    ```
-2. GitHub -> the repo -> Settings -> Secrets and variables -> Actions -> New
-   repository secret: name `STABLE_SIGNING_KEY`, value: the whole content of
-   `$env:TEMP\stable_signing` (the private key).
-3. Trust the public half on each machine that updates:
+2. Trust its public half on each machine that updates:
    ```powershell
    $dir = "$env:APPDATA\HeyClaude"; New-Item -ItemType Directory -Force $dir | Out-Null
-   $pub = Get-Content "$env:TEMP\stable_signing.pub"
-   [IO.File]::WriteAllText("$dir\allowed_signers", "stable-promotion@users.noreply.github.com namespaces=`"git`" $pub`n")
+   $pub = Get-Content "$env:USERPROFILE\.ssh\hey_claude_approve.pub"
+   [IO.File]::WriteAllText("$dir\allowed_signers", "kylechen839@gmail.com namespaces=`"git`" $pub`n")
    ```
    On the Pi: `mkdir -p ~/.config/hey-claude` and put the same line in
-   `~/.config/hey-claude/allowed_signers`.
-4. Delete both key files from `$env:TEMP`. From the next promotion on, the
-   workflow pushes a signed `stable-<sha>` tag that the hosts verify
-   (`git verify-tag`).
+   `~/.config/hey-claude/allowed_signers` (only the public key goes there).
+3. Each update you approve: look at what changed, then sign and push a tag:
+   ```powershell
+   git fetch origin stable
+   git log --oneline HEAD..origin/stable
+   $sha = git rev-parse origin/stable
+   git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
+   git push origin "stable-$($sha.Substring(0,7))"
+   ```
+   The hosts update on their next check (`git verify-tag` against
+   allowed_signers; only SSH signatures count, never OpenPGP).
 
-A CI-signed tag only proves **"CI passed"**, not **"Kyle approved"**: the key
-sits in GitHub, so it guards against a bad push to `stable` or a changed
-`origin`, but not against someone who can change the workflow or the code
-on master (branch protection on `master` and `stable` narrows that,
-BLOCKERS.md).
+**Optional, weaker: CI signs for you.** A CI-signed tag only proves **"CI
+passed"**, not **"Kyle approved"**. If you want it anyway, the key must live
+in a GitHub **Environment**, never as a repository secret (a repository
+secret can be read by a workflow pushed on any branch, which could sign its
+own code):
 
-**Strongest setup: you approve each update.** Use a key that exists only on
-your PC, put only its public half in `allowed_signers` (on the PC and the
-Pi), and don't add the `STABLE_SIGNING_KEY` secret. The workflow still moves
-`stable` after green CI, but nothing installs until you sign that commit:
+1. GitHub -> the repo -> Settings -> Environments -> New environment
+   `stable-signing`: Deployment branches and tags -> Selected -> `master`
+   only; Required reviewers -> you.
+2. Make a key without a passphrase (`ssh-keygen -t ed25519 -N '""' -C
+   "hey-claude stable" -f "$env:TEMP\stable_signing"`), add the private
+   key as the environment secret `STABLE_SIGNING_KEY` of `stable-signing`,
+   add the `.pub` line to allowed_signers as in step 2 above (with
+   `stable-promotion@users.noreply.github.com`), then delete both files.
+3. Each promotion then waits for your approval in GitHub (Actions ->
+   promote-stable -> Review deployments) before the `sign` job signs
+   `stable-<sha>`. With both keys trusted, either one is enough.
 
-```powershell
-# once: a key only on this PC (here with a passphrase), and git set up to sign with it
-ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
-git config gpg.format ssh
-git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
-# allowed_signers line (as in step 3 above, with this .pub file and your email)
-
-# each update you approve: look at what changed, then sign and push a tag
-git fetch origin stable
-git log --oneline HEAD..origin/stable
-$sha = git rev-parse origin/stable
-git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
-git push origin "stable-$($sha.Substring(0,7))"
-```
-
-The hosts update on their next check. You can use both keys (both lines in
-`allowed_signers`), but then either one is enough, so the CI key alone can
-still approve an update. The only way around signatures is `[update] trust_unsigned =
-true`: then **anyone who can push to master or stable can run code on this
-machine**. Use it only for a repository only you can push to.
+The only way around signatures is `[update] trust_unsigned = true`: then
+**anyone who can push to master or stable can run code on this machine**.
+Use it only for a repository only you can push to.
 
 **Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
 so it never updates. Switch with this, in PowerShell (5.1 or 7):
@@ -864,13 +997,16 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface: pyttsx3, Piper, espeak-ng, print; voice download
+  tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
+  tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
+  tts_elevenlabs.py  optional ElevenLabs cloud voice
+  earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   history.py    conversation history: SQLite store, search, resume
   history_cli.py  python -m assistant --history ...
-  audio.py      wav I/O, resampling, chime
+  audio.py      wav I/O, resampling, chimes
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
   history_web.py  phone app history API (/api/conversations)
@@ -879,13 +1015,21 @@ assistant/
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
   web/          the page: index.html, app.js, app.css, sw.js; voice.js,
-                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
+                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored);
+                earcons/ (generated by earcons.py)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   host.py       home host supervisor: restarts, updates (python -m assistant.host)
   updater.py    safe update from the stable branch  (--update)
   version.py    git short SHA for /healthz
-  tools/        calendar.py, notion.py, web.py, history.py, tool registry
+  webfeatures.py lecture recorder + tutor routes for the phone app
+  lecture.py    chunked uploads, transcription job, Notion lecture notes
+  tutor.py      homework photos: checks, EXIF removal, Socratic vision call
+  mathspeech.py LaTeX read aloud
+  web/          the page: index.html, app.js, app.css, sw.js;
+                static/ features.js/css, vendored KaTeX
+  tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
+                notion.py, notes.py, web.py, history.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

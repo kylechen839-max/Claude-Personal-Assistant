@@ -124,10 +124,11 @@ def make_service(event=None, items=()):
     return service, events
 
 
-DENTIST = {"id": "ev1", "summary": "Dentist",
+OWN = {"self": True}  # the API sets organizer.self only on Kyle's own events
+DENTIST = {"id": "ev1", "summary": "Dentist", "organizer": OWN,
            "start": {"dateTime": "2026-10-17T15:00:00-04:00"},
            "end": {"dateTime": "2026-10-17T16:00:00-04:00"}}
-HOLIDAY = {"id": "ev2", "summary": "Fall break",
+HOLIDAY = {"id": "ev2", "summary": "Fall break", "organizer": OWN,
            "start": {"date": "2026-10-17"}, "end": {"date": "2026-10-19"}}
 
 

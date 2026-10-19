@@ -48,7 +48,24 @@ def check_google_files(config: dict) -> list[Check]:
         Check(str(token), token.exists(), "found" if token.exists() else
               "missing (copy it from your PC, or run "
               "`python -m assistant.tools.calendar --headless`)", required=False),
-    ]
+    ] + check_gmail_scopes(config)
+
+
+def check_gmail_scopes(config: dict) -> list[Check]:
+    """An older token.json has only the Calendar scope; Gmail needs more."""
+    from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
+                                             missing_scopes)
+
+    if not config.get("gmail", {}).get("enabled", True):
+        return []
+    try:
+        lacking = missing_scopes(GMAIL_SCOPES, config["calendar"]["token"])
+    except (OSError, ValueError) as e:
+        return [Check("Gmail access", False, f"token unreadable: {e}",
+                      required=False)]
+    return [Check("Gmail access", not lacking, "granted (read + drafts)"
+                  if not lacking else "not granted yet (re-run the Google "
+                  f"sign-in: `{SIGN_IN_COMMAND}`)", required=False)]
 
 
 def check_wake_model(config: dict, keyword_path: str | None = None) -> Check:
@@ -130,12 +147,35 @@ def check_whisper_model(config: dict, download_model=None) -> Check:
     return Check("Whisper model", True, f"{name} cached at {path}")
 
 
-def check_tts(config: dict, which=shutil.which) -> Check:
+def check_tts(config: dict, which=shutil.which, environ=os.environ) -> Check:
+    from assistant import tts_kokoro
+    from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
+
     tts = config["tts"]
     engine = tts["engine"]
+    kokoro_hint = "python -m assistant --download-voice kokoro"
+    if engine == "elevenlabs":
+        if environ.get("ELEVENLABS_API_KEY"):  # never the value
+            return Check("TTS (elevenlabs)", True,
+                         "ELEVENLABS_API_KEY set; the local voice is the fallback")
+        return Check("TTS (elevenlabs)", False, "ELEVENLABS_API_KEY not set in "
+                     ".env; using the local voice instead", required=False)
+    if engine in ("auto", "kokoro"):
+        problem = tts_kokoro.kokoro_problem(tts.get("kokoro_model"),
+                                            tts.get("kokoro_voices"))
+        if problem is None:
+            return Check(f"TTS ({engine})", True,
+                         f"Kokoro, voice {tts.get('kokoro_voice') or 'af_heart'}")
+        if engine == "kokoro":
+            return Check("TTS (kokoro)", False, f"{problem}; using Piper or "
+                         f"pyttsx3 instead. Get it with: {kokoro_hint}",
+                         required=False)
+        engine = "piper" if tts.get("piper_voice") else "pyttsx3"
+        if engine == "piper" and piper_voice_problem(tts["piper_voice"]) is None:
+            return Check("TTS (auto)", True, f"Piper voice {tts['piper_voice']}; "
+                         f"for a more natural voice: {kokoro_hint}")
+        engine = "pyttsx3"
     if engine == "piper":
-        from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
-
         # piper_model is the old name of piper_voice
         voice = tts.get("piper_voice") or tts.get("piper_model")
         problem = piper_voice_problem(voice)

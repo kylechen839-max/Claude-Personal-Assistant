@@ -51,6 +51,7 @@ class PineconeMemory:
         self._pc = pc
         self._index = index
         self._namespaces: list[str] | None = None
+        self.last_untrusted = False  # set by retrieve()
 
     @property
     def pc(self):
@@ -100,13 +101,17 @@ class PineconeMemory:
                 vector=vector, namespaces=namespaces, metric="cosine",
                 top_k=self.top_k, include_metadata=True)
         notes = []
+        self.last_untrusted = False
         for match in result.matches:
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
-        log.info("Memory: %d notes for %r", len(notes), query[:60])
+                # Written from untrusted text (e.g. an email): the turn that
+                # uses it must confirm changes (see ClaudeChat.recall).
+                self.last_untrusted |= meta.get("untrusted") is True
+        log.info("Memory: %d notes", len(notes))
         return notes
 
     def store(self, summary: str, extra: dict | None = None) -> str:
@@ -160,10 +165,13 @@ class PineconeMemory:
             log.info("Memory: deleted %d vectors", len(vector_ids))
 
 
-def transcript(history: list[dict]) -> str:
-    """Plain-text transcript of user text and assistant text (no tool data)."""
+def transcript(history: list[dict], user_only: bool = False) -> str:
+    """Plain-text transcript of user text and assistant text (no tool data).
+    `user_only`: just Kyle's lines (when untrusted text was in context)."""
     lines = []
     for msg in history:
+        if user_only and msg["role"] != "user":
+            continue
         content = msg["content"]
         if isinstance(content, str):
             text = content

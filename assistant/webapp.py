@@ -69,8 +69,9 @@ MIN_TOKEN_LENGTH = 32
 PC_ONLY_TOOLS = {"open_in_browser"}
 
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+EARCONS = ("listening", "thinking", "ended")  # assistant/earcons.py
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
-       "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+       "img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -224,6 +225,12 @@ class SessionStore:
             if now - self._saved_at.get(sid, 0) > 86400:
                 self._save()
             return True
+
+    def listed(self, sid: str) -> bool:
+        """Still signed in? (A read-only check, e.g. for a live WebSocket.)"""
+        with self.lock:
+            last = self.sessions.get(sid)
+        return last is not None and self.clock() - last <= self.max_age
 
     def revoke(self, sid: str) -> None:
         with self.lock:
@@ -591,6 +598,9 @@ class WebAssistant:
         # thread, so all rendering happens in one dedicated thread.
         self._tts_pool = ThreadPoolExecutor(1, thread_name_prefix="web-tts",
                                             initializer=_init_com)
+        if callable(getattr(tts, "warm_up", None)):
+            # load the voice model now, so the first reply isn't the slow one
+            self._tts_pool.submit(_warm_up, tts)
 
     # sessions
     def session(self, sid: str) -> Session:
@@ -714,7 +724,7 @@ class WebAssistant:
         return True
 
     def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit
+        from assistant.cli import get_reply, is_exit, loggable_reply
 
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
@@ -738,7 +748,7 @@ class WebAssistant:
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
             log.info("Web replied %d chars", len(reply))
-            log.debug("Web replied: %r", reply)
+            log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -764,7 +774,6 @@ class WebAssistant:
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            log.debug("Unanswered: %r", question)
             s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
@@ -891,6 +900,16 @@ def _init_com() -> None:
         pass
 
 
+def _warm_up(tts) -> None:
+    started = time.perf_counter()
+    try:
+        tts.warm_up()
+        log.info("TTS %s warmed up in %.2f s", type(tts).__name__,
+                 time.perf_counter() - started)
+    except Exception:
+        log.exception("TTS warm-up failed")
+
+
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
@@ -952,6 +971,12 @@ class WebAuth:
         sid = read_cookie(self.token, conn.cookies.get(COOKIE), self.store.epoch)
         return sid if self.store.valid(sid) else None
 
+    def signed_in(self, sid: str) -> bool:
+        """Is this session still allowed in? For connections that outlive the
+        request that checked them (voice WebSockets): a sign-out revokes the
+        cookie session; a Bearer session lasts as long as the token."""
+        return sid == self.bearer_sid or self.store.listed(sid)
+
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
         return self.assistant.session(sid) if sid else None
@@ -984,10 +1009,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None, failover=None):
+               voice: dict | None = None, failover=None, features=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
-    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md).
+    `features`: a webfeatures.Features (lecture recorder, tutor), whose
+    routes are added before any wrapping, so they get the same auth."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1181,6 +1208,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
 
+    @app.get("/earcons/{name}.wav")
+    def earcon(name: str):
+        """The voice view's soft listening / thinking / ended sounds."""
+        if name not in EARCONS:
+            return error("not found", 404)
+        return FileResponse(STATIC / "earcons" / f"{name}.wav", media_type="audio/wav",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
     from assistant.version import version
 
     @app.get("/healthz")
@@ -1351,6 +1386,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    if features is not None:
+        from assistant import webfeatures
+
+        webfeatures.install(app, features)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -1449,7 +1488,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
     from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
-                               build_tools)
+                               build_tools, register_notes)
     from assistant.history import Recorder, open_store
     import anthropic
 
@@ -1462,6 +1501,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
+    register_notes(tools, memory, config)
     store = open_store(config)  # conversation history (None if off)
     add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1514,16 +1554,21 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
 
     failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
+    features = webfeatures.Features(config, assistant)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"), failover=failover)
+                     voice=config.get("voice"), failover=failover,
+                     features=features)
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
         start_history_sync(config, assistant, token, failover)
+    features.resume_jobs()  # lecture jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

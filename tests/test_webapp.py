@@ -684,6 +684,8 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
+          # the voice view's earcons (assistant/earcons.py)
+          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
@@ -697,7 +699,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
-               and r.path != "/static/vad/{name}"
+               and r.path not in ("/static/vad/{name}", "/earcons/{name}.wav")
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:
@@ -1240,3 +1242,77 @@ def test_sign_out_closes_an_open_voice_socket(path, monkeypatch):
         with connect(http) as ws:
             ws.receive_text()
     assert closed.value.code == 1008
+
+
+def test_sign_out_during_the_voice_handshake_closes_the_socket(monkeypatch):
+    """Review cycle 3: sign-out everywhere landing between the socket's auth
+    check and its registration must not leave a working conversation."""
+    from starlette.websockets import WebSocket, WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice
+    from tests.test_voice_ws import login as voice_login
+
+    _, http = make_voice.__wrapped__(monkeypatch)()
+    voice_login(http)
+    web = http.app.state.web
+    real_accept = WebSocket.accept
+
+    async def accept_after_sign_out(self, *args, **kwargs):
+        web.store.revoke_all()  # "sign out everywhere" in the race window
+        return await real_accept(self, *args, **kwargs)
+
+    monkeypatch.setattr(WebSocket, "accept", accept_after_sign_out)
+    got = {}
+
+    def run():
+        try:
+            with connect(http) as ws:
+                while True:
+                    msg = ws.receive()
+                    if msg["type"] == "websocket.close":
+                        got["closed"] = msg.get("code")
+                        return
+        except WebSocketDisconnect as e:
+            got["closed"] = e.code
+
+    reader = threading.Thread(target=run, daemon=True)
+    reader.start()
+    reader.join(5)
+    assert got.get("closed") == 1008, got
+    assert http.app.state.voice_conversations == {}
+
+
+def test_voice_watchdog_ends_a_revoked_session(monkeypatch):
+    """However the session gets revoked, an open voice socket notices."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    _, http = make_voice.__wrapped__(monkeypatch)()
+    voice_login(http)
+    web = http.app.state.web
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        web.store.revoke(next(iter(web.store.sessions)))  # no end_voice call
+        got = {}
+
+        def read():
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+            except (WebSocketDisconnect, AssertionError) as e:
+                got["error"] = repr(e)
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+
+
+def test_signed_in_check():
+    store = webapp.SessionStore()
+    web = webapp.WebAuth(None, TOKEN, store=store)
+    sid = store.create()
+    assert web.signed_in(sid) and web.signed_in(web.bearer_sid)
+    store.revoke(sid)
+    assert not web.signed_in(sid) and not web.signed_in("made-up")
