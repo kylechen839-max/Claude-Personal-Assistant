@@ -686,9 +686,10 @@ def pgp_commit(repo, parent, message="pgp-signed"):
             "committer Eve <eve@example.com> 1700000000 +0000\n"
             "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n"
             " -----END PGP SIGNATURE-----\n\n" + message + "\n")
+    # bytes, not text: on Windows text mode would write \r\n into the object
     p = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin"], cwd=repo,
-                       input=body, capture_output=True, text=True, check=True)
-    return p.stdout.strip()
+                       input=body.encode(), capture_output=True, check=True)
+    return p.stdout.decode().strip()
 
 
 class VerifierSaysYes(Recorder):
@@ -715,10 +716,10 @@ def test_openpgp_signatures_never_count(repos):
     tag_body = (f"object {bad}\ntype commit\ntag stable-{bad[:7]}\n"
                 "tagger Eve <eve@example.com> 1700000000 +0000\n\nok\n"
                 "-----BEGIN PGP SIGNATURE-----\n\niQEz\n-----END PGP SIGNATURE-----\n")
-    p = subprocess.run(["git", "mktag"], cwd=dev, input=tag_body, capture_output=True,
-                       text=True)
+    p = subprocess.run(["git", "mktag"], cwd=dev, input=tag_body.encode(),
+                       capture_output=True)
     if p.returncode == 0:  # newer git validates; the PGP block is fine for mktag
-        git(dev, "update-ref", f"refs/tags/stable-{bad[:7]}", p.stdout.strip())
+        git(dev, "update-ref", f"refs/tags/stable-{bad[:7]}", p.stdout.decode().strip())
         git(dev, "push", "-q", "origin", "--tags")
         assert up.update().status == SKIPPED
 
