@@ -190,3 +190,22 @@ def test_websocket_from_foreign_origin_refused(make):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/api/ws", headers={"origin": "https://evil.example"}):
             pass
+
+
+def test_sign_out_everywhere_survives_a_restart_without_history(fake_client, tmp_path):
+    """No history (nothing to sync): the sign-out time is kept in the
+    sessions file, so a restarted backend still refuses old tokens."""
+    sessions = tmp_path / "web_sessions.json"
+
+    def boot():
+        assistant = webapp.WebAssistant(
+            lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg), None, PrintTTS())
+        app = webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                                sessions_file=sessions, failover=settings("pi"))
+        return TestClient(app, base_url=PI)
+
+    client = boot()
+    token = sign_in(client)
+    assert client.post("/api/logout-all", headers=bearer(token, **CROSS)).status_code == 200
+    client = boot()  # restart
+    assert client.get("/api/state", headers=bearer(token, **CROSS)).status_code == 401

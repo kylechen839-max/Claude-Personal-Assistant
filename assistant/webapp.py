@@ -159,6 +159,9 @@ class SessionStore:
         self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
         self._saved_at: dict[str, float] = {}
         self._unsaved = False  # a save failed; retry before trusting the file
+        # failover access tokens signed in at or before this unix time are
+        # refused ("Sign out everywhere"); kept here so a restart remembers
+        self.tokens_not_before = 0
         self._load()
 
     def _load(self) -> None:
@@ -169,6 +172,7 @@ class SessionStore:
             self.epoch = str(data["epoch"])
             self.sessions = {str(k): float(v) for k, v in data["sessions"].items()}
             self._saved_at = dict(self.sessions)
+            self.tokens_not_before = int(data.get("tokens_not_before", 0))
         except Exception as e:  # unreadable: start over (everyone signs in again)
             log.warning("Ignoring unreadable web session file %s: %s", self.path, e)
 
@@ -179,7 +183,9 @@ class SessionStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_name(self.path.name + ".tmp")
             tmp.write_text(json.dumps({"epoch": self.epoch,
-                                       "sessions": self.sessions}), encoding="utf-8")
+                                       "sessions": self.sessions,
+                                       "tokens_not_before": self.tokens_not_before}),
+                           encoding="utf-8")
             try:
                 os.chmod(tmp, 0o600)
             except OSError:
@@ -236,6 +242,12 @@ class SessionStore:
         with self.lock:
             if self.sessions.pop(sid, None) is not None:
                 self._save()
+
+    def revoke_tokens(self, not_before: int) -> None:
+        """Remember a "Sign out everywhere" for access tokens (persisted)."""
+        with self.lock:
+            self.tokens_not_before = max(self.tokens_not_before, int(not_before))
+            self._save()
 
     def revoke_all(self) -> list[str]:
         """Sign out every browser; returns the ids that were signed in."""
@@ -956,7 +968,6 @@ class WebAuth:
         # failover access tokens seen (sid -> Claims), the local "sign out
         # everywhere" time for them, and this backend's role (wrap_failover)
         self.token_sessions: dict = {}
-        self.tokens_not_before = 0
         self.failover_role = "pc"
 
     def sid(self, conn) -> str | None:
@@ -1000,7 +1011,7 @@ class WebAuth:
     def token_not_before(self) -> int:
         """App tokens signed in at or before this unix time are refused:
         the latest "sign out everywhere" here or on any synced backend."""
-        nb = self.tokens_not_before
+        nb = self.store.tokens_not_before  # persisted in the sessions file
         log_ = self._sync_log()
         if log_ is not None:
             from assistant.failover.sync import revoked_before
@@ -1009,15 +1020,17 @@ class WebAuth:
         return nb
 
     def revoke_tokens(self, role: str = "pc") -> None:
-        """Sign out every phone holding an access token, on every backend
-        (through the synced history log; without history, this one only)."""
-        self.tokens_not_before = int(time.time())
+        """Sign out every phone holding an access token: on this backend
+        (kept in the sessions file, so it survives a restart) and on every
+        other one through the synced history log (if history is on)."""
+        now = int(time.time())
+        self.store.revoke_tokens(now)
         self.token_sessions.clear()
         log_ = self._sync_log()
         if log_ is not None:
             from assistant.failover.sync import revoke_event
 
-            log_.append([revoke_event(self.tokens_not_before, role)])
+            log_.append([revoke_event(now, role)])
 
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
