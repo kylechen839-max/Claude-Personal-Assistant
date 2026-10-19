@@ -210,7 +210,8 @@ off access tokens: the backend records the time in the synced history log
 every backend refuses app tokens signed in at or before the latest such
 time, including their refresh and open voice sockets. A backend that was
 off picks it up on its next sync; without history (no log to sync) only
-the backend that did it knows, so then rotate `WEB_TOKEN` everywhere.
+the backend that did it knows (it keeps the time in its sessions file, so a
+restart remembers), so then rotate `WEB_TOKEN` on the others.
 
 Trade-offs:
 
