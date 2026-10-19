@@ -147,7 +147,8 @@ def test_kokoro_never_returns_noise(bad, fake_kokoro, kokoro_paths):
 
 
 def test_engine_names_and_cli_choices():
-    assert set(tts.ENGINES) == {"auto", "kokoro", "piper", "pyttsx3", "elevenlabs", "print"}
+    assert set(tts.ENGINES) == {"auto", "kokoro", "piper", "pyttsx3", "espeak",
+                                "elevenlabs", "print"}
     assert cli.parse_args(["--tts", "kokoro"]).tts == "kokoro"
     assert isinstance(make_tts("print"), PrintTTS)
 
@@ -244,7 +245,7 @@ def test_cli_warms_up_the_voice(monkeypatch, tmp_path, restore_root_logging):
     monkeypatch.setattr(cli, "make_tts", lambda *a, **k: Engine())
     monkeypatch.setattr(cli, "build_tools", lambda *a, **k: cli.ToolRegistry())
     monkeypatch.setattr(cli, "build_memory", lambda *a, **k: None)
-    monkeypatch.setattr(cli, "build_chat", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "build_chat", lambda *a, **k: types.SimpleNamespace(incognito=False))
     monkeypatch.setattr(cli, "Transcriber", lambda *a, **k: object())
     monkeypatch.setattr(cli, "run_voice", lambda *a, **k: None)
     toml = tmp_path / "c.toml"
@@ -583,3 +584,19 @@ def test_the_listed_voices_are_in_the_voice_pack(kokoro_files):
     out = run_kokoro("import sys, numpy as np; print(' '.join(np.load(sys.argv[1]).files))",
                      kokoro_files[1])
     assert set(tts_kokoro.ENGLISH_VOICES) <= set(out.split())
+
+
+def test_server_profile_never_picks_kokoro(fake_kokoro, kokoro_paths, no_kokoro, tmp_path,
+                                           monkeypatch, caplog):
+    """Render's memory is tight: the server profile pins Piper (espeak-ng if the
+    voice is missing), whatever config.toml says, even with Kokoro downloaded."""
+    toml = tmp_path / "config.toml"
+    toml.write_text('[tts]\nengine = "auto"\n')
+    cfg = load_config(toml, None, profile="server")["tts"]
+    assert cfg["engine"] == "piper" and cfg["fallback"] == "espeak"
+    cfg.update(kokoro_paths, piper_voice=str(tmp_path / "missing.onnx"))
+    espeak = object()
+    monkeypatch.setattr(tts, "EspeakTTS", lambda: espeak)
+    assert make_tts(cfg["engine"], **cfg) is espeak
+    # "auto" with nothing neural ends at the configured fallback too
+    assert make_tts("auto", **no_kokoro, piper_voice="", fallback="espeak") is espeak

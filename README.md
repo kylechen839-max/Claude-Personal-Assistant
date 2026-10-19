@@ -93,7 +93,7 @@ talking and the `silence_ms` pause that tells it you're done; the last
 figure is the wait you notice. Run with `--timings` to see it on the
 console too.
 
-Things to try: "What's on my calendar tomorrow?", "Move my dentist
+Things to try: "What's on my calendar tomorrow?", "What did we talk about yesterday?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
 "Mark Homework 6 as done", "Delete the study group tomorrow",
 "What's the weather this afternoon?", "Who won the Braves game last night?",
@@ -106,6 +106,89 @@ your Anthropic account per search). "Open ..." requests open pages in this
 computer's default browser. Set `[web] location` in `config.toml` for local
 answers like the weather, and `allowed_domains` / `blocked_domains` to limit
 which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
+
+## Conversation history
+
+Every conversation is saved: wake word and push-to-talk on the PC or Pi,
+text mode, the phone app's push-to-talk and its hands-free voice mode. You
+can search it and pick a conversation up later.
+
+**By voice or text:** "Hey Claude, what did we talk about yesterday?",
+"Find our conversation about the lab report", "Continue our conversation
+about the lab report". Claude searches your history and asks *"Continue
+'Lab report error bars' from Tuesday?"*; say yes and the old conversation
+is loaded, so "and what about standard deviation?" is answered in context.
+This works mid-conversation too (the current one is saved first).
+
+**On the phone:** the clock button at the top of the app opens History:
+a search bar (results update as you type, matching words highlighted),
+filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
+grouped by Today / Yesterday / This week / Older with a source icon, time
+and snippet. Swipe a row left for Pin / Rename / Delete, or long-press it
+(or tap its "..." button) for all actions including Archive and Export.
+Tap a conversation to read it; **Continue this conversation** loads it and
+returns to the chat, and the voice view continues it too (it uses the same
+conversation). Delete always asks first. **Incognito** in the settings
+menu (gear) stops saving for this phone until you turn it off; the header
+shows an "Incognito" badge meanwhile. It follows the phone's light or dark
+setting and works as a home-screen app on iOS.
+
+**From the command line:**
+
+| Command | What it does |
+|---|---|
+| `python -m assistant --history list` | Newest 50 conversations (id, date, source, title); add `--source wake`, `--since 2026-10-01`, `--until 2026-10-14`, `--pinned` |
+| `python -m assistant --history search lab report` | Ranked keyword search with the matching words highlighted (same filters) |
+| `python -m assistant --history show ID` | The whole transcript |
+| `python -m assistant --history export ID --format json` | Export as Markdown (`--format md`, default) or JSON, to the console; redirect with `> file.md` |
+| `python -m assistant --history delete ID` | Delete (asks first; `--yes` skips the question) |
+| `python -m assistant --mode text --continue ID` | Continue a conversation in text mode (`--continue last` for the most recent) |
+| `python -m assistant --incognito` | Save nothing this session: no history and no memory summary |
+
+**What is saved:** what you said and what Claude replied, as text, turn by
+turn as it happens (a crash or power cut loses at most the turn in
+progress), including spoken "yes/no" confirmations and replies you cut off
+(marked "interrupted"). For tool use only the tool name, a few short
+arguments and whether it worked are kept (e.g. "list calendar events, day =
+tomorrow, ok"), never the results, so calendar details or web pages are not
+copied into history. API keys and tokens are masked before saving. When a
+conversation ends, a fast model (`[history] title_model`, Haiku) writes a
+title of up to six words and a one or two sentence summary in the
+background, so replies never wait for it; if the API is unreachable, the
+first thing you said becomes the title.
+
+**Search:** keyword search uses SQLite full-text search (FTS5) over messages,
+titles and summaries, ranked by relevance, with prefix matching (typing
+"chem" finds "chemistry"); if your Python's SQLite lacks FTS5 it falls back
+to simpler matching. When Pinecone memory is on, the conversation's memory
+summary carries the conversation id, so a semantic match ("that thing about
+uncertainty in graphs") also links back to the full conversation. Searching
+5,000 conversations takes well under 100 ms.
+
+**Where it lives:** one SQLite file, `data/history.sqlite` (gitignored) on
+the PC's disk or the Pi's SD card; on the Render deploy the `HISTORY_PATH`
+environment variable points it at the persistent disk
+(`/data/history.sqlite`). Settings in `config.toml` `[history]`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `[history] enabled` | true | Save and search conversations |
+| `[history] path` | "data/history.sqlite" | Where the database file goes (`HISTORY_PATH` overrides) |
+| `[history] retention_days` | 0 | Delete unpinned conversations older than this; 0 = keep forever |
+| `[history] max_mb` | 500 | Size guard: above this, the oldest unpinned conversations are deleted |
+| `[history] incognito` | false | Never save (same as always passing `--incognito`) |
+| `[history] title_model` | "claude-haiku-5-5" | Model for titles and summaries |
+
+Deleting a conversation also deletes its memory summary in Pinecone.
+Privacy details are in SECURITY.md.
+
+**How it's stored:** every change (a message, a title, a pin, a delete) is
+an event in the history sync log (failover's event log, in the same file),
+and the searchable tables are built from those events. With the failover
+setup the Pi, the PC and the cloud exchange events, so all three show the
+same history, and a delete anywhere deletes everywhere (the deleted text is
+wiped from the log too). Retention and the size guard delete the same way,
+so they also apply on every backend.
 
 ## Settings
 
@@ -123,7 +206,7 @@ you are most likely to tune:
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
 | `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
-| `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "elevenlabs" or "print" |
+| `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
 | `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
 | `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
@@ -275,7 +358,9 @@ other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
 `--check` reports whether the token is set. On the Pi it is the same: install
 Tailscale there and run the same two commands.
 
-**On a public server** (e.g. Render, behind its HTTPS proxy): set `WEB_TOKEN`
+**On a public server** the ready-made way is the Docker image and Render
+Blueprint in the next section (it adds an auth wall in front of every route
+and escalating lockouts). By hand, behind an HTTPS proxy: set `WEB_TOKEN`
 as a secret in the host's environment (the app refuses to listen on anything
 but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
 trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
@@ -353,6 +438,90 @@ confirm_timeout`. Voice and push-to-talk share this phone's conversation.
 Replies use the voice from [Voices](#voices) (Kokoro once downloaded),
 rendered sentence by sentence so the first one plays while the rest are
 made; the model is warmed up when the server starts.
+
+## Run it in the cloud (Render)
+
+The phone web app can also run 24/7 on a small paid server at
+[Render](https://render.com), so it works from your iPhone with the PC off.
+The repo has everything: a `Dockerfile` (Whisper and the Piper voice are
+baked into the image, so a restart downloads nothing) and a `render.yaml`
+Blueprint with a `hey-claude` service. In the cloud it runs with
+`ASSISTANT_PROFILE=server`: no mic, speakers or wake word, Piper voice (or
+espeak-ng if the voice is missing), no "open in browser" tool, and logs go
+to Render's log viewer. Secrets live only in Render's settings, never in the
+image or on its disk. It is on the public internet, so it is hardened
+(SECURITY.md, "Cloud server"): only the login page, `/healthz` and the app
+icon work without the token, and wrong tokens slow the sender down and lock
+it out (the right token always works).
+
+Cost: about $25.25 a month: the Standard plan (2 GB RAM, $25) plus a 1 GB
+persistent disk ($0.25/GB). Speech recognition with
+Whisper `base.en` plus the Piper voice was measured at up to 564 MB, which
+doesn't fit the $7 Starter plan's 512 MB (PROGRESS.md, "Cloud hosting").
+Render's free Hobby workspace is enough; you pay only for the service. To
+save money you can switch the service to Starter and set `WHISPER_MODEL` to
+`tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
+mishears more often).
+
+**Persistent disk.** The service has a 1 GB disk mounted at `/data`, and
+the image sets `DATA_DIR=/data` and `HISTORY_PATH=/data/history.sqlite` for
+the conversation-history and lecture features. Until those are merged
+nothing is written there yet: conversations live in memory and end with
+each deploy (long-term memory in Pinecone is unaffected). Everything outside
+`/data` is wiped on each deploy. Render's free instance type can't have a disk, which is one more
+reason the service is on a paid plan. Render takes daily snapshots of the
+disk, but that is the only backup: export your history now and then with
+the history export command (it arrives with the conversation-history
+feature) and keep the file somewhere else. With a disk, Render runs exactly
+one instance and a deploy has a short gap of downtime.
+
+1. **Push** this branch to GitHub (merged into master).
+2. **Create the service.** On render.com: sign up (GitHub login), add a
+   payment card, then **New -> Blueprint**, pick this repository and the
+   `master` branch. Render reads `render.yaml` and shows two services,
+   `hey-claude` and `pinecone-mcp`. It asks for each secret marked
+   `sync: false`; paste them in yourself (they are never in the repo):
+   - `ANTHROPIC_API_KEY`, `PINECONE_API_KEY`, `NOTION_TOKEN`: the same values
+     as in your `.env`.
+   - `GOOGLE_TOKEN_JSON`: open `token.json` (in the project folder on the PC)
+     in Notepad, select all, copy, paste. The whole file, braces included.
+   - `GOOGLE_CLIENT_JSON`: the same for `credentials.json`.
+   - `ASSISTANT_TIMEZONE`: your time zone, e.g. `America/New_York`, so
+     "tomorrow" means your tomorrow (the server runs on UTC).
+   - `WEB_TOKEN` is generated by Render; leave it.
+   Click **Apply**. The first build takes about 10 minutes.
+3. **Publish the Google app.** Google Cloud console -> APIs & Services ->
+   OAuth consent screen (Google Auth Platform -> Audience) -> **Publish
+   app**. In "Testing" mode Google expires refresh tokens after 7 days, which
+   would break the calendar every week. Google then shows an "unverified
+   app" warning when you sign in: that is expected for a personal app (click
+   Advanced -> Go to Hey Claude). After publishing, sign in once more on the
+   PC so the token is a long-lived one: delete `token.json`, run
+   `python -m assistant.tools.calendar`, and paste the new `token.json` into
+   `GOOGLE_TOKEN_JSON` in Render (Environment -> Save; it restarts).
+4. **Check it.** In Render -> hey-claude -> Shell, run
+   `python -m assistant --check` (no mic or speaker checks on a server).
+   The Logs tab should show "Speech models loaded".
+5. **On the iPhone.** Render -> hey-claude -> Environment -> `WEB_TOKEN` ->
+   reveal and copy it (e.g. AirDrop or a note to yourself). Open
+   `https://hey-claude.onrender.com` (the address at the top of the service
+   page; Render may add a suffix) in **Safari**, paste the token once,
+   allow the microphone, then Share -> **Add to Home Screen**. Open it from
+   the home screen from now on; it stays signed in (90 days, renewed
+   each time you use it).
+
+If Google stops working (Render logs say "Google Calendar sign-in could not
+be refreshed"), sign in again on the PC as in step 3 and paste the new
+`token.json`. To sign every phone out, change `WEB_TOKEN` in Render (any 32+
+random characters) and save. `WHISPER_MODEL` picks the speech model:
+`base.en` (default, more accurate) or `tiny.en` (smaller, faster, more
+mistakes). Run the same image anywhere with Docker:
+`docker build -t hey-claude .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
+-e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front, and
+trusts forwarded headers only from 10.x addresses, Render's; set
+`CLOUD_TRUSTED_PROXIES` to your proxy's network, e.g. `172.18.0.0/16`, or to
+nothing). After the first Render deploy, the log's first five "Proxy check"
+lines show what Render's proxy sends; see BLOCKERS.md.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
@@ -705,16 +874,20 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, print
+  tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
   tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
   tts_elevenlabs.py  optional ElevenLabs cloud voice
   earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
+  history.py    conversation history: SQLite store, search, resume
+  history_cli.py  python -m assistant --history ...
   audio.py      wav I/O, resampling, chimes
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
+  history_web.py  phone app history API (/api/conversations)
+  cloud.py      the web app on a public server (auth wall, lockout, /healthz)
   voice_ws.py   voice conversation WebSocket (/api/voice)
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
@@ -726,11 +899,17 @@ assistant/
   host.py       home host supervisor: restarts, updates (python -m assistant.host)
   updater.py    safe update from the stable branch  (--update)
   version.py    git short SHA for /healthz
-  tools/        calendar.py, notion.py, web.py, tool registry
+  tools/        calendar.py, notion.py, web.py, history.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
+                measure_memory.py, container_smoke.sh, ws_smoke.py (cloud image)
+Dockerfile      the cloud image; render.yaml deploys it on Render
 deploy/         hey-claude.service                 (systemd user unit)
+tests/          pytest suite (offline; live tests skip without keys)
+.github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
+                              the Docker image, the Pinecone MCP connector
+
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)

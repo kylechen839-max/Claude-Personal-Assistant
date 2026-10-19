@@ -567,8 +567,11 @@ class WebAssistant:
     def __init__(self, chat_factory: Callable[[ToolRegistry], object],
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
-                 max_sessions: int = 20, clock=time.monotonic):
+                 max_sessions: int = 20, clock=time.monotonic,
+                 history=None, memory=None):
         self.chat_factory = chat_factory
+        self.history = history  # a HistoryStore (conversation history) or None
+        self.memory = memory    # PineconeMemory, for semantic search and deletes
         self.transcriber = transcriber
         self.tts = tts
         self.tools = tools or ToolRegistry()
@@ -649,6 +652,33 @@ class WebAssistant:
         if s is not None:
             self._end(s)
 
+    # conversation history
+    def forget_conversation(self, cid: str) -> None:
+        """A conversation was deleted: drop it from any browser that has it
+        open, so it isn't summarized into memory or saved again."""
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for s in sessions:
+            if s.chat.recorder and s.chat.conversation_id == cid:
+                s.chat.reset()
+                s.chat.recorder.conversation_id = None
+
+    def set_incognito(self, s: Session, on: bool) -> bool:
+        """Switch this browser's incognito mode. The current conversation
+        ends first (saved if it was being saved), so nothing said while
+        incognito ends up in history or memory. False if a turn is running."""
+        if s.chat.recorder is None or s.chat.incognito == on:
+            return True
+        if not s.busy.acquire(timeout=2):
+            return False
+        try:
+            if s.chat.history or s.chat.conversation_id:
+                s.chat.end_conversation()
+            s.chat.recorder.incognito = on
+        finally:
+            s.busy.release()
+        return True
+
     def shutdown(self) -> None:
         with self.lock:
             sessions = list(self.sessions.values())
@@ -687,6 +717,9 @@ class WebAssistant:
     def _run_turn(self, s: Session, text, recording) -> None:
         from assistant.cli import get_reply, is_exit
 
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "web"  # a new conversation started with push-to-talk
         try:
             if recording is not None:
                 text = self.transcribe(recording)
@@ -781,6 +814,9 @@ class WebAssistant:
         if not s.busy.acquire(timeout=2):
             raise RuntimeError("a turn is already running in this session")
         s.listener = on_event
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "voice"  # a new conversation started in voice mode
         deltas: queue.Queue = queue.Queue()
         end = object()
 
@@ -1107,8 +1143,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     def index():
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
-    for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript"),
+    for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
+                        ("app.css", "text/css"), ("sw.js", "text/javascript"),
                         ("update-watch.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -1231,6 +1267,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return {"busy": s.busy.locked(),
                 "confirm": (s.pending.question if s.pending
                             and not s.pending.stream else None),
+                "incognito": s.chat.incognito,
+                "history": assistant.history is not None,
+                "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
 
@@ -1309,6 +1348,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     app.state.voice_conversations = add_voice_routes(
         app, assistant, allowed_origins=web.allowed_origins, voice=voice)
+
+    from assistant import history_web
+
+    history_web.register(app, assistant, session_of, error)
     return app
 
 
@@ -1354,7 +1397,9 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import add_memory_tools, build_memory, build_tools
+    from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
+                               build_tools)
+    from assistant.history import Recorder, open_store
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1366,13 +1411,19 @@ def build_assistant(config: dict, tts_name: str | None = None,
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
+    store = open_store(config)  # conversation history (None if off)
+    add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
     def chat_factory(registry):
+        recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
+                            client_fn=lambda: client,
+                            title_model=config["history"]["title_model"])
         return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
-                          max_tool_rounds=a["max_tool_rounds"], memory=memory)
+                          max_tool_rounds=a["max_tool_rounds"], memory=memory,
+                          recorder=recorder)
 
     stt = config["stt"]
     tts_cfg = config["tts"]
@@ -1381,7 +1432,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"])
+                        confirm_timeout=config["webapp"]["confirm_timeout"],
+                        history=store, memory=memory)
 
 
 def serve(config: dict, host: str | None = None, port: int | None = None,

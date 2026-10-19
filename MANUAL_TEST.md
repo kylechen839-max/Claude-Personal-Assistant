@@ -1,6 +1,6 @@
 # Manual test checklist
 
-One sitting on the Windows PC, about 25 minutes. Do the steps in order; each
+One sitting on the Windows PC, about 35 minutes. Do the steps in order; each
 one says what to do, what should happen, and what to change in `config.toml`
 if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
 then run it again).
@@ -191,6 +191,51 @@ Ctrl+C to stop.
     "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
     `silence_ms` pause.
 
+## 12. Conversation history (4 min)
+- [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
+      lab report graph?" Let the follow-up window close. Wait ~10 s, then
+      `python -m assistant --history list` in a second PowerShell window.
+  - Should: a line with a short title like "Lab report error bars", source
+    `wake`, and today's time.
+- [ ] "Hey Claude, continue our conversation about the lab report."
+  - Should: it asks "Continue 'Lab report error bars' from today? Please say
+    yes or no." Say "yes", then "and what about standard deviation?"
+  - Should: the answer is clearly about error bars (it kept the context).
+    `--history show ID` shows both parts in one conversation.
+- [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
+  - Should: a one or two sentence answer naming the topics.
+- [ ] `python -m assistant --history search error bars`
+  - Should: the conversation, with "error" and "bars" highlighted.
+- [ ] Ctrl+C, run `python -m assistant --mode text --incognito`, type
+      "this is a secret test", then `quit`. Run `--history search secret`.
+  - Should: "No conversations match." (and no "Saved to memory" line).
+- [ ] `python -m assistant --history delete ID` with the lab report id,
+      answer `yes`, then `--history list`.
+  - Should: it's gone. If Pinecone is set up, its memory summary is
+    deleted too (the `voice-assistant` namespace in the Pinecone console
+    has one vector fewer).
+
+## 13. History on the phone (4 min)
+Needs the phone app (`python -m assistant --mode web`, section on the phone
+app above).
+- [ ] Tap the clock button. Type "lab" in the search bar.
+  - Should: within a second, the lab report conversation from step 12 (if
+    not deleted yet; otherwise any conversation) with "lab" highlighted.
+    Rows are grouped under Today / Yesterday / ...
+- [ ] Swipe a row left; tap Pin. Tap the Pinned filter.
+  - Should: only pinned conversations, with a pin icon.
+- [ ] Tap a conversation, then **Continue this conversation**, then ask a
+      follow-up by voice or text ("and what about the conclusion?").
+  - Should: the answer uses the old context.
+- [ ] Open the voice conversation view and ask another follow-up.
+  - Should: still the same conversation (History shows it with the new turns).
+- [ ] Long-press a row, choose Delete..., confirm.
+  - Should: it disappears; Cancel instead keeps it.
+- [ ] Gear → Incognito on. Say something. Open History and search for it.
+  - Should: not found; the header shows "Incognito". Turn it off again.
+- [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
+      the back button and the dialogs work, light and dark mode both read well.
+
 Note anything that failed or any setting you changed in BLOCKERS.md.
 
 ---
@@ -233,7 +278,6 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
       about?"
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
-
 
 ## Voice conversation on the phone (optional, ~12 min)
 In the phone web app, tap **Voice conversation**. Turn the latency panel on
@@ -291,6 +335,40 @@ with the stopwatch button.
     saved to memory" (if anything memorable was said).
 - [ ] Leave it open and silent for over 2 minutes.
   - Should: it ends by itself ("Ended after a quiet stretch").
+
+## Cloud server on Render (optional, ~30 min)
+Setup is in README.md ("Run it in the cloud (Render)"). Your PC can be off
+for all of this except the Google sign-in.
+- [ ] Render: New -> Blueprint -> this repo; paste `ANTHROPIC_API_KEY`,
+      `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+      `GOOGLE_TOKEN_JSON` (all of `token.json`) and `GOOGLE_CLIENT_JSON` (all
+      of `credentials.json`) yourself. Apply.
+  - Should: `hey-claude` turns "Live" after the build; Logs show "Speech
+    models loaded" and no tracebacks.
+- [ ] Google Cloud console -> OAuth consent screen -> **Publish app**. Then
+      sign in again on the PC (delete `token.json`, run
+      `python -m assistant.tools.calendar`; the "unverified app" screen is
+      expected: Advanced -> Go to Hey Claude) and paste the new `token.json`
+      into `GOOGLE_TOKEN_JSON` in Render.
+  - Should: a week later the calendar still works (in Testing mode it would
+    stop after 7 days).
+- [ ] Render Shell: `python -m assistant --check`.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
+    time zone, Whisper model and Piper voice OK.
+- [ ] In Safari on the iPhone (Wi-Fi off), open
+      `https://hey-claude.onrender.com`. Enter a wrong token, then the
+      `WEB_TOKEN` from Render -> Environment.
+  - Should: "wrong token", then the chat page.
+- [ ] Share -> Add to Home Screen; open it from the home screen; hold the mic:
+      "What's on my calendar tomorrow?"
+  - Should: full screen, your words appear, then the answer spoken within a
+    few seconds, with tomorrow in your time zone.
+- [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
+      by voice.
+  - Should: Yes/No buttons and a spoken question, as on the PC.
+- [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
+- [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
+  - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 
 ---
 

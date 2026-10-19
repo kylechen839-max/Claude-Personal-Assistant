@@ -16,29 +16,156 @@ log = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
+# On a server the OAuth files come from the environment instead (no files
+# to upload, nothing written back): the contents of token.json and of
+# credentials.json, pasted into the host's secret settings.
+TOKEN_ENV = "GOOGLE_TOKEN_JSON"
+CLIENT_ENV = "GOOGLE_CLIENT_JSON"
+
+
+class GoogleSignInError(RuntimeError):
+    """Google refused to refresh the sign-in (revoked, or expired: in the
+    consent screen's Testing mode refresh tokens last only 7 days)."""
+
+
+REFRESH_FAILED = ("Google Calendar sign-in could not be refreshed (%s). Sign in "
+                  "again on your PC (python -m assistant.tools.calendar) and "
+                  "update token.json, or the GOOGLE_TOKEN_JSON secret on the "
+                  "server. If this happens every week, publish the app on the "
+                  "Google OAuth consent screen (README).")
+
+
+def _json_env(name: str, environ) -> dict | None:
+    """Parsed JSON from an env var; errors never include the value."""
+    import json
+
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise ValueError(f"{name} is set but is not valid JSON (paste the whole "
+                         "file contents)") from None
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a JSON object (the whole file)")
+    return value
+
+
+def client_config(credentials_path="credentials.json", environ=os.environ) -> dict | None:
+    """The OAuth client (credentials.json) from GOOGLE_CLIENT_JSON or the file."""
+    import json
+
+    config = _json_env(CLIENT_ENV, environ)
+    if config is None and Path(credentials_path).exists():
+        config = json.loads(Path(credentials_path).read_text(encoding="utf-8"))
+    return config
+
+
+def token_info(token_path="token.json", credentials_path="credentials.json",
+               environ=os.environ) -> tuple[dict | None, bool]:
+    """(authorized-user info, came from the environment).
+
+    A token without client_id/client_secret (e.g. trimmed by hand) gets them
+    from the client config, which refreshing needs."""
+    import json
+
+    info = _json_env(TOKEN_ENV, environ)
+    from_env = info is not None
+    if info is None and Path(token_path).exists():
+        info = json.loads(Path(token_path).read_text(encoding="utf-8"))
+    if info is not None and not (info.get("client_id") and info.get("client_secret")):
+        client = client_config(credentials_path, environ) or {}
+        client = client.get("installed") or client.get("web") or {}
+        for key in ("client_id", "client_secret"):
+            if client.get(key):
+                info.setdefault(key, client[key])
+    return info, from_env
+
+
+def has_credentials(credentials_path="credentials.json", token_path="token.json",
+                    environ=os.environ) -> bool:
+    return bool(environ.get(TOKEN_ENV, "").strip() or environ.get(CLIENT_ENV, "").strip()
+                or Path(credentials_path).exists() or Path(token_path).exists())
+
+
+def _warn_on_refresh_failure(creds):
+    """Make every later refresh (google-auth refreshes inside API calls)
+    log a clear warning, with the error code only, if Google refuses."""
+    from google.auth.exceptions import RefreshError
+
+    original = creds.refresh
+
+    def refresh(request):
+        try:
+            original(request)
+        except RefreshError as e:
+            reason = _refresh_reason(e)
+            log.warning(REFRESH_FAILED, reason)
+            raise GoogleSignInError(
+                f"Google sign-in expired or was revoked ({reason}); "
+                "Kyle needs to sign in again.") from None
+
+    creds.refresh = refresh
+    return creds
+
+
+def _refresh_reason(error) -> str:
+    """A short, secret-free reason: the OAuth error code, e.g. invalid_grant."""
+    import re
+
+    text = str(error.args[0]) if error.args else ""
+    m = re.match(r"\s*([a-z_]+)\b", text)
+    return m.group(1) if m else type(error).__name__
+
+
 def get_credentials(credentials_path="credentials.json", token_path="token.json",
-                    open_browser: bool = True):
+                    open_browser: bool = True, save_token: bool = True,
+                    environ=os.environ):
     """OAuth for an installed app. The first run opens a browser to sign in
-    and saves token.json; later runs refresh it silently."""
+    and saves token.json; later runs refresh it silently.
+
+    GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON, when set, replace token.json /
+    credentials.json. A token from the environment is refreshed in memory
+    only and never written to disk; nor is any token if `save_token` is off
+    (the server profile). There is no interactive sign-in then: a server
+    has no browser."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
 
+    info, from_env = token_info(token_path, credentials_path, environ)
+    persist = save_token and not from_env
     creds = None
-    if Path(token_path).exists():
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+    if info:
+        try:
+            creds = Credentials.from_authorized_user_info(info, SCOPES)
+        except ValueError as e:  # names the missing fields, not values
+            raise GoogleSignInError(f"Unusable Google token "
+                                    f"({TOKEN_ENV if from_env else token_path}): "
+                                    f"{e}") from None
+    if creds is not None:
+        _warn_on_refresh_failure(creds)
     if creds and creds.valid:
         return creds
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+    if creds and creds.refresh_token:
+        creds.refresh(Request())  # GoogleSignInError (logged) if refused
+    elif from_env or not save_token:
+        raise GoogleSignInError(
+            f"No usable Google sign-in: set {TOKEN_ENV} to the contents of a "
+            "token.json made on your PC (python -m assistant.tools.calendar)")
     else:
-        if not Path(credentials_path).exists():
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+        client = client_config(credentials_path, environ)
+        if client is None:
             raise FileNotFoundError(
                 f"{credentials_path} not found. Create an OAuth client "
                 "(Desktop app) in Google Cloud Console and download it.")
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=open_browser)
-    Path(token_path).write_text(creds.to_json())
+        flow = InstalledAppFlow.from_client_config(client, SCOPES)
+        creds = _warn_on_refresh_failure(
+            flow.run_local_server(port=0, open_browser=open_browser))
+    if persist:
+        Path(token_path).write_text(creds.to_json())
     return creds
 
 
@@ -99,10 +226,11 @@ def _is_date(value: str) -> bool:
 class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
-                 timezone: str | None = None):
+                 timezone: str | None = None, save_token: bool = True):
         self._service = service
         self.credentials_path = credentials_path
         self.token_path = token_path
+        self.save_token = save_token
         self.calendar_id = calendar_id
         self.tz = local_zone(timezone)
 
@@ -111,7 +239,8 @@ class GoogleCalendar:
         if self._service is None:
             from googleapiclient.discovery import build
 
-            creds = get_credentials(self.credentials_path, self.token_path)
+            creds = get_credentials(self.credentials_path, self.token_path,
+                                    save_token=self.save_token)
             self._service = build("calendar", "v3", credentials=creds,
                                   cache_discovery=False)
         return self._service

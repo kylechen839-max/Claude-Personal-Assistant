@@ -1,6 +1,50 @@
-# Render Blueprint for the Pinecone MCP connector (pinecone-mcp/).
-# The voice assistant itself runs on Kyle's PC / Pi and is not deployed here.
+# Render Blueprint (render.com): Dashboard -> New -> Blueprint -> this repo.
+#  - hey-claude: the phone web app (python -m assistant --mode web) running
+#    24/7 from the Dockerfile, so it works with Kyle's PC off. Setup steps:
+#    README "Run it in the cloud (Render)".
+#  - pinecone-mcp: the Pinecone MCP connector (pinecone-mcp/).
 services:
+  - type: web
+    name: hey-claude
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Measured (PROGRESS.md, "Cloud hosting"): base.en + Piper peaks at
+    # 465-564 MB, more than Starter's 512 MB; Standard (2 GB, $25/month) has
+    # room. Starter ($7) only with WHISPER_MODEL=tiny.en, and tightly.
+    plan: standard
+    healthCheckPath: /healthz
+    # Persistent disk (paid instance types only; $0.25/GB a month): history,
+    # lecture audio, job state. Snapshotted daily by Render; export too.
+    # A service with a disk runs one instance and redeploys with a short gap.
+    disk:
+      name: hey-claude-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # Secrets: Render asks for each one when the Blueprint is created.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: NOTION_TOKEN
+        sync: false
+      - key: GOOGLE_TOKEN_JSON      # the whole contents of token.json
+        sync: false
+      - key: GOOGLE_CLIENT_JSON     # the whole contents of credentials.json
+        sync: false
+      - key: ASSISTANT_TIMEZONE     # e.g. America/New_York ("tomorrow" is in this zone)
+        sync: false
+      # The phone's sign-in token: Render makes a random one (256 bits).
+      - key: WEB_TOKEN
+        generateValue: true
+      - key: WHISPER_MODEL          # base.en (better) or tiny.en (smaller, faster)
+        value: base.en
+      - key: DATA_DIR               # on the persistent disk
+        value: /data
+      - key: HISTORY_PATH
+        value: /data/history.sqlite
+
   - type: web
     name: pinecone-mcp
     runtime: node

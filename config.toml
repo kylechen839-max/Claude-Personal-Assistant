@@ -104,6 +104,16 @@ enabled = false               # set true in config.local.toml, after signing is 
 channel = "stable"
 check_minutes = 15
 
+[history]
+# Every conversation (wake word, text, phone) is saved here and can be
+# searched and continued: python -m assistant --history list
+enabled = true
+path = "data/history.sqlite"  # HISTORY_PATH in the environment overrides (Render: /data/history.sqlite)
+retention_days = 0            # delete unpinned conversations older than this many days; 0 = keep forever
+max_mb = 500                  # size guard: the oldest unpinned conversations are deleted above this
+incognito = false             # true = save nothing (also no Pinecone summary); or run with --incognito
+title_model = "claude-haiku-5-5"  # fast model that writes each conversation's title and summary
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

@@ -4,9 +4,10 @@ Every engine implements `speak(text)` and `save_to_file(text, path)`.
 Pick one with `make_tts(name)`: "auto" (default: the best voice whose
 files are present), "kokoro" (most natural, assistant/tts_kokoro.py),
 "piper" (offline neural voice, great on a Raspberry Pi), "pyttsx3" (the OS
-voice), "elevenlabs" (optional paid cloud voice, assistant/tts_elevenlabs.py)
-or "print" (no audio). A missing voice falls back down that list
-(Kokoro -> Piper -> pyttsx3) with one log line saying why.
+voice), "espeak" (the espeak-ng command, for servers), "elevenlabs"
+(optional paid cloud voice, assistant/tts_elevenlabs.py) or "print" (no
+audio). A missing voice falls back down that list (Kokoro -> Piper ->
+`fallback`, pyttsx3 by default) with one log line saying why.
 
 Download voices: python -m assistant --download-voice kokoro
                  python -m assistant --download-voice en_US-lessac-medium
@@ -167,6 +168,43 @@ class PiperTTS:
             audio.play(samples, sr)
 
 
+class EspeakTTS:
+    """The espeak-ng command line: robotic, but always there on a Linux
+    server (the cloud image's fallback when the Piper voice is missing).
+    Renders files only; there are no speakers on a server."""
+
+    def __init__(self, rate: int = 175, voice: str | None = None,
+                 command: str | None = None):
+        import shutil
+
+        self.rate = rate
+        self.voice = voice or "en-us"
+        self.command = command or shutil.which("espeak-ng") or shutil.which("espeak")
+        if not self.command:
+            raise RuntimeError("espeak-ng is not installed "
+                               "(sudo apt-get install espeak-ng)")
+        self.on_audio_start = None
+
+    def save_to_file(self, text: str, path: str | Path) -> None:
+        import subprocess
+
+        # "--" so a reply starting with "-" isn't read as an option
+        subprocess.run([self.command, "-v", self.voice, "-s", str(int(self.rate)),
+                        "-w", str(path), "--", text], check=True, timeout=60,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def speak(self, text: str) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "say.wav"
+            self.save_to_file(text, path)
+            samples, sr = audio.read_wav(path)
+        if self.on_audio_start:
+            self.on_audio_start()
+        audio.play(samples, sr)
+
+
 class PrintTTS:
     """No audio: prints the text. Useful for tests and headless debugging."""
 
@@ -228,6 +266,11 @@ def make_tts(name: str = "auto", **options) -> TTS:
     def pyttsx3():
         return Pyttsx3TTS(rate=options.get("rate", 185), voice=options.get("voice"))
 
+    # the last resort: pyttsx3, or espeak on a server (the server profile)
+    fallback_name = (options.get("fallback") or "pyttsx3").lower()
+    if fallback_name not in ("pyttsx3", "espeak", "print"):
+        fallback_name = "pyttsx3"
+
     def local():
         """auto: the best local voice that is set up."""
         k = tts_kokoro.kokoro_problem(kokoro_model, kokoro_voices)
@@ -239,9 +282,10 @@ def make_tts(name: str = "auto", **options) -> TTS:
             log.info("TTS: Piper (%s)%s", piper_voice,
                      "" if k else "; Kokoro is slow on ARM, so Piper is preferred")
             return PiperTTS(piper_voice)
-        log.info("TTS: pyttsx3; no Kokoro (%s) and no Piper voice (%s). For a "
-                 "natural voice: python -m assistant --download-voice kokoro", k, p)
-        return pyttsx3()
+        log.info("TTS: %s; no Kokoro (%s) and no Piper voice (%s). For a "
+                 "natural voice: python -m assistant --download-voice kokoro",
+                 fallback_name, k, p)
+        return make_tts(fallback_name, **options)
 
     if name == "elevenlabs":
         from assistant import tts_elevenlabs
@@ -268,10 +312,16 @@ def make_tts(name: str = "auto", **options) -> TTS:
         problem = piper_voice_problem(piper_voice)
         if problem is None:
             return PiperTTS(piper_voice)
-        log.warning("Piper voice unavailable, using pyttsx3 instead: %s. "
+        name = fallback_name
+        log.warning("Piper voice unavailable, using %s instead: %s. "
                     "Download one with: python -m assistant.tts "
-                    "--download-voice %s", problem, DEFAULT_PIPER_VOICE)
-        name = "pyttsx3"
+                    "--download-voice %s", name, problem, DEFAULT_PIPER_VOICE)
+    if name == "espeak":
+        try:
+            return EspeakTTS()
+        except RuntimeError as e:  # keep the server up: replies still show as text
+            log.error("%s; replies will have no audio", e)
+            return PrintTTS()
     if name == "pyttsx3":
         return pyttsx3()
     if name == "print":
@@ -279,7 +329,7 @@ def make_tts(name: str = "auto", **options) -> TTS:
     raise ValueError(f"Unknown TTS engine: {name}")
 
 
-ENGINES = ("auto", "kokoro", "piper", "pyttsx3", "elevenlabs", "print")
+ENGINES = ("auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs", "print")
 
 
 # Official Piper voices: https://huggingface.co/rhasspy/piper-voices
