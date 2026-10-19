@@ -305,6 +305,12 @@ class HistoryStore:
         self.fts = self._ensure_fts() if use_fts else self._drop_fts_triggers()
         self.eventlog = _open_eventlog(self.path) if eventlog is None else (
             eventlog or None)
+        # Redaction rewrites rows in the event log through its own
+        # connection: zero the old bytes there too (SQLite builds differ in
+        # the default; Python's on Windows leaves them in the file).
+        db = getattr(self.eventlog, "_db", None)
+        if isinstance(db, sqlite3.Connection):
+            db.execute("PRAGMA secure_delete = ON")
         self._catch_up()
         self.prune()
 

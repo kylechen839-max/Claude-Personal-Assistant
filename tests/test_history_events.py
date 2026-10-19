@@ -78,7 +78,16 @@ def test_each_change_is_an_event(tmp_path):
     assert projection(s) == materialized(s.eventlog.all())
 
 
-def test_delete_is_a_tombstone_that_redacts_and_purges(tmp_path):
+def test_delete_is_a_tombstone_that_redacts_and_purges(tmp_path, monkeypatch):
+    # As on Windows, where Python's SQLite doesn't zero deleted bytes by
+    # default: the store must turn that on for both connections.
+    connect = sqlite3.connect
+
+    def insecure(*a, **kw):
+        con = connect(*a, **kw)
+        con.execute("PRAGMA secure_delete = OFF")
+        return con
+    monkeypatch.setattr(sqlite3, "connect", insecure)
     s = make(tmp_path)
     cid = s.create("text")
     s.append(cid, "user", "my locker code is zebra4417")
