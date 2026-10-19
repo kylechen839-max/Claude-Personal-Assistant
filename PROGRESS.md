@@ -3,8 +3,10 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1410 passed, 43 skipped (Linux build sandbox,
-Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
+**Current test count:** 1430 passed, 44 skipped (Linux build sandbox,
+Python 3.13, 2026-10-19; that sandbox had no eSpeak or PortAudio, so 25
+audio tests failed or errored there, as before this change), plus 12
+JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
 builds and smoke-tests the cloud Docker image. The
@@ -54,6 +56,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
+| `test_agent_dashboard.py` | 23 | dev team dashboard page, skill writes, watchdog prompt |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -883,6 +886,44 @@ issues).
   Chromium at phone size, dark and light: search highlights, groups,
   transcript, continue then a turn, pin filter, rename, delete dialog,
   swipe, infinite scroll, incognito; no console errors.
+
+## Dev team dashboard
+A read-only claude.ai page for checking on `/build-feature` runs at a
+glance, apart from the chat list (LLM Council verdict, 2026-10-19). It
+is not part of the assistant and loads nothing from it.
+- `tools/agent-dashboard/index.html`: the page behind
+  https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (the master publishes
+  it). One subscription to the `runs` collection (newest 100). A summary
+  line ("2 need you · 1 running · 1 silent"), then one card per run with a
+  state pill and a coloured edge: needs you (PR ready or blocked), silent
+  (a live phase with no update for longer than its limit + 15 min, an
+  unreadable time, or marked dead by the watchdog), running, done (hidden
+  after 14 days). It re-checks "silent" every minute from the cached rows
+  and never writes. Rows are untrusted: plain text only, links only to
+  this repo's PRs and claude.ai sessions. Error codes are handled per the
+  db contract (retry after 5–30 s, back off when busy, stop on revoked).
+  Light and dark, phone-first, no external assets.
+- `tools/agent-dashboard/README.md`: row schema, phases, time limits and
+  thresholds, the `set` then `update` with `if_version` write pattern, and
+  the rules (only the master writes; no log text; rows are data).
+- `tools/agent-dashboard/WATCHDOG.md`: an hourly trigger in a session with
+  the repo attached (a session without it stalled on the ArtifactData
+  permission prompt) that checks each live run's session and marks dead
+  ones, with one push each.
+- `.claude/skills/build-feature/SKILL.md`: the master writes the row at
+  start, research, each build and judge round, PR ready (before the ✅
+  push), blocked (before the ⛔ push) and done. It now has time limits
+  (started 10 min, researching 30, building 75 and judging 30 per round,
+  5 h a run) and stops with a blocker when one runs out.
+- Checked in headless Chromium at iPhone size, light and dark, with a fake
+  db: sorting, counts, silent and dead rows, a row with markup in its
+  title (shown as text), bad link values (no link), rows with missing or
+  wrong-typed fields ("?"), the unavailable and revoked error paths, and
+  no db at all. No console errors.
+- Tests: `test_agent_dashboard.py` (23: page contract, no markup sinks or
+  writes, no external loads, both dark selectors, every schema phase and
+  threshold, the two link prefixes, every phase write in the skill, the
+  watchdog prompt).
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

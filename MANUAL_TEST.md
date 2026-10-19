@@ -485,3 +485,15 @@ phone app installed from the cloud URL with Tailscale on.
 - [ ] From a laptop browser *not* on the app: open
       `https://<pi>.<tailnet>.ts.net/healthz`.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
+
+## Agent run dashboard (optional, ~3 min)
+The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
+(see tools/agent-dashboard/README.md).
+- [ ] Open it on the iPhone in Safari, signed in to claude.ai.
+  - Should: a summary line at the top (for example "1 running") and one
+    card per run, or "No runs yet". Nothing is cut off at the sides.
+- [ ] Switch the phone between light and dark mode.
+  - Should: the page follows, and the coloured edges and labels stay easy
+    to read in both.
+- [ ] Share -> Add to Home Screen, then open it from the icon.
+  - Should: the same list. Tapping Session or PR opens it in a new tab.
