@@ -45,7 +45,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_failover_leader.py` | 216 | failover: leader check for scheduled jobs (incl. the real network topology) |
 | `test_failover_eventlog.py` | 6 | failover: the SQLite event log |
 | `test_failover_config.py` | 8 | failover: `[failover]` settings, `--role` |
-| `test_failover_cloud.py` | 13 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
+| `test_failover_cloud.py` | 17 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 | `test_gmail.py` | 28 | Gmail tools, scopes, email as untrusted input |

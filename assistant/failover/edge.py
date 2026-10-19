@@ -87,7 +87,8 @@ class EdgeMiddleware:
                  limiter=None, client_ip=default_client_ip,
                  trusts_proxy=lambda scope: False,
                  ws_auth_timeout: float = 5.0, protected_prefix: str = "/api/",
-                 root_bearer_sid: str | None = None):
+                 root_bearer_sid: str | None = None,
+                 not_before=lambda: 0):
         self.app = app
         self.authority = authority
         self.role = role
@@ -110,6 +111,9 @@ class EdgeMiddleware:
         # Scripts may also send WEB_TOKEN itself as the bearer token (as the
         # web app allows without failover); they share this one session.
         self.root_bearer_sid = root_bearer_sid
+        # "Sign out everywhere": app tokens from a sign-in at or before this
+        # unix time are refused (synced between backends, see webapp)
+        self.not_before = not_before
 
     @property
     def state(self):
@@ -128,11 +132,13 @@ class EdgeMiddleware:
             norm = normalize_url(origin)
         except ValueError:
             return False, None  # "null", garbage
-        if norm in self.app_origins:
-            return True, norm
         trusted = bool(scope is not None and self.trusts_proxy(scope))
         if urlsplit(norm).netloc in own_origins(headers, trusted):
-            return True, None  # same origin: no CORS headers needed
+            # same origin (also the cloud host, whose origin is the app's):
+            # no CORS headers needed, and cookie clients stay cookie clients
+            return True, None
+        if norm in self.app_origins:
+            return True, norm
         return False, None
 
     async def _fail(self, ip: str) -> None:
@@ -149,10 +155,16 @@ class EdgeMiddleware:
     def check_bearer(self, headers: dict[str, str], path: str) -> Claims | None:
         given = bearer_of(headers.get("authorization"))
         scope = self.needed_scope(path)
-        claims = self.authority.verify(given, scope=scope)
+        claims = self.app_claims(self.authority.verify(given, scope=scope))
         if claims is None and given and self.root_bearer_sid and scope == "app" \
                 and not given.startswith("hc1.") and self.authority.check_root(given):
             claims = Claims("app", self.root_bearer_sid, 0, 0)
+        return claims
+
+    def app_claims(self, claims: Claims | None) -> Claims | None:
+        """None for an app token signed in before the last sign-out-everywhere."""
+        if claims is not None and claims.scope == "app" and claims.signed_in <= self.not_before():
+            return None
         return claims
 
     # --- ASGI ---------------------------------------------------------------
@@ -216,7 +228,8 @@ class EdgeMiddleware:
                 # phone retrying must not lock out its owner). Only a bearer
                 # that could be a guess at WEB_TOKEN itself counts.
                 given = bearer_of(headers.get("authorization"))
-                if given and self.root_bearer_sid and not given.startswith("hc1."):
+                if given and self.root_bearer_sid and not given.startswith("hc1.") \
+                        and self.needed_scope(path) == "app":
                     ip = self.client_ip(scope)
                     if self.limiter.blocked(ip):
                         return await _json(send, 429, {"error": "too many attempts"},
@@ -254,8 +267,8 @@ class EdgeMiddleware:
         if body is None:
             return await _json(send, 413, {"error": "too large"}, cors())
         if path == "/api/auth/refresh":
-            claims = self.authority.verify(bearer_of(headers.get("authorization")),
-                                           scope="app")
+            claims = self.app_claims(self.authority.verify(
+                bearer_of(headers.get("authorization")), scope="app"))
             if claims is None:  # not counted: see the bearer check above
                 return await _json(send, 401, {"error": "unauthorized"},
                                    cors([("www-authenticate", "Bearer")]))
@@ -322,7 +335,8 @@ class EdgeMiddleware:
         try:
             data = json.loads(msg.get("text") or "")
             if isinstance(data, dict) and data.get("type") == "auth":
-                claims = self.authority.verify(str(data.get("token", "")), scope="app")
+                claims = self.app_claims(
+                    self.authority.verify(str(data.get("token", "")), scope="app"))
         except ValueError:
             pass
         if claims is None:

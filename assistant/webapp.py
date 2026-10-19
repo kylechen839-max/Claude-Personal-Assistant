@@ -953,10 +953,17 @@ class WebAuth:
         self.limiter = limiter or LoginLimiter()
         self.store = store or SessionStore()
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
+        # failover access tokens seen (sid -> Claims), the local "sign out
+        # everywhere" time for them, and this backend's role (wrap_failover)
+        self.token_sessions: dict = {}
+        self.tokens_not_before = 0
+        self.failover_role = "pc"
 
     def sid(self, conn) -> str | None:
         claims = getattr(conn, "scope", {}).get("auth")  # set by failover.edge.EdgeMiddleware
         if claims is not None:
+            if claims.scope == "app" and claims.expires:
+                self.token_sessions[claims.sid] = claims  # for signed_in()
             return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
@@ -974,8 +981,43 @@ class WebAuth:
     def signed_in(self, sid: str) -> bool:
         """Is this session still allowed in? For connections that outlive the
         request that checked them (voice WebSockets): a sign-out revokes the
-        cookie session; a Bearer session lasts as long as the token."""
-        return sid == self.bearer_sid or self.store.listed(sid)
+        cookie session; a Bearer session lasts as long as the token (a
+        failover access token: until it expires or "sign out everywhere")."""
+        if sid == self.bearer_sid or self.store.listed(sid):
+            return True
+        claims = self.token_sessions.get(sid)
+        if claims is None:
+            return False
+        from assistant.failover.tokens import LEEWAY
+
+        return (claims.expires + LEEWAY > time.time()
+                and claims.signed_in > self.token_not_before())
+
+    # --- failover access tokens (assistant/failover) ---
+    def _sync_log(self):
+        return getattr(getattr(self.assistant, "history", None), "sync_log", None)
+
+    def token_not_before(self) -> int:
+        """App tokens signed in at or before this unix time are refused:
+        the latest "sign out everywhere" here or on any synced backend."""
+        nb = self.tokens_not_before
+        log_ = self._sync_log()
+        if log_ is not None:
+            from assistant.failover.sync import revoked_before
+
+            nb = max(nb, revoked_before(log_))
+        return nb
+
+    def revoke_tokens(self, role: str = "pc") -> None:
+        """Sign out every phone holding an access token, on every backend
+        (through the synced history log; without history, this one only)."""
+        self.tokens_not_before = int(time.time())
+        self.token_sessions.clear()
+        log_ = self._sync_log()
+        if log_ is not None:
+            from assistant.failover.sync import revoke_event
+
+            log_.append([revoke_event(self.tokens_not_before, role)])
 
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
@@ -1281,11 +1323,15 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     @app.post("/api/logout-all")
     async def logout_all(request: Request):
-        """Sign out every browser (e.g. a lost phone). Bearer clients use the
-        token itself: change WEB_TOKEN to cut those off."""
+        """Sign out every browser (e.g. a lost phone), and with failover every
+        phone's access token on every synced backend. Clients sending
+        WEB_TOKEN itself as bearer: change WEB_TOKEN to cut those off."""
         if web.sid(request) is None:
             return unauthorized()
         revoked = store.revoke_all()
+        # failover access tokens (phones) too, on every synced backend
+        revoked += list(web.token_sessions)
+        web.revoke_tokens(web.failover_role)
         await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
         for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)
@@ -1404,6 +1450,7 @@ def wrap_failover(app, token: str, failover, web: WebAuth):
     from assistant.failover.edge import EdgeMiddleware
     from assistant.failover.tokens import TokenAuthority
 
+    web.failover_role = failover.role
     routes = {}
     history = getattr(web.assistant, "history", None)
     sync_log = getattr(history, "sync_log", None)
@@ -1419,7 +1466,8 @@ def wrap_failover(app, token: str, failover, web: WebAuth):
                           client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
                           trusts_proxy=lambda scope: web.trusted_proxy.trusts(
                               HTTPConnection(scope)),
-                          root_bearer_sid=web.bearer_sid)
+                          root_bearer_sid=web.bearer_sid,
+                          not_before=web.token_not_before)
 
 
 def start_history_sync(config: dict, assistant, token: str, failover):

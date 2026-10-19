@@ -222,3 +222,60 @@ def test_unauthenticated_voice_sockets_are_capped_until_their_first_message(clou
                                                             Origin=APP)) as ws:
         ws.send_text(json.dumps({"type": "auth", "token": token}))
         assert json.loads(ws.receive_text()) == {"type": "auth_ok"}
+
+
+# --- final review: sign out everywhere, voice over tokens, cookies on the cloud ---
+
+def test_sign_out_everywhere_cuts_off_access_tokens_on_every_backend(cloud_app, tmp_path):
+    from assistant.failover.sync import REVOKE_CONV
+
+    _, client, history = cloud_app()
+    token = sign_in(client)
+    assert client.get("/api/state", headers=bearer(token)).status_code == 200
+    assert client.post("/api/logout-all", headers=bearer(token)).status_code == 200
+    assert client.get("/api/state", headers=bearer(token)).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(token)).status_code == 401
+    # it is in the synced log, so another backend that syncs refuses it too
+    revoke = history.sync_log.by_conv(REVOKE_CONV)
+    assert revoke
+    pi_history = HistoryStore(tmp_path / "pi.sqlite", origin="pi")
+    pi_history.sync_log.append(revoke)
+    authority = TokenAuthority(TOKEN)
+    from assistant.failover.edge import EdgeMiddleware
+    from assistant.failover.sync import revoked_before
+
+    edge = EdgeMiddleware(lambda *a: None, authority=authority, role="pi",
+                          not_before=lambda: revoked_before(pi_history.sync_log))
+    assert edge.app_claims(authority.verify(token)) is None
+    # signing in again afterwards works
+    import time
+
+    time.sleep(1.05)  # sign-in times are in whole seconds
+    fresh = sign_in(client)
+    assert client.get("/api/state", headers=bearer(fresh)).status_code == 200
+
+
+def test_voice_over_an_access_token_reaches_ready(cloud_app):
+    _, client, _ = cloud_app()
+    token = sign_in(client)
+    with client.websocket_connect("/api/voice?auth=first", headers=hdr(Origin=APP)) as ws:
+        ws.send_text(json.dumps({"type": "auth", "token": token}))
+        assert json.loads(ws.receive_text()) == {"type": "auth_ok"}
+        assert json.loads(ws.receive_text())["type"] == "ready"
+
+
+def test_cookie_clients_on_the_cloud_with_failover(cloud_app):
+    _, client, _ = cloud_app()
+    same = hdr(Origin=APP)  # the app origin is the cloud's own origin
+    assert client.post("/api/login", json={"token": TOKEN}, headers=same).status_code == 200
+    r = client.get("/api/state", headers=same)
+    assert r.status_code == 200 and "access-control-allow-origin" not in r.headers
+
+
+def test_web_token_as_sync_bearer_is_not_counted(cloud_app):
+    """WEB_TOKEN itself is right, just not a sync token: 401, not a failure."""
+    _, client, _ = cloud_app()
+    for _ in range(8):
+        assert client.get("/api/sync/events", headers=bearer(TOKEN)).status_code == 401
+    assert client.post("/api/auth/token", json={"token": "x" * 43},
+                       headers=hdr()).status_code == 401  # not locked out

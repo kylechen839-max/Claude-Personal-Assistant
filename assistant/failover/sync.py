@@ -492,3 +492,22 @@ class Syncer:
         while not stop.is_set():
             self.sync_all()
             stop.wait(interval)
+
+
+# --- "sign out everywhere" for access tokens ----------------------------------
+# Carried as a job event (conv "job:auth-revoke"), which history stores and
+# older backends already ignore, so it needs no new event kind.
+
+REVOKE_CONV = "job:auth-revoke"
+
+
+def revoke_event(not_before: int, origin: str) -> Event:
+    """App tokens signed in at or before `not_before` (unix s) stop working."""
+    return new_event("job", REVOKE_CONV, {"key": "auth-revoke",
+                                          "not_before": int(not_before)}, origin=origin)
+
+
+def revoked_before(store: EventLog) -> int:
+    """The latest sign-out-everywhere time in the log (0 if none)."""
+    times = [e.data.get("not_before") for e in store.by_conv(REVOKE_CONV)]
+    return max((t for t in times if isinstance(t, int)), default=0)

@@ -352,7 +352,8 @@ conversations and audio are never cached.
 
 `tailscale serve reset` stops publishing it. "Sign out" in the gear menu
 revokes that phone's cookie on the server; "Sign out everywhere" (e.g. after
-losing a phone) revokes every browser's. Signed-in phones are listed in
+losing a phone) revokes every browser's (with failover, every phone's access
+token on every backend too, see FAILOVER.md). Signed-in phones are listed in
 `[webapp] sessions_file` (`data/web_sessions.json`, ids only, no token) so
 they stay signed in across restarts; on a host without a persistent disk a
 redeploy signs everyone out. Scripts using the token as a Bearer token are
