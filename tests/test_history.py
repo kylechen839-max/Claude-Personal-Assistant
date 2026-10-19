@@ -134,12 +134,21 @@ def test_ids_are_random_not_enumerable(store):
     ids = [store.create("text") for _ in range(300)]
     assert len(set(ids)) == 300
     assert all(history.valid_id(i) and len(i) == 16 for i in ids)
+    assert all(i[0].isalnum() for i in ids)  # never parsed as a CLI flag
     assert not any(i.isdigit() for i in ids)
     # neighbours share no structure (not counters or timestamps)
     common = [len(_common_prefix(a, b)) for a, b in zip(ids, ids[1:])]
     assert statistics.mean(common) < 1
     rowids = [r[0] for r in store._con.execute("SELECT rid FROM conversations")]
     assert not set(map(str, rowids)) & set(ids)
+
+
+def test_ids_never_look_like_a_flag(monkeypatch):
+    drawn = iter(["-AbCdEfGhIjKlMnO", "_AbCdEfGhIjKlMnO", "xAbCdEfGhIjKlMnO"])
+    monkeypatch.setattr(history.secrets, "token_urlsafe", lambda n: next(drawn))
+    cid = history.new_id()
+    assert cid == "xAbCdEfGhIjKlMnO"
+    assert cli.parse_args(["--continue", cid]).continue_id == cid
 
 
 def _common_prefix(a, b):

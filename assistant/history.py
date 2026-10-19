@@ -154,8 +154,13 @@ class HistoryError(Exception):
 
 
 def new_id() -> str:
-    """16 random URL-safe characters (96 bits): not guessable or countable."""
-    return secrets.token_urlsafe(12)
+    """16 random URL-safe characters (96 bits): not guessable or countable.
+    Never starting with "-" or "_", so an id works as a command-line
+    argument (`--continue ID`) and doesn't look like a flag."""
+    while True:
+        cid = secrets.token_urlsafe(12)
+        if cid[0].isalnum():
+            return cid
 
 
 def valid_id(conversation_id) -> bool:
