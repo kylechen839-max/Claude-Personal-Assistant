@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 (2026-10-19)
+
+- If the saved sign-in file can't be read, phone access tokens are refused
+  (fail closed), the same as browser cookies.
+
 ## 1.0.1 (2026-10-19)
 
 - Failover with history turned off now remembers "Sign out everywhere"
