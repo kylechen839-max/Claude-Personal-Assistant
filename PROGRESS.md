@@ -567,7 +567,11 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   HEAD moves made by hand only restart, `config.local.toml` (gitignored)
   for per-machine settings, `.github/workflows/promote-stable.yml` moves
   `stable` only when `tests` and `pi-arm64` both passed on that commit
-  (signed tag with the `STABLE_SIGNING_KEY` secret). Tests sign with a real
+  (review cycle 3: the optional CI signature comes from a separate `sign`
+  job whose key is only in the `stable-signing` Environment, master-only
+  with Kyle as reviewer; the recommended setup is Kyle signing
+  `stable-<sha>` tags himself; only SSH signatures are accepted, OpenPGP
+  and X.509 objects are refused before verifying). Tests sign with a real
   SSH key: unsigned, unknown key, signed tag, non-stable tag, missing
   allowed_signers, trust_unsigned, wrong origin, other branch. Not done:
   hash-pinned requirements (no single lock fits Windows x64, Linux x86_64
