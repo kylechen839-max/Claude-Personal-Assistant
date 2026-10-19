@@ -287,7 +287,11 @@ def test_server_check_skips_mic_speaker_and_wake_word():
     assert checks["TTS fallback (espeak-ng)"].ok
 
 
-def test_server_check_requires_web_token_and_reports_no_values(capsys):
+def test_server_check_requires_web_token_and_reports_no_values(capsys, tmp_path,
+                                                               monkeypatch):
+    # A credentials.json in the working folder (e.g. on Kyle's PC) would fill
+    # in the token's missing client_id, so check from an empty folder.
+    monkeypatch.chdir(tmp_path)
     env = {"ANTHROPIC_API_KEY": "sk-ant-secret-value",
            "GOOGLE_TOKEN_JSON": json.dumps(fake_token(with_client=False))}
     checks = server_checks(env)
