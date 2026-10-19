@@ -156,7 +156,8 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
     # anything else: keep the session alive
-    log.error("Unexpected error answering %r", user_text, exc_info=e)
+    log.error("Unexpected error answering a %d-character request",
+              len(user_text), exc_info=e)
     output_fn(f"Error: {e}")
     return "Sorry, something went wrong."
 
@@ -366,7 +367,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("transcript")
     output_fn(f"You: {heard}")
-    log.info("Heard: %r", heard)
+    log.info("Heard %d characters", len(heard))
+    log.debug("Heard: %r", heard)
     user_text = strip_wake_phrase(heard, wake_phrase).strip()
     if not user_text:
         return bool(heard)  # just "Hey Claude": still listening
@@ -378,7 +380,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
-    log.info("Replied: %r", loggable_reply(chat, reply))
+    log.info("Replied with %d characters", len(reply or ""))
+    log.debug("Replied: %r", loggable_reply(chat, reply))
     speak(tts, reply, timer)
     return True
 
