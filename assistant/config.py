@@ -123,6 +123,14 @@ DEFAULTS: dict = {
         "enabled": False,       # host supervisor: update from `channel`
         "channel": "stable",    # git branch; fast-forwarded only after green CI
         "check_minutes": 15,
+        "local_branch": "master",  # only this checked-out branch is updated
+        # the origin it must come from, and who must have signed it
+        "repo": "github.com/kylechen839-max/Claude-Personal-Assistant",
+        "allowed_signers": "",  # "" = the per-user default (see updater.py)
+        # true = run unsigned updates too: anyone who can push to master or
+        # stable can then run code on this machine
+        "trust_unsigned": False,
+        "health_seconds": 180,  # for the restarted web app to answer /healthz
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -182,6 +190,12 @@ def active_profile(environ=os.environ) -> str:
     return profile
 
 
+def local_config_path(path: str | Path) -> Path:
+    """config.toml -> config.local.toml (other.toml -> other.local.toml)."""
+    p = Path(path)
+    return p.with_name(p.stem + ".local" + p.suffix)
+
+
 def load_config(path: str | Path | None = "config.toml",
                 env_file: str | Path | None = ".env",
                 profile: str | None = None) -> dict:
@@ -190,9 +204,13 @@ def load_config(path: str | Path | None = "config.toml",
 
         load_dotenv(env_file)
     config = copy.deepcopy(DEFAULTS)
-    if path and Path(path).exists():
-        with open(path, "rb") as f:
-            _merge(config, tomllib.load(f))
+    if path:
+        # config.toml, then this machine's own config.local.toml beside it
+        # (gitignored: per-machine settings that never block an update)
+        for file in (Path(path), local_config_path(path)):
+            if file.exists():
+                with open(file, "rb") as f:
+                    _merge(config, tomllib.load(f))
     profile = active_profile() if profile is None else profile
     if profile:
         _merge(config, copy.deepcopy(PROFILES[profile]))

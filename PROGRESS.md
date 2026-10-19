@@ -546,6 +546,21 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   config.toml edits kept, config conflict, failed smoke/pip -> rollback,
   rejected commit, lock), the host's restart/verify/rollback with fakes,
   /healthz version/busy, and update-watch.js in node.
+- **Update hardening (review cycle 2)**: fail-closed signatures (the new
+  stable commit or a `stable-<sha>` tag must verify against an
+  allowed_signers file outside the checkout; only `trust_unsigned = true`
+  skips it), origin URL check, only `local_branch` is updated, no automatic
+  pip (a requirements change needs `--update` by hand with the assistant
+  stopped, detected via `logs/host-*.alive`), failed rollback pip = FAILED,
+  HEAD moves made by hand only restart, `config.local.toml` (gitignored)
+  for per-machine settings, `.github/workflows/promote-stable.yml` moves
+  `stable` only when `tests` and `pi-arm64` both passed on that commit
+  (signed tag with the `STABLE_SIGNING_KEY` secret). Tests sign with a real
+  SSH key: unsigned, unknown key, signed tag, non-stable tag, missing
+  allowed_signers, trust_unsigned, wrong origin, other branch. Not done:
+  hash-pinned requirements (no single lock fits Windows x64, Linux x86_64
+  and aarch64 with this dependency set); mitigated by never running pip
+  automatically.
   Tested: supervisor restart/back-off/network wait and the powercfg parsing
   in pytest; the .ps1 parses and is PSScriptAnalyzer-clean (checked with
   PowerShell 7 here and Windows PowerShell 5.1 in CI). Not run on a real

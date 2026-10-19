@@ -1085,3 +1085,120 @@ def test_session_store_expiry_and_bad_file(tmp_path):
     bad = tmp_path / "s.json"
     bad.write_text("not json")
     assert webapp.SessionStore(bad).sessions == {}
+
+
+# --- review cycle 2 ------------------------------------------------------------
+
+class FakeVoiceConversation:
+    def __init__(self):
+        self.ended = []
+
+    def end(self, reason="user"):
+        self.ended.append(reason)
+
+
+def test_logout_hangs_up_that_browsers_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)  # TestClient has .cookies/.headers
+    mine, other = FakeVoiceConversation(), FakeVoiceConversation()
+    client.app.state.voice_conversations.update({sid: (mine, None),
+                                                 "someone-else": (other, None)})
+    client.post("/api/logout")
+    assert mine.ended == ["signed_out"] and other.ended == []
+
+
+def test_sign_out_everywhere_hangs_up_every_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    convs = [FakeVoiceConversation() for _ in range(3)]
+    client.app.state.voice_conversations.update(
+        {f"sid{i}": (c, None) for i, c in enumerate(convs)})
+    assert client.post("/api/logout-all").status_code == 200
+    assert all(c.ended == ["signed_out"] for c in convs)
+
+
+def test_answers_are_bound_to_their_question(make_app):
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    page_q = webapp.PendingConfirm("Delete the dentist?")
+    s.pending = page_q
+    # a late "no" from the voice view (no id) must not answer the page's question
+    assert not assistant.answer(s, False)
+    assert not assistant.answer(s, True, confirm_id="wrong")
+    assert not page_q.answered.is_set()
+    assert assistant.answer(s, True, confirm_id=page_q.id)
+    assert page_q.answered.is_set() and page_q.answer
+    voice_q = webapp.PendingConfirm("Delete lunch?", stream=True)
+    s.pending = voice_q
+    assert assistant.answer(s, False) and voice_q.answered.is_set()
+
+
+def test_page_cannot_answer_the_voice_views_question(make_app):
+    assistant, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)
+    s = assistant.session(sid)
+    s.pending = webapp.PendingConfirm("Delete lunch?", stream=True)
+    assert client.post("/api/confirm", json={"answer": "yes"}).status_code == 409
+    assert client.get("/api/state").json()["confirm"] is None
+    assert not s.pending.answered.is_set()
+
+
+def test_confirm_events_carry_an_id(make_app, fake_client):
+    deleted = []
+    fake_client.queue = [
+        make_response(tool_use_block("delete_event", {"title": "Dentist"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Okay.")),
+    ]
+    assistant, client = make_app(tools=delete_registry(deleted))
+    login(client)
+    first = events(client.post("/api/turn", json={"text": "delete the dentist"}))
+    sid = client.app.state.web.sid(client)
+    assert first[-1]["id"] == assistant.session(sid).pending.id
+    events(client.post("/api/confirm", json={"answer": "yes"}))
+    assert deleted == ["Dentist"]
+
+
+def test_limiter_memory_is_bounded_under_a_flood():
+    clock = Clock()
+    limiter = webapp.LoginLimiter(per_ip=3, global_free=20, window=900, clock=clock)
+    for i in range(25_000):
+        limiter.fail(f"10.{i // 65536}.{(i // 256) % 256}.{i % 256}")
+        clock.now += 0.01
+    assert len(limiter.all_failures) <= 21
+    assert limiter.fail("1.1.1.1") > 0  # still slowing down
+    for _ in range(10):
+        limiter.fail("2.2.2.2")
+    assert len(limiter.failures["2.2.2.2"]) == 3
+    clock.now += 1000  # everything is old now: the next sweep drops it
+    limiter._sweep_at = 0
+    limiter.fail("3.3.3.3")
+    assert len(limiter.failures) == 1
+
+
+def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
+    from pathlib import Path
+
+    path = tmp_path / "sessions.json"
+    store = webapp.SessionStore(path)
+    keep, gone = store.create(), store.create()
+    real_replace = Path.replace
+    broken = {"on": True}
+
+    def flaky_replace(self, target):
+        if broken["on"]:
+            raise OSError("disk full")
+        return real_replace(self, target)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "replace", flaky_replace)
+        with caplog.at_level("ERROR"):
+            store.revoke(gone)
+        assert "sign-out may be undone" in caplog.text
+        assert gone in json.loads(path.read_text())["sessions"]  # not on disk yet
+        broken["on"] = False
+        assert store.valid(keep)  # the next request retries the save
+    assert gone not in json.loads(path.read_text())["sessions"]
+    assert not webapp.SessionStore(path).valid(gone)

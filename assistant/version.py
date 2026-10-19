@@ -19,10 +19,11 @@ def version() -> str:
         if os.environ.get(var):
             return os.environ[var].strip()[:7]
     try:
-        out = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=ROOT,
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
                              capture_output=True, text=True, timeout=10)
         if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
+            # exactly 7 (--short may give more), as the host compares sha[:7]
+            return out.stdout.strip()[:7]
     except (OSError, subprocess.SubprocessError):
         pass
     return "unknown"

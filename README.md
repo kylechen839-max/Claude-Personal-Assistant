@@ -125,7 +125,7 @@ you are most likely to tune:
 | `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
-| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested `stable` branch, see [Automatic updates](#automatic-updates) |
+| `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
 ### Better voice: Piper
@@ -545,56 +545,105 @@ updates sometimes reset power plans).
 
 ### Automatic updates
 
-Changes reach the PC (and the phone app it serves) or the Pi by themselves
-once you set this in `config.toml`:
+**Off by default, and it stays off until you set up signing (below).** With
+it on, changes reach the PC (and the phone app it serves) or the Pi by
+themselves. Turn it on in `config.local.toml`, a gitignored file next to
+`config.toml` for this machine's own settings (so `config.toml` stays
+unchanged and never blocks an update):
 
 ```toml
 [update]
 enabled = true
 ```
 
-The host supervisor (`python -m assistant.host`, which the `HeyClaude` tasks
-and the Pi's `hey-claude` service run) then checks every `check_minutes`
-(15) for a new commit on the `stable` branch, which only moves after master
-passed CI on every job, so nothing untested arrives. It updates only by
-fast-forward: with local edits to tracked files (other than your
-`config.toml` settings) or local commits it skips the update and logs why,
-and never resets or discards anything. After `git merge --ff-only` it
-installs `requirements.txt` if that changed, checks that the package
-imports and `--check` passes, then restarts the assistant: the web app only
-when no request or voice turn is running (at most ~2 minutes), and only
-counts the update as good once `/healthz` reports the new version. If any
-step fails it goes back to the previous commit (`git reset --keep`), restarts
-that, and won't retry the failed commit. Everything is logged to
-`logs/host-<mode>.log` (failures start with `!!!`); `logs/update-state.json`
-has the last result. The supervisor itself (`assistant/host.py`) keeps running its
-starting version until the task or service restarts (next sign-in or reboot,
-or `systemctl --user restart hey-claude` on the Pi).
+What it does: the host supervisor (`python -m assistant.host`, which the
+`HeyClaude` tasks and the Pi's `hey-claude` service run) checks every
+`check_minutes` (15) for a new commit on the `stable` branch. Only the
+**promote-stable** workflow moves `stable`, and only to a master commit on
+which both `tests` and `pi-arm64` passed. Before any new code runs here:
 
-`python -m assistant --update` updates right away (it works even with
-`enabled = false`); a running host picks the new code up within a minute.
-The phone page notices the new version through `/healthz` and reloads
-itself once, never in the middle of a turn, a recording or the voice
-conversation.
+- `origin` must be this GitHub repository (`[update] repo`);
+- the new commit, or a `stable-<sha>` tag on it, must carry a valid SSH
+  signature from a key in your **allowed_signers** file, which lives outside
+  the checkout so an update can't change whom you trust:
+  `%APPDATA%\HeyClaude\allowed_signers` on Windows,
+  `~/.config/hey-claude/allowed_signers` on Linux/the Pi. No file, no
+  valid signature: no update, and `logs/host-<mode>.log` says why;
+- HEAD must be on `master` with no local commits (fast-forward only), and no
+  local edits to tracked files. Nothing local is ever reset or discarded;
+  anything else is skipped and logged.
+
+Then `git merge --ff-only`, a smoke check (the package imports, `--check`
+passes) and a restart: the web app only when no request or voice turn is
+running (at most ~2 minutes), and the update only counts once `/healthz`
+reports the new version within `health_seconds` (180). If anything fails it
+goes back with `git reset --keep`, restarts the old version and never
+retries that commit. An update that **changes requirements.txt is never
+applied automatically** (pip would install new, unpinned dependency ranges
+into the venv the assistant is running from): stop the assistant, then run
+`python -m assistant --update`. Everything is logged to
+`logs/host-<mode>.log` (failures start with `!!!`), with the exact range
+(`old -> new`); `logs/update-state.json` has the last result. Moving HEAD
+yourself (`git checkout`, `git pull`) only restarts the assistant, never
+rolls back. The supervisor itself keeps running its starting version until
+the task or service restarts (next sign-in or reboot, or `systemctl --user
+restart hey-claude` on the Pi).
+
+`python -m assistant --update` updates right away (same checks, also with
+`enabled = false`). The phone page notices the new version through
+`/healthz` and reloads itself once, never in the middle of a turn, a
+recording or the voice conversation.
+
+**Setting up signing (once).** The promotion workflow signs each promotion
+with a key only GitHub Actions holds; your machines trust that key.
+
+1. On the PC, make a key just for this (no passphrase; it never leaves
+   GitHub):
+   ```powershell
+   ssh-keygen -t ed25519 -N '""' -C "hey-claude stable" -f "$env:TEMP\stable_signing"
+   ```
+2. GitHub -> the repo -> Settings -> Secrets and variables -> Actions -> New
+   repository secret: name `STABLE_SIGNING_KEY`, value: the whole content of
+   `$env:TEMP\stable_signing` (the private key).
+3. Trust the public half on each machine that updates:
+   ```powershell
+   $dir = "$env:APPDATA\HeyClaude"; New-Item -ItemType Directory -Force $dir | Out-Null
+   $pub = Get-Content "$env:TEMP\stable_signing.pub"
+   [IO.File]::WriteAllText("$dir\allowed_signers", "stable-promotion@users.noreply.github.com namespaces=`"git`" $pub`n")
+   ```
+   On the Pi: `mkdir -p ~/.config/hey-claude` and put the same line in
+   `~/.config/hey-claude/allowed_signers`.
+4. Delete both key files from `$env:TEMP`. From the next promotion on, the
+   workflow pushes a signed `stable-<sha>` tag that the hosts verify
+   (`git verify-tag`).
+
+Because the signing key sits in GitHub, it protects you from a bad push to
+`stable` or a changed `origin`, not from someone who can change the workflow
+on master; that's what branch protection on `master` and `stable` is for
+(BLOCKERS.md). The only way around signatures is `[update] trust_unsigned =
+true`: then **anyone who can push to master or stable can run code on this
+machine**. Use it only for a repository only you can push to.
 
 **Still running the hand-made "Hey Claude Web" task?** It has no supervisor,
 so it never updates. Switch with this, in PowerShell (5.1 or 7):
 
 ```powershell
 cd C:\Users\kylec\Claude-Personal-Assistant
-# 1. Up to date: no changes except config.toml in `git status`, then
+# 1. Up to date: no changes in `git status` (config.toml edits: move them
+#    to config.local.toml first), then
 git status --short
 git checkout master
 git pull --ff-only
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 2. Turn on automatic updates ([update] enabled = true in config.toml;
-#    written as UTF-8 without a BOM, which the TOML reader needs)
-$cfg = Join-Path (Get-Location) 'config.toml'
-$text = [IO.File]::ReadAllText($cfg)
-$text = $text -replace '(?m)^enabled = false(\s+# true: follow the tested)', 'enabled = true $1'
-[IO.File]::WriteAllText($cfg, $text, (New-Object Text.UTF8Encoding $false))
-Select-String -Path config.toml -Pattern '^\[update\]' -Context 0,2   # shows enabled = true
+# 2. Turn on automatic updates in config.local.toml (UTF-8 without a BOM,
+#    which the TOML reader needs); it only updates once signing is set up
+$local = Join-Path (Get-Location) 'config.local.toml'
+if (Test-Path $local) { $text = [IO.File]::ReadAllText($local) } else { $text = '' }
+$nl = [Environment]::NewLine
+if ($text -notmatch '(?m)^\[update\]') { $text += $nl + '[update]' + $nl + 'enabled = true' + $nl }
+[IO.File]::WriteAllText($local, $text, (New-Object Text.UTF8Encoding $false))
+Get-Content config.local.toml
 
 # 3. Replace the "Hey Claude Web" task (answer y), then the power check
 #    (answer y to stay awake when plugged in). Add -NoWake to install only
@@ -606,7 +655,7 @@ Get-ScheduledTask -TaskPath '\HeyClaude\' | Format-Table TaskName, State
 Start-Sleep -Seconds 40
 Invoke-RestMethod http://127.0.0.1:8765/healthz        # ok: True, version: <sha>
 Get-Content logs\host-web.log -Tail 5
-.\.venv\Scripts\python.exe -m assistant --update       # "update up-to-date" (or updated)
+.\.venv\Scripts\python.exe -m assistant --update       # up-to-date, or why it skipped
 ```
 
 The phone keeps working throughout, apart from a few seconds while the web
