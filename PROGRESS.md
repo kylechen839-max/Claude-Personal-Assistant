@@ -1152,3 +1152,21 @@ chips, Notion link and Add buttons, after it flags nothing. Before / after
 images: `docs/screenshots/before/` and `docs/screenshots/after/`
 (`<screen>-<width>x<height>-<light|dark>.png`). Voice-mode and confirmation
 screens are staged by setting the same attributes the JS sets (no mic).
+
+## Dev team coordinator link (voice -> /build-feature coordinator)
+
+- `assistant/devteam.py`: Hey Claude talks to the same coordinator session
+  the agent dashboard shows. `message_dev_team` sends Kyle's words with the
+  Claude Code CLI (`claude -p --cloud <id> --output-format json`, message on
+  stdin, so it never appears in a process list); `check_dev_team` reads the
+  coordinator's replies from the Notion database "Hey Claude coordinator
+  inbox", which the app creates next to Assignments. No Claude API agents:
+  the coordinator and its team run on Kyle's plan. Contract for the
+  coordinator side: docs/COORDINATOR_LINK.md.
+- Off by default (`[devteam] enabled`); needs the CLI signed in on the
+  machine that sends (the home PC). No confirmation for Kyle's own requests;
+  asks first when outside content is in the conversation.
+- Tests: `tests/test_devteam.py` (CLI and Notion mocked): session id parsing,
+  stdin, CLI error paths, reply status handling and de-duplication across
+  restarts, inbox creation, registration, prompt. Not run against the real
+  CLI or Notion from this sandbox.

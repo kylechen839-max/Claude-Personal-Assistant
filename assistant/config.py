@@ -171,6 +171,12 @@ DEFAULTS: dict = {
               "max_tokens": 1200},
     "notes": {"enabled": True,      # remember_note / recall_notes (needs memory)
               "min_score": 0.3},
+    "devteam": {"enabled": False,   # talk to the dev team coordinator (docs/COORDINATOR_LINK.md)
+                "coordinator_session": "",  # session_... or its claude.ai/code URL
+                "claude_command": "claude",
+                "repo_dir": "",             # where to run the CLI; "" = here
+                "timeout": 60,
+                "state_file": "data/devteam.json"},
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }

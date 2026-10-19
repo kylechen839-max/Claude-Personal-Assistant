@@ -426,6 +426,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
                                              timezone=tz).tools())
     elif config["notion"]["enabled"]:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
+    register_devteam(registry, config, output_fn)
     web = config["web"]
     if web["enabled"]:
         from assistant.tools import web as web_tools
@@ -435,6 +436,33 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         if web["browser"]:
             registry.register(*web_tools.browser_tools())
     return registry
+
+
+def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
+    """message_dev_team / check_dev_team, when a coordinator session is set.
+    Replies are read from Notion, so they also need NOTION_TOKEN."""
+    team = config["devteam"]
+    if not team["enabled"]:
+        return False
+    from assistant.devteam import CoordinatorLink, session_id
+
+    if not session_id(team["coordinator_session"]):
+        output_fn("(Dev team tools off: [devteam] coordinator_session is not "
+                  "a session id or claude.ai/code link)")
+        return False
+    assignments = None
+    if os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]:
+        from assistant.tools.notion import NotionAssignments
+
+        assignments = NotionAssignments(config["notion"]["database_id"])
+    else:
+        output_fn("(Dev team replies off: NOTION_TOKEN not set; messages still go out)")
+    link = CoordinatorLink(team["coordinator_session"],
+                           claude_command=team["claude_command"],
+                           repo_dir=team["repo_dir"], timeout=team["timeout"],
+                           state_file=team["state_file"], assignments=assignments)
+    registry.register(*link.tools())
+    return True
 
 
 def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:

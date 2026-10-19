@@ -147,6 +147,13 @@ max_tokens = 1200
 enabled = true                # "Remember that...": short notes in Pinecone (needs [memory])
 min_score = 0.3               # how close a note must be to count as a match
 
+[devteam]                     # talk to your dev team coordinator by voice (docs/COORDINATOR_LINK.md)
+enabled = false               # needs Claude Code signed in on this machine; set it in config.local.toml
+coordinator_session = ""      # the coordinator's session_... id or claude.ai/code URL
+claude_command = "claude"
+repo_dir = ""                 # folder to run Claude Code in ("" = this one)
+timeout = 60
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

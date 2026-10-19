@@ -85,6 +85,14 @@ EMAIL_PROMPT = (
 )
 
 
+DEVTEAM_PROMPT = (
+    "Kyle has a dev team: a coordinator Claude Code session that runs his "
+    "researcher, builder and judge agents. Pass his requests to it with "
+    "message_dev_team, in his words, without asking him to confirm. It "
+    "answers later, so say you've passed it on; use check_dev_team when he "
+    "asks how it's going. Read its replies to him in a sentence or two."
+)
+
 # The ClaudeChat whose turn is running, so a tool (resume_conversation)
 # can act on the conversation that called it.
 _CURRENT_CHAT: ContextVar["ClaudeChat | None"] = ContextVar("current_chat",
@@ -176,6 +184,8 @@ class ClaudeChat:
                 parts.append(WEB_PROMPT)
             if self.tools.has("email_summary"):
                 parts.append(EMAIL_PROMPT)
+            if self.tools.has("message_dev_team"):
+                parts.append(DEVTEAM_PROMPT)
         if self.memory:
             parts.append(MEMORY_PROMPT)
         if notes:
