@@ -779,7 +779,7 @@ def test_windows_service_legacy_task_scenarios():
                         "-Script", str(ROOT / "scripts" / "install_windows_service.ps1")],
                        capture_output=True, text=True, timeout=180)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.count("PASS ") == 7, p.stdout
+    assert p.stdout.count("PASS ") == 8, p.stdout
 
 
 @pytest.mark.parametrize("url,unsafe", [
@@ -799,3 +799,16 @@ def test_smoke_never_posts_the_token_over_remote_http():
     allowed = smoke_with(FakeHTTP("t" * 32), url="http://raspberrypi.local:8765",
                          allow_http=True)
     assert allowed["login"].status == PASS
+
+
+def test_smoke_posts_never_follow_redirects():
+    sent = []
+
+    class Session:
+        def post(self, url, **kw):
+            sent.append(kw)
+            return FakeResponse(307, headers={"location": "http://evil/"})
+
+    c = smoke.WebClient("https://hey.example.com", session=Session())
+    assert c.login("t" * 32) == 307 and c.cookie is None
+    assert sent[0]["allow_redirects"] is False

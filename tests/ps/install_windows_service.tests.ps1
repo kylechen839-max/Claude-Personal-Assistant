@@ -88,7 +88,12 @@ $script:tasks = @(
 $found = @(Get-LegacyWebTask)
 Assert 'only the hand-made one in this repo' ($found.Count -eq 1 -and $found[0].TaskName -eq 'Phone app')
 
-# 7. no legacy task: nothing asked
+# 7. a sibling folder whose name starts with the repo's is not the repo
+$script:tasks = @((New-Task '\' 'Hey Claude Web' (New-Action "$repoDir-old\.venv\Scripts\python.exe" `
+                '-m assistant --mode web' "$repoDir-old")))
+Assert 'C:\x\Claude-old is not C:\x\Claude' (@(Get-LegacyWebTask).Count -eq 0)
+
+# 8. no legacy task: nothing asked
 $script:tasks = @(); $script:answer = 'should not be asked'; $script:log = @()
 Assert 'no legacy task' ((Resolve-LegacyWebTask) -and $script:log.Count -eq 0)
 exit 0

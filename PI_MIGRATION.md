@@ -195,11 +195,12 @@ Then start it at boot:
 ./scripts/install_service.sh
 ```
 
-The service runs `python -m assistant.host wake`, which also keeps the Pi
-up to date if you set `[update] enabled = true` in its `config.toml`: it
-follows the tested `stable` branch, restarts on the new version and rolls
-back if it doesn't come up (README, "Automatic updates"). Pi and PC can
-both have it on; each updates its own checkout.
+The service runs `python -m assistant.host wake`, which can also keep the
+Pi up to date: put `[update] enabled = true` in `config.local.toml` and the
+signing key's line in `~/.config/hey-claude/allowed_signers` (README,
+"Automatic updates"). It follows the tested, signed `stable` branch,
+restarts on the new version and rolls back if it doesn't come up. Pi and
+PC can both have it on; each updates its own checkout.
 
 ## 6. Manual voice checks
 
