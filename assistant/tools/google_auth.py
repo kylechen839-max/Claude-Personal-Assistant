@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -38,6 +40,9 @@ SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
 
 
+_write_lock = threading.Lock()
+
+
 def write_private(path: str | Path, text: str) -> None:
     """Write a secret file readable only by its owner (0600 on Linux/Pi),
     atomically: a temp file, then a rename, so concurrent Calendar and
@@ -45,16 +50,24 @@ def write_private(path: str | Path, text: str) -> None:
     import tempfile
 
     path = Path(path)
-    fd, tmp = tempfile.mkstemp(dir=path.parent or ".", prefix=f".{path.name}.",
-                               suffix=".tmp")  # unique per call, mode 0600
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    with _write_lock:  # Windows can't replace a file another thread is replacing
+        fd, tmp = tempfile.mkstemp(dir=path.parent or ".", prefix=f".{path.name}.",
+                                   suffix=".tmp")  # unique per call, mode 0600
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.chmod(tmp, 0o600)
+            for attempt in range(20):  # another process (or a reader) on Windows
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    time.sleep(0.05)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
 
 def token_json(creds) -> str:
