@@ -33,7 +33,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
-| `test_voices.py` | 35 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
+| `test_voices.py` | 38 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -625,6 +625,15 @@ issues).
   in the test suite. The app only ever builds one engine (and the web app's
   pyttsx3 path runs the espeak-ng program, not the library), so this only
   affects tests; the real-Kokoro tests run in a child process.
+- **Kokoro needs onnxruntime 1.25+, so Python 3.11+.** With onnxruntime
+  1.23 (the last build for Python 3.10) and 1.24, the int8 model's output on
+  some CPUs is noise (peaks around 1e29) that kokoro-onnx's silence trimming
+  cuts down to nothing, and it renders ~4x slower; reproduced here, and it
+  made the Python 3.10 CI job flaky (an empty WAV on one run, 5 s renders on
+  another). 1.25, 1.27 and 1.31 are fine. requirements.txt installs Kokoro
+  only on 3.11+ with `onnxruntime>=1.25`, `kokoro_problem()` reports an
+  older onnxruntime (so "auto" falls back to Piper), and `synthesize()`
+  raises rather than return empty, non-finite or out-of-range audio.
 - **Kokoro's voice hasn't been heard by a person yet** (no audio in the
   sandbox): MANUAL_TEST.md step 9 and the voice-mode listen check.
 - **Voice mode on a real phone is untested** (no iPhone in the sandbox):

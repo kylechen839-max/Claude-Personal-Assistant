@@ -140,7 +140,9 @@ you have downloaded, and logs one line saying which and why:
    Apache-2.0, run by the `kokoro-onnx` package). The default voice was
    picked to be close to the calm, warm feel of the Claude app's voice
    conversations (the app's own voices aren't available outside it). About
-   120 MB: the int8 model (88 MB) and the voice pack (28 MB).
+   120 MB: the int8 model (88 MB) and the voice pack (28 MB). Needs Python
+   3.11+ (it relies on onnxruntime 1.25+, which has no 3.10 build); on 3.10
+   "auto" uses Piper.
 2. **Piper** (fast neural voice, the best choice on a Raspberry Pi; about 60 MB).
 3. **pyttsx3** (the OS voice: SAPI5 on Windows, eSpeak on Linux), always there.
 

@@ -6,7 +6,11 @@ piper-tts==1.8.0
 # Kokoro-82M neural TTS (Apache-2.0; the model downloads at setup with
 # `python -m assistant --download-voice kokoro`). Pure-Python wheel on
 # onnxruntime; its espeak-ng loader has Windows x64 and Linux x86_64/aarch64 wheels.
-kokoro-onnx>=0.4; python_version < "3.14"
+# Its int8 model needs onnxruntime 1.25+ (older versions output noise or
+# silence on some CPUs), which has no Python 3.10 wheels: there "auto"
+# uses Piper.
+kokoro-onnx>=0.4; python_version >= "3.11" and python_version < "3.14"
+onnxruntime>=1.25; python_version >= "3.11"
 sounddevice>=0.4.6
 faster-whisper>=1.0
 # openWakeWord: on Linux its metadata pulls in tflite-runtime, which has no

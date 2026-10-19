@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import queue
+import re
 import threading
 from pathlib import Path
 
@@ -40,6 +41,9 @@ FILES = {
     VOICES_FILE: (
         "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d", 28214398),
 }
+# onnxruntime 1.23/1.24 turn the int8 model's output into noise (peaks of
+# 1e29, trimmed to nothing) on some CPUs; 1.25 and later are fine.
+MIN_ONNXRUNTIME = (1, 25)
 VARIANTS = {"int8": "kokoro-v1.0.int8.onnx", "fp16": "kokoro-v1.0.fp16.onnx"}
 # The English voices of voices-v1.0.bin (it also has other languages).
 ENGLISH_VOICES = (
@@ -90,7 +94,12 @@ class KokoroTTS:
         with self._lock:
             samples, sr = self.kokoro.create(text, voice=self.voice,
                                              speed=self.speed, lang=self.lang)
-        return np.asarray(samples, dtype=np.float32), sr
+        samples = np.asarray(samples, dtype=np.float32)
+        if not len(samples) or not np.isfinite(samples).all() \
+                or np.abs(samples).max() > 4:
+            # never play noise; the caller reports the error instead
+            raise RuntimeError("Kokoro produced no valid audio (is onnxruntime 1.25+?)")
+        return samples, sr
 
     def warm_up(self) -> None:
         """Load the model and run it once, so the first reply isn't slow."""
@@ -138,9 +147,18 @@ def kokoro_problem(model: str | Path | None, voices: str | Path | None) -> str |
             return f"{path} not found"
     try:
         import kokoro_onnx  # noqa: F401
+        import onnxruntime
     except ImportError:
-        return "the kokoro-onnx package is not installed (pip install -r requirements.txt)"
+        return ("the kokoro-onnx package is not installed (pip install -r "
+                "requirements.txt; needs Python 3.11+)")
+    if _version(onnxruntime.__version__) < MIN_ONNXRUNTIME:
+        return (f"onnxruntime {onnxruntime.__version__} is too old for Kokoro's "
+                "int8 model (needs 1.25+; older versions output noise)")
     return None
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in re.findall(r"\d+", text)[:2])
 
 
 def sha256_of(path: Path) -> str:

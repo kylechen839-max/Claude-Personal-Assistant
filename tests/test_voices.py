@@ -29,7 +29,10 @@ ROOT = Path(__file__).resolve().parent.parent
 @pytest.fixture
 def fake_kokoro(monkeypatch):
     """A stand-in kokoro_onnx package; records every create() call."""
-    calls = []
+    class Calls(list):
+        pass
+
+    calls = Calls()
 
     class Kokoro:
         def __init__(self, model, voices):
@@ -40,11 +43,17 @@ def fake_kokoro(monkeypatch):
 
         def create(self, text, voice, speed, lang):
             calls.append(("create", text, voice, speed, lang))
+            if calls.output is not None:
+                return calls.output, 24000
             return np.full(2400, 0.25, dtype=np.float32), 24000
 
     module = types.ModuleType("kokoro_onnx")
     module.Kokoro = Kokoro
     monkeypatch.setitem(sys.modules, "kokoro_onnx", module)
+    ort = types.ModuleType("onnxruntime")  # a version Kokoro works with
+    ort.__version__ = "1.31.0"
+    monkeypatch.setitem(sys.modules, "onnxruntime", ort)
+    calls.output = None  # set to make create() return these samples
     return calls
 
 
@@ -119,8 +128,22 @@ def test_kokoro_problem(kokoro_paths, fake_kokoro, monkeypatch):
     assert tts_kokoro.kokoro_problem(m, v) is None
     assert "not found" in tts_kokoro.kokoro_problem(m + "x", v)
     assert "no model set" in tts_kokoro.kokoro_problem("", v)
+    sys.modules["onnxruntime"].__version__ = "1.24.1"  # int8 noise bug
+    assert "too old" in tts_kokoro.kokoro_problem(m, v)
+    sys.modules["onnxruntime"].__version__ = "1.25.0"
+    assert tts_kokoro.kokoro_problem(m, v) is None
     monkeypatch.setitem(sys.modules, "kokoro_onnx", None)
     assert "not installed" in tts_kokoro.kokoro_problem(m, v)
+
+
+@pytest.mark.parametrize("bad", [np.zeros(0), np.full(100, 3.9e29), np.full(100, np.nan)],
+                         ids=["empty", "noise", "nan"])
+def test_kokoro_never_returns_noise(bad, fake_kokoro, kokoro_paths):
+    """What onnxruntime < 1.25 did with the int8 model on some CPUs."""
+    k = KokoroTTS(kokoro_paths["kokoro_model"], kokoro_paths["kokoro_voices"])
+    fake_kokoro.output = bad.astype(np.float32)
+    with pytest.raises(RuntimeError, match="no valid audio"):
+        k.synthesize("Cheers.")
 
 
 def test_engine_names_and_cli_choices():
