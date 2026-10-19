@@ -1202,3 +1202,40 @@ def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
         assert store.valid(keep)  # the next request retries the save
     assert gone not in json.loads(path.read_text())["sessions"]
     assert not webapp.SessionStore(path).valid(gone)
+
+
+@pytest.mark.parametrize("path", ["/api/logout", "/api/logout-all"])
+def test_sign_out_closes_an_open_voice_socket(path, monkeypatch):
+    """The real /api/voice socket: signing out ends it at once, and the
+    revoked cookie can't open a new one."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    make = make_voice.__wrapped__(monkeypatch)
+    _, http = make()
+    voice_login(http)
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        cookie = http.cookies.get(webapp.COOKIE)
+        assert http.post(path).status_code == 200
+        got = {}
+
+        def read():  # in a thread, so a missing "ended" fails instead of hanging
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+                ws.receive_text()
+            except WebSocketDisconnect as e:
+                got["closed"] = e.code
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+        assert "closed" in got
+    http.cookies.set(webapp.COOKIE, cookie)  # the stolen-cookie case
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with connect(http) as ws:
+            ws.receive_text()
+    assert closed.value.code == 1008
