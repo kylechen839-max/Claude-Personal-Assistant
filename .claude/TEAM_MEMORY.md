@@ -165,23 +165,33 @@ as the work. Never put secrets, tokens or personal data in this file.
     (`tests/js/agent-dashboard.test.mjs`); string checks on the HTML alone
     let real regressions through. Arrays made inside the vm are from another realm:
     spread them (`[...x]`) before `assert.deepEqual`.
-  - The page's Grid shows one coordinator panel per master session (from
-    `runs` rows, plus the master's own `status_lines`) and a tile per
-    researcher, builder and judge from the `agents` collection. Only the
+  - The page's Grid is a flat window workspace (`#coords`, auto-tiled):
+    one coordinator window per master session (from `runs` rows, plus the
+    master's own `status_lines`) and a window per researcher, builder and
+    judge from the `agents` collection. Only the
     master writes `agents` rows (`set` before each agent starts, `update`
     with `if_version` when it returns, ideally batched with the runs phase
-    write); subagents and the watchdog never touch them. "Message
-    coordinator" only opens claude.ai's own comment composer
-    (`comments: {composer_only: true}`); Kyle presses Send to Claude and a
-    master watching with ArtifactComments answers in the thread. A comment
-    is Kyle's word about that run, within scope, never copied into a row.
-    Tile order and size live in the viewer's localStorage, never the db.
+    write); subagents and the watchdog never touch them. Each
+    coordinator window has a chat box: the page holds the full
+    `comments: {}` grant and calls `sendToClaude` (one call site, Kyle's
+    own press, consent asked once); a master watching with
+    ArtifactComments answers in the thread and mirrors each message it
+    gives Kyle to `data/users/me/chat-<sessionTail>/msgs`, which the page
+    shows. A comment is Kyle's word about that run, within scope, never
+    copied into a row, except Kyle's private
+    `data/users/me/chat-<sessionTail>/msgs` mirror; never shared rows.
+    Window order, size and the filter live in the viewer's localStorage,
+    never the db.
     Desktop launchers are in `tools/agent-dashboard/desktop/`.
   - Lesson (2026-10-19): the first Grid and chat were built on a "Claude
     Code Remote" connector that doesn't exist on Kyle's account, so they
     never worked. Before building on a connector or other account-side
     service, check that it really exists for him (a ListConnectors-style
     check, or ask), and prefer data the team writes itself.
+  - Lesson (2026-10-19): ArtifactData accepts `me` in `data/users/me/...`
+    paths and resolves it to Kyle's own user id, so the master can write
+    his private per-viewer subtree; the page reads the same path with the
+    id from `user.id()`.
   - `test_page_never_writes` rejects any `.set(`/`.update(`/`.delete(`/
     `.add(` in the page, Map and Set included; keep page state in arrays
     or plain objects.

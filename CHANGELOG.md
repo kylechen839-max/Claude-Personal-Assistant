@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Dev team dashboard: the Grid is now a full-screen window workspace.
+  Windows auto-tile, with a dark monospace body, run colours, maximize
+  (Esc or Restore), an Active only / All recent filter, and a slim
+  one-row layout on the phone.
+- Dev team dashboard: each coordinator window has a chat box. Type to
+  the coordinator (sent as a comment to Claude) and read everything it
+  tells you, rendered as markdown; the coordinator mirrors its messages
+  to your private dashboard storage.
 - Dev team dashboard: the Grid view shows one panel per `/build-feature`
   coordinator (phase, round, elapsed time and its latest status lines)
   with a tile for each researcher, builder and judge, all written by the
