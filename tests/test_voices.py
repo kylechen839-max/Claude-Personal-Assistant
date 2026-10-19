@@ -177,6 +177,12 @@ def test_config_switches_voice(tmp_path, fake_kokoro, kokoro_paths):
 
 # --- Kokoro engine (fake model) ------------------------------------------------
 
+def test_kokoro_pauses_after_a_clause(fake_kokoro, kokoro_paths):
+    k = KokoroTTS(kokoro_paths["kokoro_model"], kokoro_paths["kokoro_voices"])
+    assert len(k.synthesize("Tomorrow you have the dentist at three,")[0]) == 2400 + 2880
+    assert len(k.synthesize("Tomorrow you have the dentist at three.")[0]) == 2400
+
+
 def test_kokoro_synthesize_voice_lang_speed(fake_kokoro, kokoro_paths):
     k = KokoroTTS(kokoro_paths["kokoro_model"], kokoro_paths["kokoro_voices"],
                   voice="bf_emma", speed=5)
@@ -525,7 +531,13 @@ from assistant.tts import PiperTTS
 from assistant.tts_kokoro import KokoroTTS
 from assistant.webapp import render_wav
 
+from assistant.sentences import SentenceSplitter
+
 first = "Tomorrow you have the dentist at three thirty."
+long_first = ("Tomorrow you have the dentist at three thirty, and after that you "
+              "have a study group at the library until six.")
+splitter = SentenceSplitter()  # voice mode's: first piece ends at the comma
+first_piece = splitter.feed(long_first + " Then")[0]
 name, paths = sys.argv[1], sys.argv[2:]
 engine = KokoroTTS(*paths) if name == "kokoro" else PiperTTS(*paths)
 started = time.perf_counter()
@@ -536,7 +548,15 @@ for _ in range(5):
     started = time.perf_counter()
     assert len(render_wav(engine, first)) > 10000
     runs.append(time.perf_counter() - started)
-print(cold, statistics.median(runs), min(runs))
+extra = []
+for text in (long_first, first_piece):
+    times = []
+    for _ in range(3):
+        started = time.perf_counter()
+        render_wav(engine, text)
+        times.append(time.perf_counter() - started)
+    extra.append(statistics.median(times))
+print(cold, statistics.median(runs), min(runs), *extra)
 """
 
 
@@ -552,7 +572,9 @@ def test_time_to_first_audio_kokoro_vs_piper(kokoro_files, request):
     results = {name: [float(x) for x in run_kokoro(BENCH, name, *paths).split()]
                for name, paths in engines.items()}
     line = "; ".join(f"{n}: load+warm-up {c:.2f} s, first sentence median {m:.3f} s "
-                     f"(best {b:.3f} s)" for n, (c, m, b) in results.items())
+                     f"(best {b:.3f} s), long first sentence {whole:.3f} s whole vs "
+                     f"{piece:.3f} s split at its comma"
+                     for n, (c, m, b, whole, piece) in results.items())
     with request.config.pluginmanager.get_plugin("capturemanager").global_and_fixture_disabled():
         print(f"\nTTS first-audio bench ({os.cpu_count()} CPUs, {sys.platform}): {line}")
     # A measurement, not a speed gate: shared CI runners vary several-fold

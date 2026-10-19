@@ -57,6 +57,9 @@ LANGS = {"a": "en-us", "b": "en-gb", "e": "es", "f": "fr-fr", "h": "hi",
          "i": "it", "p": "pt-br"}
 
 
+CLAUSE_ENDS = ",;:-–—"
+
+
 class KokoroTTS:
     """`synthesize(text)` -> (float32 samples, 24000). The model loads on
     first use (or `warm_up()`); calls are serialized by a lock."""
@@ -99,6 +102,10 @@ class KokoroTTS:
                 or np.abs(samples).max() > 4:
             # never play noise; the caller reports the error instead
             raise RuntimeError("Kokoro produced no valid audio (is onnxruntime 1.25+?)")
+        if text.rstrip()[-1:] in CLAUSE_ENDS:
+            # Kokoro trims the pause after a clause; voice mode sends the
+            # reply's first clause on its own, so put a short one back
+            samples = np.concatenate([samples, np.zeros(int(sr * 0.12), np.float32)])
         return samples, sr
 
     def warm_up(self) -> None:

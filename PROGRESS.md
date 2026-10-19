@@ -665,6 +665,17 @@ because it sounds far more natural, and a desktop CPU is usually faster
 than a CI runner. If the wait feels too long, `[tts] engine = "piper"`
 brings it back to ~0.1 s (MANUAL_TEST.md step 9 compares the two).
 
+- **First piece split at a clause** (`SentenceSplitter(first_clause_words=4)`,
+  the default for streaming, so voice mode gets it with no change to
+  `voice_session.py`): a reply's first piece also ends at a comma,
+  semicolon or spaced dash once it has 4+ words ("3,000" and "9, 10, and
+  11" are not breaks), so Kokoro renders a short piece first; later
+  sentences are unchanged, and `split_sentences()` (whole texts) keeps whole
+  sentences. Kokoro adds a 0.12 s pause after a piece ending at a clause
+  break, since its trimming removes the comma's pause. A long first sentence
+  ("Tomorrow you have the dentist at three thirty, and after that you have
+  a study group at the library until six.") then renders its first audio
+  in 0.56 s instead of 1.32 s in the build sandbox; CI: CLAUSE_CI.
 - Kokoro's render time is about 0.15 s + 0.2 x the audio length ("Sure.":
   0.24 s; a 6 s sentence: 1.3 s), so a long first sentence costs more; the
   sentences after it render while the first plays (real-time factor ~0.25),

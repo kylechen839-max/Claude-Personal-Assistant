@@ -25,6 +25,8 @@ END_IF_CAPITAL = {
     "mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun",
 }
 _CLOSERS = "\"')]}”’"
+# ", " or "; " or a spaced dash, followed by a word (not "3,000" or "1, 2")
+_CLAUSE_BREAK = re.compile(r"(?<!\d)[,;](?= +[A-Za-z])|(?<= ) ?[-–—](?= +[A-Za-z])")
 _TOKEN_BEFORE = re.compile(r"([A-Za-z][A-Za-z.]*)$")
 
 
@@ -35,15 +37,24 @@ class SentenceSplitter:
     comma/semicolon/dash (else the last space), so a rambling sentence
     doesn't hold up the audio."""
 
-    def __init__(self, max_chars: int = 220):
+    def __init__(self, max_chars: int = 220, first_clause_words: int = 4):
         self.max_chars = max_chars
+        # The reply's first piece also ends at a clause break (comma,
+        # semicolon, dash) once it has this many words, so the first audio
+        # renders sooner (Kokoro's time grows with length). 0 = off.
+        self.first_clause_words = first_clause_words
         self.buffer = ""
+        self._first = True
 
     def feed(self, text: str) -> list[str]:
         self.buffer += text
         out = []
         while True:
             cut = self._find_boundary()
+            if self._first:  # whichever comes first: sentence or clause end
+                clause = self._find_first_clause()
+                if clause is not None and (cut is None or clause < cut):
+                    cut = clause
             if cut is None:
                 cut = self._find_forced_cut()
             if cut is None:
@@ -52,6 +63,7 @@ class SentenceSplitter:
             sentence = _clean(sentence)
             if sentence:
                 out.append(sentence)
+                self._first = False
         return out
 
     def flush(self) -> list[str]:
@@ -107,6 +119,14 @@ class SentenceSplitter:
             return following.isupper()
         return True
 
+    def _find_first_clause(self) -> int | None:
+        if not self.first_clause_words:
+            return None
+        for m in _CLAUSE_BREAK.finditer(self.buffer):
+            if len(self.buffer[:m.start()].split()) >= self.first_clause_words:
+                return m.end()
+        return None
+
     def _find_forced_cut(self) -> int | None:
         text = self.buffer
         if len(text) <= self.max_chars:
@@ -130,5 +150,5 @@ def _clean(sentence: str) -> str:
 
 def split_sentences(text: str) -> list[str]:
     """All sentences of a finished text."""
-    splitter = SentenceSplitter()
+    splitter = SentenceSplitter(first_clause_words=0)  # whole sentences only
     return splitter.feed(text) + splitter.flush()
