@@ -114,6 +114,16 @@ class ClaudeChat:
     def reset(self) -> None:
         self.history = []
         self.untrusted_context = False
+        self.untrusted_memory = False
+
+    def tainted(self) -> bool:
+        """Has untrusted text been in this conversation: web, email or
+        outside-invite results, saved history, or a recalled note written
+        from such text? Then changes ask first and the memory summary is
+        built from Kyle's words only and stored untrusted."""
+        return (self.untrusted_memory or self.untrusted_context
+                or (bool(self.tools) and has_untrusted_content(
+                    self.history, self.tools.untrusted_names())))
 
     @property
     def incognito(self) -> bool:
@@ -234,10 +244,10 @@ class ClaudeChat:
         if new_thread:
             self.recorder.discard()
         else:
-            previous = list(self.history)
+            previous, untrusted = list(self.history), self.tainted()
             cid = self.recorder.finish()
             if self.memory and not self.incognito:
-                _background().submit(self._remember, previous, cid)
+                _background().submit(self._remember, previous, cid, untrusted)
         self.history = rebuild_history(conv, self.max_history)
         self.recorder.resume(conversation_id)
         self.recorder.user(user_text)
@@ -323,12 +333,13 @@ class ClaudeChat:
         return True
 
     def recall(self, user_text: str) -> list[str]:
-        self.untrusted_memory = False
         if not self.memory:
             return []
         try:
             notes = self.memory.retrieve(user_text)
-            self.untrusted_memory = getattr(self.memory, "last_untrusted", False) is True
+            # Sticky for the conversation: the note stays in context through
+            # Claude's own replies even when a later turn doesn't recall it.
+            self.untrusted_memory |= getattr(self.memory, "last_untrusted", False) is True
             return notes
         except Exception as e:  # memory is a bonus; never block a reply
             log.warning("Memory lookup failed: %s", e)
@@ -338,21 +349,22 @@ class ClaudeChat:
         """Summarize the conversation into long-term memory, then reset.
 
         Returns the stored summary, or None if nothing was stored."""
-        previous = self.history
+        previous, untrusted = self.history, self.tainted()
         self.reset()
         cid = self.recorder.finish() if self.recorder else None
         if self.incognito:
             return None  # incognito: no history and no long-term memory
-        return self._remember(previous, cid)
+        return self._remember(previous, cid, untrusted)
 
-    def _remember(self, history: list[dict], conversation_id: str | None = None):
+    def _remember(self, history: list[dict], conversation_id: str | None = None,
+                  untrusted: bool = False):
         from assistant.memory import SUMMARY_PROMPT, transcript
 
-        # With email or web text in the conversation, Claude's side may repeat
-        # it (an injected instruction, say), so only Kyle's own words go into
-        # the summary, and it is stored marked untrusted.
-        untrusted = bool(self.tools) and has_untrusted_content(
-            history, self.tools.untrusted_names())
+        # With untrusted text in the conversation (see tainted()), Claude's
+        # side may repeat it (an injected instruction, say), so only Kyle's
+        # own words go into the summary, and it is stored marked untrusted.
+        untrusted = untrusted or (bool(self.tools) and has_untrusted_content(
+            history, self.tools.untrusted_names()))
         text = transcript(history, user_only=untrusted)
         if not self.memory or not text:
             return None
@@ -440,9 +452,7 @@ class ClaudeChat:
                     return text.strip() or "Sorry, I can't help with that one."
                 return text.strip()
             results = []
-            untrusted = (self.untrusted_memory or self.untrusted_context
-                         or has_untrusted_content(self.history,
-                                                  self.tools.untrusted_names()))
+            untrusted = self.tainted()
             for call in calls:
                 if cancel is not None and cancel.is_set():
                     # Kyle talked over it: run nothing more. Every tool_use

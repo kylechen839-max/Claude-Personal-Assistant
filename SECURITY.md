@@ -172,7 +172,15 @@ notes saved through `remember_note` or `remember` (after Kyle's yes). When
 a later turn recalls one, automatically or through `recall_notes`,
 `list_recent_notes` or `search_memory`, that turn confirms every change,
 like an email in context (the tools add `"untrusted_content": true` to
-their result; automatic recall sets `ClaudeChat.untrusted_memory`). The
+their result; automatic recall sets `ClaudeChat.untrusted_memory`). Once
+set, these stay set for the rest of the conversation (the injected text
+lives on in Claude's own replies even when a later turn doesn't recall it),
+and the conversation's summary is then written from Kyle's words only and
+stored untrusted, whether it ends normally or by switching to a resumed
+conversation (`ClaudeChat.tainted()`). Saved history is untrusted too:
+resuming a conversation or using the history search tools makes changes
+ask first for the rest of that conversation, so history's own titles and
+summaries never come back as trusted text. The
 system prompt also labels recalled notes as stored data, not
 instructions. (Recalled notes stay in the system prompt rather than moving
 into the user turn: the code-level confirmation above is what protects
