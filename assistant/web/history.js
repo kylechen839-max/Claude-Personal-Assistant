@@ -302,6 +302,7 @@ async function openTranscript(id) {
 }
 
 function messageNode(m) {
+  if (m.kind === "note") return el("div", "msg note", m.text);
   if (m.kind === "confirm") {
     return el("div", "msg note", m.role === "assistant" ? `Asked: ${m.text}` : `Answered: ${m.text}`);
   }

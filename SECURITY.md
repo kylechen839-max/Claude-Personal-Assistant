@@ -161,6 +161,12 @@ continued (`assistant/history.py`). What that means for privacy:
 - **Titles and summaries** are written by one extra call to the Anthropic API
   (`[history] title_model`) with the conversation text, the same data the
   conversation already sent. If it fails, the first thing Kyle said is used.
+- **Resumed text is untrusted.** A continued conversation comes back as
+  plain text, so a reply that once repeated a web page is no longer marked
+  as web content. After a resume, or once `search_conversations` /
+  `resume_conversation` put past text into the context, every tool that
+  changes something asks for a yes first, for the rest of that
+  conversation (as with web content in context).
 - **Search tools.** `search_conversations` returns only titles, dates and
   short snippets to Claude, and `resume_conversation` always asks for a
   spoken yes first. A web page in context could ask Claude to search history;

@@ -520,6 +520,14 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   redact and purge the search index. Startup replays events after a saved
   cursor, so a crash between the log and the tables heals. Without the
   failover modules it runs standalone (nothing to sync).
+- Review fixes: resumed text and history tool results count as untrusted
+  (changes ask first); a turn whose API call fails takes its saved user
+  message back (a retry isn't saved twice); a title written in the
+  background after the conversation was resumed doesn't mark it ended.
+- For other features: `history.current_conversation_id()` (inside a turn)
+  and `history.record_event(conversation_id, kind, text)` add a note (e.g. a
+  lecture summary or quick capture) to a conversation, shown in its
+  transcript and search and passed to Claude when it's continued.
 - Phone app: `assistant/history_web.py` adds `GET /api/conversations`
   (paginated, `q`, source/pinned/archived/date filters, highlight parts),
   `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,

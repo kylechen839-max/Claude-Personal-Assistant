@@ -49,6 +49,9 @@ _CURRENT_CHAT: ContextVar["ClaudeChat | None"] = ContextVar("current_chat",
                                                             default=None)
 
 
+HISTORY_TOOLS = ("search_conversations", "resume_conversation")
+
+
 def current_chat() -> "ClaudeChat | None":
     return _CURRENT_CHAT.get()
 
@@ -71,6 +74,11 @@ class ClaudeChat:
         self.recorder = recorder
         self._turn_events: list[dict] = []
         self._pending_resume: str | None = None
+        # Text from saved history (a resumed conversation, history search
+        # results) comes back as plain text and may repeat web pages, so
+        # changes ask first for the rest of the conversation, as with web
+        # content (has_web_content can't see it in plain text).
+        self.untrusted_context = False
         self.tools = tools  # a ToolRegistry, or None
         self.max_tool_rounds = max_tool_rounds
         self.model = model or default_model()
@@ -91,6 +99,7 @@ class ClaudeChat:
 
     def reset(self) -> None:
         self.history = []
+        self.untrusted_context = False
 
     @property
     def incognito(self) -> bool:
@@ -129,8 +138,9 @@ class ClaudeChat:
             notes = self.recall(user_text)
             start = len(self.history)
             new_thread = not (self.recorder and self.recorder.conversation_id)
+            saved = None
             if self.recorder:  # saved before the reply: crash-safe
-                self.recorder.user(user_text)
+                saved = self.recorder.user(user_text)
             message = {"role": "user", "content": user_text}
             self.history.append(message)
             self._turn_start = message  # for mark_interrupted()
@@ -146,6 +156,8 @@ class ClaudeChat:
                                          reply or "(interrupted)"})
             except Exception:
                 del self.history[start:]  # keep history valid so the user can retry
+                if self.recorder:  # the retry saves it again
+                    self.recorder.retract(saved, new_thread)
                 raise
             if self.recorder:
                 self.recorder.assistant(reply or "(interrupted)",
@@ -180,6 +192,7 @@ class ClaudeChat:
                 conv["id"] != self.conversation_id:
             self.end_conversation()
         self.history = rebuild_history(conv, self.max_history)
+        self.untrusted_context = True
         self.recorder.resume(conversation_id)
         return conv
 
@@ -209,6 +222,7 @@ class ClaudeChat:
         self.recorder.assistant(reply)
         self.history += [{"role": "user", "content": user_text},
                          {"role": "assistant", "content": reply}]
+        self.untrusted_context = True
         log.info("Resumed conversation %s", conversation_id)
 
     def _confirm_wrapper(self, confirm):
@@ -241,6 +255,8 @@ class ClaudeChat:
             except (ValueError, AttributeError):
                 pass
         self._turn_events.append(tool_event(call.name, dict(call.input), status))
+        if call.name in HISTORY_TOOLS and not is_error:
+            self.untrusted_context = True  # past text is now in the context
         return content, is_error
 
     def abort(self) -> None:
@@ -391,7 +407,7 @@ class ClaudeChat:
                     return text.strip() or "Sorry, I can't help with that one."
                 return text.strip()
             results = []
-            untrusted = has_web_content(self.history)
+            untrusted = has_web_content(self.history) or self.untrusted_context
             for call in calls:
                 if cancel is not None and cancel.is_set():
                     # Kyle talked over it: run nothing more. Every tool_use

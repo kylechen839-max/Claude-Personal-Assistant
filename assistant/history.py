@@ -197,6 +197,7 @@ def _fts_query(terms: list[str], any_term: bool = False) -> str:
     return (" OR " if any_term else " ").join(quoted)
 
 
+MESSAGE_KINDS = ("chat", "confirm", "note")  # note: added by a feature, not said
 MAX_TEXT = 8000  # characters per message (an event is at most 64 KB of JSON)
 
 
@@ -472,7 +473,7 @@ class HistoryStore:
             "kind, text, created_at, interrupted, tool_events) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (e.id, e.conv, e.ts, role,
-             d.get("kind") if d.get("kind") in ("chat", "confirm") else "chat",
+             d.get("kind") if d.get("kind") in MESSAGE_KINDS else "chat",
              str(d.get("text", "")), e.ts / 1000, int(bool(d.get("interrupted"))),
              json.dumps(tools, separators=(",", ":")) if tools else None)).rowcount
         if inserted:
@@ -545,11 +546,20 @@ class HistoryStore:
                 (cid, self.owner, source, now, now))
         return cid
 
-    def append(self, conversation_id: str, role: str, text: str, *,
-               kind: str = "chat", interrupted: bool = False,
-               tool_events: list[dict] | None = None) -> int:
+    def append(self, conversation_id: str, role: str, text: str, **kwargs) -> int:
+        """Add one message (see add_message). Returns its position in the
+        conversation."""
+        with self._lock:
+            self.add_message(conversation_id, role, text, **kwargs)
+            return self._con.execute("SELECT count(*) FROM messages WHERE "
+                                     "conversation_id = ?",
+                                     (conversation_id,)).fetchone()[0]
+
+    def add_message(self, conversation_id: str, role: str, text: str, *,
+                    kind: str = "chat", interrupted: bool = False,
+                    tool_events: list[dict] | None = None) -> str:
         """Add one message (a "message" event, committed at once). Returns
-        its position in the conversation."""
+        its event id."""
         if role not in ("user", "assistant"):
             raise sqlite3.IntegrityError("role must be user or assistant")
         with self._lock:
@@ -563,10 +573,13 @@ class HistoryStore:
                 data["interrupted"] = True
             if tool_events:
                 data["tools"] = tool_events
-            self._record("message", conversation_id, data)
-            return self._con.execute("SELECT count(*) FROM messages WHERE "
-                                     "conversation_id = ?",
-                                     (conversation_id,)).fetchone()[0]
+            return self._record("message", conversation_id, data).id
+
+    def retract(self, conversation_id: str, event_id: str) -> None:
+        """Remove one message (a delete_message tombstone)."""
+        with self._lock:
+            self._own(conversation_id)
+            self._record("delete_message", conversation_id, {"target": event_id})
 
     def mark_interrupted(self, conversation_id: str,
                          spoken_text: str | None = None) -> bool:
@@ -597,7 +610,7 @@ class HistoryStore:
         return True
 
     def finish(self, conversation_id: str, title: str | None = None,
-               summary: str | None = None) -> None:
+               summary: str | None = None, ended: bool = True) -> None:
         """Mark ended and set the generated title/summary (a "rename"
         event; a title Kyle typed himself is kept)."""
         with self._lock:
@@ -609,8 +622,9 @@ class HistoryStore:
             if by_user or title is None:
                 title = row["title"]
             # Always the full title: a rename sets it (last writer wins).
-            data = {"title": _clean(title)[:200], "by": "user" if by_user else "auto",
-                    "ended": True}
+            data = {"title": _clean(title)[:200], "by": "user" if by_user else "auto"}
+            if ended:
+                data["ended"] = True
             if summary is not None:
                 data["summary"] = _clean(summary)[:1000]
             self._record("rename", conversation_id, data)
@@ -1162,6 +1176,8 @@ def rebuild_history(conv: dict, max_history: int = 40) -> list[dict]:
         if m.get("kind") == "confirm":
             text = (f"(I asked: {text})" if m["role"] == "assistant"
                     else f"(Kyle answered: {text})")
+        elif m.get("kind") == "note":
+            text = f"(Saved note: {text})"
         if m["role"] == "assistant":
             if m.get("tool_events"):
                 text = f"[Tools used: {describe_events(m['tool_events'])}]\n{text}"
@@ -1249,22 +1265,31 @@ class Recorder:
             self.conversation_id = self.store.create(self.source)
         return self.conversation_id
 
-    def _append(self, role: str, text: str, **kwargs) -> None:
+    def _append(self, role: str, text: str, **kwargs) -> str | None:
         def write():
             try:
-                self.store.append(self._ensure(), role, text, **kwargs)
+                return self.store.add_message(self._ensure(), role, text, **kwargs)
             except KeyError:  # deleted meanwhile (e.g. from the phone)
                 self.conversation_id = None
-                self.store.append(self._ensure(), role, text, **kwargs)
-        self._safe(write)
+                return self.store.add_message(self._ensure(), role, text, **kwargs)
+        return self._safe(write)
 
-    def user(self, text: str, kind: str = "chat") -> None:
-        self._append("user", text, kind=kind)
+    def user(self, text: str, kind: str = "chat") -> str | None:
+        """Save what Kyle said; returns the message's event id."""
+        return self._append("user", text, kind=kind)
 
     def assistant(self, text: str, tool_events: list[dict] | None = None,
-                  kind: str = "chat", interrupted: bool = False) -> None:
-        self._append("assistant", text or "(no reply)", kind=kind,
-                     tool_events=tool_events, interrupted=interrupted)
+                  kind: str = "chat", interrupted: bool = False) -> str | None:
+        return self._append("assistant", text or "(no reply)", kind=kind,
+                            tool_events=tool_events, interrupted=interrupted)
+
+    def retract(self, event_id: str | None, whole: bool = False) -> None:
+        """Take back a message saved for a turn that then failed (the user
+        will retry). `whole`: the conversation was only that message."""
+        if whole:
+            self.discard()
+        elif event_id and self.conversation_id:
+            self._safe(self.store.retract, self.conversation_id, event_id)
 
     def confirm(self, question: str, answer: str) -> None:
         self.assistant(question, kind="confirm")
@@ -1320,13 +1345,15 @@ class Recorder:
                 return
             client = self.client_fn() if self.client_fn else None
             asked = ask_title(client, conv["messages"], self.title_model)
+            # Resumed again before this ran: titled, but not marked ended.
+            ended = cid != self.conversation_id
             if conv["title"]:
                 # A continued conversation keeps the title it is known by;
                 # only the summary is brought up to date.
-                self.store.finish(cid, None, asked[1] if asked else None)
+                self.store.finish(cid, None, asked[1] if asked else None, ended)
             else:
                 title, summary = asked or fallback_title(conv["messages"])
-                self.store.finish(cid, title, summary)
+                self.store.finish(cid, title, summary, ended)
             log.info("History: saved %s", cid)
         except KeyError:
             pass  # deleted meanwhile
@@ -1352,6 +1379,36 @@ class Recorder:
         self._futures = []
 
 
+# ---------- for other features (lecture recorder, quick capture) ----------
+_STORE: HistoryStore | None = None  # the store open_store() opened last
+
+
+def current_conversation_id() -> str | None:
+    """The conversation of the turn running now (inside a tool call), or
+    None (incognito, history off, or called outside a turn)."""
+    from assistant.chat import current_chat
+
+    chat = current_chat()
+    return chat.conversation_id if chat is not None else None
+
+
+def record_event(conversation_id: str | None, kind: str, text: str) -> bool:
+    """Add a note to a saved conversation, e.g. a lecture summary or a
+    quick-capture note: shown in its transcript and search, and passed to
+    Claude when it's continued. `kind` names the feature (stored with the
+    note); `conversation_id` None = the current one. False if there is
+    nowhere to put it (incognito, history off, unknown id)."""
+    store = _STORE
+    cid = conversation_id or current_conversation_id()
+    if store is None or not cid or not text.strip():
+        return False
+    try:
+        store.add_message(cid, "assistant", f"[{kind}] {text.strip()}", kind="note")
+        return True
+    except KeyError:
+        return False
+
+
 def origin_of(config: dict) -> str:
     """This backend's role for events: [failover] role / ASSISTANT_ROLE,
     or "pc" when it runs on its own."""
@@ -1366,9 +1423,11 @@ def open_store(config: dict) -> HistoryStore | None:
     if not h.get("enabled", True):
         return None
     path = h.get("path") or "data/history.sqlite"  # HISTORY_PATH via config
+    global _STORE
     try:
-        return HistoryStore(path, retention_days=h.get("retention_days", 0),
-                            max_mb=h.get("max_mb", 0), origin=origin_of(config))
+        _STORE = HistoryStore(path, retention_days=h.get("retention_days", 0),
+                              max_mb=h.get("max_mb", 0), origin=origin_of(config))
+        return _STORE
     except Exception as e:
         log.exception("History: could not open %s", path)
         print(f"(History off: could not open {path}: {e})")
