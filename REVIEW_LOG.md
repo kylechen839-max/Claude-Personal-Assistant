@@ -253,3 +253,17 @@ Possibly flaky, passing on rerun:
 | Untrusted memory end to end | OK. Traced with real code: invite → tainted → untrusted summary → recall → move asks and is refused. |
 | Secrets in logs | OK (`RedactingFormatter`). |
 | PRIVACY.md | 15 claims accurate. Inaccurate claims are listed under B4. |
+
+## Cycle 4b: blocker re-check, 2026-10-19 ~02:45 UTC
+
+- **Commit:** master fcdc8db.
+- **Tests:** 1414 passed, 48 skipped.
+
+| Blocker | Status |
+|---|---|
+| B2 | FIXED: `cli.py:159,370,383` log lengths only |
+| B3 | FIXED: `chat.py:469` logs the name and argument keys; `tools/__init__.py:107` logs the name. A sweep of INFO/WARN/ERROR calls found no remaining text. |
+| B4 | FIXED: every PRIVACY.md point is corrected |
+| B1 | OPEN: PRIVACY.md wording is fixed, but the UI confirm (`app.js:432`) still promises "every phone" while failover hc1 tokens aren't revoked. Clears with the revocation epoch or corrected confirm text. |
+
+Verdict: GO once B1 lands.
