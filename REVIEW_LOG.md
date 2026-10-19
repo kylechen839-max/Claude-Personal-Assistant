@@ -302,3 +302,13 @@ Verdict: GO once B1 lands.
 The fix that persists failover "Sign out everywhere" in `web_sessions.json` (95dd77e) is verified. No HIGH or MED findings.
 
 LOW (sent to failover): an unreadable sessions file resets `tokens_not_before` to 0, which re-admits revoked access tokens when history is off. Fix: set it to now on an unreadable file.
+
+## Light check, 2026-10-19 ~08:55 UTC
+
+- **Commits:** 0c6ed55..3e873c8 (1.0.2).
+- **Change verified:** 432c1db. An unreadable sessions file now sets `tokens_not_before` to now, so access tokens fail closed. A missing file returns early, so a first start is unaffected.
+- **Findings:** none at HIGH or MED.
+- **Tests:** about 1422 passed.
+  - Each full run hits 1-10 setup errors in different TTS-fixture tests (eSpeak/pyttsx3 sometimes doesn't write its `.wav`, e.g. `wake0/cmd.wav`, `out.wav`).
+  - `test_follow_up.py` passes 14/14 when run alone (3 runs).
+  - This is an environment flake, unrelated to the diff. LOW: add a retry or a file-exists wait in the TTS render fixture.
