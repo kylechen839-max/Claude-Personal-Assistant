@@ -158,6 +158,7 @@ class SessionStore:
         self.epoch = secrets.token_hex(8)
         self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
         self._saved_at: dict[str, float] = {}
+        self._unsaved = False  # a save failed; retry before trusting the file
         self._load()
 
     def _load(self) -> None:
@@ -185,8 +186,15 @@ class SessionStore:
                 pass
             tmp.replace(self.path)
             self._saved_at = dict(self.sessions)
+            if self._unsaved:
+                log.warning("Web sessions saved to %s again", self.path)
+            self._unsaved = False
         except OSError as e:
-            log.warning("Could not save web sessions to %s: %s", self.path, e)
+            # A sign-out not on disk would come back after a restart: say so
+            # loudly and retry on every request until it is saved.
+            log.error("Could not save web sessions to %s (%s); a sign-out may "
+                      "be undone by a restart until this works", self.path, e)
+            self._unsaved = True
 
     def create(self) -> str:
         sid = secrets.token_urlsafe(16)
@@ -204,6 +212,8 @@ class SessionStore:
             return False
         now = self.clock()
         with self.lock:
+            if self._unsaved:
+                self._save()
             last = self.sessions.get(sid)
             if last is None:
                 return False
@@ -255,9 +265,12 @@ class LoginLimiter:
         self.global_delay = global_delay
         self.clock = clock
         self.failures: dict[str, deque] = {}
-        self.all_failures: deque = deque()
+        # Only the newest global_free + 1 times matter: more than global_free
+        # within the window means all of those are inside it.
+        self.all_failures: deque = deque(maxlen=global_free + 1)
         self.locked_until: dict[str, float] = {}
         self.lock = threading.Lock()
+        self._sweep_at = 10_000  # tracked addresses before the next cleanup
 
     def _prune(self, q: deque, now: float) -> None:
         while q and q[0] <= now - self.window:
@@ -272,7 +285,7 @@ class LoginLimiter:
         """Record a wrong token; returns how long to wait before answering."""
         now = self.clock()
         with self.lock:
-            q = self.failures.setdefault(ip, deque())
+            q = self.failures.setdefault(ip, deque(maxlen=self.per_ip))
             q.append(now)
             self.all_failures.append(now)
             self._prune(q, now)
@@ -281,12 +294,14 @@ class LoginLimiter:
                 self.locked_until[ip] = now + self.lockout
                 log.warning("Web sign-in: one address locked out after %d "
                             "wrong tokens", len(q))
-            if len(self.failures) > 10_000:  # bound memory under a flood
+            if len(self.failures) > self._sweep_at:  # bound memory under a flood
                 for key in [k for k, v in self.failures.items()
                             if not v or v[-1] <= now - self.window]:
                     self.failures.pop(key, None)
                 for key in [k for k, t in self.locked_until.items() if t <= now]:
                     self.locked_until.pop(key, None)
+                # sweep again only once it has doubled: amortized O(1)
+                self._sweep_at = max(10_000, 2 * len(self.failures))
             if len(self.all_failures) > self.global_free:
                 return self.global_delay
             return 0.0
@@ -503,6 +518,10 @@ MANIFEST = {
 @dataclass
 class PendingConfirm:
     question: str
+    # True when asked during chat_stream(on_event=...) (the voice view):
+    # only that caller may answer it, not the page's /api/confirm.
+    stream: bool = False
+    id: str = field(default_factory=lambda: secrets.token_urlsafe(8))
     answered: threading.Event = field(default_factory=threading.Event)
     answer: bool = False
 
@@ -705,10 +724,10 @@ class WebAssistant:
 
     def _confirm(self, s: Session, question: str) -> bool:
         """Called in the turn's thread: ask the page and wait for the answer."""
-        pending = PendingConfirm(question)
+        pending = PendingConfirm(question, stream=s.listener is not None)
         s.pending = pending
-        s.emit({"type": "confirm", "question": question,
-                      "audio": f"/api/audio/{self.remember(question)}"})
+        s.emit({"type": "confirm", "question": question, "id": pending.id,
+                "audio": f"/api/audio/{self.remember(question)}"})
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
@@ -717,10 +736,16 @@ class WebAssistant:
             s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
-    def answer(self, s: Session, yes: bool) -> bool:
-        """Answer the pending question. False if there is none."""
+    def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
+        """Answer the pending question; False if there is none, or it isn't
+        the one meant. With `confirm_id` (from the "confirm" event) only that
+        question is answered. Without it, only a question asked during
+        chat_stream(on_event=...) is: a late answer from the voice view must
+        never answer a newer push-to-talk question."""
         pending = s.pending
         if pending is None:
+            return False
+        if (pending.id != confirm_id) if confirm_id is not None else not pending.stream:
             return False
         pending.answer = yes
         s.last_active = self.clock()
@@ -1165,12 +1190,22 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                                samesite="strict")
         return response
 
+    async def end_voice(sids) -> None:
+        """Hang up the voice conversations of signed-out sessions (their
+        WebSockets close when the conversation ends)."""
+        live = getattr(app.state, "voice_conversations", {})
+        for sid in list(sids):
+            entry = live.get(sid)
+            if entry is not None:
+                await run_in_threadpool(entry[0].end, "signed_out")
+
     @app.post("/api/logout")
     async def logout(request: Request):
         """Sign this browser out; its cookie stops working everywhere."""
         sid = web.sid(request)
         if sid:
             store.revoke(sid)
+            await end_voice([sid])
             await run_in_threadpool(assistant.end_session, sid)
         return signed_out()
 
@@ -1180,7 +1215,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         token itself: change WEB_TOKEN to cut those off."""
         if web.sid(request) is None:
             return unauthorized()
-        for sid in store.revoke_all():
+        revoked = store.revoke_all()
+        await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
+        for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)
         log.warning("Web: signed out everywhere")
         return signed_out()
@@ -1192,7 +1229,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if s is None:
             return unauthorized()
         return {"busy": s.busy.locked(),
-                "confirm": s.pending.question if s.pending else None,
+                "confirm": (s.pending.question if s.pending
+                            and not s.pending.stream else None),
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
 
@@ -1226,7 +1264,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         s = session_of(request)
         if s is None:
             return unauthorized()
-        if s.pending is None:
+        pending = s.pending
+        if pending is None or pending.stream:  # the voice view's question
             return error("nothing to confirm", 409)
         fields, data, err = await read_upload(request)
         if err:
@@ -1241,7 +1280,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
         log.debug("Confirmation answer: %r", answer)
-        if not assistant.answer(s, yes):
+        if not assistant.answer(s, yes, confirm_id=pending.id):
             return error("nothing to confirm", 409)
         return stream(s)
 

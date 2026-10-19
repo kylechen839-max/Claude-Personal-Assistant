@@ -18,6 +18,16 @@ Only what is still open for Kyle. None of it blocks the code.
       section). Before it, consider **publishing the Google OAuth app**
       (consent screen -> Publish app): in "Testing" mode Google expires
       `token.json` after 7 days, which an always-on Pi would hit.
+- [ ] **Protect `master` and `stable` on GitHub** before turning on
+      automatic updates. GitHub -> the repo -> Settings -> Rules ->
+      Rulesets -> New branch ruleset: target `stable`, restrict updates and
+      deletions, block force pushes, bypass list: GitHub Actions only (the
+      promote-stable workflow moves it). A second ruleset for `master`:
+      block force pushes and deletions (and ideally require pull requests).
+      Until then keep `[update] enabled = false` (the default).
+- [ ] **Signing key for updates** (only if you want automatic updates):
+      README, "Automatic updates" -> "Setting up signing" (a GitHub secret
+      `STABLE_SIGNING_KEY` and an allowed_signers file on the PC/Pi).
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

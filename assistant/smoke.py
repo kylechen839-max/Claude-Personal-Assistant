@@ -53,8 +53,11 @@ class WebClient:
                              timeout=kw.pop("timeout", self.timeout), **kw)
 
     def post(self, path: str, **kw):
+        # never follow a redirect with the body (the token, a recording):
+        # requests would re-send it, even from https to http
         return self.http.post(self.base + path, headers=self._headers(),
-                              timeout=kw.pop("timeout", self.timeout), **kw)
+                              timeout=kw.pop("timeout", self.timeout),
+                              allow_redirects=False, **kw)
 
     def login(self, token: str) -> int:
         r = self.post("/api/login", json={"token": token})
