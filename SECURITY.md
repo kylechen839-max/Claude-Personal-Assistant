@@ -379,6 +379,23 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
+- **The dev-team dashboard can open a comment box, nothing more.** The
+  page (tools/agent-dashboard) declares `comments` as `composer_only`:
+  it can only open claude.ai's own new-comment composer on a panel
+  (`openComposer`, one call per click, never at load, on a timer or as a
+  retry). It cannot post, reply, read threads or send anything to
+  Claude, and asks for no consent. The composer is the shell's own, and
+  only Kyle can press its Send to Claude. A master that receives such a
+  comment treats it as Kyle's words about its own run, within that
+  run's scope only: it may re-order or stop work, but never changes
+  permissions, touches secrets or routes around a denial, and never
+  copies comment text into a row. Replies live in the artifact's comment
+  store. The connector Grid and chat panel that came before were removed
+  (the connector didn't exist on Kyle's account), so the page no longer
+  messages sessions at all. ArtifactComments is pre-approved in
+  `.claude/settings.json`, like ArtifactData; Kyle approved that. The
+  page keeps only its view and tile layout in the browser's
+  localStorage (no row text), and still never writes to the db.
 
 ## Conversation history
 

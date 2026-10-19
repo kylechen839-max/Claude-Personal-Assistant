@@ -486,7 +486,7 @@ phone app installed from the cloud URL with Tailscale on.
       `https://<pi>.<tailnet>.ts.net/healthz`.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
 
-## Agent run dashboard (optional, ~3 min)
+## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
 (see tools/agent-dashboard/README.md).
 - [ ] Open it on the iPhone in Safari, signed in to claude.ai.
@@ -501,3 +501,40 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
       GitHub UI while that session is still open.
   - Should: within a few minutes its card changes from "needs you" to
     "done" (the master's CI watch writes it).
+- [ ] During a `/build-feature` run, open the dashboard on a computer and
+      tap Grid.
+  - Should: one large panel for the run (feature, phase and round,
+    elapsed time, a few status lines, Message coordinator and Open
+    session) and a small tile for each researcher, builder and judge
+    with a coloured dot (running green and pulsing, done blue, failed
+    red). They match what the master's session at claude.ai/code says.
+- [ ] Tap Message coordinator, type "status?" in claude.ai's comment box
+      and press Send to Claude.
+  - Should: the box opens quoting the panel's "run <id>" line, and the
+    master replies in that comment thread within a minute or two (one
+    or two lines). A plain comment without Send to Claude gets no reply.
+- [ ] In the desktop window, drag an agent tile by its handle onto
+      another tile, then drag a tile's bottom-right corner to make it
+      wider and taller. Reload the page.
+  - Should: the tile moves and snaps to the new size (at most 3 columns
+    by 2 rows), and both survive the reload. Tab to a handle, press
+    Enter, then the arrow keys: the tile moves. Reset layout puts it all
+    back. A drag made while the master is starting or finishing an
+    agent still drops cleanly, and the next drag works.
+- [ ] Run `/build-feature` a second time in the same master session.
+  - Should: the panel shows the new run's title, elapsed time and status
+    lines only, not the earlier run's.
+- [ ] On the iPhone, open Grid.
+  - Should: one column, no drag or resize handles; Message coordinator
+    either opens claude.ai's comment box or is not shown at all, and
+    Open session opens the master's session.
+- [ ] Switch to Grid, reload the page, then switch to Runs and reload.
+  - Should: each reload opens the view you left it on.
+- [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
+  - Should: the dashboard opens in its own Chrome or Edge window with no
+    address bar, already signed in to claude.ai, and can be pinned to the
+    taskbar.
+- [ ] On a Mac, double-click tools/agent-dashboard/desktop/open-dashboard.command
+      (the first time, right-click it and choose Open).
+  - Should: the same, in its own Chrome or Edge window, already signed
+    in, and no Finder window opens.
