@@ -293,3 +293,12 @@ Verdict: GO once B1 lands.
 - **Tests:** 1422 passed, 48 skipped.
 - **Verdict:** GO confirmed.
 - **Next:** light checks every few hours, stopping if master doesn't change.
+
+## Light check, 2026-10-19 ~05:50 UTC
+
+- **Commits:** 025d86d..0c6ed55 (1.0.1).
+- **Tests:** 1423 passed, 48 skipped.
+
+The fix that persists failover "Sign out everywhere" in `web_sessions.json` (95dd77e) is verified. No HIGH or MED findings.
+
+LOW (sent to failover): an unreadable sessions file resets `tokens_not_before` to 0, which re-admits revoked access tokens when history is off. Fix: set it to now on an unreadable file.
