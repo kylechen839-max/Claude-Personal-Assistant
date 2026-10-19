@@ -498,8 +498,17 @@ def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
     registry.tools.pop("remember", None)
     registry.register(*QuickNotes(memory,
                                   timezone=config["assistant"]["timezone"] or None,
-                                  min_score=config["notes"]["min_score"]).tools())
+                                  min_score=config["notes"]["min_score"],
+                                  on_saved=note_to_history).tools())
     return True
+
+
+def note_to_history(note: dict) -> bool:
+    """Show a saved note in the current conversation's history (through
+    the history module's public function; nothing if history is off)."""
+    from assistant import history
+
+    return history.record_event(None, "note", f"Saved a note: {note['text']}")
 
 
 def text_confirm(input_fn=None):

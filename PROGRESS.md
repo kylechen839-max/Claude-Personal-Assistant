@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1398 passed, 43 skipped (Linux build sandbox,
+**Current test count:** 1406 passed, 43 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -53,6 +53,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_lecture.py` | 28 | lecture uploads, pipeline, Notion database |
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
+| `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -552,8 +553,19 @@ Four features on top of the seven stages (branch `claude/features`).
   `/static/katex` and drawn with `katex.render` (CSP-safe), spoken replies
   with LaTeX read aloud. Tested: auth on every route, type/size rejection,
   EXIF removal, mocked vision call, 27 LaTeX-to-speech forms.
-- Waiting on other branches: cloud host (`[lecture] upload_dir` on `/data`,
-  `GOOGLE_TOKEN_JSON`), history (notes via `on_saved`).
+- Integration (after history, cloud-host and failover landed): a saved
+  note is added to the current conversation's history and a filed lecture's
+  summary to the phone conversation it was recorded from, both through
+  `history.record_event` only. The lecture/tutor routes are installed inside
+  `webapp.create_app` (before the failover wrapper), so they need the same
+  sign-in on the local web app, a failover backend (bearer token, CORS from
+  the app origin; chunks are POSTs) and the cloud server (CloudGuard: page
+  code public, API not; lecture chunks and tutor photos get the upload size
+  cap, and `chunk_mb`/`max_image_mb` are lowered to fit `[webapp]
+  max_upload_mb`). With failover the page pins the backend while a
+  recording uploads. Google sign-in from cloud-host and this branch now
+  live together in `tools/google_auth.py`. Tests:
+  `tests/test_features_deploy.py`.
 
 ## Pi preflight ✅
 Everything testable before the move to a Raspberry Pi, in one pass per

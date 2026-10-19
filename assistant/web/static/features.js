@@ -23,8 +23,14 @@
     return el;
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // With failover (app.js sets window.heyClaudeFailover) requests go to the
+  // active backend with a bearer token; otherwise same-origin with the cookie.
+  const failover = () => window.heyClaudeFailover && window.heyClaudeFailover.request
+    ? window.heyClaudeFailover : null;
   async function api(url, options = {}) {
-    const res = await fetch(url, { credentials: "same-origin", ...options });
+    const f = failover();
+    const res = f ? await f.request(url, options)
+                  : await fetch(url, { credentials: "same-origin", ...options });
     let body = {};
     try { body = await res.json(); } catch (e) { /* not JSON */ }
     if (res.status === 401) location.reload();  // signed out: show the login
@@ -130,7 +136,7 @@
         let res;
         try {
           res = await api(`/api/lecture/${upload.id}/chunk?offset=${upload.base}`,
-                          { method: "PUT", headers: { "Content-Type": "application/octet-stream" },
+                          { method: "POST", headers: { "Content-Type": "application/octet-stream" },
                             body: chunk });
         } catch (e) {
           showUpload(`offline, retrying in ${Math.round(delay / 1000)} s`);
@@ -150,8 +156,15 @@
           delay = 1000;
           showUpload();
         } else {
-          showUpload(res.body.error || "upload refused");
-          if (res.status === 413) { stop(); upload.done = true; return; }
+          showUpload(res.status === 404
+            ? "the server changed (failover), so this recording stopped there"
+            : res.body.error || "upload refused");
+          if (res.status === 413 || res.status === 404) {
+            stop();
+            upload.done = true;
+            if (failover() && failover().endTurn) failover().endTurn();
+            return;
+          }
           await sleep(delay);
           delay = Math.min(delay * 2, 30000);
         }
@@ -168,6 +181,7 @@
         showUpload(res.body.error || "could not finish"); return;
       }
       upload.done = true;
+      if (failover() && failover().endTurn) failover().endTurn();
       try { localStorage.removeItem("lectureUpload"); } catch (e) { /* ignore */ }
       upload = null;
       showUpload("Uploaded. Transcribing on the server...");
@@ -189,6 +203,8 @@
       upload = { id: res.body.id, chunkBytes: res.body.chunk_bytes || 4e6, base: 0,
                  blobs: [], sent: 0, stopped: false, done: false };
       try { localStorage.setItem("lectureUpload", upload.id); } catch (e) { /* ignore */ }
+      // The recording lives on one backend: don't switch while it uploads.
+      if (failover() && failover().beginTurn) failover().beginTurn();
       recorder = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}),
                                              audioBitsPerSecond: 32000 });
       recorder.ondataavailable = (e) => { if (e.data && e.data.size) upload.blobs.push(e.data); };
@@ -324,6 +340,19 @@
 
     let photo = null;  // resized JPEG Blob waiting to be sent with the next question
     const player = new Audio();
+    let blobUrl = null;
+    async function playAudio(url) {
+      const f = failover();
+      if (!f) { player.src = url; player.play().catch(() => {}); return; }
+      try {  // another origin and a bearer token: fetch it, then play the blob
+        const r = await f.request(url);
+        if (!r.ok) return;
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = URL.createObjectURL(await r.blob());
+        player.src = blobUrl;
+        player.play().catch(() => {});
+      } catch (e) { /* no audio; the text is on screen */ }
+    }
 
     // Shrink to <= 1600 px and re-encode as JPEG (drops EXIF, saves data).
     async function resize(file) {
@@ -393,7 +422,7 @@
         full.checked = false;
         status.textContent = "";
         bubble("claude", res.body.text);
-        if (speak.checked && res.body.audio) { player.src = res.body.audio; player.play().catch(() => {}); }
+        if (speak.checked && res.body.audio) playAudio(res.body.audio);
       } catch (e) {
         status.textContent = "Couldn't reach the server.";
       } finally {

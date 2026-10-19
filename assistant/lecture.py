@@ -149,7 +149,8 @@ class ChunkedUploads:
             log.info("Purged %d stale lecture uploads", removed)
         return removed
 
-    def start(self, course: str = "", mime: str = "", started_at: str = "") -> str:
+    def start(self, course: str = "", mime: str = "", started_at: str = "",
+              conversation_id: str = "") -> str:
         if len(self._unfinished()) >= self.max_active:
             self.purge_stale()  # abandoned ones shouldn't block new recordings
         if len(self._unfinished()) >= self.max_active:
@@ -167,7 +168,9 @@ class ChunkedUploads:
             started = datetime.now().astimezone()
         _write_json(d / "upload.json", {
             "id": upload_id, "course": course[:100], "mime": mime[:100],
-            "started_at": started.isoformat(), "received": 0, "finished": False})
+            "started_at": started.isoformat(), "received": 0, "finished": False,
+            # the phone conversation it was started from, for history
+            "conversation_id": str(conversation_id or "")[:64]})
         log.info("Lecture upload %s started", upload_id)
         return upload_id
 
@@ -581,7 +584,7 @@ class LecturePipeline:
                  model: str = "claude-sonnet-5-5", whisper_model: str = "base.en",
                  device: str = "cpu", compute_type: str = "int8",
                  keep_audio: bool = False, whisper_factory=None,
-                 timezone: str | None = None):
+                 timezone: str | None = None, on_filed=None):
         self.uploads = uploads
         self.client = client
         self.notes_db = notes_db
@@ -592,6 +595,8 @@ class LecturePipeline:
         self._whisper_factory = whisper_factory
         self._whisper = None
         self.tz = timezone
+        # Called with (job, notes, upload meta) once the Notion page exists.
+        self.on_filed = on_filed
         self._queue: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -735,6 +740,11 @@ class LecturePipeline:
             transcript_file.unlink(missing_ok=True)  # the page has the notes now
             job.status, job.error = DONE, ""
             log.info("Lecture %s filed in Notion", upload_id)
+            if self.on_filed:
+                try:
+                    self.on_filed(job, notes, self.uploads.meta(upload_id))
+                except Exception:
+                    log.exception("Lecture %s: after-filing hook failed", upload_id)
         except NotionBlocked as e:
             job.status, job.error = FAILED, str(e)
             log.error("Lecture %s: Notion blocked: %s", upload_id, e)

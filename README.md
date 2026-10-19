@@ -562,7 +562,8 @@ text never goes into the log file (see SECURITY.md).
 "Remember that the lab report needs error bars" saves a short note in
 Pinecone (your `voice-assistant` namespace, tagged as a note);
 "What did I need for the lab report?" finds it by meaning. You can also ask
-for your recent notes or to delete one (it asks first). Notes need
+for your recent notes or to delete one (it asks first). With conversation
+history on, a saved note also shows up in that conversation. Notes need
 `[memory]` (Pinecone); `[notes] enabled` turns them off.
 
 ### Record a lecture (phone app)
@@ -585,6 +586,12 @@ so and BLOCKERS.md has the two-minute fix. Action items that look like
 assignments are listed under the lecture with an **Add** button; nothing is
 added to Assignments unless you tap it. A failed job can be retried without
 transcribing again.
+
+With conversation history on, the summary and the Notion link are also
+added to the phone conversation you were in when you started recording.
+With failover (FAILOVER.md) a recording stays on the backend it started
+on; if that backend goes away mid-lecture, the page says the recording
+stopped there.
 
 The audio is deleted as soon as it is transcribed (`[lecture] keep_audio =
 true` keeps it) and the transcript once the Notion page exists. Recordings

@@ -263,13 +263,14 @@ def test_lecture_off_blocks_every_lecture_route(features_app):
     assert client.post(f"/api/lecture/{uid}/retry", json={}).status_code == 404
 
 
-def test_limits_must_fit_the_request_cap():
+def test_limits_are_lowered_to_fit_the_request_cap():
     cfg = load_config(None, None)
-    webfeatures.check_limits(cfg)  # defaults fit
-    cfg["lecture"]["chunk_mb"] = 12
-    with pytest.raises(ValueError, match="chunk_mb"):
-        webfeatures.check_limits(cfg)
-    cfg["lecture"]["chunk_mb"] = 4
-    cfg["tutor"]["max_image_mb"] = 20
-    with pytest.raises(ValueError, match="max_image_mb"):
-        webfeatures.check_limits(cfg)
+    assert webfeatures.check_limits(cfg) == []  # defaults fit
+    cfg["lecture"]["chunk_mb"], cfg["tutor"]["max_image_mb"] = 12, 20
+    warnings = webfeatures.check_limits(cfg)
+    assert len(warnings) == 2 and "chunk_mb" in warnings[0]
+    assert cfg["lecture"]["chunk_mb"] == cfg["tutor"]["max_image_mb"] == 9.9
+    server = load_config(None, None)
+    server["webapp"]["max_upload_mb"] = 4  # the cloud profile
+    webfeatures.check_limits(server)
+    assert server["lecture"]["chunk_mb"] == 3.9

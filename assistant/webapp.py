@@ -997,10 +997,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None, failover=None):
+               voice: dict | None = None, failover=None, features=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
-    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md).
+    `features`: a webfeatures.Features (lecture recorder, tutor), whose
+    routes are added before any wrapping, so they get the same auth."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1372,6 +1374,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    if features is not None:
+        from assistant import webfeatures
+
+        webfeatures.install(app, features)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -1536,22 +1542,21 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
 
     failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
+    features = webfeatures.Features(config, assistant)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"), failover=failover)
+                     voice=config.get("voice"), failover=failover,
+                     features=features)
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
         start_history_sync(config, assistant, token, failover)
-    from assistant import webfeatures  # lecture recorder + homework tutor
-
-    features = webfeatures.Features(config, assistant)
-    webfeatures.install(app, features)
-    if config["lecture"]["enabled"]:
-        features.pipeline.resume_pending()  # jobs cut off by a restart
+    features.resume_jobs()  # lecture jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

@@ -6,7 +6,7 @@ page code for these screens and the vendored KaTeX (no CDN).
   GET  /api/lecture/courses            Course options from Notion
   POST /api/lecture/start              {course, mime, started_at} -> {id, ...}
   GET  /api/lecture/{id}               upload status and job state
-  PUT  /api/lecture/{id}/chunk?offset= raw bytes; 409 {received} on a gap
+  POST /api/lecture/{id}/chunk?offset= raw bytes; 409 {received} on a gap
   POST /api/lecture/{id}/finish        {total} -> starts the job
   POST /api/lecture/{id}/retry         re-run a failed job from its last stage
   POST /api/lecture/{id}/assignments   {index, name?, due?, type?} -> adds one
@@ -22,6 +22,22 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
+
+
+def lecture_to_history(job, notes: dict, meta: dict) -> bool:
+    """Add the filed lecture's summary to the phone conversation it was
+    recorded from, through the history module's public function (nothing
+    if history is off or there was no conversation)."""
+    from assistant import history
+
+    cid = meta.get("conversation_id") or None
+    if not cid:
+        return False
+    minutes = f", {round(job.duration_seconds / 60)} min" if job.duration_seconds else ""
+    summary = " ".join((notes.get("summary") or "").split())[:800]
+    text = (f"Lecture notes filed in Notion: {job.title or 'Lecture'} "
+            f"({job.course or 'no course'}{minutes}). {summary} {job.notion_url}").strip()
+    return history.record_event(cid, "lecture", text)
 
 
 class Features:
@@ -89,8 +105,17 @@ class Features:
             self._pipeline = LecturePipeline(
                 uploads, self.client, notes_db,
                 model=self.config["assistant"]["model"], whisper_model=lec["model"],
-                keep_audio=bool(lec["keep_audio"]), whisper_factory=whisper)
+                keep_audio=bool(lec["keep_audio"]), whisper_factory=whisper,
+                on_filed=lecture_to_history)
         return self._pipeline
+
+    def resume_jobs(self) -> int:
+        """Re-queue lecture jobs cut off by a restart or redeploy (only if
+        there have ever been recordings: nothing is created otherwise)."""
+        lec = self.config["lecture"]
+        if not lec["enabled"] or not Path(lec["upload_dir"]).is_dir():
+            return 0
+        return self.pipeline.resume_pending()
 
     def courses(self) -> list[str]:
         if self.assignments is None:
@@ -114,18 +139,23 @@ class Features:
             return self.tutors[sid]
 
 
-def check_limits(config: dict) -> None:
+def check_limits(config: dict) -> list[str]:
     """Lecture pieces and tutor photos must fit under the web app's request
-    size cap ([webapp] max_upload_mb), or every upload would fail with 413."""
+    size cap ([webapp] max_upload_mb; 4 on the cloud server), or every
+    upload would fail with 413. Values that don't fit are lowered to just
+    under the cap, with a warning. Returns the warnings."""
     cap = float(config["webapp"]["max_upload_mb"])
-    problems = []
-    if float(config["lecture"]["chunk_mb"]) + 0.1 > cap:
-        problems.append(f"[lecture] chunk_mb ({config['lecture']['chunk_mb']})")
-    if float(config["tutor"]["max_image_mb"]) + 0.1 > cap:
-        problems.append(f"[tutor] max_image_mb ({config['tutor']['max_image_mb']})")
-    if problems:
-        raise ValueError(" and ".join(problems) + f" must be below [webapp] "
-                         f"max_upload_mb ({cap:g}) in config.toml")
+    room = max(0.5, cap - 0.1)  # headroom for the request's own overhead
+    warnings = []
+    for section, key in (("lecture", "chunk_mb"), ("tutor", "max_image_mb")):
+        value = float(config[section][key])
+        if value > room:
+            warnings.append(f"[{section}] {key} = {value:g} is over [webapp] "
+                            f"max_upload_mb ({cap:g}); using {room:g}")
+            config[section][key] = room
+    for w in warnings:
+        log.warning(w)
+    return warnings
 
 
 def install(app, features: Features) -> None:
@@ -184,7 +214,8 @@ def install(app, features: Features) -> None:
         try:
             upload_id = await run_in_threadpool(
                 uploads.start, str(body.get("course") or ""),
-                str(body.get("mime") or ""), str(body.get("started_at") or ""))
+                str(body.get("mime") or ""), str(body.get("started_at") or ""),
+                getattr(getattr(session, "chat", None), "conversation_id", None) or "")
         except UploadError as e:
             return upload_error(e)
         return {**uploads.status(upload_id),
@@ -201,7 +232,7 @@ def install(app, features: Features) -> None:
             return upload_error(e)
         return {**status, "job": job}
 
-    @app.put("/api/lecture/{upload_id}/chunk")
+    @app.api_route("/api/lecture/{upload_id}/chunk", methods=["POST", "PUT"])
     async def lecture_chunk(upload_id: str, offset: int, request: Request,
                             session=Depends(require_session)):
         if (off := lecture_on()) is not None:
