@@ -58,3 +58,24 @@ def test_concurrent_appends(tmp_path):
     for t in threads:
         t.join()
     assert len(log.all()) == 200
+
+
+def test_secure_delete_is_on(tmp_path):
+    from assistant.failover.eventlog import SqliteEventLog
+
+    log = SqliteEventLog(tmp_path / "events.sqlite")
+    assert log._db.execute("PRAGMA secure_delete").fetchone()[0] == 1
+    log.close()
+
+
+def test_deleted_text_leaves_no_trace_in_the_database_files(tmp_path):
+    from assistant.failover.sync import new_event as ev
+
+    path = tmp_path / "h.db"
+    log = SqliteEventLog(path)
+    secret = "zebra-unicorn-password-1234"
+    log.append([ev("message", "c", {"role": "user", "text": secret}, origin="pi")])
+    log.append([ev("delete", "c", {}, origin="pi")])
+    raw = b"".join(p.read_bytes() for p in tmp_path.iterdir() if p.is_file())
+    assert secret.encode() not in raw
+    log.close()

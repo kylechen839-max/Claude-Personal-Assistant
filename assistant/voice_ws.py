@@ -211,6 +211,15 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         live[sid] = (conv, ws)
         if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")
+        if not web.signed_in(sid):
+            # Signed out while this socket was opening: a sign-out ends the
+            # conversations in `live`, and this one wasn't there yet.
+            if live.get(sid, (None,))[0] is conv:
+                live.pop(sid)
+            await run_in_threadpool(conv.end, "signed_out")
+            log.warning("Closed a voice socket: signed out while it opened")
+            await ws.close(code=1008)
+            return
         log.info("Voice conversation started")
         send({"type": "ready", "settings": client_settings(v)})
 
@@ -228,7 +237,8 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         async def watchdog():
             while True:
                 await asyncio.sleep(1)
-                reason = conv.expired()
+                reason = conv.expired() or (
+                    None if web.signed_in(sid) else "signed_out")
                 if reason:
                     log.info("Voice conversation ended: %s", reason)
                     await run_in_threadpool(conv.end, reason)

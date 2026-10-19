@@ -51,6 +51,7 @@ class PineconeMemory:
         self._pc = pc
         self._index = index
         self._namespaces: list[str] | None = None
+        self.last_untrusted = False  # set by retrieve()
 
     @property
     def pc(self):
@@ -100,14 +101,17 @@ class PineconeMemory:
                 vector=vector, namespaces=namespaces, metric="cosine",
                 top_k=self.top_k, include_metadata=True)
         notes = []
+        self.last_untrusted = False
         for match in result.matches:
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
+                # Written from untrusted text (e.g. an email): the turn that
+                # uses it must confirm changes (see ClaudeChat.recall).
+                self.last_untrusted |= meta.get("untrusted") is True
         log.info("Memory: %d notes for a %d-character query", len(notes), len(query))
-        log.debug("Memory query: %r", query[:60])
         return notes
 
     def store(self, summary: str, extra: dict | None = None) -> str:
@@ -124,10 +128,50 @@ class PineconeMemory:
         return vector_id
 
 
-def transcript(history: list[dict]) -> str:
-    """Plain-text transcript of user text and assistant text (no tool data)."""
+    def search_conversations(self, query: str, top_k: int = 5,
+                             min_score: float | None = None) -> list[dict]:
+        """Semantic search over the assistant's own conversation summaries
+        that link back to a saved conversation. Best first:
+        [{"conversation_id", "score", "text"}]."""
+        if not query.strip():
+            return []
+        result = self.index.query(
+            vector=self.embed(query, "query"), top_k=top_k,
+            namespace=self.namespace, include_metadata=True,
+            filter={"conversation_id": {"$exists": True}})
+        floor = self.min_score if min_score is None else min_score
+        hits = []
+        for match in result.matches:
+            meta = match.metadata or {}
+            if meta.get("conversation_id") and match.score >= floor:
+                hits.append({"conversation_id": str(meta["conversation_id"]),
+                             "score": float(match.score),
+                             "text": str(meta.get("text", ""))[: self.max_note_chars]})
+        return hits
+
+    def vectors_for(self, conversation_id: str, top_k: int = 100) -> list[str]:
+        """Ids of this namespace's summaries of one saved conversation (by
+        their conversation_id metadata), wherever they were written."""
+        result = self.index.query(
+            vector=self.embed("conversation summary", "query"), top_k=top_k,
+            namespace=self.namespace, include_metadata=False,
+            filter={"conversation_id": {"$eq": conversation_id}})
+        return [m.id for m in result.matches]
+
+    def delete(self, vector_ids: list[str]) -> None:
+        """Delete summaries (by vector id) from the assistant's namespace."""
+        if vector_ids:
+            self.index.delete(ids=list(vector_ids), namespace=self.namespace)
+            log.info("Memory: deleted %d vectors", len(vector_ids))
+
+
+def transcript(history: list[dict], user_only: bool = False) -> str:
+    """Plain-text transcript of user text and assistant text (no tool data).
+    `user_only`: just Kyle's lines (when untrusted text was in context)."""
     lines = []
     for msg in history:
+        if user_only and msg["role"] != "user":
+            continue
         content = msg["content"]
         if isinstance(content, str):
             text = content

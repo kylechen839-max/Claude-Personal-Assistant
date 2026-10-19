@@ -126,11 +126,11 @@ function Test-InRepo {
     # Does this task action belong to this checkout (path in the command or
     # the working folder)?
     param($Action)
-    $root = $repoDir.TrimEnd('\')
+    # The repo path must end there or continue with \ (so C:\x\Claude doesn't
+    # match C:\x\Claude-old), a quote or a space; case-insensitive.
+    $pattern = [regex]::Escape($repoDir.TrimEnd('\')) + '(\\|"|\s|$)'
     foreach ($text in @($Action.Execute, $Action.Arguments, $Action.WorkingDirectory)) {
-        if ($text -and $text.TrimEnd('\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            return $true
-        }
+        if ($text -and $text -match $pattern) { return $true }
     }
     return $false
 }

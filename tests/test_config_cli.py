@@ -189,3 +189,21 @@ def test_text_mode_survives_unexpected_errors(fake_client):
                  output_fn=out.append)
     assert "Claude: Sorry, something went wrong." in out
     assert "Claude: Hi." in out
+
+
+def test_config_local_toml_overrides_config_toml(tmp_path):
+    from assistant.config import load_config
+
+    (tmp_path / "config.toml").write_text('[update]\nenabled = false\n[wake]\nsensitivity = 0.4\n')
+    assert load_config(tmp_path / "config.toml", None)["update"]["enabled"] is False
+    (tmp_path / "config.local.toml").write_text('[update]\nenabled = true\n')
+    cfg = load_config(tmp_path / "config.toml", None)
+    assert cfg["update"]["enabled"] is True and cfg["wake"]["sensitivity"] == 0.4
+    assert cfg["update"]["channel"] == "stable"  # the rest stays default
+
+
+def test_config_local_toml_is_gitignored():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    assert "config.local.toml" in (root / ".gitignore").read_text().splitlines()

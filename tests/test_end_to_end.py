@@ -124,7 +124,7 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
     tomorrow = datetime.now(ZoneInfo(TZ)).date() + timedelta(days=1)
     two_pm = datetime.combine(tomorrow, datetime.min.time(), ZoneInfo(TZ)) \
         + timedelta(hours=14)
-    event = {"id": "ev9", "summary": "Physics lab",
+    event = {"id": "ev9", "summary": "Physics lab", "organizer": {"self": True},
              "start": {"dateTime": two_pm.isoformat()},
              "end": {"dateTime": (two_pm + timedelta(minutes=90)).isoformat()}}
     service, events = make_service(items=[event])

@@ -145,8 +145,9 @@ def test_login_sets_a_strict_cookie(make_app):
     for attr in ("httponly", "secure", "samesite=strict", "path=/"):
         assert attr in cookie
     assert TOKEN.lower() not in cookie  # the cookie is signed, not the token
-    assert client.get("/api/state").json() == {"busy": False, "confirm": None,
-                                                "turns": 0}
+    assert client.get("/api/state").json() == {
+        "busy": False, "confirm": None, "turns": 0, "incognito": False,
+        "history": False, "conversation": None}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -677,12 +678,14 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 # --- public server hardening -------------------------------------------------------
 
-PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz",
+          "/silence.wav", "/healthz", "/backend-router.js",
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
+          # the voice view's earcons (assistant/earcons.py)
+          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
@@ -696,7 +699,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
-               and r.path != "/static/vad/{name}"
+               and r.path not in ("/static/vad/{name}", "/earcons/{name}.wav")
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:
@@ -1085,3 +1088,231 @@ def test_session_store_expiry_and_bad_file(tmp_path):
     bad = tmp_path / "s.json"
     bad.write_text("not json")
     assert webapp.SessionStore(bad).sessions == {}
+
+
+# --- review cycle 2 ------------------------------------------------------------
+
+class FakeVoiceConversation:
+    def __init__(self):
+        self.ended = []
+
+    def end(self, reason="user"):
+        self.ended.append(reason)
+
+
+def test_logout_hangs_up_that_browsers_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)  # TestClient has .cookies/.headers
+    mine, other = FakeVoiceConversation(), FakeVoiceConversation()
+    client.app.state.voice_conversations.update({sid: (mine, None),
+                                                 "someone-else": (other, None)})
+    client.post("/api/logout")
+    assert mine.ended == ["signed_out"] and other.ended == []
+
+
+def test_sign_out_everywhere_hangs_up_every_voice_conversation(make_app):
+    _, client = make_app()
+    login(client)
+    convs = [FakeVoiceConversation() for _ in range(3)]
+    client.app.state.voice_conversations.update(
+        {f"sid{i}": (c, None) for i, c in enumerate(convs)})
+    assert client.post("/api/logout-all").status_code == 200
+    assert all(c.ended == ["signed_out"] for c in convs)
+
+
+def test_answers_are_bound_to_their_question(make_app):
+    assistant, _ = make_app()
+    s = assistant.session("abc")
+    page_q = webapp.PendingConfirm("Delete the dentist?")
+    s.pending = page_q
+    # a late "no" from the voice view (no id) must not answer the page's question
+    assert not assistant.answer(s, False)
+    assert not assistant.answer(s, True, confirm_id="wrong")
+    assert not page_q.answered.is_set()
+    assert assistant.answer(s, True, confirm_id=page_q.id)
+    assert page_q.answered.is_set() and page_q.answer
+    voice_q = webapp.PendingConfirm("Delete lunch?", stream=True)
+    s.pending = voice_q
+    assert assistant.answer(s, False) and voice_q.answered.is_set()
+
+
+def test_page_cannot_answer_the_voice_views_question(make_app):
+    assistant, client = make_app()
+    login(client)
+    sid = client.app.state.web.sid(client)
+    s = assistant.session(sid)
+    s.pending = webapp.PendingConfirm("Delete lunch?", stream=True)
+    assert client.post("/api/confirm", json={"answer": "yes"}).status_code == 409
+    assert client.get("/api/state").json()["confirm"] is None
+    assert not s.pending.answered.is_set()
+
+
+def test_confirm_events_carry_an_id(make_app, fake_client):
+    deleted = []
+    fake_client.queue = [
+        make_response(tool_use_block("delete_event", {"title": "Dentist"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Okay.")),
+    ]
+    assistant, client = make_app(tools=delete_registry(deleted))
+    login(client)
+    first = events(client.post("/api/turn", json={"text": "delete the dentist"}))
+    sid = client.app.state.web.sid(client)
+    assert first[-1]["id"] == assistant.session(sid).pending.id
+    events(client.post("/api/confirm", json={"answer": "yes"}))
+    assert deleted == ["Dentist"]
+
+
+def test_limiter_memory_is_bounded_under_a_flood():
+    clock = Clock()
+    limiter = webapp.LoginLimiter(per_ip=3, global_free=20, window=900, clock=clock)
+    for i in range(25_000):
+        limiter.fail(f"10.{i // 65536}.{(i // 256) % 256}.{i % 256}")
+        clock.now += 0.01
+    assert len(limiter.all_failures) <= 21
+    assert limiter.fail("1.1.1.1") > 0  # still slowing down
+    for _ in range(10):
+        limiter.fail("2.2.2.2")
+    assert len(limiter.failures["2.2.2.2"]) == 3
+    clock.now += 1000  # everything is old now: the next sweep drops it
+    limiter._sweep_at = 0
+    limiter.fail("3.3.3.3")
+    assert len(limiter.failures) == 1
+
+
+def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
+    from pathlib import Path
+
+    path = tmp_path / "sessions.json"
+    store = webapp.SessionStore(path)
+    keep, gone = store.create(), store.create()
+    real_replace = Path.replace
+    broken = {"on": True}
+
+    def flaky_replace(self, target):
+        if broken["on"]:
+            raise OSError("disk full")
+        return real_replace(self, target)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "replace", flaky_replace)
+        with caplog.at_level("ERROR"):
+            store.revoke(gone)
+        assert "sign-out may be undone" in caplog.text
+        assert gone in json.loads(path.read_text())["sessions"]  # not on disk yet
+        broken["on"] = False
+        assert store.valid(keep)  # the next request retries the save
+    assert gone not in json.loads(path.read_text())["sessions"]
+    assert not webapp.SessionStore(path).valid(gone)
+
+
+@pytest.mark.parametrize("path", ["/api/logout", "/api/logout-all"])
+def test_sign_out_closes_an_open_voice_socket(path, monkeypatch):
+    """The real /api/voice socket: signing out ends it at once, and the
+    revoked cookie can't open a new one."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    make = make_voice.__wrapped__(monkeypatch)
+    _, http = make()
+    voice_login(http)
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        cookie = http.cookies.get(webapp.COOKIE)
+        assert http.post(path).status_code == 200
+        got = {}
+
+        def read():  # in a thread, so a missing "ended" fails instead of hanging
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+                ws.receive_text()
+            except WebSocketDisconnect as e:
+                got["closed"] = e.code
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+        assert "closed" in got
+    http.cookies.set(webapp.COOKIE, cookie)  # the stolen-cookie case
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with connect(http) as ws:
+            ws.receive_text()
+    assert closed.value.code == 1008
+
+
+def test_sign_out_during_the_voice_handshake_closes_the_socket(monkeypatch):
+    """Review cycle 3: sign-out everywhere landing between the socket's auth
+    check and its registration must not leave a working conversation."""
+    from starlette.websockets import WebSocket, WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice
+    from tests.test_voice_ws import login as voice_login
+
+    _, http = make_voice.__wrapped__(monkeypatch)()
+    voice_login(http)
+    web = http.app.state.web
+    real_accept = WebSocket.accept
+
+    async def accept_after_sign_out(self, *args, **kwargs):
+        web.store.revoke_all()  # "sign out everywhere" in the race window
+        return await real_accept(self, *args, **kwargs)
+
+    monkeypatch.setattr(WebSocket, "accept", accept_after_sign_out)
+    got = {}
+
+    def run():
+        try:
+            with connect(http) as ws:
+                while True:
+                    msg = ws.receive()
+                    if msg["type"] == "websocket.close":
+                        got["closed"] = msg.get("code")
+                        return
+        except WebSocketDisconnect as e:
+            got["closed"] = e.code
+
+    reader = threading.Thread(target=run, daemon=True)
+    reader.start()
+    reader.join(5)
+    assert got.get("closed") == 1008, got
+    assert http.app.state.voice_conversations == {}
+
+
+def test_voice_watchdog_ends_a_revoked_session(monkeypatch):
+    """However the session gets revoked, an open voice socket notices."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    _, http = make_voice.__wrapped__(monkeypatch)()
+    voice_login(http)
+    web = http.app.state.web
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        web.store.revoke(next(iter(web.store.sessions)))  # no end_voice call
+        got = {}
+
+        def read():
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+            except (WebSocketDisconnect, AssertionError) as e:
+                got["error"] = repr(e)
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+
+
+def test_signed_in_check():
+    store = webapp.SessionStore()
+    web = webapp.WebAuth(None, TOKEN, store=store)
+    sid = store.create()
+    assert web.signed_in(sid) and web.signed_in(web.bearer_sid)
+    store.revoke(sid)
+    assert not web.signed_in(sid) and not web.signed_in("made-up")

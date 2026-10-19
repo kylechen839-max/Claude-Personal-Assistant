@@ -69,8 +69,9 @@ MIN_TOKEN_LENGTH = 32
 PC_ONLY_TOOLS = {"open_in_browser"}
 
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+EARCONS = ("listening", "thinking", "ended")  # assistant/earcons.py
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
-       "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+       "img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -157,6 +158,7 @@ class SessionStore:
         self.epoch = secrets.token_hex(8)
         self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
         self._saved_at: dict[str, float] = {}
+        self._unsaved = False  # a save failed; retry before trusting the file
         self._load()
 
     def _load(self) -> None:
@@ -184,8 +186,15 @@ class SessionStore:
                 pass
             tmp.replace(self.path)
             self._saved_at = dict(self.sessions)
+            if self._unsaved:
+                log.warning("Web sessions saved to %s again", self.path)
+            self._unsaved = False
         except OSError as e:
-            log.warning("Could not save web sessions to %s: %s", self.path, e)
+            # A sign-out not on disk would come back after a restart: say so
+            # loudly and retry on every request until it is saved.
+            log.error("Could not save web sessions to %s (%s); a sign-out may "
+                      "be undone by a restart until this works", self.path, e)
+            self._unsaved = True
 
     def create(self) -> str:
         sid = secrets.token_urlsafe(16)
@@ -203,6 +212,8 @@ class SessionStore:
             return False
         now = self.clock()
         with self.lock:
+            if self._unsaved:
+                self._save()
             last = self.sessions.get(sid)
             if last is None:
                 return False
@@ -214,6 +225,12 @@ class SessionStore:
             if now - self._saved_at.get(sid, 0) > 86400:
                 self._save()
             return True
+
+    def listed(self, sid: str) -> bool:
+        """Still signed in? (A read-only check, e.g. for a live WebSocket.)"""
+        with self.lock:
+            last = self.sessions.get(sid)
+        return last is not None and self.clock() - last <= self.max_age
 
     def revoke(self, sid: str) -> None:
         with self.lock:
@@ -254,9 +271,12 @@ class LoginLimiter:
         self.global_delay = global_delay
         self.clock = clock
         self.failures: dict[str, deque] = {}
-        self.all_failures: deque = deque()
+        # Only the newest global_free + 1 times matter: more than global_free
+        # within the window means all of those are inside it.
+        self.all_failures: deque = deque(maxlen=global_free + 1)
         self.locked_until: dict[str, float] = {}
         self.lock = threading.Lock()
+        self._sweep_at = 10_000  # tracked addresses before the next cleanup
 
     def _prune(self, q: deque, now: float) -> None:
         while q and q[0] <= now - self.window:
@@ -271,7 +291,7 @@ class LoginLimiter:
         """Record a wrong token; returns how long to wait before answering."""
         now = self.clock()
         with self.lock:
-            q = self.failures.setdefault(ip, deque())
+            q = self.failures.setdefault(ip, deque(maxlen=self.per_ip))
             q.append(now)
             self.all_failures.append(now)
             self._prune(q, now)
@@ -280,12 +300,14 @@ class LoginLimiter:
                 self.locked_until[ip] = now + self.lockout
                 log.warning("Web sign-in: one address locked out after %d "
                             "wrong tokens", len(q))
-            if len(self.failures) > 10_000:  # bound memory under a flood
+            if len(self.failures) > self._sweep_at:  # bound memory under a flood
                 for key in [k for k, v in self.failures.items()
                             if not v or v[-1] <= now - self.window]:
                     self.failures.pop(key, None)
                 for key in [k for k, t in self.locked_until.items() if t <= now]:
                     self.locked_until.pop(key, None)
+                # sweep again only once it has doubled: amortized O(1)
+                self._sweep_at = max(10_000, 2 * len(self.failures))
             if len(self.all_failures) > self.global_free:
                 return self.global_delay
             return 0.0
@@ -367,7 +389,10 @@ def is_cross_origin(headers, allowed_origins=(), trust_forwarded: bool = True) -
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
     the Host (or X-Forwarded-Host, as set by a proxy, if `trust_forwarded`).
     Requests with neither header (curl, tests) pass; they still need the
-    session cookie."""
+    session cookie. An Origin in `allowed_origins` (e.g. the failover app
+    origin) is never cross-origin."""
+    if headers.get("origin") and headers.get("origin") in allowed_origins:
+        return False
     site = headers.get("sec-fetch-site")
     if site in ("cross-site", "same-site"):
         return True
@@ -502,6 +527,10 @@ MANIFEST = {
 @dataclass
 class PendingConfirm:
     question: str
+    # True when asked during chat_stream(on_event=...) (the voice view):
+    # only that caller may answer it, not the page's /api/confirm.
+    stream: bool = False
+    id: str = field(default_factory=lambda: secrets.token_urlsafe(8))
     answered: threading.Event = field(default_factory=threading.Event)
     answer: bool = False
 
@@ -547,8 +576,11 @@ class WebAssistant:
     def __init__(self, chat_factory: Callable[[ToolRegistry], object],
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
-                 max_sessions: int = 20, clock=time.monotonic):
+                 max_sessions: int = 20, clock=time.monotonic,
+                 history=None, memory=None):
         self.chat_factory = chat_factory
+        self.history = history  # a HistoryStore (conversation history) or None
+        self.memory = memory    # PineconeMemory, for semantic search and deletes
         self.transcriber = transcriber
         self.tts = tts
         self.tools = tools or ToolRegistry()
@@ -566,6 +598,9 @@ class WebAssistant:
         # thread, so all rendering happens in one dedicated thread.
         self._tts_pool = ThreadPoolExecutor(1, thread_name_prefix="web-tts",
                                             initializer=_init_com)
+        if callable(getattr(tts, "warm_up", None)):
+            # load the voice model now, so the first reply isn't the slow one
+            self._tts_pool.submit(_warm_up, tts)
 
     # sessions
     def session(self, sid: str) -> Session:
@@ -626,6 +661,33 @@ class WebAssistant:
         if s is not None:
             self._end(s)
 
+    # conversation history
+    def forget_conversation(self, cid: str) -> None:
+        """A conversation was deleted: drop it from any browser that has it
+        open, so it isn't summarized into memory or saved again."""
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for s in sessions:
+            if s.chat.recorder and s.chat.conversation_id == cid:
+                s.chat.reset()
+                s.chat.recorder.conversation_id = None
+
+    def set_incognito(self, s: Session, on: bool) -> bool:
+        """Switch this browser's incognito mode. The current conversation
+        ends first (saved if it was being saved), so nothing said while
+        incognito ends up in history or memory. False if a turn is running."""
+        if s.chat.recorder is None or s.chat.incognito == on:
+            return True
+        if not s.busy.acquire(timeout=2):
+            return False
+        try:
+            if s.chat.history or s.chat.conversation_id:
+                s.chat.end_conversation()
+            s.chat.recorder.incognito = on
+        finally:
+            s.busy.release()
+        return True
+
     def shutdown(self) -> None:
         with self.lock:
             sessions = list(self.sessions.values())
@@ -662,8 +724,11 @@ class WebAssistant:
         return True
 
     def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit
+        from assistant.cli import get_reply, is_exit, loggable_reply
 
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "web"  # a new conversation started with push-to-talk
         try:
             if recording is not None:
                 text = self.transcribe(recording)
@@ -683,7 +748,7 @@ class WebAssistant:
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
             log.info("Web replied %d chars", len(reply))
-            log.debug("Web replied: %r", reply)
+            log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -701,22 +766,27 @@ class WebAssistant:
 
     def _confirm(self, s: Session, question: str) -> bool:
         """Called in the turn's thread: ask the page and wait for the answer."""
-        pending = PendingConfirm(question)
+        pending = PendingConfirm(question, stream=s.listener is not None)
         s.pending = pending
-        s.emit({"type": "confirm", "question": question,
-                      "audio": f"/api/audio/{self.remember(question)}"})
+        s.emit({"type": "confirm", "question": question, "id": pending.id,
+                "audio": f"/api/audio/{self.remember(question)}"})
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            log.debug("Unanswered: %r", question)
             s.emit({"type": "status", "text": "No answer, so I didn't do it."})
         return answered and pending.answer
 
-    def answer(self, s: Session, yes: bool) -> bool:
-        """Answer the pending question. False if there is none."""
+    def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
+        """Answer the pending question; False if there is none, or it isn't
+        the one meant. With `confirm_id` (from the "confirm" event) only that
+        question is answered. Without it, only a question asked during
+        chat_stream(on_event=...) is: a late answer from the voice view must
+        never answer a newer push-to-talk question."""
         pending = s.pending
         if pending is None:
+            return False
+        if (pending.id != confirm_id) if confirm_id is not None else not pending.stream:
             return False
         pending.answer = yes
         s.last_active = self.clock()
@@ -752,6 +822,9 @@ class WebAssistant:
         if not s.busy.acquire(timeout=2):
             raise RuntimeError("a turn is already running in this session")
         s.listener = on_event
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "voice"  # a new conversation started in voice mode
         deltas: queue.Queue = queue.Queue()
         end = object()
 
@@ -827,6 +900,16 @@ def _init_com() -> None:
         pass
 
 
+def _warm_up(tts) -> None:
+    started = time.perf_counter()
+    try:
+        tts.warm_up()
+        log.info("TTS %s warmed up in %.2f s", type(tts).__name__,
+                 time.perf_counter() - started)
+    except Exception:
+        log.exception("TTS warm-up failed")
+
+
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
@@ -872,6 +955,9 @@ class WebAuth:
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
     def sid(self, conn) -> str | None:
+        claims = getattr(conn, "scope", {}).get("auth")  # set by failover.edge.EdgeMiddleware
+        if claims is not None:
+            return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             if tokens_match(auth[7:], self.token):
@@ -884,6 +970,12 @@ class WebAuth:
             return None
         sid = read_cookie(self.token, conn.cookies.get(COOKIE), self.store.epoch)
         return sid if self.store.valid(sid) else None
+
+    def signed_in(self, sid: str) -> bool:
+        """Is this session still allowed in? For connections that outlive the
+        request that checked them (voice WebSockets): a sign-out revokes the
+        cookie session; a Bearer session lasts as long as the token."""
+        return sid == self.bearer_sid or self.store.listed(sid)
 
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
@@ -917,7 +1009,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None):
+               voice: dict | None = None, failover=None, features=None):
+    """The ASGI app. With `failover` (a failover.peers.FailoverSettings
+    with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md).
+    `features`: a webfeatures.Features (lecture recorder, tutor), whose
+    routes are added before any wrapping, so they get the same auth."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -928,6 +1025,17 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from starlette.concurrency import run_in_threadpool
 
     limiter = limiter or LoginLimiter()
+    failover = failover if failover is not None and failover.role else None
+    security_headers = dict(SECURITY_HEADERS)
+    if failover:
+        from assistant.failover.edge import connect_src
+
+        allowed_origins = tuple(allowed_origins) + tuple(
+            o for o in (failover.app_origin,) if o)
+        security_headers["Content-Security-Policy"] = CSP.replace(
+            "connect-src 'self'", "connect-src " + connect_src(list(failover.backends)))
+        # the phone app reads replies cross-origin from the Pi and PC
+        security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     store = SessionStore(sessions_file)
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
 
@@ -999,7 +1107,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             delay = getattr(request.state, "auth_delay", 0)
             if delay:  # a wrong bearer token while many are failing
                 await _wait(delay)
-        for k, v in SECURITY_HEADERS.items():
+        for k, v in security_headers.items():
             response.headers.setdefault(k, v)
         if proxied:
             response.headers.setdefault(
@@ -1068,9 +1176,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     def index():
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
-    for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript"),
-                        ("update-watch.js", "text/javascript")):
+    for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
+                        ("app.css", "text/css"), ("sw.js", "text/javascript"),
+                        ("update-watch.js", "text/javascript"),
+                        ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1098,6 +1207,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         buf = io.BytesIO()
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
+
+    @app.get("/earcons/{name}.wav")
+    def earcon(name: str):
+        """The voice view's soft listening / thinking / ended sounds."""
+        if name not in EARCONS:
+            return error("not found", 404)
+        return FileResponse(STATIC / "earcons" / f"{name}.wav", media_type="audio/wav",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     from assistant.version import version
 
@@ -1143,12 +1260,22 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                                samesite="strict")
         return response
 
+    async def end_voice(sids) -> None:
+        """Hang up the voice conversations of signed-out sessions (their
+        WebSockets close when the conversation ends)."""
+        live = getattr(app.state, "voice_conversations", {})
+        for sid in list(sids):
+            entry = live.get(sid)
+            if entry is not None:
+                await run_in_threadpool(entry[0].end, "signed_out")
+
     @app.post("/api/logout")
     async def logout(request: Request):
         """Sign this browser out; its cookie stops working everywhere."""
         sid = web.sid(request)
         if sid:
             store.revoke(sid)
+            await end_voice([sid])
             await run_in_threadpool(assistant.end_session, sid)
         return signed_out()
 
@@ -1158,7 +1285,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         token itself: change WEB_TOKEN to cut those off."""
         if web.sid(request) is None:
             return unauthorized()
-        for sid in store.revoke_all():
+        revoked = store.revoke_all()
+        await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
+        for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)
         log.warning("Web: signed out everywhere")
         return signed_out()
@@ -1170,7 +1299,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if s is None:
             return unauthorized()
         return {"busy": s.busy.locked(),
-                "confirm": s.pending.question if s.pending else None,
+                "confirm": (s.pending.question if s.pending
+                            and not s.pending.stream else None),
+                "incognito": s.chat.incognito,
+                "history": assistant.history is not None,
+                "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
 
@@ -1204,7 +1337,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         s = session_of(request)
         if s is None:
             return unauthorized()
-        if s.pending is None:
+        pending = s.pending
+        if pending is None or pending.stream:  # the voice view's question
             return error("nothing to confirm", 409)
         fields, data, err = await read_upload(request)
         if err:
@@ -1219,7 +1353,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
         log.debug("Confirmation answer: %r", answer)
-        if not assistant.answer(s, yes):
+        if not assistant.answer(s, yes, confirm_id=pending.id):
             return error("nothing to confirm", 409)
         return stream(s)
 
@@ -1248,7 +1382,67 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     app.state.voice_conversations = add_voice_routes(
         app, assistant, allowed_origins=web.allowed_origins, voice=voice)
+
+    from assistant import history_web
+
+    history_web.register(app, assistant, session_of, error)
+    if features is not None:
+        from assistant import webfeatures
+
+        webfeatures.install(app, features)
+    if failover:
+        return wrap_failover(app, token, failover, web)
     return app
+
+
+def wrap_failover(app, token: str, failover, web: WebAuth):
+    """EdgeMiddleware around the web app (FAILOVER.md section 3). It uses
+    this app's LoginLimiter and client address, and cookie clients keep
+    working (same-origin requests without a bearer token pass through)."""
+    from starlette.requests import HTTPConnection
+
+    from assistant.failover.edge import EdgeMiddleware
+    from assistant.failover.tokens import TokenAuthority
+
+    routes = {}
+    history = getattr(web.assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    if sync_log is not None:
+        from assistant.failover.sync import make_sync_app
+
+        # pulled/pushed events are projected into the history tables at once
+        routes["/api/sync/"] = make_sync_app(sync_log)
+    return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
+                          app_origins=[o for o in (failover.app_origin,) if o],
+                          backends=list(failover.backends), routes=routes,
+                          limiter=web.limiter,
+                          client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
+                          trusts_proxy=lambda scope: web.trusted_proxy.trusts(
+                              HTTPConnection(scope)),
+                          root_bearer_sid=web.bearer_sid)
+
+
+def start_history_sync(config: dict, assistant, token: str, failover):
+    """Pi and PC: push/pull history with the other backends every
+    [failover] sync_interval seconds, in a daemon thread. The cloud only
+    answers (it can't reach the tailnet). Returns the thread or None."""
+    from assistant.failover.sync import Syncer, default_peers
+    from assistant.failover.tokens import TokenAuthority
+
+    history = getattr(assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    peers = default_peers(failover.role, list(failover.backends))
+    if sync_log is None or not peers:
+        return None
+    syncer = Syncer(sync_log, peers, TokenAuthority(token), failover.role)
+    stop = threading.Event()
+    interval = float(config["failover"]["sync_interval"])
+    thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
+                              name="history-sync", daemon=True)
+    thread.start()
+    log.info("History sync with %s every %.0f s",
+             ", ".join(p.role for p in peers), interval)
+    return thread
 
 
 def assistant_busy(assistant: "WebAssistant", app) -> bool:
@@ -1293,7 +1487,9 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import add_memory_tools, build_memory, build_tools
+    from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
+                               build_tools, register_notes)
+    from assistant.history import Recorder, open_store
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1305,13 +1501,20 @@ def build_assistant(config: dict, tts_name: str | None = None,
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
+    register_notes(tools, memory, config)
+    store = open_store(config)  # conversation history (None if off)
+    add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
     def chat_factory(registry):
+        recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
+                            client_fn=lambda: client,
+                            title_model=config["history"]["title_model"])
         return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
-                          max_tool_rounds=a["max_tool_rounds"], memory=memory)
+                          max_tool_rounds=a["max_tool_rounds"], memory=memory,
+                          recorder=recorder)
 
     stt = config["stt"]
     tts_cfg = config["tts"]
@@ -1320,7 +1523,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"])
+                        confirm_timeout=config["webapp"]["confirm_timeout"],
+                        history=store, memory=memory)
 
 
 def serve(config: dict, host: str | None = None, port: int | None = None,
@@ -1346,13 +1550,25 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.failover.peers import settings_from_config
+
+    failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
+    from assistant import webfeatures  # lecture recorder + homework tutor
+
+    features = webfeatures.Features(config, assistant)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"))
+                     voice=config.get("voice"), failover=failover,
+                     features=features)
+    if failover.role:
+        log.info("Failover role %s; backends: %s", failover.role,
+                 ", ".join(b.role for b in failover.backends) or "none")
+        start_history_sync(config, assistant, token, failover)
+    features.resume_jobs()  # lecture jobs cut off by a restart
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

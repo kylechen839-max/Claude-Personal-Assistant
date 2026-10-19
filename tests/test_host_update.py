@@ -9,8 +9,8 @@ import pytest
 
 from assistant import host, updater
 from tests.test_webapp import make_app  # noqa: F401 (fixture)
-from assistant.updater import (LOCKED, ROLLED_BACK, SKIPPED, UP_TO_DATE, UPDATED,
-                               Updater)
+from assistant.updater import (FAILED, LOCKED, ROLLED_BACK, SKIPPED, UP_TO_DATE,
+                               UPDATED, Updater)
 
 
 def git(cwd, *args):
@@ -19,25 +19,45 @@ def git(cwd, *args):
     return out.stdout.strip()
 
 
-def commit(repo, name, text, message=None):
+def commit(repo, name, text, message=None, sign=True):
     path = Path(repo) / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     git(repo, "add", name)
-    git(repo, "commit", "-q", "-m", message or f"edit {name}")
+    git(repo, "commit", "-q", "-S" if sign else "--no-gpg-sign", "-m",
+        message or f"edit {name}")
     return git(repo, "rev-parse", "HEAD")
 
 
+def keygen(path):
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test",
+                    "-f", str(path)], check=True)
+    return path
+
+
 @pytest.fixture
-def repos(tmp_path):
-    """(dev clone that pushes `stable`, the home host's clone)."""
+def repos(tmp_path, monkeypatch):
+    """(dev clone that signs and pushes `stable`, the home host's clone).
+    Commits are SSH-signed with a test key listed in tmp allowed_signers."""
+    import shutil
+
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen not available")
+    gitconfig = tmp_path / "gitconfig"  # isolate from the machine's git config
+    gitconfig.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    key = keygen(tmp_path / "ci_key")
+    signers = tmp_path / "allowed_signers"
+    signers.write_text(f'ci@example.com namespaces="git" {Path(str(key) + ".pub").read_text()}')
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", str(remote))
     dev = tmp_path / "dev"
     git(tmp_path, "init", "-q", "-b", "master", str(dev))
-    for repo in (dev,):
-        git(repo, "config", "user.email", "ci@example.com")
-        git(repo, "config", "user.name", "CI")
+    for k, v in (("user.email", "ci@example.com"), ("user.name", "CI"),
+                 ("gpg.format", "ssh"), ("gpg.ssh.program", "ssh-keygen"),
+                 ("user.signingkey", str(key))):
+        git(dev, "config", k, v)
     commit(dev, "requirements.txt", "anthropic\n")
     commit(dev, "config.toml", '[update]\nenabled = true\n')
     commit(dev, "app.py", "v = 1\n")
@@ -47,7 +67,7 @@ def repos(tmp_path):
     git(tmp_path, "clone", "-q", "-b", "master", str(remote), str(home))
     git(home, "config", "user.email", "kyle@example.com")
     git(home, "config", "user.name", "Kyle")
-    return dev, home
+    return dev, home, signers
 
 
 class Recorder:
@@ -63,159 +83,287 @@ class Recorder:
             return p.returncode, p.stdout + p.stderr
         self.python_calls.append(cmd[1:])
         if cmd[1:3] == ["-m", "pip"]:
-            return (0, "") if self.pip_ok else (1, "ERROR: no matching distribution")
+            ok = self.pip_ok if not callable(self.pip_ok) else self.pip_ok()
+            return (0, "") if ok else (1, "ERROR: no matching distribution")
         if "--check" in cmd:
             return (0, "All required checks passed.") if self.smoke_ok else \
                 (1, "[FAIL] ANTHROPIC_API_KEY: not set")
         return 0, ""
 
 
-def make(home, rec=None, said=None):
+def make(repos_, rec=None, said=None, **kw):
+    _, home, signers = repos_
     rec = rec or Recorder()
+    kw.setdefault("allowed_signers", signers)
     return Updater(root=home, python="python", run=rec,
-                   say=(said.append if said is not None else lambda s: None)), rec
+                   say=(said.append if said is not None else lambda s: None), **kw), rec
 
 
-def publish(dev, name="app.py", text="v = 2\n"):
-    sha = commit(dev, name, text)
+def publish(dev, name="app.py", text="v = 2\n", sign=True):
+    sha = commit(dev, name, text, sign=sign)
     git(dev, "push", "-q", "origin", "master:stable")
     return sha
 
 
+def pips(rec):
+    return sum(c[:2] == ["-m", "pip"] for c in rec.python_calls)
+
+
 def test_up_to_date(repos):
-    _, home = repos
-    up, rec = make(home)
+    up, rec = make(repos)
     assert up.update().status == UP_TO_DATE and rec.python_calls == []
 
 
 def test_fast_forward_and_smoke(repos):
-    dev, home = repos
+    dev, home, _ = repos
     new = publish(dev)
     said = []
-    up, rec = make(home, said=said)
+    up, rec = make(repos, said=said)
     r = up.update()
     assert r.status == UPDATED and git(home, "rev-parse", "HEAD") == new
     assert (home / "app.py").read_text() == "v = 2\n"
     assert ["-m", "assistant", "--check"] in rec.python_calls  # smoke ran
-    assert not any(c[:2] == ["-m", "pip"] for c in rec.python_calls)  # no reqs change
+    assert pips(rec) == 0  # no requirements change
     assert said and said[0].startswith("update updated")
-    assert not up.lock_file.exists()
+    assert up.applied() == new and not up.lock_file.exists()
 
 
-def test_requirements_change_runs_pip(repos):
-    dev, home = repos
-    publish(dev, "requirements.txt", "anthropic\nnew-package\n")
-    up, rec = make(home)
+# ---------- who is trusted ----------
+
+def test_unsigned_commit_is_not_applied(repos):
+    dev, home, _ = repos
+    old = git(home, "rev-parse", "HEAD")
+    publish(dev, sign=False)
+    up, rec = make(repos)
     r = up.update()
-    assert r.status == UPDATED and "requirements installed" in r.detail
-    assert ["-m", "pip", "install", "-q", "-r", "requirements.txt"] in rec.python_calls
+    assert r.status == SKIPPED and "no valid signature" in r.detail
+    assert git(home, "rev-parse", "HEAD") == old and rec.python_calls == []
 
+
+def test_commit_signed_by_an_unknown_key_is_not_applied(repos, tmp_path):
+    dev, home, _ = repos
+    other = keygen(tmp_path / "attacker_key")
+    git(dev, "config", "user.signingkey", str(other))
+    old = git(home, "rev-parse", "HEAD")
+    publish(dev)
+    up, _ = make(repos)
+    assert up.update().status == SKIPPED and git(home, "rev-parse", "HEAD") == old
+
+
+def test_a_signed_stable_tag_on_an_unsigned_commit_is_enough(repos):
+    dev, home, _ = repos
+    new = publish(dev, sign=False)
+    git(dev, "tag", "-s", "-m", "promoted", f"stable-{new[:7]}", new)
+    git(dev, "push", "-q", "origin", "--tags")
+    up, _ = make(repos)
+    assert up.update().status == UPDATED and git(home, "rev-parse", "HEAD") == new
+
+
+def test_other_tags_dont_count(repos):
+    dev, home, _ = repos
+    new = publish(dev, sign=False)
+    git(dev, "tag", "-s", "-m", "x", "v1-not-stable", new)
+    git(dev, "push", "-q", "origin", "--tags")
+    up, _ = make(repos)
+    assert up.update().status == SKIPPED
+
+
+def test_missing_allowed_signers_refuses(repos, tmp_path):
+    dev, home, _ = repos
+    publish(dev)
+    up, _ = make(repos, allowed_signers=tmp_path / "nope")
+    r = up.update()
+    assert r.status == SKIPPED and "doesn't exist" in r.detail
+
+
+def test_signatures_can_be_turned_off_explicitly(repos, tmp_path):
+    dev, home, _ = repos
+    new = publish(dev, sign=False)
+    up, _ = make(repos, trust_unsigned=True, allowed_signers=tmp_path / "nope")
+    assert up.update().status == UPDATED and git(home, "rev-parse", "HEAD") == new
+
+
+def test_wrong_origin_is_refused(repos):
+    dev, home, _ = repos
+    publish(dev)
+    up, _ = make(repos, repo="github.com/kylechen839-max/Claude-Personal-Assistant")
+    r = up.update()
+    assert r.status == SKIPPED and "not github.com/kylechen839-max" in r.detail
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/kylechen839-max/Claude-Personal-Assistant.git",
+    "https://x-access-token:abc@github.com/kylechen839-max/claude-personal-assistant",
+    "git@github.com:kylechen839-max/Claude-Personal-Assistant.git",
+    "ssh://git@github.com/kylechen839-max/Claude-Personal-Assistant/"])
+def test_normalize_remote(url):
+    assert updater.normalize_remote(url) == \
+        "github.com/kylechen839-max/claude-personal-assistant"
+    assert updater.normalize_remote("https://github.com/evil/Claude-Personal-Assistant") != \
+        updater.normalize_remote(url)
+
+
+# ---------- what is updated ----------
 
 def test_only_the_stable_branch_is_followed(repos):
-    dev, home = repos
+    dev, home, _ = repos
     commit(dev, "app.py", "v = untested\n")
     git(dev, "push", "-q", "origin", "master")  # master moved, stable didn't
-    up, _ = make(home)
+    up, _ = make(repos)
     assert up.update().status == UP_TO_DATE
     assert (home / "app.py").read_text() == "v = 1\n"
 
 
-def test_diverged_is_skipped_and_left_alone(repos):
-    dev, home = repos
-    mine = commit(home, "notes.txt", "my local commit\n")
+def test_only_the_local_branch_is_updated(repos):
+    dev, home, _ = repos
+    git(home, "checkout", "-q", "-b", "my-feature")
+    mine = git(home, "rev-parse", "HEAD")
     publish(dev)
-    up, rec = make(home)
+    up, _ = make(repos)
+    r = up.update()
+    assert r.status == SKIPPED and "my-feature, not master" in r.detail
+    assert git(home, "rev-parse", "HEAD") == mine
+
+
+def test_diverged_is_skipped_and_left_alone(repos):
+    dev, home, _ = repos
+    mine = commit(home, "notes.txt", "my local commit\n", sign=False)
+    publish(dev)
+    up, rec = make(repos)
     r = up.update()
     assert r.status == SKIPPED and "not an ancestor" in r.detail
     assert git(home, "rev-parse", "HEAD") == mine and rec.python_calls == []
 
 
 def test_dirty_tree_is_skipped_and_kept(repos):
-    dev, home = repos
+    dev, home, _ = repos
     publish(dev)
     (home / "app.py").write_text("v = my experiment\n")
-    up, _ = make(home)
+    up, _ = make(repos)
     r = up.update()
     assert r.status == SKIPPED and "app.py" in r.detail
     assert (home / "app.py").read_text() == "v = my experiment\n"
 
 
 def test_local_config_edits_dont_block_and_survive(repos):
-    dev, home = repos
+    dev, home, _ = repos
     new = publish(dev)
     (home / "config.toml").write_text('[update]\nenabled = true\n[wake]\nmic_device = 0\n')
-    up, _ = make(home)
+    up, _ = make(repos)
     assert up.update().status == UPDATED and git(home, "rev-parse", "HEAD") == new
     assert "mic_device = 0" in (home / "config.toml").read_text()
 
 
 def test_config_conflict_is_skipped_safely(repos):
-    dev, home = repos
+    dev, home, _ = repos
     old = git(home, "rev-parse", "HEAD")
     publish(dev, "config.toml", '[update]\nenabled = true\ncheck_minutes = 5\n')
     (home / "config.toml").write_text('[update]\nenabled = true\n# mine\n')
-    up, _ = make(home)
+    up, _ = make(repos)
     r = up.update()
-    assert r.status == SKIPPED and "ff-only refused" in r.detail
+    assert r.status == SKIPPED and "config.local.toml" in r.detail
     assert git(home, "rev-parse", "HEAD") == old
     assert "# mine" in (home / "config.toml").read_text()
 
 
+# ---------- requirements: never automatically ----------
+
+def test_requirements_change_is_not_applied_automatically(repos):
+    dev, home, _ = repos
+    old = git(home, "rev-parse", "HEAD")
+    publish(dev, "requirements.txt", "anthropic\nnew-package\n")
+    up, rec = make(repos)
+    r = up.update()
+    assert r.status == SKIPPED and "--update" in r.detail
+    assert git(home, "rev-parse", "HEAD") == old and pips(rec) == 0
+
+
+def test_requirements_change_by_hand_needs_the_assistant_stopped(repos):
+    dev, home, _ = repos
+    publish(dev, "requirements.txt", "anthropic\nnew-package\n")
+    up, rec = make(repos)
+    alive = home / "logs" / "host-web.alive"
+    alive.parent.mkdir(exist_ok=True)
+    alive.touch()
+    r = up.update(allow_requirements=True)
+    assert r.status == SKIPPED and "running (web)" in r.detail and pips(rec) == 0
+    import os
+    import time as _t
+
+    os.utime(alive, (_t.time() - 60, _t.time() - 60))  # host stopped a minute ago
+    r = up.update(allow_requirements=True)
+    assert r.status == UPDATED and "requirements installed" in r.detail
+    assert ["-m", "pip", "install", "-q", "-r", "requirements.txt"] in rec.python_calls
+
+
 def test_failed_smoke_rolls_back_and_rejects(repos):
-    dev, home = repos
+    dev, home, _ = repos
     old = git(home, "rev-parse", "HEAD")
     bad = publish(dev, "requirements.txt", "anthropic\nbroken\n")
     (home / "config.toml").write_text('[update]\nenabled = true\n# local\n')
     said = []
-    up, rec = make(home, Recorder(smoke_ok=False), said)
-    r = up.update()
+    up, rec = make(repos, Recorder(smoke_ok=False), said)
+    r = up.update(allow_requirements=True)
     assert r.status == ROLLED_BACK and "ANTHROPIC_API_KEY" in r.detail
     assert git(home, "rev-parse", "HEAD") == old
     assert (home / "requirements.txt").read_text() == "anthropic\n"
     assert "# local" in (home / "config.toml").read_text()  # --keep kept it
-    # pip ran for the update and again to put the old requirements back
-    assert sum(c[:2] == ["-m", "pip"] for c in rec.python_calls) == 2
+    assert pips(rec) == 2  # the update's, then the old requirements back
     assert said[-1].startswith("!!! update rolled-back")
+    assert up.applied() is None and bad in up.rejected()
     # the bad commit is not retried; a newer stable is
-    assert up.update().status == SKIPPED
+    assert up.update(allow_requirements=True).status == SKIPPED
     newer = publish(dev, "app.py", "v = 3\n")
     up.run = Recorder()
-    assert up.update().status == UPDATED and git(home, "rev-parse", "HEAD") == newer
+    assert up.update(allow_requirements=True).status == UPDATED
+    assert git(home, "rev-parse", "HEAD") == newer
 
 
 def test_failed_pip_rolls_back(repos):
-    dev, home = repos
+    dev, home, _ = repos
     old = git(home, "rev-parse", "HEAD")
     publish(dev, "requirements.txt", "anthropic\nnope\n")
-    up, _ = make(home, Recorder(pip_ok=False))
-    r = up.update()
+    calls = iter([False, True])  # the update's pip fails; the rollback's works
+    up, _ = make(repos, Recorder(pip_ok=lambda: next(calls)))
+    r = up.update(allow_requirements=True)
     assert r.status == ROLLED_BACK and "pip install failed" in r.detail
     assert git(home, "rev-parse", "HEAD") == old
 
 
-def test_no_stable_branch_is_skipped(repos, tmp_path):
-    _, home = repos
-    up = Updater(root=home, branch="does-not-exist", run=Recorder())
+def test_failed_rollback_pip_is_a_failure(repos):
+    dev, home, _ = repos
+    publish(dev, "requirements.txt", "anthropic\nnope\n")
+    up, _ = make(repos, Recorder(pip_ok=False))
+    r = up.update(allow_requirements=True)
+    assert r.status == FAILED and "pip install -r requirements.txt` by hand" in r.detail
+
+
+def test_no_stable_branch_is_skipped(repos):
+    up, _ = make(repos, branch="does-not-exist")
     assert up.update().status == SKIPPED
 
 
 def test_one_update_at_a_time(repos):
-    dev, home = repos
+    dev, _, _ = repos
     publish(dev)
-    up, _ = make(home)
+    up, _ = make(repos)
     assert up.acquire()
     assert up.update().status == LOCKED
     up.release()
     assert up.update().status == UPDATED
 
 
-def test_rollback_locked_only_if_head_is_still_bad(repos):
-    dev, home = repos
+def test_rollback_locked_only_for_its_own_update(repos):
+    dev, home, _ = repos
     old = git(home, "rev-parse", "HEAD")
     new = publish(dev)
-    up, _ = make(home)
+    up, _ = make(repos)
     assert up.update().status == UPDATED
     assert up.rollback_locked(old, "f" * 40, "x").status == SKIPPED  # HEAD isn't that
+    git(home, "checkout", "-q", "-b", "kyles-branch")  # Kyle switched branch
+    assert up.rollback_locked(old, new, "x").status == SKIPPED
+    assert git(home, "rev-parse", "kyles-branch") == new  # his branch untouched
+    git(home, "checkout", "-q", "master")
     r = up.rollback_locked(old, new, "web did not come up")
     assert r.status == ROLLED_BACK and git(home, "rev-parse", "HEAD") == old
     assert new in up.rejected()
@@ -264,6 +412,11 @@ class FakeUpdater:
 
     def update(self):
         self.updates += 1
+
+    def applied(self):
+        return self.made
+
+    made = None  # the commit "the updater" applied
 
     def rollback_locked(self, old, bad, why):
         self.rollbacks.append((old, bad))
@@ -341,6 +494,7 @@ def test_head_change_restarts_web_when_idle_on_the_new_version():
             return {"ok": True, "version": new[:7]}
 
     h, started, clock = make_host(heads=[old, new, new], health=health)
+    h.updater.made = new
     h.start()
     assert h.child_sha == old
     h.tick(100, {"next_update": 1e9, "next_head": 0})
@@ -512,3 +666,69 @@ const SCRIPT = process.argv[2];
 
     got = json.loads(p.stdout)
     assert got == {"same": 0, "changed": 1, "busy": 0, "voice": 0, "draft": 0}, got
+
+
+def test_head_moved_by_hand_restarts_without_rollback():
+    old, new = "a" * 40, "c" * 40
+    h, started, _ = make_host(heads=[old, new, new],
+                              health=lambda port: {"ok": True, "version": "zzz"})
+    h.start()
+    h.tick(100, {"next_update": 1e9, "next_head": 0})  # updater.made is None
+    assert len(started) == 2 and h.updater.rollbacks == []
+    assert "by hand" in h.log.getvalue()
+
+
+def pgp_commit(repo, parent, message="pgp-signed"):
+    """A commit object carrying an OpenPGP signature block (not SSH)."""
+    tree = git(repo, "rev-parse", f"{parent}^{{tree}}")
+    body = (f"tree {tree}\nparent {parent}\n"
+            "author Eve <eve@example.com> 1700000000 +0000\n"
+            "committer Eve <eve@example.com> 1700000000 +0000\n"
+            "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n"
+            " -----END PGP SIGNATURE-----\n\n" + message + "\n")
+    # bytes, not text: on Windows text mode would write \r\n into the object
+    p = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin"], cwd=repo,
+                       input=body.encode(), capture_output=True, check=True)
+    return p.stdout.decode().strip()
+
+
+class VerifierSaysYes(Recorder):
+    """As if a keyring verified anything: verify-commit/verify-tag exit 0."""
+
+    def __call__(self, cmd, cwd, timeout=0):
+        if cmd[0] == "git" and any(c in ("verify-commit", "verify-tag") for c in cmd):
+            return 0, "gpg: Good signature"
+        return super().__call__(cmd, cwd, timeout)
+
+
+def test_openpgp_signatures_never_count(repos):
+    """Only SSH signatures are checked against allowed_signers; an OpenPGP
+    one (that a gpg keyring might accept) is refused before verifying."""
+    dev, home, _ = repos
+    old = git(home, "rev-parse", "HEAD")
+    bad = pgp_commit(dev, git(dev, "rev-parse", "HEAD"))
+    git(dev, "push", "-q", "origin", f"{bad}:refs/heads/stable")
+    up, _ = make(repos, VerifierSaysYes())
+    r = up.update()
+    assert r.status == SKIPPED and "no valid signature" in r.detail
+    assert git(home, "rev-parse", "HEAD") == old
+    # and a stable-* tag whose signature is PGP doesn't count either
+    tag_body = (f"object {bad}\ntype commit\ntag stable-{bad[:7]}\n"
+                "tagger Eve <eve@example.com> 1700000000 +0000\n\nok\n"
+                "-----BEGIN PGP SIGNATURE-----\n\niQEz\n-----END PGP SIGNATURE-----\n")
+    p = subprocess.run(["git", "mktag"], cwd=dev, input=tag_body.encode(),
+                       capture_output=True)
+    if p.returncode == 0:  # newer git validates; the PGP block is fine for mktag
+        git(dev, "update-ref", f"refs/tags/stable-{bad[:7]}", p.stdout.decode().strip())
+        git(dev, "push", "-q", "origin", "--tags")
+        assert up.update().status == SKIPPED
+
+
+def test_ssh_signed_detection(repos):
+    dev, _, _ = repos
+    up, _ = make(repos)
+    up.root = dev
+    assert up.ssh_signed("commit", "HEAD")
+    unsigned = commit(dev, "x.txt", "x\n", sign=False)
+    assert not up.ssh_signed("commit", unsigned)
+    assert not up.ssh_signed("commit", pgp_commit(dev, unsigned))

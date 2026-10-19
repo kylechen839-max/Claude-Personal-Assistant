@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import re
+import threading
 import time
 
 import anthropic
@@ -15,7 +16,7 @@ from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
 from assistant.tools import ToolRegistry
-from assistant.tts import make_tts
+from assistant.tts import ENGINES, make_tts
 
 EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
@@ -26,6 +27,30 @@ log = logging.getLogger(__name__)
 
 def is_exit(text: str) -> bool:
     return text.lower().strip(" .!?,") in EXIT_WORDS
+
+
+def download_voice_command(name: str, output_fn=print) -> int:
+    """--download-voice: Kokoro (checksummed) or a Piper voice. Setup only:
+    voices are never downloaded while answering."""
+    from assistant import tts, tts_kokoro
+
+    try:
+        if name.lower().startswith("kokoro"):
+            variant = name.lower().partition("-")[2] or "int8"
+            model, voices = tts_kokoro.download(variant=variant, output_fn=output_fn)
+            output_fn(f"Saved {model} and {voices} (checksums ok). With "
+                      '[tts] engine = "auto" (the default) Kokoro is used now.')
+            if variant != "int8":
+                output_fn(f'Set [tts] kokoro_model = "{model.as_posix()}" to use it.')
+        else:
+            model = tts.download_voice(name)
+            output_fn(f"Saved {model}. To use it, set in config.toml:\n"
+                      f'[tts]\nengine = "piper"\npiper_voice = "{model.as_posix()}"')
+    except Exception as e:
+        log.exception("Voice download failed")
+        output_fn(f"Download failed: {e}")
+        return 1
+    return 0
 
 
 def is_yes(text: str) -> bool:
@@ -40,15 +65,20 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="python -m assistant",
                                      description="Hey Claude voice assistant")
     parser.add_argument("--mode", choices=["text", "speak", "voice", "wake", "web"],
-                        default="wake",
                         help="text: type/read; speak: type/listen; voice: "
                              "push-to-talk; wake: always listening (default); "
-                             "web: private phone web app")
+                             "web: private phone web app (the only mode, and "
+                             "the default, with ASSISTANT_PROFILE=server)")
     parser.add_argument("--audio-file",
                         help="wake mode: feed this .wav through the wake-word "
                              "pipeline instead of the live mic, then exit")
-    parser.add_argument("--tts", choices=["pyttsx3", "piper", "print"],
+    parser.add_argument("--tts", choices=list(ENGINES),
                         help="override the TTS engine from config.toml")
+    parser.add_argument("--download-voice", metavar="VOICE",
+                        help='download a voice at setup time and exit: "kokoro" '
+                             '(int8 model and voices, checksum-verified, into '
+                             'models/kokoro/), "kokoro-fp16", or a Piper voice '
+                             'such as en_US-lessac-medium (into voices/)')
     parser.add_argument("--config", default="config.toml",
                         help="settings file (default: config.toml)")
     parser.add_argument("--keyword-path",
@@ -67,9 +97,33 @@ def parse_args(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
+    parser.add_argument("--role", choices=["pi", "pc", "cloud"],
+                        help="which backend this is in the Pi -> PC -> cloud "
+                             "failover (see FAILOVER.md); overrides "
+                             "[failover] role")
     parser.add_argument("--update", action="store_true",
                         help="update now from the tested `stable` branch "
                              "(fast-forward only; rolled back if checks fail)")
+    hist = parser.add_argument_group("conversation history")
+    hist.add_argument("--history", nargs="+", metavar="ACTION",
+                      help="list | search WORDS | show ID | export ID | delete ID")
+    hist.add_argument("--format", choices=["md", "json"], default="md",
+                      help="--history export format (default md)")
+    hist.add_argument("--source", choices=["wake", "text", "web", "voice"],
+                      help="--history list/search: only this source")
+    hist.add_argument("--since", metavar="YYYY-MM-DD",
+                      help="--history list/search: from this day")
+    hist.add_argument("--until", metavar="YYYY-MM-DD",
+                      help="--history list/search: up to this day")
+    hist.add_argument("--pinned", action="store_true",
+                      help="--history list/search: pinned only")
+    hist.add_argument("--yes", action="store_true",
+                      help="--history delete: don't ask first")
+    hist.add_argument("--continue", dest="continue_id", metavar="ID",
+                      help="text/speak mode: continue a saved conversation "
+                           "(an id from --history list, or 'last')")
+    hist.add_argument("--incognito", action="store_true",
+                      help="save nothing: no history, no memory summary")
     return parser.parse_args(argv)
 
 
@@ -102,7 +156,8 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
     # anything else: keep the session alive
-    log.error("Unexpected error answering %r", user_text, exc_info=e)
+    log.error("Unexpected error answering a %d-character request", len(user_text),
+              exc_info=e)
     output_fn(f"Error: {e}")
     return "Sorry, something went wrong."
 
@@ -154,6 +209,8 @@ def run_voice(chat: ClaudeChat, tts, transcriber: Transcriber,
 
 def finish(chat: ClaudeChat, output_fn=print) -> None:
     end_conversation(chat, output_fn)
+    if chat.recorder:
+        chat.recorder.flush()  # let the last title/summary finish saving
     output_fn("Bye!")
 
 
@@ -268,6 +325,14 @@ def strip_wake_phrase(text: str, wake_phrase: str | None) -> str:
     return re.sub(rf"^\W*{words}\b\W*", "", text, flags=re.IGNORECASE)
 
 
+def loggable_reply(chat, reply: str) -> str:
+    """The reply for the log file, or a placeholder when it may quote
+    private content (an email, a personal note)."""
+    if getattr(chat, "private_turn", False) is True:
+        return f"<{len(reply)} characters; private tool content not logged>"
+    return reply
+
+
 def report_timings(timer: TurnTimer, output_fn=None) -> None:
     """One summary line per turn in the log, and on the console if asked."""
     line = timer.summary()
@@ -302,7 +367,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("transcript")
     output_fn(f"You: {heard}")
-    log.info("Heard: %r", heard)
+    log.info("Heard %d characters", len(heard))
+    log.debug("Heard: %r", heard)
     user_text = strip_wake_phrase(heard, wake_phrase).strip()
     if not user_text:
         return bool(heard)  # just "Hey Claude": still listening
@@ -314,7 +380,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
-    log.info("Replied: %r", reply)
+    log.info("Replied with %d characters", len(reply))
+    log.debug("Replied: %r", loggable_reply(chat, reply))
     speak(tts, reply, timer)
     return True
 
@@ -338,20 +405,20 @@ def show_voice_timings(output_fn=print) -> logging.Handler:
 
 def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     """Register every service that is enabled and has credentials."""
-    from pathlib import Path
-
     registry = ToolRegistry()
     tz = config["assistant"]["timezone"] or None
     cal = config["calendar"]
-    if cal["enabled"] and (Path(cal["credentials"]).exists()
-                           or Path(cal["token"]).exists()):
-        from assistant.tools.calendar import GoogleCalendar
+    from assistant.tools.calendar import GoogleCalendar, has_credentials
 
+    if cal["enabled"] and has_credentials(cal["credentials"], cal["token"]):
         registry.register(*GoogleCalendar(
             credentials_path=cal["credentials"], token_path=cal["token"],
-            calendar_id=cal["calendar_id"], timezone=tz).tools())
+            calendar_id=cal["calendar_id"], timezone=tz,
+            save_token=cal["save_token"]).tools())
     elif cal["enabled"]:
-        output_fn(f"(Calendar tools off: {cal['credentials']} not found)")
+        output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
+                  "GOOGLE_TOKEN_JSON not set)")
+    register_gmail(registry, config, output_fn)
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
@@ -368,6 +435,35 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         if web["browser"]:
             registry.register(*web_tools.browser_tools())
     return registry
+
+
+def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
+    """Gmail tools, if the Google token has the Gmail scopes. A token from
+    before Gmail support doesn't: say how to grant them and leave them off."""
+    from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
+                                             load_token_info, missing_scopes)
+
+    cal = config["calendar"]
+    if not config["gmail"]["enabled"] or not cal["enabled"]:
+        return False
+    try:
+        if load_token_info(cal["token"]) is None:
+            return False  # no Google sign-in at all (Calendar says so)
+        lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
+    except (OSError, ValueError) as e:
+        output_fn(f"(Gmail tools off: Google token unreadable: {e})")
+        return False
+    if lacking:
+        output_fn("(Gmail tools off: Gmail access not granted yet. Run "
+                  f"{SIGN_IN_COMMAND} once to sign in again.)")
+        return False
+    from assistant.tools.gmail import GmailInbox
+
+    registry.register(*GmailInbox(
+        credentials_path=cal["credentials"], token_path=cal["token"],
+        timezone=config["assistant"]["timezone"] or None,
+        max_summary=config["gmail"]["max_summary"]).tools())
+    return True
 
 
 def build_memory(config: dict, output_fn=print):
@@ -394,8 +490,35 @@ def add_memory_tools(tools: ToolRegistry, memory) -> None:
         tools.register(*memory_tools(memory))
 
 
+def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
+    """Quick-capture note tools; they need Pinecone memory. They replace
+    the plain `remember` memory tool (same job, plus tags, listing and
+    deleting); `search_memory` stays for searching all of memory."""
+    if memory is None or not config["notes"]["enabled"]:
+        return False
+    from assistant.tools.notes import QuickNotes
+
+    registry.tools.pop("remember", None)
+    registry.register(*QuickNotes(memory,
+                                  timezone=config["assistant"]["timezone"] or None,
+                                  min_score=config["notes"]["min_score"],
+                                  on_saved=note_to_history).tools())
+    return True
+
+
+def note_to_history(note: dict) -> bool:
+    """Show a saved note in the current conversation's history (through
+    the history module's public function; nothing if history is off)."""
+    from assistant import history
+
+    return history.record_event(None, "note", f"Saved a note: {note['text']}")
+
+
 def text_confirm(input_fn=None):
-    return lambda question: is_yes((input_fn or input)(f"{question} (yes/no): "))
+    def confirm(question: str) -> bool:
+        confirm.last_answer = (input_fn or input)(f"{question} (yes/no): ")
+        return is_yes(confirm.last_answer)
+    return confirm
 
 
 def voice_confirm(tts, record_fn, transcriber, output_fn=print):
@@ -406,6 +529,7 @@ def voice_confirm(tts, record_fn, transcriber, output_fn=print):
         recording = record_fn()
         answer = transcriber.transcribe(recording) if recording is not None else ""
         output_fn(f"You: {answer}")
+        confirm.last_answer = answer  # saved in conversation history
         return is_yes(answer)
     return confirm
 
@@ -434,13 +558,64 @@ def build_wake_components(args, config: dict):
     return listener, source, detector.phrase
 
 
-def build_chat(config: dict, tools=None, memory=None) -> ClaudeChat:
+def build_chat(config: dict, tools=None, memory=None,
+               recorder=None) -> ClaudeChat:
     a = config["assistant"]
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
-    return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
+    chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                       max_history=a["max_history"], tools=tools,
-                      max_tool_rounds=a["max_tool_rounds"], memory=memory)
+                      max_tool_rounds=a["max_tool_rounds"], memory=memory,
+                      recorder=recorder)
+    if recorder is not None and recorder.client_fn is None:
+        recorder.client_fn = lambda: chat.client
+    return chat
+
+
+HISTORY_SOURCES = {"text": "text", "speak": "text", "voice": "wake", "wake": "wake"}
+
+
+def build_recorder(config: dict, store, mode: str, incognito: bool = False):
+    """A history Recorder for this mode, or None if history is off."""
+    from assistant.history import Recorder
+
+    if store is None:
+        return None
+    return Recorder(store, HISTORY_SOURCES.get(mode, mode),
+                    incognito=incognito or config["history"]["incognito"],
+                    title_model=config["history"]["title_model"])
+
+
+def add_history_tools(registry: ToolRegistry, config: dict, store, memory) -> None:
+    if store is None:
+        return
+    from zoneinfo import ZoneInfo
+
+    from assistant.tools.history import history_tools
+
+    tz = config["assistant"]["timezone"]
+    registry.register(*history_tools(store, memory, ZoneInfo(tz) if tz else None))
+
+
+def continue_conversation(chat: ClaudeChat, conversation_id: str,
+                          output_fn=print) -> bool:
+    """--continue ID (or 'last'): load a saved conversation into the chat."""
+    store = chat.recorder.store if chat.recorder else None
+    if store is None:
+        output_fn("Conversation history is off; can't continue.")
+        return False
+    if conversation_id == "last":
+        recent = store.list(limit=1)
+        conversation_id = recent[0]["id"] if recent else ""
+    try:
+        conv = chat.resume(conversation_id)
+    except KeyError:
+        output_fn(f"No conversation with id {conversation_id!r} "
+                  "(see: python -m assistant --history list)")
+        return False
+    output_fn(f"(Continuing '{conv['title'] or 'untitled'}', "
+              f"{conv['message_count']} messages)")
+    return True
 
 
 def main(argv=None) -> int:
@@ -448,7 +623,12 @@ def main(argv=None) -> int:
 
     args = parse_args(argv)
     config = load_config(args.config)
+    if args.role:
+        config["failover"]["role"] = args.role
     log_file = setup_logging(config)
+    if args.download_voice:
+        return download_voice_command(args.download_voice)
+    server = config["profile"] == "server"
     if args.check:
         from assistant import doctor
 
@@ -457,6 +637,17 @@ def main(argv=None) -> int:
         from assistant import updater
 
         return updater.main()
+    if args.history:
+        from assistant import history_cli
+
+        return history_cli.run(args, config,
+                               memory_fn=lambda: build_memory(config, lambda _: None))
+    args.mode = args.mode or ("web" if server else "wake")
+    if server and args.mode not in ("web", "text"):
+        # no microphone or speakers on a server
+        print(f"--mode {args.mode} needs audio devices; with "
+              "ASSISTANT_PROFILE=server use --mode web.")
+        return 1
     log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")
@@ -465,6 +656,10 @@ def main(argv=None) -> int:
     tts_name = args.tts or tts_cfg["engine"]
     stt_cfg = config["stt"]
     try:
+        if args.mode == "web" and server:
+            from assistant import cloud
+
+            return cloud.serve(config, port=args.port, tts_name=tts_name)
         if args.mode == "web":
             from assistant import webapp
 
@@ -473,16 +668,36 @@ def main(argv=None) -> int:
 
             return webapp.serve(config, host=args.host, port=args.port,
                                 tts_name=tts_name, show_token=args.show_token)
+        from assistant.history import open_store
+
         tools = build_tools(config)
         memory = build_memory(config)
         add_memory_tools(tools, memory)
-        chat = build_chat(config, tools, memory)
+        register_notes(tools, memory, config)
+        store = open_store(config)
+        add_history_tools(tools, config, store, memory)
+        recorder = build_recorder(config, store, args.mode, args.incognito)
+        chat = build_chat(config, tools, memory, recorder)
+        if chat.incognito:
+            print("(Incognito: this session won't be saved)")
+        elif recorder:
+            recorder.finish_orphans()  # title anything a crash left behind
+        if args.continue_id:
+            if args.mode not in ("text", "speak"):
+                print("--continue works with --mode text or speak "
+                      "(by voice, say: continue our conversation about ...)")
+                return 1
+            if not continue_conversation(chat, args.continue_id):
+                return 1
         if args.mode in ("text", "speak"):
             tools.confirm = text_confirm()
             tts = make_tts(tts_name, **tts_cfg) if args.mode == "speak" else None
             run_text(chat, tts=tts)
             return 0
         tts = make_tts(tts_name, **tts_cfg)
+        if callable(getattr(tts, "warm_up", None)):  # load the voice model now
+            threading.Thread(target=tts.warm_up, name="tts-warm-up",
+                             daemon=True).start()
         transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
                                   stt_cfg["compute_type"])
         if args.mode == "voice":
@@ -504,6 +719,6 @@ def main(argv=None) -> int:
         print("Bye!")
     except Exception as e:  # startup problems: missing key, no mic, bad config
         log.exception("Fatal error")
-        print(f"Error: {e}\n(Details in {log_file})")
+        print(f"Error: {e}\n(Details in {log_file or 'the log above'})")
         return 1
     return 0

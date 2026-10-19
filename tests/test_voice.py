@@ -543,3 +543,30 @@ def test_memory_retrieve_logs_no_query_text(caplog):
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert any("Memory:" in m for m in info)
     assert not [m for m in info if "4512" in m]
+
+
+def test_wake_and_voice_loop_log_no_words_at_info(caplog):
+    """handle_command (wake, push-to-talk voice) and get_reply's error path
+    log lengths at INFO, never what was said or answered."""
+    import logging
+
+    from assistant import cli
+    from tests.conftest import make_response as mr, text_block as tb
+
+    class Words:
+        def transcribe(self, recording):
+            return "Hey Claude, my locker code is 4512"
+
+    client = MagicMock()
+    client.messages.create.return_value = mr(tb("Noted, 4512 is your code."))
+    chat = ClaudeChat(client=client, model="m")
+    with caplog.at_level(logging.INFO, logger="assistant"):
+        cli.handle_command(chat, MagicMock(), Words(), SPEECH, output_fn=lambda m: None,
+                           wake_phrase="Hey Claude")
+        broken = MagicMock()
+        broken.ask.side_effect = ValueError("boom")
+        assert cli.get_reply(broken, "my pin is 4512", output_fn=lambda m: None) == \
+            "Sorry, something went wrong."
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert any(m.startswith("Heard ") for m in info) and any("Replied" in m for m in info)
+    assert not [m for m in info if "4512" in m]

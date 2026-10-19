@@ -140,6 +140,46 @@ class NotionAssignments:
             properties={self.status_prop: {"status": {"name": match}}})
         return {"status": "updated", "assignment": self._summarize(page)}
 
+    # ----- used by the lecture recorder (not Claude tools) -----
+    def _database(self) -> dict:
+        if not hasattr(self, "_db_info"):
+            self._db_info = self.client.databases.retrieve(database_id=self.database_id)
+        return self._db_info
+
+    def parent_page_id(self) -> str | None:
+        """The page holding the Assignments database (Fall 2026 Assignments)."""
+        parent = self._database().get("parent", {})
+        return parent.get("page_id") if parent.get("type") == "page_id" else None
+
+    def course_options(self) -> list[dict]:
+        """The Course select options: [{"name": ..., "color": ...}, ...]."""
+        ds = self.client.data_sources.retrieve(data_source_id=self.data_source_id)
+        prop = ds.get("properties", {}).get(self.course_prop, {})
+        return [{"name": o["name"], "color": o.get("color", "default")}
+                for o in (prop.get("select") or {}).get("options", [])]
+
+    def create_assignment(self, name: str, course: str | None = None,
+                          due: str | None = None, type: str | None = None) -> dict:
+        """Add a row (Status: Not started). Only ever called after Kyle
+        picks it in the app; never automatically."""
+        name = name.strip()
+        if not name:
+            raise ValueError("The assignment needs a name")
+        props = {self.title_prop: {"title": [{"type": "text",
+                                              "text": {"content": name[:200]}}]},
+                 self.status_prop: {"status": {"name": "Not started"}}}
+        if course:
+            props[self.course_prop] = {"select": {"name": course}}
+        if due:
+            date.fromisoformat(due[:10])  # raises on a malformed date
+            props[self.due_prop] = {"date": {"start": due}}
+        if type:
+            props[self.type_prop] = {"select": {"name": type}}
+        page = self.client.pages.create(
+            parent={"type": "data_source_id", "data_source_id": self.data_source_id},
+            properties=props)
+        return {"status": "created", "assignment": self._summarize(page)}
+
     def describe_for_update(self, tool_input: dict) -> str:
         what = tool_input.get("name") or "that assignment"
         if not tool_input.get("name") and tool_input.get("assignment_id"):
