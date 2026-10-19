@@ -90,9 +90,16 @@ never written to `logs/assistant.log` in any mode (text, wake, phone web
 app, hands-free voice): only tool names, message ids and counts are, and
 memory summaries and confirmation questions are logged by length only.
 
-The Google token (`token.json`, which can read all mail once Gmail is on)
-and the sign-in state file are written owner-only (0600 on Linux/Pi) via a
-temp file and rename. The draft question names the real reply address
+The Google token (`token.json`) is the most sensitive file here: once Gmail
+is on, its refresh token can read all mail **and could send mail** if it
+were stolen, because Google offers no narrower permission for drafts. The
+code can't send, but anyone holding the file could. It and the sign-in
+state file are written owner-only (0600 on Linux/Pi) via a unique temp file
+and rename; never share them, and use `GOOGLE_TOKEN_JSON` as a secret on a
+host. **Turning `[gmail] enabled` off does not take the permission back:**
+revoke it at myaccount.google.com -> Security -> Third-party connections
+("Hey Claude" -> Delete all connections), then sign in again with
+`python -m assistant.tools.google_auth` (Calendar only). The draft question names the real reply address
 ("Prof. Smith at smith@uni.edu") and warns when Reply-To differs from the
 sender, since a display name can say anything.
 
@@ -100,9 +107,19 @@ Email (and web) text also stays out of long-term memory: when a
 conversation contained any, its summary is written from Kyle's own words
 only (`transcript(user_only=True)`, stored with `from_user_only`), so an
 injected instruction can't be laundered into a memory and come back later
-as trusted context. As a backstop, a recalled memory marked
-`untrusted: true` makes that turn confirm every change, like an email in
-context. Tests:
+as trusted context. Anything written to memory while untrusted content is in
+the conversation is stored with `untrusted: true`: such summaries, and
+notes saved through `remember_note` or `remember` (after Kyle's yes). When
+a later turn recalls one, automatically or through `recall_notes`,
+`list_recent_notes` or `search_memory`, that turn confirms every change,
+like an email in context (the tools add `"untrusted_content": true` to
+their result; automatic recall sets `ClaudeChat.untrusted_memory`). The
+system prompt also labels recalled notes as stored data, not
+instructions. (Recalled notes stay in the system prompt rather than moving
+into the user turn: the code-level confirmation above is what protects
+changes, and moving them would change the history every mode shares.)
+`search_memory` and `remember` are private like the email tools, and the
+log records memory lookups by count only. Tests:
 `tests/test_gmail.py` (an injection email that tries to delete an event,
 move events, change Notion or create a draft must trigger a confirmation).
 
@@ -139,12 +156,16 @@ third-party script), drawn with `katex.render` so the CSP needs no
 - **Calendar data from Kyle's own events.** Treating every calendar
   listing like web content would make every move ask for confirmation (a
   move always starts by listing), which defeats the point. Instead, only
-  events **organized by someone else** (invites, whose title and location
-  anyone can write) count: a listing that includes one carries
+  events that someone else could have written count: invites (the Calendar
+  API marks only Kyle's own events with `organizer.self`), events created
+  from Gmail (`eventType` "fromGmail") and events whose guests may edit
+  them (`guestsCanModify`): a listing that includes one carries
   `"untrusted_content": true`, and from then on changes in that
   conversation ask first (`chat.has_marked_results`). The description field
   is never sent to Claude, and deletes always ask. Notion assignment titles
-  are written only by Kyle and the integration, so they stay trusted.
+  stay trusted only because the Assignments database is not shared with
+  anyone else; if it ever is, its read tools should be marked untrusted
+  too (`Tool.untrusted_output`).
 - **Voice mode and nearby speech.** Hands-free mode listens continuously
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends

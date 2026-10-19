@@ -16,7 +16,9 @@ Only what is still open for Kyle. None of it blocks the code.
          Google words the drafts permission that way (there is no
          drafts-only one); the assistant blocks sending in code. This
          replaces `token.json`. (With `[gmail] enabled = false` it asks for
-         Calendar only.)
+         Calendar only.) Keep `token.json` private: it could send mail if
+         stolen. To take Gmail access back later, see SECURITY.md (turning
+         `[gmail]` off is not enough; revoke it in your Google account).
       4. Copy the new `token.json` to the Pi, or paste its contents into
          `GOOGLE_TOKEN_JSON` on the cloud host.
       `python -m assistant --check` shows "Gmail access: granted" afterwards.

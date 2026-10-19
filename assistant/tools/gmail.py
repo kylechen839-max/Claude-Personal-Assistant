@@ -282,12 +282,16 @@ class GmailInbox:
         to, warning = "that email", ""
         try:
             info = self._reply_headers(tool_input["message_id"])
-            name, addr = parseaddr(info["to"])
-            to = f"{name.strip()} at {addr}" if name.strip() and addr else (addr or name)
-            from_addr = parseaddr(info["from"])[1]
-            if addr and from_addr and addr.lower() != from_addr.lower():
-                warning = (f" Careful: replies go to {addr}, not to the sender "
-                           f"{from_addr}.")
+            pairs = [(n.strip(), a) for n, a in getaddresses([info["to"]]) if a]
+            to = " and ".join(f"{n} at {a}" if n else a for n, a in pairs) or to
+            from_addr = parseaddr(info["from"])[1].lower()
+            others = [a for _, a in pairs if a.lower() != from_addr]
+            if others and from_addr:
+                sender_too = len(others) < len(pairs)
+                warning = (f" Careful: replies also go to {', '.join(others)}."
+                           if sender_too else
+                           f" Careful: replies go to {', '.join(others)}, not "
+                           f"to the sender {from_addr}.")
         except Exception:
             pass
         text, _ = _trim(_squash(tool_input.get("body", "")), 200)

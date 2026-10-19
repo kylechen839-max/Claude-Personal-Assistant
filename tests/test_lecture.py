@@ -666,3 +666,24 @@ def test_add_taps_during_saving_are_kept_and_never_doubled(tmp_path, fake_client
         t.join()
     assert notion.pages.create.call_count == before + 1
     assert sorted(results) == ["already_added"] * 3 + ["created"]
+
+
+
+def test_abandoned_uploads_are_purged_when_the_cap_is_hit(tmp_path):
+    import os
+
+    up = ChunkedUploads(tmp_path / "u", max_active=2,
+                        disk_usage=lambda p: SimpleNamespace(free=10**12))
+    a, b = up.start(), up.start()
+    old = time.time() - 3 * 86400
+    for uid in (a, b):
+        os.utime(up.directory(uid) / "upload.json", (old, old))
+    c = up.start()  # purges the two abandoned ones instead of refusing
+    assert {d.name for d in up.root.iterdir()} == {c}
+
+
+def test_upload_ids_must_match_fully(tmp_path):
+    up = ChunkedUploads(tmp_path / "u")
+    uid = up.start()
+    with pytest.raises(UploadNotFound):
+        up.status(uid + "\n")

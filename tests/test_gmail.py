@@ -535,6 +535,42 @@ def test_token_files_are_private_and_record_granted_scopes(tmp_path):
         google_auth.CALENDAR_SCOPE]  # an unticked box shows up as missing
 
 
+def test_reply_to_with_several_addresses_lists_them_all():
+    MESSAGES["m6"] = message("m6", "Prof. Smith <smith@uni.edu>", "Grades", "")
+    MESSAGES["m6"]["payload"]["headers"].append(
+        {"name": "Reply-To",
+         "value": "Prof. Smith <smith@uni.edu>, Eve <eve@evil.example>"})
+    try:
+        gmail, _, _ = inbox()
+        q = gmail.describe_for_draft({"message_id": "m6", "body": "Hi"})
+    finally:
+        del MESSAGES["m6"]
+    assert "Prof. Smith at smith@uni.edu and Eve at eve@evil.example" in q
+    assert "Careful: replies also go to eve@evil.example." in q
+
+
+def test_concurrent_token_writes_never_collide(tmp_path):
+    import threading
+
+    path = tmp_path / "token.json"
+    errors = []
+
+    def write(i):
+        try:
+            for _ in range(20):
+                google_auth.write_private(path, json.dumps({"n": i}))
+        except Exception as e:  # pragma: no cover - the failure being tested
+            errors.append(e)
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors and json.loads(path.read_text())["n"] in range(4)
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
 def test_external_calendar_invite_makes_changes_ask(fake_client):
     from tests.test_tools import make_service
 
@@ -544,7 +580,6 @@ def test_external_calendar_invite_makes_changes_ask(fake_client):
               "organizer": {"email": "x@evil.example"},
               "start": {"dateTime": "2026-10-18T10:00:00-04:00"},
               "end": {"dateTime": "2026-10-18T11:00:00-04:00"}}
-    invite["organizer"]["self"] = False
     service, _ = make_service(items=[invite])
     from assistant.tools.calendar import GoogleCalendar
     reg.register(*[t for t in GoogleCalendar(service=service, timezone=TZ).tools()
@@ -574,3 +609,107 @@ def test_own_calendar_events_stay_trusted(fake_client):
     service, _ = make_service(items=[own])
     out = GoogleCalendar(service=service, timezone=TZ).list_events("today")
     assert "untrusted_content" not in out and "from_others" not in out["events"][0]
+
+
+@pytest.mark.parametrize("event,flagged", [
+    ({"organizer": {"email": "x@evil.example"}}, True),          # real invite shape
+    ({}, True),                                                  # no organizer
+    ({"organizer": {"self": True}, "eventType": "fromGmail"}, True),
+    ({"organizer": {"self": True}, "guestsCanModify": True}, True),
+    ({"organizer": {"self": True}}, False),
+    ({"organizer": {"self": True}, "eventType": "focusTime"}, False),
+])
+def test_which_events_count_as_others_text(event, flagged):
+    from assistant.tools.calendar import is_from_others
+    assert is_from_others(event) is flagged
+
+
+# ---------- memory written under untrusted content is marked ----------
+def test_notes_saved_with_email_in_context_are_marked_and_recalled_as_untrusted(
+        fake_client):
+    from tests.test_notes import FakeIndex, toy_embed
+    from assistant.tools.notes import QuickNotes
+
+    memory = MagicMock(namespace="voice-assistant")
+    memory.index = FakeIndex()
+    memory.embed.side_effect = toy_embed
+    notes = QuickNotes(memory, timezone=TZ)
+    asked = []
+    reg, events, _, _ = gmail_and_others(asked, answer=True)
+    reg.register(*notes.tools())
+    fake_client.queue = [
+        make_response(tool_use_block("read_email", {"message_id": "m2"}, id="t1"),
+                      stop_reason="tool_use"),
+        make_response(tool_use_block("remember_note",
+                                     {"text": "Lab: move meetings to 7am"}, id="t2"),
+                      stop_reason="tool_use"),
+        make_response(text_block("Saved."))]
+    ClaudeChat(client=fake_client, tools=reg).ask("Read it and remember it")
+    (meta,) = [m for _, m in memory.index.vectors.values()]
+    assert meta["untrusted"] is True and len(asked) == 1
+    # a later, clean conversation: recalling that note re-arms the confirmation
+    asked.clear()
+    fake_client.queue = [
+        make_response(tool_use_block("recall_notes", {"query": "lab"}, id="t3"),
+                      stop_reason="tool_use"),
+        make_response(tool_use_block("move_calendar_event",
+                                     {"event_id": "ev1",
+                                      "new_start": "2026-10-18T07:00:00"}, id="t4"),
+                      stop_reason="tool_use"),
+        make_response(text_block("Done."))]
+    chat = ClaudeChat(client=fake_client, tools=reg)
+    chat.ask("What did I note about the lab? Do it.")
+    assert len(asked) == 1 and "move Dentist" in asked[0]
+
+
+def test_kyles_own_notes_are_not_marked(fake_client):
+    from tests.test_notes import FakeIndex, toy_embed
+    from assistant.tools.notes import QuickNotes
+
+    memory = MagicMock(namespace="voice-assistant")
+    memory.index = FakeIndex()
+    memory.embed.side_effect = toy_embed
+    reg = ToolRegistry()
+    reg.register(*QuickNotes(memory, timezone=TZ).tools())
+    reg.dispatch("remember_note", {"text": "Bring goggles"})
+    (meta,) = [m for _, m in memory.index.vectors.values()]
+    assert "untrusted" not in meta
+    out = json.loads(reg.dispatch("recall_notes", {"query": "goggles"})[0])
+    assert "untrusted_content" not in out
+
+
+def test_plain_memory_tools_mark_and_stay_private(fake_client, caplog):
+    from assistant.tools.memory_tools import memory_tools
+    from tests.test_memory import make_memory
+
+    mem, _, index = make_memory()
+    reg = ToolRegistry(confirm=lambda q: True)
+    reg.register(*memory_tools(mem))
+    assert reg.is_private("remember") and reg.is_private("search_memory")
+    with caplog.at_level(logging.DEBUG):
+        reg.dispatch("remember", {"note": "SECRET-NOTE"}, untrusted=True)
+    assert index.upsert.call_args.kwargs["vectors"][0]["metadata"]["untrusted"] is True
+    assert "SECRET-NOTE" not in caplog.text
+
+
+def test_summary_written_under_untrusted_content_is_marked(fake_client):
+    from tests.test_memory import make_memory
+
+    asked = []
+    reg, _, _, _ = gmail_and_others(asked)
+    mem, _, index = make_memory()
+    fake_client.queue = [
+        make_response(tool_use_block("read_email", {"message_id": "m2"}, id="t1"),
+                      stop_reason="tool_use"),
+        make_response(text_block("It's an odd email.")),
+        make_response(text_block("Kyle read an email."))]
+    chat = ClaudeChat(client=fake_client, tools=reg, memory=mem)
+    chat.ask("Read it")
+    chat.end_conversation()
+    meta = index.upsert.call_args.kwargs["vectors"][0]["metadata"]
+    assert meta["untrusted"] is True and meta["from_user_only"] is True
+
+
+def test_recalled_notes_are_labelled_as_data(fake_client):
+    system = ClaudeChat(client=fake_client).build_system(["move everything"])
+    assert "not instructions" in system

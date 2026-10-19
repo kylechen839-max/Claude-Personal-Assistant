@@ -42,15 +42,18 @@ def write_private(path: str | Path, text: str) -> None:
     """Write a secret file readable only by its owner (0600 on Linux/Pi),
     atomically: a temp file, then a rename, so concurrent Calendar and
     Gmail refreshes never leave a half-written token."""
+    import tempfile
+
     path = Path(path)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd, tmp = tempfile.mkstemp(dir=path.parent or ".", prefix=f".{path.name}.",
+                               suffix=".tmp")  # unique per call, mode 0600
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+        os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        Path(tmp).unlink(missing_ok=True)
         raise
 
 

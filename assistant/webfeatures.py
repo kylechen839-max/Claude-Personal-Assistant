@@ -114,6 +114,20 @@ class Features:
             return self.tutors[sid]
 
 
+def check_limits(config: dict) -> None:
+    """Lecture pieces and tutor photos must fit under the web app's request
+    size cap ([webapp] max_upload_mb), or every upload would fail with 413."""
+    cap = float(config["webapp"]["max_upload_mb"])
+    problems = []
+    if float(config["lecture"]["chunk_mb"]) + 0.1 > cap:
+        problems.append(f"[lecture] chunk_mb ({config['lecture']['chunk_mb']})")
+    if float(config["tutor"]["max_image_mb"]) + 0.1 > cap:
+        problems.append(f"[tutor] max_image_mb ({config['tutor']['max_image_mb']})")
+    if problems:
+        raise ValueError(" and ".join(problems) + f" must be below [webapp] "
+                         f"max_upload_mb ({cap:g}) in config.toml")
+
+
 def install(app, features: Features) -> None:
     """Add the feature routes and /static to a create_app() app."""
     from fastapi import Depends, Request
@@ -125,8 +139,9 @@ def install(app, features: Features) -> None:
     from assistant.tutor import ImageRejected, prepare_image
     from assistant.webapp import require_session
 
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     lec_cfg, tutor_cfg = features.config["lecture"], features.config["tutor"]
+    check_limits(features.config)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def error(message: str, status: int, **extra):
         return JSONResponse({"error": message, **extra}, status)
@@ -166,9 +181,12 @@ def install(app, features: Features) -> None:
                          "have nowhere to go", 400)
         body = await json_body(request)
         uploads = features.pipeline.uploads
-        upload_id = uploads.start(course=str(body.get("course") or ""),
-                                  mime=str(body.get("mime") or ""),
-                                  started_at=str(body.get("started_at") or ""))
+        try:
+            upload_id = await run_in_threadpool(
+                uploads.start, str(body.get("course") or ""),
+                str(body.get("mime") or ""), str(body.get("started_at") or ""))
+        except UploadError as e:
+            return upload_error(e)
         return {**uploads.status(upload_id),
                 "chunk_bytes": int(float(lec_cfg["chunk_mb"]) * 1_000_000)}
 
@@ -186,6 +204,8 @@ def install(app, features: Features) -> None:
     @app.put("/api/lecture/{upload_id}/chunk")
     async def lecture_chunk(upload_id: str, offset: int, request: Request,
                             session=Depends(require_session)):
+        if (off := lecture_on()) is not None:
+            return off
         data = await request.body()
         try:
             received = await run_in_threadpool(features.pipeline.uploads.append,
@@ -197,6 +217,8 @@ def install(app, features: Features) -> None:
     @app.post("/api/lecture/{upload_id}/finish")
     async def lecture_finish(upload_id: str, request: Request,
                              session=Depends(require_session)):
+        if (off := lecture_on()) is not None:
+            return off
         body = await json_body(request)
         total = body.get("total")
         p = features.pipeline
@@ -209,6 +231,8 @@ def install(app, features: Features) -> None:
 
     @app.post("/api/lecture/{upload_id}/retry")
     async def lecture_retry(upload_id: str, session=Depends(require_session)):
+        if (off := lecture_on()) is not None:
+            return off
         try:
             return features.pipeline.submit(upload_id).public()
         except UploadError as e:

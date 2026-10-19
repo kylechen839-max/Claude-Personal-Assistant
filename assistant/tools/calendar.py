@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, time, timedelta
 
-from assistant.tools import Tool
+from assistant.tools import UNTRUSTED_MARK, Tool
 # Sign-in lives in google_auth (shared with Gmail); re-exported here so
 # `python -m assistant.tools.calendar` and older imports keep working.
 from assistant.tools.google_auth import (  # noqa: F401
@@ -16,7 +16,18 @@ from assistant.tools.timeutil import (local_zone, parse_datetime, resolve_day,
 
 log = logging.getLogger(__name__)
 
-UNTRUSTED_MARK = "untrusted_content"  # see chat.has_untrusted_content
+
+def is_from_others(event: dict) -> bool:
+    """Could someone other than Kyle have written this event's title or
+    location? The Calendar API sets organizer.self only when it is true, so
+    anything else is an invite. Events made from Gmail (eventType
+    "fromGmail") and events whose guests may edit them count too."""
+    if (event.get("organizer") or {}).get("self") is not True:
+        return True
+    if event.get("eventType", "default") not in ("default", "focusTime",
+                                                 "outOfOffice", "workingLocation"):
+        return True
+    return bool(event.get("guestsCanModify"))
 
 
 def _is_date(value: str) -> bool:
@@ -66,8 +77,8 @@ class GoogleCalendar:
             info.update(date=spoken_date(start), all_day=True)
         if event.get("location"):
             info["location"] = event["location"]
-        if (event.get("organizer") or {}).get("self") is False:
-            info["from_others"] = True  # an invite: its title is someone else's text
+        if is_from_others(event):
+            info["from_others"] = True  # its title/location is someone else's text
         return info
 
     def _when(self, dt: datetime) -> dict:

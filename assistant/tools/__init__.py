@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+
+# True while a tool runs in a conversation that holds untrusted (web, email,
+# outside-invite) content. Tools that write to long-term memory read it and
+# mark what they store, so a recalled note can't later pass as trusted.
+UNTRUSTED_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "untrusted_context", default=False)
+UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
+
+
+def mark_untrusted(result: dict, untrusted: bool) -> dict:
+    if untrusted:
+        result[UNTRUSTED_MARK] = True
+    return result
 
 
 @dataclass
@@ -85,7 +99,11 @@ class ToolRegistry:
                     return json.dumps({"status": "cancelled",
                                        "message": "The user said no, so nothing "
                                                   "was changed."}), False
-            result = tool.handler(**tool_input)
+            token = UNTRUSTED_CONTEXT.set(bool(untrusted))
+            try:
+                result = tool.handler(**tool_input)
+            finally:
+                UNTRUSTED_CONTEXT.reset(token)
             log.info("Tool %s(%s) ok", name,
                      "<private>" if tool.private else tool_input)
             return (result if isinstance(result, str)

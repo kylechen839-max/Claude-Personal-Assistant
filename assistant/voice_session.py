@@ -555,7 +555,7 @@ class VoiceConversation:
             try:
                 data = self.synthesize(chunk.text)
             except Exception:
-                log.exception("TTS failed for %r", chunk.text)
+                log.exception("TTS failed for a %d-character sentence", len(chunk.text))
                 continue
             if turn.stop.is_set() and chunk.reply:
                 continue

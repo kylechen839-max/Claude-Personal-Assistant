@@ -111,7 +111,7 @@ class PineconeMemory:
                 # Written from untrusted text (e.g. an email): the turn that
                 # uses it must confirm changes (see ClaudeChat.recall).
                 self.last_untrusted |= meta.get("untrusted") is True
-        log.info("Memory: %d notes for %r", len(notes), query[:60])
+        log.info("Memory: %d notes", len(notes))
         return notes
 
     def store(self, summary: str, extra: dict | None = None) -> str:

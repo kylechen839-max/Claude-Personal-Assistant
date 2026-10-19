@@ -15,7 +15,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from assistant.tools import Tool
+from assistant.tools import UNTRUSTED_CONTEXT, Tool, mark_untrusted
 from assistant.tools.timeutil import local_zone, spoken_date
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,8 @@ class QuickNotes:
         metadata = {"text": text, "kind": "note", "source": "voice-assistant",
                     "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "tags": _clean_tags(tags)}
+        if UNTRUSTED_CONTEXT.get():  # saved (after a yes) with web/email in context
+            metadata["untrusted"] = True
         self.index.upsert(vectors=[{"id": vector_id,
                                     "values": self.memory.embed(text, "passage"),
                                     "metadata": metadata}],
@@ -103,9 +105,10 @@ class QuickNotes:
                                   namespace=self.namespace,
                                   filter={"kind": {"$eq": "note"}},
                                   include_metadata=True)
-        notes = [self._note(m.id, m.metadata or {}, m.score)
-                 for m in result.matches if m.score >= self.min_score]
-        return {"count": len(notes), "notes": notes}
+        hits = [m for m in result.matches if m.score >= self.min_score]
+        notes = [self._note(m.id, m.metadata or {}, m.score) for m in hits]
+        return mark_untrusted({"count": len(notes), "notes": notes},
+                              any((m.metadata or {}).get("untrusted") for m in hits))
 
     def _ids(self) -> list[str]:
         ids = []
@@ -125,7 +128,8 @@ class QuickNotes:
         ids = sorted(self._ids(), reverse=True)[:max(1, min(int(limit), 20))]
         found = self._fetch(ids)
         notes = [self._note(i, found[i]) for i in ids if i in found]
-        return {"count": len(notes), "notes": notes}
+        return mark_untrusted({"count": len(notes), "notes": notes},
+                              any(found[i].get("untrusted") for i in ids if i in found))
 
     def delete_note(self, note_id: str) -> dict:
         if not note_id.startswith(NOTE_PREFIX):

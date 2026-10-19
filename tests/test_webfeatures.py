@@ -238,3 +238,38 @@ def test_static_files_exist_for_every_katex_font():
     css = (ROOT / "assistant/web/static/katex/katex.min.css").read_text()
     for font in set(re.findall(r"url\((fonts/[^)]+)\)", css)):
         assert (ROOT / "assistant/web/static/katex" / font).exists(), font
+
+
+
+def test_busy_server_answers_429_not_500(features_app):
+    from assistant.lecture import UploadBusy
+
+    client, feats, _ = features_app()
+    login(client)
+
+    def busy(*a, **k):
+        raise UploadBusy("Too many unfinished recordings")
+    feats.pipeline.uploads.start = busy
+    r = client.post("/api/lecture/start", json={})
+    assert r.status_code == 429 and "unfinished" in r.json()["error"]
+
+
+def test_lecture_off_blocks_every_lecture_route(features_app):
+    client, _, _ = features_app(lecture={"enabled": False})
+    login(client)
+    uid = "a" * 24
+    assert client.put(f"/api/lecture/{uid}/chunk?offset=0", content=b"x").status_code == 404
+    assert client.post(f"/api/lecture/{uid}/finish", json={}).status_code == 404
+    assert client.post(f"/api/lecture/{uid}/retry", json={}).status_code == 404
+
+
+def test_limits_must_fit_the_request_cap():
+    cfg = load_config(None, None)
+    webfeatures.check_limits(cfg)  # defaults fit
+    cfg["lecture"]["chunk_mb"] = 12
+    with pytest.raises(ValueError, match="chunk_mb"):
+        webfeatures.check_limits(cfg)
+    cfg["lecture"]["chunk_mb"] = 4
+    cfg["tutor"]["max_image_mb"] = 20
+    with pytest.raises(ValueError, match="max_image_mb"):
+        webfeatures.check_limits(cfg)

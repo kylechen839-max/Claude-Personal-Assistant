@@ -96,7 +96,7 @@ class ChunkedUploads:
         self._guard = threading.Lock()
 
     def _dir(self, upload_id: str) -> Path:
-        if not UPLOAD_ID.match(upload_id or ""):
+        if not UPLOAD_ID.fullmatch(upload_id or ""):
             raise UploadNotFound("Unknown upload")
         d = self.root / upload_id
         if not (d / "upload.json").exists():
@@ -150,6 +150,8 @@ class ChunkedUploads:
         return removed
 
     def start(self, course: str = "", mime: str = "", started_at: str = "") -> str:
+        if len(self._unfinished()) >= self.max_active:
+            self.purge_stale()  # abandoned ones shouldn't block new recordings
         if len(self._unfinished()) >= self.max_active:
             raise UploadBusy("Too many unfinished recordings; finish or wait "
                              "for one first")
