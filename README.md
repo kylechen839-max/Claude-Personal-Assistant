@@ -531,10 +531,35 @@ with a key only GitHub Actions holds; your machines trust that key.
    workflow pushes a signed `stable-<sha>` tag that the hosts verify
    (`git verify-tag`).
 
-Because the signing key sits in GitHub, it protects you from a bad push to
-`stable` or a changed `origin`, not from someone who can change the workflow
-on master; that's what branch protection on `master` and `stable` is for
-(BLOCKERS.md). The only way around signatures is `[update] trust_unsigned =
+A CI-signed tag only proves **"CI passed"**, not **"Kyle approved"**: the key
+sits in GitHub, so it guards against a bad push to `stable` or a changed
+`origin`, but not against someone who can change the workflow or the code
+on master (branch protection on `master` and `stable` narrows that,
+BLOCKERS.md).
+
+**Strongest setup: you approve each update.** Use a key that exists only on
+your PC, put only its public half in `allowed_signers` (on the PC and the
+Pi), and don't add the `STABLE_SIGNING_KEY` secret. The workflow still moves
+`stable` after green CI, but nothing installs until you sign that commit:
+
+```powershell
+# once: a key only on this PC (here with a passphrase), and git set up to sign with it
+ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
+git config gpg.format ssh
+git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
+# allowed_signers line (as in step 3 above, with this .pub file and your email)
+
+# each update you approve: look at what changed, then sign and push a tag
+git fetch origin stable
+git log --oneline HEAD..origin/stable
+$sha = git rev-parse origin/stable
+git tag -s "stable-$($sha.Substring(0,7))" -m "approved" $sha
+git push origin "stable-$($sha.Substring(0,7))"
+```
+
+The hosts update on their next check. You can use both keys (both lines in
+`allowed_signers`), but then either one is enough, so the CI key alone can
+still approve an update. The only way around signatures is `[update] trust_unsigned =
 true`: then **anyone who can push to master or stable can run code on this
 machine**. Use it only for a repository only you can push to.
 
