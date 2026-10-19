@@ -33,7 +33,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
-| `test_voices.py` | 34 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
+| `test_voices.py` | 35 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -537,8 +537,16 @@ Whisper and Claude):
 | Where | Kokoro int8 | Piper lessac-medium |
 |---|---|---|
 | Build sandbox, 4 x86 vCPUs | 0.57-0.93 s (best 0.54 s) | (voice download blocked) |
-| CI, Ubuntu runner | CI_KOKORO_LINUX | CI_PIPER_LINUX |
-| CI, Windows runner | CI_KOKORO_WIN | CI_PIPER_WIN |
+| CI, Ubuntu runner (4 vCPUs, Python 3.12) | 1.09 s (load + warm-up 1.3 s) | 0.11 s (load + warm-up 1.7 s) |
+| CI, Windows runner (4 vCPUs) | 1.25 s (load + warm-up 2.2 s) | 0.115 s (load + warm-up 3.9 s) |
+
+So on CI-class CPUs Kokoro adds about 1 s to time-to-first-audio compared
+with Piper (~10x the render time). In voice mode, first audio becomes roughly
+Whisper 0.6 s + Claude's first sentence + ~1 s of Kokoro, about 2.5-3 s
+after Kyle stops talking, against ~1.5-2 s with Piper. It stays the default
+because it sounds far more natural, and a desktop CPU is usually faster
+than a CI runner. If the wait feels too long, `[tts] engine = "piper"`
+brings it back to ~0.1 s (MANUAL_TEST.md step 9 compares the two).
 
 - Kokoro's render time is about 0.15 s + 0.2 x the audio length ("Sure.":
   0.24 s; a 6 s sentence: 1.3 s), so a long first sentence costs more; the
