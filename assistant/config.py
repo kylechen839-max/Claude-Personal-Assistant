@@ -82,6 +82,12 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
+        "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
+        "app_origin": "",           # where the phone app is installed from
+        "backends": [],             # [{role, url}], highest priority first
+        "sync_interval": 30,        # seconds between history syncs
+    },
     "history": {
         "enabled": True,
         "path": "data/history.sqlite",  # HISTORY_PATH overrides (cloud: /data/...)
@@ -180,6 +186,8 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "ASSISTANT_ROLE": ("failover", "role"),
+    "APP_ORIGIN": ("failover", "app_origin"),
     "HISTORY_PATH": ("history", "path"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
@@ -248,6 +256,7 @@ _SECRET_PATTERNS = [
     re.compile(r"\bya29\.[\w.-]+"),             # Google access tokens
     re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
     re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
+    re.compile(r"\bhc1\.[\w.-]+"),             # failover access tokens
     # OAuth / API fields in JSON, dict reprs, form bodies and URLs
     re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
                r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"

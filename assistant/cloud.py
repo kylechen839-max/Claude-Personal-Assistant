@@ -27,6 +27,14 @@ for the public internet with no Tailscale in front:
   lockout) and an Origin naming this site. X-Forwarded-Host, which the web
   app's own same-site checks read, is removed unless the proxy sent it.
 - Errors never reach the client as stack traces.
+- With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
+  the derived `hc1.` bearer tokens (checked here, never counted as wrong
+  WEB_TOKENs: they can't be guessed), keeps POST /api/auth/token public
+  like /api/login (its body is checked the same way), lets the router
+  module load before sign-in, answers /healthz with the API version and
+  role too, and lets a same-site voice socket without a cookie through so
+  its first message can carry the token (the failover layer closes it if
+  no valid token arrives).
 
 Secrets come from the environment only; nothing is written to disk.
 """
@@ -58,6 +66,10 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/static/vad/ort-wasm-simd-threaded.wasm",
               "/static/vad/silero_vad_v5.onnx"}
 PUBLIC_POST = {"/api/login"}
+# with failover on: the router module (loaded before sign-in) and the token
+# trade, whose body (WEB_TOKEN) is checked here like /api/login's
+FAILOVER_PUBLIC_GET = {"/backend-router.js"}
+FAILOVER_PUBLIC_POST = {"/api/auth/token"}
 HEALTH = "/healthz"
 UPLOAD_PATHS = {"/api/turn", "/api/confirm"}
 WEBSOCKETS = {"/api/voice"}  # the hands-free voice conversation
@@ -219,7 +231,8 @@ class CloudGuard:
                  max_busy_per_ip=2, max_busy=32, body_timeout=10.0,
                  max_login_busy=8, login_timeout=2.0,
                  min_upload_rate=65536, sleep=None, client_ip_header="",
-                 log_proxy_headers=5, web=None):
+                 log_proxy_headers=5, web=None, authority=None,
+                 failover_role: str | None = None):
         import asyncio
 
         self.app = app
@@ -250,6 +263,9 @@ class CloudGuard:
         self.max_upload_bytes = max_upload_bytes
         self.max_body_bytes = max_body_bytes
         self.lockout = lockout or BoundedLoginLimiter()
+        # failover (assistant/failover): token checker and this backend's role
+        self.authority = authority
+        self.failover_role = failover_role if authority is not None else None
         self.limiter = limiter or RateLimiter()
 
     # where the request really came from
@@ -323,7 +339,10 @@ class CloudGuard:
         if not self.same_site(scope):
             return await refuse("origin is not this site")
         bearer = _bearer(scope)
-        if bearer is not None:
+        if bearer is not None and self.derived(bearer):
+            if self.authority.verify(bearer, scope="app") is None:
+                return await refuse("bad access token")
+        elif bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
                 if not self.login_slots.take(ip):
                     return await refuse("too many requests at once")
@@ -332,9 +351,15 @@ class CloudGuard:
                 finally:
                     self.login_slots.release(ip)
                 return await refuse("wrong bearer token")
-        elif not self.signed_in(scope):
+        elif not self.signed_in(scope) and not self.failover_role:
             return await refuse("not signed in")
+        # (with failover, a socket with no cookie must send its token as the
+        # first message; the failover layer closes it otherwise)
         await self.app(self.scrub(scope), receive, send)
+
+    def derived(self, bearer: str) -> bool:
+        """A failover access token (hc1....), not WEB_TOKEN itself."""
+        return self.failover_role is not None and bearer.startswith("hc1.")
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "websocket":
@@ -349,7 +374,12 @@ class CloudGuard:
             # a supervisor on the same machine, and there is none here).
             from assistant.version import version
 
-            return await _json(send, 200, {"ok": True, "version": version()})
+            health = {"ok": True, "version": version()}
+            if self.failover_role:
+                from assistant.failover import API_VERSION
+
+                health.update(api=API_VERSION, role=self.failover_role)
+            return await _json(send, 200, health)
         ip, proto = self.client(scope)
         extra = {"Strict-Transport-Security": HSTS} if proto == "https" else {}
         if proto == "http":
@@ -363,10 +393,19 @@ class CloudGuard:
         if not self.limiter.allow(ip):
             return await _json(send, 429, {"error": "too many requests"},
                                {"Retry-After": "60", **extra})
-        public = ((method in ("GET", "HEAD") and path in PUBLIC_GET)
-                  or (method == "POST" and path in PUBLIC_POST))
+        public_get = PUBLIC_GET | (FAILOVER_PUBLIC_GET if self.failover_role else set())
+        public_post = PUBLIC_POST | (FAILOVER_PUBLIC_POST if self.failover_role else set())
+        public = ((method in ("GET", "HEAD") and path in public_get)
+                  or (method == "POST" and path in public_post))
         bearer = _bearer(scope)
-        login = method == "POST" and path == "/api/login" and bearer is None
+        login = method == "POST" and path in public_post and bearer is None
+        if bearer is not None and self.derived(bearer):
+            # checked here; the failover layer checks scope (app / sync)
+            need = "sync" if path.startswith("/api/sync/") else "app"
+            if self.authority.verify(bearer, scope=need) is None:
+                return await _json(send, 401, {"error": "not signed in"}, extra)
+            bearer = None
+            public = True  # signed in with an access token
         # Who it is comes first: nothing reads a body for an unknown caller
         # except the login call (16 KB at most).
         if bearer is not None:
@@ -578,17 +617,23 @@ def build_app(config: dict, web_assistant, token: str):
                                   lockout=cloud["login_lockout"],
                                   global_free=cloud["login_global_free"],
                                   global_delay=cloud["login_global_delay"])
+    from assistant.failover.peers import settings_from_config
+    from assistant.failover.tokens import TokenAuthority
+
+    failover = settings_from_config(config)
     app = webapp.create_app(web_assistant, token,
                             allowed_origins=web["allowed_origins"],
                             max_upload_bytes=max_upload,
                             max_audio_seconds=float(web["max_audio_seconds"]),
                             trusted_proxy=trust, limiter=limiter,
                             sessions_file=web["sessions_file"] or None,
-                            voice=config.get("voice"))
+                            voice=config.get("voice"), failover=failover)
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),
         lockout=limiter, web=_web_auth(app),
+        authority=TokenAuthority(token) if failover.role else None,
+        failover_role=failover.role or None,
         limiter=RateLimiter(cloud["requests_per_minute"]),
         allowed_origins=web["allowed_origins"],
         max_busy_per_ip=cloud["uploads_per_address"], max_busy=cloud["uploads_total"],

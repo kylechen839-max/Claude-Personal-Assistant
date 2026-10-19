@@ -396,3 +396,37 @@ Setup is in README.md ("Raspberry Pi").
     startup lines.
 - [ ] `pkill -f "python -m assistant"`: within ~10 s
       `systemctl --user status hey-claude` shows it running again.
+
+---
+
+## Phone app failover: Pi -> PC -> cloud (optional, ~15 min)
+Setup is in README.md ("Phone app failover") and FAILOVER.md. You need the
+Pi, the PC and the cloud host running with the same `WEB_TOKEN`, and the
+phone app installed from the cloud URL with Tailscale on.
+- [ ] Open the app. Settings -> Backends lists Pi, PC and Cloud, all
+      healthy, mode Auto.
+  - Should: the badge in the header says **Pi**.
+- [ ] Start a conversation ("what's on my calendar tomorrow?"), then
+      **unplug the Pi** and ask a follow-up in the same conversation.
+  - Should: the reply comes from the PC (badge **PC**) within a few seconds.
+    If the Pi died while a question was being sent, the app says "Pi didn't
+    answer; tap to try again" instead of sending it twice; tap once.
+  - Should: the conversation's earlier messages are still there.
+- [ ] **Turn the PC off** (or quit the assistant on it) and ask again.
+  - Should: badge **Cloud**, and an answer (the first one may take a few
+    seconds if Render was asleep).
+- [ ] **Airplane mode, then Wi-Fi off and cellular on** (Tailscale still
+      on), with the Pi and PC back on.
+  - Should: within about two minutes the badge goes back to **Pi** (it
+    waits for two good checks in a row), but never in the middle of a
+    reply or while you are speaking.
+- [ ] Turn Tailscale off on the phone (cellular only).
+  - Should: badge **Cloud**; Settings shows Pi and PC as unreachable.
+- [ ] Settings -> force **PC**, ask something, then back to **Auto**.
+  - Should: the badge follows the setting.
+- [ ] Open the history on another backend (force Cloud, then Pi).
+  - Should: the same conversations everywhere (give it 30 s to sync), and
+    a conversation deleted on one backend is gone from all of them.
+- [ ] From a laptop browser *not* on the app: open
+      `https://<pi>.<tailnet>.ts.net/healthz`.
+  - Should: only `{"ok":true,"api":1,"role":"pi"}`.

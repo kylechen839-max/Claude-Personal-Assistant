@@ -16,7 +16,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 h1 { font-size: 1.2rem; margin: 0; }
 button, input { font: inherit; color: inherit; }
 button { border: 0; border-radius: 12px; background: var(--panel); padding: .7em 1.1em; }
-input[type=text], input[type=password] { width: 100%; padding: .7em .9em; border-radius: 12px;
+input[type=text], input[type=password], input[type=url], select { width: 100%; padding: .7em .9em; border-radius: 12px;
   border: 1px solid var(--line); background: var(--panel); }
 
 .login { max-width: 26rem; margin: 0 auto; padding: 3rem 1rem; }
@@ -146,3 +146,15 @@ dialog.sheet input { margin-bottom: .2rem; }
 }
 .transcript .summary::before { content: "Summary"; display: block; font-size: .75rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .2rem; }
+
+.backend-badge { margin-left: auto; margin-right: .6rem; padding: .15em .6em; border-radius: 999px;
+  font-size: .8rem; background: var(--panel); color: var(--muted); }
+.backend-badge[data-role=pi] { background: var(--ok); color: var(--text); }
+.backend-badge[data-role=pc] { background: #3b4a5a; color: var(--text); }
+.backend-badge[data-role=cloud] { background: #5a4a3b; color: var(--text); }
+.backend-badge[data-role=offline] { background: var(--bad); color: var(--text); }
+.backends { border: 1px solid var(--line); border-radius: 12px; display: grid; gap: .5rem;
+  max-width: 20rem; }
+.backends label { display: grid; gap: .2rem; font-size: .9rem; }
+.backend-status { margin: 0; padding-left: 1.1rem; font-size: .85rem; color: var(--muted); }
+header .backend-badge:not([hidden]) + .icon-btn { margin-left: 0; }

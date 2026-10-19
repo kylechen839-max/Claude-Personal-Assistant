@@ -22,7 +22,8 @@ DOCS = ["README.md", "MANUAL_TEST.md", "PI_MIGRATION.md"]
 # scripts/install_service.sh).
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--now", "--bg", "--https",  # + tailscale serve
-               "--keep", "--ff-only", "--short", "--oneline"}  # git (updates)
+               "--keep", "--ff-only", "--short", "--oneline",  # git (updates)
+               "--test"}  # node --test
 OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "resume_conversation",  # tool names, not settings
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names

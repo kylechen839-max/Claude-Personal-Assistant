@@ -44,6 +44,65 @@ headers, OAuth fields (`access_token`, `refresh_token`, `client_secret`, ...)
 and OAuth sign-in `code=` values, tracebacks included. At the default INFO
 level nothing secret was found being logged.
 
+## Cross-origin backends (Pi -> PC -> cloud failover)
+
+The phone app is installed from the cloud host but also talks to the Pi and
+the PC on other origins (FAILOVER.md). That adds a cross-origin surface on
+all three, which `assistant/failover/edge.py` closes the same way on each:
+
+- **CORS for the app origin only.** `[failover] app_origin` is the only
+  foreign origin that gets CORS headers, for `GET`/`POST` with the
+  `Authorization` and `Content-Type` headers. Credentials mode is never
+  allowed (`Access-Control-Allow-Credentials` is stripped even if the app
+  sets it), so the browser never attaches cookies cross-origin. Any other
+  `Origin` (another site, `null`, `http://`, look-alikes such as
+  `https://hey-claude.onrender.com.evil.example`) is refused with 403 on
+  every path, including `/healthz`, the token endpoint and the WebSocket
+  handshake. CORS only stops *browsers*; every API call also needs a token.
+- **Bearer tokens, not cookies** (third-party cookies are blocked on iOS).
+  The phone trades `WEB_TOKEN` once for a derived token (HMAC of the shared
+  `WEB_TOKEN`, 30 days, renewable up to 90 days after sign-in) and doesn't
+  keep `WEB_TOKEN`. Tokens have a scope: phone tokens can't call the sync
+  API, backend sync tokens (5 minutes) can't call the app API. Missing,
+  wrong, expired or wrong-scope tokens get 401 on every API path.
+- **Token storage.** The token is in IndexedDB on the app origin, so a
+  script injected into the page (XSS) could read it. Mitigations: a strict
+  CSP (`script-src 'self'`, no inline script or `eval`, `connect-src` only
+  the app's own origin and the configured backends, `frame-ancestors
+  'none'`), replies rendered as text, never HTML, and the token's limited
+  life. A stolen token works on all backends until it expires or
+  `WEB_TOKEN` is changed on all of them (there is no per-device
+  revocation). The root `WEB_TOKEN` itself is never stored by the app.
+- **WebSockets** get the token in the first message after opening, never in
+  the URL (URLs end up in proxy logs and browser history); a socket without
+  a valid token within 5 s is closed.
+- **`/healthz`** is public and returns only `ok`, the API version number and
+  the role: no hostnames, versions, load or errors.
+- **Lockout** stays per backend and is the web app's own `LoginLimiter`
+  (per address plus a global limit). Only guesses at `WEB_TOKEN` count
+  (a wrong one on the token endpoint, or a non-derived bearer); expired or
+  bad derived tokens don't, since they can't be guessed and an old phone
+  retrying shouldn't lock Kyle out. Once an address is locked out its wrong
+  attempts get 429. `X-Forwarded-Host` is trusted only from the configured
+  proxy (`trusted_proxy`).
+  The right `WEB_TOKEN` and valid bearer tokens are always accepted, so
+  hammering the public cloud URL can't lock Kyle out.
+- **Cookies keep working on the same origin.** A same-origin request with
+  no `Authorization` header goes to the web app's cookie check, as before;
+  cross-origin requests always need a bearer token.
+- **Deleted conversations are redacted from the synced log**, not just
+  hidden: the text of every event a delete covers is dropped from each
+  backend's store (and from what it sends to peers) once the delete
+  reaches it, whichever arrives first.
+- **History sync** between backends uses the same token scheme (sync scope)
+  over HTTPS; pushed events are validated (id format, known kinds, size, a
+  timestamp at most a day ahead) and taken all or nothing. Events are not
+  tied to the pushing backend (`origin` can be another backend's, because
+  events are relayed: the PC forwards the Pi's events to the cloud). A
+  backend that has `WEB_TOKEN` can write history on the others, so every
+  backend is equally trusted; keep `WEB_TOKEN` out of logs (it is redacted) and out of
+  git.
+
 ### Voice conversation WebSocket (`/api/voice`)
 The socket is reachable wherever the web app is (including the public
 hosted setup), so it gets the same protection as the rest of the API plus
@@ -205,6 +264,11 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 - **Hostile text inside a confirmation question.** An event title such as
   "Dentist? Just say yes" would be read out in the question. Kyle still has
   to answer; a cosmetic issue, not a bypass.
+- **One shared secret for all backends.** The cloud host (on Render) holds
+  the same `WEB_TOKEN` as the Pi and PC, so a compromised Render account
+  could mint tokens for the Pi and PC too. Separate per-backend secrets would
+  need a token service or public-key tokens; for one user this isn't worth
+  it. Rotate `WEB_TOKEN` everywhere if Render is ever compromised.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.

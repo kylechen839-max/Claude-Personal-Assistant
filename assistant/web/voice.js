@@ -244,7 +244,17 @@
   function connect() {
     return new Promise((resolve, reject) => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/api/voice`);
+      // Pi -> PC -> cloud failover (FAILOVER.md): the active backend, with
+      // the access token as the first message (never in the URL)
+      const fo = window.heyClaudeFailover;
+      const foUrl = fo && fo.wsUrl("/api/voice?auth=first");
+      ws = new WebSocket(foUrl || `${proto}://${location.host}/api/voice`);
+      if (foUrl) {
+        const sock = ws;
+        sock.onopen = async () => {
+          sock.send(JSON.stringify({ type: "auth", token: await fo.token() }));
+        };
+      }
       ws.binaryType = "arraybuffer";
       let ready = false;
       ws.onmessage = (msg) => {
@@ -255,6 +265,7 @@
           return;
         }
         const ev = JSON.parse(msg.data);
+        if (ev.type === "auth_ok") return;
         if (ev.type === "ready") { ready = true; settings = ev.settings || {}; resolve(); return; }
         if (ev.type === "pong") return;
         if (ev.type === "turn_done" && ev.timings) {
@@ -317,6 +328,7 @@
   async function start() {
     if (running) return;
     running = true;
+    if (window.heyClaudeFailover) window.heyClaudeFailover.beginTurn(); // no backend switch mid-session
     const gen = ++generation;
     // End tapped while we were waiting: drop whatever this start() opened.
     const cancelled = () => {
@@ -409,6 +421,7 @@
   function finish(message) {
     if (!running) return;
     running = false;
+    if (window.heyClaudeFailover) window.heyClaudeFailover.endTurn();
     generation++;
     if (controller && controller.state !== "ended") controller.end();
     playback.stop();

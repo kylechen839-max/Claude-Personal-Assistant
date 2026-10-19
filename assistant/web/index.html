@@ -38,6 +38,7 @@
 <main id="app" class="app" hidden>
   <header>
     <h1>Hey Claude <span id="incognito-badge" class="badge" hidden>Incognito</span></h1>
+    <span id="badge" class="backend-badge" title="Backend in use" hidden></span>
     <button id="open-history" class="icon-btn" type="button" aria-label="Conversation history" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
     </button>
@@ -47,6 +48,26 @@
         <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
         <label><input id="mute" type="checkbox"> Don't speak replies</label>
         <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
+        <fieldset id="backends" class="backends" hidden>
+          <legend>Backends</legend>
+          <label>Use
+            <select id="backend-mode">
+              <option value="auto">Auto: Pi, then PC, then cloud</option>
+              <option value="pi">Pi only</option>
+              <option value="pc">PC only</option>
+              <option value="cloud">Cloud only</option>
+            </select>
+          </label>
+          <label>Pi (tailnet) <input id="url-pi" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://pi.your-tailnet.ts.net"></label>
+          <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
+          <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="this app's address"></label>
+          <p class="hint">Empty = the address the server suggests.</p>
+          <button id="backends-save" type="button">Save and check</button>
+          <ul id="backend-status" class="backend-status"></ul>
+        </fieldset>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>

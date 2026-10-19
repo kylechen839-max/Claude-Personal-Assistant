@@ -68,6 +68,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode web` | Private phone web app (see "Phone web app" below) |
 | `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
 | `--show-token` | Web mode: print the access token to the console once |
+| `--role pi` | Which backend this is in the phone app's Pi -> PC -> cloud failover (`pi`, `pc` or `cloud`; see FAILOVER.md) |
 
 **Follow-up mode:** after a reply, the assistant plays a soft, low blip
 and keeps listening for 5 seconds without the wake word, so you can just
@@ -630,6 +631,39 @@ slow. On a Pi with no screen, set `[web] browser = false`.
   `systemctl --user restart hey-claude`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
+
+## Phone app failover: Pi, then PC, then cloud
+
+The phone app (installed from the cloud host) uses the Raspberry Pi when it
+can reach it, the PC when it can't, and the cloud host when neither
+answers, and moves back up when a better one returns (never mid-reply).
+FAILOVER.md has the whole protocol. To set it up:
+
+1. Run the web app on each machine you want in the list, with the same
+   `WEB_TOKEN` in every `.env` (or the Render environment), and expose the Pi
+   and PC with `tailscale serve`.
+2. In each machine's `config.toml`, fill in `[failover]`: `role` (or pass
+   `--role pi` / `--role pc` / `--role cloud`), `app_origin` (the cloud
+   URL the phone app is installed from) and the three `backends` URLs:
+   ```toml
+   [failover]
+   role = "pi"
+   app_origin = "https://hey-claude.onrender.com"
+   backends = [
+     { role = "pi", url = "https://pi.tail1234.ts.net" },
+     { role = "pc", url = "https://kyle-pc.tail1234.ts.net" },
+     { role = "cloud", url = "https://hey-claude.onrender.com" },
+   ]
+   ```
+3. Copy the same `.env`, `credentials.json` and `token.json` to each machine
+   (one Google sign-in works on all of them; see FAILOVER.md section 6).
+4. On the phone, open the app's Settings -> Backends to check the URLs and
+   the badge (Pi / PC / Cloud), or force one backend.
+
+Conversation history is synced between the machines every
+`sync_interval` seconds (30); memory is shared through Pinecone as before.
+Tests: `pytest` (server side) and `node --test tests/js/*.test.mjs` (the
+router; Node 18+).
 
 ## Windows PC as the always-on home host
 

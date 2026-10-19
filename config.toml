@@ -114,6 +114,17 @@ max_mb = 500                  # size guard: the oldest unpinned conversations ar
 incognito = false             # true = save nothing (also no Pinecone summary); or run with --incognito
 title_model = "claude-haiku-5-5"  # fast model that writes each conversation's title and summary
 
+[failover]                    # Pi -> PC -> cloud for the phone app (see FAILOVER.md)
+role = ""                     # "pi", "pc" or "cloud" (--role overrides); "" = not in a failover setup
+app_origin = ""               # where the phone app is installed from, e.g. "https://hey-claude.onrender.com"
+sync_interval = 30            # seconds between history syncs with the other backends
+# The app tries these in this order. Leave a URL empty if you don't run that one.
+backends = [
+  { role = "pi", url = "" },     # e.g. "https://pi.tail1234.ts.net"
+  { role = "pc", url = "" },     # e.g. "https://kyle-pc.tail1234.ts.net"
+  { role = "cloud", url = "" },  # e.g. "https://hey-claude.onrender.com"
+]
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

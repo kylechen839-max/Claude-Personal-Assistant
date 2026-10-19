@@ -383,7 +383,10 @@ def is_cross_origin(headers, allowed_origins=(), trust_forwarded: bool = True) -
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
     the Host (or X-Forwarded-Host, as set by a proxy, if `trust_forwarded`).
     Requests with neither header (curl, tests) pass; they still need the
-    session cookie."""
+    session cookie. An Origin in `allowed_origins` (e.g. the failover app
+    origin) is never cross-origin."""
+    if headers.get("origin") and headers.get("origin") in allowed_origins:
+        return False
     site = headers.get("sec-fetch-site")
     if site in ("cross-site", "same-site"):
         return True
@@ -947,6 +950,9 @@ class WebAuth:
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
     def sid(self, conn) -> str | None:
+        claims = getattr(conn, "scope", {}).get("auth")  # set by failover.edge.EdgeMiddleware
+        if claims is not None:
+            return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             if tokens_match(auth[7:], self.token):
@@ -992,7 +998,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None):
+               voice: dict | None = None, failover=None):
+    """The ASGI app. With `failover` (a failover.peers.FailoverSettings
+    with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1003,6 +1012,17 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from starlette.concurrency import run_in_threadpool
 
     limiter = limiter or LoginLimiter()
+    failover = failover if failover is not None and failover.role else None
+    security_headers = dict(SECURITY_HEADERS)
+    if failover:
+        from assistant.failover.edge import connect_src
+
+        allowed_origins = tuple(allowed_origins) + tuple(
+            o for o in (failover.app_origin,) if o)
+        security_headers["Content-Security-Policy"] = CSP.replace(
+            "connect-src 'self'", "connect-src " + connect_src(list(failover.backends)))
+        # the phone app reads replies cross-origin from the Pi and PC
+        security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     store = SessionStore(sessions_file)
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
 
@@ -1074,7 +1094,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             delay = getattr(request.state, "auth_delay", 0)
             if delay:  # a wrong bearer token while many are failing
                 await _wait(delay)
-        for k, v in SECURITY_HEADERS.items():
+        for k, v in security_headers.items():
             response.headers.setdefault(k, v)
         if proxied:
             response.headers.setdefault(
@@ -1145,7 +1165,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
                         ("app.css", "text/css"), ("sw.js", "text/javascript"),
-                        ("update-watch.js", "text/javascript")):
+                        ("update-watch.js", "text/javascript"),
+                        ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1352,7 +1373,59 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    if failover:
+        return wrap_failover(app, token, failover, web)
     return app
+
+
+def wrap_failover(app, token: str, failover, web: WebAuth):
+    """EdgeMiddleware around the web app (FAILOVER.md section 3). It uses
+    this app's LoginLimiter and client address, and cookie clients keep
+    working (same-origin requests without a bearer token pass through)."""
+    from starlette.requests import HTTPConnection
+
+    from assistant.failover.edge import EdgeMiddleware
+    from assistant.failover.tokens import TokenAuthority
+
+    routes = {}
+    history = getattr(web.assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    if sync_log is not None:
+        from assistant.failover.sync import make_sync_app
+
+        # pulled/pushed events are projected into the history tables at once
+        routes["/api/sync/"] = make_sync_app(sync_log)
+    return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
+                          app_origins=[o for o in (failover.app_origin,) if o],
+                          backends=list(failover.backends), routes=routes,
+                          limiter=web.limiter,
+                          client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
+                          trusts_proxy=lambda scope: web.trusted_proxy.trusts(
+                              HTTPConnection(scope)),
+                          root_bearer_sid=web.bearer_sid)
+
+
+def start_history_sync(config: dict, assistant, token: str, failover):
+    """Pi and PC: push/pull history with the other backends every
+    [failover] sync_interval seconds, in a daemon thread. The cloud only
+    answers (it can't reach the tailnet). Returns the thread or None."""
+    from assistant.failover.sync import Syncer, default_peers
+    from assistant.failover.tokens import TokenAuthority
+
+    history = getattr(assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    peers = default_peers(failover.role, list(failover.backends))
+    if sync_log is None or not peers:
+        return None
+    syncer = Syncer(sync_log, peers, TokenAuthority(token), failover.role)
+    stop = threading.Event()
+    interval = float(config["failover"]["sync_interval"])
+    thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
+                              name="history-sync", daemon=True)
+    thread.start()
+    log.info("History sync with %s every %.0f s",
+             ", ".join(p.role for p in peers), interval)
+    return thread
 
 
 def assistant_busy(assistant: "WebAssistant", app) -> bool:
@@ -1459,13 +1532,20 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.failover.peers import settings_from_config
+
+    failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"))
+                     voice=config.get("voice"), failover=failover)
+    if failover.role:
+        log.info("Failover role %s; backends: %s", failover.role,
+                 ", ".join(b.role for b in failover.backends) or "none")
+        start_history_sync(config, assistant, token, failover)
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

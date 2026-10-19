@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 751 passed, 13 skipped (Linux build sandbox,
+**Current test count:** 1174 passed, 41 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -40,6 +40,14 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_history.py` | 67 | conversation history: store, search, resume, CLI |
 | `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
 | `test_history_events.py` | 18 | history as sync events (skips without failover) |
+| `test_failover_edge.py` | 51 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
+| `test_failover_sync.py` | 162 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
+| `test_failover_leader.py` | 216 | failover: leader check for scheduled jobs (incl. the real network topology) |
+| `test_failover_eventlog.py` | 6 | failover: the SQLite event log |
+| `test_failover_config.py` | 8 | failover: `[failover]` settings, `--role` |
+| `test_failover_cloud.py` | 13 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
+| `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
+| `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -847,6 +855,61 @@ issues).
   raises rather than return empty, non-finite or out-of-range audio.
 - **Kokoro's voice hasn't been heard by a person yet** (no audio in the
   sandbox): MANUAL_TEST.md step 9 and the voice-mode listen check.
+
+## Failover: Pi -> PC -> cloud (phase A) ✅
+The phone app's backend failover, documented in FAILOVER.md.
+- `assistant/web/backend-router.js`: the client router as a standalone ES
+  module: parallel `/healthz` probes (1.5 s tailnet, 3 s cloud), highest
+  priority healthy backend with a 300 ms grace for a slower better one, API
+  version check, one retry of idempotent requests on the next backend,
+  writes never replayed (`NeedsUserRetry`), 60 s background re-probe with
+  fail-back after 2 good probes, no switch mid-turn, Auto / forced override,
+  IndexedDB token store.
+- `assistant/failover/edge.py` + `tokens.py`: ASGI middleware for every
+  backend: `/healthz` (ok, api, role only), CORS for the app origin only (no
+  credentials), derived bearer tokens (`POST /api/auth/token`, refresh,
+  scopes app/sync, 90-day session limit), WebSocket first-message auth
+  (4401 / 4408), per-backend lockout.
+- `assistant/failover/sync.py`: history as an append-only, id-addressed
+  event log; `materialize()` is order-independent and idempotent (LWW
+  renames/pins on (ts, id), permanent tombstones); push/pull endpoints and
+  client with cursors and peer-reset detection; `MemoryEventLog` reference
+  store (the SQLite store from claude/history implements the same API).
+- `assistant/failover/leader.py`: leader check (probe higher-priority peers
+  right before firing) and a run-once job runner with a per-job dedupe key
+  in the shared log.
+- `--role pi|pc|cloud`, `[failover]` settings (`ASSISTANT_ROLE`,
+  `APP_ORIGIN` env overrides).
+- Tests (offline): three-fake-backend simulation on a virtual clock (node),
+  CORS rejection and 401s everywhere incl. the WebSocket, property-style
+  sync convergence with three stores, random interleavings, duplicates and
+  outages, tombstones, leader election with flapping peers and partitions.
+  CI runs the node tests in a `backend-router` job.
+- Phase B, phone web app (done): with a `[failover] role`, `--mode web` is
+  wrapped in the edge middleware, its CSP lists the backends, and the page
+  switches to bearer tokens + the router, with a Pi / PC / Cloud badge and
+  a Backends section in Settings. Checked in headless Chromium against
+  three live local backends: Pi; Pi killed mid-conversation -> "Pi didn't
+  answer; tap to try again" (not replayed) -> the tap goes to the PC; PC
+  killed -> Cloud; Pi back -> Pi. That run found a real bug the node tests
+  couldn't (window.fetch called as a method), now fixed and tested.
+- Phase B, the rest (done): history sync runs on the Pi and PC against
+  the history store's `sync_log`, and every backend serves the sync
+  endpoints on it; the voice view connects to the active backend and sends
+  the token as its first message (`?auth=first`), with no backend switch
+  during a voice session; on Render, `CloudGuard` accepts the derived tokens, keeps the
+  token trade public and passes first-message sockets through
+  (`ASSISTANT_ROLE`, `APP_ORIGIN`, `FAILOVER_BACKENDS` in render.yaml,
+  empty = off). Tests: `test_failover_cloud.py`, incl. a real Pi
+  HistoryStore syncing into the cloud's over HTTP through the guard.
+- Review fixes: jobs elect the highest-priority claim (optionally preferring
+  on-time ones), always someone; a claim without `done` expires after 10
+  minutes; a `delete_message` can't hit a tombstone or job; the SQLite log
+  checkpoints its WAL after a delete and waits on a busy database.
+
+Known issue: a conversation in progress lives in each backend's memory, so
+after a failover mid-conversation Claude starts it fresh (it is in the
+synced history list; Pinecone memory still works).
 - **Voice mode on a real phone is untested** (no iPhone in the sandbox):
   iOS audio routing with the mic open (speaker vs. earpiece), echo
   cancellation of the reply on the loudspeaker, and the interruption

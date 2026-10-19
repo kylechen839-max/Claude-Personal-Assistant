@@ -97,6 +97,10 @@ def parse_args(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
+    parser.add_argument("--role", choices=["pi", "pc", "cloud"],
+                        help="which backend this is in the Pi -> PC -> cloud "
+                             "failover (see FAILOVER.md); overrides "
+                             "[failover] role")
     parser.add_argument("--update", action="store_true",
                         help="update now from the tested `stable` branch "
                              "(fast-forward only; rolled back if checks fail)")
@@ -554,6 +558,8 @@ def main(argv=None) -> int:
 
     args = parse_args(argv)
     config = load_config(args.config)
+    if args.role:
+        config["failover"]["role"] = args.role
     log_file = setup_logging(config)
     if args.download_voice:
         return download_voice_command(args.download_voice)
