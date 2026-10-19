@@ -540,7 +540,9 @@ Whisper and Claude):
 | CI, Ubuntu runner (4 vCPUs, Python 3.12) | 1.09 s (load + warm-up 1.3 s) | 0.11 s (load + warm-up 1.7 s) |
 | CI, Windows runner (4 vCPUs) | 1.25 s (load + warm-up 2.2 s) | 0.115 s (load + warm-up 3.9 s) |
 
-So on CI-class CPUs Kokoro adds about 1 s to time-to-first-audio compared
+Shared runners vary a lot: on one slow run the same sentence took 5.0 s
+with Kokoro (Piper 0.13 s), so the test only checks that the model works,
+not a speed limit. So on CI-class CPUs Kokoro adds about 1 s to time-to-first-audio compared
 with Piper (~10x the render time). In voice mode, first audio becomes roughly
 Whisper 0.6 s + Claude's first sentence + ~1 s of Kokoro, about 2.5-3 s
 after Kyle stops talking, against ~1.5-2 s with Piper. It stays the default
