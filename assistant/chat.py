@@ -464,13 +464,13 @@ class ClaudeChat:
                     continue
                 private = self.tools.is_private(call.name)
                 self.private_turn |= private
-                # Inputs can hold event titles, queries or URLs: only the
-                # argument names at INFO.
+                # Names (and input keys) only at INFO: values hold event titles,
+                # invite text, notes, queries, URLs.
                 log.info("Claude called %s (%s)%s", call.name,
-                         ", ".join(sorted(call.input or {})),
+                         ", ".join(sorted(call.input or {})) or "no input",
                          " (untrusted content in context)" if untrusted else "")
                 if not private:
-                    log.debug("Input of %s: %r", call.name, call.input)
+                    log.debug("Tool input for %s: %s", call.name, call.input)
                 content, is_error = self._dispatch(call, untrusted)
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})

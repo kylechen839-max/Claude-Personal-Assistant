@@ -188,7 +188,16 @@ def add_voice_routes(app, assistant, allowed_origins=(),
             log.warning("Refused a voice socket: %d conversations already", len(live))
             await ws.close(code=1013)  # try again later
             return
-        await ws.accept()
+        # Take the slot before the first await, so handshakes arriving
+        # together can't all pass the check above.
+        old = live.pop(sid, None)
+        live[sid] = (None, ws)
+        try:
+            await ws.accept()
+        except Exception:
+            if live.get(sid, (None, None))[1] is ws:
+                live.pop(sid)
+            raise
         loop = asyncio.get_running_loop()
         out: asyncio.Queue = asyncio.Queue()
 
@@ -199,9 +208,8 @@ def add_voice_routes(app, assistant, allowed_origins=(),
             WebBackend(assistant, session), assistant.transcribe, assistant.synthesize,
             send, clock=clock, idle_timeout=v["idle_timeout"],
             max_session=v["max_session_minutes"] * 60)
-        old = live.pop(sid, None)
         live[sid] = (conv, ws)
-        if old is not None:  # one voice conversation per browser
+        if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")
         if not web.signed_in(sid):
             # Signed out while this socket was opening: a sign-out ends the
