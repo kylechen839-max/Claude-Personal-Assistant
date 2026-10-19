@@ -351,6 +351,7 @@ def test_pipeline_end_to_end_with_mocks(tmp_path, fake_client, caplog):
     d = up.directory(uid)
     assert not (d / AUDIO_FILE).exists()           # audio deleted
     assert not (d / "transcript.txt").exists()     # transcript deleted
+    assert not (d / "notes.json").exists()         # notes live in Notion only
     assert "SECRET-LECTURE" not in caplog.text     # never logged
     assert not notion.pages.create.call_args.kwargs["parent"].get("database_id")
     # nothing was added to Assignments on its own

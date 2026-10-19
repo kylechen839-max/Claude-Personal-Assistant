@@ -599,7 +599,7 @@ on; if that backend goes away mid-lecture, the page says the recording
 stopped there.
 
 The audio is deleted as soon as it is transcribed (`[lecture] keep_audio =
-true` keeps it) and the transcript once the Notion page exists. Recordings
+true` keeps it), and the transcript and notes once the Notion page exists. Recordings
 and job state live in `[lecture] upload_dir` (`data/lectures`; point it at
 the `/data` disk on a cloud host). Other settings: `max_upload_mb` (300 per
 recording), `chunk_mb` (4), `notes_database_id` (use an existing database
