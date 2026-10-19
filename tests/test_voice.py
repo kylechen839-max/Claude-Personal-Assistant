@@ -492,3 +492,20 @@ def test_web_chat_stream_sends_turn_events_to_its_caller_only():
     assert seen == [{"type": "tool", "name": "list_events"}]
     assert s.events.empty()  # a page reading /api/events gets nothing of it
     assert s.listener is None
+
+
+def test_no_conversation_text_in_info_logs(caplog):
+    import logging
+
+    memory = MagicMock()
+    memory.retrieve.return_value = []
+    client = stream_client(streamed("Your secret exam is Friday."))
+    client.create_queue.append(make_response(text_block("Kyle's secret exam is Friday.")))
+    conv, chat, events = make_conv(client, "when is my secret exam", memory=memory)
+    with caplog.at_level(logging.INFO, logger="assistant"):
+        conv.utterance(1, SPEECH)
+        events.wait_for("turn_done")
+        conv.end("user")
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert any("saved to memory" in m for m in info)
+    assert not [m for m in info if "secret" in m]
