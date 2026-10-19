@@ -92,6 +92,14 @@ class BoundedLoginLimiter(webapp.LoginLimiter):
     def fail(self, ip: str = "") -> float:
         delay = super().fail(ip)
         with self.lock:
+            if len(self.failures) > self.max_tracked:
+                # addresses that aren't locked out go first
+                now = self.clock()
+                for key in [k for k in self.failures
+                            if self.locked_until.get(k, 0) <= now]:
+                    if len(self.failures) <= self.max_tracked:
+                        break
+                    del self.failures[key]
             for table in (self.failures, self.locked_until):
                 if len(table) > self.max_tracked:
                     _cap(table, self.max_tracked)
@@ -122,6 +130,42 @@ def client_key(ip: str) -> str:
             return str(addr.ipv4_mapped)
         return str(ipaddress.ip_network(f"{addr}/64", strict=False))
     return str(addr)
+
+
+class Slots:
+    """Requests in flight (reading a body, or held after a wrong token):
+    at most `per_key` per address (IPv6: per /56, so one network can't
+    spread over many /64s) and `total` in all."""
+
+    def __init__(self, per_key: int, total: int):
+        self.per_key = per_key
+        self.total = total
+        self.busy: dict[str, int] = {}
+        self.count = 0
+
+    @staticmethod
+    def key(ip: str) -> str:
+        if ip.endswith("/64"):  # client_key's IPv6 form
+            return str(ipaddress.ip_network(ip, strict=False).supernet(new_prefix=56))
+        return ip
+
+    def take(self, ip: str, limit: int | None = None) -> bool:
+        """Claim a slot for `ip`; False if none is free."""
+        key = self.key(ip)
+        per_key = self.per_key if limit is None else min(limit, self.per_key)
+        if self.busy.get(key, 0) >= per_key or self.count >= self.total:
+            return False
+        self.busy[key] = self.busy.get(key, 0) + 1
+        self.count += 1
+        return True
+
+    def release(self, ip: str) -> None:
+        key = self.key(ip)
+        self.count -= 1
+        if self.busy.get(key, 0) <= 1:
+            self.busy.pop(key, None)
+        else:
+            self.busy[key] -= 1
 
 
 class RateLimiter:
@@ -173,6 +217,7 @@ class CloudGuard:
                  lockout: webapp.LoginLimiter | None = None,
                  limiter: RateLimiter | None = None, allowed_origins=(),
                  max_busy_per_ip=2, max_busy=32, body_timeout=10.0,
+                 max_login_busy=8, login_timeout=2.0,
                  min_upload_rate=65536, sleep=None, client_ip_header="",
                  log_proxy_headers=5, web=None):
         import asyncio
@@ -181,10 +226,11 @@ class CloudGuard:
         self.token = token
         # Requests reading a body (or held after a wrong token), per address
         # and in all; a slow client can't tie up more than that.
-        self.max_busy_per_ip = max_busy_per_ip
-        self.max_busy = max_busy
-        self.busy: dict[str, int] = {}
-        self.busy_total = 0
+        # Two pools, so callers without the token (sign-in attempts, wrong
+        # Bearer tokens) can never use up the slots of signed-in ones.
+        self.slots = Slots(max_busy_per_ip, max_busy)
+        self.login_slots = Slots(max_busy_per_ip, max_login_busy)
+        self.login_timeout = login_timeout  # a 16 KB sign-in body is quick
         # a body must arrive within body_timeout + size / min_upload_rate s
         self.body_timeout = body_timeout
         self.min_upload_rate = min_upload_rate
@@ -279,12 +325,12 @@ class CloudGuard:
         bearer = _bearer(scope)
         if bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
-                if not self.take(ip):
+                if not self.login_slots.take(ip):
                     return await refuse("too many requests at once")
                 try:
                     await self.wrong_token(ip, "bearer token")
                 finally:
-                    self.release(ip)
+                    self.login_slots.release(ip)
                 return await refuse("wrong bearer token")
         elif not self.signed_in(scope):
             return await refuse("not signed in")
@@ -333,13 +379,16 @@ class CloudGuard:
         if not has_body:
             body = None  # nothing read: the app gets the server's receive
         else:
-            if not self.take(ip):
+            pool = self.login_slots if login else self.slots
+            # a locked-out address may still sign in (right token), one try at a time
+            if not pool.take(ip, limit=1 if login and self.lockout.blocked(ip) else None):
                 return await _json(send, 429, {"error": "too many requests at once"},
                                    {"Retry-After": "5", **extra})
             try:
                 limit = (self.max_upload_bytes if path in UPLOAD_PATHS
                          else self.max_body_bytes)
-                timeout = self.body_timeout + limit / self.min_upload_rate
+                timeout = (self.login_timeout if login else
+                           self.body_timeout + limit / self.min_upload_rate)
                 body, error = await _read_body(scope, receive, limit, timeout)
                 if error:
                     return await _json(send, *error, extra)
@@ -347,7 +396,7 @@ class CloudGuard:
                     return await self.refuse_token(send, ip, "token", extra,
                                                    held=True)
             finally:
-                self.release(ip)
+                pool.release(ip)
         if body is not None:
             # the body is complete now: pass it on with its real length
             # (a chunked upload under the cap is fine)
@@ -377,21 +426,6 @@ class CloudGuard:
                 return await _json(send, 500, {"error": "internal error"}, extra)
             return
 
-    def take(self, ip: str) -> bool:
-        """Claim one of the in-flight slots for `ip`; False if none is free."""
-        if self.busy.get(ip, 0) >= self.max_busy_per_ip or self.busy_total >= self.max_busy:
-            return False
-        self.busy[ip] = self.busy.get(ip, 0) + 1
-        self.busy_total += 1
-        return True
-
-    def release(self, ip: str) -> None:
-        self.busy_total -= 1
-        if self.busy.get(ip, 0) <= 1:
-            self.busy.pop(ip, None)
-        else:
-            self.busy[ip] -= 1
-
     async def wrong_token(self, ip: str, what: str) -> bool:
         """A wrong token, as the web app treats it: from a locked-out
         address it is refused at once (True), otherwise it is counted and
@@ -406,14 +440,14 @@ class CloudGuard:
 
     async def refuse_token(self, send, ip: str, what: str, extra, held=False):
         if not held:
-            if not self.take(ip):
+            if not self.login_slots.take(ip):
                 return await _json(send, 429, {"error": "too many requests at once"},
                                    {"Retry-After": "5", **extra})
         try:
             locked = await self.wrong_token(ip, what)
         finally:
             if not held:
-                self.release(ip)
+                self.login_slots.release(ip)
         if locked:
             return await _json(send, 429, {"error": "too many attempts; try again later"},
                                {"Retry-After": str(self.lockout.retry_after(ip)), **extra})
@@ -554,12 +588,22 @@ def build_app(config: dict, web_assistant, token: str):
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
         max_upload_bytes=max_upload, max_body_bytes=int(cloud["max_body_kb"] * 1024),
-        lockout=limiter,
+        lockout=limiter, web=_web_auth(app),
         limiter=RateLimiter(cloud["requests_per_minute"]),
         allowed_origins=web["allowed_origins"],
         max_busy_per_ip=cloud["uploads_per_address"], max_busy=cloud["uploads_total"],
-        body_timeout=cloud["body_timeout"],
+        body_timeout=cloud["body_timeout"], max_login_busy=cloud["logins_total"],
         client_ip_header=cloud["client_ip_header"])
+
+
+def _web_auth(app):
+    """The web app's WebAuth. Without it the guard couldn't check cookies
+    against the session store (every request would get 401), so fail now."""
+    web = getattr(getattr(app, "state", None), "web", None)
+    if web is None or not hasattr(web, "store"):
+        raise RuntimeError("CloudGuard needs the web app's WebAuth (app.state.web); "
+                           "if create_app now wraps the app, expose its state")
+    return web
 
 
 def warm_up(web_assistant) -> None:

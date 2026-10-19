@@ -138,10 +138,16 @@ in `tests/test_cloud.py`):
   without a length are capped too; 120 requests a minute per address
   (`[cloud] requests_per_minute`).
 - **Slow clients.** Nobody but a signed-in caller (or the 16 KB login call)
-  gets a body read at all. At most 2 requests per address and 32 in all may
-  be sending a body at once (`[cloud] uploads_per_address`,
-  `uploads_total`; more get 429), and a body must arrive within 10 s plus
-  1 s per 64 KB (`[cloud] body_timeout`; else 408). uvicorn's own
+  gets a body read at all. Signed-in callers may have 2 requests per
+  address and 32 in all sending a body at once (`[cloud]
+  uploads_per_address`, `uploads_total`; more get 429), each due within
+  10 s plus 1 s per 64 KB (`[cloud] body_timeout`; else 408). Callers
+  without the token (sign-in attempts, wrong Bearer tokens) have their own
+  pool: 2 per address, 8 in all (`[cloud] logins_total`), a locked-out
+  address only 1, and a sign-in body is due within 2 s. IPv6 addresses
+  share these slots per /56. So a flood of slow sign-ins (found in review:
+  16 IPv6 networks used to fill all 32 slots) can at worst delay a *new*
+  sign-in, never a signed-in phone. uvicorn's own
   `limit_concurrency` is off: it counts every open connection and, once a
   slow client held 64, answered 503 to everyone, `/healthz` included (found
   in review, reproduced against real uvicorn, now a regression test).

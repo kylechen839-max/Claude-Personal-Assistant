@@ -656,3 +656,102 @@ def test_first_requests_log_what_the_proxy_sends(make_cloud, caplog):
             client.get("/", headers=via_proxy(PUBLIC))
     lines = [r.getMessage() for r in caplog.records if "Proxy check" in r.getMessage()]
     assert len(lines) == 2 and PUBLIC in lines[0] and "trusted" in lines[0]
+
+
+def test_sign_in_floods_cannot_take_signed_in_slots(make_cloud, fake_client):
+    """Review cycle 2: slow sign-ins from 16 IPv6 networks used to fill all
+    32 body slots, so Kyle's own requests got 429. Sign-ins now have their
+    own small pool (8) and a 2 s body deadline."""
+    import http.client
+    import json as _json
+    import socket
+    import threading
+    import time as _time
+
+    import uvicorn
+
+    guard, _ = make_cloud()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(
+        guard, host="127.0.0.1", port=port, lifespan="off", log_level="critical",
+        **cloud.UVICORN_OPTIONS))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    attacker = []
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            _time.sleep(0.05)
+        for net in range(16):  # 16 /56s of one /48, 2 slow sign-ins each
+            for _ in range(2):
+                sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+                sock.sendall(
+                    b"POST /api/login HTTP/1.1\r\nHost: t\r\n"
+                    + f"X-Forwarded-For: 2001:db8:aa:{net:02x}00::1\r\n".encode()
+                    + b"X-Forwarded-Proto: https\r\nContent-Type: application/json\r\n"
+                      b"Content-Length: 10000\r\n\r\n{")
+                attacker.append(sock)
+        _time.sleep(0.3)
+        assert guard.login_slots.count == 8 and guard.slots.count == 0
+        fake_client.queue.append(make_response(text_block("Nothing tomorrow.")))
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", "/api/turn", body=_json.dumps({"text": "tomorrow?"}),
+                     headers={"Authorization": f"Bearer {TOKEN}",
+                              "Content-Type": "application/json",
+                              "X-Forwarded-For": "198.51.100.20",
+                              "X-Forwarded-Proto": "https"})
+        r = conn.getresponse()
+        assert r.status == 200 and b"Nothing tomorrow." in r.read()
+        conn.close()
+        attacker[0].settimeout(5)
+        assert b" 408 " in attacker[0].recv(200)  # 2 s for a sign-in body
+    finally:
+        for sock in attacker:
+            sock.close()
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_slots_group_ipv6_by_56_and_locked_addresses_get_one():
+    slots = cloud.Slots(per_key=2, total=8)
+    a, b = cloud.client_key("2001:db8:1:200::1"), cloud.client_key("2001:db8:1:2ff::1")
+    assert a != b and cloud.Slots.key(a) == cloud.Slots.key(b) == "2001:db8:1:200::/56"
+    assert slots.take(a) and slots.take(b) and not slots.take(a)
+    slots.release(a)
+    assert slots.take("198.51.100.1", limit=1) and not slots.take("198.51.100.1", limit=1)
+
+
+def test_locked_out_addresses_hold_at_most_one_sign_in(make_cloud):
+    guard, client = make_cloud()
+    for _ in range(5):
+        login(client, "wrong")
+    assert guard.lockout.blocked(PUBLIC)
+    assert guard.login_slots.take(PUBLIC, limit=1)  # what a locked sign-in gets
+    r = login(client)  # a second one at the same time: no slot
+    assert r.status_code == 429
+    guard.login_slots.release(PUBLIC)
+    assert login(client).status_code == 200  # the right token still works
+
+
+def test_eviction_keeps_locked_out_addresses():
+    clock = Clock()
+    limiter = cloud.BoundedLoginLimiter(max_tracked=10, per_ip=2, clock=clock)
+    limiter.fail("192.0.2.1")
+    limiter.fail("192.0.2.1")  # locked out
+    for i in range(50):
+        limiter.fail(f"198.51.100.{i}")  # one wrong token each: not locked
+    assert limiter.blocked("192.0.2.1") and len(limiter.failures) <= 10
+
+
+def test_build_app_refuses_a_web_app_without_its_auth(monkeypatch, fake_client):
+    cfg = load_config(None, None, profile="server")
+    cfg["webapp"]["sessions_file"] = ""
+    monkeypatch.setattr(webapp, "create_app", lambda *a, **k: (lambda s, r, se: None))
+    assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
+                                                           model="m", tools=reg),
+                                    FakeTranscriber(), PrintTTS())
+    with pytest.raises(RuntimeError, match="WebAuth"):
+        cloud.build_app(cfg, assistant, TOKEN)

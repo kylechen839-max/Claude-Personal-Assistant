@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 746 passed, 13 skipped (Linux build sandbox,
+**Current test count:** 751 passed, 13 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
@@ -29,7 +29,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 67 | phone web app (`--mode web`) |
-| `test_cloud.py` | 71 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_cloud.py` | 76 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
@@ -252,7 +252,9 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   checked against the web app's `SessionStore` (`sessions_file` on `/data`
   in the server profile); at most 2 body uploads per address / 32 in all, bodies
   due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
-  (it let one slow client 503 everything, `/healthz` included); no trusted
+  (it let one slow client 503 everything, `/healthz` included); sign-ins
+  and wrong Bearer tokens in a separate pool (8, 2 s deadline) so they can't
+  take signed-in slots, IPv6 slots per /56; no trusted
   proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;
   trusting all private ranges let a Docker-bridge or LAN peer forge client
   addresses), optional `[cloud] client_ip_header`, IPv6 counted per /64,
