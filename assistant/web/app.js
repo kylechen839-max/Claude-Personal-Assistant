@@ -230,10 +230,14 @@ async function login(token) {
   }
 }
 
-els.logout.addEventListener("click", async () => {
-  await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+async function signOut(path) {
+  await fetch(path, { method: "POST", credentials: "same-origin" });
   els.log.textContent = "";
   show("login");
+}
+els.logout.addEventListener("click", () => signOut("/api/logout"));
+$("logout-all").addEventListener("click", () => {
+  if (confirm("Sign out on every phone and browser?")) signOut("/api/logout-all");
 });
 
 // --- text ---

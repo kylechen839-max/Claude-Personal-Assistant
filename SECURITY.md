@@ -57,9 +57,13 @@ which blocks cross-site WebSocket hijacking. Each utterance is at most
 text messages at 4 KB; more than `utterances_per_minute` utterances or 60
 control messages per 10 s closes the socket; a conversation ends after
 `max_session_minutes` or `idle_timeout`; one voice conversation per signed-in
-browser. Closing the socket aborts the Claude stream and pending TTS and
-answers a pending confirmation with "no". Tool confirmations work as before:
-only a clear spoken yes proceeds. The VAD runs from files the app serves
+browser and at most 4 server-wide; the rate limits are kept per session, so
+reconnecting doesn't reset them. Transcripts are not logged at INFO. Closing the socket aborts the Claude stream and pending TTS and
+answers a pending confirmation with "no". A spoken confirmation counts only once the
+page reports the question finished playing, and only as a short explicit
+yes ("yes", "yeah, delete it"); talking over the question, answering before
+it was heard, or any other reply is a no, and it says so. Turns never run
+two at a time, and a confirmation stays with the turn that asked it. The VAD runs from files the app serves
 itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
 compilation), still no inline script, eval or third-party hosts. Tests:
 `tests/test_voice_ws.py`.

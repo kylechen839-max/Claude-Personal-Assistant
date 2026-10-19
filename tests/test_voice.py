@@ -7,6 +7,7 @@ import json
 import shutil
 import sys
 import threading
+import time
 from unittest.mock import MagicMock
 
 import anthropic
@@ -118,7 +119,7 @@ def test_turn_streams_sentence_audio_before_reply_finishes():
     first = events.wait_for("audio")
     # the first sentence was spoken while Claude was still "writing"
     assert s.held.is_set() and not s.release.is_set()
-    assert first == {"type": "audio", "turn": 1, "index": 0, "reply": True,
+    assert first == {"type": "audio", "turn": 1, "index": 0, "reply": True, "question": False,
                      "text": "Tomorrow you have the dentist at 3:30 PM.",
                      "duration": 0.5}
     s.release.set()
@@ -192,32 +193,138 @@ def test_stale_interrupt_is_ignored():
     assert chat.history[-1]["content"][0]["text"] == "Hello there."
 
 
-@pytest.mark.parametrize("answer, done", [("yes, delete it", ["Dentist"]),
-                                          ("no", []), ("what's the weather", [])])
-def test_spoken_confirmation_answers_and_is_never_a_request(answer, done):
+def ask_to_delete(answer, **kw):
+    """A turn whose tool asks to delete Dentist; returns once the question's
+    audio was sent. The second transcript is `answer`."""
     deleted = []
     client = stream_client(
         streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
                  stop_reason="tool_use"),
-        streamed("Done." if done else "Okay, I left it."))
-    conv, chat, events = make_conv(client, "delete the dentist", answer,
-                                   tools=delete_tool(deleted))
+        streamed("Done." if answer else "Okay, I left it."),
+        streamed("Sure."))
+    conv, chat, events = make_conv(client, "delete the dentist", answer, "yes",
+                                   tools=delete_tool(deleted), **kw)
     conv.utterance(1, SPEECH)
     q = events.wait_for("confirm")
     assert q["question"] == "Do you want me to delete Dentist?"
-    asked = events.wait_for("audio", index=1)  # "Okay." then the question
+    asked = events.wait_for("audio", question=True)
     assert asked["text"].endswith("Please say yes or no.") and asked["reply"] is False
-    conv.interrupt(1, 1, 0.3)  # Kyle answers over the question: not a cancel
+    return conv, chat, events, client, deleted, asked
+
+
+@pytest.mark.parametrize("answer, yes", [
+    ("yes", True), ("Yeah, delete it.", True), ("go ahead", True), ("Yes please.", True),
+    ("no", False), ("okay, and what about Friday?", False), ("okay", False),
+    ("yes but not that one", False), ("what's the weather", False), ("", False)])
+def test_only_an_explicit_yes_confirms(answer, yes):
+    conv, chat, events, client, deleted, asked = ask_to_delete(answer)
+    conv.chunk_played(1, asked["index"])  # the page heard the whole question
     conv.utterance(2, SPEECH)
     ans = events.wait_for("confirm_answer")
-    assert ans["turn"] == 1 and ans["yes"] == bool(done)
-    fin = events.wait_for("turn_done", turn=1)
-    assert fin["interrupted"] is False
-    assert deleted == done
-    assert answer not in user_texts(client)  # the answer never went to Claude
-    assert not events.of("transcript")[1:]  # and isn't a new turn
-    result = json.loads(chat.history[2]["content"][0]["content"])
-    assert ("deleted" in result) == bool(done)
+    assert ans["turn"] == 1 and ans["yes"] is yes
+    events.wait_for("turn_done", turn=1)
+    assert deleted == (["Dentist"] if yes else [])
+    spoken = [a["text"] for a in events.of("audio")]
+    assert ("OK, I won't delete it." in spoken) is (not yes)
+    assert answer not in user_texts(client) or not answer  # never a request
+    assert len(events.of("transcript")) == 1  # and not a new turn
+
+
+def test_talking_over_the_question_cancels_the_action():
+    conv, chat, events, client, deleted, asked = ask_to_delete("okay, and Friday?")
+    conv.interrupt(1, asked["index"], 0.3)  # barge-in while the question plays
+    ans = events.wait_for("confirm_answer")
+    assert ans["yes"] is False and ans["reason"] == "interrupted"
+    events.wait_for("turn_done", turn=1)
+    assert deleted == []
+    assert "OK, I won't delete it." in [a["text"] for a in events.of("audio")]
+    # what Kyle said over it is a new request, not an answer
+    conv.utterance(2, SPEECH)
+    events.wait_for("turn_done", turn=2)
+    assert deleted == []
+    assert user_texts(client)[-1] == "okay, and Friday?"
+
+
+def test_answer_before_the_question_was_heard_is_no():
+    conv, chat, events, client, deleted, asked = ask_to_delete("yes")
+    conv.utterance(2, SPEECH)  # page never reported the question as played
+    ans = events.wait_for("confirm_answer")
+    assert ans["yes"] is False and ans["reason"] == "not heard"
+    events.wait_for("turn_done", turn=1)
+    assert deleted == []
+    assert "yes" not in user_texts(client)
+
+
+def test_turns_never_overlap_and_confirmations_stay_with_their_turn():
+    """Kyle talks again while a tool of turn 1 is still running: turn 2 waits
+    for turn 1 to finish (one request at a time), and a confirmation turn 1
+    asks after it was cancelled is declined, never attached to turn 2."""
+    release, started = threading.Event(), threading.Event()
+    running, overlap, late = [0], [0], {}
+    reg = ToolRegistry()
+
+    def slow_lookup():
+        started.set()
+        release.wait(5)
+        late["yes"] = backend.confirm("Do you want me to delete Dentist?")
+        return {"events": ["Dentist"]}
+
+    reg.register(Tool(name="list_events", description="List.",
+                      input_schema={"type": "object", "properties": {}},
+                      handler=slow_lookup))
+    client = stream_client(
+        streamed("Let me look.", extra=[tool_use_block("list_events", {})],
+                 stop_reason="tool_use"),
+        streamed("The weather is sunny."))
+    conv, chat, events = make_conv(client, "find my dentist", "what's the weather",
+                                   tools=reg)
+    backend = conv.backend
+    real_ask = backend.ask
+
+    def counting_ask(*a, **kw):  # how many turns ask Claude at the same time
+        running[0] += 1
+        overlap[0] = max(overlap[0], running[0])
+        try:
+            return real_ask(*a, **kw)
+        finally:
+            running[0] -= 1
+
+    backend.ask = counting_ask
+    conv.utterance(1, SPEECH)
+    assert started.wait(5)
+    conv.utterance(2, SPEECH)  # while list_events is still running
+    time.sleep(0.1)
+    assert len(client.stream_calls) == 1  # turn 2 hasn't started
+    release.set()
+    events.wait_for("turn_done", turn=2)
+    assert overlap[0] == 1
+    assert late["yes"] is False and not events.of("confirm")
+    assert [m["content"] for m in chat.history if m["role"] == "user"
+            and isinstance(m["content"], str)] == ["find my dentist", "what's the weather"]
+    roles = [m["role"] for m in chat.history]
+    assert all(a != b for a, b in zip(roles, roles[1:]))  # valid alternation
+
+
+def test_superseded_utterances_are_not_transcribed():
+    release, started = threading.Event(), threading.Event()
+    reg = ToolRegistry()
+    reg.register(Tool(name="slow", description="Slow.",
+                      input_schema={"type": "object", "properties": {}},
+                      handler=lambda: started.set() or (release.wait(5) and "ok")))
+    client = stream_client(
+        streamed(extra=[tool_use_block("slow", {})], stop_reason="tool_use"),
+        streamed("Third answer."))
+    conv, chat, events = make_conv(client, "first", "third", tools=reg)
+    conv.utterance(1, SPEECH)
+    assert started.wait(5)
+    conv.utterance(2, SPEECH * 2)
+    conv.utterance(3, SPEECH * 3)  # replaces 2 before it was transcribed
+    release.set()
+    events.wait_for("turn_done", turn=3)
+    assert conv.dropped == 1
+    heard = conv.transcribe.heard
+    assert len(heard) == 2 and heard[1] is not None
+    assert [e["turn"] for e in events.of("transcript")] == [1, 3]
 
 
 def test_unanswered_confirmation_times_out_as_no():
@@ -336,3 +443,69 @@ def test_timings_flag_prints_voice_turn_lines():
     finally:
         log.removeHandler(handler)
     assert out == ["(Turn timings from utterance received: transcript +0.40 s)"]
+
+
+def test_no_tool_runs_after_a_barge_in_before_the_tool_call():
+    """Kyle says "stop" while "Okay, I'll add it." plays, after Claude asked
+    for the tool but before it ran: the tool must not run, and history
+    stays valid (every tool_use has a tool_result)."""
+    added = []
+    reg = ToolRegistry()
+    reg.register(Tool(name="create_event", description="Create.",
+                      input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+                      handler=lambda title: added.append(title) or "ok"))
+    client = stream_client(
+        streamed("Okay, I'll add it.", extra=[tool_use_block("create_event", {"title": "Gym"})],
+                 stop_reason="tool_use"))
+    chat = ClaudeChat(client=client, model="m", tools=reg)
+    cancel = threading.Event()
+
+    def on_text(delta):
+        cancel.set()  # the barge-in lands while the reply is streaming
+
+    reply = chat.ask("add gym tomorrow", on_text=on_text, cancel=cancel)
+    assert added == []
+    assert reply == "Okay, I'll add it."
+    roles = [m["role"] for m in chat.history]
+    assert roles == ["user", "assistant", "user", "assistant"]
+    assert chat.history[2]["content"][0]["is_error"] is True
+    assert chat.history[1]["content"][-1]["type"] == "tool_use"
+
+
+def test_web_chat_stream_sends_turn_events_to_its_caller_only():
+    from assistant import webapp
+    from assistant.tools import Tool as T
+
+    reg = ToolRegistry()
+    reg.register(T(name="list_events", description="List.",
+                   input_schema={"type": "object", "properties": {}},
+                   handler=lambda: "none"))
+    client = stream_client(
+        streamed(extra=[tool_use_block("list_events", {})], stop_reason="tool_use"),
+        streamed("Nothing tomorrow."))
+    wa = webapp.WebAssistant(lambda r: ClaudeChat(client=client, model="m", tools=r),
+                             FakeTranscriber(), FakeSynth(), tools=reg)
+    s = wa.session("sid-1")
+    seen = []
+    out = "".join(wa.chat_stream(s, "tomorrow?", on_event=seen.append))
+    assert out == "Nothing tomorrow."
+    assert seen == [{"type": "tool", "name": "list_events"}]
+    assert s.events.empty()  # a page reading /api/events gets nothing of it
+    assert s.listener is None
+
+
+def test_no_conversation_text_in_info_logs(caplog):
+    import logging
+
+    memory = MagicMock()
+    memory.retrieve.return_value = []
+    client = stream_client(streamed("Your secret exam is Friday."))
+    client.create_queue.append(make_response(text_block("Kyle's secret exam is Friday.")))
+    conv, chat, events = make_conv(client, "when is my secret exam", memory=memory)
+    with caplog.at_level(logging.INFO, logger="assistant"):
+        conv.utterance(1, SPEECH)
+        events.wait_for("turn_done")
+        conv.end("user")
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert any("saved to memory" in m for m in info)
+    assert not [m for m in info if "secret" in m]

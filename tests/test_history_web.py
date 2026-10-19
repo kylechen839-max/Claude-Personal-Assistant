@@ -41,7 +41,7 @@ def web(fake_client, tmp_path):
     assistant = webapp.WebAssistant(chat_factory, FakeTranscriber(), PrintTTS(),
                                     clock=Clock(), history=store, memory=memory)
     app = webapp.create_app(assistant, TOKEN, reap_interval=3600,
-                            limiter=webapp.LoginLimiter(per_ip=3, global_max=50))
+                            limiter=webapp.LoginLimiter(per_ip=3, global_delay=0))
     client = TestClient(app, base_url=BASE)
     yield store, assistant, client, memory
     store.close()

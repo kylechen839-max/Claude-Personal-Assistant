@@ -39,6 +39,7 @@
   let backlog = 0;
   let timings = {}; // turn -> {name: ms}
   let debugOn = false;
+  let generation = 0; // bumped by finish(), so a start() still loading gives up
 
   // --- playback: decoded chunks scheduled back to back ---
   const playback = {
@@ -63,6 +64,10 @@
         }
         node.onended = () => {
           this.sources = this.sources.filter((s) => s !== entry);
+          // A yes/no question only counts as asked once it was heard to the end.
+          if (header.question && ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "played", turn: header.turn, index: header.index }));
+          }
           if (!this.sources.length) controller.onPlaybackIdle();
         };
       });
@@ -281,6 +286,14 @@
   async function start() {
     if (running) return;
     running = true;
+    const gen = ++generation;
+    // End tapped while we were waiting: drop whatever this start() opened.
+    const cancelled = () => {
+      if (gen === generation) return false;
+      if (mic && !running) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
+      if (ws && !running) { try { ws.close(1000); } catch (e) { /* closed */ } ws = null; }
+      return true;
+    };
     timings = {};
     ui.view.hidden = false;
     document.body.classList.add("voice-open");
@@ -305,8 +318,11 @@
     }
     keepAwake();
     try {
-      mic = await micPromise;
+      const stream = await micPromise;
+      if (gen !== generation) { stream.getTracks().forEach((t) => t.stop()); return; }
+      mic = stream;
       await connect();
+      if (cancelled()) return;
       if (settings.debug_panel && !debugOn && ui.debugToggle) ui.debugToggle.click();
       controller = new VC.TurnController({
         setState, caption, sendUtterance,
@@ -328,6 +344,7 @@
       inAnalyser.fftSize = 512;
       micNode.connect(inAnalyser);
       await ctx.audioWorklet.addModule("/voice-worklet.js");
+      if (cancelled()) return;
       capture = new AudioWorkletNode(ctx, "voice-capture");
       capture.port.onmessage = (e) => onFrame(new Float32Array(e.data));
       micNode.connect(capture);
@@ -339,6 +356,7 @@
           console.warn("Silero VAD unavailable, using the energy VAD:", e);
         }
       }
+      if (cancelled()) return;
       for (const track of mic.getAudioTracks()) {
         track.onended = () => finish("The microphone stopped.");
         track.onmute = () => pause("Paused: the microphone was interrupted.");
@@ -352,13 +370,14 @@
       if (ui.mute.getAttribute("aria-pressed") === "true") toggleMute(true);
       requestAnimationFrame(animate);
     } catch (e) {
-      finish(`Voice mode couldn't start: ${e.message || e.name}`);
+      if (!cancelled()) finish(`Voice mode couldn't start: ${e.message || e.name}`);
     }
   }
 
   function finish(message) {
     if (!running) return;
     running = false;
+    generation++;
     if (controller && controller.state !== "ended") controller.end();
     playback.stop();
     if (ws) { try { ws.close(1000); } catch (e) { /* closed */ } ws = null; }

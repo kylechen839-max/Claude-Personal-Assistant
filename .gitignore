@@ -23,3 +23,6 @@ data/
 *.sqlite-shm
 *.wav
 !tests/fixtures/*.wav
+
+# Web app sign-in sessions (python -m assistant --mode web)
+data/
