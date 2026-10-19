@@ -3,6 +3,8 @@ claude.ai page contract and treats rows as untrusted; the master skill
 writes every phase."""
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -49,7 +51,8 @@ def test_page_loads_nothing_external():
 
 @pytest.mark.parametrize("banned", ["alert(", "confirm(", "prompt(", "innerHTML",
                                     "outerHTML", "insertAdjacentHTML",
-                                    "document.write", "eval("])
+                                    "document.write", "eval(", "createContextualFragment",
+                                    "DOMParser", "srcdoc", "new Function"])
 def test_page_never_renders_rows_as_markup(banned):
     assert banned not in _page()
 
@@ -91,12 +94,45 @@ def test_page_knows_every_schema_phase():
 
 def test_page_thresholds_match_the_readme():
     """Page threshold = skill limit + 15 min, as the README table says."""
-    readme = (DASH / "README.md").read_text(encoding="utf-8")
     page = _page()
-    for phase, limit, page_min in re.findall(
-            r"\| `(\w+)` \|[^|]*\| (\d+) min[^|]*\| (\d+) min \|", readme):
-        assert int(page_min) == int(limit) + 15, phase
+    rows = _readme_thresholds()
+    assert [phase for phase, _, _ in rows] == ["started", "researching", "building", "judging"]
+    for phase, limit, page_min in rows:
+        assert page_min == limit + 15, phase
         assert f"{phase}: {page_min}" in page, phase
+
+
+def _readme_thresholds() -> list[tuple[str, int, int]]:
+    """(phase, skill limit, page threshold) rows of the README table."""
+    readme = (DASH / "README.md").read_text(encoding="utf-8")
+    return [(phase, int(limit), int(page_min)) for phase, limit, page_min in re.findall(
+        r"\| `(\w+)` \|[^|]*\| (\d+) min[^|]*\| (\d+) min \|", readme)]
+
+
+def test_watchdog_idle_rule_uses_the_page_thresholds():
+    """A master waiting on a long build round can report IDLE; the watchdog
+    must not call it dead before the page would call it silent."""
+    prompt = (DASH / "WATCHDOG.md").read_text(encoding="utf-8").split("```")[1]
+    flat = " ".join(prompt.split())
+    for phase, _, page_min in _readme_thresholds():
+        assert f"{phase} {page_min} min" in flat, phase
+    assert "15 minutes old" not in flat
+
+
+def test_watchdog_tracks_the_bucket_and_pushes_only_on_a_new_block():
+    flat = " ".join((DASH / "WATCHDOG.md").read_text(encoding="utf-8").split("```")[1].split())
+    assert "differs from the row's watch.bucket" in flat
+    assert "watch.checked_at is older than the row's updated_at" in flat
+    assert "Push only when the new bucket is BLOCKED" in flat
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
+def test_page_logic_in_node():
+    """tests/js/agent-dashboard.test.mjs runs the page's script in node:vm."""
+    result = subprocess.run(["node", "--test", "tests/js/agent-dashboard.test.mjs"], cwd=ROOT,
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"^# pass [1-9]\d*$", result.stdout, re.M), result.stdout
 
 
 def test_page_links_only_to_allowed_prefixes():
@@ -118,6 +154,18 @@ def test_skill_writes_every_phase_except_dead():
         assert f'phase: "{phase}"' in skill, phase
     assert "if_version" in skill
     assert "Only the master writes the dashboard; subagents never do." in skill
+
+
+def test_skill_retires_rows_and_has_no_dangling_steps():
+    skill = SKILL.read_text(encoding="utf-8")
+    flat = " ".join(skill.split())
+    # Kyle merges in the GitHub UI: the CI watch writes done on merge/close.
+    assert "reported merged or closed" in flat
+    # Parallel pieces: one row each.
+    assert "-<piece-slug>" in skill
+    # There is no step or section 4; references point at real places.
+    assert not re.search(r"\(step 4\)", skill)
+    assert "(§3 step 8)" in skill
 
 
 def test_watchdog_prompt_is_one_fenced_block():

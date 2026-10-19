@@ -80,7 +80,7 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
 </header>
 <ul id="runs" aria-label="Runs"></ul>
 <p id="empty" hidden></p>
-<footer>Read-only. Silent means no update for longer than the phase allows. Done runs older than 14 days are hidden.</footer>
+<footer>Read-only. Silent means no update for longer than the phase allows. PR ready, blocked and dead runs with no change for 7 days count as done. Done runs older than 14 days are hidden.</footer>
 </main>
 <script>
 (() => {
@@ -91,6 +91,10 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
   // Page thresholds = the skill's time limit + 15 min, in minutes.
   const SILENT_AFTER_MIN = {started: 25, researching: 45, building: 90, judging: 45};
   const HIDE_DONE_MS = 14 * 24 * 3600e3;
+  // PR ready, blocked and dead rows that sit this long count as done: Kyle
+  // merges in the GitHub UI, and nothing else retires a blocked or dead row.
+  const PARKED = ["pr_ready", "blocked", "dead"];
+  const PARKED_DONE_MS = 7 * 24 * 3600e3;
   const FUTURE_SLACK_MS = 10 * 60e3;
   const SESSION_PREFIX = "https://claude.ai/code/session_";
   const PR_PREFIX = "https://github.com/kylechen839-max/Claude-Personal-Assistant/pull/";
@@ -136,9 +140,21 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
     const updated = time(r.updated_at);
     const out = {phase, updated, state: "silent", pill: "silent", note: ""};
     if (phase === "done") { out.state = "done"; out.pill = "done"; return out; }
+    if (PARKED.includes(phase) && updated !== null && now - updated > PARKED_DONE_MS) {
+      out.state = "done"; out.pill = "done (no change 7 d)"; return out;
+    }
     if (phase === "pr_ready" || phase === "blocked") { out.state = "needs"; out.pill = "needs you"; return out; }
     if (phase === "dead") { out.pill = "dead (watchdog)"; return out; }
     if (!PHASES.includes(phase)) { out.note = "unknown phase"; return out; }
+    // The watchdog saw the session waiting on an approval prompt after the
+    // master's last write. A newer master write clears it.
+    const watch = r.watch && typeof r.watch === "object" ? r.watch : {};
+    const checked = time(watch.checked_at);
+    if (text(watch.bucket, 40).toUpperCase() === "BLOCKED" && checked !== null
+        && (updated === null || checked > updated)) {
+      out.state = "needs"; out.pill = "needs you (approval)"; out.note = "waiting on an approval prompt";
+      return out;
+    }
     const limit = SILENT_AFTER_MIN[phase];
     if (updated === null || updated > now + FUTURE_SLACK_MS) { out.note = "last update unreadable"; return out; }
     const mins = (now - updated) / 60e3;
@@ -334,6 +350,13 @@ footer{font-size:.78rem;color:var(--muted);margin-top:6px}
     setInterval(render, 60e3);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
   }
+
+  // Pure helpers for tests/js/agent-dashboard.test.mjs. Read-only.
+  window.AgentDashboard = Object.freeze({
+    classify, safeLink, text, number, time,
+    SILENT_AFTER_MIN: Object.freeze({...SILENT_AFTER_MIN}),
+    FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX,
+  });
 
   start();
 })();

@@ -20,10 +20,10 @@ Subagents can't start agents, so only you start them.
 **Every run ends in exactly one of two ways.** Kyle decided this on
 2026-10-19, following the LLM Council's advice. Either:
 - a **draft PR** whose description holds the judge's verdict, tests and
-  cost (step 3), or
+  cost (§3), or
 - a **blocker note**, saying what stopped the run and what Kyle must do.
 
-Either way, finish with a **phone push** (step 4). A run never ends in a
+Either way, finish with a **phone push** (§3 step 8). A run never ends in a
 silent stall.
 
 **Budget for each run:**
@@ -78,6 +78,13 @@ watchdog's `dead`).
   rest.
 - Split big requests into independent pieces, one branch and one
   research-build-judge loop each.
+- **One dashboard row per piece.** A run with several pieces gives each
+  piece its own row: `run_id` = the run's id plus `-<piece-slug>`, e.g.
+  `20261019-183000-voice-speed-settings`. Each piece row has its own
+  `if_version` chain, its own `phase` and `round`, and its own per-round
+  time limits. A single-piece run keeps the plain `run_id`. When you split,
+  `set` each piece row (`phase: "started"`) before its first builder, then
+  write `phase: "done"` to the plain row: the piece rows take over.
 - **Running pieces in parallel:** start each builder with
   `isolation: "worktree"`, at most 2–3 at once (the usage limit is
   shared). Stage the work Phase A, where each builder stays in its own
@@ -102,8 +109,8 @@ watchdog's `dead`).
    code. Say why in the next builder brief; don't loop on it.
 6. **Still not approved after round 3:** don't open a PR. Commit the work
    to its `claude/<feature>` branch and push it, so nothing is lost. Then
-   end with a **blocker note** (step 4): what's open, and what you
-   recommend.
+   end with a **blocker note** (see "Blocker note" below): what's open,
+   and what you recommend.
 
 Keep a running total of the `subagent_tokens` each agent reports when it
 finishes. That total is the run's **cost**.
@@ -139,10 +146,14 @@ finishes. That total is the run's **cost**.
 6. **Watch CI on the PR.** Subscribe with `subscribe_pr_activity`. Every
    job must be green on the PR's head: tests.yml on Ubuntu 3.10/3.12 and
    Windows 3.12, pinecone-mcp, Docker, JS, and `pi-arm64`. Fix anything
-   red with the build-judge loop.
+   red with the build-judge loop. When the PR is reported merged or closed
+   (Kyle usually merges in the GitHub UI), write `phase: "done"` to the
+   dashboard row.
 7. **Merging** is Kyle's job: he merges the PR, which rolls back with one
    revert. You merge it only when he asks. When you do, use a merge
    commit, not a squash, then write `phase: "done"` to the dashboard row.
+   If the run ends before you hear of a merge, the page counts the
+   `pr_ready` row as done after 7 days with no change.
 8. **End the run.** Send a **phone push** with `PushNotification` (load it
    with ToolSearch), one line, either:
    - "✅ <feature>: draft PR ready, judge approved, <tests>", or

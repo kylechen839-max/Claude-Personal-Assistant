@@ -497,3 +497,7 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
     to read in both.
 - [ ] Share -> Add to Home Screen, then open it from the icon.
   - Should: the same list. Tapping Session or PR opens it in a new tab.
+- [ ] After a `/build-feature` run opens its draft PR, merge it in the
+      GitHub UI while that session is still open.
+  - Should: within a few minutes its card changes from "needs you" to
+    "done" (the master's CI watch writes it).
