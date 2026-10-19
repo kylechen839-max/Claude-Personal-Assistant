@@ -1022,3 +1022,60 @@ synced history list; Pinecone memory still works).
   conversation); in the wake-word loop only the final answer is spoken.
 - Tests: `tests/test_sentences.py` (URL, emoji, bullet stripping),
   `tests/test_chat.py` prompt check. Full suite: 1431 passed, 45 skipped.
+
+## Frontend refresh (phone app look)
+
+A visual pass over the phone web app; behaviour, the WebSocket/API protocol,
+sign-in, confirmations and security logic are unchanged, and every element
+id and data attribute the JS and tests use is kept.
+
+- **Palette and type** (`assistant/web/app.css`): warm neutral tokens on
+  `:root` (ivory / near-black), one clay accent, separate light and dark sets
+  through `prefers-color-scheme`; the system font (`-apple-system`) with a
+  clear scale (20 px bold header, 17 px body, 13-15 px secondary).
+- **Chat**: Claude's replies are plain text, your messages soft bubbles,
+  notes and errors small centred pills; an empty-state greeting
+  ("How can I help?"); a pulsing dot while a reply is still empty; a pill
+  composer with a round send button; the confirmation card is a warm card
+  with a filled Yes and an outlined No.
+- **Push-to-talk**: a raised clay mic with a pressed state; while recording
+  it turns red with two soft ripples. Compact sizes below 700 px tall
+  (iPhone SE).
+- **Gear menu**: a floating card with iOS-style switches (CSS on the existing
+  checkboxes), grouped sign-out rows, "Sign out everywhere" in red.
+- **Features**: segmented Chat / Lecture / Tutor control; lecture reminder
+  readable in light mode (it was dark-on-dark), record button with a dot,
+  job cards with status pills and a slim progress bar; tutor photo buttons
+  with icons, switches for the two options.
+- **History**: blurred sticky bar, filled search field, filter chips,
+  conversations in rounded inset groups, an icon on empty results, a
+  loading placeholder, bottom action sheet and alert-style rename / delete
+  dialogs.
+- **Voice mode** (`voice.css`): soft background glow, glossier orb with a
+  breathing halo while listening, a state pill with a coloured dot, 56 px
+  round controls, and a filled Mute when muted.
+- **Accessibility**: every tap target is at least 44 px (gear, tabs, chips,
+  links and Add buttons were smaller), visible `:focus-visible` rings
+  (two-tone on the mic and send button), safe-area insets on every screen,
+  and `prefers-reduced-motion` turns animations off (the recording ripple
+  becomes a static ring, the orb an outline).
+- **Markup** (`index.html` only): SVG gear, send arrow and mic glyph instead
+  of text symbols and the app icon image; the app icon on the sign-in
+  screen; `theme-color` matches the new backgrounds. Data-URI icons are
+  inside the stylesheets (`img-src 'self' data:`), so the CSP is unchanged
+  and there are no inline scripts or styles. No third-party assets.
+- `sw.js`: cache `hey-claude-shell-v3`, so phones fetch the new CSS.
+- Email and quick capture have no screens of their own in the phone app
+  (they are voice tools), so there was nothing to restyle for them.
+
+**Tested:** a mocked server (fake Claude, seeded history, fake lecture
+jobs, no keys) driven by Playwright/Chromium at 390x844 and 375x667, light
+and dark, 16 screens each (sign-in, sign-in error, empty chat, chat, chat
+with a confirmation and recording, gear menu, lecture, tutor, voice
+listening and paused, history, no results, action sheet, rename, delete,
+transcript). A script also checks every screen for sideways overflow and
+tap targets under 44 px; before the refresh it flagged the gear, tabs,
+chips, Notion link and Add buttons, after it flags nothing. Before / after
+images: `docs/screenshots/before/` and `docs/screenshots/after/`
+(`<screen>-<width>x<height>-<light|dark>.png`). Voice-mode and confirmation
+screens are staged by setting the same attributes the JS sets (no mic).
