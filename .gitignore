@@ -31,3 +31,7 @@ data/
 
 # Web app sign-in sessions (python -m assistant --mode web)
 data/
+
+# LLM Council reports (.claude/skills/llm-council)
+council-report-*.html
+council-transcript-*.md
