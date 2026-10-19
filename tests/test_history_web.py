@@ -108,7 +108,7 @@ def test_ids_cant_be_enumerated(web):
     store, _, client, _ = web
     ids = [seed(store, title=f"Chat {i}") for i in range(5)]
     login(client)
-    for guess in ["1", "2", "0", "00000000000000000000", ids[0][:-1] + "x",
+    for guess in ["1", "2", "0", "00000000000000000000", ids[0][:-1] + ("y" if ids[0].endswith("x") else "x"),
                   "%27%20OR%201=1", "conversations"]:
         assert client.get(f"/api/conversations/{guess}").status_code == 404, guess
     assert all(history.valid_id(i) and not i.isdigit() for i in ids)
