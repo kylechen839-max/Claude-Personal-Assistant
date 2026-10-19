@@ -96,6 +96,14 @@ DEFAULTS: dict = {
         "enabled": False,       # host supervisor: update from `channel`
         "channel": "stable",    # git branch; fast-forwarded only after green CI
         "check_minutes": 15,
+        "local_branch": "master",  # only this checked-out branch is updated
+        # the origin it must come from, and who must have signed it
+        "repo": "github.com/kylechen839-max/Claude-Personal-Assistant",
+        "allowed_signers": "",  # "" = the per-user default (see updater.py)
+        # true = run unsigned updates too: anyone who can push to master or
+        # stable can then run code on this machine
+        "trust_unsigned": False,
+        "health_seconds": 180,  # for the restarted web app to answer /healthz
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO"},
 }
@@ -122,6 +130,12 @@ def _merge(base: dict, override: dict) -> dict:
     return base
 
 
+def local_config_path(path: str | Path) -> Path:
+    """config.toml -> config.local.toml (other.toml -> other.local.toml)."""
+    p = Path(path)
+    return p.with_name(p.stem + ".local" + p.suffix)
+
+
 def load_config(path: str | Path | None = "config.toml",
                 env_file: str | Path | None = ".env") -> dict:
     if env_file and Path(env_file).exists():
@@ -129,9 +143,13 @@ def load_config(path: str | Path | None = "config.toml",
 
         load_dotenv(env_file)
     config = copy.deepcopy(DEFAULTS)
-    if path and Path(path).exists():
-        with open(path, "rb") as f:
-            _merge(config, tomllib.load(f))
+    if path:
+        # config.toml, then this machine's own config.local.toml beside it
+        # (gitignored: per-machine settings that never block an update)
+        for file in (Path(path), local_config_path(path)):
+            if file.exists():
+                with open(file, "rb") as f:
+                    _merge(config, tomllib.load(f))
     for var, (section, key) in ENV_OVERRIDES.items():
         if os.environ.get(var):
             config[section][key] = os.environ[var]

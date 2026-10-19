@@ -89,7 +89,7 @@ utterances_per_minute = 30
 debug_panel = false           # latency timings on the voice screen
 
 [update]                      # automatic updates on the home host (PC tasks / Pi service)
-enabled = false               # true: follow the tested `stable` branch, restart when idle
+enabled = false               # set true in config.local.toml, after signing is set up (README)
 channel = "stable"
 check_minutes = 15
 
