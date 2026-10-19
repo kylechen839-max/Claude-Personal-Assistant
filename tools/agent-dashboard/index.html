@@ -1755,10 +1755,10 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       if (c < 32 || (c >= 0x7f && c <= 0x9f)) continue;
       if (c >= 0xd800 && c <= 0xdbff) {
         const d = s.charCodeAt(i + 1);
-        if (d >= 0xdc00 && d <= 0xdfff) { out += s[i] + s[i + 1]; i += 1; } else out += "�";
+        if (d >= 0xdc00 && d <= 0xdfff) { out += s[i] + s[i + 1]; i += 1; } else out += "\uFFFD";
         continue;
       }
-      out += c >= 0xdc00 && c <= 0xdfff ? "�" : s[i];
+      out += c >= 0xdc00 && c <= 0xdfff ? "\uFFFD" : s[i];
     }
     return out;
   }
