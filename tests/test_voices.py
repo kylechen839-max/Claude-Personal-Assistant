@@ -551,3 +551,10 @@ def test_check_reports_the_voice(fake_kokoro, kokoro_paths, piper_paths, no_koko
     check = doctor.check_tts(cfg(engine="elevenlabs"),
                              environ={"ELEVENLABS_API_KEY": "el-secret-key-123456"})
     assert check.ok and "el-secret" not in check.detail
+
+
+@pytest.mark.slow
+def test_the_listed_voices_are_in_the_voice_pack(kokoro_files):
+    out = run_kokoro("import sys, numpy as np; print(' '.join(np.load(sys.argv[1]).files))",
+                     kokoro_files[1])
+    assert set(tts_kokoro.ENGLISH_VOICES) <= set(out.split())

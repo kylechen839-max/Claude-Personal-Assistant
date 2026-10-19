@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 505 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 682 passed, 19 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
@@ -33,6 +33,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
+| `test_voices.py` | 34 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -462,6 +463,125 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
   preflight/smoke flags, step names and script paths.
 
+## Natural voice (Kokoro, optional ElevenLabs, earcons) ✅
+Kyle asked for replies and voice-mode sounds that feel like the Claude
+app's voice conversations. The app's voices and sounds are proprietary
+(no API, not extracted or imitated), so this uses the closest open
+equivalent and original sounds.
+- **Kokoro-82M** (`assistant/tts_kokoro.py`, `kokoro-onnx`, Apache-2.0):
+  `KokoroTTS.synthesize(text) -> (float32, 24000)`, so the web app's
+  `fast_wav`/`render_wav` render it in memory with no change to the voice
+  pipeline. Model: **int8** (`kokoro-v1.0.int8.onnx`, 88 MB, + 28 MB voice
+  pack), the smallest; resident memory ~300 MB for a Python process with the
+  model loaded (fp16: ~420 MB, fp32: ~570 MB, measured here), which fits a
+  Render instance with Whisper. `speak()` (desktop modes) renders sentence
+  by sentence in a thread while the previous one plays. Calls are
+  serialized by a lock; the language comes from the voice prefix (`a` =
+  en-us, `b` = en-gb).
+- **Default voice: `af_heart`**, speed 1.0. It is the highest-rated voice
+  on the Kokoro model card and warm, unhurried and conversational, the
+  closest match to the Claude app's calm voice-conversation feel among the
+  candidates. Alternatives, documented in README "Voices": `af_bella`
+  (brighter, more animated), `bf_emma` (British, soft and composed),
+  `am_michael` (male, relaxed). The choice was made from the model card's
+  quality grades and descriptions plus intelligibility (Whisper transcribes
+  af_heart's render correctly in CI); I could not listen in the sandbox, so
+  MANUAL_TEST.md step 9 has a listen check with the alternatives to try.
+- **Setup-time download**: `python -m assistant --download-voice kokoro`
+  (or `kokoro-fp16`; a Piper voice name works too) fetches the files from
+  the kokoro-onnx GitHub release into `models/kokoro/` (gitignored). Each
+  file's SHA-256 is pinned in `tts_kokoro.FILES`: data goes to `.part`
+  while hashing and is renamed only on a match, so a mismatch or an
+  interrupted download leaves nothing behind; verified files are kept,
+  corrupt ones re-fetched. Nothing is downloaded at request time or by the
+  browser.
+- **Engine choice**: `[tts] engine = "auto"` (new default, in DEFAULTS and
+  config.toml): Kokoro if its files and package are there, else Piper, else
+  pyttsx3, with one log line saying which and why. On ARM Linux (the Pi)
+  "auto" prefers Piper when both exist. Forcing `kokoro`/`piper` falls down
+  the same list with a warning. New settings: `kokoro_voice`, `speed`,
+  `kokoro_model`, `kokoro_voices`, `elevenlabs_voice`, `elevenlabs_model`.
+  `--tts` accepts every engine. `--check` reports the voice in use.
+- **Warm-up**: the web app queues `tts.warm_up()` in its TTS thread when it
+  starts (logged with its time), and the desktop modes warm up in a
+  background thread, so the first reply doesn't pay the model load
+  (0.8-2 s here). Piper got a `warm_up()` too.
+- **ElevenLabs** (`assistant/tts_elevenlabs.py`, optional, paid): only with
+  `engine = "elevenlabs"` *and* `ELEVENLABS_API_KEY`; streams raw 24 kHz
+  PCM per sentence from `/v1/text-to-speech/{voice}/stream`
+  (`eleven_flash_v2_5`), 8 s timeout. On any error that sentence is spoken
+  by the local engine (Kokoro -> Piper -> pyttsx3) and the cloud is skipped
+  for 60 s. The key is sent only in the `xi-api-key` header; log lines give
+  only the error type and message (and the key was already redacted from
+  logs).
+- **Earcons** (`assistant/earcons.py`): original sounds from sine waves
+  (a little octave overtone, 12 ms attack, exponential decay, 20 ms fade to
+  zero, so no clicks): *listening* rises a fifth (D5 -> A5, 0.35 s, peak
+  0.25), *thinking* is one quiet G4 (0.16 s, peak 0.08), *ended* falls a
+  fifth (0.41 s, peak 0.2). The WAVs are committed in
+  `assistant/web/earcons/` (8-20 KB) and served by the web app at
+  `/earcons/<name>.wav` (whitelisted names, same origin, so the self-only
+  CSP is untouched). `voice.js` fetches and decodes them when the view
+  opens and plays them on state changes: listening when the mic first opens
+  or after a pause, thinking when a turn is sent, ended in `finish()`. They
+  go straight to the speakers, not through the orb's level meter, and a
+  failed load just means no cue. The desktop wake chime and follow-up blip
+  now use the listening and thinking sounds (the old 880/1320 Hz beeps are
+  gone). `voice_session.py` and `voice_ws.py` are unchanged.
+
+**Latency** (time to render a reply's first sentence, "Tomorrow you have
+the dentist at three thirty." = 2.4 s of audio, warm model, median of 5;
+this is what voice mode waits for before the first audio, on top of
+Whisper and Claude):
+
+| Where | Kokoro int8 | Piper lessac-medium |
+|---|---|---|
+| Build sandbox, 4 x86 vCPUs | 0.57-0.93 s (best 0.54 s) | (voice download blocked) |
+| CI, Ubuntu runner | CI_KOKORO_LINUX | CI_PIPER_LINUX |
+| CI, Windows runner | CI_KOKORO_WIN | CI_PIPER_WIN |
+
+- Kokoro's render time is about 0.15 s + 0.2 x the audio length ("Sure.":
+  0.24 s; a 6 s sentence: 1.3 s), so a long first sentence costs more; the
+  sentences after it render while the first plays (real-time factor ~0.25),
+  so there are no gaps. Threads: 1 thread 1.66 s, 2 threads 0.92 s, 4
+  threads 0.71 s for the same sentence; fp16 was ~20% faster here but twice
+  the size and memory, so int8 stays the default.
+- Browser smoke test (headless Chromium, fake mic, energy VAD, real page and
+  WebSocket, fake Whisper, Claude mocked at 30 ms per word, real Kokoro on
+  the same 4 vCPUs as the browser): states connecting -> listening ->
+  thinking -> speaking -> listening; the listening cue (0.35 s) played when
+  the mic opened, the thinking cue (0.16 s) when the turn was sent, then two
+  Kokoro chunks (2.41 s, 1.30 s), and the ended cue on End. All three
+  earcons were fetched with 200, no CSP errors. End of turn -> first audio
+  was ~1.5 s there (vs ~0.2 s with eSpeak), mostly Kokoro's render with
+  the browser competing for the CPU.
+- **Raspberry Pi**: not measured on a real Pi. A Pi 5's cores are roughly
+  half as fast as these, which puts Kokoro at ~1.2-1.5 s for a first
+  sentence (near real time on one core), against ~0.2 s for Piper. So
+  **Piper stays the Pi default** ("auto" prefers it on ARM). MANUAL_TEST.md
+  has an optional step to measure Kokoro on the Pi.
+
+Tested (`tests/test_voices.py`, all offline): auto picks Kokoro -> Piper ->
+pyttsx3 with one log line, Piper on ARM, forced-engine fallback, missing
+package/files; config defaults and switching voice/speed through
+config.toml; KokoroTTS with a fake model (voice, language, speed clamp,
+unknown voice, sentence-by-sentence `speak` with one `on_audio_start`, a
+render error re-raised, WAV files, the web app's in-memory render and the
+warm-up queued before the first request, the CLI's warm-up); the download
+with a mocked network (checksum verified, mismatch and HTTP error leave no
+files, kept/corrupt files, fp16, bad variant, the CLI command and its
+wiring without an API key); ElevenLabs with a fake session (request shape,
+PCM decoding, speed clamp, fallback on 401/network/empty with the key never
+logged, cooldown, no key -> local voice, file-only fallback engines);
+`--check`; earcons (files exist, 0.1-0.5 s, < 30 KB, gentle peaks, start
+and end at zero, match the generator, served and wired into voice.js with
+no external URLs). With the real model (downloaded and cached in CI,
+skipped when it can't be had): a WAV render (American and British), every
+listed voice is in the voice pack, the latency bench above, and Whisper
+transcribing Kokoro's "What is on my calendar tomorrow" correctly
+(`test_stt.py`). The real-model tests run in a child process (see Known
+issues).
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -487,7 +607,16 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   that will actually open and fails if an index resolves to another one.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
-- `piper-tts` is GPL-3.0; fine for personal use.
+- `piper-tts` is GPL-3.0; fine for personal use. Kokoro's model is
+  Apache-2.0, `kokoro-onnx` is MIT, and it pulls in `phonemizer` (GPL-3.0)
+  and a bundled espeak-ng (GPL-3.0); also fine for personal use.
+- **Kokoro and pyttsx3 can't share a process on Linux**: kokoro-onnx loads
+  its own libespeak-ng, and pyttsx3's eSpeak driver then crashed the process
+  in the test suite. The app only ever builds one engine (and the web app's
+  pyttsx3 path runs the espeak-ng program, not the library), so this only
+  affects tests; the real-Kokoro tests run in a child process.
+- **Kokoro's voice hasn't been heard by a person yet** (no audio in the
+  sandbox): MANUAL_TEST.md step 9 and the voice-mode listen check.
 - **Voice mode on a real phone is untested** (no iPhone in the sandbox):
   iOS audio routing with the mic open (speaker vs. earpiece), echo
   cancellation of the reply on the loudspeaker, and the interruption
