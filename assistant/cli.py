@@ -67,6 +67,9 @@ def parse_args(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="check keys, files, audio devices and models, "
                              "then exit (prints no secret values)")
+    parser.add_argument("--update", action="store_true",
+                        help="update now from the tested `stable` branch "
+                             "(fast-forward only; rolled back if checks fail)")
     return parser.parse_args(argv)
 
 
@@ -479,11 +482,9 @@ def build_wake_components(args, config: dict):
                             silence_ms=wake["silence_ms"],
                             max_seconds=wake["max_seconds"],
                             no_speech_timeout=wake["no_speech_timeout"])
-    device = wake["mic_device"]
-    if isinstance(device, str) and device.isdigit():
-        device = int(device)
+    device = audio.resolve_mic_device(wake["mic_device"])
     source = (FileSource(args.audio_file, detector.frame_length) if args.audio_file
-              else MicSource(detector.frame_length, device=device or None))
+              else MicSource(detector.frame_length, device=device))
     return listener, source, detector.phrase
 
 
@@ -506,6 +507,10 @@ def main(argv=None) -> int:
         from assistant import doctor
 
         return doctor.report(doctor.run_checks(config, args.keyword_path))
+    if args.update:
+        from assistant import updater
+
+        return updater.main()
     log.info("Starting in %s mode (model %s)", args.mode, config["assistant"]["model"])
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set. Add it to .env (see README.md).")
@@ -536,8 +541,12 @@ def main(argv=None) -> int:
         transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
                                   stt_cfg["compute_type"])
         if args.mode == "voice":
-            tools.confirm = voice_confirm(tts, record_push_to_talk, transcriber)
-            run_voice(chat, tts, transcriber)
+            mic = audio.resolve_mic_device(config["wake"]["mic_device"])
+
+            def record():
+                return record_push_to_talk(device=mic)
+            tools.confirm = voice_confirm(tts, record, transcriber)
+            run_voice(chat, tts, transcriber, record_fn=record)
         else:
             listener, source, phrase = build_wake_components(args, config)
             tools.confirm = voice_confirm(

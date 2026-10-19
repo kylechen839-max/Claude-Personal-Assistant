@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 671 passed, 10 skipped (Linux build sandbox,
+**Current test count:** 833 passed, 19 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
@@ -446,6 +446,79 @@ Four features on top of the seven stages (branch `claude/features`).
 - Waiting on other branches: cloud host (`[lecture] upload_dir` on `/data`,
   `GOOGLE_TOKEN_JSON`), history (notes via `on_saved`).
 
+## Pi preflight ✅
+Everything testable before the move to a Raspberry Pi, in one pass per
+machine, with a go/no-go (`PI_MIGRATION.md`).
+
+- **Simulated Pi in CI** (`.github/workflows/pi-arm64.yml`,
+  `scripts/ci/pi_simulation.sh`): Debian Bookworm linux/arm64 with Python
+  3.11.2 (what 64-bit Raspberry Pi OS is) on GitHub's native
+  `ubuntu-24.04-arm` runner, in a `debian:bookworm` container, as a normal
+  user `pi` with sudo. It runs `install_pi.sh` end to end (apt, venv, pip,
+  openWakeWord `--no-deps`, models), then again (must be a no-op), checks
+  the aarch64 wheels import (onnxruntime, ctranslate2, piper, openwakeword,
+  sounddevice), downloads the Piper voice, runs the **full pytest suite**,
+  `python -m assistant --check`, `install_service.sh` (systemctl/loginctl
+  stubbed and their calls checked) and `preflight.sh`, which runs the real
+  wake word -> VAD -> Whisper -> reply on the committed fixture, both TTS
+  engines, and `--mode web` with a text and an audio turn. Stubbed only:
+  systemd, the sound card (an ALSA `null` device) and Claude
+  (`scripts/ci/fake_claude.py`, no key in CI). Runs on every push to
+  master, on pushes that touch the Pi files, and by hand (with a QEMU
+  option). First green run: about 1.5 minutes in total (install 42 s,
+  pytest 17 s, preflight 8 s) with downloads cached.
+- **Preflight** (`assistant/preflight.py`, `scripts/preflight.ps1` for
+  Windows PowerShell 5.1+, `scripts/preflight.sh`): git, .env, `--check`,
+  pytest offline and live (live skips are a FAIL), the wake-word end to end
+  on `tests/fixtures/hey_claude_calendar_tomorrow.wav` (asserts a wake, a
+  transcript matching the phrase and a non-error reply), text-mode calendar
+  and Notion questions (the log must show both tools called), web mode on
+  127.0.0.1 (healthz, auth refusal, login with `WEB_TOKEN`, text and audio
+  turn), pyttsx3 and Piper renders, and with `--hardware` the audio device
+  list and a 3 s mic level. Table + `logs/preflight-<timestamp>.txt`.
+  Every `.env` value is masked in the console and the report.
+- **Smoke check** (`assistant/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
+  the same web checks against any base URL (Render, or the Pi), plus a
+  hands-free turn over the voice WebSocket where the server has it.
+- **The PC as the always-on host** (`scripts/install_windows_service.ps1`,
+  `scripts/windows_host.py`): Task Scheduler tasks `\HeyClaude\Wake` and
+  `\HeyClaude\Web` at sign-in, hidden (pythonw), kept running by a small
+  supervisor (network wait, restart after 10 s, 5-minute pause after 5
+  crashes in 5 minutes; Task Scheduler's restart-on-failure doesn't see the
+  assistant's exit codes), `-Uninstall`; a power check that, after a typed
+  `y`, sets never-sleep/never-hibernate on AC and turns off USB selective
+  suspend. The preflight's `power` row WARNs on Windows when sleep is on.
+  The supervisor is `assistant/host.py` (`python -m assistant.host`), also
+  used by the Pi's systemd unit.
+- **Automatic updates** (`assistant/updater.py`, `assistant/host.py`,
+  `assistant/version.py`, `assistant/web/update-watch.js`): opt-in `[update]
+  enabled`, follows the `stable` branch (fast-forwarded only after master's
+  CI is green on all jobs). Fast-forward only; skips with local changes to
+  tracked files (config.toml excepted), local commits or a commit that
+  failed before; pip install when requirements.txt changed; smoke (import +
+  `--check`); restart when idle (loopback-only `busy` in /healthz) and
+  verify /healthz `version`; any failure -> `git reset --keep <old>`, old
+  requirements back, commit rejected, loud log. A lock file keeps the two
+  PC hosts and `--update` from updating at once; each host restarts its own
+  child when HEAD moves. The page reloads once when /healthz's version
+  changes, only when quiet. Tested with real git repos and a bare remote
+  (fast-forward, up to date, master-only push ignored, diverged, dirty,
+  config.toml edits kept, config conflict, failed smoke/pip -> rollback,
+  rejected commit, lock), the host's restart/verify/rollback with fakes,
+  /healthz version/busy, and update-watch.js in node.
+  Tested: supervisor restart/back-off/network wait and the powercfg parsing
+  in pytest; the .ps1 parses and is PSScriptAnalyzer-clean (checked with
+  PowerShell 7 here and Windows PowerShell 5.1 in CI). Not run on a real
+  Windows Task Scheduler yet: MANUAL_TEST.md.
+- **Tests** (`tests/test_preflight.py`): result parsing (junit, wake and
+  text output, mic levels), verdicts, every step's PASS/FAIL/SKIP rules with
+  faked commands, the smoke HTTP flow against a fake app, and redaction: a
+  fake `.env` whose values are echoed by every command never appears in the
+  console or the report. shellcheck and `bash -n` on every .sh; the .ps1
+  files are parsed by Windows PowerShell 5.1 and PSScriptAnalyzer in the
+  Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
+  preflight/smoke flags, step names and script paths.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -459,8 +532,16 @@ Four features on top of the seven stages (branch `claude/features`).
 - **pyttsx3/eSpeak flakiness in tests** (Linux): about 1 run in 10 the eSpeak
   driver writes an empty .wav or crashes. The tests re-render empty clips up
   to 3 times; a crash means re-running.
-- **Real Pi not tested:** systemd lingering, real audio devices and Pi
-  latency are in MANUAL_TEST.md's Raspberry Pi section.
+- **Real Pi not tested:** the arm64 CI job proves the install, packages,
+  models and pipeline on Bookworm arm64, but not real audio devices,
+  systemd lingering or Pi latency; those are `preflight.sh --hardware` and
+  MANUAL_TEST.md's Pi part.
+- **Fixed (2026-10-18): `[wake] mic_device = 0`** silently opened the
+  default mic (`device or None`), and push-to-talk ignored `mic_device`
+  altogether, while `--check` reported the configured device as fine. Now
+  one resolver (`audio.resolve_mic_device`) is used by wake mode,
+  push-to-talk, `--check` and the preflight; `--check` shows the device
+  that will actually open and fails if an index resolves to another one.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use.

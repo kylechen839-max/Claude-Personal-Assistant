@@ -94,6 +94,11 @@ DEFAULTS: dict = {
         "utterances_per_minute": 30,  # per connection; more closes it
         "debug_panel": False,       # show latency timings on the page
     },
+    "update": {
+        "enabled": False,       # host supervisor: update from `channel`
+        "channel": "stable",    # git branch; fast-forwarded only after green CI
+        "check_minutes": 15,
+    },
     "lecture": {
         "enabled": True,
         "model": "base.en",          # faster-whisper model: "tiny.en" is faster

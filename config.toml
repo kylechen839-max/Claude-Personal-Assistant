@@ -92,6 +92,11 @@ max_session_minutes = 30
 utterances_per_minute = 30
 debug_panel = false           # latency timings on the voice screen
 
+[update]                      # automatic updates on the home host (PC tasks / Pi service)
+enabled = false               # true: follow the tested `stable` branch, restart when idle
+channel = "stable"
+check_minutes = 15
+
 [lecture]
 enabled = true                # "Record lecture" in the phone app
 model = "base.en"             # faster-whisper model for lectures; "tiny.en" is faster

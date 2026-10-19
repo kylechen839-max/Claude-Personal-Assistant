@@ -101,17 +101,30 @@ def check_audio_devices(config: dict, sd=None) -> list[Check]:
 
     checks = [Check("Input devices", bool(inputs), describe(inputs)),
               Check("Output devices", bool(outputs), describe(outputs))]
-    mic = config["wake"]["mic_device"]
-    if mic != "":
-        if isinstance(mic, str) and mic.isdigit():
-            mic = int(mic)
-        try:
-            info = sd.query_devices(mic, "input")
-            checks.append(Check("Configured mic", True,
-                                f"{mic!r} -> {info['name']}"))
-        except Exception as e:
-            checks.append(Check("Configured mic", False,
-                                f"{mic!r} not usable: {e}"))
+    if not inputs:
+        return checks
+    # The device the assistant will open, resolved by the same code it uses
+    # (so mic_device = 0 is index 0, not "the default").
+    from assistant.audio import mic_that_opens, resolve_mic_device
+
+    configured = config["wake"]["mic_device"]
+    wanted = resolve_mic_device(configured)
+    try:
+        info = mic_that_opens(configured, sd)
+    except Exception as e:
+        label = "Configured mic" if wanted is not None else "Default mic"
+        checks.append(Check(label, False, f"{configured!r} not usable: {e}"))
+        return checks
+    opened = f"[{info.get('index', '?')}] {info['name']}"
+    if wanted is None:
+        checks.append(Check("Mic that will open", True,
+                            f"{opened} (the default; set [wake] mic_device to change)"))
+    elif isinstance(wanted, int) and info.get("index", wanted) != wanted:
+        checks.append(Check("Configured mic", False,
+                            f"{configured!r} asked for index {wanted} but {opened} "
+                            "would open"))
+    else:
+        checks.append(Check("Configured mic", True, f"{configured!r} -> {opened}"))
     return checks
 
 

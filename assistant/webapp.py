@@ -611,8 +611,8 @@ class WebAssistant:
         try:
             summary = s.chat.end_conversation()
             if summary:
-                log.info("Web conversation saved to memory (%d characters)",
-                         len(summary))
+                log.info("Web conversation saved to memory (%d chars)", len(summary))
+                log.debug("Saved summary: %s", summary)
             return summary
         except Exception:
             log.exception("Ending a web conversation failed")
@@ -668,7 +668,8 @@ class WebAssistant:
             if recording is not None:
                 text = self.transcribe(recording)
                 s.events.put({"type": "transcript", "text": text})
-                log.info("Web heard: %r", text)
+                log.info("Web heard %d chars", len(text))
+                log.debug("Web heard: %r", text)
             text = (text or "").strip()
             if not text:
                 s.events.put({"type": "error",
@@ -681,7 +682,8 @@ class WebAssistant:
             reply = get_reply(  # it logs errors itself
                 s.chat, text, output_fn=lambda m: None,
                 on_text=lambda d: s.events.put({"type": "delta", "text": d}))
-            log.info("Web replied: %r", loggable_reply(s.chat, reply))
+            log.info("Web replied %d chars", len(reply))
+            log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
@@ -1066,7 +1068,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
     for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript")):
+                        ("sw.js", "text/javascript"),
+                        ("update-watch.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1095,9 +1098,18 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
 
+    from assistant.version import version
+
     @app.get("/healthz")
-    def healthz():
-        return {"ok": True}
+    def healthz(request: Request):
+        # The version lets the page reload after an update. Only a request
+        # from this machine itself (the host supervisor waiting to restart,
+        # not one relayed by a proxy) also learns whether a turn is running.
+        body = {"ok": True, "version": version()}
+        client = request.client.host if request.client else ""
+        if is_loopback(client) and "x-forwarded-for" not in request.headers:
+            body["busy"] = assistant_busy(assistant, app)
+        return body
 
     # --- sign-in ---
     @app.post("/api/login")
@@ -1204,7 +1216,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             answer = await run_in_threadpool(assistant.transcribe, recording)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
-        log.info("Web confirmation %r -> %s", answer, "yes" if yes else "no")
+        log.info("Web confirmation -> %s", "yes" if yes else "no")
+        log.debug("Confirmation answer: %r", answer)
         if not assistant.answer(s, yes):
             return error("nothing to confirm", 409)
         return stream(s)
@@ -1235,6 +1248,21 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     app.state.voice_conversations = add_voice_routes(
         app, assistant, allowed_origins=web.allowed_origins, voice=voice)
     return app
+
+
+def assistant_busy(assistant: "WebAssistant", app) -> bool:
+    """Is any web turn, pending confirmation or voice turn in progress?"""
+    with assistant.lock:
+        sessions = list(assistant.sessions.values())
+    if any(s.busy.locked() or s.pending is not None for s in sessions):
+        return True
+    for conv, _ in list(getattr(app.state, "voice_conversations", {}).values()):
+        with conv.lock:
+            if (conv.current is not None and not conv.current.finished) \
+                    or getattr(conv, "waiting", None) is not None \
+                    or conv.pending is not None:
+                return True
+    return False
 
 
 ICON_SIZES = (180, 192, 512)

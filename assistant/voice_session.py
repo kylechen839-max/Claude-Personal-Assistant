@@ -37,7 +37,7 @@ from typing import Callable
 import numpy as np
 
 from assistant import audio
-from assistant.cli import get_reply, is_exit, strip_wake_phrase
+from assistant.cli import get_reply, is_exit, loggable_reply, strip_wake_phrase
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -446,8 +446,8 @@ class VoiceConversation:
         try:
             summary = self.backend.end()
             if summary:
-                log.info("Voice conversation saved to memory (%d characters)",
-                         len(summary))
+                log.info("Voice conversation saved to memory (%d chars)", len(summary))
+                log.debug("Voice conversation summary: %s", summary)
         except Exception:
             log.exception("Ending the voice conversation failed")
         self._send({"type": "ended", "reason": reason, "saved": bool(summary)})
@@ -640,7 +640,9 @@ class VoiceConversation:
             self._send({"type": "error", "turn": turn.id, "message": reply})
             turn.sentences.put(Chunk(reply, 0, reply=False))
         log.info("Voice turn %s: replied %d chars", turn.id, len(reply or ""))
-        log.debug("Voice replied: %r", reply)
+        log.debug("Voice replied: %r", loggable_reply(  # email stays out
+            getattr(self.backend, "chat", None)
+            or getattr(getattr(self.backend, "session", None), "chat", None), reply))
         turn.flush()
         timer.mark("reply")
         return False
