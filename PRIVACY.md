@@ -35,6 +35,9 @@ All paths are relative to the project folder unless noted. On Render the
 | Signed-in browsers | `data/web_sessions.json` | Session ids and last-used times only, never the sign-in code. "Sign out everywhere" clears it |
 | Google sign-in | `token.json` (+ `credentials.json`) | Readable only by you (0600 on Linux; private file on Windows). Revoke at myaccount.google.com/permissions |
 | Secrets | `.env` (never committed) | Anthropic, Pinecone, Notion, web sign-in code, optional ElevenLabs |
+| Lecture recordings | `data/lectures/` (`[lecture] upload_dir`) | Audio is deleted once transcribed (unless `keep_audio = true`) and the local transcript once the Notion page exists; the transcript and notes go to your Notion "Lecture Notes" page, and the transcript to Anthropic for summarizing |
+| Homework photos | Not stored | Sent to Anthropic with your question, metadata (location, camera, comments) stripped first |
+| Quick notes ("remember that...") | Your Pinecone index | Notes saved while outside content was in the conversation are marked untrusted |
 | Logs | `logs/assistant.log` (rotating, ~4 MB max) | INFO level records lengths, yes/no answers and tool names, **not** what you said, replies, email text or memory summaries. Those appear only at DEBUG, which is off by default |
 | Downloaded models | `models/`, `voices/` | No personal data |
 
