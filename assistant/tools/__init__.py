@@ -104,8 +104,9 @@ class ToolRegistry:
                 result = tool.handler(**tool_input)
             finally:
                 UNTRUSTED_CONTEXT.reset(token)
-            log.info("Tool %s(%s) ok", name,
-                     "<private>" if tool.private else tool_input)
+            log.info("Tool %s ok", name)
+            if not tool.private:
+                log.debug("Tool %s(%s) ok", name, tool_input)
             return (result if isinstance(result, str)
                     else json.dumps(result, default=str)), False
         except Exception as e:  # report the error to Claude, don't crash

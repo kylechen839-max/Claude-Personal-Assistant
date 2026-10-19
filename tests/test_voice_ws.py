@@ -423,6 +423,28 @@ def test_server_wide_cap_on_voice_conversations(make_voice, monkeypatch):
         assert e.value.code == 1013
 
 
+def test_conversation_slot_is_taken_before_accepting(make_voice, monkeypatch):
+    """Two handshakes at once can't both pass the server-wide cap: the slot
+    is reserved before the first await (the accept)."""
+    from starlette.websockets import WebSocket
+
+    _, http = make_voice()
+    login(http)
+    live = http.app.state.voice_conversations
+    seen = []
+    real_accept = WebSocket.accept
+
+    async def accept(self, *a, **kw):
+        seen.append(len(live))
+        return await real_accept(self, *a, **kw)
+
+    monkeypatch.setattr(WebSocket, "accept", accept)
+    with connect(http) as ws:
+        ws.receive_text()
+    assert seen == [1]
+    assert live == {}
+
+
 def test_utterance_rate_limit(make_voice):
     _, http = make_voice(streamed("One."), streamed("Two."),
                          heard=("a", "b", "c"), utterances_per_minute=2)

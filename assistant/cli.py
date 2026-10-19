@@ -156,7 +156,8 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
         output_fn(f"API error: {e}")
         return "Sorry, something went wrong talking to Claude."
     # anything else: keep the session alive
-    log.error("Unexpected error answering %r", user_text, exc_info=e)
+    log.error("Unexpected error answering a %d-character request",
+              len(user_text), exc_info=e)
     output_fn(f"Error: {e}")
     return "Sorry, something went wrong."
 
@@ -366,7 +367,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("transcript")
     output_fn(f"You: {heard}")
-    log.info("Heard: %r", heard)
+    log.info("Heard %d characters", len(heard))
+    log.debug("Heard: %r", heard)
     user_text = strip_wake_phrase(heard, wake_phrase).strip()
     if not user_text:
         return bool(heard)  # just "Hey Claude": still listening
@@ -378,7 +380,8 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if timer:
         timer.mark("reply")
     output_fn(f"Claude: {reply}")
-    log.info("Replied: %r", loggable_reply(chat, reply))
+    log.info("Replied with %d characters", len(reply or ""))
+    log.debug("Replied: %r", loggable_reply(chat, reply))
     speak(tts, reply, timer)
     return True
 
@@ -504,11 +507,15 @@ def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
 
 
 def note_to_history(note: dict) -> bool:
-    """Show a saved note in the current conversation's history (through
-    the history module's public function; nothing if history is off)."""
+    """Mark in the current conversation's history that a note was saved
+    (through the history module's public function; nothing if history is
+    off). The note's text stays only in Pinecone, so delete_note removes it
+    completely."""
     from assistant import history
 
-    return history.record_event(None, "note", f"Saved a note: {note['text']}")
+    tags = f" (tags: {', '.join(note['tags'])})" if note.get("tags") else ""
+    return history.record_event(None, "note",
+                                f"Saved a note to long-term memory{tags}.")
 
 
 def text_confirm(input_fn=None):
