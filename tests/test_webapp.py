@@ -145,8 +145,9 @@ def test_login_sets_a_strict_cookie(make_app):
     for attr in ("httponly", "secure", "samesite=strict", "path=/"):
         assert attr in cookie
     assert TOKEN.lower() not in cookie  # the cookie is signed, not the token
-    assert client.get("/api/state").json() == {"busy": False, "confirm": None,
-                                                "turns": 0}
+    assert client.get("/api/state").json() == {
+        "busy": False, "confirm": None, "turns": 0, "incognito": False,
+        "history": False, "conversation": None}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -677,12 +678,14 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 # --- public server hardening -------------------------------------------------------
 
-PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz",
+          "/silence.wav", "/healthz", "/backend-router.js",
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
+          # the voice view's earcons (assistant/earcons.py)
+          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
@@ -696,7 +699,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
-               and r.path != "/static/vad/{name}"
+               and r.path not in ("/static/vad/{name}", "/earcons/{name}.wav")
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:
@@ -1202,3 +1205,40 @@ def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
         assert store.valid(keep)  # the next request retries the save
     assert gone not in json.loads(path.read_text())["sessions"]
     assert not webapp.SessionStore(path).valid(gone)
+
+
+@pytest.mark.parametrize("path", ["/api/logout", "/api/logout-all"])
+def test_sign_out_closes_an_open_voice_socket(path, monkeypatch):
+    """The real /api/voice socket: signing out ends it at once, and the
+    revoked cookie can't open a new one."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from tests.test_voice_ws import connect, make_voice, receive
+    from tests.test_voice_ws import login as voice_login
+
+    make = make_voice.__wrapped__(monkeypatch)
+    _, http = make()
+    voice_login(http)
+    with connect(http) as ws:
+        ws.receive_text()  # ready
+        cookie = http.cookies.get(webapp.COOKIE)
+        assert http.post(path).status_code == 200
+        got = {}
+
+        def read():  # in a thread, so a missing "ended" fails instead of hanging
+            try:
+                got["ended"] = receive(ws, "ended")[-1]
+                ws.receive_text()
+            except WebSocketDisconnect as e:
+                got["closed"] = e.code
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(5)
+        assert got.get("ended", {}).get("reason") == "signed_out", got
+        assert "closed" in got
+    http.cookies.set(webapp.COOKIE, cookie)  # the stolen-cookie case
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with connect(http) as ws:
+            ws.receive_text()
+    assert closed.value.code == 1008

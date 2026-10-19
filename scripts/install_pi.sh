@@ -107,8 +107,9 @@ Done. Next steps:
   2. Google Calendar: copy credentials.json and token.json from your PC into
      $REPO_DIR (or sign in with: .venv/bin/python -m assistant.tools.calendar --headless)
   3. Optional, a much better voice (Piper, about 60 MB):
-       .venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium
-     then set [tts] engine = "piper" in config.toml (or copy voices/ from your PC)
+       .venv/bin/python -m assistant --download-voice en_US-lessac-medium
+     (or copy voices/ from your PC); [tts] engine = "auto" then uses it.
+     Kokoro is more natural but too slow for a Pi, so Piper is preferred here.
   4. Check the setup:                .venv/bin/python -m assistant --check
   5. Try it:                         .venv/bin/python -m assistant
   6. Start it at boot:               ./scripts/install_service.sh

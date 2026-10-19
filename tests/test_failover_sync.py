@@ -184,6 +184,19 @@ def test_delete_message_only_applies_in_its_own_conversation():
     assert [m["text"] for m in materialize(s.all())["conversations"]["c"].messages] == ["stays"]
 
 
+def test_delete_message_cannot_target_a_tombstone_or_a_job():
+    s1, s2 = make_store(), make_store()
+    dele = new_event("delete", "c", {}, origin="pc", ts=5)
+    late = new_event("message", "c", {"role": "user", "text": "late secret"}, origin="pi", ts=1)
+    bogus = new_event("delete_message", "c", {"target": dele.id}, origin="pi", ts=6)
+    s1.append([dele, bogus])
+    s2.append([bogus, dele])
+    for s in (s1, s2):  # the tombstone keeps working in both stores
+        s.append([late])
+        assert "late secret" not in all_text(s)
+        assert next(e for e in s.all() if e.id == dele.id).kind == "delete"
+
+
 def test_redaction_reaches_every_peer():
     stores, net = three()
     msg = new_event("message", "c", {"role": "user", "text": "very private"}, origin="pi")
@@ -378,3 +391,25 @@ def test_merge_is_order_and_duplicate_independent(seed):
         a.append(b.all())
         b.append(a.all())
         assert fingerprint(materialize(a.all())) == fingerprint(materialize(b.all())) == want
+
+
+def test_extra_data_fields_are_kept_through_sync():
+    """The history store adds fields (kind, tools, summary, archived...)
+    that materialize ignores; sync must carry them unchanged."""
+    stores, net = three()
+    extras = [
+        new_event("message", "c", {"role": "assistant", "text": "Done.", "kind": "confirm",
+                                   "interrupted": False, "tools": ["move_event"],
+                                   "source": "voice"}, origin="pi"),
+        new_event("rename", "c", {"title": "Dentist", "summary": "Moved the dentist",
+                                  "by": "auto", "ended": True}, origin="pi"),
+        new_event("pin", "c", {"pinned": True, "archived": False}, origin="pi"),
+    ]
+    stores["pi"].append(extras)
+    net.syncer("pi").sync_all()
+    net.syncer("pc").sync_all()
+    for role in ("cloud", "pc"):
+        got = {e.id: e.data for e in stores[role].all()}
+        assert got == {e.id: e.data for e in extras}, role
+    c = materialize(stores["pc"].all())["conversations"]["c"]
+    assert c.title == "Dentist" and c.pinned and c.messages[0]["text"] == "Done."

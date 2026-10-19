@@ -3,10 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 505 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 1174 passed, 41 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
-push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
+push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
+builds and smoke-tests the cloud Docker image. The
 sandbox skips are the tests that need something it can't reach: the Whisper
 model and Piper voice downloads (Hugging Face is blocked; CI downloads both
 and runs those tests), and the live Notion and Google calls (no keys). On
@@ -28,11 +29,25 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 67 | phone web app (`--mode web`) |
+| `test_cloud.py` | 76 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
+| `test_voices.py` | 38 | natural voice: Kokoro, ElevenLabs, engine choice, download, earcons |
+| `test_history.py` | 67 | conversation history: store, search, resume, CLI |
+| `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
+| `test_history_events.py` | 18 | history as sync events (skips without failover) |
+| `test_failover_edge.py` | 51 | failover: /healthz, CORS, bearer tokens, WebSocket auth |
+| `test_failover_sync.py` | 162 | failover: history event log merge, redaction and sync (memory and SQLite logs) |
+| `test_failover_leader.py` | 216 | failover: leader check for scheduled jobs (incl. the real network topology) |
+| `test_failover_eventlog.py` | 6 | failover: the SQLite event log |
+| `test_failover_config.py` | 8 | failover: `[failover]` settings, `--role` |
+| `test_failover_cloud.py` | 13 | failover: on Render behind CloudGuard (tokens, sync, voice socket) |
+| `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
+| `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -222,6 +237,100 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   unlocked `<audio>` element, a service worker that caches only the app shell
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
+
+## Cloud hosting (Render) ✅
+Runs the phone web app 24/7 on Render so it works with the PC off.
+- **Secrets from the environment.** `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON`
+  (the contents of `token.json` / `credentials.json`) replace the files when
+  set; a token from the environment is refreshed in memory and never written
+  to disk (nor any token with `[calendar] save_token = false`). A refused
+  refresh logs one clear warning with only the OAuth error code (e.g.
+  `invalid_grant`) and tells Claude the sign-in expired. The JSON values are
+  in log redaction too. No interactive sign-in on a server.
+- **Server profile** (`ASSISTANT_PROFILE=server`, set in the image; config
+  `SERVER_PROFILE`): Piper with the voice baked in, then espeak-ng (new
+  `EspeakTTS`, the `espeak-ng` command), then text only; no browser tool, no
+  wake word or chimes, logs to stdout only, listens on 0.0.0.0:`$PORT`; web
+  is the default and only audio-free mode. `--check` has a server variant: no
+  mic/speaker/wake-word checks; `WEB_TOKEN` required; time zone,
+  `GOOGLE_TOKEN_JSON` contents, Whisper cache, Piper and espeak-ng checked.
+  New env overrides: `ASSISTANT_TIMEZONE`, `WHISPER_MODEL`.
+- **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
+  itself is unchanged): `/healthz` -> `{"ok": true, "version": ...}` (no `busy`); every other route needs the
+  cookie or Bearer token except the login page, its static files, login, the
+  manifest and icons (unknown paths 401 too); sign-in limits through the web
+  app's shared `LoginLimiter` (`BoundedLoginLimiter` caps its tables), keyed
+  by the guard's client address, the right token always accepted; cookies
+  checked against the web app's `SessionStore` (`sessions_file` on `/data`
+  in the server profile); at most 2 body uploads per address / 32 in all, bodies
+  due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
+  (it let one slow client 503 everything, `/healthz` included); sign-ins
+  and wrong Bearer tokens in a separate pool (8, 2 s deadline) so they can't
+  take signed-in slots, IPv6 slots per /56; no trusted
+  proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;
+  trusting all private ranges let a Docker-bridge or LAN peer forge client
+  addresses), optional `[cloud] client_ip_header`, IPv6 counted per /64,
+  limit tables capped, "Proxy check" log lines for the first 5 requests; forwarded
+  headers only from a private-address peer (`[cloud] trusted_proxies`),
+  rightmost untrusted `X-Forwarded-For` hop as the client; https redirect and
+  HSTS; bodies buffered and capped (4 MB audio, 16 KB otherwise, chunked
+  included); 120 requests/min per address; generic 500s. Whisper and the
+  voice load at startup in the background. The voice WebSocket
+  (`/api/voice`) passes the same checks before its handshake (rate limit,
+  cookie or Bearer with lockout, same-site Origin); `X-Forwarded-Host` is
+  dropped unless the proxy sent it. The web app inside trusts forwarded
+  headers from the same networks (`ProxyNetworks`, a `ProxyTrust` by CIDR),
+  so its own proxy-aware checks agree with the guard. uvicorn runs with `ws="auto"` (the
+  `websockets` sans-I/O implementation) and `ws_max_size` 2 MB.
+- **Docker image** (`Dockerfile`, python:3.11-slim + espeak-ng + ffmpeg):
+  Whisper `base.en` and `tiny.en` and the Piper `en_US-lessac-medium` voice
+  downloaded at build time (`HF_HUB_OFFLINE=1` at run time), non-root user,
+  no openWakeWord. `.dockerignore` keeps secrets, logs, voices and the venv
+  out. `render.yaml` adds the `hey-claude` service (docker, `standard`,
+  `/healthz`, secrets `sync: false`, `WEB_TOKEN` generated) next to
+  `pinecone-mcp`.
+- **Persistent disk**: 1 GB at `/data` (`DATA_DIR=/data`,
+  `HISTORY_PATH=/data/history.sqlite`) for conversation history, lecture
+  audio and job state from the history/features branches. Nothing on this
+  branch reads them yet: until those land, conversations stay in memory. Disks need a paid
+  instance type (already the case) and cost $0.25/GB a month, so the total
+  is about $25.25. `deploy/docker-entrypoint.sh` chowns the mounted disk to
+  the app user and drops root with `setpriv --no-new-privs`; CI checks the
+  server's uid is 10001 and that it owns and can write a root-mounted `/data`.
+- **Memory, measured** in CI (`scripts/container_smoke.sh` +
+  `scripts/measure_memory.py`, GitHub runner, 4 CPUs, image built from this
+  branch), 5 s Piper clip of "Hey Claude, what's on my calendar tomorrow? And
+  do I have any assignments due this week?":
+
+  | Run | Peak RSS | Container (cgroup) peak | Transcribe 5 s |
+  |---|---|---|---|
+  | Server after one spoken turn, base.en + Piper | 465 MB | 395 MB | - |
+  | Script: imports + Piper + base.en + Piper reply | 564 MB | 507 MB | 0.71 s |
+  | Same, capped at 512 MB | 569 MB | 511 MB (at the cap) | - |
+  | Script with tiny.en | 467 MB | 410 MB | 0.43 s |
+
+  The imports alone are about 120 MB, the Piper voice adds about 160 MB, and
+  loading base.en briefly peaks about 150 MB above its steady size. Both
+  models transcribed the clip correctly ("...assignments to this week").
+  **Plan: Render Standard (2 GB, 1 CPU, $25/month; $25.25 with the disk)**: base.en needs up to
+  about 565 MB, more than Starter's 512 MB (it only stayed under the cap by
+  the kernel reclaiming file cache, with nothing left for a second session).
+  Starter ($7, 512 MB, 0.5 CPU) would work with `WHISPER_MODEL=tiny.en` at
+  about 410-470 MB, but with under 100 MB to spare and more misheard words;
+  documented in README as the cheaper option. Prices from Render's pricing
+  as listed in October 2026 (render.com itself was unreachable from the build
+  sandbox; check it when signing up).
+- **CI**: new `Docker image (cloud)` job builds the image, starts it as
+  Render would, checks `/healthz`, 401 on `/api/state` and `/silence.wav`,
+  wrong and right logins, a signed-in `/api/state`, a 413 upload, the
+  server's uid and `/data` owner, the voice WebSocket (`scripts/ws_smoke.py`:
+  opens with cookie + Origin, 1009 over 2 MB, refused without the cookie or
+  from another site), `--check`,
+  one real spoken turn (Whisper + Piper inside the container) and prints the
+  memory table to the job summary.
+- Tests: `test_cloud.py`, `test_server_profile.py` (offline, fake Google
+  credentials, mocked refresh). Not yet run on Render itself: README "Run it
+  in the cloud (Render)" and MANUAL_TEST.md "Cloud server on Render".
 
 ## Voice conversation mode (phone web app) ✅
 Hands-free, turn-by-turn conversation in the phone page, like voice mode in
@@ -477,6 +586,231 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
   preflight/smoke flags, step names and script paths.
 
+## Natural voice (Kokoro, optional ElevenLabs, earcons) ✅
+Kyle asked for replies and voice-mode sounds that feel like the Claude
+app's voice conversations. The app's voices and sounds are proprietary
+(no API, not extracted or imitated), so this uses the closest open
+equivalent and original sounds.
+- **Kokoro-82M** (`assistant/tts_kokoro.py`, `kokoro-onnx`, Apache-2.0):
+  `KokoroTTS.synthesize(text) -> (float32, 24000)`, so the web app's
+  `fast_wav`/`render_wav` render it in memory with no change to the voice
+  pipeline. Model: **int8** (`kokoro-v1.0.int8.onnx`, 88 MB, + 28 MB voice
+  pack), the smallest; resident memory ~300 MB for a Python process with the
+  model loaded (fp16: ~420 MB, fp32: ~570 MB, measured here), which fits a
+  Render instance with Whisper. `speak()` (desktop modes) renders sentence
+  by sentence in a thread while the previous one plays. Calls are
+  serialized by a lock; the language comes from the voice prefix (`a` =
+  en-us, `b` = en-gb).
+- **Default voice: `af_heart`**, speed 1.0. It is the highest-rated voice
+  on the Kokoro model card and warm, unhurried and conversational, the
+  closest match to the Claude app's calm voice-conversation feel among the
+  candidates. Alternatives, documented in README "Voices": `af_bella`
+  (brighter, more animated), `bf_emma` (British, soft and composed),
+  `am_michael` (male, relaxed). The choice was made from the model card's
+  quality grades and descriptions plus intelligibility (Whisper transcribes
+  af_heart's render correctly in CI); I could not listen in the sandbox, so
+  MANUAL_TEST.md step 9 has a listen check with the alternatives to try.
+- **Setup-time download**: `python -m assistant --download-voice kokoro`
+  (or `kokoro-fp16`; a Piper voice name works too) fetches the files from
+  the kokoro-onnx GitHub release into `models/kokoro/` (gitignored). Each
+  file's SHA-256 is pinned in `tts_kokoro.FILES`: data goes to `.part`
+  while hashing and is renamed only on a match, so a mismatch or an
+  interrupted download leaves nothing behind; verified files are kept,
+  corrupt ones re-fetched. Nothing is downloaded at request time or by the
+  browser.
+- **Engine choice**: `[tts] engine = "auto"` (new default, in DEFAULTS and
+  config.toml): Kokoro if its files and package are there, else Piper, else
+  pyttsx3, with one log line saying which and why. On ARM Linux (the Pi)
+  "auto" prefers Piper when both exist. Forcing `kokoro`/`piper` falls down
+  the same list with a warning. New settings: `kokoro_voice`, `speed`,
+  `kokoro_model`, `kokoro_voices`, `elevenlabs_voice`, `elevenlabs_model`.
+  `--tts` accepts every engine. `--check` reports the voice in use.
+- **Warm-up**: the web app queues `tts.warm_up()` in its TTS thread when it
+  starts (logged with its time), and the desktop modes warm up in a
+  background thread, so the first reply doesn't pay the model load
+  (0.8-2 s here). Piper got a `warm_up()` too.
+- **ElevenLabs** (`assistant/tts_elevenlabs.py`, optional, paid): only with
+  `engine = "elevenlabs"` *and* `ELEVENLABS_API_KEY`; streams raw 24 kHz
+  PCM per sentence from `/v1/text-to-speech/{voice}/stream`
+  (`eleven_flash_v2_5`), 8 s timeout. On any error that sentence is spoken
+  by the local engine (Kokoro -> Piper -> pyttsx3) and the cloud is skipped
+  for 60 s. The key is sent only in the `xi-api-key` header; log lines give
+  only the error type and message (and the key was already redacted from
+  logs).
+- **Earcons** (`assistant/earcons.py`): original sounds from sine waves
+  (a little octave overtone, 12 ms attack, exponential decay, 20 ms fade to
+  zero, so no clicks): *listening* rises a fifth (D5 -> A5, 0.35 s, peak
+  0.25), *thinking* is one quiet G4 (0.16 s, peak 0.08), *ended* falls a
+  fifth (0.41 s, peak 0.2). The WAVs are committed in
+  `assistant/web/earcons/` (8-20 KB) and served by the web app at
+  `/earcons/<name>.wav` (whitelisted names, same origin, so the self-only
+  CSP is untouched). `voice.js` fetches and decodes them when the view
+  opens and plays them on state changes: listening when the mic first opens
+  or after a pause, thinking when a turn is sent, ended in `finish()`. They
+  go straight to the speakers, not through the orb's level meter, and a
+  failed load just means no cue. The desktop wake chime and follow-up blip
+  now use the listening and thinking sounds (the old 880/1320 Hz beeps are
+  gone). `voice_session.py` and `voice_ws.py` are unchanged.
+
+**Latency** (time to render a reply's first sentence, "Tomorrow you have
+the dentist at three thirty." = 2.4 s of audio, warm model, median of 5;
+this is what voice mode waits for before the first audio, on top of
+Whisper and Claude):
+
+| Where | Kokoro int8 | Piper lessac-medium |
+|---|---|---|
+| Build sandbox, 4 x86 vCPUs | 0.57-0.93 s (best 0.54 s) | (voice download blocked) |
+| CI, Ubuntu runner (4 vCPUs, Python 3.12) | 1.09 s (load + warm-up 1.3 s) | 0.11 s (load + warm-up 1.7 s) |
+| CI, Windows runner (4 vCPUs) | 1.25 s (load + warm-up 2.2 s) | 0.115 s (load + warm-up 3.9 s) |
+
+Shared runners vary a lot: on one slow run the same sentence took 5.0 s
+with Kokoro (Piper 0.13 s), so the test only checks that the model works,
+not a speed limit. So on CI-class CPUs Kokoro adds about 1 s to time-to-first-audio compared
+with Piper (~10x the render time). In voice mode, first audio becomes roughly
+Whisper 0.6 s + Claude's first sentence + ~1 s of Kokoro, about 2.5-3 s
+after Kyle stops talking, against ~1.5-2 s with Piper. It stays the default
+because it sounds far more natural, and a desktop CPU is usually faster
+than a CI runner. If the wait feels too long, `[tts] engine = "piper"`
+brings it back to ~0.1 s (MANUAL_TEST.md step 9 compares the two).
+
+- **First piece split at a clause** (`SentenceSplitter(first_clause_words=4)`,
+  the default for streaming, so voice mode gets it with no change to
+  `voice_session.py`): a reply's first piece also ends at a comma,
+  semicolon or spaced dash once it has 4+ words ("3,000" and "9, 10, and
+  11" are not breaks), so Kokoro renders a short piece first; later
+  sentences are unchanged, and `split_sentences()` (whole texts) keeps whole
+  sentences. Kokoro adds a 0.12 s pause after a piece ending at a clause
+  break, since its trimming removes the comma's pause. A long first sentence
+  ("Tomorrow you have the dentist at three thirty, and after that you have
+  a study group at the library until six.") then renders its first audio
+  in 0.56 s instead of 1.32 s in the build sandbox, and 0.42 s instead of 1.08 s on the CI Ubuntu runner (Piper: 0.05 s instead of 0.12 s).
+- Kokoro's render time is about 0.15 s + 0.2 x the audio length ("Sure.":
+  0.24 s; a 6 s sentence: 1.3 s), so a long first sentence costs more; the
+  sentences after it render while the first plays (real-time factor ~0.25),
+  so there are no gaps. Threads: 1 thread 1.66 s, 2 threads 0.92 s, 4
+  threads 0.71 s for the same sentence; fp16 was ~20% faster here but twice
+  the size and memory, so int8 stays the default.
+- Browser smoke test (headless Chromium, fake mic, energy VAD, real page and
+  WebSocket, fake Whisper, Claude mocked at 30 ms per word, real Kokoro on
+  the same 4 vCPUs as the browser): states connecting -> listening ->
+  thinking -> speaking -> listening; the listening cue (0.35 s) played when
+  the mic opened, the thinking cue (0.16 s) when the turn was sent, then two
+  Kokoro chunks (2.41 s, 1.30 s), and the ended cue on End. All three
+  earcons were fetched with 200, no CSP errors. End of turn -> first audio
+  was ~1.5 s there (vs ~0.2 s with eSpeak), mostly Kokoro's render with
+  the browser competing for the CPU.
+- **Raspberry Pi**: not measured on a real Pi. A Pi 5's cores are roughly
+  half as fast as these, which puts Kokoro at ~1.2-1.5 s for a first
+  sentence (near real time on one core), against ~0.2 s for Piper. So
+  **Piper stays the Pi default** ("auto" prefers it on ARM). MANUAL_TEST.md
+  has an optional step to measure Kokoro on the Pi.
+
+Tested (`tests/test_voices.py`, all offline): auto picks Kokoro -> Piper ->
+pyttsx3 with one log line, Piper on ARM, forced-engine fallback, missing
+package/files; config defaults and switching voice/speed through
+config.toml; KokoroTTS with a fake model (voice, language, speed clamp,
+unknown voice, sentence-by-sentence `speak` with one `on_audio_start`, a
+render error re-raised, WAV files, the web app's in-memory render and the
+warm-up queued before the first request, the CLI's warm-up); the download
+with a mocked network (checksum verified, mismatch and HTTP error leave no
+files, kept/corrupt files, fp16, bad variant, the CLI command and its
+wiring without an API key); ElevenLabs with a fake session (request shape,
+PCM decoding, speed clamp, fallback on 401/network/empty with the key never
+logged, cooldown, no key -> local voice, file-only fallback engines);
+`--check`; earcons (files exist, 0.1-0.5 s, < 30 KB, gentle peaks, start
+and end at zero, match the generator, served and wired into voice.js with
+no external URLs). With the real model (downloaded and cached in CI,
+skipped when it can't be had): a WAV render (American and British), every
+listed voice is in the voice pack, the latency bench above, and Whisper
+transcribing Kokoro's "What is on my calendar tomorrow" correctly
+(`test_stt.py`). The real-model tests run in a child process (see Known
+issues).
+## Conversation history ✅
+- `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
+  `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
+  `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
+  source wake/text/web/voice, timestamps, title, summary, pinned, archived),
+  `messages` (seq, role, kind chat/confirm, text, interrupted, compact
+  `tool_events` JSON) and `memory_vectors` (Pinecone ids). FTS5 index over
+  messages, titles and summaries kept in sync by triggers, bm25 ranking
+  (titles weigh more), snippets with highlights, prefix matching, filler
+  words dropped, any-word fallback; LIKE search if FTS5 is missing.
+  Retention (`retention_days`) and a size guard (`max_mb`) skip pinned
+  conversations.
+- Recording: `ClaudeChat(recorder=...)` saves the user turn before calling
+  the API and the reply after, with spoken/typed delete confirmations
+  (question and the heard answer) and `mark_interrupted()` for barge-in.
+  `end_conversation()` hands the conversation to a background thread that
+  asks `[history] title_model` for a title (<= 6 words) and summary, with the
+  first user message as the fallback. Conversations left open by a crash are
+  titled at the next start. The Pinecone summary now stores
+  `conversation_id` in its metadata, and its vector id is kept for deletes.
+- Search: FTS ranked keyword hits, then Pinecone semantic hits that link to
+  a conversation; filters by date range, source, pinned, archived.
+- Continue: `rebuild_history()` turns stored messages into plain-text turns
+  (tool events and confirmations as text, interrupted replies noted),
+  trimmed to `max_history` with a summary of older turns first.
+  `ClaudeChat.resume(id)`; tools `search_conversations` (titles, dates,
+  snippets) and `resume_conversation` (asks "Continue '...' from Tuesday?",
+  switches after the reply; a conversation that was only the "continue..."
+  request is dropped, a real one is saved first).
+- CLI: `--history list|search|show|export|delete`, `--format md|json`,
+  filters `--source/--since/--until/--pinned`, `--yes`, `--continue ID|last`,
+  `--incognito`.
+- Tests (`test_history.py`): CRUD, owner scoping, id randomness, migrations
+  (upgrade, rollback, newer schema refused, FTS built later), a real crash
+  in a subprocess then reopen, FTS and LIKE ranking/snippets/filters (each
+  test runs on both), retention and size guard, titles with a mocked API and
+  the fallback, off-the-hot-path titling, recording through ClaudeChat
+  (tool events, confirmations, errors, interruptions, incognito), resume
+  rebuilding and trimming, the tools via mocked Claude tool calls (search,
+  resume yes/no, mid-conversation, unknown id), semantic merge, delete
+  cascading to a mocked Pinecone (and not deleting when Pinecone fails),
+  export redaction, and the CLI commands. Performance: 5,000 seeded
+  conversations (50,000 messages), median search under 100 ms (about
+  30-55 ms in the sandbox even on a tiny vocabulary where every word
+  matches most messages).
+- Events: every change is a failover sync `Event` (message, rename with
+  the auto title/summary or Kyle's title, pin with archived, delete,
+  delete_message for barge-in edits) recorded in failover's
+  `SqliteEventLog` in the same file; the tables above are a projection of
+  the log, written only by one idempotent `_apply()` used for local and
+  synced events (`HistoryStore.sync_log` is the EventLog to give the
+  Syncer). Last writer wins on title/summary/pin by (ts, id); tombstones
+  redact and purge the search index. Startup replays events after a saved
+  cursor, so a crash between the log and the tables heals. Without the
+  failover modules it runs standalone (nothing to sync).
+- Review fixes: resumed text and history tool results count as untrusted
+  (changes ask first); a turn whose API call fails takes its saved user
+  message back (a retry isn't saved twice); a title written in the
+  background after the conversation was resumed doesn't mark it ended.
+- For other features: `history.current_conversation_id()` (inside a turn)
+  and `history.record_event(conversation_id, kind, text)` add a note (e.g. a
+  lecture summary or quick capture) to a conversation, shown in its
+  transcript and search and passed to Claude when it's continued.
+- Phone app: `assistant/history_web.py` adds `GET /api/conversations`
+  (paginated, `q`, source/pinned/archived/date filters, highlight parts),
+  `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,
+  archive), `DELETE` (with the Pinecone cascade; also clears the
+  conversation from any open session), `GET .../export?format=md|json`, and
+  `GET/POST /api/incognito`, all behind the web sign-in. Push-to-talk turns
+  are saved as `web`, voice-mode turns (`chat_stream`) as `voice`, and a
+  barge-in keeps only the spoken part, flagged interrupted.
+  `assistant/web/history.js`: History screen (debounced search, day groups,
+  filter chips, swipe and long-press actions, transcript, Continue),
+  rename/delete dialogs, incognito switch and badge, light theme.
+- Tests: `test_history_web.py` (401 on every route, cross-site 403, id
+  guessing and other owners get 404, pagination, highlights, semantic hits,
+  filters, rename/pin/archive, delete cascade and failure, export, continue,
+  incognito, web and voice recording with barge-in) and
+  `test_history_events.py` (each change is an event, projection ==
+  `materialize(events)` over random operations, two-store sync in any
+  arrival order, late events under tombstones, last-writer-wins, startup
+  catch-up, no deleted text left in the database file). Driven in headless
+  Chromium at phone size, dark and light: search highlights, groups,
+  transcript, continue then a turn, pin filter, rename, delete dialog,
+  swipe, infinite scroll, incognito; no console errors.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -502,7 +836,80 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   that will actually open and fails if an index resolves to another one.
 - Two Notion databases are named "Assignments"; the Fall 2026 one
   (`7eefabe3-...`) is configured.
-- `piper-tts` is GPL-3.0; fine for personal use.
+- `piper-tts` is GPL-3.0; fine for personal use. Kokoro's model is
+  Apache-2.0, `kokoro-onnx` is MIT, and it pulls in `phonemizer` (GPL-3.0)
+  and a bundled espeak-ng (GPL-3.0); also fine for personal use.
+- **Kokoro and pyttsx3 can't share a process on Linux**: kokoro-onnx loads
+  its own libespeak-ng, and pyttsx3's eSpeak driver then crashed the process
+  in the test suite. The app only ever builds one engine (and the web app's
+  pyttsx3 path runs the espeak-ng program, not the library), so this only
+  affects tests; the real-Kokoro tests run in a child process.
+- **Kokoro needs onnxruntime 1.25+, so Python 3.11+.** With onnxruntime
+  1.23 (the last build for Python 3.10) and 1.24, the int8 model's output on
+  some CPUs is noise (peaks around 1e29) that kokoro-onnx's silence trimming
+  cuts down to nothing, and it renders ~4x slower; reproduced here, and it
+  made the Python 3.10 CI job flaky (an empty WAV on one run, 5 s renders on
+  another). 1.25, 1.27 and 1.31 are fine. requirements.txt installs Kokoro
+  only on 3.11+ with `onnxruntime>=1.25`, `kokoro_problem()` reports an
+  older onnxruntime (so "auto" falls back to Piper), and `synthesize()`
+  raises rather than return empty, non-finite or out-of-range audio.
+- **Kokoro's voice hasn't been heard by a person yet** (no audio in the
+  sandbox): MANUAL_TEST.md step 9 and the voice-mode listen check.
+
+## Failover: Pi -> PC -> cloud (phase A) ✅
+The phone app's backend failover, documented in FAILOVER.md.
+- `assistant/web/backend-router.js`: the client router as a standalone ES
+  module: parallel `/healthz` probes (1.5 s tailnet, 3 s cloud), highest
+  priority healthy backend with a 300 ms grace for a slower better one, API
+  version check, one retry of idempotent requests on the next backend,
+  writes never replayed (`NeedsUserRetry`), 60 s background re-probe with
+  fail-back after 2 good probes, no switch mid-turn, Auto / forced override,
+  IndexedDB token store.
+- `assistant/failover/edge.py` + `tokens.py`: ASGI middleware for every
+  backend: `/healthz` (ok, api, role only), CORS for the app origin only (no
+  credentials), derived bearer tokens (`POST /api/auth/token`, refresh,
+  scopes app/sync, 90-day session limit), WebSocket first-message auth
+  (4401 / 4408), per-backend lockout.
+- `assistant/failover/sync.py`: history as an append-only, id-addressed
+  event log; `materialize()` is order-independent and idempotent (LWW
+  renames/pins on (ts, id), permanent tombstones); push/pull endpoints and
+  client with cursors and peer-reset detection; `MemoryEventLog` reference
+  store (the SQLite store from claude/history implements the same API).
+- `assistant/failover/leader.py`: leader check (probe higher-priority peers
+  right before firing) and a run-once job runner with a per-job dedupe key
+  in the shared log.
+- `--role pi|pc|cloud`, `[failover]` settings (`ASSISTANT_ROLE`,
+  `APP_ORIGIN` env overrides).
+- Tests (offline): three-fake-backend simulation on a virtual clock (node),
+  CORS rejection and 401s everywhere incl. the WebSocket, property-style
+  sync convergence with three stores, random interleavings, duplicates and
+  outages, tombstones, leader election with flapping peers and partitions.
+  CI runs the node tests in a `backend-router` job.
+- Phase B, phone web app (done): with a `[failover] role`, `--mode web` is
+  wrapped in the edge middleware, its CSP lists the backends, and the page
+  switches to bearer tokens + the router, with a Pi / PC / Cloud badge and
+  a Backends section in Settings. Checked in headless Chromium against
+  three live local backends: Pi; Pi killed mid-conversation -> "Pi didn't
+  answer; tap to try again" (not replayed) -> the tap goes to the PC; PC
+  killed -> Cloud; Pi back -> Pi. That run found a real bug the node tests
+  couldn't (window.fetch called as a method), now fixed and tested.
+- Phase B, the rest (done): history sync runs on the Pi and PC against
+  the history store's `sync_log`, and every backend serves the sync
+  endpoints on it; the voice view connects to the active backend and sends
+  the token as its first message (`?auth=first`), with no backend switch
+  during a voice session; on Render, `CloudGuard` accepts the derived tokens, keeps the
+  token trade public and passes first-message sockets through
+  (`ASSISTANT_ROLE`, `APP_ORIGIN`, `FAILOVER_BACKENDS` in render.yaml,
+  empty = off). Tests: `test_failover_cloud.py`, incl. a real Pi
+  HistoryStore syncing into the cloud's over HTTP through the guard.
+- Review fixes: jobs elect the highest-priority claim (optionally preferring
+  on-time ones), always someone; a claim without `done` expires after 10
+  minutes; a `delete_message` can't hit a tombstone or job; the SQLite log
+  checkpoints its WAL after a delete and waits on a busy database.
+
+Known issue: a conversation in progress lives in each backend's memory, so
+after a failover mid-conversation Claude starts it fresh (it is in the
+synced history list; Pinecone memory still works).
 - **Voice mode on a real phone is untested** (no iPhone in the sandbox):
   iOS audio routing with the mic open (speaker vs. earpiece), echo
   cancellation of the reply on the loudspeaker, and the interruption

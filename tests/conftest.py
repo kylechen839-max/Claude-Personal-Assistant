@@ -5,6 +5,20 @@ from unittest.mock import MagicMock
 import pytest
 
 
+def pytest_configure(config):
+    """Windows: import comtypes on the main thread first. Importing it sets up
+    COM for the importing thread only; if a web-app TTS worker thread were
+    first (test_cloud.py renders reply audio), the main-thread SAPI tests
+    would fail with "CoInitialize has not been called"."""
+    import sys
+
+    if sys.platform == "win32":
+        try:
+            import comtypes  # noqa: F401
+        except ImportError:
+            pass
+
+
 def text_block(text):
     return SimpleNamespace(type="text", text=text)
 
@@ -91,6 +105,23 @@ def piper_voice():
         return download_voice(DEFAULT_PIPER_VOICE, voices)
     except Exception as e:
         pytest.skip(f"Piper voice {DEFAULT_PIPER_VOICE} unavailable: {type(e).__name__}")
+
+
+@pytest.fixture(scope="session")
+def kokoro_files():
+    """The real Kokoro int8 model and voices in models/kokoro/, downloaded
+    (checksum-verified) once; CI caches them. Skips when they can't be had."""
+    from assistant import tts_kokoro
+
+    try:
+        import kokoro_onnx  # noqa: F401
+    except ImportError:
+        pytest.skip("kokoro-onnx not installed")
+    dest = Path(__file__).resolve().parent.parent / tts_kokoro.DEFAULT_DIR
+    try:
+        return tts_kokoro.download(dest, output_fn=lambda m: None)
+    except Exception as e:
+        pytest.skip(f"Kokoro model unavailable: {type(e).__name__}")
 
 
 @pytest.fixture

@@ -130,12 +130,35 @@ def check_whisper_model(config: dict, download_model=None) -> Check:
     return Check("Whisper model", True, f"{name} cached at {path}")
 
 
-def check_tts(config: dict, which=shutil.which) -> Check:
+def check_tts(config: dict, which=shutil.which, environ=os.environ) -> Check:
+    from assistant import tts_kokoro
+    from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
+
     tts = config["tts"]
     engine = tts["engine"]
+    kokoro_hint = "python -m assistant --download-voice kokoro"
+    if engine == "elevenlabs":
+        if environ.get("ELEVENLABS_API_KEY"):  # never the value
+            return Check("TTS (elevenlabs)", True,
+                         "ELEVENLABS_API_KEY set; the local voice is the fallback")
+        return Check("TTS (elevenlabs)", False, "ELEVENLABS_API_KEY not set in "
+                     ".env; using the local voice instead", required=False)
+    if engine in ("auto", "kokoro"):
+        problem = tts_kokoro.kokoro_problem(tts.get("kokoro_model"),
+                                            tts.get("kokoro_voices"))
+        if problem is None:
+            return Check(f"TTS ({engine})", True,
+                         f"Kokoro, voice {tts.get('kokoro_voice') or 'af_heart'}")
+        if engine == "kokoro":
+            return Check("TTS (kokoro)", False, f"{problem}; using Piper or "
+                         f"pyttsx3 instead. Get it with: {kokoro_hint}",
+                         required=False)
+        engine = "piper" if tts.get("piper_voice") else "pyttsx3"
+        if engine == "piper" and piper_voice_problem(tts["piper_voice"]) is None:
+            return Check("TTS (auto)", True, f"Piper voice {tts['piper_voice']}; "
+                         f"for a more natural voice: {kokoro_hint}")
+        engine = "pyttsx3"
     if engine == "piper":
-        from assistant.tts import DEFAULT_PIPER_VOICE, piper_voice_problem
-
         # piper_model is the old name of piper_voice
         voice = tts.get("piper_voice") or tts.get("piper_model")
         problem = piper_voice_problem(voice)
@@ -179,9 +202,63 @@ def check_web(environ=os.environ, find_spec=None) -> list[Check]:
                        "requirements.txt)", required=False)]
 
 
+def check_google_env(config: dict, environ=os.environ) -> list[Check]:
+    """Server variant: the OAuth files come from GOOGLE_*_JSON secrets."""
+    from assistant.tools.calendar import CLIENT_ENV, TOKEN_ENV, token_info
+
+    if not config["calendar"]["enabled"]:
+        return [Check("Google Calendar", True, "disabled in config.toml",
+                      required=False)]
+    try:
+        info, from_env = token_info(config["calendar"]["token"],
+                                    config["calendar"]["credentials"], environ)
+    except ValueError as e:  # the message names the variable, not its value
+        return [Check(TOKEN_ENV, False, str(e), required=False)]
+    if not from_env:
+        return [Check(TOKEN_ENV, False, "not set (calendar tools will be off; "
+                      "paste the contents of token.json)", required=False)]
+    missing = [k for k in ("refresh_token", "client_id", "client_secret")
+               if not info.get(k)]
+    if missing:
+        hint = (f"; set {CLIENT_ENV} too" if "client_secret" in missing
+                or "client_id" in missing else "")
+        return [Check(TOKEN_ENV, False, f"set, but has no {', '.join(missing)}"
+                      f"{hint}", required=False)]
+    return [Check(TOKEN_ENV, True, "set (refreshed in memory, never saved)")]
+
+
+def check_server(config: dict, environ=os.environ) -> list[Check]:
+    """Things a public server needs that a PC doesn't."""
+    token = environ.get("WEB_TOKEN", "")
+    checks = [Check("WEB_TOKEN", len(token) >= 32,
+                    "set" if len(token) >= 32 else
+                    ("too short (32+ random characters)" if token else
+                     "not set (the Render Blueprint generates it)"))]
+    tz = config["assistant"]["timezone"]
+    checks.append(Check("Time zone", bool(tz), tz or "not set: \"today\" and "
+                        "\"tomorrow\" would be in UTC (set ASSISTANT_TIMEZONE, "
+                        "e.g. America/New_York)", required=False))
+    return checks
+
+
+def check_server_tts(config: dict, which=shutil.which) -> list[Check]:
+    checks = [check_tts(config, which)]
+    found = which("espeak-ng") or which("espeak")
+    checks.append(Check("TTS fallback (espeak-ng)", bool(found),
+                        "found" if found else "missing (apt-get install espeak-ng)",
+                        required=checks[0].ok is False))
+    return checks
+
+
 def run_checks(config: dict, keyword_path: str | None = None,
                environ=os.environ, sd=None, download_model=None,
                which=shutil.which) -> list[Check]:
+    if config.get("profile") == "server":
+        # No microphone, speakers or wake word on a server.
+        return [*check_keys(environ), *check_server(config, environ),
+                *check_google_env(config, environ),
+                check_whisper_model(config, download_model),
+                *check_server_tts(config, which), *check_web(environ)[1:]]
     return [*check_keys(environ), *check_google_files(config),
             check_wake_model(config, keyword_path),
             *check_audio_devices(config, sd),

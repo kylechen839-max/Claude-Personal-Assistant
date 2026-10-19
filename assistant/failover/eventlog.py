@@ -24,6 +24,7 @@ from typing import Iterable
 
 from assistant.failover.sync import Event, covered_by, new_id, redacted
 
+COLS = "seq, id, ts, origin, kind, conv, data"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_events (
     seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +47,11 @@ class SqliteEventLog:
         self._db = sqlite3.connect(str(path), check_same_thread=False,
                                    isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
+        # Redaction rewrites rows in place; without this, SQLite (e.g. the
+        # Windows build) can leave the deleted text in free pages.
+        self._db.execute("PRAGMA secure_delete = ON")
+        # another connection (the history store) may hold the write lock briefly
+        self._db.execute("PRAGMA busy_timeout = 5000")
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
@@ -64,7 +70,7 @@ class SqliteEventLog:
 
     def _tombstones(self, conv: str) -> list[Event]:
         rows = self._db.execute(
-            "SELECT * FROM sync_events WHERE conv = ? AND kind IN ('delete', 'delete_message')",
+            f"SELECT {COLS} FROM sync_events WHERE conv = ? AND kind IN ('delete', 'delete_message')",
             (conv,)).fetchall()
         return [self._event(r) for r in rows]
 
@@ -86,13 +92,16 @@ class SqliteEventLog:
                     added.append(e)
                     if e.kind in ("delete", "delete_message"):
                         for row in self._db.execute(
-                                "SELECT * FROM sync_events WHERE conv = ? AND data != '{}'",
+                                f"SELECT {COLS} FROM sync_events WHERE conv = ? AND data != '{{}}'",
                                 (e.conv,)).fetchall():
                             old = self._event(row)
                             if covered_by(e, old):
                                 self._db.execute("UPDATE sync_events SET data = '{}' WHERE id = ?",
                                                  (old.id,))
                 self._db.execute("COMMIT")
+                if any(e.kind in ("delete", "delete_message") for e in added):
+                    # redacted text must not linger in the write-ahead log
+                    self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except BaseException:
                 self._db.execute("ROLLBACK")
                 raise
@@ -106,7 +115,7 @@ class SqliteEventLog:
     def since(self, seq: int, limit: int) -> tuple[list[Event], int, bool]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM sync_events WHERE seq > ? ORDER BY seq LIMIT ?",
+                f"SELECT {COLS} FROM sync_events WHERE seq > ? ORDER BY seq LIMIT ?",
                 (max(0, seq), limit + 1)).fetchall()
         more = len(rows) > limit
         rows = rows[:limit]
@@ -116,12 +125,12 @@ class SqliteEventLog:
     def by_conv(self, conv: str) -> list[Event]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM sync_events WHERE conv = ? ORDER BY seq", (conv,)).fetchall()
+                f"SELECT {COLS} FROM sync_events WHERE conv = ? ORDER BY seq", (conv,)).fetchall()
         return [self._event(r) for r in rows]
 
     def all(self) -> list[Event]:
         with self._lock:
-            rows = self._db.execute("SELECT * FROM sync_events ORDER BY seq").fetchall()
+            rows = self._db.execute(f"SELECT {COLS} FROM sync_events ORDER BY seq").fetchall()
         return [self._event(r) for r in rows]
 
     def meta_get(self, key: str) -> str | None:

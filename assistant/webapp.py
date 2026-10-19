@@ -69,6 +69,7 @@ MIN_TOKEN_LENGTH = 32
 PC_ONLY_TOOLS = {"open_in_browser"}
 
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+EARCONS = ("listening", "thinking", "ended")  # assistant/earcons.py
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
@@ -382,7 +383,10 @@ def is_cross_origin(headers, allowed_origins=(), trust_forwarded: bool = True) -
     Uses Sec-Fetch-Site when the browser sends it, else compares Origin with
     the Host (or X-Forwarded-Host, as set by a proxy, if `trust_forwarded`).
     Requests with neither header (curl, tests) pass; they still need the
-    session cookie."""
+    session cookie. An Origin in `allowed_origins` (e.g. the failover app
+    origin) is never cross-origin."""
+    if headers.get("origin") and headers.get("origin") in allowed_origins:
+        return False
     site = headers.get("sec-fetch-site")
     if site in ("cross-site", "same-site"):
         return True
@@ -566,8 +570,11 @@ class WebAssistant:
     def __init__(self, chat_factory: Callable[[ToolRegistry], object],
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
-                 max_sessions: int = 20, clock=time.monotonic):
+                 max_sessions: int = 20, clock=time.monotonic,
+                 history=None, memory=None):
         self.chat_factory = chat_factory
+        self.history = history  # a HistoryStore (conversation history) or None
+        self.memory = memory    # PineconeMemory, for semantic search and deletes
         self.transcriber = transcriber
         self.tts = tts
         self.tools = tools or ToolRegistry()
@@ -585,6 +592,9 @@ class WebAssistant:
         # thread, so all rendering happens in one dedicated thread.
         self._tts_pool = ThreadPoolExecutor(1, thread_name_prefix="web-tts",
                                             initializer=_init_com)
+        if callable(getattr(tts, "warm_up", None)):
+            # load the voice model now, so the first reply isn't the slow one
+            self._tts_pool.submit(_warm_up, tts)
 
     # sessions
     def session(self, sid: str) -> Session:
@@ -645,6 +655,33 @@ class WebAssistant:
         if s is not None:
             self._end(s)
 
+    # conversation history
+    def forget_conversation(self, cid: str) -> None:
+        """A conversation was deleted: drop it from any browser that has it
+        open, so it isn't summarized into memory or saved again."""
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for s in sessions:
+            if s.chat.recorder and s.chat.conversation_id == cid:
+                s.chat.reset()
+                s.chat.recorder.conversation_id = None
+
+    def set_incognito(self, s: Session, on: bool) -> bool:
+        """Switch this browser's incognito mode. The current conversation
+        ends first (saved if it was being saved), so nothing said while
+        incognito ends up in history or memory. False if a turn is running."""
+        if s.chat.recorder is None or s.chat.incognito == on:
+            return True
+        if not s.busy.acquire(timeout=2):
+            return False
+        try:
+            if s.chat.history or s.chat.conversation_id:
+                s.chat.end_conversation()
+            s.chat.recorder.incognito = on
+        finally:
+            s.busy.release()
+        return True
+
     def shutdown(self) -> None:
         with self.lock:
             sessions = list(self.sessions.values())
@@ -683,6 +720,9 @@ class WebAssistant:
     def _run_turn(self, s: Session, text, recording) -> None:
         from assistant.cli import get_reply, is_exit
 
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "web"  # a new conversation started with push-to-talk
         try:
             if recording is not None:
                 text = self.transcribe(recording)
@@ -777,6 +817,9 @@ class WebAssistant:
         if not s.busy.acquire(timeout=2):
             raise RuntimeError("a turn is already running in this session")
         s.listener = on_event
+        rec = s.chat.recorder
+        if rec is not None and rec.conversation_id is None:
+            rec.source = "voice"  # a new conversation started in voice mode
         deltas: queue.Queue = queue.Queue()
         end = object()
 
@@ -852,6 +895,16 @@ def _init_com() -> None:
         pass
 
 
+def _warm_up(tts) -> None:
+    started = time.perf_counter()
+    try:
+        tts.warm_up()
+        log.info("TTS %s warmed up in %.2f s", type(tts).__name__,
+                 time.perf_counter() - started)
+    except Exception:
+        log.exception("TTS warm-up failed")
+
+
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
@@ -897,6 +950,9 @@ class WebAuth:
         self.bearer_sid = "bearer-" + _sign(token, "bearer")[:16]
 
     def sid(self, conn) -> str | None:
+        claims = getattr(conn, "scope", {}).get("auth")  # set by failover.edge.EdgeMiddleware
+        if claims is not None:
+            return claims.sid
         auth = conn.headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             if tokens_match(auth[7:], self.token):
@@ -942,7 +998,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None):
+               voice: dict | None = None, failover=None):
+    """The ASGI app. With `failover` (a failover.peers.FailoverSettings
+    with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
+    tokens as well as cookies, CORS for the app origin (FAILOVER.md)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -953,6 +1012,17 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from starlette.concurrency import run_in_threadpool
 
     limiter = limiter or LoginLimiter()
+    failover = failover if failover is not None and failover.role else None
+    security_headers = dict(SECURITY_HEADERS)
+    if failover:
+        from assistant.failover.edge import connect_src
+
+        allowed_origins = tuple(allowed_origins) + tuple(
+            o for o in (failover.app_origin,) if o)
+        security_headers["Content-Security-Policy"] = CSP.replace(
+            "connect-src 'self'", "connect-src " + connect_src(list(failover.backends)))
+        # the phone app reads replies cross-origin from the Pi and PC
+        security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     store = SessionStore(sessions_file)
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
 
@@ -1024,7 +1094,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             delay = getattr(request.state, "auth_delay", 0)
             if delay:  # a wrong bearer token while many are failing
                 await _wait(delay)
-        for k, v in SECURITY_HEADERS.items():
+        for k, v in security_headers.items():
             response.headers.setdefault(k, v)
         if proxied:
             response.headers.setdefault(
@@ -1093,9 +1163,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     def index():
         return FileResponse(STATIC / "index.html", media_type="text/html")
 
-    for name, media in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                        ("sw.js", "text/javascript"),
-                        ("update-watch.js", "text/javascript")):
+    for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
+                        ("app.css", "text/css"), ("sw.js", "text/javascript"),
+                        ("update-watch.js", "text/javascript"),
+                        ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1123,6 +1194,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         buf = io.BytesIO()
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
+
+    @app.get("/earcons/{name}.wav")
+    def earcon(name: str):
+        """The voice view's soft listening / thinking / ended sounds."""
+        if name not in EARCONS:
+            return error("not found", 404)
+        return FileResponse(STATIC / "earcons" / f"{name}.wav", media_type="audio/wav",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     from assistant.version import version
 
@@ -1209,6 +1288,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return {"busy": s.busy.locked(),
                 "confirm": (s.pending.question if s.pending
                             and not s.pending.stream else None),
+                "incognito": s.chat.incognito,
+                "history": assistant.history is not None,
+                "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
 
@@ -1287,7 +1369,63 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     app.state.voice_conversations = add_voice_routes(
         app, assistant, allowed_origins=web.allowed_origins, voice=voice)
+
+    from assistant import history_web
+
+    history_web.register(app, assistant, session_of, error)
+    if failover:
+        return wrap_failover(app, token, failover, web)
     return app
+
+
+def wrap_failover(app, token: str, failover, web: WebAuth):
+    """EdgeMiddleware around the web app (FAILOVER.md section 3). It uses
+    this app's LoginLimiter and client address, and cookie clients keep
+    working (same-origin requests without a bearer token pass through)."""
+    from starlette.requests import HTTPConnection
+
+    from assistant.failover.edge import EdgeMiddleware
+    from assistant.failover.tokens import TokenAuthority
+
+    routes = {}
+    history = getattr(web.assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    if sync_log is not None:
+        from assistant.failover.sync import make_sync_app
+
+        # pulled/pushed events are projected into the history tables at once
+        routes["/api/sync/"] = make_sync_app(sync_log)
+    return EdgeMiddleware(app, authority=TokenAuthority(token), role=failover.role,
+                          app_origins=[o for o in (failover.app_origin,) if o],
+                          backends=list(failover.backends), routes=routes,
+                          limiter=web.limiter,
+                          client_ip=lambda scope: web.client_ip(HTTPConnection(scope)),
+                          trusts_proxy=lambda scope: web.trusted_proxy.trusts(
+                              HTTPConnection(scope)),
+                          root_bearer_sid=web.bearer_sid)
+
+
+def start_history_sync(config: dict, assistant, token: str, failover):
+    """Pi and PC: push/pull history with the other backends every
+    [failover] sync_interval seconds, in a daemon thread. The cloud only
+    answers (it can't reach the tailnet). Returns the thread or None."""
+    from assistant.failover.sync import Syncer, default_peers
+    from assistant.failover.tokens import TokenAuthority
+
+    history = getattr(assistant, "history", None)
+    sync_log = getattr(history, "sync_log", None)
+    peers = default_peers(failover.role, list(failover.backends))
+    if sync_log is None or not peers:
+        return None
+    syncer = Syncer(sync_log, peers, TokenAuthority(token), failover.role)
+    stop = threading.Event()
+    interval = float(config["failover"]["sync_interval"])
+    thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
+                              name="history-sync", daemon=True)
+    thread.start()
+    log.info("History sync with %s every %.0f s",
+             ", ".join(p.role for p in peers), interval)
+    return thread
 
 
 def assistant_busy(assistant: "WebAssistant", app) -> bool:
@@ -1332,7 +1470,9 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
-    from assistant.cli import add_memory_tools, build_memory, build_tools
+    from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
+                               build_tools)
+    from assistant.history import Recorder, open_store
     import anthropic
 
     from assistant.stt import Transcriber
@@ -1344,13 +1484,19 @@ def build_assistant(config: dict, tts_name: str | None = None,
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
+    store = open_store(config)  # conversation history (None if off)
+    add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
 
     def chat_factory(registry):
+        recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
+                            client_fn=lambda: client,
+                            title_model=config["history"]["title_model"])
         return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
-                          max_tool_rounds=a["max_tool_rounds"], memory=memory)
+                          max_tool_rounds=a["max_tool_rounds"], memory=memory,
+                          recorder=recorder)
 
     stt = config["stt"]
     tts_cfg = config["tts"]
@@ -1359,7 +1505,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"])
+                        confirm_timeout=config["webapp"]["confirm_timeout"],
+                        history=store, memory=memory)
 
 
 def serve(config: dict, host: str | None = None, port: int | None = None,
@@ -1385,13 +1532,20 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.failover.peers import settings_from_config
+
+    failover = settings_from_config(config)
     assistant = build_assistant(config, tts_name, output_fn)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
-                     voice=config.get("voice"))
+                     voice=config.get("voice"), failover=failover)
+    if failover.role:
+        log.info("Failover role %s; backends: %s", failover.role,
+                 ", ".join(b.role for b in failover.backends) or "none")
+        start_history_sync(config, assistant, token, failover)
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

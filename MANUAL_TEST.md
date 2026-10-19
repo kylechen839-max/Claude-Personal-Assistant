@@ -1,6 +1,6 @@
 # Manual test checklist
 
-One sitting on the Windows PC, about 25 minutes. Do the steps in order; each
+One sitting on the Windows PC, about 35 minutes. Do the steps in order; each
 one says what to do, what should happen, and what to change in `config.toml`
 if it doesn't. After changing `config.toml`, restart the assistant (Ctrl+C,
 then run it again).
@@ -19,8 +19,8 @@ Assignments database open in a browser to compare.
 
 ## 1. Setup (2 min)
 - [ ] `python -m assistant --check`
-  - Should: every line `[OK  ]` (a `[WARN]` for Piper is fine), your mic under
-    "Input devices", your speakers under "Output devices", no key values
+  - Should: every line `[OK  ]` (a `[WARN]` for the voice is fine before
+    step 9), your mic under "Input devices", your speakers under "Output devices", no key values
     printed, and "All required checks passed."
   - If not: fix whatever line says FAIL (missing key in `.env`, missing
     `credentials.json`/`token.json`). If the wrong mic is the default, note
@@ -36,7 +36,7 @@ Assignments database open in a browser to compare.
     second one too: pyttsx3 sometimes went silent after the first reply).
   - If not: speed is `[tts] rate` (default 185); a different Windows voice is
     `[tts] voice = "Zira"` (part of the name). If the second reply is silent,
-    use Piper (step 9) and note it in BLOCKERS.md. Type `quit`.
+    use Kokoro or Piper (step 9) and note it in BLOCKERS.md. Type `quit`.
 - [ ] **Mic level:** `python -m assistant --mode voice`, press Enter, say
       "What time is it?" at normal volume, press Enter.
   - Should: the printed `You:` line matches what you said.
@@ -138,15 +138,38 @@ Run `python -m assistant` for steps 3-8 and leave it running.
 
 Ctrl+C to stop.
 
-## 9. Piper vs pyttsx3 voice (3 min)
-- [ ] `python -m assistant.tts --download-voice en_US-lessac-medium`, then
-      `python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"`
-  - Should: a natural-sounding voice.
-- [ ] Set `[tts] engine = "piper"`, run `python -m assistant --mode speak`,
-      ask two questions.
-  - Should: both replies in the Piper voice, starting without a long pause.
-  - Keep whichever voice you prefer (`engine = "pyttsx3"` to go back). If
-    the voice file is missing, it warns and uses pyttsx3.
+## 9. Voices: Kokoro, Piper, pyttsx3 (5 min)
+- [ ] `python -m assistant --download-voice kokoro`
+  - Should: two downloads (about 120 MB) and "checksums ok". Running it
+    again downloads nothing.
+- [ ] `python -m assistant --check`
+  - Should: the TTS line says "Kokoro, voice af_heart".
+- [ ] **Listen check:** `python -m assistant --mode speak`, ask "What's a
+      good way to start the morning?" and then a question with numbers and
+      a time ("What's 15% of 80, and what time is it?").
+  - Should: a calm, warm, natural voice, close to the feel of a Claude app
+    voice conversation; numbers, times and percentages read correctly;
+    short sentence gaps, no clicks or robotic pitch jumps; the first
+    sentence starts within about a second, and there are no gaps while
+    the next sentence renders.
+  - If the pace feels quick: `[tts] speed = 0.9`. Try other voices with
+    `[tts] kokoro_voice = "af_bella"`, `"bf_emma"` or `"am_michael"`; keep
+    the one you like and note it in BLOCKERS.md if none feels right.
+- [ ] Compare with Piper: `python -m assistant --download-voice
+      en_US-lessac-medium`, then `python -m assistant --mode speak --tts
+      piper` and ask the same question.
+  - Should: Piper starts a little sooner but sounds flatter. `--tts
+    pyttsx3` is the Windows voice for comparison.
+- [ ] Fallback: rename `models\kokoro` to `models\kokoro-off`, run
+      `python -m assistant --mode speak`, ask anything, then rename it back.
+  - Should: it answers in the Piper voice, and `logs/assistant.log` has one
+    "TTS: Piper" line explaining that Kokoro was not found.
+- [ ] Optional, only if you have an ElevenLabs account (paid): add
+      `ELEVENLABS_API_KEY` to `.env`, set `[tts] engine = "elevenlabs"`, ask
+      a question; then pull the network cable / turn Wi-Fi off and ask again.
+  - Should: the ElevenLabs voice first; offline, the local voice answers
+    instead after a short wait (and the key never appears in
+    `logs/assistant.log`). Set `engine = "auto"` back afterwards.
 
 ## 10. Network down (2 min)
 - [ ] Run `python -m assistant`, turn Wi-Fi off (or unplug the cable), then
@@ -167,6 +190,51 @@ Ctrl+C to stop.
   - If slow: the `transcript` step is Whisper (try `[stt] model =
     "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
     `silence_ms` pause.
+
+## 12. Conversation history (4 min)
+- [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
+      lab report graph?" Let the follow-up window close. Wait ~10 s, then
+      `python -m assistant --history list` in a second PowerShell window.
+  - Should: a line with a short title like "Lab report error bars", source
+    `wake`, and today's time.
+- [ ] "Hey Claude, continue our conversation about the lab report."
+  - Should: it asks "Continue 'Lab report error bars' from today? Please say
+    yes or no." Say "yes", then "and what about standard deviation?"
+  - Should: the answer is clearly about error bars (it kept the context).
+    `--history show ID` shows both parts in one conversation.
+- [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
+  - Should: a one or two sentence answer naming the topics.
+- [ ] `python -m assistant --history search error bars`
+  - Should: the conversation, with "error" and "bars" highlighted.
+- [ ] Ctrl+C, run `python -m assistant --mode text --incognito`, type
+      "this is a secret test", then `quit`. Run `--history search secret`.
+  - Should: "No conversations match." (and no "Saved to memory" line).
+- [ ] `python -m assistant --history delete ID` with the lab report id,
+      answer `yes`, then `--history list`.
+  - Should: it's gone. If Pinecone is set up, its memory summary is
+    deleted too (the `voice-assistant` namespace in the Pinecone console
+    has one vector fewer).
+
+## 13. History on the phone (4 min)
+Needs the phone app (`python -m assistant --mode web`, section on the phone
+app above).
+- [ ] Tap the clock button. Type "lab" in the search bar.
+  - Should: within a second, the lab report conversation from step 12 (if
+    not deleted yet; otherwise any conversation) with "lab" highlighted.
+    Rows are grouped under Today / Yesterday / ...
+- [ ] Swipe a row left; tap Pin. Tap the Pinned filter.
+  - Should: only pinned conversations, with a pin icon.
+- [ ] Tap a conversation, then **Continue this conversation**, then ask a
+      follow-up by voice or text ("and what about the conclusion?").
+  - Should: the answer uses the old context.
+- [ ] Open the voice conversation view and ask another follow-up.
+  - Should: still the same conversation (History shows it with the new turns).
+- [ ] Long-press a row, choose Delete..., confirm.
+  - Should: it disappears; Cancel instead keeps it.
+- [ ] Gear → Incognito on. Say something. Open History and search for it.
+  - Should: not found; the header shows "Incognito". Turn it off again.
+- [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
+      the back button and the dialogs work, light and dark mode both read well.
 
 Note anything that failed or any setting you changed in BLOCKERS.md.
 
@@ -211,7 +279,6 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
-
 ## Voice conversation on the phone (optional, ~12 min)
 In the phone web app, tap **Voice conversation**. Turn the latency panel on
 with the stopwatch button.
@@ -222,9 +289,18 @@ with the stopwatch button.
     allowing, it starts listening.
 - [ ] First tap: allow the microphone. Ask "What's on my calendar tomorrow?"
       and then just stop talking.
-  - Should: the orb moves with your voice, pulses briefly, then the answer
-    starts within about 2 seconds of you stopping. The panel says
-    "silero VAD" and shows the times.
+  - Should: a soft two-note "listening" sound when it opens; the orb moves
+    with your voice; a very quiet low note when you stop (your turn was
+    heard); then the answer starts within about 2 seconds of you stopping.
+    The panel says "silero VAD" and shows the times.
+- [ ] **Listen check (voice and sounds):** with the Kokoro voice
+      downloaded on the PC, listen to a few answers on the loudspeaker and
+      on AirPods.
+  - Should: the reply voice is calm and natural (Kokoro, not the robotic
+    eSpeak/Windows voice), with no gaps or clicks between sentences. The
+    three cues are gentle, short and not beep-like, and never louder than
+    the voice. The "thinking" note must not make it interrupt itself. If a
+    cue bothers you, note which one.
 - [ ] Natural turn-taking: have a 4-5 turn conversation without touching the
       screen, with normal pauses mid-sentence ("Remind me... what's due this
       week?").
@@ -254,10 +330,45 @@ with the stopwatch button.
     the same conversation after the tap.
 - [ ] Mute, CC and End: tap Mute and talk (nothing happens), unmute; toggle
       CC; tap End.
-  - Should: End closes the view; `logs/assistant.log` has "Voice conversation
+  - Should: End plays a soft falling two-note sound and closes the view;
+    `logs/assistant.log` has "Voice conversation
     saved to memory" (if anything memorable was said).
 - [ ] Leave it open and silent for over 2 minutes.
   - Should: it ends by itself ("Ended after a quiet stretch").
+
+## Cloud server on Render (optional, ~30 min)
+Setup is in README.md ("Run it in the cloud (Render)"). Your PC can be off
+for all of this except the Google sign-in.
+- [ ] Render: New -> Blueprint -> this repo; paste `ANTHROPIC_API_KEY`,
+      `PINECONE_API_KEY`, `NOTION_TOKEN`, `ASSISTANT_TIMEZONE`,
+      `GOOGLE_TOKEN_JSON` (all of `token.json`) and `GOOGLE_CLIENT_JSON` (all
+      of `credentials.json`) yourself. Apply.
+  - Should: `hey-claude` turns "Live" after the build; Logs show "Speech
+    models loaded" and no tracebacks.
+- [ ] Google Cloud console -> OAuth consent screen -> **Publish app**. Then
+      sign in again on the PC (delete `token.json`, run
+      `python -m assistant.tools.calendar`; the "unverified app" screen is
+      expected: Advanced -> Go to Hey Claude) and paste the new `token.json`
+      into `GOOGLE_TOKEN_JSON` in Render.
+  - Should: a week later the calendar still works (in Testing mode it would
+    stop after 7 days).
+- [ ] Render Shell: `python -m assistant --check`.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
+    time zone, Whisper model and Piper voice OK.
+- [ ] In Safari on the iPhone (Wi-Fi off), open
+      `https://hey-claude.onrender.com`. Enter a wrong token, then the
+      `WEB_TOKEN` from Render -> Environment.
+  - Should: "wrong token", then the chat page.
+- [ ] Share -> Add to Home Screen; open it from the home screen; hold the mic:
+      "What's on my calendar tomorrow?"
+  - Should: full screen, your words appear, then the answer spoken within a
+    few seconds, with tomorrow in your time zone.
+- [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
+      by voice.
+  - Should: Yes/No buttons and a spoken question, as on the PC.
+- [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
+- [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
+  - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 
 ---
 
@@ -273,10 +384,49 @@ Setup is in README.md ("Raspberry Pi").
     `speaker-test -t wav -c 2`.
 - [ ] `.venv/bin/python -m assistant --timings`: repeat steps 3 (1 m normal
       only), 4 and 11.
-  - If slow: `[stt] model = "tiny.en"` and `[tts] engine = "piper"`.
+  - If slow: `[stt] model = "tiny.en"` and `[tts] engine = "piper"` (with
+    "auto" the Pi already prefers Piper over Kokoro).
+- [ ] Optional, Kokoro on the Pi: `.venv/bin/python -m assistant
+      --download-voice kokoro`, set `[tts] engine = "kokoro"`, run with
+      `--timings` and ask two questions; note the "first audio" times in
+      PROGRESS.md, then set `engine = "auto"` back.
 - [ ] `./scripts/install_service.sh`, reboot without logging in, wait a
       minute, then "Hey Claude, what time is it?"
   - Should: it answers. `journalctl --user -u hey-claude -n 20` shows the
     startup lines.
 - [ ] `pkill -f "python -m assistant"`: within ~10 s
       `systemctl --user status hey-claude` shows it running again.
+
+---
+
+## Phone app failover: Pi -> PC -> cloud (optional, ~15 min)
+Setup is in README.md ("Phone app failover") and FAILOVER.md. You need the
+Pi, the PC and the cloud host running with the same `WEB_TOKEN`, and the
+phone app installed from the cloud URL with Tailscale on.
+- [ ] Open the app. Settings -> Backends lists Pi, PC and Cloud, all
+      healthy, mode Auto.
+  - Should: the badge in the header says **Pi**.
+- [ ] Start a conversation ("what's on my calendar tomorrow?"), then
+      **unplug the Pi** and ask a follow-up in the same conversation.
+  - Should: the reply comes from the PC (badge **PC**) within a few seconds.
+    If the Pi died while a question was being sent, the app says "Pi didn't
+    answer; tap to try again" instead of sending it twice; tap once.
+  - Should: the conversation's earlier messages are still there.
+- [ ] **Turn the PC off** (or quit the assistant on it) and ask again.
+  - Should: badge **Cloud**, and an answer (the first one may take a few
+    seconds if Render was asleep).
+- [ ] **Airplane mode, then Wi-Fi off and cellular on** (Tailscale still
+      on), with the Pi and PC back on.
+  - Should: within about two minutes the badge goes back to **Pi** (it
+    waits for two good checks in a row), but never in the middle of a
+    reply or while you are speaking.
+- [ ] Turn Tailscale off on the phone (cellular only).
+  - Should: badge **Cloud**; Settings shows Pi and PC as unreachable.
+- [ ] Settings -> force **PC**, ask something, then back to **Auto**.
+  - Should: the badge follows the setting.
+- [ ] Open the history on another backend (force Cloud, then Pi).
+  - Should: the same conversations everywhere (give it 30 s to sync), and
+    a conversation deleted on one backend is gone from all of them.
+- [ ] From a laptop browser *not* on the app: open
+      `https://<pi>.<tailnet>.ts.net/healthz`.
+  - Should: only `{"ok":true,"api":1,"role":"pi"}`.
