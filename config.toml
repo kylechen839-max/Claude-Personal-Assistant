@@ -8,13 +8,24 @@ conversation_timeout = 300    # seconds of quiet before a new conversation start
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 
 [tts]
-engine = "pyttsx3"            # "pyttsx3" (offline OS voice), "piper" (better offline voice), "print"
+# "auto" (default): Kokoro if its files are downloaded, else Piper, else pyttsx3.
+# Or pick one: "kokoro" (most natural), "piper" (fast, best on a Raspberry Pi),
+# "pyttsx3" (OS voice), "elevenlabs" (optional, paid cloud voice), "print".
+# A missing voice falls back down that list, with one log line saying why.
+engine = "auto"
+# Kokoro: get it with  python -m assistant --download-voice kokoro
+kokoro_voice = "af_heart"     # warm and calm; also af_bella, bf_emma, am_michael (README)
+speed = 1.0                   # Kokoro 0.5-2.0, ElevenLabs 0.7-1.2
+kokoro_model = "models/kokoro/kokoro-v1.0.int8.onnx"
+kokoro_voices = "models/kokoro/voices-v1.0.bin"
+# Piper voice (.onnx, with its .onnx.json next to it).
+# Get one with: python -m assistant --download-voice en_US-lessac-medium
+piper_voice = "voices/en_US-lessac-medium.onnx"
 rate = 185                    # pyttsx3 only
 voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" on Windows
-# Piper voice (.onnx, with its .onnx.json next to it), used when engine = "piper".
-# Get one with: python -m assistant.tts --download-voice en_US-lessac-medium
-# If the file is missing, the assistant warns and uses pyttsx3 instead.
-piper_voice = "voices/en_US-lessac-medium.onnx"
+# ElevenLabs: only with engine = "elevenlabs" and ELEVENLABS_API_KEY in .env.
+elevenlabs_voice = ""         # a voice ID from your ElevenLabs library; "" = Rachel
+elevenlabs_model = "eleven_flash_v2_5"
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
@@ -92,6 +103,27 @@ debug_panel = false           # latency timings on the voice screen
 enabled = false               # set true in config.local.toml, after signing is set up (README)
 channel = "stable"
 check_minutes = 15
+
+[history]
+# Every conversation (wake word, text, phone) is saved here and can be
+# searched and continued: python -m assistant --history list
+enabled = true
+path = "data/history.sqlite"  # HISTORY_PATH in the environment overrides (Render: /data/history.sqlite)
+retention_days = 0            # delete unpinned conversations older than this many days; 0 = keep forever
+max_mb = 500                  # size guard: the oldest unpinned conversations are deleted above this
+incognito = false             # true = save nothing (also no Pinecone summary); or run with --incognito
+title_model = "claude-haiku-5-5"  # fast model that writes each conversation's title and summary
+
+[failover]                    # Pi -> PC -> cloud for the phone app (see FAILOVER.md)
+role = ""                     # "pi", "pc" or "cloud" (--role overrides); "" = not in a failover setup
+app_origin = ""               # where the phone app is installed from, e.g. "https://hey-claude.onrender.com"
+sync_interval = 30            # seconds between history syncs with the other backends
+# The app tries these in this order. Leave a URL empty if you don't run that one.
+backends = [
+  { role = "pi", url = "" },     # e.g. "https://pi.tail1234.ts.net"
+  { role = "pc", url = "" },     # e.g. "https://kyle-pc.tail1234.ts.net"
+  { role = "cloud", url = "" },  # e.g. "https://hey-claude.onrender.com"
+]
 
 [logging]
 file = "logs/assistant.log"

@@ -44,6 +44,65 @@ headers, OAuth fields (`access_token`, `refresh_token`, `client_secret`, ...)
 and OAuth sign-in `code=` values, tracebacks included. At the default INFO
 level nothing secret was found being logged.
 
+## Cross-origin backends (Pi -> PC -> cloud failover)
+
+The phone app is installed from the cloud host but also talks to the Pi and
+the PC on other origins (FAILOVER.md). That adds a cross-origin surface on
+all three, which `assistant/failover/edge.py` closes the same way on each:
+
+- **CORS for the app origin only.** `[failover] app_origin` is the only
+  foreign origin that gets CORS headers, for `GET`/`POST` with the
+  `Authorization` and `Content-Type` headers. Credentials mode is never
+  allowed (`Access-Control-Allow-Credentials` is stripped even if the app
+  sets it), so the browser never attaches cookies cross-origin. Any other
+  `Origin` (another site, `null`, `http://`, look-alikes such as
+  `https://hey-claude.onrender.com.evil.example`) is refused with 403 on
+  every path, including `/healthz`, the token endpoint and the WebSocket
+  handshake. CORS only stops *browsers*; every API call also needs a token.
+- **Bearer tokens, not cookies** (third-party cookies are blocked on iOS).
+  The phone trades `WEB_TOKEN` once for a derived token (HMAC of the shared
+  `WEB_TOKEN`, 30 days, renewable up to 90 days after sign-in) and doesn't
+  keep `WEB_TOKEN`. Tokens have a scope: phone tokens can't call the sync
+  API, backend sync tokens (5 minutes) can't call the app API. Missing,
+  wrong, expired or wrong-scope tokens get 401 on every API path.
+- **Token storage.** The token is in IndexedDB on the app origin, so a
+  script injected into the page (XSS) could read it. Mitigations: a strict
+  CSP (`script-src 'self'`, no inline script or `eval`, `connect-src` only
+  the app's own origin and the configured backends, `frame-ancestors
+  'none'`), replies rendered as text, never HTML, and the token's limited
+  life. A stolen token works on all backends until it expires or
+  `WEB_TOKEN` is changed on all of them (there is no per-device
+  revocation). The root `WEB_TOKEN` itself is never stored by the app.
+- **WebSockets** get the token in the first message after opening, never in
+  the URL (URLs end up in proxy logs and browser history); a socket without
+  a valid token within 5 s is closed.
+- **`/healthz`** is public and returns only `ok`, the API version number and
+  the role: no hostnames, versions, load or errors.
+- **Lockout** stays per backend and is the web app's own `LoginLimiter`
+  (per address plus a global limit). Only guesses at `WEB_TOKEN` count
+  (a wrong one on the token endpoint, or a non-derived bearer); expired or
+  bad derived tokens don't, since they can't be guessed and an old phone
+  retrying shouldn't lock Kyle out. Once an address is locked out its wrong
+  attempts get 429. `X-Forwarded-Host` is trusted only from the configured
+  proxy (`trusted_proxy`).
+  The right `WEB_TOKEN` and valid bearer tokens are always accepted, so
+  hammering the public cloud URL can't lock Kyle out.
+- **Cookies keep working on the same origin.** A same-origin request with
+  no `Authorization` header goes to the web app's cookie check, as before;
+  cross-origin requests always need a bearer token.
+- **Deleted conversations are redacted from the synced log**, not just
+  hidden: the text of every event a delete covers is dropped from each
+  backend's store (and from what it sends to peers) once the delete
+  reaches it, whichever arrives first.
+- **History sync** between backends uses the same token scheme (sync scope)
+  over HTTPS; pushed events are validated (id format, known kinds, size, a
+  timestamp at most a day ahead) and taken all or nothing. Events are not
+  tied to the pushing backend (`origin` can be another backend's, because
+  events are relayed: the PC forwards the Pi's events to the cloud). A
+  backend that has `WEB_TOKEN` can write history on the others, so every
+  backend is equally trusted; keep `WEB_TOKEN` out of logs (it is redacted) and out of
+  git.
+
 ### Voice conversation WebSocket (`/api/voice`)
 The socket is reachable wherever the web app is (including the public
 hosted setup), so it gets the same protection as the rest of the API plus
@@ -205,6 +264,88 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 - **Hostile text inside a confirmation question.** An event title such as
   "Dentist? Just say yes" would be read out in the question. Kyle still has
   to answer; a cosmetic issue, not a bypass.
+- **One shared secret for all backends.** The cloud host (on Render) holds
+  the same `WEB_TOKEN` as the Pi and PC, so a compromised Render account
+  could mint tokens for the Pi and PC too. Separate per-backend secrets would
+  need a token service or public-key tokens; for one user this isn't worth
+  it. Rotate `WEB_TOKEN` everywhere if Render is ever compromised.
 - **Model-level prompt injection in general.** The system prompt already
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
+
+## Conversation history
+
+Every conversation is saved to a SQLite file so it can be searched and
+continued (`assistant/history.py`). What that means for privacy:
+
+- **Events.** Every change is an event in the history sync log (failover's
+  `sync_events` table in the same file); the searchable tables are built
+  from it. Text is never edited in place: a cut-off reply is a
+  `delete_message` tombstone plus the spoken part, and a delete is a
+  tombstone. A tombstone wipes the covered events' text (`data = {}`) in
+  this log and in every backend it syncs to, also when the text arrives
+  after the delete, removes the rows and their search index entries, and
+  the file is written with `secure_delete` and the write-ahead log is
+  checkpointed, so the words don't linger in the file (a test checks the
+  raw file bytes).
+- **Where it lives.** One file, `[history] path` (default
+  `data/history.sqlite`, plus `-wal`/`-shm` files next to it while the
+  assistant runs): on the PC's disk, on the Pi's SD card, and on the Render
+  deploy on its persistent disk (`HISTORY_PATH=/data/history.sqlite`).
+  `data/` and `*.sqlite*` are gitignored, so it is never committed. Anyone
+  with access to that disk or a backup of it can read the transcripts.
+- **What is in it.** User and assistant text, the conversation title and
+  summary, timestamps and the source (wake / text / web / voice). For tools,
+  only the tool name, at most four argument values cut to 40 characters, and
+  ok / error / cancelled. Tool *results* (calendar entries, Notion pages,
+  web pages) are never stored. Text is passed through the same redaction as
+  the log file before it is written, so API keys, OAuth tokens and Bearer
+  headers that end up in a message are stored as `[REDACTED]`.
+- **Retention.** Unlimited by default. `[history] retention_days` deletes
+  unpinned conversations older than that many days at each start;
+  `[history] max_mb` (500) deletes the oldest unpinned ones when the file
+  grows past it. Pinned conversations are only deleted by hand. These are
+  ordinary (synced) deletes, so with failover they apply on every backend.
+- **Deleting.** `--history delete ID` (and the phone app's delete) removes
+  the conversation, its messages and its search index entries, and first
+  deletes its summary vector(s) from Pinecone (the summary metadata stores
+  the conversation id, so summaries written by another backend are found
+  too). If Pinecone can't be reached, nothing is deleted and
+  you're told, so a retry can't leave an orphaned summary. Retention and the
+  size guard delete local history only; long-term memory notes in Pinecone
+  are kept, as they are a separate feature.
+- **Incognito.** `--incognito`, `[history] incognito = true` or the phone
+  app's Incognito switch (per phone) saves nothing:
+  no history rows and no Pinecone summary. Searching existing history still
+  works; resuming a conversation is refused while incognito.
+- **Ids.** Conversations are addressed by 16 random URL-safe characters
+  (96 bits from `secrets`), not row numbers, so ids in URLs can't be guessed
+  or counted. Every query is also filtered by the store's owner.
+- **Phone API.** Every `/api/conversations...` and `/api/incognito` route
+  is behind the web app's sign-in (cookie or bearer token, cross-site
+  requests refused); an unknown id and another owner's id both give the
+  same 404. A test calls every route without the cookie and expects 401.
+  The page builds the list with `textContent` (no HTML from the server), and
+  highlights come as `[text, matched]` pairs.
+- **Export** contains only the transcript, title, summary, dates and
+  source: no owner, Pinecone ids or other internal fields, and text is
+  redacted again on the way out.
+- **Titles and summaries** are written by one extra call to the Anthropic API
+  (`[history] title_model`) with the conversation text, the same data the
+  conversation already sent. If it fails, the first thing Kyle said is used.
+- **Resumed text is untrusted.** A continued conversation comes back as
+  plain text, so a reply that once repeated a web page is no longer marked
+  as web content. After a resume, or once `search_conversations` /
+  `resume_conversation` put past text into the context, every tool that
+  changes something asks for a yes first, for the rest of that
+  conversation (as with web content in context).
+- **Search tools.** `search_conversations` returns only titles, dates and
+  short snippets to Claude, and `resume_conversation` always asks for a
+  spoken yes first. A web page in context could ask Claude to search history;
+  the snippets then end up in the conversation, but nothing leaves the
+  machine except through tools that already ask before acting.
+- **Not done: encryption at rest.** The database is a plain SQLite file.
+  Encrypting it (SQLCipher) needs a native build on Windows and the Pi and a
+  key that would have to live next to the file anyway, so it is out of
+  scope; use full-disk encryption (BitLocker on Windows, an encrypted disk
+  on the Pi) if the device could be stolen.

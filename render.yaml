@@ -44,6 +44,15 @@ services:
         value: /data
       - key: HISTORY_PATH
         value: /data/history.sqlite
+      # Pi -> PC -> cloud failover (FAILOVER.md). Leave ASSISTANT_ROLE empty
+      # for a cloud-only setup; set it to "cloud" to join. WEB_TOKEN must then
+      # be the same on the Pi and the PC (copy this service's value there).
+      - key: ASSISTANT_ROLE         # "cloud" or empty
+        sync: false
+      - key: APP_ORIGIN             # this service's URL, e.g. https://hey-claude.onrender.com
+        sync: false
+      - key: FAILOVER_BACKENDS      # e.g. pi=https://pi.tail1234.ts.net,pc=https://kyle-pc.tail1234.ts.net
+        sync: false
 
   - type: web
     name: pinecone-mcp

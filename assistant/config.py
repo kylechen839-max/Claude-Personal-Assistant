@@ -33,9 +33,18 @@ DEFAULTS: dict = {
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
-    "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
-            "fallback": "pyttsx3"},  # used when the Piper voice is missing
+    "tts": {
+        "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
+        "rate": 185, "voice": "",  # pyttsx3
+        "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
+        "fallback": "pyttsx3",  # used when no neural voice is there
+        "kokoro_voice": "af_heart",
+        "speed": 1.0,  # Kokoro and ElevenLabs
+        "kokoro_model": "models/kokoro/kokoro-v1.0.int8.onnx",
+        "kokoro_voices": "models/kokoro/voices-v1.0.bin",
+        "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
+        "elevenlabs_model": "eleven_flash_v2_5",
+    },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
@@ -73,6 +82,20 @@ DEFAULTS: dict = {
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
                "text_fields": ["text", "chunk_text", "content", "summary"]},
+    "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
+        "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
+        "app_origin": "",           # where the phone app is installed from
+        "backends": [],             # [{role, url}], highest priority first
+        "sync_interval": 30,        # seconds between history syncs
+    },
+    "history": {
+        "enabled": True,
+        "path": "data/history.sqlite",  # HISTORY_PATH overrides (cloud: /data/...)
+        "retention_days": 0,            # delete unpinned conversations older than this; 0 = keep
+        "max_mb": 500,                  # size guard: oldest unpinned go first; 0 = no limit
+        "incognito": False,             # true = save nothing (no history, no memory summary)
+        "title_model": "claude-haiku-5-5",  # fast model for titles and summaries
+    },
     "webapp": {
         "host": "127.0.0.1",        # only this computer; use tailscale serve
         "port": 8765,
@@ -163,6 +186,9 @@ ENV_OVERRIDES = {
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
     "GOOGLE_TOKEN": ("calendar", "token"),
     "PINECONE_INDEX": ("memory", "index"),
+    "ASSISTANT_ROLE": ("failover", "role"),
+    "APP_ORIGIN": ("failover", "app_origin"),
+    "HISTORY_PATH": ("history", "path"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
     "CLOUD_TRUSTED_PROXIES": ("cloud", "trusted_proxies"),  # comma-separated
@@ -230,6 +256,7 @@ _SECRET_PATTERNS = [
     re.compile(r"\bya29\.[\w.-]+"),             # Google access tokens
     re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
     re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
+    re.compile(r"\bhc1\.[\w.-]+"),             # failover access tokens
     # OAuth / API fields in JSON, dict reprs, form bodies and URLs
     re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
                r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"

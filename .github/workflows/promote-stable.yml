@@ -39,11 +39,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER: ${{ github.event.workflow_run.path }}
         run: |
           ok=true
           for wf in tests.yml pi-arm64.yml; do
-            c=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$SHA&event=push&per_page=1" \
-                  --jq '.workflow_runs[0].conclusion // "missing"')
+            # The run that triggered us already concluded success (job `if`);
+            # the API can still list it as unfinished for a few seconds.
+            if [ "$TRIGGER" = ".github/workflows/$wf" ]; then
+              echo "$wf: success (triggering run)"; continue
+            fi
+            c=missing
+            for attempt in 1 2 3 4 5 6; do
+              c=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$SHA&event=push&per_page=1" \
+                    --jq '.workflow_runs[0].conclusion // "missing"')
+              [ "$c" = missing ] || break
+              sleep 10
+            done
             echo "$wf: $c"
             [ "$c" = success ] || ok=false
           done

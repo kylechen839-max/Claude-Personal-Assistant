@@ -145,8 +145,9 @@ def test_login_sets_a_strict_cookie(make_app):
     for attr in ("httponly", "secure", "samesite=strict", "path=/"):
         assert attr in cookie
     assert TOKEN.lower() not in cookie  # the cookie is signed, not the token
-    assert client.get("/api/state").json() == {"busy": False, "confirm": None,
-                                                "turns": 0}
+    assert client.get("/api/state").json() == {
+        "busy": False, "confirm": None, "turns": 0, "incognito": False,
+        "history": False, "conversation": None}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -677,12 +678,14 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 # --- public server hardening -------------------------------------------------------
 
-PUBLIC = ["/", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest",
+PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz",
+          "/silence.wav", "/healthz", "/backend-router.js",
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
+          # the voice view's earcons (assistant/earcons.py)
+          "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js"]  # reloads the page after an update (host.py)
 
 
@@ -696,7 +699,7 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     private = [(r.path, m) for r in client.app.routes if isinstance(r, APIRoute)
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
-               and r.path != "/static/vad/{name}"
+               and r.path not in ("/static/vad/{name}", "/earcons/{name}.wav")
                and r.path not in ("/api/login", "/api/logout")]
     assert len(private) >= 5
     for path, method in private:
