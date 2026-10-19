@@ -283,3 +283,13 @@ Verdict: GO once B1 lands.
 
 ### LOW, non-blocking
 - With failover on and `[history]` disabled, there is no `sync_log`. The revocation not-before is then in memory only (`webapp.py:1003-1020`), so a restart forgets "sign out everywhere". Persist it locally, or require history when failover is on.
+
+## Cycle 4d: release commit, 2026-10-19 ~03:10 UTC
+
+- **Commit:** master 025d86d (v1.0.0 final; `stable` promoted).
+- **Reviewed:** 8685701..025d86d, the features privacy merge. Clean.
+  - `note_to_history` no longer stores the note text.
+  - `notes.json` is deleted only after the Notion page is filed (`lecture.py:741-744`).
+- **Tests:** 1422 passed, 48 skipped.
+- **Verdict:** GO confirmed.
+- **Next:** light checks every few hours, stopping if master doesn't change.
