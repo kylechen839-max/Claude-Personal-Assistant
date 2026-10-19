@@ -18,6 +18,11 @@ voices/
 
 # Runtime output
 logs/
+# Conversation history (personal data; see SECURITY.md)
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.wav
 !tests/fixtures/*.wav
 

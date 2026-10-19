@@ -23,7 +23,8 @@ DOCS = ["README.md", "MANUAL_TEST.md", "PI_MIGRATION.md"]
 OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--now", "--bg", "--https",  # + tailscale serve
                "--keep", "--ff-only", "--short", "--oneline"}  # git (updates)
-OTHER_IDENTIFIERS = {"open_in_browser"}  # tool names, not settings
+OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
+                     "resume_conversation"}  # tool names, not settings
 
 
 class _Captured(Exception):

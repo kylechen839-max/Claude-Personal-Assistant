@@ -33,6 +33,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
+| `test_history.py` | 67 | conversation history: store, search, resume, CLI |
+| `test_history_web.py` | 21 | history in the phone app (API, incognito, voice) |
+| `test_history_events.py` | 18 | history as sync events (skips without failover) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -476,6 +479,92 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   files are parsed by Windows PowerShell 5.1 and PSScriptAnalyzer in the
   Windows CI job. `tests/test_docs.py` also covers `PI_MIGRATION.md`, the
   preflight/smoke flags, step names and script paths.
+
+## Conversation history ✅
+- `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
+  `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
+  `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
+  source wake/text/web/voice, timestamps, title, summary, pinned, archived),
+  `messages` (seq, role, kind chat/confirm, text, interrupted, compact
+  `tool_events` JSON) and `memory_vectors` (Pinecone ids). FTS5 index over
+  messages, titles and summaries kept in sync by triggers, bm25 ranking
+  (titles weigh more), snippets with highlights, prefix matching, filler
+  words dropped, any-word fallback; LIKE search if FTS5 is missing.
+  Retention (`retention_days`) and a size guard (`max_mb`) skip pinned
+  conversations.
+- Recording: `ClaudeChat(recorder=...)` saves the user turn before calling
+  the API and the reply after, with spoken/typed delete confirmations
+  (question and the heard answer) and `mark_interrupted()` for barge-in.
+  `end_conversation()` hands the conversation to a background thread that
+  asks `[history] title_model` for a title (<= 6 words) and summary, with the
+  first user message as the fallback. Conversations left open by a crash are
+  titled at the next start. The Pinecone summary now stores
+  `conversation_id` in its metadata, and its vector id is kept for deletes.
+- Search: FTS ranked keyword hits, then Pinecone semantic hits that link to
+  a conversation; filters by date range, source, pinned, archived.
+- Continue: `rebuild_history()` turns stored messages into plain-text turns
+  (tool events and confirmations as text, interrupted replies noted),
+  trimmed to `max_history` with a summary of older turns first.
+  `ClaudeChat.resume(id)`; tools `search_conversations` (titles, dates,
+  snippets) and `resume_conversation` (asks "Continue '...' from Tuesday?",
+  switches after the reply; a conversation that was only the "continue..."
+  request is dropped, a real one is saved first).
+- CLI: `--history list|search|show|export|delete`, `--format md|json`,
+  filters `--source/--since/--until/--pinned`, `--yes`, `--continue ID|last`,
+  `--incognito`.
+- Tests (`test_history.py`): CRUD, owner scoping, id randomness, migrations
+  (upgrade, rollback, newer schema refused, FTS built later), a real crash
+  in a subprocess then reopen, FTS and LIKE ranking/snippets/filters (each
+  test runs on both), retention and size guard, titles with a mocked API and
+  the fallback, off-the-hot-path titling, recording through ClaudeChat
+  (tool events, confirmations, errors, interruptions, incognito), resume
+  rebuilding and trimming, the tools via mocked Claude tool calls (search,
+  resume yes/no, mid-conversation, unknown id), semantic merge, delete
+  cascading to a mocked Pinecone (and not deleting when Pinecone fails),
+  export redaction, and the CLI commands. Performance: 5,000 seeded
+  conversations (50,000 messages), median search under 100 ms (about
+  30-55 ms in the sandbox even on a tiny vocabulary where every word
+  matches most messages).
+- Events: every change is a failover sync `Event` (message, rename with
+  the auto title/summary or Kyle's title, pin with archived, delete,
+  delete_message for barge-in edits) recorded in failover's
+  `SqliteEventLog` in the same file; the tables above are a projection of
+  the log, written only by one idempotent `_apply()` used for local and
+  synced events (`HistoryStore.sync_log` is the EventLog to give the
+  Syncer). Last writer wins on title/summary/pin by (ts, id); tombstones
+  redact and purge the search index. Startup replays events after a saved
+  cursor, so a crash between the log and the tables heals. Without the
+  failover modules it runs standalone (nothing to sync).
+- Review fixes: resumed text and history tool results count as untrusted
+  (changes ask first); a turn whose API call fails takes its saved user
+  message back (a retry isn't saved twice); a title written in the
+  background after the conversation was resumed doesn't mark it ended.
+- For other features: `history.current_conversation_id()` (inside a turn)
+  and `history.record_event(conversation_id, kind, text)` add a note (e.g. a
+  lecture summary or quick capture) to a conversation, shown in its
+  transcript and search and passed to Claude when it's continued.
+- Phone app: `assistant/history_web.py` adds `GET /api/conversations`
+  (paginated, `q`, source/pinned/archived/date filters, highlight parts),
+  `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,
+  archive), `DELETE` (with the Pinecone cascade; also clears the
+  conversation from any open session), `GET .../export?format=md|json`, and
+  `GET/POST /api/incognito`, all behind the web sign-in. Push-to-talk turns
+  are saved as `web`, voice-mode turns (`chat_stream`) as `voice`, and a
+  barge-in keeps only the spoken part, flagged interrupted.
+  `assistant/web/history.js`: History screen (debounced search, day groups,
+  filter chips, swipe and long-press actions, transcript, Continue),
+  rename/delete dialogs, incognito switch and badge, light theme.
+- Tests: `test_history_web.py` (401 on every route, cross-site 403, id
+  guessing and other owners get 404, pagination, highlights, semantic hits,
+  filters, rename/pin/archive, delete cascade and failure, export, continue,
+  incognito, web and voice recording with barge-in) and
+  `test_history_events.py` (each change is an event, projection ==
+  `materialize(events)` over random operations, two-store sync in any
+  arrival order, late events under tombstones, last-writer-wins, startup
+  catch-up, no deleted text left in the database file). Driven in headless
+  Chromium at phone size, dark and light: search highlights, groups,
+  transcript, continue then a turn, pin filter, rename, delete dialog,
+  swipe, infinite scroll, incognito; no console errors.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

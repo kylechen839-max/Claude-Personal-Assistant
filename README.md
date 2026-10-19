@@ -92,7 +92,7 @@ talking and the `silence_ms` pause that tells it you're done; the last
 figure is the wait you notice. Run with `--timings` to see it on the
 console too.
 
-Things to try: "What's on my calendar tomorrow?", "Move my dentist
+Things to try: "What's on my calendar tomorrow?", "What did we talk about yesterday?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
 "Mark Homework 6 as done", "Delete the study group tomorrow",
 "What's the weather this afternoon?", "Who won the Braves game last night?",
@@ -105,6 +105,89 @@ your Anthropic account per search). "Open ..." requests open pages in this
 computer's default browser. Set `[web] location` in `config.toml` for local
 answers like the weather, and `allowed_domains` / `blocked_domains` to limit
 which sites are used. On a Raspberry Pi with no screen, set `browser = false`.
+
+## Conversation history
+
+Every conversation is saved: wake word and push-to-talk on the PC or Pi,
+text mode, the phone app's push-to-talk and its hands-free voice mode. You
+can search it and pick a conversation up later.
+
+**By voice or text:** "Hey Claude, what did we talk about yesterday?",
+"Find our conversation about the lab report", "Continue our conversation
+about the lab report". Claude searches your history and asks *"Continue
+'Lab report error bars' from Tuesday?"*; say yes and the old conversation
+is loaded, so "and what about standard deviation?" is answered in context.
+This works mid-conversation too (the current one is saved first).
+
+**On the phone:** the clock button at the top of the app opens History:
+a search bar (results update as you type, matching words highlighted),
+filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
+grouped by Today / Yesterday / This week / Older with a source icon, time
+and snippet. Swipe a row left for Pin / Rename / Delete, or long-press it
+(or tap its "..." button) for all actions including Archive and Export.
+Tap a conversation to read it; **Continue this conversation** loads it and
+returns to the chat, and the voice view continues it too (it uses the same
+conversation). Delete always asks first. **Incognito** in the settings
+menu (gear) stops saving for this phone until you turn it off; the header
+shows an "Incognito" badge meanwhile. It follows the phone's light or dark
+setting and works as a home-screen app on iOS.
+
+**From the command line:**
+
+| Command | What it does |
+|---|---|
+| `python -m assistant --history list` | Newest 50 conversations (id, date, source, title); add `--source wake`, `--since 2026-10-01`, `--until 2026-10-14`, `--pinned` |
+| `python -m assistant --history search lab report` | Ranked keyword search with the matching words highlighted (same filters) |
+| `python -m assistant --history show ID` | The whole transcript |
+| `python -m assistant --history export ID --format json` | Export as Markdown (`--format md`, default) or JSON, to the console; redirect with `> file.md` |
+| `python -m assistant --history delete ID` | Delete (asks first; `--yes` skips the question) |
+| `python -m assistant --mode text --continue ID` | Continue a conversation in text mode (`--continue last` for the most recent) |
+| `python -m assistant --incognito` | Save nothing this session: no history and no memory summary |
+
+**What is saved:** what you said and what Claude replied, as text, turn by
+turn as it happens (a crash or power cut loses at most the turn in
+progress), including spoken "yes/no" confirmations and replies you cut off
+(marked "interrupted"). For tool use only the tool name, a few short
+arguments and whether it worked are kept (e.g. "list calendar events, day =
+tomorrow, ok"), never the results, so calendar details or web pages are not
+copied into history. API keys and tokens are masked before saving. When a
+conversation ends, a fast model (`[history] title_model`, Haiku) writes a
+title of up to six words and a one or two sentence summary in the
+background, so replies never wait for it; if the API is unreachable, the
+first thing you said becomes the title.
+
+**Search:** keyword search uses SQLite full-text search (FTS5) over messages,
+titles and summaries, ranked by relevance, with prefix matching (typing
+"chem" finds "chemistry"); if your Python's SQLite lacks FTS5 it falls back
+to simpler matching. When Pinecone memory is on, the conversation's memory
+summary carries the conversation id, so a semantic match ("that thing about
+uncertainty in graphs") also links back to the full conversation. Searching
+5,000 conversations takes well under 100 ms.
+
+**Where it lives:** one SQLite file, `data/history.sqlite` (gitignored) on
+the PC's disk or the Pi's SD card; on the Render deploy the `HISTORY_PATH`
+environment variable points it at the persistent disk
+(`/data/history.sqlite`). Settings in `config.toml` `[history]`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `[history] enabled` | true | Save and search conversations |
+| `[history] path` | "data/history.sqlite" | Where the database file goes (`HISTORY_PATH` overrides) |
+| `[history] retention_days` | 0 | Delete unpinned conversations older than this; 0 = keep forever |
+| `[history] max_mb` | 500 | Size guard: above this, the oldest unpinned conversations are deleted |
+| `[history] incognito` | false | Never save (same as always passing `--incognito`) |
+| `[history] title_model` | "claude-haiku-5-5" | Model for titles and summaries |
+
+Deleting a conversation also deletes its memory summary in Pinecone.
+Privacy details are in SECURITY.md.
+
+**How it's stored:** every change (a message, a title, a pin, a delete) is
+an event in the history sync log (failover's event log, in the same file),
+and the searchable tables are built from those events. With the failover
+setup the Pi, the PC and the cloud exchange events, so all three show the
+same history, and a delete anywhere deletes everywhere (the deleted text is
+wiped from the log too). Retention and the size guard delete the same way,
+so they also apply on every backend.
 
 ## Settings
 
@@ -665,9 +748,12 @@ assistant/
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
+  history.py    conversation history: SQLite store, search, resume
+  history_cli.py  python -m assistant --history ...
   audio.py      wav I/O, resampling, chime
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
+  history_web.py  phone app history API (/api/conversations)
   voice_ws.py   voice conversation WebSocket (/api/voice)
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
@@ -678,7 +764,7 @@ assistant/
   host.py       home host supervisor: restarts, updates (python -m assistant.host)
   updater.py    safe update from the stable branch  (--update)
   version.py    git short SHA for /healthz
-  tools/        calendar.py, notion.py, web.py, tool registry
+  tools/        calendar.py, notion.py, web.py, history.py, tool registry
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

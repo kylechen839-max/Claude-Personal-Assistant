@@ -32,6 +32,10 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
+  for (const id of ["history-view", "transcript-view"]) {  // history.js
+    const el = $(id);
+    if (el) el.hidden = view !== id;
+  }
 }
 
 function addMessage(kind, text) {
@@ -187,7 +191,9 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    show("app");
+    const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
+    if (!elsewhere) show("app");
+    if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
