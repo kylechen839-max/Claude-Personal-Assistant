@@ -169,3 +169,48 @@ Possibly flaky, passing on rerun:
 | Mic index 0 | FIXED (`audio.resolve_mic_device`) |
 | pi-preflight cycle-1 #1-#4 | FIXED (`72da662`) |
 | history cycle-1 items | no new commits |
+
+## Cycle 3 — 2026-10-19 ~01:25-01:40 UTC (60-min cadence, HIGH/MED only)
+
+### Commits reviewed
+- **master:** ab27a4f..aa990bd (71 files, about 10.7k lines). This merged:
+  - pi-preflight (signed auto-updates, promote-stable)
+  - phone-web (sign-out ends voice, confirmations bound by id)
+  - cloud-host (Render, CloudGuard)
+  - history (on the shared event log)
+  - natural-voice (Kokoro, ElevenLabs, first-clause streaming)
+- **cloud-host, history, natural-voice, pi-preflight:** fully merged, nothing ahead of master.
+- **features 8d458cc:** not merged; reviewed on its branch.
+
+### Tests
+- **master aa990bd:** full suite green (`-x`, 0 failures).
+- **Updater signature tests:** the real-signature tests are skipped here because ssh-keygen isn't installed. CI must run them.
+
+### New findings
+**HIGH (conditional)**
+- master: promote-stable uses `STABLE_SIGNING_KEY` as a repository secret with no Environment, and the stable ruleset lets all of GitHub Actions bypass it. Any workflow pushed on any branch can sign and promote its own commit, so hosts with updates enabled would run it. Updates are off by default. Fix: an Environment limited to master with Kyle as reviewer, or Kyle's own key as the default.
+
+**MED**
+- master `updater.py:186-192`: OpenPGP/X.509 signatures are verified by gpg and bypass allowed_signers. Disable those programs or require an SSH signature.
+- master `voice_ws.py:176-203`: a race lets a voice socket opened during logout-all survive it. Re-check `store.valid` after inserting into live.
+- features `chat.py:181-188,283`: untrusted_memory resets every turn, so an injected instruction repeated by Claude runs unconfirmed in the next turn.
+- features `chat.py:202-204`: a summary of a conversation steered by a recalled untrusted note is stored as trusted.
+- features merge risk: chat.py and calendar.py were rewritten on both sides. The merge must keep untrusted_context, history-tool untrusted handling and the invite flag.
+- master (until features merges): summaries are stored and recalled with no untrusted flag.
+
+### Fix verification
+| Item | Status |
+|---|---|
+| Updater runs unverified `stable` (HIGH, cycle 2) | FIXED: mandatory fail-closed verify (`updater.py:176-194`), allowed_signers outside checkout, updates off by default, CI-gated promote via workflow_run/push/master; see new conditional HIGH on the CI key |
+| Updater config.toml stall / HEAD-move rollback / pip in live venv | FIXED |
+| Logout closes voice WS | FIXED (`webapp.py:1230-1258`), race MED above |
+| Confirmations bound by id; limiter bounded | FIXED |
+| cloud-host login slot pool | FIXED: own pool (2/addr, 8 total, 2 s, /56); signed-in requests unaffected |
+| cloud-host × failover EdgeMiddleware.state | PARTLY: build_app fails fast without WebAuth; hc1/sync routes pending failover merge |
+| Container non-root / no secrets / 0.0.0.0 only in server profile | OK |
+| History: resume untrusted flag | FIXED (`chat.py:194-195,224-225,258-259`) |
+| History: auth/CSRF/delete confirm/FTS/XSS/purge (marker absent from db, -wal and -shm) | OK |
+| Event log redaction left in WAL | FIXED (secure_delete + checkpoint TRUNCATE) |
+| features organizer.self | FIXED on branch (flag unless `self is True`, plus eventType/guestsCanModify) |
+| features untrusted note mark | PARTLY on branch (written and honored, but per-turn only; see MED) |
+| natural-voice: key handling, opt-in cloud, pinned Kokoro hashes, confirm question unsplit | OK |
