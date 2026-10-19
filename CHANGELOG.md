@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 (2026-10-19)
+
+- Failover with history turned off now remembers "Sign out everywhere"
+  across restarts (saved in `[webapp] sessions_file`).
+
 ## 1.0.0 (2026-10-19)
 
 The first full release: the voice assistant from the seven original stages,

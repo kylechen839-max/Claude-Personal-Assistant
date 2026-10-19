@@ -50,8 +50,8 @@ All paths are relative to the project folder unless noted. On Render the
   `WEB_TOKEN` in `.env` (that also cuts off Shortcuts and other bearer clients).
   With failover on, "Sign out everywhere" also signs out every phone's
   access token on all backends that sync history; one that is off applies it
-  on its next sync. A backend with history turned off only signs out itself,
-  so there change `WEB_TOKEN`. Clients that use `WEB_TOKEN` itself are cut
+  on its next sync. A backend with history turned off only signs out itself
+  (it remembers that across restarts); to cover it too, change `WEB_TOKEN` there. Clients that use `WEB_TOKEN` itself are cut
   off only by changing it.
 - **Stop Gmail access:** set `[gmail] enabled = false` and revoke the app at
   myaccount.google.com/permissions.
