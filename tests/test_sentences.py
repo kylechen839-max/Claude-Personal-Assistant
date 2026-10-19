@@ -43,7 +43,7 @@ def test_token_by_token_matches_whole_text():
     text = ("Tomorrow you have three things. Dentist at 9:30 a.m. with Dr. Patel, "
             "then lunch with Sam at noon. Finally, the U.S. history essay is due "
             "at 11:59 PM. Want me to move anything?")
-    s = SentenceSplitter()
+    s = SentenceSplitter(first_clause_words=0)
     out = []
     for i in range(0, len(text), 3):
         out += s.feed(text[i:i + 3])
@@ -63,3 +63,28 @@ def test_long_run_is_cut_at_a_comma():
 
 def test_punctuation_only_is_dropped():
     assert split_sentences("... !") == []
+
+
+def test_first_piece_ends_at_a_clause_for_faster_first_audio():
+    """Voice mode: the reply's first piece also ends at a comma, semicolon or
+    dash once it has 4+ words, so the first audio renders sooner."""
+    s = SentenceSplitter()
+    out = []
+    for ch in "Tomorrow you have the dentist at three thirty, and after that you're free. Then lunch, with Sam.":
+        out += s.feed(ch)
+    out += s.flush()
+    assert out == ["Tomorrow you have the dentist at three thirty,",
+                   "and after that you're free.", "Then lunch, with Sam."]  # first piece only
+    for text, first in [
+            ("Sure, I can do that. Okay.", "Sure, I can do that."),  # < 4 words before
+            ("It costs 3,000 dollars, which is a lot.", "It costs 3,000 dollars,"),
+            ("Your meetings are at 9, 10, and 11 tomorrow.",
+             "Your meetings are at 9, 10, and 11 tomorrow."),  # a list of numbers
+            ("Well — the forecast says rain all day; bring a coat.",
+             "Well — the forecast says rain all day;"),
+            ("The forecast for today - rain, mostly.", "The forecast for today -")]:
+        s = SentenceSplitter()
+        assert (s.feed(text) + s.flush())[0] == first, text
+    s = SentenceSplitter(first_clause_words=0)
+    assert s.feed("Tomorrow you have the dentist at three thirty, and then. X") == [
+        "Tomorrow you have the dentist at three thirty, and then."]

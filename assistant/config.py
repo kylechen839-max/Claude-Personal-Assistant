@@ -33,9 +33,18 @@ DEFAULTS: dict = {
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
     },
-    "tts": {"engine": "pyttsx3", "rate": 185, "voice": "",
-            "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
-            "fallback": "pyttsx3"},  # used when the Piper voice is missing
+    "tts": {
+        "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
+        "rate": 185, "voice": "",  # pyttsx3
+        "piper_voice": "",  # .onnx path; its .onnx.json sits beside it
+        "fallback": "pyttsx3",  # used when no neural voice is there
+        "kokoro_voice": "af_heart",
+        "speed": 1.0,  # Kokoro and ElevenLabs
+        "kokoro_model": "models/kokoro/kokoro-v1.0.int8.onnx",
+        "kokoro_voices": "models/kokoro/voices-v1.0.bin",
+        "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
+        "elevenlabs_model": "eleven_flash_v2_5",
+    },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)

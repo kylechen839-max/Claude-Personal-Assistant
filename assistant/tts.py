@@ -1,18 +1,23 @@
 """Text to speech behind a small interface so engines can be swapped.
 
 Every engine implements `speak(text)` and `save_to_file(text, path)`.
-Pick one with `make_tts(name)`: "pyttsx3" (offline, default), "piper"
-(offline neural voice, great on a Raspberry Pi), "espeak" (the espeak-ng
-command, for servers) or "print" (no audio). If Piper's voice file is
-missing, make_tts warns and falls back to `fallback` (pyttsx3 by default).
+Pick one with `make_tts(name)`: "auto" (default: the best voice whose
+files are present), "kokoro" (most natural, assistant/tts_kokoro.py),
+"piper" (offline neural voice, great on a Raspberry Pi), "pyttsx3" (the OS
+voice), "espeak" (the espeak-ng command, for servers), "elevenlabs"
+(optional paid cloud voice, assistant/tts_elevenlabs.py) or "print" (no
+audio). A missing voice falls back down that list (Kokoro -> Piper ->
+`fallback`, pyttsx3 by default) with one log line saying why.
 
-Download a Piper voice: python -m assistant.tts --download-voice en_US-lessac-medium
+Download voices: python -m assistant --download-voice kokoro
+                 python -m assistant --download-voice en_US-lessac-medium
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -131,6 +136,10 @@ class PiperTTS:
         self._voice = None
         self.on_audio_start = None
 
+    def warm_up(self) -> None:
+        """Load the voice now rather than on the first reply."""
+        self.synthesize("Hello.")
+
     @property
     def voice(self):
         if self._voice is None:
@@ -229,17 +238,81 @@ def piper_voice_problem(voice: str | Path | None) -> str | None:
     return None
 
 
-def make_tts(name: str = "pyttsx3", **options) -> TTS:
-    name = name.lower()
-    if name == "piper":
-        # piper_model is the old name of piper_voice
-        voice = options.get("piper_voice") or options.get("piper_model")
-        problem = piper_voice_problem(voice)
+def _is_pi_class() -> bool:
+    """ARM Linux (Raspberry Pi): Kokoro is too slow there, Piper is preferred."""
+    import platform
+
+    return sys.platform.startswith("linux") and platform.machine().lower() in (
+        "aarch64", "arm64", "armv7l")
+
+
+def make_tts(name: str = "auto", **options) -> TTS:
+    """The engine `name`, or the next one down Kokoro -> Piper -> pyttsx3 if
+    its files are missing (one log line says why)."""
+    from assistant import tts_kokoro
+
+    name = (name or "auto").lower()
+    piper_voice = options.get("piper_voice") or options.get("piper_model")
+    kokoro_model = options.get("kokoro_model") or (
+        tts_kokoro.DEFAULT_DIR / tts_kokoro.VARIANTS["int8"])
+    kokoro_voices = options.get("kokoro_voices") or (
+        tts_kokoro.DEFAULT_DIR / tts_kokoro.VOICES_FILE)
+
+    def kokoro():
+        return tts_kokoro.KokoroTTS(kokoro_model, kokoro_voices,
+                                    voice=options.get("kokoro_voice") or "",
+                                    speed=options.get("speed") or 1.0)
+
+    def pyttsx3():
+        return Pyttsx3TTS(rate=options.get("rate", 185), voice=options.get("voice"))
+
+    # the last resort: pyttsx3, or espeak on a server (the server profile)
+    fallback_name = (options.get("fallback") or "pyttsx3").lower()
+    if fallback_name not in ("pyttsx3", "espeak", "print"):
+        fallback_name = "pyttsx3"
+
+    def local():
+        """auto: the best local voice that is set up."""
+        k = tts_kokoro.kokoro_problem(kokoro_model, kokoro_voices)
+        p = piper_voice_problem(piper_voice)
+        if k is None and (p is not None or not _is_pi_class()):
+            log.info("TTS: Kokoro (%s)", kokoro_model)
+            return kokoro()
+        if p is None:
+            log.info("TTS: Piper (%s)%s", piper_voice,
+                     "" if k else "; Kokoro is slow on ARM, so Piper is preferred")
+            return PiperTTS(piper_voice)
+        log.info("TTS: %s; no Kokoro (%s) and no Piper voice (%s). For a "
+                 "natural voice: python -m assistant --download-voice kokoro",
+                 fallback_name, k, p)
+        return make_tts(fallback_name, **options)
+
+    if name == "elevenlabs":
+        from assistant import tts_elevenlabs
+
+        fallback = local()
+        if not os.environ.get(tts_elevenlabs.KEY_ENV):
+            log.warning("TTS: engine is elevenlabs but %s is not set; using "
+                        "the local voice", tts_elevenlabs.KEY_ENV)
+            return fallback
+        return tts_elevenlabs.ElevenLabsTTS(
+            fallback, voice_id=options.get("elevenlabs_voice") or "",
+            model=options.get("elevenlabs_model") or "",
+            speed=options.get("speed") or 1.0)
+    if name == "auto":
+        return local()
+    if name == "kokoro":
+        problem = tts_kokoro.kokoro_problem(kokoro_model, kokoro_voices)
         if problem is None:
-            return PiperTTS(voice)
-        name = (options.get("fallback") or "pyttsx3").lower()
-        if name == "piper":
-            name = "pyttsx3"
+            return kokoro()
+        log.warning("Kokoro unavailable (%s), using the next voice. Download "
+                    "it with: python -m assistant --download-voice kokoro", problem)
+        name = "piper"
+    if name == "piper":
+        problem = piper_voice_problem(piper_voice)
+        if problem is None:
+            return PiperTTS(piper_voice)
+        name = fallback_name
         log.warning("Piper voice unavailable, using %s instead: %s. "
                     "Download one with: python -m assistant.tts "
                     "--download-voice %s", name, problem, DEFAULT_PIPER_VOICE)
@@ -250,10 +323,13 @@ def make_tts(name: str = "pyttsx3", **options) -> TTS:
             log.error("%s; replies will have no audio", e)
             return PrintTTS()
     if name == "pyttsx3":
-        return Pyttsx3TTS(rate=options.get("rate", 185), voice=options.get("voice"))
+        return pyttsx3()
     if name == "print":
         return PrintTTS()
     raise ValueError(f"Unknown TTS engine: {name}")
+
+
+ENGINES = ("auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs", "print")
 
 
 # Official Piper voices: https://huggingface.co/rhasspy/piper-voices

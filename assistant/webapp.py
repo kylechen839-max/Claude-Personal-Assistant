@@ -69,6 +69,7 @@ MIN_TOKEN_LENGTH = 32
 PC_ONLY_TOOLS = {"open_in_browser"}
 
 # 'wasm-unsafe-eval': the voice view runs the Silero VAD in WebAssembly.
+EARCONS = ("listening", "thinking", "ended")  # assistant/earcons.py
 CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
@@ -588,6 +589,9 @@ class WebAssistant:
         # thread, so all rendering happens in one dedicated thread.
         self._tts_pool = ThreadPoolExecutor(1, thread_name_prefix="web-tts",
                                             initializer=_init_com)
+        if callable(getattr(tts, "warm_up", None)):
+            # load the voice model now, so the first reply isn't the slow one
+            self._tts_pool.submit(_warm_up, tts)
 
     # sessions
     def session(self, sid: str) -> Session:
@@ -888,6 +892,16 @@ def _init_com() -> None:
         pass
 
 
+def _warm_up(tts) -> None:
+    started = time.perf_counter()
+    try:
+        tts.warm_up()
+        log.info("TTS %s warmed up in %.2f s", type(tts).__name__,
+                 time.perf_counter() - started)
+    except Exception:
+        log.exception("TTS warm-up failed")
+
+
 def render_wav(tts, text: str, attempts: int = 3) -> bytes:
     """Render `text` with the TTS engine to WAV bytes (retries an empty file,
     which eSpeak occasionally writes)."""
@@ -1159,6 +1173,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         buf = io.BytesIO()
         audio.write_wav(buf, audio.silence(0.05))
         return Response(buf.getvalue(), media_type="audio/wav")
+
+    @app.get("/earcons/{name}.wav")
+    def earcon(name: str):
+        """The voice view's soft listening / thinking / ended sounds."""
+        if name not in EARCONS:
+            return error("not found", 404)
+        return FileResponse(STATIC / "earcons" / f"{name}.wav", media_type="audio/wav",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     from assistant.version import version
 

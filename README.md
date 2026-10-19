@@ -8,7 +8,7 @@ conversations in Pinecone.
 ```
 mic -> openWakeWord wake word -> chime -> record until silence (VAD)
     -> faster-whisper (speech to text) -> Claude (+ tools, + memory)
-    -> pyttsx3 / Piper (text to speech) -> speaker
+    -> Kokoro / Piper / pyttsx3 (text to speech) -> speaker
 ```
 
 ## Quick start (Windows 11, PowerShell)
@@ -58,7 +58,8 @@ which), so you can start with only the Anthropic key in text mode.
 | `--mode speak` | Type, replies spoken |
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
 | `--audio-file f.wav` | Wake mode on a recording instead of the mic, then exit |
-| `--tts print` | No audio output (prints what it would say) |
+| `--tts print` | No audio output (prints what it would say); also `kokoro`, `piper`, `pyttsx3`, `elevenlabs`, `auto` |
+| `--download-voice kokoro` | Download a voice at setup time, then exit (see "Voices") |
 | `--timings` | Also print each turn's latency summary (always in the log) |
 | `--keyword-path f.onnx` | Override the wake-word model |
 | `--config other.toml` | Use a different settings file |
@@ -205,51 +206,92 @@ you are most likely to tune:
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
 | `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
-| `[tts] engine` | "pyttsx3" | "pyttsx3", "piper" or "print" |
+| `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
+| `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
+| `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
 
-### Better voice: Piper
+### Voices
 
-The default voice is pyttsx3 (the OS voice: SAPI5 on Windows, eSpeak on the
-Pi). [Piper](https://github.com/OHF-Voice/piper1-gpl) is an offline neural
-voice that sounds far more natural and is fast enough for a Pi 4/5. It is
-installed by `requirements.txt` (`piper-tts`); you only need to download a
-voice once (about 60 MB, from the official
-[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) repo):
+With `[tts] engine = "auto"` (the default) the assistant uses the best voice
+you have downloaded, and logs one line saying which and why:
+
+1. **Kokoro** (most natural; [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M),
+   Apache-2.0, run by the `kokoro-onnx` package). The default voice was
+   picked to be close to the calm, warm feel of the Claude app's voice
+   conversations (the app's own voices aren't available outside it). About
+   120 MB: the int8 model (88 MB) and the voice pack (28 MB). Needs Python
+   3.11+ (it relies on onnxruntime 1.25+, which has no 3.10 build); on 3.10
+   "auto" uses Piper.
+2. **Piper** (fast neural voice, the best choice on a Raspberry Pi; about 60 MB).
+3. **pyttsx3** (the OS voice: SAPI5 on Windows, eSpeak on Linux), always there.
+
+Download them once, at setup (never while answering). Each Kokoro file's
+SHA-256 is checked, and a bad download is deleted:
 
 ```powershell
-# Windows (PowerShell, venv active) - same command on the Pi
-python -m assistant.tts --download-voice en_US-lessac-medium
+python -m assistant --download-voice kokoro                # into models/kokoro/
+python -m assistant --download-voice en_US-lessac-medium   # Piper, into voices/
 python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
 ```
 
-That saves `voices/en_US-lessac-medium.onnx` and its `.onnx.json` (the
-`voices/` folder is not committed). Then switch the engine in `config.toml`:
+`models/` and `voices/` are not committed. On a Raspberry Pi, "auto"
+prefers Piper even if Kokoro is there, because Kokoro is several times
+slower on ARM (PROGRESS.md has the numbers). `--check` shows which voice
+is in use.
+
+**Switching voices.** In `config.toml`:
 
 ```toml
 [tts]
-engine = "piper"
-piper_voice = "voices/en_US-lessac-medium.onnx"
+engine = "auto"            # or "kokoro" / "piper" / "pyttsx3" to force one
+kokoro_voice = "af_heart"  # the default
+speed = 1.0                # 0.9 = a little slower and calmer
 ```
 
-To go back, set `engine = "pyttsx3"`. If the voice file is missing, the
-assistant logs a warning and uses pyttsx3 instead of crashing. Other voices:
-pick a name from the voices repo (e.g. `en_US-amy-medium`,
-`en_GB-alan-medium`); `-low` voices are faster on an older Pi. `--tts piper`
-on the command line tries Piper for one run without editing the config.
-`[tts] rate` and `voice` apply to pyttsx3 only.
+| Kokoro voice | Sounds like |
+|---|---|
+| `af_heart` (default) | American, female: warm, calm, the most natural of the set |
+| `af_bella` | American, female: brighter and more animated |
+| `bf_emma` | British, female: soft and composed |
+| `am_michael` | American, male: relaxed, low |
+| `af_nicole`, `af_sarah`, `bm_george`, `bm_lewis`, ... | the rest of the voice pack (`am_`/`bm_` = male, `bf_` = British female) |
+
+A Kokoro voice name that doesn't exist logs a warning and uses `af_heart`.
+If a forced engine's files are missing, it falls back down the list (Kokoro
+-> Piper -> pyttsx3) with a warning instead of crashing. For Piper, set
+`piper_voice` to another voice from
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (e.g.
+`en_US-amy-medium`). `[tts] rate` and `voice` apply to pyttsx3 only. `--tts
+kokoro` on the command line tries an engine for one run.
+
+**Optional cloud voice: ElevenLabs (paid).** Put `ELEVENLABS_API_KEY=...` in
+`.env` and set `[tts] engine = "elevenlabs"` (optionally `elevenlabs_voice`,
+a voice ID from your ElevenLabs library; the default is the premade
+"Rachel", and `elevenlabs_model` is `eleven_flash_v2_5`, its fastest). Every
+sentence goes to ElevenLabs' servers and counts against your plan. Each one
+is streamed with a timeout; if the request fails (network, quota, a bad
+key) that sentence is spoken by the local voice above, and the cloud is
+skipped for a minute. Without the key the local voice is used. The key is
+never logged.
+
+**Sounds.** Voice mode on the phone plays three soft cues: a gentle two-note
+rise when it starts listening, a very quiet low note when your turn has
+been heard ("thinking"), and a falling pair when the conversation ends. The
+desktop wake chime uses the same listening sound. They are original
+sine-wave sounds generated by `assistant/earcons.py` (`python -m
+assistant.earcons` rewrites `assistant/web/earcons/*.wav`).
 
 ## Phone web app
 
 `python -m assistant --mode web` runs the same assistant (Calendar, Notion,
 memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
-asks Claude, and sends back the reply as text and audio (Piper if
-`[tts] engine = "piper"`, else pyttsx3; or tick "Use the phone's voice" in
-the page's settings). Hold the big mic button to talk (or tap once to start
+asks Claude, and sends back the reply as text and audio (in the voice from
+[Voices](#voices); or tick "Use the phone's voice" in the page's settings). Hold the big mic button to talk (or tap once to start
 and again to stop), or type. When Claude wants to delete something, Yes/No
 buttons appear; saying "yes" into the mic works too. Each phone/browser
 gets its own conversation; after `[assistant] conversation_timeout` (5
@@ -393,8 +435,9 @@ Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
 ignored), `max_utterance_s` (30), `max_session_minutes` (30) and
 `utterances_per_minute` (30); a yes/no question waits `[webapp]
 confirm_timeout`. Voice and push-to-talk share this phone's conversation.
-For the most natural voice set `[tts] engine = "piper"`; with pyttsx3 on
-Linux it uses eSpeak directly.
+Replies use the voice from [Voices](#voices) (Kokoro once downloaded),
+rendered sentence by sentence so the first one plays while the rest are
+made; the model is warmed up when the server starts.
 
 ## Run it in the cloud (Render)
 
@@ -507,7 +550,7 @@ the Pi's host name or IP):
 
 ```powershell
 scp .env credentials.json token.json pi@raspberrypi:~/hey-claude/
-scp -r voices pi@raspberrypi:~/hey-claude/   # only if you use Piper
+scp -r voices pi@raspberrypi:~/hey-claude/   # the Piper voice, if you have it
 ```
 
 Or type the keys into `nano .env` on the Pi. The "Hey Claude" wake-word
@@ -532,7 +575,7 @@ fail to load; that's expected). This needs `credentials.json` on the Pi.
 `--check` prints which keys are set (never their values), whether
 `credentials.json`, `token.json` and the wake-word model exist, the audio
 devices with their index numbers, whether the Whisper model is cached, and,
-with `[tts] engine = "piper"`, whether the Piper voice is there.
+which voice will speak (Kokoro, Piper or pyttsx3).
 It exits with 1 if something required is missing.
 
 `install_service.sh` installs `deploy/hey-claude.service` as a systemd
@@ -550,10 +593,11 @@ systemctl --user restart hey-claude     # after changing .env or config.toml
 
 **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
 (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
-`.venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium` on
-the Pi (or copy `voices/` from your PC) and set `[tts] engine = "piper"`, as
-in [Better voice: Piper](#better-voice-piper). Without the voice file the
-assistant falls back to eSpeak.
+`.venv/bin/python -m assistant --download-voice en_US-lessac-medium` on
+the Pi (or copy `voices/` from your PC); `[tts] engine = "auto"` then uses
+it (see [Voices](#voices)). Kokoro also installs on a Pi but takes well over
+a second per sentence there, so "auto" keeps Piper on ARM. Without a voice
+file the assistant falls back to eSpeak.
 
 **Speed:** set `[stt] model = "tiny.en"` in `config.toml` if `base.en` feels
 slow. On a Pi with no screen, set `[web] browser = false`.
@@ -830,13 +874,16 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
-  tts.py        TTS interface: pyttsx3, Piper, espeak-ng, print; voice download
+  tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
+  tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
+  tts_elevenlabs.py  optional ElevenLabs cloud voice
+  earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   history.py    conversation history: SQLite store, search, resume
   history_cli.py  python -m assistant --history ...
-  audio.py      wav I/O, resampling, chime
+  audio.py      wav I/O, resampling, chimes
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
   history_web.py  phone app history API (/api/conversations)
@@ -845,7 +892,8 @@ assistant/
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
   web/          the page: index.html, app.js, app.css, sw.js; voice.js,
-                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored)
+                voice-core.js, voice-worklet.js, voice.css; vad/ (vendored);
+                earcons/ (generated by earcons.py)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   host.py       home host supervisor: restarts, updates (python -m assistant.host)

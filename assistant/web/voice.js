@@ -91,6 +91,35 @@
     },
   };
 
+  // --- earcons: soft original cues made by assistant/earcons.py, served locally ---
+  const earcons = {
+    buffers: {},
+    load() {
+      for (const name of ["listening", "thinking", "ended"]) {
+        if (this.buffers[name]) continue;
+        fetch(`/earcons/${name}.wav`, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
+          .then((data) => ctx.decodeAudioData(data))
+          .then((buffer) => { this.buffers[name] = buffer; })
+          .catch(() => { /* no cue then; never blocks the conversation */ });
+      }
+    },
+    play(name) {
+      const buffer = this.buffers[name];
+      if (!ctx || !buffer) return;
+      const node = ctx.createBufferSource();
+      node.buffer = buffer;
+      node.connect(ctx.destination); // not outGain: the orb shows only the voice
+      node.start();
+    },
+    // listening when the mic first opens (or after a pause), thinking once
+    // your turn is sent; the ended cue is played by finish().
+    onState(prev, state) {
+      if (state === "listening" && (prev === "connecting" || prev === "paused")) this.play("listening");
+      else if (state === "thinking" && prev === "listening") this.play("thinking");
+    },
+  };
+
   // --- timings (debug panel) ---
   function mark(name, turn, offsetMs = 0) {
     if (turn === null || turn === undefined) return;
@@ -127,7 +156,9 @@
 
   // --- UI ---
   function setState(state) {
+    const prev = ui.view.dataset.state;
     ui.view.dataset.state = state;
+    if (prev !== state) earcons.onState(prev, state);
     ui.state.textContent = LABELS[state] || state;
     if (endpointer) endpointer.strict = state === "speaking";
     if (state === "thinking" || state === "listening") ui.resume.hidden = true;
@@ -309,6 +340,7 @@
     unlock.buffer = ctx.createBuffer(1, 1, 22050);
     unlock.connect(ctx.destination);
     unlock.start();
+    earcons.load();
     let micPromise;
     try {
       micPromise = navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true,
@@ -380,6 +412,7 @@
     generation++;
     if (controller && controller.state !== "ended") controller.end();
     playback.stop();
+    earcons.play("ended");
     if (ws) { try { ws.close(1000); } catch (e) { /* closed */ } ws = null; }
     if (capture) { capture.port.onmessage = null; capture.disconnect(); capture = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
