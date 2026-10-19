@@ -3,7 +3,7 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1438 passed, 44 skipped (Linux build sandbox,
+**Current test count:** 1439 passed, 44 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak or PortAudio, so 25
 audio tests failed or errored there, as before this change), plus 37
 JavaScript tests (node:test: `voice-core.test.js` and
@@ -57,7 +57,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 31 | dev team dashboard page, skill writes, watchdog prompt |
+| `test_agent_dashboard.py` | 32 | dev team dashboard page, skill writes, watchdog prompt |
 | `tests/js/agent-dashboard.test.mjs` | 25 | dev team dashboard: the page's own script in node:vm (states, links, text only, error codes) |
 
 ## Stage 1 - Core chat ✅
@@ -914,31 +914,37 @@ is not part of the assistant and loads nothing from it.
 - `tools/agent-dashboard/WATCHDOG.md`: an hourly trigger in a session with
   the repo attached (a session without it stalled on the ArtifactData
   permission prompt) that checks each live run's session and marks dead
-  ones, with one push each. An idle session counts as dead only past the
+  ones. An idle session counts as dead only past the
   page's threshold for the row's phase (failed or archived at once), so a
   master waiting on a long build round isn't marked dead. It records the
-  session's status bucket in `watch` whenever it changes and pushes once
-  per new approval prompt.
+  session's status bucket in `watch` whenever it changes. It pushes at
+  most once per session per check (piece rows share the master's
+  session), naming every affected piece, on a death or a new approval
+  prompt.
 - `.claude/skills/build-feature/SKILL.md`: the master writes the row at
   start, research, each build and judge round, PR ready (before the ✅
   push), blocked (before the ⛔ push) and done (when the CI watch reports
   the PR merged or closed, since Kyle merges in the GitHub UI). A run split
   into pieces has one row per piece (`run_id-<piece-slug>`, own
-  `if_version` chain and limits). It now has time limits
-  (started 10 min, researching 30, building 75 and judging 30 per round,
-  5 h a run) and stops with a blocker when one runs out.
+  `if_version` chain and limits), set with every start field (piece name,
+  piece branch, the shared session_url, its own times, round 0). It now
+  has time limits (started 10 min, researching 30, building 75 and
+  judging 30 per round, 5 h a run) and stops with a blocker when one runs out.
 - Checked in headless Chromium at iPhone size, light and dark, with a fake
   db: sorting, counts, silent and dead rows, a row with markup in its
   title (shown as text), bad link values (no link), rows with missing or
   wrong-typed fields ("?"), the unavailable and revoked error paths, and
   no db at all. No console errors.
-- Tests: `test_agent_dashboard.py` (31: page contract, no markup sinks
+- Tests: `test_agent_dashboard.py` (32: page contract, no markup sinks
   (incl. `createContextualFragment`, `DOMParser`, `srcdoc`) or writes, no
   external loads, both dark selectors, every schema phase, exactly the 4
   README threshold rows, the two link prefixes, every phase write in the
-  skill, done on merge/close, one row per piece, no dangling step
-  references, the watchdog prompt and its per-phase idle thresholds and
-  bucket tracking, and a runner for the JS tests).
+  skill, done on merge/close, one row per piece with every start field,
+  no dangling step references (§2 sends an approved piece to §3), the
+  watchdog prompt and its per-phase idle thresholds, bucket tracking and
+  one push per session, and a runner for the JS tests that asks for the
+  TAP reporter, accepts the spec reporter's `ℹ pass`, and drops reporter
+  flags from NODE_OPTIONS so Node 23+ and a spec override still pass).
   `tests/js/agent-dashboard.test.mjs` (25) runs the page's own `<script>`
   in node:vm with a fake document, fake `window.claude.use("db")` and
   fake timers: silent at each phase limit ±1 min, missing/unreadable/future

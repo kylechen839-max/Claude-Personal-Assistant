@@ -2,6 +2,7 @@
 claude.ai page contract and treats rows as untrusted; the master skill
 writes every phase."""
 
+import os
 import re
 import shutil
 import subprocess
@@ -126,13 +127,29 @@ def test_watchdog_tracks_the_bucket_and_pushes_only_on_a_new_block():
     assert "Push only when the new bucket is BLOCKED" in flat
 
 
+def test_watchdog_pushes_once_per_session_not_per_row():
+    """Piece rows share the master's session_url: one push per session."""
+    flat = " ".join((DASH / "WATCHDOG.md").read_text(encoding="utf-8").split("```")[1].split())
+    assert "at most one PushNotification per session per check" in flat
+    assert "naming every affected feature" in flat
+    assert "push per row" not in flat
+    assert "Send one PushNotification" not in flat
+
+
 @pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
 def test_page_logic_in_node():
     """tests/js/agent-dashboard.test.mjs runs the page's script in node:vm."""
-    result = subprocess.run(["node", "--test", "tests/js/agent-dashboard.test.mjs"], cwd=ROOT,
-                            capture_output=True, text=True, timeout=120)
+    # Node 23+ defaults to the spec reporter ("ℹ pass 25"); ask for TAP and
+    # accept either prefix. Reporters from NODE_OPTIONS add to ours and node
+    # then refuses two reporters without destinations, so drop those there.
+    env = dict(os.environ)
+    env["NODE_OPTIONS"] = re.sub(r"--test-reporter(-destination)?(=|\s+)\S+", "",
+                                 env.get("NODE_OPTIONS", ""))
+    result = subprocess.run(["node", "--test", "--test-reporter=tap",
+                             "tests/js/agent-dashboard.test.mjs"], cwd=ROOT, env=env,
+                            capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert re.search(r"^# pass [1-9]\d*$", result.stdout, re.M), result.stdout
+    assert re.search(r"^(#|ℹ) pass [1-9]\d*$", result.stdout, re.M), result.stdout
 
 
 def test_page_links_only_to_allowed_prefixes():
@@ -163,6 +180,16 @@ def test_skill_retires_rows_and_has_no_dangling_steps():
     assert "reported merged or closed" in flat
     # Parallel pieces: one row each.
     assert "-<piece-slug>" in skill
+    # A piece row is a full set: it names every field §0 step 4 writes.
+    piece = flat.split("When you split,", 1)[1].split("the piece rows take over", 1)[0]
+    for field in ("§0 step 4", "`feature` = the piece name", "`branch` = the piece's branch",
+                  "same `session_url`", "`started_at`", "`updated_at`",
+                  '`phase: "started"`', "`round: 0`"):
+        assert field in piece, field
+    # §2 sends an approved piece on to §3, not to its own step 3.
+    section2 = skill.split("## 2.", 1)[1].split("## 3.", 1)[0]
+    assert "go to step 3" not in section2
+    assert "go to §3" in section2
     # There is no step or section 4; references point at real places.
     assert not re.search(r"\(step 4\)", skill)
     assert "(§3 step 8)" in skill

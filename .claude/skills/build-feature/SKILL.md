@@ -83,8 +83,11 @@ watchdog's `dead`).
   `20261019-183000-voice-speed-settings`. Each piece row has its own
   `if_version` chain, its own `phase` and `round`, and its own per-round
   time limits. A single-piece run keeps the plain `run_id`. When you split,
-  `set` each piece row (`phase: "started"`) before its first builder, then
-  write `phase: "done"` to the plain row: the piece rows take over.
+  `set` each piece row before its first builder with the §0 step 4
+  fields: `feature` = the piece name, `branch` = the piece's branch, the
+  same `session_url`, its own `started_at` and `updated_at`,
+  `phase: "started"`, `round: 0`. Then write `phase: "done"` to the
+  plain row: the piece rows take over.
 - **Running pieces in parallel:** start each builder with
   `isolation: "worktree"`, at most 2–3 at once (the usage limit is
   shared). Stage the work Phase A, where each builder stays in its own
@@ -100,7 +103,7 @@ watchdog's `dead`).
    **judge** on the result (the working tree, or the builder's
    worktree branch) with the request, brief, baseline, the builder's
    report and the earlier findings to verify.
-3. **APPROVED** with no open findings: go to step 3.
+3. **APPROVED** with no open findings: go to §3.
 4. **CHANGES_NEEDED**, or LOW findings left over: send every CONFIRMED
    finding back, LOW included ("fix the minor items too"). First send any
    finding that turns on a missing fact to the **researcher** for an
