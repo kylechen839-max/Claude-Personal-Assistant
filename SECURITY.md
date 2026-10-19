@@ -272,7 +272,11 @@ in `tests/test_cloud.py`):
   naming this site. `X-Forwarded-Host`, which both the guard and the web
   app accept as the site's own name, is removed from requests that don't
   come from the proxy, so a direct caller can't vouch for a foreign Origin
-  with it. uvicorn caps WebSocket messages at 2 MB (closes with 1009); the
+  with it. With failover on, a same-site socket without a cookie may open
+  and send its access token as the first message (closed within 5 s
+  otherwise); until then it holds one of a few pre-auth slots (2 per
+  address or IPv6 /56, 32 in all), so unauthenticated sockets can't pile
+  up. uvicorn caps WebSocket messages at 2 MB (closes with 1009); the
   CI container test checks the handshake, the refusals and the cap.
 - **Cookies:** Secure, HttpOnly, SameSite=Strict, 90 days (renewed on use).
 - **Browser protections:** strict CSP (`default-src 'none'`, scripts and

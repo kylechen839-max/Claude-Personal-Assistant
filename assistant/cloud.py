@@ -254,6 +254,8 @@ class CloudGuard:
         # Bearer tokens) can never use up the slots of signed-in ones.
         self.slots = Slots(max_busy_per_ip, max_busy)
         self.login_slots = Slots(max_busy_per_ip, max_login_busy)
+        # failover voice sockets waiting for their first-message token
+        self.preauth_slots = Slots(max_busy_per_ip, max_login_busy * 4)
         self.login_timeout = login_timeout  # a 16 KB sign-in body is quick
         # a body must arrive within body_timeout + size / min_upload_rate s
         self.body_timeout = body_timeout
@@ -362,10 +364,38 @@ class CloudGuard:
                 finally:
                     self.login_slots.release(ip)
                 return await refuse("wrong bearer token")
-        elif not self.signed_in(scope) and not self.failover_role:
-            return await refuse("not signed in")
-        # (with failover, a socket with no cookie must send its token as the
-        # first message; the failover layer closes it otherwise)
+        elif not self.signed_in(scope):
+            if not self.failover_role:
+                return await refuse("not signed in")
+            # With failover, a socket with no cookie sends its token as the
+            # first message (the failover layer closes it otherwise, within
+            # ws_auth_timeout). Until then it holds one of a few pre-auth
+            # slots, so unauthenticated sockets can't pile up.
+            if not self.preauth_slots.take(ip):
+                return await refuse("too many unauthenticated sockets")
+            released = False
+
+            def release():
+                nonlocal released
+                if not released:
+                    released = True
+                    self.preauth_slots.release(ip)
+
+            async def first_receive():
+                message = await receive()
+                if message["type"] != "websocket.connect":
+                    release()  # the auth message (or a disconnect) arrived
+                return message
+
+            async def watched_send(message):
+                if message["type"] == "websocket.close":
+                    release()
+                await send(message)
+
+            try:
+                return await self.app(self.scrub(scope), first_receive, watched_send)
+            finally:
+                release()
         await self.app(self.scrub(scope), receive, send)
 
     def derived(self, bearer: str) -> bool:
