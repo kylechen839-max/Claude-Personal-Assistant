@@ -5,6 +5,20 @@ from unittest.mock import MagicMock
 import pytest
 
 
+def pytest_configure(config):
+    """Windows: import comtypes on the main thread first. Importing it sets up
+    COM for the importing thread only; if a web-app TTS worker thread were
+    first (test_cloud.py renders reply audio), the main-thread SAPI tests
+    would fail with "CoInitialize has not been called"."""
+    import sys
+
+    if sys.platform == "win32":
+        try:
+            import comtypes  # noqa: F401
+        except ImportError:
+            pass
+
+
 def text_block(text):
     return SimpleNamespace(type="text", text=text)
 

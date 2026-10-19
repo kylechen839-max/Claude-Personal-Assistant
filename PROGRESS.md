@@ -3,10 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 505 passed, 9 skipped (Linux build sandbox,
+**Current test count:** 751 passed, 13 skipped (Linux build sandbox,
 Python 3.13), plus 12 JavaScript tests (node:test, also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
-push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12). The
+push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
+builds and smoke-tests the cloud Docker image. The
 sandbox skips are the tests that need something it can't reach: the Whisper
 model and Piper voice downloads (Hugging Face is blocked; CI downloads both
 and runs those tests), and the live Notion and Google calls (no keys). On
@@ -28,6 +29,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
 | `test_webapp.py` | 67 | phone web app (`--mode web`) |
+| `test_cloud.py` | 76 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
 | `test_docs.py` | 11 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
@@ -225,6 +228,100 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   unlocked `<audio>` element, a service worker that caches only the app shell
   (network first).
 - Not yet tried on a real phone: MANUAL_TEST.md "Phone web app".
+
+## Cloud hosting (Render) ✅
+Runs the phone web app 24/7 on Render so it works with the PC off.
+- **Secrets from the environment.** `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON`
+  (the contents of `token.json` / `credentials.json`) replace the files when
+  set; a token from the environment is refreshed in memory and never written
+  to disk (nor any token with `[calendar] save_token = false`). A refused
+  refresh logs one clear warning with only the OAuth error code (e.g.
+  `invalid_grant`) and tells Claude the sign-in expired. The JSON values are
+  in log redaction too. No interactive sign-in on a server.
+- **Server profile** (`ASSISTANT_PROFILE=server`, set in the image; config
+  `SERVER_PROFILE`): Piper with the voice baked in, then espeak-ng (new
+  `EspeakTTS`, the `espeak-ng` command), then text only; no browser tool, no
+  wake word or chimes, logs to stdout only, listens on 0.0.0.0:`$PORT`; web
+  is the default and only audio-free mode. `--check` has a server variant: no
+  mic/speaker/wake-word checks; `WEB_TOKEN` required; time zone,
+  `GOOGLE_TOKEN_JSON` contents, Whisper cache, Piper and espeak-ng checked.
+  New env overrides: `ASSISTANT_TIMEZONE`, `WHISPER_MODEL`.
+- **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
+  itself is unchanged): `/healthz` -> `{"ok": true, "version": ...}` (no `busy`); every other route needs the
+  cookie or Bearer token except the login page, its static files, login, the
+  manifest and icons (unknown paths 401 too); sign-in limits through the web
+  app's shared `LoginLimiter` (`BoundedLoginLimiter` caps its tables), keyed
+  by the guard's client address, the right token always accepted; cookies
+  checked against the web app's `SessionStore` (`sessions_file` on `/data`
+  in the server profile); at most 2 body uploads per address / 32 in all, bodies
+  due within 10 s + 1 s per 64 KB (408), no uvicorn `limit_concurrency`
+  (it let one slow client 503 everything, `/healthz` included); sign-ins
+  and wrong Bearer tokens in a separate pool (8, 2 s deadline) so they can't
+  take signed-in slots, IPv6 slots per /56; no trusted
+  proxy by default, 10.0.0.0/8 in the server profile (`CLOUD_TRUSTED_PROXIES`;
+  trusting all private ranges let a Docker-bridge or LAN peer forge client
+  addresses), optional `[cloud] client_ip_header`, IPv6 counted per /64,
+  limit tables capped, "Proxy check" log lines for the first 5 requests; forwarded
+  headers only from a private-address peer (`[cloud] trusted_proxies`),
+  rightmost untrusted `X-Forwarded-For` hop as the client; https redirect and
+  HSTS; bodies buffered and capped (4 MB audio, 16 KB otherwise, chunked
+  included); 120 requests/min per address; generic 500s. Whisper and the
+  voice load at startup in the background. The voice WebSocket
+  (`/api/voice`) passes the same checks before its handshake (rate limit,
+  cookie or Bearer with lockout, same-site Origin); `X-Forwarded-Host` is
+  dropped unless the proxy sent it. The web app inside trusts forwarded
+  headers from the same networks (`ProxyNetworks`, a `ProxyTrust` by CIDR),
+  so its own proxy-aware checks agree with the guard. uvicorn runs with `ws="auto"` (the
+  `websockets` sans-I/O implementation) and `ws_max_size` 2 MB.
+- **Docker image** (`Dockerfile`, python:3.11-slim + espeak-ng + ffmpeg):
+  Whisper `base.en` and `tiny.en` and the Piper `en_US-lessac-medium` voice
+  downloaded at build time (`HF_HUB_OFFLINE=1` at run time), non-root user,
+  no openWakeWord. `.dockerignore` keeps secrets, logs, voices and the venv
+  out. `render.yaml` adds the `hey-claude` service (docker, `standard`,
+  `/healthz`, secrets `sync: false`, `WEB_TOKEN` generated) next to
+  `pinecone-mcp`.
+- **Persistent disk**: 1 GB at `/data` (`DATA_DIR=/data`,
+  `HISTORY_PATH=/data/history.sqlite`) for conversation history, lecture
+  audio and job state from the history/features branches. Nothing on this
+  branch reads them yet: until those land, conversations stay in memory. Disks need a paid
+  instance type (already the case) and cost $0.25/GB a month, so the total
+  is about $25.25. `deploy/docker-entrypoint.sh` chowns the mounted disk to
+  the app user and drops root with `setpriv --no-new-privs`; CI checks the
+  server's uid is 10001 and that it owns and can write a root-mounted `/data`.
+- **Memory, measured** in CI (`scripts/container_smoke.sh` +
+  `scripts/measure_memory.py`, GitHub runner, 4 CPUs, image built from this
+  branch), 5 s Piper clip of "Hey Claude, what's on my calendar tomorrow? And
+  do I have any assignments due this week?":
+
+  | Run | Peak RSS | Container (cgroup) peak | Transcribe 5 s |
+  |---|---|---|---|
+  | Server after one spoken turn, base.en + Piper | 465 MB | 395 MB | - |
+  | Script: imports + Piper + base.en + Piper reply | 564 MB | 507 MB | 0.71 s |
+  | Same, capped at 512 MB | 569 MB | 511 MB (at the cap) | - |
+  | Script with tiny.en | 467 MB | 410 MB | 0.43 s |
+
+  The imports alone are about 120 MB, the Piper voice adds about 160 MB, and
+  loading base.en briefly peaks about 150 MB above its steady size. Both
+  models transcribed the clip correctly ("...assignments to this week").
+  **Plan: Render Standard (2 GB, 1 CPU, $25/month; $25.25 with the disk)**: base.en needs up to
+  about 565 MB, more than Starter's 512 MB (it only stayed under the cap by
+  the kernel reclaiming file cache, with nothing left for a second session).
+  Starter ($7, 512 MB, 0.5 CPU) would work with `WHISPER_MODEL=tiny.en` at
+  about 410-470 MB, but with under 100 MB to spare and more misheard words;
+  documented in README as the cheaper option. Prices from Render's pricing
+  as listed in October 2026 (render.com itself was unreachable from the build
+  sandbox; check it when signing up).
+- **CI**: new `Docker image (cloud)` job builds the image, starts it as
+  Render would, checks `/healthz`, 401 on `/api/state` and `/silence.wav`,
+  wrong and right logins, a signed-in `/api/state`, a 413 upload, the
+  server's uid and `/data` owner, the voice WebSocket (`scripts/ws_smoke.py`:
+  opens with cookie + Origin, 1009 over 2 MB, refused without the cookie or
+  from another site), `--check`,
+  one real spoken turn (Whisper + Piper inside the container) and prints the
+  memory table to the job summary.
+- Tests: `test_cloud.py`, `test_server_profile.py` (offline, fake Google
+  credentials, mocked refresh). Not yet run on Render itself: README "Run it
+  in the cloud (Render)" and MANUAL_TEST.md "Cloud server on Render".
 
 ## Voice conversation mode (phone web app) ✅
 Hands-free, turn-by-turn conversation in the phone page, like voice mode in
