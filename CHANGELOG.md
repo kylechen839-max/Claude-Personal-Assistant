@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Team chat connectors (off by default, owner only): Claude can read Slack
+  channels and threads (user token), Discord channels and threads (bot) and
+  GitHub issues, pull requests and discussions, search them, list and read
+  shared text files (up to 50 KB) and sum them up. Nothing is ever posted.
+  "Save that as a digest" files the summary as a page in a Notion "Chat
+  Digests" database after a spoken yes, once per service, channel and day.
+  New `[teamchat]` settings; tokens `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`,
+  `GITHUB_TOKEN` in `.env`. A family instance never uses them, and a
+  refusal to start is now written to that instance's log.
 - Fixed: asking about "tomorrow" just before midnight could list the day
   after tomorrow. The date is now read once per question, so the system
   prompt and the calendar and Notion tools agree.

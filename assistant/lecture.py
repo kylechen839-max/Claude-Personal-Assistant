@@ -398,7 +398,12 @@ BLOCKED_HELP = (
 
 
 class LectureNotesDB:
-    """Finds or creates the Lecture Notes database next to Assignments."""
+    """Finds or creates the Lecture Notes database next to Assignments.
+    Subclasses (teamchat.ChatDigestsDB) file other pages the same way:
+    they set `key_prop` and `blocked_help` and override `_schema`."""
+
+    key_prop = KEY_PROP
+    blocked_help = BLOCKED_HELP
 
     def __init__(self, assignments, database_id: str = "",
                  state_file: str | Path | None = None, title: str = NOTES_TITLE):
@@ -461,23 +466,26 @@ class LectureNotesDB:
         parent = self.assignments.parent_page_id()
         if not parent:
             raise NotionBlocked("The Assignments database isn't inside a page "
-                                "the integration can reach. " + BLOCKED_HELP)
-        options = self.assignments.course_options()
+                                "the integration can reach. " + self.blocked_help)
+        properties = self._schema()
         try:
             db = self.client.databases.create(
                 parent={"type": "page_id", "page_id": parent},
                 title=[{"type": "text", "text": {"content": self.title}}],
-                initial_data_source={"properties": {
-                    "Title": {"title": {}},
-                    "Course": {"select": {"options": options}},
-                    "Date": {"date": {}},
-                    "Duration": {"number": {"format": "number"}},
-                    KEY_PROP: {"rich_text": {}}}})
+                initial_data_source={"properties": properties})
         except APIResponseError as e:
             raise NotionBlocked(f"Notion refused to create the {self.title} "
-                                f"database ({e.code}). " + BLOCKED_HELP) from None
+                                f"database ({e.code}). " + self.blocked_help) from None
         log.info("Created the %s database in Notion", self.title)
         return db["id"], db["data_sources"][0]["id"]
+
+    def _schema(self) -> dict:
+        """The new database's properties."""
+        return {"Title": {"title": {}},
+                "Course": {"select": {"options": self.assignments.course_options()}},
+                "Date": {"date": {}},
+                "Duration": {"number": {"format": "number"}},
+                self.key_prop: {"rich_text": {}}}
 
     def _has_key_property(self) -> bool:
         """Does the database have the "Lecture ID" property? Adds it to an
@@ -486,16 +494,16 @@ class LectureNotesDB:
             ds_id = self.data_source_id()
             try:
                 ds = self.client.data_sources.retrieve(data_source_id=ds_id)
-                self._key_prop = KEY_PROP in ds.get("properties", {})
+                self._key_prop = self.key_prop in ds.get("properties", {})
                 if not self._key_prop:
                     self.client.data_sources.update(
                         data_source_id=ds_id,
-                        properties={KEY_PROP: {"rich_text": {}}})
+                        properties={self.key_prop: {"rich_text": {}}})
                     self._key_prop = True
             except Exception as e:  # no permission to change the schema
-                log.warning("Lecture Notes has no %s property (%s); relying on "
-                            "the local record against duplicates", KEY_PROP,
-                            type(e).__name__)
+                log.warning("%s has no %s property (%s); relying on "
+                            "the local record against duplicates", self.title,
+                            self.key_prop, type(e).__name__)
                 self._key_prop = False
         return self._key_prop
 
@@ -505,7 +513,7 @@ class LectureNotesDB:
             return None
         resp = self.client.data_sources.query(
             data_source_id=self.data_source_id(),
-            filter={"property": KEY_PROP, "rich_text": {"equals": key}},
+            filter={"property": self.key_prop, "rich_text": {"equals": key}},
             page_size=1)
         pages = [p for p in resp.get("results", []) if not p.get("in_trash")]
         return pages[0] if pages else None
@@ -540,7 +548,7 @@ class LectureNotesDB:
                 if duration_minutes is not None:
                     props["Duration"] = {"number": round(duration_minutes)}
                 if key and self._has_key_property():
-                    props[KEY_PROP] = {"rich_text": [
+                    props[self.key_prop] = {"rich_text": [
                         {"type": "text", "text": {"content": key}}]}
                 page = self.client.pages.create(
                     parent={"type": "data_source_id",

@@ -24,8 +24,11 @@
 
     A task starts in your normal Windows environment. If you have set
     GOOGLE_TOKEN_JSON, WEB_TOKEN or similar as user environment variables,
-    the copy refuses to start (so it never sees your accounts) and its log
-    says which variable; remove it from the user environment.
+    the copy refuses to start (so it never sees your accounts) and writes
+    which variable (never its value) to its log (e.g. logs\mom.log), then
+    Task Scheduler retries it every minute; remove the variable from the
+    user environment. Team chat tokens (SLACK_USER_TOKEN, DISCORD_BOT_TOKEN,
+    GITHUB_TOKEN) don't stop it: a family copy never turns team chat on.
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
     Justification = 'Interactive installer: output is for the person running it.')]

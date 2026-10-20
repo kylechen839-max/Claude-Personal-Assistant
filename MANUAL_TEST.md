@@ -646,6 +646,30 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 - [ ] As a family member (phone app invite), ask to turn on a light.
   - Should: it has no smart home control.
 
+## Team chat (optional, ~10 min)
+Needs at least one of `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`
+in `.env` and `[teamchat] enabled = true` with that service turned on
+(README "Team chat"). One real read per service you set up:
+- [ ] Slack: "Hey Claude, what happened in #<a busy channel> today?"
+  - Should: a short summary naming who said what; nothing is posted in
+    Slack, and nothing from a DM shows up.
+- [ ] Discord: "Summarize #general in Discord from yesterday."
+  - Should: a summary. If it says the Message Content Intent is off, turn
+    it on in the developer portal (Bot page) and ask again.
+- [ ] GitHub: "What's new in the issues on <repo> this week?"
+  - Should: issues, pull requests and discussions with their numbers.
+- [ ] GitHub: "Search GitHub for <a word in a recent issue title>."
+  - Should: the matching issues and pull requests, not an error (GitHub's
+    issue search needs is:issue / is:pull-request, which it adds).
+- [ ] "Save that as a digest", say yes; then ask it to save it again.
+  - Should: one page in Notion's "Chat Digests"; the second time it says
+    the page is already there (still one page). Saying no saves nothing.
+- [ ] After a chat read, "add lunch with Sam tomorrow at noon".
+  - Should: it asks before adding (chat text is untrusted).
+- [ ] Open `logs/assistant.log`.
+  - Should: only counts and service names for these turns, no message
+    text and no token.
+
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again

@@ -597,10 +597,14 @@ One-time setup on the PC (PowerShell, in the project folder):
    your tailnet. It refuses to start, naming the variables (never their
    values), if `GOOGLE_TOKEN_JSON`, `GOOGLE_CLIENT_JSON`, `GOOGLE_TOKEN`,
    `GOOGLE_CREDENTIALS`, `HISTORY_PATH`, `WEB_TOKEN`, `NOTION_TOKEN`,
-   `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY` or `PINECONE_INDEX` is set in
-   the shell but not by `.env.mom`: `.env.mom` cannot override them, so her
-   instance would use your Google account, history or token. The same check
-   runs whenever `[webapp] google_connect` is on.
+   `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `HA_URL`
+   or `HA_TOKEN` is set in the shell but not by `.env.mom`: `.env.mom`
+   cannot override them, so her instance would use your Google account,
+   history, token or smart home. The refusal is printed and also written
+   to her log (`logs/mom.log`), since the sign-in task runs hidden. The
+   same check runs whenever `[webapp] google_connect` is on. Your team chat
+   tokens don't matter here: an instance started with an `--env-file`
+   other than `.env` never turns team chat on.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
@@ -966,6 +970,85 @@ token travels unencrypted. That is fine inside your home network or over
 Tailscale; anywhere else use https (Nabu Casa or your own certificate).
 The assistant warns at startup when `HA_URL` is a plain http address
 outside the home network.
+
+## Team chat (Slack, Discord, GitHub)
+
+"What happened in #eng today?", "summarize the release thread", "any
+decisions about the launch in Discord this week?", "what's new in the
+issues on hey-claude?", "read the spec file Bob shared". Claude reads the
+channel, thread, search results or a shared text file and sums up the
+ideas, decisions, open questions and files. It never posts: there is no
+tool that writes to Slack, Discord or GitHub. "Save that as a digest"
+files Claude's summary as a page in your Notion (a "Chat Digests"
+database it creates beside Assignments, or `[teamchat]
+digest_database_id`), after a spoken yes, once per service, channel and
+day (asking again that day finds the same page and adds nothing). Off by
+default; owner only (family members never get these tools).
+
+LinkedIn isn't here: LinkedIn doesn't allow apps to read your messages or
+feed.
+
+Set up the services you use (each token is read only and goes in `.env`):
+
+1. **Slack** (a user token, so it reads what you can read): at
+   api.slack.com/apps, Create New App -> From scratch, in your team's
+   workspace. Under OAuth & Permissions -> User Token Scopes add
+   `channels:read`, `channels:history`, `groups:read`, `groups:history`,
+   `users:read`, `files:read` and `search:read` (no direct-message
+   scopes: DMs are never passed to Claude). Install to Workspace, then copy the
+   User OAuth Token (`xoxp-...`) into `.env` as `SLACK_USER_TOKEN=`.
+   **Never turn on Manage Distribution:** a distributed app that isn't in
+   the Slack Marketplace is limited to one history read a minute.
+2. **Discord** (a bot that a server admin adds): at
+   discord.com/developers/applications, New Application -> Bot -> Reset
+   Token, and copy it into `.env` as `DISCORD_BOT_TOKEN=`. On the same
+   page turn **on** Message Content Intent (without it Discord sends
+   messages with no text; the assistant says so) and turn **off** Public
+   Bot. Under OAuth2 -> URL Generator tick `bot` with View Channels and
+   Read Message History (permissions=66560) and have a server admin open
+   that link to add the bot.
+3. **GitHub**: github.com/settings/personal-access-tokens -> Generate new
+   token (fine-grained), only the repositories you want, with read-only
+   Issues, Pull requests, Discussions and Metadata. Put it in `.env` as
+   `GITHUB_TOKEN=`.
+4. In `config.local.toml`, turn it on with the services you set up:
+
+```toml
+[teamchat]
+enabled = true
+slack = true
+discord = false
+github = true
+channels = ["#eng", "general"]
+github_repos = ["kylechen839-max/Claude-Personal-Assistant"]
+```
+
+Restart; the startup line names any turned-on service whose token is
+missing. Claude gets `chat_channels`, `chat_read` (a channel or one
+thread, the last 24 hours by default, or a day such as "yesterday"),
+`chat_search`, `chat_files`, `chat_read_file` and, with Notion set up,
+`chat_save_digest`.
+
+Limits, in code:
+- `[teamchat] channels` lists the Slack and Discord channels it may read
+  (by name or id, Discord also as server/channel); `[]` means every
+  channel the token can see. `[teamchat] github_repos` does the same for
+  GitHub. Slack DMs and group DMs are never passed to Claude or logged
+  (Slack's search and file list return some; they are dropped). A search
+  that had to be cut (Discord: 20 channels in each of 3 servers; GitHub:
+  5 repos) says so; name a channel or repo to search it.
+- At most `[teamchat] max_messages` (100) messages per read, 300
+  characters of each, about 12,000 characters per answer, 20 files per
+  list, and only text files up to 50 KB, downloaded only from Slack's or
+  Discord's own file servers (the Slack token goes to files.slack.com
+  only; Discord's file links need none).
+- Everything read is other people's text, so once Claude has read chat,
+  any tool that changes something asks you first. Message text, file
+  text and tokens never go in the log.
+- After a refused token it stops calling that service until restart, and
+  when a service asks it to slow down it waits that long without calling
+  (Discord bans addresses that make too many bad requests).
+- `[teamchat] timeout` is the seconds per request.
 
 ## Spotify by voice
 
