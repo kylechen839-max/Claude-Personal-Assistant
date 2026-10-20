@@ -28,6 +28,13 @@
   fixed set of actions; scripts only if allowlisted. Locks, garage doors
   and alarms always ask first, and unlocking or opening is refused while
   web or email content is in the conversation. Owner only.
+- Spotify by voice (off by default, Premium required): "play my study
+  playlist", "pause", "skip", "what's playing?", "turn it up", "play it
+  on my phone". Your own playlists are searched first. Sign in once with
+  `python -m assistant.tools.spotify` or the owner-only Connect Spotify
+  (PKCE, read-and-control scopes only; nothing changes playlists or the
+  library). In wake-word mode, music on this PC pauses at "Hey Claude"
+  and resumes after. Family members don't get Spotify yet.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

@@ -219,6 +219,7 @@ you are most likely to tune:
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
+| `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
 
 ### Voices
 
@@ -854,6 +855,70 @@ Tailscale; anywhere else use https (Nabu Casa or your own certificate).
 The assistant warns at startup when `HA_URL` is a plain http address
 outside the home network.
 
+## Spotify by voice
+
+"Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+"what's playing?", "turn it up", "play it on my phone". The assistant
+remote-controls a Spotify app that is already open somewhere (the PC's
+desktop app, your phone, a speaker) through the Spotify Web API; it plays
+no audio itself. Your own playlists are searched first, then Spotify's
+catalog (a mood or genre plays a playlist, a song name plays that song).
+
+- **Spotify Premium is required.** Spotify only lets apps control playback
+  on Premium accounts; without it every command answers "Spotify only lets
+  apps control playback with a Premium account."
+- **Spotify has to be open on a device.** With nothing playing anywhere it
+  uses this computer's Spotify if it is open, or the only device that is;
+  with several it asks which one.
+- **Nothing changes your library.** Sign-in asks only for
+  user-read-playback-state, user-modify-playback-state and
+  playlist-read-private: no tool can edit
+  playlists, saved songs or follows. Playback control never asks for a
+  yes (it is harmless and easy to undo).
+- **Pauses while you talk.** With `[spotify] pause_while_listening = true`
+  (the default) the wake word pauses Spotify if it is playing on this
+  computer, and it resumes when the assistant goes back to waiting for
+  "Hey Claude" (not if you said "pause" meanwhile). This computer is the
+  Spotify device whose name is `[spotify] local_device`, or the computer's
+  hostname when that is empty. Only the wake-word mode does this; the phone
+  app plays its replies on the phone.
+- Family members (cloud invites) never get Spotify: not in this version.
+  Spotify is meant for the PC or Pi (wake word and its phone web app);
+  the cloud server's sign-in wall doesn't pass Spotify's redirect back, so
+  connect it on the PC.
+
+Setup, once (about 5 minutes):
+
+1. At developer.spotify.com -> Dashboard -> Create app (any name, "Web
+   API"). Under Redirect URIs add exactly `http://127.0.0.1:8888/callback`
+   (the `[spotify] redirect_uri` default), and, for the phone app's button,
+   `<public_origin>/spotify/callback` too (e.g.
+   `https://your-pc.your-tailnet.ts.net/spotify/callback`). In Development
+   mode, add your Spotify account's email under User Management.
+2. Copy the app's **Client ID** into `.env` as `SPOTIFY_CLIENT_ID=...`. No
+   client secret is used (the sign-in is PKCE).
+3. Turn it on in `config.local.toml`:
+
+   ```toml
+   [spotify]
+   enabled = true
+   ```
+4. Sign in, either on the PC or Pi:
+
+   ```powershell
+   python -m assistant.tools.spotify
+   ```
+
+   It prints a link (and opens it); after you allow access the browser
+   lands on a 127.0.0.1 address. If that page doesn't load (for example
+   the link was opened on another device), that's fine: copy the full
+   address from the address bar and paste it back. Or, in the phone app,
+   gear -> **Connect Spotify** (owner only; needs `[webapp] public_origin`).
+5. Restart the assistant. The sign-in is saved privately in
+   `[spotify] token` (`data/spotify_token.json`); delete that file to
+   disconnect, and remove the app's access at spotify.com -> Account ->
+   Manage apps.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
@@ -1311,7 +1376,8 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, history.py, tool registry
+                notion.py, notes.py, web.py, history.py, spotify.py, tool registry
+  spotify_web.py  the phone app's "Connect Spotify" (owner only)
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

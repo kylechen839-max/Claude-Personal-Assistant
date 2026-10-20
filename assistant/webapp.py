@@ -1248,7 +1248,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
-               language: str = "en", google=None, hub=None):
+               language: str = "en", google=None, hub=None, spotify=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
@@ -1259,7 +1259,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only).
     `max_attachment_bytes` / `max_image_bytes`: per file attached to a
     turn (PDF or text / photo); the whole request stays under
-    `max_upload_bytes`."""
+    `max_upload_bytes`.
+    `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1482,6 +1483,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("family.js", "text/javascript"),
                         ("attachments.js", "text/javascript"),
                         ("memory.js", "text/javascript"),
+                        ("spotify.js", "text/javascript"),
                         ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -1725,6 +1727,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         from assistant import google_web
 
         google_web.register(app, google, owner_of, error)  # Kyle's Google only
+    if spotify is not None:
+        from assistant import spotify_web
+
+        spotify_web.register(app, spotify, owner_of, error)  # Kyle's only
     if features is not None:
         from assistant import webfeatures
 
@@ -1932,6 +1938,11 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         from assistant.google_web import GoogleConnect
 
         google = GoogleConnect(config, assistant.tools)
+    spotify = None
+    if config["spotify"]["enabled"]:
+        from assistant.spotify_web import SpotifyConnect
+
+        spotify = SpotifyConnect(config, assistant.tools)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
@@ -1939,7 +1950,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub, **attachment_limits(config))
+                     hub=hub, spotify=spotify, **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")

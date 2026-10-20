@@ -66,6 +66,19 @@ EN = {
     "ha_needs_yes": "That needs your spoken yes first, so I didn't do it.",
     "ha_ask_again": "Home Assistant didn't answer while I was asking, so I "
                     "didn't do it. Please ask me again.",
+    "spotify_failed": "Spotify sign-in didn't finish. Go back to the app and try again.",
+    "spotify_premium": "Spotify only lets apps control playback with a Premium account.",
+    "spotify_no_device": "Spotify isn't open anywhere. Open Spotify on your PC or "
+                         "phone, then ask again.",
+    "spotify_which_device": "Spotify is open on {devices}. Which one should I play on?",
+    "spotify_unknown_device": "I can't find a Spotify device called {device}.",
+    "spotify_no_volume": "That device doesn't let me change its volume.",
+    "spotify_signin": "The Spotify sign-in has expired. Connect Spotify again.",
+    "spotify_busy": "Spotify is busy right now. Try again in a moment.",
+    "spotify_unreachable": "I can't reach Spotify right now.",
+    "spotify_error": "Spotify couldn't do that right now.",
+    "spotify_not_found": "I couldn't find {query} on Spotify.",
+    "spotify_nothing_playing": "Nothing is playing on Spotify right now.",
 }
 
 ZH = {
@@ -118,6 +131,18 @@ ZH = {
     "ha_refused_untrusted": "对话里有网页或邮件内容时，我不会开锁或开门。请在新的对话里再说一次。",
     "ha_needs_yes": "这需要你先口头说“是”，所以我没有做。",
     "ha_ask_again": "刚才问你的时候 Home Assistant 没有回应，所以我没有做。请再说一次。",
+    "spotify_failed": "Spotify 登录没有完成。请回到应用里再试一次。",
+    "spotify_premium": "Spotify 只允许高级会员（Premium）账户用应用控制播放。",
+    "spotify_no_device": "哪里都没有打开 Spotify。请先在电脑或手机上打开 Spotify，再说一次。",
+    "spotify_which_device": "Spotify 在{devices}上开着。要在哪一个上播放？",
+    "spotify_unknown_device": "没有找到叫“{device}”的 Spotify 设备。",
+    "spotify_no_volume": "这个设备不允许我调音量。",
+    "spotify_signin": "Spotify 登录已过期，请重新连接 Spotify。",
+    "spotify_busy": "Spotify 现在有点忙，请稍后再试。",
+    "spotify_unreachable": "现在连不上 Spotify。",
+    "spotify_error": "Spotify 现在做不了这个。",
+    "spotify_not_found": "在 Spotify 上没找到“{query}”。",
+    "spotify_nothing_playing": "Spotify 现在没有在播放。",
 }
 
 
