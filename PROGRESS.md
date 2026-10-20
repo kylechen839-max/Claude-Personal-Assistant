@@ -1892,3 +1892,12 @@ Render/Docker changes) comes separately.
 - Tests: `tests/ps/install_family_tasks.tests.ps1` (instance discovery and
   command, run by `test_preflight.py` where PowerShell exists, i.e. the
   Windows CI job) and a text check; the existing parse check covers it too.
+
+## Phone page: menu closes on an outside tap; swipe down hides the keyboard
+
+- New `assistant/web/ui.js` (all pages): the settings menu closes on a tap
+  anywhere outside it, or Escape, like other apps; a downward swipe of
+  40 px or more while typing blurs the field so iOS closes the keyboard.
+  Served at `/ui.js` (public on the cloud, like the other page files),
+  cached by the service worker (v10).
+- Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.

@@ -1401,7 +1401,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("update-watch.js", "text/javascript"),
                         ("i18n.js", "text/javascript"),
                         ("backend-router.js", "text/javascript"),
-                        ("family.js", "text/javascript")):
+                        ("family.js", "text/javascript"),
+                        ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
