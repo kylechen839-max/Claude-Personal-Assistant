@@ -73,6 +73,39 @@ SYSTEM_PROMPT_ZH = (
     "一定要用简体中文（普通话）回答。"
 )
 
+# What a Chinese-speaking user (a family member's instance) can ask for, so
+# "你能帮我做什么？" gets a real answer. Only what this instance has right now.
+ZH_HELP_ALWAYS = ("everyday questions and explanations, translating between "
+                  "Chinese and English, helping write a message or letter, "
+                  "recipes and cooking tips, simple math and unit conversions")
+ZH_HELP_WEB = "weather, news, opening hours and other things that need a web search"
+ZH_HELP_CALENDAR = ("her calendar: what's on today or tomorrow, adding an "
+                    "appointment or reminder, moving one (deleting always asks first)")
+ZH_HELP_EMAIL = ("her Gmail: what new email came in, reading one out, and "
+                 "drafting a reply she then sends herself (you never send email)")
+ZH_HELP_CONNECT = ("Not connected yet: her calendar and Gmail. Tell her she can "
+                   "connect them with the gear menu, then 连接 Google 账户.")
+
+
+def zh_help_prompt(tools) -> str:
+    can = [ZH_HELP_ALWAYS]
+    if tools and (tools.has("web_search") or tools.has("web_fetch")):
+        can.append(ZH_HELP_WEB)
+    has_calendar = bool(tools and tools.has("list_calendar_events"))
+    if has_calendar:
+        can.append(ZH_HELP_CALENDAR)
+    if tools and tools.has("email_summary"):
+        can.append(ZH_HELP_EMAIL)
+    text = ("If the user asks what you can do or how to use you (你能做什么, "
+            "你能帮我做什么, 怎么用), answer warmly in two or three spoken "
+            "sentences with a few concrete examples she could say, in Chinese, "
+            "picked from what you can do now: " + "; ".join(can) + ". She can "
+            "hold the microphone button and talk, or type.")
+    if not has_calendar:
+        text += " " + ZH_HELP_CONNECT
+    return text
+
+
 ZH_REPLY_RULE = ("Always reply in Simplified Chinese (Mandarin, 简体中文), even "
                  "when tool results are English.")
 
@@ -244,6 +277,7 @@ class ClaudeChat:
             # The English tool/memory prompts are about Kyle; this user isn't.
             parts = [parts[0]] + [p.replace("Kyle's", "the user's")
                                    .replace("Kyle", "the user") for p in parts[1:]]
+            parts.append(zh_help_prompt(self.tools))
             parts.append(ZH_REPLY_RULE)
         elif self.user_name:
             # an English-speaking family member: every prompt is about them
