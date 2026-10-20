@@ -90,6 +90,15 @@ def test_every_setting_name_in_docs_exists(doc):
     assert names - keys - OTHER_IDENTIFIERS == set()
 
 
+def test_family_section_is_mirrored_in_config_toml():
+    """Every [family] setting has a commented line in config.toml with the
+    default value (piece B's zh_* keys included)."""
+    with open(ROOT / "config.toml", "rb") as f:
+        shipped = tomllib.load(f)["family"]
+    assert shipped == DEFAULTS["family"]
+    assert shipped["invite_days"] == 30
+
+
 @pytest.mark.parametrize("name", ["config.toml", "config.mom.toml"])
 def test_config_toml_keys_have_defaults(name):
     with open(ROOT / name, "rb") as f:
