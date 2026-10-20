@@ -43,6 +43,8 @@ def is_exit(text: str) -> bool:
 
 def zh_is_yes(text: str) -> bool:
     """Whole-answer Chinese yes: every part is on ZH_YES_ANSWERS."""
+    if "?" in text or "？" in text:  # "确定？" asks back; it isn't an answer
+        return False
     parts = [p.lstrip(ZH_FILLERS) for p in re.split(r"[\s\W_]+", text)]
     parts = [p for p in parts if p]
     return bool(parts) and all(p in ZH_YES_ANSWERS for p in parts)

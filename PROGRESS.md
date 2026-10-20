@@ -1581,6 +1581,6 @@ screens are staged by setting the same attributes the JS sets (no mic).
     删吧/删除吧/加吧, which were never yes) and all 11 refusal tests fail;
     the rest (already-no answers such as 可以吗, and the start-normally
     test) are guards that pass on both.
-  - Counts: pytest 1573 -> 1618 passed, 46 skipped (unchanged). JS: i18n 7
+  - Counts: pytest 1573 -> 1618 passed, 46 skipped (unchanged); round 3 (a question like 确定？ is never a yes) 1622 passed, 46 skipped. JS: i18n 7
     passed.
 
