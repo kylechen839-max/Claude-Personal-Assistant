@@ -1505,10 +1505,9 @@ screens are staged by setting the same attributes the JS sets (no mic).
   reply in Simplified Chinese"); Whisper with `language="zh"` and a Mandarin
   initial prompt (the multilingual `small` model); the assistant's own
   sentences (goodbye, errors, "please say yes or no", decline, no answer,
-  Calendar and Gmail draft questions with Chinese dates) in Chinese; strict
-  Chinese yes/no (`cli.is_yes`, `voice_session.is_explicit_yes`: a yes word,
-  no 不/别/取消/算了/没, no question 吗/呢/？; 没问题 counts as yes; spoken
-  answers at most six characters) and 再见/拜拜 to end; sentence splitting on
+  Calendar and Gmail draft questions with Chinese dates) in Chinese; a
+  whole-answer Chinese yes (`cli.zh_is_yes`, used by `cli.is_yes` and
+  `voice_session.is_explicit_yes`; see round 2 below) and 再见/拜拜 to end; sentence splitting on
   。！？； without a following space, 」』） closers, Chinese commas for long
   runs and the first clause.
 - **Phone page**: the server sends `<html lang="zh-CN">`; new
@@ -1548,4 +1547,40 @@ screens are staged by setting the same attributes the JS sets (no mic).
   titles and summaries may come out in English (the title prompt is English); Chinese
   speech recognition and the huayan voice are untested on real audio here
   (huggingface.co is blocked in the sandbox).
+- Round 2 (review fixes):
+  - **Chinese yes is the whole answer.** Round 1 counted any 是/好/对/行
+    anywhere, so 还是明天吧, 好像错了, 是谁, 是什么, 好，等一下, 对了还有一个
+    and 我是说错的那个 confirmed. Now `cli.zh_is_yes` splits the answer at
+    punctuation and spaces, drops leading 嗯/哦/啊/呃 from each part, and
+    every remaining part must be one of 是, 是的, 对, 对的, 好, 好的, 好啊,
+    好吧, 行, 可以, 确定, 确认, 没问题, 删吧, 删除吧, 加吧 ("嗯，好的" and
+    "好，删吧" are yes; a lone 嗯, 不好, 好不好, 可以吗, 没有, 不要 are no).
+    Both `cli.is_yes` (buttons/typed and the web confirm) and
+    `voice_session.is_explicit_yes` use it; any CJK answer goes through it
+    alone, so English yes words cannot rescue a Chinese sentence. English
+    is unchanged.
+  - **A separate instance refuses the owner's inherited variables.** With
+    `--env-file` other than `.env`, or `[webapp] google_connect` on,
+    `cli.main` snapshots the environment before `load_dotenv` and refuses
+    to start (exit 1, variable names only) if any of
+    `config.ISOLATED_ENV_VARS` (GOOGLE_TOKEN_JSON, GOOGLE_CLIENT_JSON,
+    GOOGLE_TOKEN, GOOGLE_CREDENTIALS, HISTORY_PATH, WEB_TOKEN, NOTION_TOKEN,
+    NOTION_ASSIGNMENTS_DB, PINECONE_API_KEY, PINECONE_INDEX) was already set
+    with a value the env file doesn't give it. README says to start her
+    instance from a clean shell. (The sandbox itself has PINECONE_API_KEY
+    set, which is how an existing `--env-file .env.mom` test found the
+    check: that test now clears the caller's variables.)
+  - Tests: test_i18n +33 (the judge's eight sentences and nine more are no
+    in both checks; every allowlisted answer, with punctuation and leading
+    fillers, is yes in both), test_config_cli +12 (each of the ten variables
+    refuses `--env-file .env.mom` and the message names it without the
+    value; google_connect with the default `.env` refuses an inherited
+    GOOGLE_TOKEN_JSON; values from `.env.mom` itself, and Kyle's own
+    default start, still run). With the source changes reverted, 12 of the
+    new i18n cases fail (the judge's eight sentences, "yes 好像错了", and
+    删吧/删除吧/加吧, which were never yes) and all 11 refusal tests fail;
+    the rest (already-no answers such as 可以吗, and the start-normally
+    test) are guards that pass on both.
+  - Counts: pytest 1573 -> 1618 passed, 46 skipped (unchanged). JS: i18n 7
+    passed.
 

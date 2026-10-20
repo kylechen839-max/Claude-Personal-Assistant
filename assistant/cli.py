@@ -22,12 +22,16 @@ EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
              "affirmative", "confirm", "confirmed", "absolutely", "definitely"}
 NO_WORDS = {"no", "nope", "don't", "dont", "not", "cancel", "stop", "wait"}
-# Chinese (Mandarin) answers, matched as substrings: there are no spaces.
-# 没问题 ("no problem") is a yes, so it is taken out before the no-check;
-# a question (吗, 呢, ？) is never a yes.
+# Chinese (Mandarin) answers. A single character means too much on its own
+# (还是明天吧, 好像错了, 是谁, 对了还有一个), so a yes is the whole answer, from
+# this short list: each part between punctuation, after leading fillers
+# (嗯/哦/啊/呃), must be one of these ("嗯，好的", "好，删吧"). Anything else,
+# including a lone 嗯, a question or 不好, is a no.
 ZH_EXIT_WORDS = {"再见", "拜拜", "再会"}
-ZH_YES_WORDS = ("是", "好", "对", "可以", "行", "确定", "确认", "没问题")
-ZH_NO_WORDS = ("不", "别", "取消", "等等", "停", "算了", "没", "吗", "呢", "?", "？")
+ZH_YES_ANSWERS = frozenset({
+    "是", "是的", "对", "对的", "好", "好的", "好啊", "好吧", "行", "可以", "确定",
+    "确认", "没问题", "删吧", "删除吧", "加吧"})
+ZH_FILLERS = "嗯哦啊呃"
 CJK = re.compile(r"[\u4e00-\u9fff]")
 log = logging.getLogger(__name__)
 
@@ -37,11 +41,11 @@ def is_exit(text: str) -> bool:
     return word in EXIT_WORDS or word in ZH_EXIT_WORDS
 
 
-def zh_yes_no(text: str) -> tuple[bool, bool]:
-    """(has a Chinese yes word, has a Chinese no/question word)."""
-    rest = text.replace("没问题", "")
-    return (any(w in text for w in ZH_YES_WORDS),
-            any(w in rest for w in ZH_NO_WORDS))
+def zh_is_yes(text: str) -> bool:
+    """Whole-answer Chinese yes: every part is on ZH_YES_ANSWERS."""
+    parts = [p.lstrip(ZH_FILLERS) for p in re.split(r"[\s\W_]+", text)]
+    parts = [p for p in parts if p]
+    return bool(parts) and all(p in ZH_YES_ANSWERS for p in parts)
 
 
 def download_voice_command(name: str, output_fn=print) -> int:
@@ -74,9 +78,8 @@ def is_yes(text: str) -> bool:
     phrase = " ".join(re.findall(r"[a-z']+", text.lower()))
     yes = bool(words & YES_WORDS) or phrase in {"go ahead", "do it", "please do"}
     no = bool(words & NO_WORDS)
-    if CJK.search(text):  # "好的" yes; "不好", "好不好", "可以吗？" no
-        zh_yes, zh_no = zh_yes_no(text)
-        yes, no = yes or zh_yes, no or zh_no
+    if CJK.search(text):  # "好的" yes; "不好", "好不好", "可以吗？", "是谁" no
+        return zh_is_yes(text)
     return yes and not no
 
 
@@ -693,10 +696,22 @@ def continue_conversation(chat: ClaudeChat, conversation_id: str,
 
 
 def main(argv=None) -> int:
-    from assistant.config import load_config, setup_logging
+    from assistant.config import inherited_env_conflicts, load_config, setup_logging
 
     args = parse_args(argv)
+    inherited = dict(os.environ)  # before load_dotenv adds the env file
     config = load_config(args.config, env_file=args.env_file)
+    if args.env_file != ".env" or config["webapp"]["google_connect"]:
+        # a separate instance (e.g. --env-file .env.mom): nothing of the
+        # owner's may leak in from the shell that started it
+        leaked = inherited_env_conflicts(inherited, args.env_file)
+        if leaked:
+            print(f"Refusing to start: {', '.join(leaked)} "
+                  f"{'is' if len(leaked) == 1 else 'are'} set in this shell, "
+                  f"not by {args.env_file}, and would point this instance at "
+                  "someone else's data. Start it from a clean shell (see "
+                  "README.md, \"A Chinese instance\").")
+            return 1
     i18n.set_language(config["assistant"]["language"])
     if args.role:
         config["failover"]["role"] = args.role

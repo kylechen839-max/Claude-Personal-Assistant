@@ -38,7 +38,7 @@ import numpy as np
 
 from assistant import audio, i18n
 from assistant.cli import (CJK, get_reply, is_exit, loggable_reply,
-                           strip_wake_phrase, zh_yes_no)
+                           strip_wake_phrase, zh_is_yes)
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -141,10 +141,7 @@ def is_explicit_yes(text: str) -> bool:
     delete it", "go ahead". Anything with other content ("okay, and what
     about Friday?", "yes but not that one", a new question) is a no."""
     if CJK.search(text):
-        # "好的", "是的，删吧": short, a yes word, no "不", no question
-        short = re.sub(r"[\s\W_]+", "", text)
-        yes, no = zh_yes_no(text)
-        return 0 < len(short) <= 6 and yes and not no
+        return zh_is_yes(text)  # "好的", "是的，删吧"; not "是谁", "好，等一下"
     words = re.findall(r"[a-z']+", text.lower())
     if not words or len(words) > 6:
         return False

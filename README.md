@@ -457,9 +457,12 @@ drafts only; nothing is ever sent) from her phone with a menu button.
 
 `[assistant] language = "zh"` makes Claude answer in Simplified Chinese,
 Whisper listen for Mandarin (the multilingual `small` model; `.en` models
-can't hear Chinese), yes/no work in Chinese (好的 / 是的 / 没问题 confirm;
-不 / 不要 / 算了 / 取消 or a question such as 可以吗？ do not), and the page
-show in Chinese. History screens stay in English.
+can't hear Chinese), yes/no work in Chinese, and the page show in Chinese.
+A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对的 /
+好 / 好的 / 好啊 / 好吧 / 行 / 可以 / 确定 / 确认 / 没问题 / 删吧 / 删除吧 /
+加吧, optionally after 嗯 / 哦 / 啊 / 呃, e.g. "嗯，好的" or "好，删吧"); any
+other answer is a no, including sentences that merely contain 是 or 好
+(还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
 
 One-time setup on the PC (PowerShell, in the project folder):
 
@@ -481,7 +484,15 @@ One-time setup on the PC (PowerShell, in the project folder):
    [webapp]
    public_origin = "https://<pc-name>.<tailnet>.ts.net:8443"
    ```
-5. **Run it** and publish it on your tailnet:
+5. **Run it from a clean shell** (a new PowerShell window that has not
+   loaded your own `.env` or set any of your variables) and publish it on
+   your tailnet. It refuses to start, naming the variables (never their
+   values), if `GOOGLE_TOKEN_JSON`, `GOOGLE_CLIENT_JSON`, `GOOGLE_TOKEN`,
+   `GOOGLE_CREDENTIALS`, `HISTORY_PATH`, `WEB_TOKEN`, `NOTION_TOKEN`,
+   `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY` or `PINECONE_INDEX` is set in
+   the shell but not by `.env.mom`: `.env.mom` cannot override them, so her
+   instance would use your Google account, history or token. The same check
+   runs whenever `[webapp] google_connect` is on.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766

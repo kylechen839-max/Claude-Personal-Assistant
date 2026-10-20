@@ -1,4 +1,4 @@
-"""The Chinese instance ([assistant] language = "zh"): strict Chinese yes/no,
+"""The Chinese instance ([assistant] language = "zh"): whole-answer Chinese yes,
 the assistant's own sentences, and confirmation questions. Offline."""
 
 from datetime import datetime
@@ -41,6 +41,28 @@ def test_is_yes_chinese(answer, yes):
 ])
 def test_explicit_yes_chinese(answer, yes):
     assert is_explicit_yes(answer) is yes
+
+
+# Ordinary sentences that contain 是/好/对/行 but are not a yes (judge round 1):
+# each confirmed a delete when any yes character anywhere counted.
+NOT_YES = ["还是明天吧", "好像错了", "是哪个", "是谁", "是什么", "好，等一下",
+           "对了还有一个", "我是说错的那个", "行不行", "可以吗", "好的吗", "嗯",
+           "嗯嗯", "嗯…", "好的好的，不过等一下", "yes 好像错了", "是。是谁？"]
+ALLOWED = ["是", "是的", "对", "对的", "好", "好的", "好啊", "好吧", "行", "可以",
+           "确定", "确认", "没问题", "删吧", "删除吧", "加吧"]
+
+
+@pytest.mark.parametrize("answer", NOT_YES)
+def test_chinese_sentence_with_a_yes_character_is_not_a_yes(answer):
+    assert cli.is_yes(answer) is False
+    assert is_explicit_yes(answer) is False
+
+
+@pytest.mark.parametrize("answer", ALLOWED)
+def test_chinese_whole_answer_allowlist(answer):
+    for said in (answer, answer + "。", f"嗯，{answer}！", f" 哦{answer} ", f"呃…{answer}"):
+        assert cli.is_yes(said) is True, said
+        assert is_explicit_yes(said) is True, said
 
 
 @pytest.mark.parametrize("text, leaves", [

@@ -307,6 +307,8 @@ phone (or yours signed in as her test user).
 - [ ] "明天下午三点加一个看牙医。" then say "不要".
   - Should: a Chinese yes/no question is spoken; "不要" cancels (nothing
     added). Repeat and say "好的": the event appears in her Google Calendar.
+    Repeat once more and answer "还是明天吧" (out loud, in voice
+    conversation): not a yes, nothing added.
 - [ ] Ask it to draft a reply to one email; answer "可以吗？".
   - Should: a question is not a yes: no draft. Answer "是的": a draft
     appears in her Gmail Drafts, nothing is sent.

@@ -354,8 +354,19 @@ a PKCE challenge, `access_type=offline` and the redirect
 - Calendar and Gmail tools are added to the running app in one dictionary
   update, so a turn never sees half of them. Gmail stays drafts-only (the
   `gmail.compose` scope also allows sending; sending is blocked in code, as
-  for Kyle). Deletes still ask; her yes/no is the same strict check, in
-  Chinese.
+  for Kyle). Deletes still ask. In Chinese a yes is the whole answer from
+  a short allowlist (是的, 好的, 没问题, 删吧, ...; each part between
+  punctuation, after a leading 嗯/哦/啊/呃): a sentence that only contains a
+  yes character (还是明天吧, 是谁, 好，等一下, 对了还有一个) is a no, as is
+  anything not on the list.
+- **Separate instance, separate data.** `load_dotenv` never overrides a
+  variable already set in the shell, and `google_auth` reads
+  `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` before any file, so her
+  instance started from Kyle's shell would use his Google token, history,
+  web token, Notion or Pinecone. With `--env-file` other than `.env`, or
+  with `google_connect` on, `python -m assistant` refuses to start if any
+  of `config.ISOLATED_ENV_VARS` was set before the env file was loaded with
+  a different value; it names the variables, never their values.
 - Without a saved token the Google tools stay off: Calendar would otherwise
   start a browser sign-in on the PC.
 - Not fixed: sharing the PC through Tailscale lets her reach every port it

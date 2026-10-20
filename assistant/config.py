@@ -225,6 +225,30 @@ ENV_OVERRIDES = {
 }
 
 
+# Variables that point at the owner's own data or accounts. A separate
+# instance (--env-file other than .env, e.g. .env.mom) or one where someone
+# connects their own Google account must not inherit them from the shell:
+# load_dotenv never overrides a variable that is already set, and
+# google_auth reads GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON before any file.
+ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
+                     "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
+                     "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
+                     "PINECONE_INDEX")
+
+
+def inherited_env_conflicts(inherited, env_file: str | Path | None) -> list[str]:
+    """Names (never values) of ISOLATED_ENV_VARS that were already set in the
+    environment before env_file was loaded, unless env_file sets the same
+    value (a wrapper that loaded this very file first)."""
+    from_file = {}
+    if env_file and Path(env_file).exists():
+        from dotenv import dotenv_values
+
+        from_file = dotenv_values(env_file)
+    return [var for var in ISOLATED_ENV_VARS
+            if inherited.get(var) and inherited[var] != from_file.get(var)]
+
+
 def _merge(base: dict, override: dict) -> dict:
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
