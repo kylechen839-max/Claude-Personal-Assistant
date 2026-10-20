@@ -2777,6 +2777,42 @@ How it was tested (offline, Linux sandbox, Python 3.13):
   cleared, and its test failed (10 reverts); the round-2 reverts were rerun
   against the new code and all 21 still fail.
 
+### Follow-up (judge round 3 LOWs)
+
+- The watchdog now honours the hosts' backoff: `Watch.switch` skips the
+  go-live check until the last inconclusive try plus `gate_backoff(count)`
+  (`Updater.gate_wait`). The table moved from `host.GATE_BACKOFF` to
+  `updater.GATE_BACKOFF` / `updater.gate_backoff`, used by both. An hour of
+  5-minute watchdog runs now gates 4 times (0, 5, 10, 25 min), not 12.
+  Tests: `test_watchdog_backs_off_an_inconclusive_gate_like_the_hosts`,
+  `test_gate_backoff_is_one_table_for_hosts_and_watchdog`.
+- The automatic-update path alerts too: `Watch.alert_inconclusive` reads the
+  stored record whatever its commit (`Updater.last_inconclusive`). Off HEAD
+  it counts only while the commit is neither refused nor checked since
+  (`gated(sha) is None`), and only by tries (3), never the half-hour rule, so
+  a hand pull undone after one try doesn't alert. Tests:
+  `test_inconclusive_checks_on_the_update_path_alert_once`,
+  `test_an_off_head_record_alerts_only_while_its_commit_is_pending`.
+- A check copy killed by a signal (negative exit code, e.g. the Pi's OOM
+  killer) is inconclusive ("killed by signal 9"), not "did not start", so it
+  isn't refused after two tries. Test:
+  `test_a_copy_killed_by_a_signal_is_inconclusive`.
+- Windows CI fix (PR #28, windows-latest / 3.12: 2 failed): two tests used an
+  empty `restart_command` to model "no way to restart", but on Windows
+  `restart_command()` falls back to `restart_instance.ps1`, so a restart ran
+  and the rollback followed. `watch.WINDOWS` now holds the platform; those
+  tests pin it to False, and
+  `test_windows_falls_back_to_the_task_scheduler_restart` covers the
+  fallback. Reproduced on Linux by forcing the Windows branch: the same two
+  tests failed with the same reset to ccccccc; with the fix they pass.
+- README and SECURITY now say: 1, 5, 15, then 60 minutes after the last try
+  for a pull by hand (hosts and watchdog), the next `[update]` check for an
+  automatic update.
+- Each fix was reverted alone with `__pycache__` cleared and its test failed
+  (6 reverts). Full run (Linux sandbox, Python 3.13): 2205 passed, 58
+  skipped (HEAD e49c3a5: 2199 / 58, i.e. minus the 6 new tests); `tests/test_watch.py` has 76 tests. ruff:
+  no new findings in the touched files.
+
 ## Fix: phone barge-in cancelled replies before any audio (2026-10-20)
 
 Kyle's phone log (12:47 and 12:52 UTC): "Voice barge-in on turn N after 0

@@ -56,9 +56,6 @@ HEAD_POLL = 30          # seconds between "did HEAD move?" checks
 IDLE_WAIT = 120         # at most this long for the web app to go quiet
 HEALTH_WAIT = 180       # default for the new web app to answer /healthz
 WAKE_SETTLE = 20        # the new wake loop must still run after this
-# A go-live check that couldn't tell (busy side port, Claude down) is tried
-# again after 1, 5, 15, then every 60 minutes (the watchdog alerts if it lasts).
-GATE_BACKOFF = (60, 300, 900, 3600)
 
 
 def log_path(mode: str, root: Path = ROOT) -> Path:
@@ -201,6 +198,8 @@ class Host:
         check itself (holding the update lock, so nothing else restarts on
         `new` meanwhile); a failed `new` is undone and the old version keeps
         running. The wake host waits for the web host's verdict."""
+        from assistant.updater import gate_backoff
+
         up = self.updater
         if up is None or getattr(up, "gate", None) is None:
             return True
@@ -215,7 +214,7 @@ class Host:
                 ok, why = up.gate(new)
                 if ok is None:
                     count = int(up.note_inconclusive(new, why)["count"])
-                    wait = GATE_BACKOFF[min(count, len(GATE_BACKOFF)) - 1]
+                    wait = gate_backoff(count)
                     self.say(f"go-live check of {new[:7]} couldn't run ({why}); "
                              f"trying again in {wait // 60 or 1} min")
                     self.gate_retry = self.clock() + wait

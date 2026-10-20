@@ -78,6 +78,7 @@ NOT_HEALED = ("version", "phone address")
 # While an update holds the lock, an app that doesn't answer is reported
 # after start_grace_seconds plus this (it's never healed meanwhile).
 LOCKED_MARGIN = 15 * 60
+WINDOWS = sys.platform == "win32"  # restart_command's Task Scheduler fallback
 # A go-live check that keeps being inconclusive is reported after this many
 # tries, or this long (Watch.record).
 INCONCLUSIVE_ALERT_COUNT = 3
@@ -215,7 +216,7 @@ def restart_command(root: Path, inst: Instance) -> list[str]:
     Scheduler task (scripts/restart_instance.ps1), else nothing."""
     if inst.restart_command:
         return [str(a) for a in inst.restart_command]
-    if sys.platform == "win32":
+    if WINDOWS:
         return ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
                 "Bypass", "-File", str(root / "scripts" / "restart_instance.ps1"),
                 "-Name", inst.name]
@@ -393,7 +394,8 @@ def candidate_check(root: Path, inst: Instance, sha: str, http=None, popen=None,
     """Start `inst` on the checked-out code at its side port, run the test
     conversation against it, stop it. Empty list = passed. A busy side port
     (after stopping a leftover copy) is inconclusive (Check.outside), not a
-    verdict on `sha`; a copy that exits before answering on a free port is
+    verdict on `sha`, and so is a copy killed by a signal (out of memory on
+    the Pi, a shutdown); a copy that exits before answering on a free port is
     a failure (the new code doesn't start; gate_check tries it twice)."""
     http = http or _session()
     popen = popen or subprocess.Popen
@@ -418,6 +420,8 @@ def candidate_check(root: Path, inst: Instance, sha: str, http=None, popen=None,
         deadline = clock() + wait
         while True:
             code = child.poll()
+            if code is not None and code < 0:  # killed by a signal (the Pi's OOM killer)
+                return [Check("go-live", False, f"killed by signal {-code}", outside=True)]
             if code is not None:
                 return [Check("go-live", False, f"did not start (exit {code})")]
             health, _ = get_health(http, f"http://127.0.0.1:{port}")
@@ -758,6 +762,11 @@ class Watch:
         if gated is None and head == self.up.last_good():
             gated = True
         if gated is None and self.cfg["gate"]:
+            wait = self.up.gate_wait(head)
+            if wait > 0:  # it couldn't tell last time: the hosts' backoff
+                log.info("Go-live check of %s is due again in %d min", head[:7],
+                         wait // 60 or 1)
+                return
             if not self.up.acquire():
                 log.info("An update is running; switching later")
                 return
@@ -766,7 +775,7 @@ class Watch:
                 if ok is None:
                     self.up.note_inconclusive(head, why)
                     log.warning("Go-live check of %s couldn't tell (%s); trying "
-                                "again next run", head[:7], why)
+                                "again later", head[:7], why)
                     return
                 self.up.mark_gated(head, ok)
                 if not ok:
@@ -922,6 +931,29 @@ class Watch:
         self.wait_for(inst, good, timeout=grace)
         return self.check(inst, good, force=True)
 
+    def alert_inconclusive(self, head: str | None, now: float) -> None:
+        """A go-live check that keeps failing to run means new code never goes
+        live: say so once. The record may be on a commit other than HEAD (the
+        updater notes it, then rolls back and retries at its next check); such
+        a one counts only while it is still pending (neither refused nor
+        checked since), and only by its count: a hand pull undone after one
+        try isn't stuck."""
+        stuck = self.up.last_inconclusive()
+        if not stuck or stuck.get("alerted"):
+            return
+        sha = str(stuck.get("sha") or "")
+        tries = int(stuck.get("count") or 0) >= INCONCLUSIVE_ALERT_COUNT
+        if sha and sha == head:
+            due = tries or now - float(stuck.get("first") or now) >= INCONCLUSIVE_ALERT_SECONDS
+        else:
+            due = tries and bool(sha) and self.up.gated(sha) is None
+        if not due:
+            return
+        self.up.mark_inconclusive_alerted(sha)
+        self.event("inconclusive", f"The go-live check of {sha[:7]} can't run "
+                   f"({stuck.get('why') or 'no reason'}), so it isn't live yet; "
+                   "the running version stays.")
+
     def record(self, instances, results, head) -> None:
         now = self.clock()
         self.status.update(checked=now, checked_iso=iso(now),
@@ -930,14 +962,7 @@ class Watch:
         known = self.status.setdefault("instances", {})
         for gone in set(known) - {i.name for i in instances}:
             known.pop(gone)
-        stuck = self.up.inconclusive(head)
-        if stuck and not stuck.get("alerted") and (
-                int(stuck.get("count") or 0) >= INCONCLUSIVE_ALERT_COUNT
-                or now - float(stuck.get("first") or now) >= INCONCLUSIVE_ALERT_SECONDS):
-            self.up.mark_inconclusive_alerted(head)
-            self.event("inconclusive", f"The go-live check of {head[:7]} can't run "
-                       f"({stuck.get('why') or 'no reason'}), so it isn't live yet; "
-                       "the running version stays.")
+        self.alert_inconclusive(head, now)
         for inst in instances:
             checks, health = results[inst.name]
             st = self._state(inst)

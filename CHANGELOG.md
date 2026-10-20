@@ -20,6 +20,11 @@
 - When the Claude API itself is down or overloaded, the app now says
   "Claude is unreachable right now. I retried a few times; please try
   again in a minute."
+- The watchdog waits the same 1/5/15/60-minute backoff as the hosts before
+  re-running a go-live check that couldn't tell, alerts once when the
+  automatic updater's go-live check keeps failing to run, and a check copy
+  killed by the system (e.g. out of memory on a Pi) no longer gets a commit
+  refused.
 - CI: `api-contract` runs a real multi-turn conversation (tool use,
   thinking, two requests sharing a history, the voice socket) against the
   Anthropic API when the `ANTHROPIC_API_KEY` secret is set.

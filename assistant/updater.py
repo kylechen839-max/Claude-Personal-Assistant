@@ -63,6 +63,16 @@ TAG_PATTERN = "stable-*"
 SSH_SIG = "-----BEGIN SSH SIGNATURE-----"
 OTHER_SIGS = ("-----BEGIN PGP SIGNATURE-----", "-----BEGIN SIGNED MESSAGE-----",
               "-----BEGIN PGP MESSAGE-----")
+# A go-live check that couldn't tell (busy side port, Claude down) is tried
+# again 1, 5, 15, then every 60 minutes after the last try, by the hosts and
+# the watchdog alike (the watchdog alerts if it lasts).
+GATE_BACKOFF = (60, 300, 900, 3600)
+
+
+def gate_backoff(count: int) -> int:
+    """Seconds to wait after the `count`th inconclusive go-live check in a row."""
+    return GATE_BACKOFF[min(max(int(count), 1), len(GATE_BACKOFF)) - 1]
+
 
 # statuses
 UP_TO_DATE, UPDATED, SKIPPED, FAILED, ROLLED_BACK, LOCKED = (
@@ -407,8 +417,22 @@ class Updater:
             return rec
 
     def inconclusive(self, sha: str | None) -> dict | None:
-        rec = self._state().get("inconclusive") or None
+        rec = self.last_inconclusive()
         return rec if rec and sha and rec.get("sha") == sha else None
+
+    def last_inconclusive(self) -> dict | None:
+        """The stored record, whatever its commit (the updater notes one on
+        the commit it then rolls back from)."""
+        return self._state().get("inconclusive") or None
+
+    def gate_wait(self, sha: str | None) -> float:
+        """Seconds until the go-live check of `sha` is due again after an
+        inconclusive one (gate_backoff); 0 = now."""
+        rec = self.inconclusive(sha)
+        if not rec:
+            return 0.0
+        due = float(rec.get("last") or 0) + gate_backoff(rec.get("count") or 1)
+        return max(0.0, due - self.clock())
 
     def mark_inconclusive_alerted(self, sha: str) -> None:
         with self._state_lock():

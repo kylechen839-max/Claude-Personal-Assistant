@@ -1420,10 +1420,13 @@ default): each instance is started a second time on a side port (its port
 + `side_port_offset`, 100: 8765 -> 8865, on 127.0.0.1) and must pass the same
 test conversation first (a failure, including new code that exits before
 it answers, is tried once more before the commit is refused; a busy side
-port, after stopping a leftover check copy, or Claude being unreachable says
-nothing about the code and is tried again later: after 1, 5, 15, then every
-60 minutes, and you are told once if it keeps happening for 3 tries or
-half an hour). The automatic updater does this before the running
+port, after stopping a leftover check copy, a check copy killed by the
+system (out of memory on the Pi) or Claude being unreachable says nothing
+about the code and is tried again later: for a pull by hand, 1, 5, 15, then
+every 60 minutes after the last try (the host supervisor and the watchdog
+share that schedule); for an automatic update, at the next `[update]`
+check. You are told once if it keeps happening for 3 tries, or for half an
+hour on a pull by hand). The automatic updater does this before the running
 apps see the new commit; for a pull by hand the host supervisor or the
 watchdog does it before restarting anything. A commit that fails is undone
 and the old version keeps running. **Update with one command** instead of

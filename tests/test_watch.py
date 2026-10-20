@@ -855,9 +855,10 @@ def test_host_starts_the_watchdog_after_a_restart_on_new_code():
 LOCAL = "d" * 40
 
 
-def test_no_rollback_without_a_restart_that_ran(world):
+def test_no_rollback_without_a_restart_that_ran(world, monkeypatch):
     """A Pi with no [watch] restart_command: an app that doesn't answer is
     reported, never rolled back (nothing proves the code is to blame)."""
+    monkeypatch.setattr(watch, "WINDOWS", False)  # no Task Scheduler fallback
     world.apps.add(8765, up=False)
     inst = make_instance()
     inst.restart_command = []
@@ -868,6 +869,21 @@ def test_no_rollback_without_a_restart_that_ran(world):
         later(world)
     assert world.git.resets() == [] and w.up.rejected() == []
     assert "Your app is failing" in world.sent[0]
+
+
+def test_windows_falls_back_to_the_task_scheduler_restart(tmp_path, monkeypatch):
+    """No [watch] restart_command: Windows restarts the app's task
+    (restart_instance.ps1), elsewhere there is no way to restart it."""
+    inst = make_instance("mom", 8866)
+    inst.restart_command = []
+    monkeypatch.setattr(watch, "WINDOWS", True)
+    cmd = watch.restart_command(tmp_path, inst)
+    assert cmd[0] == "powershell" and cmd[-2:] == ["-Name", "mom"]
+    assert cmd[cmd.index("-File") + 1] == str(tmp_path / "scripts" / "restart_instance.ps1")
+    monkeypatch.setattr(watch, "WINDOWS", False)
+    assert watch.restart_command(tmp_path, inst) == []
+    inst.restart_command = ["systemctl", "--user", "restart", "hey-claude"]
+    assert watch.restart_command(tmp_path, inst) == inst.restart_command
 
 
 def test_a_slow_start_after_the_restart_is_waited_for(world):
@@ -901,8 +917,9 @@ def test_down_app_gets_the_start_grace_and_a_long_wait_before_any_rollback(world
     assert world.git.resets() == [GOOD]
 
 
-def test_family_copy_down_without_restart_rolls_back_nobody(world):
+def test_family_copy_down_without_restart_rolls_back_nobody(world, monkeypatch):
     """Mom's copy not answering, no way to restart it: everyone's code stays."""
+    monkeypatch.setattr(watch, "WINDOWS", False)  # no Task Scheduler fallback
     world.apps.add(8865, up=False)
     mom = make_instance("mom", 8865)
     mom.restart_command = []
@@ -1319,3 +1336,110 @@ def test_a_fresh_lock_survives_a_late_stale_clear(tmp_path):
     assert lock.exists() and lock.read_text() == mine
     assert not take_lock(lock, 3600)  # still held
     assert not list(tmp_path.glob("*.stale"))
+
+
+# ----- follow-up: the judge's round-3 LOWs ------------------------------------------------
+
+def test_watchdog_backs_off_an_inconclusive_gate_like_the_hosts(world):
+    """Every 5-minute run used to rerun the whole go-live check while it
+    couldn't tell (12 an hour); now the watchdog waits the hosts' backoff
+    (updater.gate_backoff) after the last try, whoever made it."""
+    world.apps.add(8765, version=OLD)
+    tried = []
+    w = world.make(gate=lambda sha: tried.append(world.clock.t) or (None, "side port in use"))
+    start = world.clock.t
+    for _ in range(12):  # an hour of watchdog runs
+        w.run()
+        world.clock.t += 300
+    assert [round(t - start) for t in tried] == [0, 300, 600, 1500]
+    assert w.up.inconclusive(NEW)["count"] == 4 and w.up.rejected() == []
+
+
+def test_gate_backoff_is_one_table_for_hosts_and_watchdog(world):
+    from assistant import updater
+
+    assert [updater.gate_backoff(n) for n in (0, 1, 2, 3, 4, 9)] == [
+        60, 60, 300, 900, 3600, 3600]
+    assert not hasattr(host, "GATE_BACKOFF")  # no second copy to drift
+    up = world.make().up
+    assert up.gate_wait(NEW) == 0
+    up.note_inconclusive(NEW, "x")
+    up.note_inconclusive(NEW, "x")  # e.g. the host's second try
+    world.clock.t += 100
+    assert up.gate_wait(NEW) == 200 and up.gate_wait(OLD) == 0
+
+
+def _updater_on(world, gate):
+    """An Updater sharing the watchdog's state, finding NEW on stable."""
+    def run(cmd, cwd, timeout=0):
+        args = cmd[1:]
+        if args[:2] == ["rev-parse", "origin/stable"]:
+            return 0, NEW + "\n"
+        if args[:2] == ["merge", "--ff-only"]:
+            world.git.head = NEW
+            return 0, ""
+        return world.git(cmd, cwd, timeout)
+    up = Updater(root=world.root, run=run, trust_unsigned=True, gate=gate,
+                 clock=world.clock)
+    up.smoke = lambda: (True, "ok")
+    return up
+
+
+def test_inconclusive_checks_on_the_update_path_alert_once(world):
+    """The updater notes an inconclusive check on the new commit and rolls
+    HEAD back, so the record is never on HEAD; it still alerts, once."""
+    world.git.head = OLD
+    world.git.remote = {NEW}
+    world.apps.add(8765, version=OLD)
+    up = _updater_on(world, lambda sha: (None, "Your app: go-live: Claude unreachable"))
+    w = world.make()
+    for _ in range(4):  # an hour of [update] checks, a watchdog run after each
+        assert up.update().status == "rolled-back" and world.git.head == OLD
+        w.run()
+        world.clock.t += 15 * 60
+    stuck = [t for t in world.sent if "can't run" in t]
+    assert len(stuck) == 1 and NEW[:7] in stuck[0] and "Claude unreachable" in stuck[0]
+    assert up.rejected() == []
+
+
+def test_an_off_head_record_alerts_only_while_its_commit_is_pending(world):
+    """Not for a commit refused or checked since, nor a hand pull undone after
+    one try (count only, never the half-hour rule, off HEAD)."""
+    world.apps.add(8765, version=OLD)
+    world.git.head = OLD
+    w = world.make()
+    w.cfg["gate"] = False
+    w.up.note_inconclusive(NEW, "x")
+    world.clock.t += watch.INCONCLUSIVE_ALERT_SECONDS * 4
+    w.run()
+    for _ in range(watch.INCONCLUSIVE_ALERT_COUNT):
+        w.up.note_inconclusive(NEW, "x")
+    w.up._save_state(gated={"sha": NEW, "ok": True, "at": world.clock.t})
+    w.run()
+    w.up._save_state(gated=None, rejected=[NEW])
+    w.run()
+    assert not [t for t in world.sent if "can't run" in t]
+
+
+def test_a_copy_killed_by_a_signal_is_inconclusive(tmp_path):
+    """An OOM kill on the Pi (exit -9) says nothing about the code: not a
+    "did not start", so the commit is neither retried at once nor refused."""
+    (tmp_path / ".env").write_text(f"WEB_TOKEN={TOKEN}\n")
+    started = []
+
+    class Killed:
+        def __init__(self, cmd, **kw):
+            started.append(cmd)
+
+        def poll(self):
+            return -9
+
+    class Nothing:
+        def get(self, url, timeout=0):
+            raise ConnectionError("nothing")
+
+    def check(root, i, sha):
+        return watch.candidate_check(root, i, sha, http=Nothing(), popen=Killed,
+                                     sleep=lambda s: None)
+    ok, why = watch.gate_check(NEW, tmp_path, [make_instance()], check=check)
+    assert ok is None and "killed by signal 9" in why and len(started) == 1

@@ -758,10 +758,19 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
 - **A fluke can't reject a commit for good.** A failing go-live check is
   tried once more; a busy side port (after stopping a leftover
   `--candidate` copy of that instance, matched by its own config and env
-  file) is inconclusive: the commit is neither switched on nor rejected,
-  the hosts back off (1, 5, 15, 60 minutes) and the watchdog alerts once
-  after 3 such tries or 30 minutes. New code that exits before answering
-  on a free port is a real failure (tried twice, then refused). A rollback
+  file), or a check copy killed by a signal (an OOM kill on the Pi), is
+  inconclusive: the commit is neither switched on nor rejected. For a pull
+  by hand the hosts and the watchdog both wait 1, 5, 15, then 60 minutes
+  after the last try (`updater.gate_backoff`, one table); the automatic
+  updater rolls back and tries again at its next check. The watchdog alerts
+  once after 3 such tries (or 30 minutes on HEAD), including on the update
+  path, where the commit is no longer checked out, as long as it is neither
+  refused nor checked since. New code that exits before answering on a free
+  port is a real failure (tried twice, then refused). Deliberate non-fix:
+  any negative exit code counts as a kill, so a candidate that segfaults
+  (a broken native dependency) is retried and alerted on rather than
+  refused; on Windows a killed copy has a positive exit code and is still
+  refused after two tries. A rollback
   whose reset fails still clears the updater's "applied" commit, and the
   host never restarts on a refused commit. Lock files hold their PID, so a
   killed run's lock is stale at once, and a stale lock is cleared by an
