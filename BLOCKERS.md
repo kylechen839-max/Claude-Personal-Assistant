@@ -9,6 +9,30 @@ Only what is still open for Kyle. None of it blocks the code.
       on the cloud their list is "Default" alone until a `zh_CN` Piper voice
       is added to the image (~60 MB more; Dockerfile `PIPER_VOICE_URL`
       step). Nothing breaks without it.
+- [ ] **Family members' own Google on the cloud (~10 min, README "Invite
+      family" -> "Their own Google").** Only you can: (1) in
+      console.cloud.google.com, project `hey-claude-511904`, create an OAuth
+      client of type **Web application** with redirect URI
+      `https://hey-claude.onrender.com/google/callback` (your real Render
+      address); (2) in Render -> hey-claude -> Environment set
+      `PUBLIC_ORIGIN` to that address and paste the client's JSON into
+      `GOOGLE_WEB_CLIENT_JSON`; (3) make sure the consent screen is
+      **published** (Testing mode allows only listed test users, for 7
+      days). Until then invites work and the Connect button stays hidden.
+      Redeploy after merging so the image has the Chinese Whisper model and
+      voice (the build takes a few minutes longer).
+      `PUBLIC_ORIGIN` must be exactly the https address family members
+      open (scheme, host and port, no trailing path): the sign-in cookie
+      is set there and Google returns there, so a LAN `http://` address or
+      a second hostname (e.g. a custom domain next to `*.onrender.com`)
+      makes their sign-in fail.
+- [ ] **Measure Render memory with a Chinese-speaking family member.** The
+      +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
+      estimate, not measured (Hugging Face is blocked in the build
+      sandbox). After the first Chinese voice turn, check Render ->
+      hey-claude -> Metrics (memory peak) and note it in PROGRESS.md
+      ("Family invites, piece B"); if it nears 2 GB, set `FAMILY_ZH=0` or
+      a larger plan.
 - [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
       someone else").** Only you can: (1) create a **Web application** OAuth
       client in console.cloud.google.com with redirect URI

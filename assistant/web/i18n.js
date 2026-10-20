@@ -3,9 +3,10 @@
 // aria-label, title) at load and whenever app.js / voice.js change it, and the
 // questions passed to confirm(). Only exact known strings are replaced, so
 // messages and replies are left as they are. With lang="en" it does nothing.
-// Also: the "Connect Google account" menu button ([webapp] google_connect:
-// the server marks <html data-google>), shown only when /api/google/status
-// says it is set up.
+// Also: the "Connect Google account" menu button ([webapp] google_connect,
+// or a family member's own account: the server marks <html data-google>),
+// shown only when /api/google/status says it is set up, and "Disconnect
+// Google account" when the status allows it (family members).
 "use strict";
 
 (function (root) {
@@ -89,6 +90,11 @@
     "Spotify connected.": "Spotify 已连接。",
     "Opening Spotify…": "正在打开 Spotify…",
     "Couldn't start the Spotify sign-in.": "无法开始 Spotify 登录。",
+    "Disconnect Google account": "断开 Google 账户",
+    "Disconnect your Google account? I won't see your calendar or email any more.":
+      "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
+    "Google account disconnected.": "Google 账户已断开。",
+    "Couldn't disconnect. Try again.": "没能断开，请再试一次。",
     "Invite someone": "邀请家人",
     "Name": "名字",
     "Language": "语言",
@@ -264,11 +270,13 @@
       "with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there."]:
       "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
       "再点“添加到主屏幕”，以后从主屏幕打开。",
-    ["Connect your Google account so I can see your calendar and email: tap the gear at " +
-      "the top right, then \"Connect Google account\". If Google says it hasn't verified " +
+    ["Connect your own Google account so I can see your calendar and email: tap the gear at " +
+      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
       "app was made by your family, not a company."]:
-      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”。" +
+      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
   };
@@ -380,8 +388,10 @@
   // --- first-run guide: the steps only she can do on her phone ---
   const STEP_HOME = "Add this app to your home screen: in Safari, tap the Share button (the " +
     "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
-  const STEP_GOOGLE = "Connect your Google account so I can see your calendar and email: tap " +
-    "the gear at the top right, then \"Connect Google account\". If Google says it hasn't " +
+  // (a family member's own account on the shared server, google_web.py)
+  const STEP_GOOGLE = "Connect your own Google account so I can see your calendar and email: tap " +
+    "the gear at the top right, then \"Connect Google account\", and sign in with your own " +
+    "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
 
@@ -434,6 +444,7 @@
   function setupGoogle(win, doc) {
     const btn = doc.getElementById("google-connect");
     const hint = doc.getElementById("google-status");
+    const unlink = doc.getElementById("google-disconnect");
     if (!btn) return null;
     const say = (text) => (isActive(doc) ? translate(text) : text);
     const login = doc.getElementById("login-text");
@@ -463,6 +474,7 @@
         renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
+        if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
         if (hint) {
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = say("Google account connected.");
@@ -487,6 +499,29 @@
       btn.disabled = false;
       if (hint) hint.textContent = say("Couldn't start the Google sign-in.");
     });
+    if (unlink) {
+      unlink.addEventListener("click", async () => {
+        const ask = say("Disconnect your Google account? I won't see your calendar or email any more.");
+        if (typeof win.confirm === "function" && !win.confirm(ask)) return;
+        unlink.disabled = true;
+        let ok = false;
+        try {
+          const res = await win.fetch("/api/google/disconnect", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" }, body: "{}",
+          });
+          ok = res.ok;
+        } catch (e) { /* shown below */ }
+        unlink.disabled = false;
+        if (ok) {
+          await refresh();
+          if (hint) { hint.hidden = false; hint.textContent = say("Google account disconnected."); }
+        } else if (hint) {
+          hint.hidden = false;
+          hint.textContent = say("Couldn't disconnect. Try again.");
+        }
+      });
+    }
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
     refresh();

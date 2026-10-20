@@ -51,8 +51,9 @@ def make_voice(monkeypatch):
         assistant = webapp.WebAssistant(chat_factory, transcriber or Transcriber(*heard),
                                          PrintTTS(), tools=tools)
         if synth:
+            # (the session, and its language, are passed too: one voice here)
             monkeypatch.setattr(assistant, "synthesize",
-                                lambda text, session=None: synth(text))
+                                lambda text, session=None, language=None: synth(text))
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, voice=voice)
         http = TestClient(app, base_url=BASE)
         return client, http

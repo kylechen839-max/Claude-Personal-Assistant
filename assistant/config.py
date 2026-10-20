@@ -225,8 +225,15 @@ DEFAULTS: dict = {
         "dir": "data/users",        # users.json + one folder per person
         "max_users": 10,
         "invite_days": 30,          # an invite link works this long, once
-        "zh_stt_model": "small",    # Whisper for Chinese speakers (piece B)
-        "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",  # (piece B)
+        # Their own Google (Calendar, Gmail drafts) from their phone: needs
+        # a Web application OAuth client (GOOGLE_WEB_CLIENT_JSON, or this
+        # file) and the server's public address (public_origin)
+        "google": True,
+        "google_client": "",
+        # Chinese speakers' speech on a server whose language is English:
+        # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
+        "zh_stt_model": "small",
+        "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -266,6 +273,8 @@ ENV_OVERRIDES = {
     "HISTORY_PATH": ("history", "path"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
+    "ZH_WHISPER_MODEL": ("family", "zh_stt_model"),
+    "PUBLIC_ORIGIN": ("webapp", "public_origin"),  # e.g. https://hey-claude.onrender.com
     "CLOUD_TRUSTED_PROXIES": ("cloud", "trusted_proxies"),  # comma-separated
     "CLOUD_CLIENT_IP_HEADER": ("cloud", "client_ip_header"),
     "PORT": ("webapp", "port"),                # set by hosts such as Render

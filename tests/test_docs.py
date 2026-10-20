@@ -24,7 +24,8 @@ OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--now", "--bg", "--https",  # + tailscale serve
                "--keep", "--ff-only", "--short", "--oneline",  # git (updates)
                "--test",  # node --test
-               "--cloud"}  # claude -p --cloud (the PC hub)
+               "--cloud",  # claude -p --cloud (the PC hub)
+               "--build-arg"}  # docker build (FAMILY_ZH=0)
 OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "resume_conversation",  # tool names, not settings
                      "email_summary", "read_email", "draft_reply",

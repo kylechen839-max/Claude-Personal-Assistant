@@ -11,11 +11,16 @@ services:
     dockerContext: .
     # Measured (PROGRESS.md, "Cloud hosting"): base.en + Piper peaks at
     # 465-564 MB, more than Starter's 512 MB; Standard (2 GB, $25/month) has
-    # room. Starter ($7) only with WHISPER_MODEL=tiny.en, and tightly.
+    # room. Starter ($7) only with WHISPER_MODEL=tiny.en, and tightly. A
+    # Chinese-speaking family member's first words also load Whisper small
+    # and the Mandarin voice (estimated 0.5-0.7 GB more, not measured yet:
+    # PROGRESS.md "Family invites, piece B"): keep Standard for family use.
     plan: standard
     healthCheckPath: /healthz
     # Persistent disk (paid instance types only; $0.25/GB a month): history,
-    # lecture audio, job state. Snapshotted daily by Render; export too.
+    # lecture audio, job state, and family members' accounts (/data/users:
+    # their history and their own Google tokens; [family] dir in the server
+    # profile). Snapshotted daily by Render; export too.
     # A service with a disk runs one instance and redeploys with a short gap.
     disk:
       name: hey-claude-data
@@ -44,6 +49,17 @@ services:
         value: /data
       - key: HISTORY_PATH
         value: /data/history.sqlite
+      # Family members (README "Invite family"): their own Google sign-in
+      # from their phones needs this service's address and a *Web
+      # application* OAuth client whose redirect URI is
+      # <PUBLIC_ORIGIN>/google/callback. Left empty, invites still work and
+      # the "Connect Google account" button stays hidden.
+      - key: PUBLIC_ORIGIN          # e.g. https://hey-claude.onrender.com
+        sync: false
+      - key: GOOGLE_WEB_CLIENT_JSON # the whole contents of that client's JSON file
+        sync: false
+      - key: ZH_WHISPER_MODEL       # Chinese speech recognition (baked into the image)
+        value: small
       # Pi -> PC -> cloud failover (FAILOVER.md). Leave ASSISTANT_ROLE empty
       # for a cloud-only setup; set it to "cloud" to join. WEB_TOKEN must then
       # be the same on the Pi and the PC (copy this service's value there).

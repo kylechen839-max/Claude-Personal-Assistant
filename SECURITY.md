@@ -402,11 +402,13 @@ server (`[family] enabled`, on in the server profile).
   and so does the owner's WEB_TOKEN. Redeeming and creating the session
   happen under the family lock, so a DELETE can't race in between.
 - **Isolation.** A family session (`SessionStore.users`) gets its own
-  `ToolRegistry` with only Anthropic's web search and fetch (no browser,
-  Notion, memory, notes, history tools, Google or dev team), its own
+  `ToolRegistry` with only Anthropic's web search and fetch, plus their
+  own Google once they connect it (below); no browser, Notion, memory,
+  notes, history tools, Kyle's Google or dev team; its own
   `HistoryStore` at `<dir>/<id>/history.sqlite` with no sync event log,
   and no Pinecone memory. Owner-only routes (`require_owner`: invites and
-  users, lecture, tutor, Google connect) answer 404 to it, as if absent.
+  users, lecture, tutor) answer 404 to it, as if absent; the Google routes
+  answer about the caller's own account only.
   History routes use the session's own store, so the owner's conversation
   ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
   session that made it. Failover tokens and Bearer WEB_TOKEN are always the
@@ -430,6 +432,36 @@ server (`[family] enabled`, on in the server profile).
   token to sign in again; remove them to cut them off). The cookie epoch is
   rotated only when nobody else is left signed in, since rotating it would
   sign everyone out. A family member's signs out only their own browsers.
+
+- **Their own Google** (`[family] google`, piece B). A family member
+  signs in to their own Google account through the same flow as the
+  owner's (`google_web.py`, below) with a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` / `[family] google_client`) and the server's
+  own address. The token goes to `<dir>/<id>/google_token.json`
+  (`write_private`, under the family lock, refused once they are removed)
+  and is only ever read from there: their Calendar and Gmail tools get
+  `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
+  never read for them, and `save_token=False`, so a missing or revoked
+  token is an error, never a sign-in started on the server. Kyle's tools
+  read only his own token, never `<dir>`. The tools go only into their own
+  registry (shared by their sessions; added before stale ones are removed,
+  so a running turn never sees none), with the descriptions about them,
+  not Kyle; the calendar is their `primary`. Gmail stays drafts-only
+  (`NoSendGmail`), deletes and drafts ask first, created/moved events ask
+  once anything untrusted is in the conversation, as for Kyle.
+  **Disconnect** (`POST /api/google/disconnect`, family sessions only)
+  deletes the file and the tools; removing them deletes their folder,
+  token included. Not done, on purpose: the token isn't revoked at Google
+  on disconnect (deleting it from the server is what stops the assistant;
+  they can also remove "Hey Claude" at myaccount.google.com/permissions).
+- **Speech and sentences in their language.** A Chinese-speaking member's
+  recordings go to the Chinese Whisper model and replies to the Mandarin
+  voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),
+  through the same single STT lock and TTS thread as everyone else's, so
+  concurrency and memory stay bounded. `i18n.t` takes the session's
+  language, and each turn's thread runs `i18n.using(its language)`, so a
+  tool's confirmation question is asked in the language of the person who
+  will answer it.
 
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
@@ -525,20 +557,29 @@ has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
 For a second user's instance, `[webapp] google_connect` adds a "connect
-Google" button. `POST /api/google/connect` needs the signed-in session and
+Google" button; on the cloud server family members get the same button for
+their own account (above). `POST /api/google/connect` needs the signed-in session and
 same-origin (the usual `/api/` guard); it returns Google's consent URL with
 a PKCE challenge, `access_type=offline` and the redirect
 `<public_origin>/google/callback`.
 
-- **The callback is authenticated by `state` alone, on purpose.** The
+- **The callback is authenticated by `state` and a binding cookie.** The
   session cookie is `SameSite=Strict`, so the browser does not send it on
-  Google's cross-site redirect back. The state is random, created only for
-  a signed-in session, kept in memory only (at most 4 at once, 10 minutes)
-  and used once: an unknown, expired, replayed or `error=` callback gets a
-  400 and writes nothing. The PKCE verifier never leaves the server, so a
-  code seen elsewhere can't be redeemed. Nobody without the web token can
-  create a state, so a stranger can't attach their Google account to her
-  instance.
+  Google's cross-site redirect back (CloudGuard lets `/google/callback`
+  through without it). The state is random, created only for a signed-in
+  session, kept in memory only (at most 4 per person and 32 in all, 10
+  minutes), bound to who started it (the owner or one family member, and
+  their session id) and used once: an unknown, expired, replayed or
+  `error=` callback gets a 400 and writes nothing. Starting also sets
+  `hc_google`, an HttpOnly, Secure, `SameSite=Lax` cookie (Lax: sent on
+  Google's top-level redirect; path `/google/callback`, 10 minutes) with a
+  random nonce whose SHA-256 is kept with the state. The callback must
+  carry it (constant-time compare), and the starting session must still be
+  signed in as the same person (and, for family, still listed). So a
+  consent link one person forwards to another can't attach the second
+  person's Google to the first person's account, nor anyone's to Kyle's.
+  The PKCE verifier never leaves the server, so a code seen elsewhere
+  can't be redeemed.
 - The token is written with `write_private` (temp file in the same folder,
   then an atomic replace). The OAuth code is masked by the log redaction if
   the server's access log ever records the callback URL; the assistant logs
@@ -780,6 +821,14 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
 - Deliberately not done: no undo (a delete is final in Pinecone); a
   conversation in history keeps its transcript when its memory summary is
   deleted here (delete the conversation in History for both).
+
+- **The Mandarin voice in the cloud image has no pinned checksum.** The
+  Dockerfile fetches `zh_CN-huayan-medium` (and Whisper `small`) over HTTPS
+  from the official rhasspy / Systran repositories at build time, the same
+  way as the English voice and `base.en`; a SHA-256 couldn't be pinned
+  because Hugging Face is blocked in the build sandbox. Nothing is
+  downloaded at run time (`HF_HUB_OFFLINE=1`). Pinning both voices to a
+  repository revision and hash is a follow-up.
 
 ## Conversation history
 

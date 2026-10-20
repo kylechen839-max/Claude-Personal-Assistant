@@ -10,13 +10,16 @@ in `<dir>/users.json`; the token itself is shown once and never logged.
 
 What a family member gets (UserContext): web search and fetch (Anthropic's
 server tools), their own history at `<dir>/<id>/history.sqlite` (never
-synced to the Pi or PC), replies in their language. Nothing else: no
-Notion, Pinecone memory or notes, Google, dev team, lecture recorder or
-tutor, and no way to see anyone else's history. Removing someone signs them
-out and deletes their folder.
-
-Piece B (per-user Google, speech language) adds to `Family._register_tools`
-and `UserContext`; nothing here needs to change shape for it.
+synced to the Pi or PC), replies, server sentences and speech in their
+language (webapp.WebAssistant picks the Chinese Whisper model and voice),
+and, once they tap "Connect Google account" on their own phone, their own
+Google Calendar and Gmail (read, drafts only; deletes ask first) from
+`<dir>/<id>/google_token.json` (google_web.py signs them in). Their token
+is only ever read from that file, never from GOOGLE_TOKEN_JSON (Kyle's),
+and Kyle's tools never read theirs. Nothing else: no Notion, Pinecone
+memory or notes, Kyle's Google, dev team, lecture recorder or tutor, and no
+way to see anyone else's history. Removing someone signs them out and
+deletes their folder, Google token included.
 """
 
 # No `from __future__ import annotations`: FastAPI must see the real
@@ -30,7 +33,7 @@ import secrets
 import shutil
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -40,6 +43,7 @@ TOKEN_PREFIX = "hcinv."
 LANGUAGES = ("en", "zh")
 MAX_NAME = 40
 STATUSES = ("invited", "active")
+GOOGLE_TOKEN = "google_token.json"  # in <dir>/<id>/
 _ID = re.compile(r"^u_[A-Za-z0-9_-]{8,40}$")
 
 
@@ -304,9 +308,10 @@ class Family:
             return ctx
 
     def _register_tools(self, user: dict, registry) -> None:
-        """Web search and fetch only: no browser (it would open on the
-        server), no Notion, memory, notes, history, Google or dev team.
-        Piece B adds the person's own Google tools here."""
+        """Web search and fetch, and their own Google once connected. No
+        browser (it would open on the server), no Notion, memory, notes,
+        history, Kyle's Google or dev team."""
+        registry.register(*self._google_tools(user))
         web = self.config["web"]
         if not web["enabled"]:
             return
@@ -316,6 +321,115 @@ class Family:
         cfg = {**web, "location": {"timezone": user.get("timezone") or ""}}
         registry.add_server_tools(
             *web_tools.server_tools(self.config["assistant"]["model"], cfg))
+
+    # ---------- their own Google (google_web.py signs them in) ----------
+    def google_token(self, uid: str) -> Path:
+        return self.dir / uid / GOOGLE_TOKEN
+
+    def google_client(self) -> dict | None:
+        """The Web application OAuth client they sign in with; None (their
+        Google is off) if it isn't set up."""
+        from assistant.tools.google_auth import web_client_config
+
+        try:
+            client = web_client_config(self.config["family"]["google_client"])
+        except (OSError, ValueError) as e:  # never the value
+            log.warning("Family: the Google web client is unreadable (%s)", e)
+            return None
+        if client is not None and "web" not in client:
+            log.warning("Family: the Google client is not a Web application client")
+            return None
+        return client
+
+    def google_enabled(self) -> bool:
+        return bool(self.config["family"]["google"] and own_origin(self.config)
+                    and self.google_client())
+
+    def google_connected(self, uid: str) -> bool:
+        return valid_id(uid) and self._google_info(uid) is not None
+
+    def _google_info(self, uid: str) -> dict | None:
+        from assistant.tools.google_auth import load_token_info
+
+        try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON
+            return load_token_info(self.google_token(uid), environ={})
+        except (OSError, ValueError):
+            return None
+
+    def _google_tools(self, user: dict) -> list:
+        """Calendar and Gmail on their own token (none until they connect).
+        Never Kyle's: `environ={}` hides GOOGLE_TOKEN_JSON/GOOGLE_CLIENT_JSON,
+        `save_token=False` never starts a sign-in on the server, `in_app`
+        makes an expired or revoked token say "reconnect in the app", and
+        the calendar is their primary one."""
+        if not (self.config["family"]["google"] and valid_id(user.get("id"))):
+            return []
+        info = self._google_info(user["id"])
+        if info is None:
+            return []
+        from assistant.tools.calendar import GoogleCalendar
+        from assistant.tools.google_auth import GMAIL_SCOPES, granted_scopes
+
+        token, tz = self.google_token(user["id"]), user.get("timezone") or None
+        tools = GoogleCalendar(credentials_path="", token_path=token,
+                               calendar_id="primary", timezone=tz,
+                               save_token=False, environ={}, in_app=True).tools()
+        if self.config["gmail"]["enabled"] and \
+                set(GMAIL_SCOPES) <= granted_scopes(info):
+            from assistant.tools.gmail import GmailInbox
+
+            tools += GmailInbox(credentials_path="", token_path=token, timezone=tz,
+                                max_summary=self.config["gmail"]["max_summary"],
+                                save_token=False, environ={}, in_app=True).tools()
+        # the descriptions say "Kyle's calendar": make them about this person
+        name = "the user" if user.get("language") == "zh" else user["name"]
+        return [replace(t, description=t.description.replace("Kyle's", f"{name}'s")
+                        .replace("Kyle", name)) for t in tools]
+
+    def save_google(self, uid: str, token_text: str) -> bool:
+        """Store their token (privately, atomically) and add their Google
+        tools to their open conversations. False if they were removed
+        meanwhile (nothing written: their folder is going away)."""
+        from assistant.tools.google_auth import write_private
+
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or user.get("status") != "active" or not valid_id(uid):
+                return False
+            path = self.google_token(uid)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_private(path, token_text)
+            self._refresh_tools(uid)
+        log.info("Family: %s connected their Google account", uid)
+        return True
+
+    def disconnect_google(self, uid: str) -> bool:
+        """Delete their token and take their Google tools away. False if
+        there was nothing to delete."""
+        with self.lock:
+            if uid not in self.users or not valid_id(uid):
+                return False
+            path = self.google_token(uid)
+            had = path.exists()
+            _unlink(path)
+            self._refresh_tools(uid)
+        log.info("Family: %s disconnected their Google account", uid)
+        return had
+
+    def _refresh_tools(self, uid: str) -> None:
+        """Their open conversations' tools after a connect or disconnect:
+        every SessionTools shares this registry's dict, so update it in
+        place, adding before removing (a running turn never sees it empty)."""
+        ctx = self._contexts.get(uid)
+        if ctx is None:
+            return
+        from assistant.tools import ToolRegistry
+
+        fresh = ToolRegistry()
+        self._register_tools(ctx.user, fresh)
+        ctx.registry.tools.update(fresh.tools)
+        for name in set(ctx.registry.tools) - set(fresh.tools):
+            ctx.registry.tools.pop(name, None)
 
     def _build(self, user: dict) -> UserContext:
         from assistant.chat import ClaudeChat
@@ -362,6 +476,18 @@ class Family:
             contexts, self._contexts = list(self._contexts.values()), {}
         for ctx in contexts:
             ctx.close()
+
+
+def _unlink(path: Path, attempts: int = 20) -> None:
+    """Delete a file; retried like _rmtree (a reader may hold it on Windows)."""
+    for attempt in range(attempts):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
 
 
 def _rmtree(folder: Path, attempts: int = 20) -> None:

@@ -350,6 +350,13 @@ def test_a_file_claude_refuses_gets_its_own_sentence(make_app, fake_client, capl
     monkeypatch.setattr(i18n, "LANG", lang)
     assistant, client = make_app()
     login(client)
+    factory = assistant.chat_factory
+
+    def chat_in(registry):  # a turn speaks its session's language (i18n.using)
+        chat = factory(registry)
+        chat.language = lang
+        return chat
+    assistant.chat_factory = chat_in
     fake_client.messages.create.side_effect = refuse
     with caplog.at_level(logging.DEBUG):
         evs = events(client.post("/api/turn", data={"text": "summarize"},

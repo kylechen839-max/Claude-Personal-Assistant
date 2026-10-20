@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, time, timedelta
 
 from assistant import i18n
@@ -45,11 +46,16 @@ def _is_date(value: str) -> bool:
 class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
-                 timezone: str | None = None, save_token: bool = True):
+                 timezone: str | None = None, save_token: bool = True,
+                 environ=None, in_app: bool = False):
         self._service = service
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.save_token = save_token
+        # where GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON are read (None: the
+        # process environment); a family member's is empty (family.py)
+        self.environ = os.environ if environ is None else environ
+        self.in_app = in_app  # errors say "reconnect Google in the app"
         self.calendar_id = calendar_id
         self.tz = local_zone(timezone)
 
@@ -59,7 +65,8 @@ class GoogleCalendar:
             from googleapiclient.discovery import build
 
             creds = get_credentials(self.credentials_path, self.token_path,
-                                    save_token=self.save_token)
+                                    save_token=self.save_token,
+                                    environ=self.environ, in_app=self.in_app)
             self._service = build("calendar", "v3", credentials=creds,
                                   cache_discovery=False)
         return self._service
