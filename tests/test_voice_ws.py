@@ -342,7 +342,10 @@ def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
     # render. The renders are long (0.8 s) so that bound leaves a slow Windows
     # runner room for thread hand-offs and logging the failed render's
     # traceback (0.31 s once, against an old 0.3 s bound with 0.4 s renders).
-    assert 0.9 * stt_s <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
+    # The turn's marks use time.monotonic (about 16 ms ticks on Windows), the
+    # renders time.perf_counter, so with no slow Whisper the difference can
+    # come out a few ms below zero (-0.005 s once): allow 50 ms of clock slack.
+    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
 
 
 @pytest.mark.slow
