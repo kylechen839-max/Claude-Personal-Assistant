@@ -45,6 +45,11 @@ DEFAULTS: dict = {
         "kokoro_voices": "models/kokoro/voices-v1.0.bin",
         "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
         "elevenlabs_model": "eleven_flash_v2_5",
+        # phone app: each person picks their own reply voice (voice_picker.py)
+        "picker": True,
+        "voices_dir": "voices",          # the Piper voices offered
+        "voice_file": "data/voice_choice.json",  # the owner's pick ("" = not kept)
+        "family_paid_voices": False,     # family members may pick ElevenLabs
     },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
@@ -212,13 +217,31 @@ DEFAULTS: dict = {
         "cache_seconds": 30,        # device list kept this long
         "timeout": 10,              # seconds per request
     },
+    "spotify": {                    # play, pause, skip by voice (Premium; README "Spotify")
+        "enabled": False,           # needs SPOTIFY_CLIENT_ID and a one-time sign-in
+        "token": "data/spotify_token.json",  # written privately; delete to disconnect
+        # where the browser lands after `python -m assistant.tools.spotify`
+        # (add it to your Spotify app's redirect URIs, exactly)
+        "redirect_uri": "http://127.0.0.1:8888/callback",
+        "pause_while_listening": True,  # wake word: pause music on this computer, resume after
+        "local_device": "",         # this computer's Spotify device name; "" = its hostname
+        "volume_step": 15,          # "turn it up" / "down" by this much (percent)
+        "timeout": 10,              # seconds per Spotify request
+    },
     "family": {                     # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
         "max_users": 10,
         "invite_days": 30,          # an invite link works this long, once
-        "zh_stt_model": "small",    # Whisper for Chinese speakers (piece B)
-        "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",  # (piece B)
+        # Their own Google (Calendar, Gmail drafts) from their phone: needs
+        # a Web application OAuth client (GOOGLE_WEB_CLIENT_JSON, or this
+        # file) and the server's public address (public_origin)
+        "google": True,
+        "google_client": "",
+        # Chinese speakers' speech on a server whose language is English:
+        # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
+        "zh_stt_model": "small",
+        "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -230,7 +253,7 @@ DEFAULTS: dict = {
 # stdout for the host's log viewer); no PC-only tools.
 SERVER_PROFILE: dict = {
     "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
-            "fallback": "espeak"},
+            "fallback": "espeak", "voice_file": "/data/voice_choice.json"},
     "wake": {"chime": False, "follow_up_seconds": 0},
     "calendar": {"save_token": False},
     "web": {"browser": False},
@@ -258,6 +281,8 @@ ENV_OVERRIDES = {
     "HISTORY_PATH": ("history", "path"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
+    "ZH_WHISPER_MODEL": ("family", "zh_stt_model"),
+    "PUBLIC_ORIGIN": ("webapp", "public_origin"),  # e.g. https://hey-claude.onrender.com
     "CLOUD_TRUSTED_PROXIES": ("cloud", "trusted_proxies"),  # comma-separated
     "CLOUD_CLIENT_IP_HEADER": ("cloud", "client_ip_header"),
     "PORT": ("webapp", "port"),                # set by hosts such as Render

@@ -51,8 +51,8 @@ VOICE_STAGES = (("transcript", "transcript"),
                 ("audio", "first audio sent"),
                 ("reply", "whole reply"))
 
-def question_suffix() -> str:
-    return i18n.t("say_yes_no")  # " Please say yes or no." in English
+def question_suffix(lang: str | None = None) -> str:
+    return i18n.t("say_yes_no", lang)  # " Please say yes or no." in English
 
 
 # --- speech synthesis -----------------------------------------------------------
@@ -150,9 +150,9 @@ def is_explicit_yes(text: str) -> bool:
     return has_yes and all(w in _YES or w in _FILLER for w in words)
 
 
-def decline_message(question: str) -> str:
+def decline_message(question: str, lang: str | None = None) -> str:
     return i18n.t("wont_delete" if "delete" in question.lower() or "删除" in question
-                  else "wont_do")
+                  else "wont_do", lang)
 
 
 # --- backends -------------------------------------------------------------------
@@ -225,7 +225,7 @@ class WebBackend:
                 parts.append(delta)
                 on_text(delta)
         except RuntimeError:  # a push-to-talk turn is running in this session
-            parts.append("I'm still working on your last request.")
+            parts.append(i18n.t("still_working", self.session.language))
             on_text(parts[-1])
         return "".join(parts)
 
@@ -312,7 +312,9 @@ class VoiceConversation:
     from worker threads and must be thread-safe.
 
     `transcribe(samples)` and `synthesize(text)` are the Whisper and TTS
-    functions (the web app passes its shared, locked ones).
+    functions (the web app passes its shared, locked ones, for the
+    session's language). `language` ("en"/"zh"; None = the server's) is
+    the one its own sentences are said in ("Please say yes or no").
 
     Turns run one at a time on one worker thread, so the conversation never
     has two requests in flight. A new utterance cancels the running turn and
@@ -323,8 +325,9 @@ class VoiceConversation:
                  synthesize: Callable[[str], bytes],
                  send: Callable[..., None], *, clock=time.monotonic,
                  idle_timeout: float = 120, max_session: float = 1800,
-                 wake_phrase: str | None = "Hey Claude"):
+                 wake_phrase: str | None = "Hey Claude", language: str | None = None):
         self.backend = backend
+        self.language = language
         backend.conv = self
         self.transcribe = transcribe
         self.synthesize = synthesize
@@ -470,13 +473,14 @@ class VoiceConversation:
             self.pending = PendingConfirm(turn.id, question)
         turn.flush()  # "Okay." before the question, in order
         self._send({"type": "confirm", "turn": turn.id, "question": question})
-        turn.sentences.put(Chunk(question + question_suffix(), 0, reply=False,
+        turn.sentences.put(Chunk(question + question_suffix(self.language), 0,
+                                 reply=False,
                                  question=True))
 
     def on_status(self, text: str) -> None:
         with self.lock:
             turn = self.current
-            if text == i18n.t("no_answer"):  # the backend gave up waiting
+            if text == i18n.t("no_answer", self.language):  # the backend gave up waiting
                 self.pending = None
         self._send({"type": "status", "turn": turn.id if turn else None, "text": text})
 
@@ -509,7 +513,8 @@ class VoiceConversation:
                     "yes": False, "reason": why})
         turn = self.current
         if turn is not None and turn.id == pending.turn and not turn.finished:
-            turn.sentences.put(Chunk(decline_message(pending.question), 0, reply=False))
+            turn.sentences.put(Chunk(decline_message(pending.question, self.language),
+                                     0, reply=False))
         self.backend.answer(False)
 
     def _answer(self, pending: PendingConfirm, utterance_id: int, samples) -> None:
@@ -533,7 +538,11 @@ class VoiceConversation:
             self.backend.answer(True)
 
     def _work(self) -> None:
-        """Run turns one at a time."""
+        """Run turns one at a time, in this conversation's language."""
+        with i18n.using(self.language):
+            self._work_loop()
+
+    def _work_loop(self) -> None:
         while True:
             with self.lock:
                 while self.waiting is None and not self.closed:
@@ -588,7 +597,7 @@ class VoiceConversation:
             goodbye = self._turn_body(turn, timer)
         except Exception:
             log.exception("Voice turn failed")
-            message = i18n.t("error")
+            message = i18n.t("error", self.language)
             self._send({"type": "error", "turn": turn.id, "message": message})
             turn.sentences.put(Chunk(message, 0, reply=False))
         finally:
@@ -623,7 +632,7 @@ class VoiceConversation:
         if not text or turn.stop.is_set():
             return False
         if is_exit(text):
-            turn.sentences.put(Chunk(i18n.t("goodbye"), 0, reply=False))
+            turn.sentences.put(Chunk(i18n.t("goodbye", self.language), 0, reply=False))
             return True
         streamed = []
 

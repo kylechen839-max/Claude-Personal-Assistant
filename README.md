@@ -254,10 +254,12 @@ you are most likely to tune:
 | `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
 | `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
 | `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
+| `[tts] picker` | true | Phone app: everyone picks their own reply voice (see "Voices") |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
+| `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
 
 ### Voices
 
@@ -322,6 +324,26 @@ is streamed with a timeout; if the request fails (network, quota, a bad
 key) that sentence is spoken by the local voice above, and the cloud is
 skipped for a minute. Without the key the local voice is used. The key is
 never logged.
+
+**Pick your voice in the phone app.** The settings menu (gear) has **Reply
+voice**: a list of the voices this server really has, in your language,
+with **Preview** to hear a short sample. It offers the Piper voices in
+`[tts] voices_dir` (`voices/`), the Kokoro voices if Kokoro is set up (not
+on the cloud server, which has too little memory for it), the system voice
+(pyttsx3, or espeak-ng on a server) and, only with `ELEVENLABS_API_KEY`
+set, your ElevenLabs voices (listed from your account, refreshed hourly,
+tagged **paid**; you can also type a voice ID). Chinese speakers see the
+Chinese voices (e.g. `zh_CN-huayan-medium`: `python -m assistant
+--download-voice zh_CN-huayan-medium`). The choice is per person: yours is
+saved on that server in `[tts] voice_file` (`data/voice_choice.json`;
+`/data/` on the cloud, `data/mom/` for `config.mom.toml`), each family
+member's in their own folder (deleted when you remove them), and it is used
+from the next reply on, in push-to-talk and voice conversations alike.
+Family members can't pick ElevenLabs voices (your bill) unless you set
+`[tts] family_paid_voices = true`. A voice that has gone away (file deleted,
+key removed) falls back to the default with one log line. "Use the phone's
+voice" in the same menu still wins over all of these. `[tts] picker =
+false` turns the picker off.
 
 **Sounds.** Voice mode on the phone plays three soft cues: a gentle two-note
 rise when it starts listening, a very quiet low note when your turn has
@@ -635,15 +657,45 @@ while the cloud is the active backend.
    deletes their conversations (if a file can't be deleted right away, it
    is retried later).
 
-What they get: chat and voice with Claude, web search, and their own
+What they get: chat and voice with Claude, web search, their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
-synced to your Pi or PC). What they never get: your Notion, Pinecone memory
-and notes, Google Calendar and Gmail, the dev team, the lecture recorder and
-tutor, your history, failover, or the invite menu. Their **Sign out
-everywhere** signs out only their own phones; yours signs out only yours.
-Settings: `[family]` in `config.toml` (`dir`, `max_users`, `invite_days`).
-Their own Google account and Chinese speech recognition and voice come
-later (`zh_stt_model`, `zh_piper_voice` are reserved for that).
+synced to your Pi or PC), and everything in their language: replies, the
+assistant's own sentences ("Please say yes or no", "I didn't catch that")
+and, for Chinese, speech recognition with the multilingual Whisper model
+(`zh_stt_model`, `small`) and the Mandarin Piper voice (`zh_piper_voice`).
+Those load the first time a Chinese-speaking person talks and are shared by
+everyone who speaks Chinese; English speakers keep the server's own.
+
+**Their own Google.** Once it is set up (below), they tap ⚙ -> **Connect
+Google account** on their own phone and sign in to *their* Google account.
+Then they can ask about their calendar (add, move, delete; deletes ask
+first) and their Gmail (read, and draft replies, never send), exactly like
+yours. Their token is kept in their own folder
+(`<dir>/<id>/google_token.json`), is never mixed with yours (your Google on
+the server stays `GOOGLE_TOKEN_JSON`), and **Disconnect Google account**
+or removing them deletes it. One-time setup for you:
+
+1. Google Cloud console, the same project as your own sign-in -> APIs &
+   Services -> Credentials -> **Create credentials -> OAuth client ID ->
+   Web application**. Authorized redirect URI:
+   `https://<cloud>/google/callback` (e.g.
+   `https://hey-claude.onrender.com/google/callback`). Download its JSON.
+2. In Render -> hey-claude -> Environment, set `PUBLIC_ORIGIN` to
+   `https://<cloud>` and paste that JSON's whole contents into
+   `GOOGLE_WEB_CLIENT_JSON`, then Save.
+3. The app must be **published** (step 3 of "Run it in the cloud" below):
+   in Testing mode only listed test users can sign in, and only for 7 days.
+   They see Google's "unverified app" warning once; their guide card tells
+   them to tap Advanced -> Go to ... (unsafe).
+
+Without step 2 everything else works and their Connect button stays hidden.
+
+What they never get: your Notion, Pinecone memory and notes, your Google
+Calendar and Gmail, the dev team, the lecture recorder and tutor, your
+history, failover, or the invite menu. Their **Sign out everywhere** signs
+out only their own phones; yours signs out only yours. Settings: `[family]`
+in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
+`google_client`, `zh_stt_model`, `zh_piper_voice`).
 
 ## Run it in the cloud (Render)
 
@@ -664,6 +716,11 @@ Cost: about $25.25 a month: the Standard plan (2 GB RAM, $25) plus a 1 GB
 persistent disk ($0.25/GB). Speech recognition with
 Whisper `base.en` plus the Piper voice was measured at up to 564 MB, which
 doesn't fit the $7 Starter plan's 512 MB (PROGRESS.md, "Cloud hosting").
+For Chinese-speaking family members the image also holds Whisper `small`
+(about 480 MB) and the Mandarin Piper voice (about 60 MB); they load into
+memory only once one of them talks (estimated at 0.5-0.7 GB more, not yet
+measured on Render), which the Standard plan has room for. Build with
+`--build-arg FAMILY_ZH=0` for a smaller image without them.
 Render's free Hobby workspace is enough; you pay only for the service. To
 save money you can switch the service to Starter and set `WHISPER_MODEL` to
 `tiny.en` (peaks around 470 MB: it fits, with little room to spare, and
@@ -695,6 +752,9 @@ one instance and a deploy has a short gap of downtime.
    - `ASSISTANT_TIMEZONE`: your time zone, e.g. `America/New_York`, so
      "tomorrow" means your tomorrow (the server runs on UTC).
    - `WEB_TOKEN` is generated by Render; leave it.
+   - `PUBLIC_ORIGIN`, `GOOGLE_WEB_CLIENT_JSON`: only for family members'
+     own Google (README "Invite family"); leave them empty for now if you
+     like.
    Click **Apply**. The first build takes about 10 minutes.
 3. **Publish the Google app.** Google Cloud console -> APIs & Services ->
    OAuth consent screen (Google Auth Platform -> Audience) -> **Publish
@@ -900,6 +960,70 @@ token travels unencrypted. That is fine inside your home network or over
 Tailscale; anywhere else use https (Nabu Casa or your own certificate).
 The assistant warns at startup when `HA_URL` is a plain http address
 outside the home network.
+
+## Spotify by voice
+
+"Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+"what's playing?", "turn it up", "play it on my phone". The assistant
+remote-controls a Spotify app that is already open somewhere (the PC's
+desktop app, your phone, a speaker) through the Spotify Web API; it plays
+no audio itself. Your own playlists are searched first, then Spotify's
+catalog (a mood or genre plays a playlist, a song name plays that song).
+
+- **Spotify Premium is required.** Spotify only lets apps control playback
+  on Premium accounts; without it every command answers "Spotify only lets
+  apps control playback with a Premium account."
+- **Spotify has to be open on a device.** With nothing playing anywhere it
+  uses this computer's Spotify if it is open, or the only device that is;
+  with several it asks which one.
+- **Nothing changes your library.** Sign-in asks only for
+  user-read-playback-state, user-modify-playback-state and
+  playlist-read-private: no tool can edit
+  playlists, saved songs or follows. Playback control never asks for a
+  yes (it is harmless and easy to undo).
+- **Pauses while you talk.** With `[spotify] pause_while_listening = true`
+  (the default) the wake word pauses Spotify if it is playing on this
+  computer, and it resumes when the assistant goes back to waiting for
+  "Hey Claude" (not if you said "pause" meanwhile). This computer is the
+  Spotify device whose name is `[spotify] local_device`, or the computer's
+  hostname when that is empty. Only the wake-word mode does this; the phone
+  app plays its replies on the phone.
+- Family members (cloud invites) never get Spotify: not in this version.
+  Spotify is meant for the PC or Pi (wake word and its phone web app);
+  the cloud server's sign-in wall doesn't pass Spotify's redirect back, so
+  connect it on the PC.
+
+Setup, once (about 5 minutes):
+
+1. At developer.spotify.com -> Dashboard -> Create app (any name, "Web
+   API"). Under Redirect URIs add exactly `http://127.0.0.1:8888/callback`
+   (the `[spotify] redirect_uri` default), and, for the phone app's button,
+   `<public_origin>/spotify/callback` too (e.g.
+   `https://your-pc.your-tailnet.ts.net/spotify/callback`). In Development
+   mode, add your Spotify account's email under User Management.
+2. Copy the app's **Client ID** into `.env` as `SPOTIFY_CLIENT_ID=...`. No
+   client secret is used (the sign-in is PKCE).
+3. Turn it on in `config.local.toml`:
+
+   ```toml
+   [spotify]
+   enabled = true
+   ```
+4. Sign in, either on the PC or Pi:
+
+   ```powershell
+   python -m assistant.tools.spotify
+   ```
+
+   It prints a link (and opens it); after you allow access the browser
+   lands on a 127.0.0.1 address. If that page doesn't load (for example
+   the link was opened on another device), that's fine: copy the full
+   address from the address bar and paste it back. Or, in the phone app,
+   gear -> **Connect Spotify** (owner only; needs `[webapp] public_origin`).
+5. Restart the assistant. The sign-in is saved privately in
+   `[spotify] token` (`data/spotify_token.json`); delete that file to
+   disconnect, and remove the app's access at spotify.com -> Account ->
+   Manage apps.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
@@ -1328,6 +1452,7 @@ assistant/
   tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
   tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
   tts_elevenlabs.py  optional ElevenLabs cloud voice
+  voice_picker.py  each person's reply voice in the phone app (/api/voices)
   earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources
@@ -1358,7 +1483,8 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, history.py, tool registry
+                notion.py, notes.py, web.py, history.py, spotify.py, tool registry
+  spotify_web.py  the phone app's "Connect Spotify" (owner only)
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

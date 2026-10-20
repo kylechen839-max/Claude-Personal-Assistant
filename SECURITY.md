@@ -402,11 +402,13 @@ server (`[family] enabled`, on in the server profile).
   and so does the owner's WEB_TOKEN. Redeeming and creating the session
   happen under the family lock, so a DELETE can't race in between.
 - **Isolation.** A family session (`SessionStore.users`) gets its own
-  `ToolRegistry` with only Anthropic's web search and fetch (no browser,
-  Notion, memory, notes, history tools, Google or dev team), its own
+  `ToolRegistry` with only Anthropic's web search and fetch, plus their
+  own Google once they connect it (below); no browser, Notion, memory,
+  notes, history tools, Kyle's Google or dev team; its own
   `HistoryStore` at `<dir>/<id>/history.sqlite` with no sync event log,
   and no Pinecone memory. Owner-only routes (`require_owner`: invites and
-  users, lecture, tutor, Google connect) answer 404 to it, as if absent.
+  users, lecture, tutor) answer 404 to it, as if absent; the Google routes
+  answer about the caller's own account only.
   History routes use the session's own store, so the owner's conversation
   ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
   session that made it. Failover tokens and Bearer WEB_TOKEN are always the
@@ -431,9 +433,83 @@ server (`[family] enabled`, on in the server profile).
   rotated only when nobody else is left signed in, since rotating it would
   sign everyone out. A family member's signs out only their own browsers.
 
+- **Their own Google** (`[family] google`, piece B). A family member
+  signs in to their own Google account through the same flow as the
+  owner's (`google_web.py`, below) with a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` / `[family] google_client`) and the server's
+  own address. The token goes to `<dir>/<id>/google_token.json`
+  (`write_private`, under the family lock, refused once they are removed)
+  and is only ever read from there: their Calendar and Gmail tools get
+  `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
+  never read for them, and `save_token=False`, so a missing or revoked
+  token is an error, never a sign-in started on the server. Kyle's tools
+  read only his own token, never `<dir>`. The tools go only into their own
+  registry (shared by their sessions; added before stale ones are removed,
+  so a running turn never sees none), with the descriptions about them,
+  not Kyle; the calendar is their `primary`. Gmail stays drafts-only
+  (`NoSendGmail`), deletes and drafts ask first, created/moved events ask
+  once anything untrusted is in the conversation, as for Kyle.
+  **Disconnect** (`POST /api/google/disconnect`, family sessions only)
+  deletes the file and the tools; removing them deletes their folder,
+  token included. Not done, on purpose: the token isn't revoked at Google
+  on disconnect (deleting it from the server is what stops the assistant;
+  they can also remove "Hey Claude" at myaccount.google.com/permissions).
+- **Speech and sentences in their language.** A Chinese-speaking member's
+  recordings go to the Chinese Whisper model and replies to the Mandarin
+  voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),
+  through the same single STT lock and TTS thread as everyone else's, so
+  concurrency and memory stay bounded. `i18n.t` takes the session's
+  language, and each turn's thread runs `i18n.using(its language)`, so a
+  tool's confirmation question is asked in the language of the person who
+  will answer it.
+
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
+
+## Reply-voice picker (`voice_picker.py`)
+
+Everyone signed in (the owner, or a family member) can pick the voice the
+server reads their replies with (`[tts] picker`, on by default).
+
+- **Routes.** `GET /api/voices`, `POST /api/voices` and
+  `POST /api/voices/preview` need a session (`require_session`: cookie or
+  Bearer, same-site; on the cloud CloudGuard's sign-in wall and its 16 KB
+  body cap for non-upload routes). Not `/api/voice`: that is the voice
+  WebSocket. A removed family member's session is gone (401).
+- **Only voices the server has.** A choice is accepted only if it is in
+  this person's list: a Piper name must match
+  `lang_REGION-name-quality` (no `/` or `..`, so no other file can be
+  named) and have its `.onnx.json`; Kokoro only if set up (never with the
+  server profile); ElevenLabs IDs must be 8-64 letters and digits. A hand-
+  edited or stale choice falls back to the default with one INFO line (the
+  voice id and the person's id; nothing they said).
+- **Per person.** The owner's choice is in `[tts] voice_file` (on the
+  cloud `/data/`), a family member's in `<family dir>/<id>/voice.json`,
+  both written with `google_auth.write_private` (temp file in the same
+  folder, rename retried on Windows). A family member's file is written
+  under the family lock and only while they are listed, so it can't be
+  written back after `remove()` deleted their folder. Choosing the default
+  deletes the file. Nobody can see or change anyone else's choice.
+- **Money.** ElevenLabs voices are listed only with `ELEVENLABS_API_KEY`
+  set, and offered to family members only with `[tts]
+  family_paid_voices = true` (off by default: they would spend the owner's
+  plan). The voice list is fetched at most hourly (failures: every 5
+  minutes); the key goes only in the `xi-api-key` header and is never
+  logged. Preview clips are cached (the last 8), so tapping Preview again
+  costs nothing. Callers asking for the same clip at once share one render,
+  and each session may have one preview rendering at a time and 10 a
+  minute (429). A typed-in voice ID that isn't in the list is checked once
+  with `GET /v1/voices/{id}` before it is saved (unknown: 400; ElevenLabs
+  unreachable: 503, nothing saved).
+- **Failures.** A chosen voice whose engine fails is dropped and skipped
+  for 5 minutes (one warning with the voice id and error type), so a broken
+  voice isn't retried, and its timeout paid, on every sentence.
+- **Bounded.** At most 4 extra engines are kept loaded (least recently
+  used out; Kokoro voices share one model), 8 preview clips, 64 cached
+  choices, 50 Piper files and 100 ElevenLabs voices looked at.
+- Voice names from ElevenLabs are cut to one printable line of 60
+  characters and shown with `textContent` only.
 
 ## PC hub (`/devteam`): loopback only
 
@@ -481,20 +557,29 @@ has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
 For a second user's instance, `[webapp] google_connect` adds a "connect
-Google" button. `POST /api/google/connect` needs the signed-in session and
+Google" button; on the cloud server family members get the same button for
+their own account (above). `POST /api/google/connect` needs the signed-in session and
 same-origin (the usual `/api/` guard); it returns Google's consent URL with
 a PKCE challenge, `access_type=offline` and the redirect
 `<public_origin>/google/callback`.
 
-- **The callback is authenticated by `state` alone, on purpose.** The
+- **The callback is authenticated by `state` and a binding cookie.** The
   session cookie is `SameSite=Strict`, so the browser does not send it on
-  Google's cross-site redirect back. The state is random, created only for
-  a signed-in session, kept in memory only (at most 4 at once, 10 minutes)
-  and used once: an unknown, expired, replayed or `error=` callback gets a
-  400 and writes nothing. The PKCE verifier never leaves the server, so a
-  code seen elsewhere can't be redeemed. Nobody without the web token can
-  create a state, so a stranger can't attach their Google account to her
-  instance.
+  Google's cross-site redirect back (CloudGuard lets `/google/callback`
+  through without it). The state is random, created only for a signed-in
+  session, kept in memory only (at most 4 per person and 32 in all, 10
+  minutes), bound to who started it (the owner or one family member, and
+  their session id) and used once: an unknown, expired, replayed or
+  `error=` callback gets a 400 and writes nothing. Starting also sets
+  `hc_google`, an HttpOnly, Secure, `SameSite=Lax` cookie (Lax: sent on
+  Google's top-level redirect; path `/google/callback`, 10 minutes) with a
+  random nonce whose SHA-256 is kept with the state. The callback must
+  carry it (constant-time compare), and the starting session must still be
+  signed in as the same person (and, for family, still listed). So a
+  consent link one person forwards to another can't attach the second
+  person's Google to the first person's account, nor anyone's to Kyle's.
+  The PKCE verifier never leaves the server, so a code seen elsewhere
+  can't be redeemed.
 - The token is written with `write_private` (temp file in the same folder,
   then an atomic replace). The OAuth code is masked by the log redaction if
   the server's access log ever records the callback URL; the assistant logs
@@ -585,6 +670,51 @@ limits are in code, not in the prompt.
   so README warns, and the startup line warns when `HA_URL` is http at a
   public address. Over Tailscale the link is encrypted anyway.
 
+## Spotify (`tools/spotify.py`, `spotify_web.py`)
+
+Off by default (`[spotify] enabled = false`); the tools are registered only
+with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
+
+- **Least privilege.** The sign-in asks for three scopes: read playback
+  state (which includes what is playing), control playback, and read
+  private playlists. Nothing can modify playlists, saved songs or follows;
+  tests check the exact scope set and that the module has no such scope or
+  endpoint.
+- **PKCE, no client secret.** Authorization Code with PKCE (S256), so no
+  secret is stored anywhere. The phone flow follows `google_web.py`: the
+  routes are the owner's only (`owner_of`, 404 for a family member), the
+  callback is authenticated by a random, single-use state (at most 4
+  pending, 10 minutes, created only on a signed-in owner's request), and an unknown,
+  replayed or `error=` callback writes nothing. The verifier never leaves
+  the server.
+- **Token storage.** `[spotify] token` is written with `write_private`
+  (temp file in the same folder, atomic replace, retried on Windows; 0600
+  on Linux/Pi). Access tokens go in the `Authorization` header only, never
+  a URL. A refresh may rotate the refresh token, and the wake-word process
+  and the web app may share the file, so an expired token is re-read from
+  the file before refreshing; if a refresh is refused because the other
+  process just rotated the refresh token, the file is read again and its
+  token (or its new refresh token, once) is used instead of reporting an
+  expired sign-in. A token file briefly locked by a Windows replace is
+  read again too. Log lines carry HTTP status codes and
+  Spotify's reason codes only; the existing redaction masks
+  `access_token`/`refresh_token`/`code_verifier` fields, bearer headers and
+  `?code=` in a logged callback URL.
+- **Untrusted names.** Track, artist, album, playlist and podcast names
+  are written by other people. Results that carry them (`spotify_play`
+  from the catalog or someone else's playlist, `spotify_now_playing`) are
+  marked `"untrusted_content": true`, so later changes in that conversation
+  (calendar, Notion, drafts) ask first. Kyle's own playlists don't taint.
+  Device names are marked too (any result naming a device: the device
+  list, "which device?", a transfer, volume), since a speaker or another
+  phone on the account can be named by anyone who set it up.
+- **No duplicated commands.** Only a 401 is retried (after a refresh; the
+  first request did nothing). A failed "next" is never sent twice, so a
+  network blip can't skip two songs.
+- **Family.** Family members' registries are their own (`family.py`), so
+  they never get the Spotify tools; the "Connect Spotify" routes 404 for
+  them.
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar
@@ -600,6 +730,11 @@ limits are in code, not in the prompt.
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **Spotify playback control never asks, even with untrusted content in
+  the conversation.** A web page or email could make Claude play
+  something, skip, or set the volume. That is an annoyance at worst, easy
+  to undo by voice, and confirming every "pause" would make it useless;
+  nothing that changes the library or playlists exists to be misused.
 - **Voice mode and nearby speech.** Hands-free mode listens continuously
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends
@@ -700,6 +835,14 @@ limits are in code, not in the prompt.
 - Deliberately not done: no undo (a delete is final in Pinecone); a
   conversation in history keeps its transcript when its memory summary is
   deleted here (delete the conversation in History for both).
+
+- **The Mandarin voice in the cloud image has no pinned checksum.** The
+  Dockerfile fetches `zh_CN-huayan-medium` (and Whisper `small`) over HTTPS
+  from the official rhasspy / Systran repositories at build time, the same
+  way as the English voice and `base.en`; a SHA-256 couldn't be pinned
+  because Hugging Face is blocked in the build sandbox. Nothing is
+  downloaded at run time (`HF_HUB_OFFLINE=1`). Pinning both voices to a
+  repository revision and hash is a follow-up.
 
 ## Conversation history
 

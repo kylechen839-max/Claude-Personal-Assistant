@@ -28,6 +28,30 @@
   fixed set of actions; scripts only if allowlisted. Locks, garage doors
   and alarms always ask first, and unlocking or opening is refused while
   web or email content is in the conversation. Owner only.
+- Spotify by voice (off by default, Premium required): "play my study
+  playlist", "pause", "skip", "what's playing?", "turn it up", "play it
+  on my phone". Your own playlists are searched first. Sign in once with
+  `python -m assistant.tools.spotify` or the owner-only Connect Spotify
+  (PKCE, read-and-control scopes only; nothing changes playlists or the
+  library). In wake-word mode, music on this PC pauses at "Hey Claude"
+  and resumes after. Family members don't get Spotify yet.
+- Reply voice in the phone app's settings: each person (you, each family
+  member, separate instances like Mom's) picks their voice from what that
+  server has in their language (Piper, Kokoro, the system voice, and your
+  ElevenLabs voices tagged paid if `ELEVENLABS_API_KEY` is set; family
+  only with `[tts] family_paid_voices`). Preview plays a sample. New
+  `[tts]` settings `picker`, `voices_dir`, `voice_file`, `family_paid_voices`.
+- Family members are self-service on the cloud server: each can connect
+  their own Google Calendar and Gmail (drafts only; deletes ask first) from
+  their own phone, kept separate from Kyle's and deleted on Disconnect or
+  removal; the sign-in is bound to the person's session and browser.
+  Chinese-speaking members get Chinese speech recognition (Whisper small)
+  and the Mandarin voice, loaded on first use, and the assistant's own
+  sentences follow each person's language on a shared server. The cloud
+  image bundles the Chinese models (`FAMILY_ZH=0` leaves them out);
+  render.yaml adds `PUBLIC_ORIGIN` and `GOOGLE_WEB_CLIENT_JSON`.
+  A family member whose Google sign-in expires is told, in their language,
+  to reconnect Google from the app's settings.
 - Interrupt by talking: on the PC, say "Hey Claude" while it is answering
   and it stops and listens (`[wake] barge_in = "wake_word"`, default);
   `barge_in = "voice"` lets you just talk (echo gate; best with headphones

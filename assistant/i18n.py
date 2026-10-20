@@ -4,11 +4,22 @@
 (Simplified Chinese, Mandarin). `set_language()` is called once at startup
 (cli.main, webapp.serve); `t(key, **values)` gives the sentence. Claude's
 own replies follow the system prompt (chat.SYSTEM_PROMPT_ZH), not this table.
+
+On a shared server (family members, family.py) each person has their own
+language: `t(key, lang)` takes it explicitly, and `using(lang)` sets it for
+everything a turn's thread calls (a tool's confirmation question, an error
+sentence), so one person's turn never speaks another's language. Threads
+don't inherit it: set it at the start of each turn's thread.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 LANG = "en"
+# this thread's (turn's) language, over LANG; None = LANG
+_SESSION: ContextVar[str | None] = ContextVar("i18n_language", default=None)
 
 EN = {
     "goodbye": "Goodbye!",
@@ -66,6 +77,22 @@ EN = {
     "ha_needs_yes": "That needs your spoken yes first, so I didn't do it.",
     "ha_ask_again": "Home Assistant didn't answer while I was asking, so I "
                     "didn't do it. Please ask me again.",
+    "spotify_failed": "Spotify sign-in didn't finish. Go back to the app and try again.",
+    "spotify_premium": "Spotify only lets apps control playback with a Premium account.",
+    "spotify_no_device": "Spotify isn't open anywhere. Open Spotify on your PC or "
+                         "phone, then ask again.",
+    "spotify_which_device": "Spotify is open on {devices}. Which one should I play on?",
+    "spotify_unknown_device": "I can't find a Spotify device called {device}.",
+    "spotify_no_volume": "That device doesn't let me change its volume.",
+    "spotify_signin": "The Spotify sign-in has expired. Connect Spotify again.",
+    "spotify_busy": "Spotify is busy right now. Try again in a moment.",
+    "spotify_unreachable": "I can't reach Spotify right now.",
+    "spotify_error": "Spotify couldn't do that right now.",
+    "spotify_not_found": "I couldn't find {query} on Spotify.",
+    "spotify_nothing_playing": "Nothing is playing on Spotify right now.",
+    "still_working": "I'm still working on your last request.",
+    "google_reconnect": "Reconnect Google from the app's settings: tap the gear, "
+                        "then \"Connect Google account\".",
 }
 
 ZH = {
@@ -118,22 +145,58 @@ ZH = {
     "ha_refused_untrusted": "对话里有网页或邮件内容时，我不会开锁或开门。请在新的对话里再说一次。",
     "ha_needs_yes": "这需要你先口头说“是”，所以我没有做。",
     "ha_ask_again": "刚才问你的时候 Home Assistant 没有回应，所以我没有做。请再说一次。",
+    "spotify_failed": "Spotify 登录没有完成。请回到应用里再试一次。",
+    "spotify_premium": "Spotify 只允许高级会员（Premium）账户用应用控制播放。",
+    "spotify_no_device": "哪里都没有打开 Spotify。请先在电脑或手机上打开 Spotify，再说一次。",
+    "spotify_which_device": "Spotify 在{devices}上开着。要在哪一个上播放？",
+    "spotify_unknown_device": "没有找到叫“{device}”的 Spotify 设备。",
+    "spotify_no_volume": "这个设备不允许我调音量。",
+    "spotify_signin": "Spotify 登录已过期，请重新连接 Spotify。",
+    "spotify_busy": "Spotify 现在有点忙，请稍后再试。",
+    "spotify_unreachable": "现在连不上 Spotify。",
+    "spotify_error": "Spotify 现在做不了这个。",
+    "spotify_not_found": "在 Spotify 上没找到“{query}”。",
+    "spotify_nothing_playing": "Spotify 现在没有在播放。",
+    "still_working": "我还在处理你上一个请求。",
+    "google_reconnect": "请在应用的设置里重新连接 Google：点齿轮，再点“连接 Google 账户”。",
 }
 
 
+def normalize(language: str | None) -> str:
+    """"zh..." -> "zh", anything else -> "en"."""
+    return "zh" if str(language or "").lower().startswith("zh") else "en"
+
+
 def set_language(language: str | None) -> str:
-    """"zh..." -> Chinese, anything else -> English. Returns the code used."""
+    """The server-wide language. Returns the code used."""
     global LANG
-    LANG = "zh" if str(language or "").lower().startswith("zh") else "en"
+    LANG = normalize(language)
     return LANG
 
 
-def is_zh() -> bool:
-    return LANG == "zh"
+def current() -> str:
+    """This turn's language (`using`), else the server's."""
+    return _SESSION.get() or LANG
 
 
-def t(key: str, **values) -> str:
-    table = ZH if LANG == "zh" else EN
+@contextmanager
+def using(language: str | None):
+    """Speak `language` in this thread (and what it calls) until the block
+    ends; None keeps the server's."""
+    token = _SESSION.set(normalize(language) if language else None)
+    try:
+        yield
+    finally:
+        _SESSION.reset(token)
+
+
+def is_zh(lang: str | None = None) -> bool:
+    return (normalize(lang) if lang else current()) == "zh"
+
+
+def t(key: str, lang: str | None = None, **values) -> str:
+    """The sentence `key` in `lang` (default: `current()`)."""
+    table = ZH if is_zh(lang) else EN
     text = table.get(key, EN[key])
     return text.format(**values) if values else text
 

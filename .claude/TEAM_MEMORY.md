@@ -113,6 +113,10 @@ as the work. Never put secrets, tokens or personal data in this file.
   `credentials.json`, and don't write to the real `logs/`.
 - Iterate with targeted tests, then run the full `python -m pytest -q` once
   before handing back.
+- Fake Google tokens need an `expiry` in the future: without one
+  `Credentials.valid` is false and google-auth makes a real refresh call.
+  Patch `Credentials.refresh` to fail the test as a guard
+  (`tests/test_family_google.py`).
 - JS tests: `node --test tests/js/*.test.mjs`. Give explicit files; the
   directory form fails on Node 22.
 - Report counts as "N passed, M skipped" against the baseline.

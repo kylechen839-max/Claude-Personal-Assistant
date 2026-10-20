@@ -40,6 +40,9 @@ def sign_in_scopes(gmail_enabled: bool = False) -> list[str]:
 # credentials.json, pasted into the host's secret settings.
 TOKEN_ENV = "GOOGLE_TOKEN_JSON"
 CLIENT_ENV = "GOOGLE_CLIENT_JSON"
+# The "Web application" OAuth client family members sign in with from the
+# phone (family.py; Kyle's own GOOGLE_CLIENT_JSON is usually a Desktop one).
+WEB_CLIENT_ENV = "GOOGLE_WEB_CLIENT_JSON"
 SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
 
@@ -120,8 +123,17 @@ def _json_env(name: str, environ) -> dict | None:
 def client_config(credentials_path="credentials.json", environ=os.environ) -> dict | None:
     """The OAuth client (credentials.json) from GOOGLE_CLIENT_JSON or the file."""
     config = _json_env(CLIENT_ENV, environ)
-    if config is None and Path(credentials_path).exists():
+    if config is None and credentials_path and Path(credentials_path).is_file():
         config = json.loads(Path(credentials_path).read_text(encoding="utf-8"))
+    return config
+
+
+def web_client_config(path: str | Path = "", environ=os.environ) -> dict | None:
+    """The family sign-in's Web application client: GOOGLE_WEB_CLIENT_JSON,
+    else the file at `path` ("" = none)."""
+    config = _json_env(WEB_CLIENT_ENV, environ)
+    if config is None and path and Path(path).is_file():
+        config = json.loads(Path(path).read_text(encoding="utf-8"))
     return config
 
 
@@ -150,9 +162,23 @@ def has_credentials(credentials_path="credentials.json", token_path="token.json"
                 or Path(credentials_path).exists() or Path(token_path).exists())
 
 
-def _warn_on_refresh_failure(creds):
+# A family member's token (family.py): they fix it themselves in the app,
+# so their errors say that, never Kyle's PC sign-in or GOOGLE_TOKEN_JSON.
+REFRESH_FAILED_IN_APP = ("Google sign-in of an in-app account could not be "
+                         "refreshed (%s); its owner must reconnect Google in the app.")
+
+
+def reconnect_hint() -> str:
+    """What a family member should do, in the turn's language (i18n.using)."""
+    from assistant import i18n
+
+    return i18n.t("google_reconnect")
+
+
+def _warn_on_refresh_failure(creds, in_app: bool = False):
     """Make every later refresh (google-auth refreshes inside API calls)
-    log a clear warning, with the error code only, if Google refuses."""
+    log a clear warning, with the error code only, if Google refuses.
+    `in_app`: a family member's token (reconnect in the app)."""
     from google.auth.exceptions import RefreshError
 
     original = creds.refresh
@@ -162,6 +188,11 @@ def _warn_on_refresh_failure(creds):
             original(request)
         except RefreshError as e:
             reason = _refresh_reason(e)
+            if in_app:
+                log.warning(REFRESH_FAILED_IN_APP, reason)
+                raise GoogleSignInError(
+                    f"Google sign-in expired or was revoked ({reason}). "
+                    f"{reconnect_hint()}") from None
             log.warning(REFRESH_FAILED, reason)
             raise GoogleSignInError(
                 f"Google sign-in expired or was revoked ({reason}); "
@@ -183,9 +214,13 @@ def _refresh_reason(error) -> str:
 class MissingScopes(RuntimeError):
     """The saved token was granted fewer scopes than a tool needs."""
 
-    def __init__(self, missing: list[str]):
+    def __init__(self, missing: list[str], in_app: bool = False):
         self.missing = missing
         names = ", ".join(s.rsplit("/", 1)[-1] for s in missing)
+        if in_app:  # a family member: allow everything when reconnecting
+            super().__init__(f"Google access for {names} hasn't been granted. "
+                             f"{reconnect_hint()}")
+            return
         super().__init__(
             f"Google access for {names} hasn't been granted yet. Run the "
             f"one-time Google sign-in again on the computer: {SIGN_IN_COMMAND} "
@@ -216,7 +251,8 @@ def missing_scopes(needed, token_path: str | Path = "token.json",
 
 def get_credentials(credentials_path="credentials.json", token_path="token.json",
                     open_browser: bool = True, save_token: bool = True,
-                    environ=os.environ, scopes=CALENDAR_SCOPES):
+                    environ=os.environ, scopes=CALENDAR_SCOPES,
+                    in_app: bool = False):
     """Credentials covering `scopes`, refreshed as needed.
 
     GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON, when set, replace token.json /
@@ -225,7 +261,8 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
     (the server profile), and there is no interactive sign-in then. On a PC
     with no token at all, the first run opens a browser to sign in (for
     `scopes`). A token lacking one of `scopes` raises MissingScopes instead
-    of silently signing in again."""
+    of silently signing in again. `in_app`: a family member's token
+    (family.py), whose errors say to reconnect Google in the app."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
@@ -235,7 +272,7 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
     if info:
         lacking = [s for s in scopes if s not in granted_scopes(info)]
         if lacking:
-            raise MissingScopes(lacking)
+            raise MissingScopes(lacking, in_app)
         try:
             # With the scopes the token was granted: a refresh never asks
             # for more than Kyle agreed to.
@@ -245,11 +282,13 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
             raise GoogleSignInError(f"Unusable Google token "
                                     f"({TOKEN_ENV if from_env else token_path}): "
                                     f"{e}") from None
-        _warn_on_refresh_failure(creds)
+        _warn_on_refresh_failure(creds, in_app)
     if creds and creds.valid:
         return creds
     if creds and creds.refresh_token:
         creds.refresh(Request())  # GoogleSignInError (logged) if refused
+    elif in_app:
+        raise GoogleSignInError(f"No usable Google sign-in. {reconnect_hint()}")
     elif from_env or not save_token:
         raise GoogleSignInError(
             f"No usable Google sign-in: set {TOKEN_ENV} to the contents of a "

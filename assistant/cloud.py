@@ -30,6 +30,10 @@ for the public internet with no Tailscale in front:
   handshake: rate limit, cookie or Bearer token (wrong ones count toward the
   lockout) and an Origin naming this site. X-Forwarded-Host, which the web
   app's own same-site checks read, is removed unless the proxy sent it.
+- Google's redirect back to /google/callback is public: the session
+  cookie isn't sent on it, and google_web.py accepts only a pending,
+  one-time state from the browser that started it (family members connect
+  their own Google from their phones).
 - Errors never reach the client as stack traces.
 - With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
   the derived `hc1.` bearer tokens (checked here, never counted as wrong
@@ -76,13 +80,21 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/family.js",
               # the chat's "+" (and the tutor's photo shrinking)
               "/attachments.js",
+              # the settings menu's reply-voice picker (its API needs sign-in)
+              "/voice-picker.js",
               # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
               "/ui.js",
               # the login page's language (Chinese for a family member) and
               # the history panel's code: page code only, no personal data
               "/i18n.js", "/history.js",
               # the Memory screen's code (its /api/memory data needs the owner)
-              "/memory.js"}
+              "/memory.js",
+              # the owner's "Connect Spotify" button (its routes need sign-in)
+              "/spotify.js",
+              # Google's redirect back after a family member's sign-in: the
+              # Strict session cookie isn't sent on it, so google_web.py
+              # checks the one-time state and its browser-binding cookie
+              "/google/callback"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it
@@ -684,6 +696,7 @@ def build_app(config: dict, web_assistant, token: str):
     from assistant.failover.peers import settings_from_config
     from assistant.failover.tokens import TokenAuthority
 
+    from assistant import google_web  # the owner's and family members' Google
     from assistant import webfeatures  # lecture recorder + homework tutor
     from assistant.attachments import limits as attachment_limits
 
@@ -696,7 +709,10 @@ def build_app(config: dict, web_assistant, token: str):
                             trusted_proxy=trust, limiter=limiter,
                             sessions_file=web["sessions_file"] or None,
                             voice=config.get("voice"), failover=failover,
-                            features=features, **attachment_limits(config))
+                            features=features,
+                            language=config["assistant"]["language"],
+                            google=google_web.from_config(config, web_assistant),
+                            **attachment_limits(config))
     features.resume_jobs()  # lecture jobs cut off by a redeploy
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],

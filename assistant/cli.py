@@ -258,7 +258,7 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
              conversation_timeout: float = 300, clock=time.monotonic,
              max_failures: int = 5, retry_delay: float = 2.0,
              show_timings: bool = False, timing_clock=time.monotonic,
-             follow_up_seconds: float = 0) -> None:
+             follow_up_seconds: float = 0, on_idle=None) -> None:
     """Always listening. Ctrl+C quits. A file source stops at its end.
 
     With `follow_up_seconds` > 0, after each reply it keeps listening that
@@ -267,7 +267,9 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
     memory, history reset) until the next wake word. With 0, a conversation
     ends on 'goodbye' or after `conversation_timeout` seconds without a
     request. Each turn's latency is logged (`timing_clock` must be the clock
-    the listener stamps `wake_time` with); `show_timings` prints it too."""
+    the listener stamps `wake_time` with); `show_timings` prints it too.
+    `on_idle` runs each time it goes back to waiting for the wake word
+    (resuming music paused on the wake word)."""
     output_fn(f"Listening for '{wake_phrase}'... (Ctrl+C to quit)")
     last_exchange = clock()
     failures = 0
@@ -301,6 +303,7 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
             last_exchange = clock()
             if recording is None:
                 output_fn("(heard the wake word but no command)")
+                idle(on_idle)
                 continue
             keep_listening = run_turn(chat, tts, transcriber, recording,
                                       output_fn, timer, wake_phrase, timings_out)
@@ -327,10 +330,13 @@ def run_wake(chat: ClaudeChat, tts, transcriber, listener, source,
                 keep_listening = run_turn(chat, tts, transcriber, recording,
                                           output_fn, timer, wake_phrase,
                                           timings_out, barge_in=cut is not None)
+            # no barge-in to answer and no follow-up: back to the wake word
             if follow_up_seconds > 0:
-                end_conversation(chat, output_fn)  # back to waiting for the wake word
+                end_conversation(chat, output_fn)
+            idle(on_idle)
     except KeyboardInterrupt:
         pass
+    idle(on_idle)  # quitting mid-conversation: music paused for it plays again
     finish(chat, output_fn)
 
 
@@ -349,6 +355,16 @@ def take_interruption(tts):
     if cut is not None:
         tts.interruption = None
     return cut
+
+
+def idle(on_idle) -> None:
+    """run_wake's on_idle hook; a failure there never stops listening."""
+    if on_idle is None:
+        return
+    try:
+        on_idle()
+    except Exception:
+        log.exception("Back-to-idle hook failed")
 
 
 def listen_follow_up(listener, source, seconds: float):
@@ -501,6 +517,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
     register_devteam(registry, config, output_fn)
     register_home_assistant(registry, config, output_fn)
+    register_spotify(registry, config, output_fn)
     web = config["web"]
     if web["enabled"]:
         from assistant.tools import web as web_tools
@@ -541,6 +558,24 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
         calendar_id=cal["calendar_id"], timezone=config["assistant"]["timezone"] or None,
         save_token=cal["save_token"]).tools())
     register_gmail(registry, config, output_fn)
+
+
+def register_spotify(registry: ToolRegistry, config: dict, output_fn=print,
+                     http=None) -> bool:
+    """Spotify playback tools, once [spotify] is on and signed in
+    (python -m assistant.tools.spotify, or the phone's "Connect Spotify")."""
+    if not config["spotify"]["enabled"]:
+        return False
+    from assistant.tools.spotify import (CLIENT_ID_ENV, SIGN_IN_COMMAND,
+                                         player_from_config)
+
+    player = player_from_config(config, http=http)
+    if player is None:
+        output_fn(f"(Spotify tools off: set {CLIENT_ID_ENV} and sign in once "
+                  f"with {SIGN_IN_COMMAND})")
+        return False
+    registry.register(*player.tools())
+    return True
 
 
 def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
@@ -715,7 +750,8 @@ def voice_confirm(tts, record_fn, transcriber, output_fn=print):
     return confirm
 
 
-def build_wake_components(args, config: dict):
+def build_wake_components(args, config: dict, music=None):
+    """`music`: a tools.spotify.SpotifyPlayer to pause on the wake word."""
     from assistant.wakeword import (EnergyVAD, FileSource, MicSource,
                                     WakeListener, barge_in_mode, make_detector)
 
@@ -726,6 +762,8 @@ def build_wake_components(args, config: dict):
     chime, soft_chime = audio.make_chime(), audio.make_follow_up_chime()
     chimes = wake["chime"] and not args.audio_file
     on_wake = (lambda: audio.play(chime)) if chimes else None
+    if music is not None:
+        on_wake = chain(music.pause_for_listening, on_wake)
     on_follow_up = ((lambda: audio.play(soft_chime))
                     if chimes and wake["follow_up_chime"] else None)
     listener = WakeListener(detector, vad=EnergyVAD(wake["vad_min_threshold"]),
@@ -752,6 +790,46 @@ def barge_in_speaker(tts, listener, source, config: dict):
     return BargeInSpeaker(tts, listener, source, mode=mode,
                           barge_in_ms=wake["barge_in_ms"],
                           echo_ratio=wake["barge_in_echo_ratio"])
+
+
+def chain(first, then=None):
+    """Call `first`, then `then` (if any)."""
+    if then is None:
+        return first
+
+    def both():
+        first()
+        then()
+    return both
+
+
+def music_to_pause(config: dict, tools: ToolRegistry):
+    """The SpotifyPlayer to pause while listening, if [spotify]
+    pause_while_listening is on and Spotify is connected."""
+    if not (config["spotify"]["enabled"]
+            and config["spotify"]["pause_while_listening"]):
+        return None
+    from assistant.tools.spotify import player_of
+
+    return player_of(tools)
+
+
+def run_wake_mode(args, config: dict, chat: ClaudeChat, tts, transcriber,
+                  tools: ToolRegistry) -> None:
+    """--mode wake: the listener (pausing Spotify on the wake word, if
+    connected; never for --audio-file), barge-in ([wake] barge_in; the wake
+    word over a reply pauses Spotify too, through the listener's on_wake),
+    spoken confirmations, run_wake (resuming Spotify when back to waiting)."""
+    music = None if args.audio_file else music_to_pause(config, tools)
+    listener, source, phrase = build_wake_components(args, config, music)
+    tts = barge_in_speaker(tts, listener, source, config)
+    tools.confirm = voice_confirm(
+        tts, lambda: listener.record_reply(source), transcriber)
+    run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase,
+             conversation_timeout=config["assistant"]["conversation_timeout"],
+             show_timings=args.timings,
+             follow_up_seconds=config["wake"]["follow_up_seconds"],
+             on_idle=music.resume_after_listening if music else None)
 
 
 def build_chat(config: dict, tools=None, memory=None,
@@ -923,14 +1001,7 @@ def main(argv=None) -> int:
             tools.confirm = voice_confirm(tts, record, transcriber)
             run_voice(chat, tts, transcriber, record_fn=record)
         else:
-            listener, source, phrase = build_wake_components(args, config)
-            tts = barge_in_speaker(tts, listener, source, config)
-            tools.confirm = voice_confirm(
-                tts, lambda: listener.record_reply(source), transcriber)
-            run_wake(chat, tts, transcriber, listener, source, wake_phrase=phrase,
-                     conversation_timeout=config["assistant"]["conversation_timeout"],
-                     show_timings=args.timings,
-                     follow_up_seconds=config["wake"]["follow_up_seconds"])
+            run_wake_mode(args, config, chat, tts, transcriber, tools)
     except KeyboardInterrupt:
         print("Bye!")
     except Exception as e:  # startup problems: missing key, no mic, bad config

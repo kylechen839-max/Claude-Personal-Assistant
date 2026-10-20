@@ -287,30 +287,44 @@ def test_owner_features_are_not_found_for_family(env, owner, method, path):
         assert owner.request(method, path).status_code == 200
 
 
-def test_google_connect_is_the_owners_only(fake_client, tmp_path):
+def test_family_never_gets_the_owners_google(fake_client, tmp_path):
+    """The owner's "connect Google" (config.mom.toml style) is his: a family
+    member's status, connect and page are about their own account only
+    (test_family_google.py), never his connected token."""
     from fastapi.testclient import TestClient as TC
+
+    from assistant import google_web
 
     config = load_config(None, None)
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    config["webapp"].update(google_connect=True, public_origin="https://pc.example")
+    client_file = tmp_path / "client.json"
+    client_file.write_text(json.dumps({"web": {"client_id": "c", "client_secret": "s",
+                                               "auth_uri": "https://a", "token_uri": "https://t"}}))
+    kyle_token = tmp_path / "token.json"
+    kyle_token.write_text(json.dumps({"token": "ya29.kyle", "refresh_token": "r"}))
+    config["calendar"].update(credentials=str(client_file), token=str(kyle_token))
     fam = family_mod.Family(config, client=fake_client)
     assistant = webapp.WebAssistant(
         lambda r: ClaudeChat(client=fake_client, tools=r), FakeTranscriber(),
         PrintTTS(), clock=Clock(), family=fam)
-    google = MagicMock()
-    google.enabled.return_value = True
-    google.connected.return_value = True
+    google = google_web.GoogleConnect(config, assistant.tools, family=fam)
     app = webapp.create_app(assistant, TOKEN, reap_interval=3600, google=google)
     owner = TC(app, base_url=BASE)
     login(owner)
-    assert owner.get("/api/google/status").status_code == 200
+    assert owner.get("/api/google/status").json()["connected"] is True
     assert 'data-google' in owner.get("/").text
     _, token = fam.invite("Mom", "zh")
     mom = TC(app, base_url=BASE)
     assert mom.post("/api/invite/accept", json={"invite": token}).status_code == 200
-    assert mom.get("/api/google/status").status_code == 404
-    assert mom.post("/api/google/connect", json={}).status_code == 404
+    # no family web client set up: her own Google is off, and Kyle's isn't hers
+    assert mom.get("/api/google/status").json() == {
+        "enabled": False, "connected": False, "disconnect": True}
+    assert mom.post("/api/google/connect", json={}).status_code == 503
     page = mom.get("/").text
     assert '<html lang="zh-CN">' in page and "data-google" not in page
+    assert not any(t in fam.context(fam.members()[0]["id"]).registry.tools
+                   for t in ("list_calendar_events", "email_summary"))
     fam.close()
 
 
@@ -332,7 +346,7 @@ def test_reply_audio_is_only_for_its_own_session(env, owner):
     other_owner_browser = env.client()
     login(other_owner_browser)
     assert other_owner_browser.get(reply["audio"]).status_code == 404
-    env.assistant.synthesize = lambda text: b"RIFF....WAVE"
+    env.assistant.synthesize = lambda text, session=None, language=None: b"RIFF....WAVE"
     assert owner.get(reply["audio"]).status_code == 200
 
 

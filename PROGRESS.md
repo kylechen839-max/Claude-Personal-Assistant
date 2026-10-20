@@ -24,7 +24,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_stt.py` | 4 | stage 3 |
 | `test_wakeword.py` | 15 | stage 4 |
 | `test_follow_up.py` | 14 | follow-up mode |
-| `test_barge_in.py` | 42 | barge-in on the PC loop (talk over a reply), with follow-ups |
+| `test_barge_in.py` | 43 | barge-in on the PC loop (talk over a reply), with follow-ups |
 | `test_tools.py` | 27 | stage 5 |
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
@@ -2173,6 +2173,252 @@ Render/Docker changes) comes separately.
   relays in `secure_entities`.
   Not tried against a real Home Assistant (none in the sandbox).
 
+## Spotify by voice (2026-10-20)
+
+- "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+  "what's playing?", "turn it up", "play it on my phone". New
+  `assistant/tools/spotify.py` drives the Spotify Web API player (Premium
+  only) with nine tools: spotify_play (Kyle's own playlists first, then
+  the catalog; a mood or genre plays a playlist, a song name plays that
+  song), spotify_pause, spotify_resume, spotify_next, spotify_previous,
+  spotify_volume, spotify_now_playing, spotify_devices and
+  spotify_transfer (by name, or "phone", "PC", 手机, 电脑, "this
+  computer"). No tool changes playlists or the library. Playback control
+  never asks for a yes; catalog names and device names are marked
+  untrusted.
+- Sign-in: Authorization Code with PKCE, no client secret
+  (`SPOTIFY_CLIENT_ID` in `.env`), minimum scopes. Once with
+  `python -m assistant.tools.spotify` (paste back the 127.0.0.1 address)
+  or the phone's owner-only "Connect Spotify" (`assistant/spotify_web.py`,
+  `assistant/web/spotify.js`, modelled on `google_web.py`: single-use
+  state map, bounded, 10-minute expiry). Token written with
+  `write_private`; refreshed a minute before expiry, re-read from the
+  file first (the wake-word process and the web app share it). If a
+  refresh is refused because the other process just rotated the refresh
+  token, the file is read again and its token (or, once, its new refresh
+  token) is used, so the race no longer reads as "sign-in expired"; a
+  token file briefly locked by a Windows replace is read again too. A 401
+  is retried once after a refresh; nothing else is retried. Three scopes:
+  user-read-playback-state, user-modify-playback-state,
+  playlist-read-private.
+- Errors read nicely in English and Chinese (i18n.py): no Premium, nothing
+  open anywhere, which device (several open), volume not allowed (phones),
+  sign-in expired, busy (429), offline. With no active device it plays on
+  this computer's Spotify, or the only one open.
+- Wake mode pauses Spotify on this computer at the wake word (in the
+  background, so recording isn't delayed) and resumes it when back to
+  waiting for "Hey Claude", unless Kyle used a Spotify control meanwhile
+  (`[spotify] pause_while_listening`, `local_device`; `cli.run_wake`
+  gained an `on_idle` hook, and the wake-mode wiring moved from `main`
+  into `cli.run_wake_mode` so it is tested).
+- `[spotify]` is off by default (config.py and config.toml); tools are
+  registered only when enabled and signed in. Family members never get
+  them (their own registry) and get 404 from the connect routes.
+- `requests` was already a dependency, so no Spotify library was added.
+- Tests: `tests/test_spotify.py` (63: PKCE, consent URL scopes, CLI
+  sign-in, private token file, refresh and rotation, a 401 retry, the
+  other process's token, each tool's request and result, Premium / no
+  device / which device / volume / 429 / offline errors, no double skip,
+  Chinese strings and device words, registration on and off, INFO logs
+  without the query or names, pause-while-listening and its races, the
+  two-process refresh race and a locked token file, untrusted device
+  names, volume up from 0, and the wake loop's wiring: idle between two
+  wakes with and without a follow-up window, a failing idle hook, pause
+  before the chime, `run_wake_mode`),
+  `tests/test_spotify_web.py` (10: owner only, state/PKCE, token saved
+  privately, tools added live, replay and refusal write nothing, bounded
+  states, family gets nothing, page and shell files),
+  `tests/js/spotify.test.mjs` (7). Measured in the sandbox, not real
+  hardware: full suite 1785 passed, 48 skipped (+73 on the master baseline of 1712 / 48); JS 202
+  passed. Phone cache v13 (`/spotify.js` added to the shell).
+- Final review LOWs: idle between wakes with `follow_up_seconds = 0` is
+  now tested; a token file that is unreadable for permission reasons is
+  retried only on Windows (a root-owned file on the Pi used to cost 1 s per
+  call and log "locked"). +2 tests, each failing with its fix reverted.
+
+## Phone app: each person picks their reply voice
+
+- New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the
+  settings menu has **Reply voice**, with the voices this server really has
+  in the person's language (Piper files in `[tts] voices_dir` with their
+  language from the file name, Kokoro if set up and never with the server
+  profile, the system voice from `[tts] fallback`, and ElevenLabs only with
+  `ELEVENLABS_API_KEY`: listed from `GET /v1/voices`, cached an hour,
+  tagged "paid", a voice ID can be typed in). **Preview** plays a short
+  sample sentence (English or Chinese), cached.
+- Saved per person: the owner's in `[tts] voice_file`
+  (`data/voice_choice.json`; `/data/` on the cloud, `data/mom/` for the
+  Chinese instance), a family member's in `<family dir>/<id>/voice.json`
+  (written only while they are listed; deleted with their folder). Family
+  members get ElevenLabs only with `[tts] family_paid_voices = true`.
+- The session's voice is used from the next reply on: `WebAssistant.synthesize(text,
+  session)` (reply audio and the voice WebSocket) asks
+  `VoicePicker.engine_for(user, language)`. Engines are built once per voice
+  and kept (4 at most, least recently used out); Kokoro voices share one
+  loaded model (`KokoroTTS(shared=...)`). A voice that is gone falls back
+  to the default with one INFO line; a chosen engine that fails mid-reply
+  falls back to the default for that sentence.
+- Endpoints: `GET /api/voices`, `POST /api/voices`, `POST
+  /api/voices/preview` (session-bound, same-site, CloudGuard sign-in wall;
+  `/api/voice` is already the voice WebSocket, hence the plural).
+  `/api/state` has `voice_picker`. New settings `[tts] picker`,
+  `voices_dir`, `voice_file`, `family_paid_voices`. Phone cache v15
+  (`/voice-picker.js` added to the shell and to CloudGuard's public page
+  files).
+- Tests: `tests/test_voice_picker.py` (27: listing with a fake voices dir,
+  Kokoro and a mocked ElevenLabs API, per-person saving where member A
+  doesn't change B or the owner, preview audio and its cache, fallback on
+  an unknown or removed voice with one log line, engine cache and shared
+  Kokoro model, removal, routes behind CloudGuard), `tests/test_voice_ws.py`
+  +1 (voice mode renders in the person's voice), `tests/js/voice-picker.test.mjs`
+  (8). Each fails with its source change reverted. Full suite: 1740 passed,
+  48 skipped (was 1712 / 48); JS: 217 node tests pass (sandbox, not real
+  hardware).
+- Review round 2:
+  - Picking the default Piper voice reuses the default engine (no second
+    model load).
+  - Previews: callers asking for the same clip at once share one render;
+    each session may have one preview rendering at a time and 10 a minute
+    (429 past that).
+  - A chosen voice whose engine fails is dropped and skipped for 5 minutes
+    (one warning), rather than retried on every sentence; picking it again
+    retries it.
+  - A typed-in ElevenLabs ID that isn't in the cached list is checked once
+    with `GET /v1/voices/{id}`: unknown -> 400, ElevenLabs unreachable ->
+    503, nothing saved.
+  - The new tests read and write text as UTF-8 (Windows), with a test that
+    checks it.
+  - Tests: `tests/test_voice_picker.py` +9 (36). Each fails with its fix
+    reverted. Full suite: 1749 passed, 48 skipped; JS 217 pass.
+- Round 3: a preview of a typed-in ElevenLabs ID is checked with ElevenLabs
+  first (unknown: 404 like any unknown preview voice, unreachable: 503;
+  nothing rendered or cached), and a test covers a second caller waiting on
+  a failing render. Tests +2 (38); full suite 1751 passed, 48 skipped.
+
+## Family invites, piece B: their own Google and speech language (2026-10-20)
+
+A family member is now self-service: they connect their own Google from
+their own phone, and a Chinese speaker's voice turns use Chinese speech
+recognition and the Mandarin voice, with the assistant's own sentences in
+their language, on the same shared cloud server as Kyle.
+
+- **Their own Google** (`google_web.py`, `family.py`): one sign-in flow for
+  the owner ([webapp] google_connect, as before) and family members.
+  `GoogleConnect(family=..., owner=...)` answers `/api/google/status` and
+  `/connect` about the caller's own account; `POST /api/google/disconnect`
+  (family only) deletes their token and tools. A member's token goes to
+  `<dir>/<id>/google_token.json` (`Family.save_google`, `write_private`,
+  under the family lock, refused once removed) and their Calendar and
+  Gmail tools (`Family._google_tools`, through the piece-A hook
+  `_register_tools`) read only that file: `environ={}` (never
+  `GOOGLE_TOKEN_JSON`), `save_token=False` (never a sign-in on the server),
+  their `primary` calendar, their time zone, descriptions about them. Gmail
+  stays drafts-only (`NoSendGmail`), deletes and drafts ask first. Tools
+  join their open conversations in place (`_refresh_tools`: add, then
+  remove). The OAuth state is bound to who started it and their session,
+  and to the browser by `hc_google` (Lax, path `/google/callback`, 10 min,
+  nonce hashed with the state); the callback also needs the session still
+  signed in as that person. Per-person cap 4 pending, 32 in all. Family
+  sign-in uses a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` or `[family] google_client`) and the server's
+  own address (`PUBLIC_ORIGIN`, new env override). On the cloud the owner
+  gets 404 on these routes (his Google is `GOOGLE_TOKEN_JSON`).
+- **Speech per session** (`webapp.SpeechByLanguage`): language ->
+  (Whisper model, Piper voice) for sessions whose language isn't the
+  server's; made on first use and cached per model/voice, not per session.
+  `WebAssistant.transcribe/transcribe_upload/synthesize(..., language)`;
+  push-to-talk, `/api/confirm`, reply audio (the language stored with each
+  reply id in piece A) and the voice socket (`voice_ws`) pass the
+  session's. Still one STT lock and one TTS thread. `family_speech(config)`
+  uses `[family] zh_stt_model` (`small`, `ZH_WHISPER_MODEL`) and
+  `zh_piper_voice`, fallback "print" (the phone's own voice, never English
+  eSpeak reading Chinese).
+- **i18n per session** (`i18n.py`): `t(key, lang)`, `is_zh(lang)`,
+  `current()`, `using(lang)` (a ContextVar). Each push-to-talk turn,
+  `chat_stream` run and voice-conversation worker runs in its session's
+  language, so error sentences and tool confirmation questions (calendar,
+  Gmail) are in the language of the person answering; `VoiceConversation
+  (language=...)`; the busy-turn sentence and the failed-callback page are
+  translated too. Fixes the piece-A limitation that `i18n.t` was
+  server-wide.
+- **Page**: a family member's page gets `data-google` when their Google is
+  set up; the first-run guide's step now says to connect *their own*
+  account; a **Disconnect Google account** button (family, connected).
+  Service worker cache v11.
+- **Cloud/Render/Docker**: CloudGuard lets `/google/callback` through
+  without the session cookie; `cloud.build_app` passes Google and the
+  language. Dockerfile `FAMILY_ZH=1` bakes in Whisper `small` (about
+  480 MB) and `zh_CN-huayan-medium` (about 60 MB; published sizes, not
+  measured here: Hugging Face is blocked in the sandbox); `render.yaml`
+  adds `PUBLIC_ORIGIN`, `GOOGLE_WEB_CLIENT_JSON` (secrets) and
+  `ZH_WHISPER_MODEL`; `/data/users` is on the disk (server profile). Memory
+  with a Chinese speaker active is estimated at 0.5-0.7 GB on top of the
+  measured 564 MB, not measured; Standard (2 GB) stays the plan.
+- Config: `[family] google` (true), `google_client` (""), comments for
+  `zh_stt_model` / `zh_piper_voice`; `PUBLIC_ORIGIN`, `ZH_WHISPER_MODEL`
+  env overrides. `client_config("")` no longer reads the current folder.
+- Tests: `tests/test_family_google.py` (23): A's token separate from B's
+  and Kyle's, and their tools build credentials from their own refresh
+  token with `GOOGLE_TOKEN_JSON` set; the owner has no connect on the
+  cloud; another session's state, a browser without the binding cookie, a
+  signed-out session and a removed person are refused (nothing written,
+  token endpoint never called); failed page in her language; tools only
+  after connecting (and in her open session at once), no owner tool or
+  "Kyle" in what Claude is sent; Gmail drafts-only, deletes ask; disconnect;
+  removal deletes the token, not others'; no secrets, state, code or names
+  at INFO (caplog); off without a web client or with a Desktop one; zh
+  push-to-talk and reply audio use the zh model and voice, en uses the
+  server's, two zh speakers share one; zh voice socket; lazy and cached
+  models; `i18n.t` follows the session language (threads isolated); push-
+  to-talk and calendar-question sentences per person; voice sentences;
+  build_assistant wiring; busy sentence; `client_config("")`. A test-only
+  guard fails any Google token refresh (a first draft without `expiry` in
+  the fake token made one real refresh request with a fake client id; no
+  account was involved). `test_cloud.py` +2 (the callback passes the guard
+  and family status works there; Dockerfile/render.yaml match the config).
+  `tests/js/i18n.test.mjs` +3 (Disconnect, its failure and "no", the guide
+  wording). Updated: `test_family.py` (the owner-only Google test now
+  checks a family member never gets Kyle's connected Google),
+  `test_google_web.py` (status has `disconnect`), `test_voice_ws.py` and
+  `test_family.py` fakes take the language, `test_webapp.py` cache v18,
+  `test_docs.py` allows `--build-arg`, `conftest.py` also clears
+  `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` / `GOOGLE_WEB_CLIENT_JSON`.
+  Each source change was undone alone and its tests failed: `environ={}`,
+  the nonce check, the session check, registering and refreshing the
+  tools, the turn's `i18n.using`, transcribe and synthesize per language,
+  `voice_ws` language, the CloudGuard path, the disconnect delete, the
+  callback language, `question_suffix` language, the description rewrite,
+  the Dockerfile and render.yaml entries, `family_speech` wiring, the page
+  tag, the busy sentence, the `client_config` guard, and the JS button and
+  guide text.
+- Counts (Linux sandbox, Python 3.13): pytest 1712 -> 1737 passed, 48
+  skipped (unchanged). JS: i18n 14, family 9, backend-router 33, ui 4,
+  devhub 12, voice-core 14, agent-dashboard 126, all passing.
+- Round 2 (judge, no security defect):
+  - `owner_of` is back in `create_app` (other branches' owner-only routes
+    use it; `session_of` there would hand family Kyle's data), also as
+    `app.state.owner_of`.
+  - A family member's expired, revoked, scope-short or missing token now
+    says "Reconnect Google from the app's settings" (EN/ZH,
+    `i18n` `google_reconnect`, in the turn's language) instead of Kyle's PC
+    sign-in, token.json or `GOOGLE_TOKEN_JSON` advice, and logs a warning
+    without that advice: `get_credentials(..., in_app=True)`,
+    `MissingScopes(in_app=)`, `GoogleCalendar`/`GmailInbox(in_app=)`, set
+    by `Family._google_tools`. Kyle's messages are unchanged.
+  - New tests (each fails with only its change undone): `owner_of` (owner
+    200, family 404, nobody 401); the in-app refresh message and log (EN and
+    ZH), scope and missing-token messages; `save_google`'s re-check (the
+    person removed while Google answers: 400, no file); the binding
+    cookie's HttpOnly, Secure, SameSite=lax, Path, Max-Age=600; the voice
+    socket twin of the Chinese calendar question (`chat_stream`'s
+    `using`); `VoiceConversation._work`'s `using` (kept: a backend that
+    answers in the worker thread, ChatBackend, needs it).
+  - Docs: BLOCKERS says `PUBLIC_ORIGIN` must be the exact https address
+    family members open and that the zh memory figure is to be measured;
+    MANUAL_TEST marks the home-screen-app sign-in as release-gating.
+  - Counts (Linux sandbox, Python 3.13): pytest 1737 -> 1744 passed, 48
+    skipped. JS unchanged (i18n 14, family 9, all files passing).
+
 ## Interrupt by talking (barge-in) and follow-ups, PC and phone (2026-10-20)
 
 - **PC wake-word loop** (`assistant/wakeword.py` `BargeInSpeaker`,
@@ -2209,7 +2455,7 @@ Render/Docker changes) comes separately.
   has played, a soft low note (the existing "thinking" earcon, the same note
   as the PC's follow-up blip) and **Still listening…** (还在听…) with the
   mic meter lit; silence quietly puts back **Listening**. No cue after a
-  barge-in, a yes/no question or a turn without audio. Phone cache v17
+  barge-in, a yes/no question or a turn without audio. Phone cache v19
   (`i18n.js` changed; master was already at v10).
 - Tests: new `tests/test_barge_in.py` (23): eSpeak-rendered speech through
   the real FileSource (paced 8x), WakeListener, VAD and BargeInSpeaker, with
@@ -2271,7 +2517,7 @@ Render/Docker changes) comes separately.
   through); README says so next to the echo-ratio advice. pyttsx3's
   "Audio saved to ..." is no longer printed on every reply. New tests: an
   echo 250 ms later than reported, the quiet render, and the leftover
-  interruption cleared at a new wake (`test_barge_in.py` 42). The pipeline
+  interruption cleared at a new wake (`test_barge_in.py` 42; 43 after the merge with Spotify, which adds `test_idle_hook_waits_for_the_barge_in_turn`: the back-to-idle hook (Spotify resume) fires only after a barge-in turn). The pipeline
   echo is now 0.2x (still above the VAD threshold), since a longer
   measurement sees more of the reply's loud parts. Full run: 1755 passed,
   48 skipped; JS files all pass.

@@ -785,3 +785,33 @@ def test_a_leftover_interruption_never_reaches_a_new_wake():
     finally:
         cli.get_reply = original
     assert sent == [] and len(heard) == 1 and tts.interruption is None
+
+
+def test_idle_hook_waits_for_the_barge_in_turn(fake_client):
+    """on_idle (resume Spotify) runs only when the loop is really back to
+    waiting for the wake word: never between a barge-in and its turn."""
+    events = []
+
+    class TTS:
+        interruption = None
+
+        def speak(self, text):
+            events.append(f"say {text}")
+            if text == "First answer.":  # talked over: a new request
+                self.interruption = Interruption("voice", np.ones(16000, np.float32),
+                                                 1.0, "")
+
+    class Listener:
+        n = 0
+
+        def listen(self, source):
+            self.n += 1
+            return (True, np.ones(16000, np.float32)) if self.n == 1 else (False, None)
+
+    texts = iter(["First question", "Second question"])
+    fake_client.queue = [make_response(text_block("First answer.")),
+                         make_response(text_block("Second answer."))]
+    cli.run_wake(ClaudeChat(client=fake_client), TTS(),
+                 SimpleNamespace(transcribe=lambda r: next(texts)), Listener(), None,
+                 output_fn=lambda *a: None, on_idle=lambda: events.append("idle"))
+    assert events[:3] == ["say First answer.", "say Second answer.", "idle"]

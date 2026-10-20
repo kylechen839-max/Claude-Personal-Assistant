@@ -38,7 +38,11 @@ def make_response(*blocks, stop_reason="end_turn"):
 def _env_vars() -> tuple[str, ...]:
     from assistant.config import ENV_OVERRIDES
 
-    return (*ENV_OVERRIDES, "WEB_TOKEN")
+    from assistant.tools.google_auth import CLIENT_ENV, TOKEN_ENV, WEB_CLIENT_ENV
+
+    # and Kyle's Google sign-in (the server's), which family tests must not see
+    return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID", TOKEN_ENV, CLIENT_ENV,
+            WEB_CLIENT_ENV)
 
 
 @pytest.fixture(autouse=True)
