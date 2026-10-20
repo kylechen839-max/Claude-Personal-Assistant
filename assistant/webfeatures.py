@@ -1,6 +1,6 @@
 """Phone app features on top of the web app (webapp.py): the lecture
-recorder and the homework tutor. Every /api route here needs the same
-session as the rest of the app (`require_session`); /static holds the
+recorder and the homework tutor. Every /api route here needs the owner's
+session (`require_owner`: a family member gets 404); /static holds the
 page code for these screens and the vendored KaTeX (no CDN).
 
   GET  /api/lecture/courses            Course options from Notion
@@ -167,7 +167,8 @@ def install(app, features: Features) -> None:
 
     from assistant.lecture import UploadError, UploadGap
     from assistant.tutor import ImageRejected, prepare_image
-    from assistant.webapp import require_session
+    # owner only: lecture notes go to Kyle's Notion; a family member gets 404
+    from assistant.webapp import require_owner
 
     lec_cfg, tutor_cfg = features.config["lecture"], features.config["tutor"]
     check_limits(features.config)
@@ -192,7 +193,7 @@ def install(app, features: Features) -> None:
         return None if lec_cfg["enabled"] else error("lecture recorder is off", 404)
 
     @app.get("/api/lecture/courses")
-    async def lecture_courses(session=Depends(require_session)):
+    async def lecture_courses(session=Depends(require_owner)):
         try:
             names = await run_in_threadpool(features.courses)
         except Exception:
@@ -203,7 +204,7 @@ def install(app, features: Features) -> None:
                 "max_bytes": int(float(lec_cfg["max_upload_mb"]) * 1_000_000)}
 
     @app.post("/api/lecture/start")
-    async def lecture_start(request: Request, session=Depends(require_session)):
+    async def lecture_start(request: Request, session=Depends(require_owner)):
         if (off := lecture_on()) is not None:
             return off
         if features.assignments is None:
@@ -222,7 +223,7 @@ def install(app, features: Features) -> None:
                 "chunk_bytes": int(float(lec_cfg["chunk_mb"]) * 1_000_000)}
 
     @app.get("/api/lecture/{upload_id}")
-    async def lecture_status(upload_id: str, session=Depends(require_session)):
+    async def lecture_status(upload_id: str, session=Depends(require_owner)):
         p = features.pipeline
         try:
             status = p.uploads.status(upload_id)
@@ -234,7 +235,7 @@ def install(app, features: Features) -> None:
 
     @app.api_route("/api/lecture/{upload_id}/chunk", methods=["POST", "PUT"])
     async def lecture_chunk(upload_id: str, offset: int, request: Request,
-                            session=Depends(require_session)):
+                            session=Depends(require_owner)):
         if (off := lecture_on()) is not None:
             return off
         data = await request.body()
@@ -247,7 +248,7 @@ def install(app, features: Features) -> None:
 
     @app.post("/api/lecture/{upload_id}/finish")
     async def lecture_finish(upload_id: str, request: Request,
-                             session=Depends(require_session)):
+                             session=Depends(require_owner)):
         if (off := lecture_on()) is not None:
             return off
         body = await json_body(request)
@@ -261,7 +262,7 @@ def install(app, features: Features) -> None:
         return job.public()
 
     @app.post("/api/lecture/{upload_id}/retry")
-    async def lecture_retry(upload_id: str, session=Depends(require_session)):
+    async def lecture_retry(upload_id: str, session=Depends(require_owner)):
         if (off := lecture_on()) is not None:
             return off
         try:
@@ -271,7 +272,7 @@ def install(app, features: Features) -> None:
 
     @app.post("/api/lecture/{upload_id}/assignments")
     async def lecture_add_assignment(upload_id: str, request: Request,
-                                     session=Depends(require_session)):
+                                     session=Depends(require_owner)):
         body = await json_body(request)
         if features.assignments is None:
             return error("Notion isn't set up", 400)
@@ -289,11 +290,11 @@ def install(app, features: Features) -> None:
             return error(str(e), 400)
 
     @app.get("/api/lectures")
-    async def lectures(session=Depends(require_session)):
+    async def lectures(session=Depends(require_owner)):
         return {"jobs": [j.public() for j in features.pipeline.jobs()[:20]]}
 
     @app.post("/api/tutor")
-    async def tutor(request: Request, session=Depends(require_session)):
+    async def tutor(request: Request, session=Depends(require_owner)):
         if not tutor_cfg["enabled"]:
             return error("tutor is off", 404)
         max_bytes = int(float(tutor_cfg["max_image_mb"]) * 1_000_000)
@@ -324,5 +325,6 @@ def install(app, features: Features) -> None:
             return error("Claude couldn't answer right now", 502)
         out = {"text": reply.text, "spoken": reply.spoken}
         if features.assistant is not None and form.get("speak") == "1":
-            out["audio"] = f"/api/audio/{features.assistant.remember(reply.spoken)}"
+            rid = features.assistant.remember(reply.spoken, session)
+            out["audio"] = f"/api/audio/{rid}"
         return out
