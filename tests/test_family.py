@@ -447,3 +447,169 @@ def test_removal_holds_the_lock_while_signing_out(tmp_path, fake_client):
     assert seen == [True]
     assert fam.redeem(token, lambda uid: "sid") is None
     assert not os.path.exists(tmp_path / "users" / user["id"])
+
+
+# --- round 2: fail closed, sign-out scope, failed saves, the link's origin -------
+
+def sid_of(client, env) -> str:
+    return webapp.read_cookie(TOKEN, client.cookies.get(webapp.COOKIE),
+                              env.app.state.web.store.epoch)
+
+
+def remove_now(env, uid):
+    """What DELETE /api/users/{id} does, called from inside a request."""
+    store = env.app.state.web.store
+    env.family.remove(uid, lambda u: (store.revoke_user(u), env.assistant.drop_user(u)))
+
+
+def test_a_member_removed_mid_request_is_never_the_owner(env, owner):
+    """Remove lands between the cookie check (store.valid) and the session
+    lookup: the member gets nothing, never Kyle's session."""
+    mom, link = env.member(owner)
+    dad, dad_link = env.member(owner, name="Dad", language="en")
+    store = env.app.state.web.store
+    valid = store.valid
+    targets = {sid_of(mom, env): link["user"]["id"],
+               sid_of(dad, env): dad_link["user"]["id"]}
+
+    def valid_then_removed(sid):
+        ok = valid(sid)
+        if ok and sid in targets:
+            remove_now(env, targets.pop(sid))
+        return ok
+
+    store.valid = valid_then_removed
+    r = mom.get("/api/state")
+    assert r.status_code == 401, r.text
+    assert not any(s.user is None for s in env.assistant.sessions.values()
+                   if s.sid in (sid_of(mom, env), sid_of(dad, env)))
+    # "sign out everywhere" in the same gap must not sign Kyle out
+    assert dad.post("/api/logout-all").status_code == 401
+    store.valid = valid
+    assert owner.get("/api/state").json()["owner"] is True
+
+
+def test_unlisted_sessions_are_nobodys(env, owner):
+    web = env.app.state.web
+    assert web.store.user("never-listed") == webapp.GONE
+    assert web.store.user(None) == webapp.GONE
+    assert env.assistant.session("never-listed") is None
+    assert web.user_of(web.bearer_sid) is None  # WEB_TOKEN itself: the owner
+    assert web.user_of(sid_of(owner, env)) is None
+
+
+def test_a_session_made_while_its_member_is_removed_is_dropped(env, owner):
+    mom, link = env.member(owner)
+    uid, sid = link["user"]["id"], sid_of(mom, env)
+    context = env.family.context
+
+    def context_then_removed(u):
+        ctx = context(u)  # made for them; then Remove (and drop_user) runs
+        remove_now(env, u)
+        return ctx
+
+    env.family.context = context_then_removed
+    assert env.assistant.session(sid) is None
+    assert sid not in env.assistant.sessions
+    assert env.family.get(uid) is None
+
+
+def test_owner_sign_out_everywhere_keeps_family_voice_calls(env, owner):
+    from tests.test_webapp import FakeVoiceConversation
+
+    mom, _ = env.member(owner)
+    other = env.client()
+    login(other)
+    calls = {sid_of(mom, env): FakeVoiceConversation(),
+             sid_of(other, env): FakeVoiceConversation(),
+             env.app.state.web.bearer_sid: FakeVoiceConversation()}
+    env.app.state.voice_conversations.update({k: (v, None) for k, v in calls.items()})
+    assert owner.post("/api/logout-all").status_code == 200
+    assert calls[sid_of(mom, env)].ended == []
+    assert calls[sid_of(other, env)].ended == ["signed_out"]
+    assert calls[env.app.state.web.bearer_sid].ended == ["signed_out"]
+    assert mom.get("/api/state").status_code == 200
+
+
+def failing_saves(monkeypatch):
+    from assistant.tools import google_auth
+
+    def fail(path, text):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(google_auth, "write_private", fail)
+
+
+def test_a_failed_save_changes_nothing_and_remove_can_be_retried(env, owner, monkeypatch):
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    env.fake_client.queue.append(make_response(text_block("好的")))
+    assert mom.post("/api/turn", json={"text": "你好"}).status_code == 200
+    folder = env.tmp / "users" / uid
+    with monkeypatch.context() as m:
+        failing_saves(m)
+        assert delete(owner, f"/api/users/{uid}").status_code == 500
+        assert env.family.get(uid) is not None and folder.exists()
+        with pytest.raises(OSError):
+            env.family.invite("Eve")
+        with pytest.raises(OSError):
+            env.family.reinvite(uid)
+    assert [u["id"] for u in env.family.members()] == [uid]
+    assert env.family.get(uid)["invite_hash"] is None  # reinvite didn't stick
+    assert delete(owner, f"/api/users/{uid}").status_code == 200  # the retry works
+    assert not folder.exists() and env.family.members() == []
+
+
+def test_a_failed_save_while_accepting_leaves_the_invite_usable(env, owner, monkeypatch):
+    link = env.invite(owner)
+    with monkeypatch.context() as m:
+        failing_saves(m)
+        with pytest.raises(OSError):
+            env.family.redeem(token_of(link["url"]), lambda uid: "sid")
+    assert env.family.get(link["user"]["id"])["status"] == "invited"
+    assert env.family.redeem(token_of(link["url"]), lambda uid: "sid") == "sid"
+
+
+def test_a_folder_that_cant_be_deleted_is_retried(env, owner, monkeypatch, caplog):
+    mom, link = env.member(owner, name="Zebediah")
+    uid = link["user"]["id"]
+    env.fake_client.queue.append(make_response(text_block("好的")))
+    assert mom.post("/api/turn", json={"text": "你好"}).status_code == 200
+    folder = env.tmp / "users" / uid
+    with monkeypatch.context() as m:
+        m.setattr(family_mod.time, "sleep", lambda s: None)
+        m.setattr(family_mod.shutil, "rmtree", MagicMock(side_effect=PermissionError("locked")))
+        with caplog.at_level(logging.INFO):
+            assert delete(owner, f"/api/users/{uid}").status_code == 200
+        assert folder.exists()
+        logged = "\n".join(r.getMessage() for r in caplog.records)
+        assert f"{uid}'s folder couldn't be deleted yet" in logged
+        assert "Zebediah" not in logged  # ids only
+        assert env.family.members() == []  # gone from the list; files pending
+    saved = json.loads((env.tmp / "users" / "users.json").read_text(encoding="utf-8"))
+    assert saved["deleting"] == [uid] and uid not in saved["users"]
+    # the next start (or the owner opening the list) finishes the job
+    again = family_mod.Family(env.config, client=env.fake_client)
+    assert not folder.exists()
+    saved = json.loads((env.tmp / "users" / "users.json").read_text(encoding="utf-8"))
+    assert saved["deleting"] == []
+    again.close()
+
+
+@pytest.mark.parametrize("failover,expected", [
+    ({"role": "cloud", "app_origin": "https://hey.example.com"}, "https://hey.example.com/"),
+    ({"role": "cloud", "app_origin": "https://app.example.com",
+      "backends": [{"role": "cloud", "url": "https://cloud.example.com"}]},
+     "https://cloud.example.com/"),
+    ({"role": ""}, "https://testserver/"),
+])
+def test_invite_links_point_at_this_server(env, owner, monkeypatch, failover, expected):
+    """Never the page's Origin: with failover the owner's page may be the
+    Pi's (or the app origin) calling the cloud cross-origin."""
+    monkeypatch.delenv("FAILOVER_BACKENDS", raising=False)
+    env.config["failover"].update(failover)
+    r = owner.post("/api/invites", json={"name": "Mom"})
+    assert r.json()["url"].startswith(expected + "#invite=hcinv."), r.json()["url"]
+    env.config["webapp"]["public_origin"] = "https://public.example.com"
+    r = owner.post("/api/invites", json={"name": "Dad"})
+    assert r.json()["url"].startswith("https://public.example.com/#invite=")

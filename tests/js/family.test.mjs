@@ -149,3 +149,40 @@ test('a new invite is shared, or copied without a share sheet', async () => {
     else assert.deepEqual(t.copied, [url]);
   }
 });
+
+test('with failover the owner\'s calls go through the router with the bearer token', async () => {
+  const { BackendRouter } = await import('../../assistant/web/backend-router.js');
+  const cloud = 'https://cloud.example.com';
+  const url = `${cloud}/#invite=${TOKEN}`;  // built by the server from its own address
+  const sent = [];
+  const router = new BackendRouter({
+    backends: [{ role: 'cloud', url: cloud }],
+    getToken: async () => 'hc1.app.sid.9999999999.1.sig',
+    fetch: async (u, opts) => {
+      sent.push({ u, opts });
+      const body = u.endsWith('/api/invites') ? { url, expires_at: 1 } : { users: [] };
+      return { ok: true, status: 200, json: async () => body };
+    },
+  });
+  router.active = 'cloud';
+  const t = load({ responses: {} });
+  t.api.configure({ request: (path, opts) => router.request(path, opts) });
+  t.api.onState({ owner: true, family: true }, t.win, t.win.document);
+  t.els['invite-name'].value = 'Mom';
+  await t.els['invite-form'].fire('submit');
+  assert.equal(t.fetches.length, 0);  // no plain same-origin fetch (it has no token)
+  const post = sent.find((s) => s.u === `${cloud}/api/invites`);
+  assert.ok(post, JSON.stringify(sent.map((s) => s.u)));
+  assert.equal(post.opts.method, 'POST');
+  assert.equal(post.opts.headers.Authorization, 'Bearer hc1.app.sid.9999999999.1.sig');
+  assert.equal(post.opts.credentials, 'omit');
+  assert.ok(sent.some((s) => s.u === `${cloud}/api/users`));
+  assert.equal(t.els['invite-link'].value, url);
+});
+
+test('app.js hands its router-aware request() to family.js before anything else', () => {
+  const app = readFileSync(new URL('../../assistant/web/app.js', import.meta.url), 'utf8');
+  const configured = app.indexOf('family.configure({ request })');
+  assert.ok(configured > 0);
+  assert.ok(configured < app.indexOf('family.acceptInvite(window)'));
+});

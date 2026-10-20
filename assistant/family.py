@@ -138,8 +138,13 @@ class Family:
         self._client = client
         self.lock = threading.RLock()
         self.users: dict[str, dict] = {}
+        # removed people whose folder isn't deleted yet (e.g. a file was
+        # locked on Windows): kept in users.json and retried at startup, on
+        # the next removal and when the owner opens the list
+        self._deleting: set[str] = set()
         self._contexts: dict[str, UserContext] = {}
         self._load()
+        self._finish_deletes()
 
     # ---------- the file ----------
     def _load(self) -> None:
@@ -151,15 +156,22 @@ class Family:
             self.users = {uid: u for uid, u in users.items()
                           if valid_id(uid) and isinstance(u, dict)
                           and u.get("status") in STATUSES}
+            deleting = data.get("deleting", []) if isinstance(data, dict) else []
+            self._deleting = {uid for uid in deleting if isinstance(uid, str)
+                              and valid_id(uid) and uid not in self.users}
         except Exception as e:  # unreadable: nobody can sign in until fixed
             log.error("Family: ignoring unreadable %s (%s)", self.path, type(e).__name__)
             self.users = {}
 
-    def _save(self) -> None:
+    def _save(self, users: dict, deleting: set | None = None) -> None:
+        """Write `users` (a new copy; the caller swaps it in only after this
+        returns, so a failed write changes nothing and can be retried)."""
         from assistant.tools.google_auth import write_private
 
+        deleting = self._deleting if deleting is None else deleting
         self.dir.mkdir(parents=True, exist_ok=True)
-        write_private(self.path, json.dumps({"users": self.users}, indent=1))
+        write_private(self.path, json.dumps(
+            {"users": users, "deleting": sorted(deleting)}, indent=1))
 
     # ---------- the owner's actions ----------
     def _new_link(self, user: dict) -> str:
@@ -178,8 +190,9 @@ class Family:
             uid = "u_" + secrets.token_urlsafe(9)
             user.update(id=uid, created=int(self.clock()), status="invited")
             token = self._new_link(user)
-            self.users[uid] = user
-            self._save()
+            users = {**self.users, uid: user}
+            self._save(users)
+            self.users = users
         log.info("Family: invited %s (%d people)", uid, len(self.users))
         return public(user), token
 
@@ -187,15 +200,18 @@ class Family:
         """A fresh link for someone (a new phone, or the old link expired);
         any earlier link stops working."""
         with self.lock:
-            user = self.users.get(uid)
-            if user is None:
+            if uid not in self.users:
                 raise FamilyError("not found", 404)
+            user = dict(self.users[uid])
             token = self._new_link(user)
-            self._save()
+            users = {**self.users, uid: user}
+            self._save(users)
+            self.users = users
         log.info("Family: new invite link for %s", uid)
         return public(user), token
 
     def members(self) -> list[dict]:
+        self._finish_deletes()
         with self.lock:
             return [public(u) for u in sorted(self.users.values(),
                                               key=lambda u: u.get("created", 0))]
@@ -222,10 +238,11 @@ class Family:
             if found is None or not found.get("invite_hash") \
                     or found.get("invite_expires", 0) < now:
                 return None
-            found["status"] = "active"
-            found["invite_hash"] = None
-            found["invite_expires"] = None
-            self._save()
+            found = {**found, "status": "active", "invite_hash": None,
+                     "invite_expires": None}
+            users = {**self.users, found["id"]: found}
+            self._save(users)
+            self.users = users
             result = create(found["id"])
         log.info("Family: %s accepted an invite", found["id"])
         return result
@@ -234,19 +251,44 @@ class Family:
         """Remove someone (invited or active): their entry, then
         `before_delete(uid)` (sign them out), then their history and folder."""
         with self.lock:
-            if self.users.pop(uid, None) is None:
+            if uid not in self.users:
                 return False
-            self._save()
+            users = {k: v for k, v in self.users.items() if k != uid}
+            deleting = self._deleting | {uid} if valid_id(uid) else self._deleting
+            self._save(users, deleting)  # OSError: nothing changed, try again
+            self.users, self._deleting = users, deleting
             ctx = self._contexts.pop(uid, None)
             if before_delete is not None:
                 before_delete(uid)
         if ctx is not None:
             ctx.close()
-        folder = self.dir / uid
-        if valid_id(uid) and folder.exists():
-            _rmtree(folder)
+        self._finish_deletes()
         log.info("Family: removed %s (%d people left)", uid, len(self.users))
         return True
+
+    def _finish_deletes(self) -> None:
+        """Delete the folders of people already removed from the list; one
+        that can't be deleted now stays listed in users.json for next time."""
+        with self.lock:
+            pending = sorted(self._deleting)
+        if not pending:
+            return
+        done = set()
+        for uid in pending:
+            try:
+                _rmtree(self.dir / uid)
+                done.add(uid)
+            except OSError:
+                log.error("Family: %s's folder couldn't be deleted yet; "
+                          "will retry", uid)
+        if not done:
+            return
+        with self.lock:
+            self._deleting = self._deleting - done
+            try:
+                self._save(self.users)
+            except OSError as e:  # listed again next start: rmtree is idempotent
+                log.error("Family: couldn't save %s (%s)", self.path, type(e).__name__)
 
     # ---------- what a family member's conversations use ----------
     def context(self, uid: str) -> UserContext | None:
@@ -333,7 +375,6 @@ def _rmtree(folder: Path, attempts: int = 20) -> None:
             return
         except OSError:
             if attempt == attempts - 1:
-                log.exception("Family: could not delete a user folder")
                 raise
             time.sleep(0.1)
 
@@ -344,6 +385,22 @@ def invite_url(origin: str, token: str) -> str:
     """The link to send: the token rides in the #fragment, which browsers
     never send to a server (family.js reads it, clears it and POSTs it)."""
     return f"{origin.rstrip('/')}/#invite={token}"
+
+
+def own_origin(config: dict) -> str:
+    """[webapp] public_origin, else (with failover) this backend's own URL
+    (the cloud's defaults to APP_ORIGIN); "" = unknown."""
+    configured = config["webapp"].get("public_origin") or ""
+    if configured:
+        return configured
+    try:
+        from assistant.failover.peers import settings_from_config
+
+        settings = settings_from_config(config)
+    except Exception:  # a bad [failover] section is reported elsewhere
+        return ""
+    own = [b.url for b in settings.backends if settings.role and b.role == settings.role]
+    return own[0] if own else ""
 
 
 def register(app, family: "Family | None", web, assistant, error) -> None:
@@ -371,14 +428,10 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         return body if isinstance(body, dict) else {}
 
     def origin_of(request: Request) -> str:
-        configured = family.config["webapp"].get("public_origin") if family else ""
-        if configured:
-            return configured
-        # same-origin POST from the page: the browser's Origin is this site
-        origin = request.headers.get("origin")
-        if origin and origin.startswith("https://"):
-            return origin
-        return f"https://{request.url.netloc}"
+        """This server's own address (where /api/invite/accept is
+        same-origin), never the page's: with failover the owner's page may
+        be the Pi's or the app origin, calling here cross-origin."""
+        return own_origin(family.config) or f"https://{request.url.netloc}"
 
     def link(request: Request, user: dict, token: str):
         return {"user": user, "url": invite_url(origin_of(request), token),
@@ -437,7 +490,7 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         try:
             removed = await run_in_threadpool(family.remove, uid, sign_out)
         except OSError:
-            return error("couldn't delete their files; try again", 500)
+            return error("couldn't remove them; try again", 500)
         if not removed:
             return error("not found", 404)
         return {"ok": True}

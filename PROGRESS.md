@@ -32,11 +32,11 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_config_cli.py` | 14 | stage 7 |
 | `test_doctor.py` | 10 | `--check` |
 | `test_timing.py` | 9 | `--timings` |
-| `test_webapp.py` | 67 | phone web app (`--mode web`) |
-| `test_cloud.py` | 76 | cloud server: auth wall, lockouts, proxy headers, limits |
+| `test_webapp.py` | 80 | phone web app (`--mode web`) |
+| `test_cloud.py` | 78 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
-| `test_docs.py` | 11 | docs match the code |
+| `test_docs.py` | 25 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
 | `test_voice_ws.py` | 31 | voice mode: WebSocket, limits, files |
@@ -59,8 +59,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
-| `test_family.py` | 27 | family invites: accounts, one-time links, isolation, sign-out, removal, logs |
-| `tests/js/family.test.mjs` | 6 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
+| `test_family.py` | 37 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
+| `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 111 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
@@ -1688,3 +1688,40 @@ Render/Docker changes) comes separately.
 - Counts (Linux sandbox, Python 3.13): pytest 1622 -> 1652 passed, 46
   skipped (unchanged). JS: family 6, i18n 7, backend-router 33,
   voice-core 14, agent-dashboard 111, all passing.
+- Round 2 (judge findings):
+  - A family member removed between the cookie check and the session lookup
+    was briefly the owner (`user()` gave None for an unlisted sid).
+    `SessionStore.user()` now gives `GONE` for a sid it doesn't list, and
+    `WebAuth.user_of()` counts only the bearer sid, failover-token sids and
+    listed owner cookies as the owner; `/`, `/api/login` and
+    `/api/logout-all` use it too (a `GONE` sign-out-everywhere is a 401, not
+    Kyle's). `WebAssistant.session()` drops a family conversation made while
+    its person was being removed. Five older tests called
+    `assistant.session("abc")` with an unlisted id; they now use a listed one
+    (`owner_sid()` in `test_webapp.py`, likewise in `test_google_web.py` and
+    `test_host_update.py`).
+  - With failover the owner's page signs in with a bearer token, so the
+    invite menu's same-origin `fetch` got 401. `family.js` now takes app.js's
+    router-aware `request()` (`HeyClaudeFamily.configure`). The link is built
+    from this server's own address: `[webapp] public_origin`, else (with a
+    failover role) this backend's URL, the cloud's defaulting to
+    `APP_ORIGIN`, else the request's host; never the page's `Origin`.
+  - The owner's sign-out-everywhere no longer hangs up family members'
+    voice calls, and hangs up each call once.
+  - `Family` writes `users.json` from a copy and changes memory only after
+    the save (invite, new link, redeem, remove), so a failed save can be
+    retried; a folder that can't be deleted stays listed under `deleting`
+    and is retried at startup, on the next removal and on `GET /api/users`
+    (an error line with the id only).
+  - `tzdata` was already in requirements.txt (Windows `zoneinfo`).
+  - Tests: `test_family.py` +10 (removal between the two steps for
+    `/api/state` and `/api/logout-all`; unlisted sids are nobody's; a session
+    made mid-removal is dropped; family voice calls survive the owner's
+    sign-out-everywhere; failed saves for remove/invite/new link/redeem; a
+    folder that can't be deleted is retried, with a caplog check; the
+    link's origin, 3 cases), `family.test.mjs` +2 (owner calls go through a
+    real `BackendRouter` with the bearer token and `credentials: 'omit'`;
+    app.js configures it first). Each fails with only its source change
+    undone (the rmtree retry by making it not catch the error).
+  - Counts (Linux sandbox, Python 3.13): pytest 1652 -> 1662 passed,
+    46 skipped (unchanged). JS: family 8, i18n 7, backend-router 33.

@@ -359,13 +359,23 @@ server (`[family] enabled`, on in the server profile).
   History routes use the session's own store, so the owner's conversation
   ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
   session that made it. Failover tokens and Bearer WEB_TOKEN are always the
-  owner. Signing in with WEB_TOKEN in a browser holding a family cookie
+  owner, and they are the only sessions outside the session list that are:
+  a cookie session that isn't listed (removed, signed out or expired after
+  its cookie was checked) is `webapp.GONE`, which gets no conversation
+  (401), so a removal racing a request never hands that browser the
+  owner's session (`WebAuth.user_of`). A family conversation made while
+  its person is being removed is dropped again. Signing in with WEB_TOKEN in a browser holding a family cookie
   makes a new owner session (never upgrades theirs).
 - **Removing** someone signs out their sessions and live voice sockets,
   drops their conversations without summarizing, closes their database and
-  deletes their folder (retried on Windows).
+  deletes their folder (retried on Windows). `users.json` is written from
+  a copy before anything changes in memory, so a failed save leaves them
+  listed and the owner can try again. A folder that still can't be deleted
+  is kept in `users.json` (`deleting`) and retried at the next start, the
+  next removal and whenever the owner opens the list.
 - **Sign out everywhere** is per person: the owner's signs out the owner's
-  browsers and access tokens; family members stay signed in (they have no
+  browsers, access tokens and voice calls; family members stay signed in,
+  live voice calls included (they have no
   token to sign in again; remove them to cut them off). The cookie epoch is
   rotated only when nobody else is left signed in, since rotating it would
   sign everyone out. A family member's signs out only their own browsers.

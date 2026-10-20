@@ -83,6 +83,12 @@ def make_app(fake_client, tmp_path):
     return make
 
 
+def owner_sid(client) -> str:
+    """A signed-in owner session's id (a sid the store doesn't list is
+    nobody's: WebAssistant.session() gives it no conversation)."""
+    return client.app.state.web.store.create()
+
+
 def login(client):
     r = client.post("/api/login", json={"token": TOKEN})
     assert r.status_code == 200, r.text
@@ -878,8 +884,8 @@ def test_web_mode_does_not_load_audio_devices():
 
 def test_chat_stream_yields_deltas(make_app, fake_client):
     fake_client.queue = [make_response(text_block("Sure, it's at three."))]
-    assistant, _ = make_app()
-    s = assistant.session("abc")
+    assistant, client = make_app()
+    s = assistant.session(owner_sid(client))
     assert "".join(assistant.chat_stream(s, "when?")) == "Sure, it's at three."
     assert s.chat.history[-1]["role"] == "assistant"
     assert not s.busy.locked()
@@ -902,8 +908,8 @@ def test_chat_stream_can_be_cancelled(make_app, fake_client):
             yield "hree four."
 
     fake_client.messages.stream.side_effect = lambda **kw: SlowStream()
-    assistant, _ = make_app()
-    s = assistant.session("abc")
+    assistant, client = make_app()
+    s = assistant.session(owner_sid(client))
     got = []
     for delta in assistant.chat_stream(s, "count", cancel=cancel):
         got.append(delta)
@@ -919,8 +925,8 @@ def test_chat_stream_error_is_a_sentence(make_app, fake_client):
 
     fake_client.messages.create.side_effect = anthropic.APIConnectionError(
         request=httpx.Request("POST", "https://api.anthropic.com"))
-    assistant, _ = make_app()
-    s = assistant.session("abc")
+    assistant, client = make_app()
+    s = assistant.session(owner_sid(client))
     assert list(assistant.chat_stream(s, "hi")) == [
         "Sorry, I can't reach the internet right now."]
 
@@ -1125,8 +1131,8 @@ def test_sign_out_everywhere_hangs_up_every_voice_conversation(make_app):
 
 
 def test_answers_are_bound_to_their_question(make_app):
-    assistant, _ = make_app()
-    s = assistant.session("abc")
+    assistant, client = make_app()
+    s = assistant.session(owner_sid(client))
     page_q = webapp.PendingConfirm("Delete the dentist?")
     s.pending = page_q
     # a late "no" from the voice view (no id) must not answer the page's question

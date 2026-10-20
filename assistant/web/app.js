@@ -627,6 +627,7 @@ if ("serviceWorker" in navigator) {
 (async function start() {
   // A family invite link ("#invite=", family.js): sign in as that person.
   const family = window.HeyClaudeFamily;
+  if (family) family.configure({ request });  // the owner's invites: through the router too
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {

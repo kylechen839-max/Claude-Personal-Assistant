@@ -137,6 +137,11 @@ def read_cookie(token: str, value: str | None, epoch: str = "") -> str | None:
     return None
 
 
+# SessionStore.user() of a session that isn't listed (signed out, removed or
+# expired a moment ago): never the owner, and no family member either
+GONE = "!gone"
+
+
 class SessionStore:
     """Signed-in browsers, kept on the server so a cookie can be revoked.
 
@@ -226,9 +231,14 @@ class SessionStore:
         return self.sessions.pop(sid, None) is not None
 
     def user(self, sid: str | None) -> str | None:
-        """The family member this session belongs to; None = the owner."""
+        """The family member this session belongs to; None = the owner's;
+        GONE for one that isn't listed (e.g. removed between the cookie
+        check and this call), so it fails closed instead of counting as
+        the owner's. Bearer and access-token sessions: WebAuth.user_of."""
         with self.lock:
-            return self.users.get(sid) if sid else None
+            if sid and sid in self.users:
+                return self.users[sid]
+            return None if sid and sid in self.sessions else GONE
 
     def revoke_user(self, user_id: str) -> list[str]:
         """Sign out every session of one family member; returns their ids."""
@@ -664,7 +674,7 @@ class WebAssistant:
         """This browser's conversation (made on first use). None for a family
         member who is no longer listed."""
         ended = []
-        user = self.user_of(sid)
+        user = self.user_of(sid)  # webapp.GONE (signed out): no session
         ctx = None
         if user is not None:
             ctx = self.family.context(user) if self.family is not None else None
@@ -683,6 +693,12 @@ class WebAssistant:
                 self.sessions[sid] = s
         for old in ended:
             self._end(old)
+        if user is not None and self.family.get(user) is None:
+            # removed while this was being made (after drop_user ran)
+            with self.lock:
+                if self.sessions.get(sid) is s:
+                    del self.sessions[sid]
+            return None
         return s
 
     def _new_session(self, sid: str, user: str | None = None, ctx=None) -> Session:
@@ -1121,6 +1137,14 @@ class WebAuth:
 
             log_.append([revoke_event(now, role)])
 
+    def user_of(self, sid: str | None) -> str | None:
+        """Whose session this is: None = the owner (WEB_TOKEN as bearer, a
+        failover access token, or an owner's cookie session); else a family
+        member's id, or GONE (not signed in any more, never the owner)."""
+        if sid and (sid == self.bearer_sid or sid in self.token_sessions):
+            return None
+        return self.store.user(sid)
+
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
         return self.assistant.session(sid) if sid else None
@@ -1212,7 +1236,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
     family = getattr(assistant, "family", None)  # family.Family, or None
     if hasattr(assistant, "user_of"):
-        assistant.user_of = store.user  # which family member a session is
+        assistant.user_of = web.user_of  # which family member a session is
 
     @asynccontextmanager
     async def lifespan(app):
@@ -1361,7 +1385,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         # in the language of whoever is signed in: a family member's own,
         # else [assistant] language; only the owner gets "connect Google"
         sid = web.sid(request) if family is not None else None
-        user = family.get(store.user(sid)) if sid else None
+        user = family.get(web.user_of(sid)) if sid else None
         tag = (page_tag(user["language"]) if user is not None
                else page_tag(language, google is not None))
         if not tag:
@@ -1444,7 +1468,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 await _wait(delay)
             return error("sign-in failed", 401)
         sid = web.sid(request)
-        if sid is None or sid == web.bearer_sid or store.user(sid) is not None:
+        if sid is None or sid == web.bearer_sid or web.user_of(sid) is not None:
             # (a browser holding a family member's cookie gets a new owner
             # session, never that member's turned into the owner's)
             sid = store.create()
@@ -1486,7 +1510,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         sid = web.sid(request)
         if sid is None:
             return unauthorized()
-        user = store.user(sid)
+        user = web.user_of(sid)
+        if user == GONE:  # signed out (or removed) a moment ago
+            return unauthorized()
         if user is not None:  # a family member: only their own browsers
             revoked = store.revoke_user(user)
             await end_voice(revoked)
@@ -1494,11 +1520,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 await run_in_threadpool(assistant.end_session, sid)
             log.info("Web: family member %s signed out everywhere", user)
             return signed_out()
+        # every live voice call but a family member's (they stay signed in)
+        live = [s for s in list(getattr(app.state, "voice_conversations", {}))
+                if web.user_of(s) in (None, GONE)]
         revoked = store.revoke_all()
         # failover access tokens (phones) too, on every synced backend
         revoked += list(web.token_sessions)
         web.revoke_tokens(web.failover_role)
-        await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
+        await end_voice(dict.fromkeys([*revoked, *live]))  # each once
         for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)
         log.warning("Web: signed out everywhere")

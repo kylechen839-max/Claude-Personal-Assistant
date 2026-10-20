@@ -409,7 +409,9 @@ for all of this except the Google sign-in.
 - [ ] **Invite family.** On your iPhone (signed in to the cloud app), ⚙ ->
       Invite someone -> a name, 中文, Create invite link.
   - Should: the share sheet opens with the link (or it says it was copied);
-    the person shows as "Invited".
+    the person shows as "Invited". With failover set up (the badge shows
+    Cloud, Pi or PC), it works the same, and the link starts with the
+    cloud's address (`https://hey-claude.onrender.com/#invite=`).
 - [ ] Open that link on a second phone (or a private Safari tab).
   - Should: the page reloads in Chinese with an empty chat, no Lecture or
     Tutor tabs, no Invite menu; a question is answered in Chinese; History

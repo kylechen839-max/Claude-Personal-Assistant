@@ -522,13 +522,16 @@ Chinese), without sharing `WEB_TOKEN`. The server profile turns this on
 1. Signed in with your token, open ⚙ -> **Invite someone**, enter their
    name and language (and their time zone, e.g. `Asia/Shanghai`), then
    **Create invite link**. The phone's share sheet opens (or the link is
-   copied). Send it to them however you like.
+   copied). Send it to them however you like. The link points at the
+   server itself (`[webapp] public_origin`, else with failover the cloud's
+   address, `APP_ORIGIN`), even when your phone is talking to the Pi.
 2. They open the link on their phone: it signs that phone in as them and
    reloads the page in their language. Share -> Add to Home Screen.
 3. The link works once and for `invite_days` (30 days). If it expired, or
    they get a new phone, tap **New link** next to their name (the old link
    stops working).
-4. **Remove** signs them out everywhere and deletes their conversations.
+4. **Remove** signs them out everywhere and deletes their conversations
+   (if a file can't be deleted right away, it is retried later).
 
 What they get: chat and voice with Claude, web search, and their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never

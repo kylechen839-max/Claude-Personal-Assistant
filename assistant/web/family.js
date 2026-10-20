@@ -6,12 +6,22 @@
 // - The owner's menu: "Invite someone" (name, language) makes a one-time
 //   link and opens the share sheet (or copies it); the list shows who is
 //   invited or active, with "New link" and "Remove".
-// app.js calls acceptInvite() first thing and onState(state) on every
-// /api/state. Loaded before app.js.
+// app.js calls configure({ request }) and acceptInvite() first thing, and
+// onState(state) on every /api/state. The owner's calls go through that
+// request() (with failover: the router, signed in with a bearer token, to
+// whichever backend is active); the invite link's address comes from the
+// server (its own public address), never this page's. Loaded before app.js.
 "use strict";
 
 (function (root) {
   const ACCOUNT_KEY = "account";
+  // app.js's request(url, options) -> Response; until configured, a plain
+  // same-origin fetch (cookie sign-in, no failover)
+  let request = null;
+
+  function configure(opts = {}) {
+    if (typeof opts.request === "function") request = opts.request;
+  }
 
   // The invite token in a location's #fragment, or null.
   function readInvite(loc) {
@@ -70,7 +80,8 @@
     let shown = false;
 
     async function call(url, options = {}) {
-      const res = await win.fetch(url, { credentials: "same-origin", ...options });
+      const res = request ? await request(url, options)
+        : await win.fetch(url, { credentials: "same-origin", ...options });
       let body = {};
       try { body = await res.json(); } catch (e) { /* not JSON */ }
       if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
@@ -182,5 +193,5 @@
     if (owner) owner.show(Boolean(state.owner && state.family));
   }
 
-  root.HeyClaudeFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner };
+  root.HeyClaudeFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner, configure };
 })(typeof window !== "undefined" ? window : globalThis);
