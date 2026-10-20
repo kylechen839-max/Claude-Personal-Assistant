@@ -583,6 +583,25 @@ def add_memory_tools(tools: ToolRegistry, memory) -> None:
         tools.register(*memory_tools(memory))
 
 
+def build_memory_review(config: dict, memory):
+    """The memory review (memory_review.py) for this memory, or None."""
+    if memory is None:
+        return None
+    from assistant.memory_review import MemoryReview
+
+    mem = config["memory"]
+    return MemoryReview(memory, timezone=config["assistant"]["timezone"] or None,
+                        weekly_review=mem["weekly_review"],
+                        state_file=mem["review_state_file"] or None)
+
+
+def register_memory_review(registry: ToolRegistry, review) -> None:
+    """The read-only review_memory tool ("what did you remember about me
+    this week?"); deleting one goes through delete_note (notes on)."""
+    if review is not None:
+        registry.register(*review.tools())
+
+
 def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
     """Quick-capture note tools; they need Pinecone memory. They replace
     the plain `remember` memory tool (same job, plus tags, listing and
@@ -656,7 +675,7 @@ def build_wake_components(args, config: dict):
 
 
 def build_chat(config: dict, tools=None, memory=None,
-               recorder=None) -> ClaudeChat:
+               recorder=None, review=None) -> ClaudeChat:
     a = config["assistant"]
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
@@ -664,6 +683,8 @@ def build_chat(config: dict, tools=None, memory=None,
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
                       recorder=recorder, language=a["language"])
+    if review is not None:  # [memory] weekly_review (off by default)
+        chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
         recorder.client_fn = lambda: chat.client
     return chat
@@ -785,10 +806,12 @@ def main(argv=None) -> int:
         memory = build_memory(config)
         add_memory_tools(tools, memory)
         register_notes(tools, memory, config)
+        review = build_memory_review(config, memory)
+        register_memory_review(tools, review)
         store = open_store(config)
         add_history_tools(tools, config, store, memory)
         recorder = build_recorder(config, store, args.mode, args.incognito)
-        chat = build_chat(config, tools, memory, recorder)
+        chat = build_chat(config, tools, memory, recorder, review)
         if chat.incognito:
             print("(Incognito: this session won't be saved)")
         elif recorder:

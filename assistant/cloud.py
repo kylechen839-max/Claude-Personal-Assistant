@@ -80,7 +80,9 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/ui.js",
               # the login page's language (Chinese for a family member) and
               # the history panel's code: page code only, no personal data
-              "/i18n.js", "/history.js"}
+              "/i18n.js", "/history.js",
+              # the Memory screen's code (its /api/memory data needs the owner)
+              "/memory.js"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it

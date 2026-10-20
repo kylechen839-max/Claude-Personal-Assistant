@@ -4,8 +4,9 @@
 need for the lab report?" finds it by meaning. Notes live in the
 assistant's own namespace (voice-assistant) with metadata kind=note,
 created_at and tags, next to the conversation summaries, so ordinary
-memory lookups before each reply can find them too. Only vectors whose id
-starts with "note-" are ever deleted here.
+memory lookups before each reply can find them too. Only the assistant's
+own vectors are ever deleted here: ids starting with "note-", or "voice-"
+(conversation summaries and `remember` notes, listed by review_memory).
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import re
 import uuid
 from datetime import datetime, timezone
 
+from assistant import i18n
+from assistant.memory import ID_PREFIX, list_ids
 from assistant.tools import UNTRUSTED_CONTEXT, Tool, mark_untrusted
 from assistant.tools.timeutil import local_zone, spoken_date
 
@@ -111,10 +114,7 @@ class QuickNotes:
                               any((m.metadata or {}).get("untrusted") for m in hits))
 
     def _ids(self) -> list[str]:
-        ids = []
-        for page in self.index.list(prefix=NOTE_PREFIX, namespace=self.namespace):
-            ids.extend(page if isinstance(page, (list, tuple)) else [page])
-        return ids
+        return list(list_ids(self.index, NOTE_PREFIX, self.namespace))
 
     def _fetch(self, ids: list[str]) -> dict:
         if not ids:
@@ -132,7 +132,7 @@ class QuickNotes:
                               any(found[i].get("untrusted") for i in ids if i in found))
 
     def delete_note(self, note_id: str) -> dict:
-        if not note_id.startswith(NOTE_PREFIX):
+        if not note_id.startswith((NOTE_PREFIX, ID_PREFIX)):
             raise ValueError("That isn't a saved note's id")
         self.index.delete(ids=[note_id], namespace=self.namespace)
         return {"status": "deleted", "id": note_id}
@@ -141,9 +141,9 @@ class QuickNotes:
         try:
             text = self._fetch([tool_input["note_id"]])[tool_input["note_id"]]["text"]
             short = text if len(text) <= 120 else text[:117] + "..."
-            return f"Do you want me to delete the note: {short}?"
+            return i18n.t("note_delete", text=short)
         except Exception:
-            return "Do you want me to delete that note?"
+            return i18n.t("note_delete_any")
 
     def describe_for_save(self, tool_input: dict) -> str:
         text = tool_input.get("text", "")
@@ -179,8 +179,9 @@ class QuickNotes:
                      "limit": {"type": "integer", "minimum": 1, "maximum": 20}}},
                  self.list_recent_notes, private=True),
             Tool("delete_note",
-                 "Delete one saved note by id (from recall_notes or "
-                 "list_recent_notes). Kyle is asked to confirm out loud "
+                 "Delete one saved note or memory by id (from recall_notes, "
+                 "list_recent_notes or review_memory), e.g. when Kyle says "
+                 "'forget that...'. Kyle is asked to confirm out loud "
                  "automatically; just call this tool.",
                  {"type": "object", "properties": {"note_id": {"type": "string"}},
                   "required": ["note_id"]},

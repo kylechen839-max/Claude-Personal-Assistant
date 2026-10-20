@@ -494,6 +494,21 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
       again, and ask "What did I need for the lab report?"
   - Should: "error bars". "What notes have I saved recently?" lists it;
     "Delete that note" asks first.
+- [ ] "Hey Claude, what did you remember about me this week?"
+  - Should: a short spoken summary (how many, the main things), not every
+    note read out. "Forget the one about <thing>" asks "Do you want me to
+    delete the note: ...?"; answer no and it stays (check in the phone app).
+- [ ] Phone app -> gear -> **Memory**.
+  - Should: this week's notes on top ("This week", "Last week", "Week of
+    ..."), each with a date and "Summary" or "Note"; a red **Untrusted**
+    badge only on ones saved while an email or web page was open. Tap
+    Delete on one and confirm: it disappears. "Delete all from this week":
+    the question gives the right count; Cancel keeps them.
+  - On a family member's phone: no Memory button.
+- [ ] Optional: set `[memory] weekly_review = true`, restart, start a
+      conversation.
+  - Should: the first reply opens with "I saved N notes this week, want to
+    review them?"; a second conversation the same day doesn't.
 - [ ] Phone app -> **Lecture** tab: the permission reminder shows; the
       course list matches your Notion Course options. Pick one, Start, talk
       (or play a YouTube lecture) for 3 minutes.

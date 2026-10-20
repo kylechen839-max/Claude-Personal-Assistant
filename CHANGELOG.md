@@ -12,6 +12,14 @@
   long PDFs are counted by their page tree, so annotated PDFs aren't refused.
 - Cloud: the sign-in page now loads its translations before sign-in, so a
   Chinese family member's login page is in Chinese right away.
+- Memory review: a Memory screen in the phone app (settings menu, owner
+  only) lists conversation summaries and notes saved in Pinecone, newest
+  first, grouped by week, with date, kind and an "untrusted" badge, plus
+  Delete and "Delete all from this week" (both confirm). By voice, "what
+  did you remember about me this week?" and "forget that..." (spoken yes
+  first). Optional weekly nudge (`[memory] weekly_review`, off).
+- Fix: "list my recent notes" was always empty with pinecone 7+
+  (`Index.list` pages are `ListResponse` objects).
 - Smart home control through Home Assistant (off by default): "turn off
   the bedroom lights", "set the thermostat to 70", "is the front door
   locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home
