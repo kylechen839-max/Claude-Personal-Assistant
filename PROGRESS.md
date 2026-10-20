@@ -550,8 +550,9 @@ Four features on top of the seven stages (branch `claude/features`).
   offset, repeats ignored, size caps), a background job (one at a time,
   resumes after restart) that decodes with PyAV in 10-minute windows
   (faster-whisper's own file decoder fails with PyAV 19, and windows keep
-  memory flat), transcribes with progress, summarizes with a forced Claude
-  tool call, finds or creates "Lecture Notes" next to Assignments, and
+  memory flat), transcribes with progress, summarizes with Claude
+  structured outputs (a JSON schema; see "Fix: lecture summaries 400 on
+  Sonnet 5.5"), finds or creates "Lecture Notes" next to Assignments, and
   files a page with inline/block equations, idempotently (Lecture ID
   property + local page record; a retry appends only missing blocks). Assignment-like action items
   are offered with Add buttons. Tested: resume after a lost chunk,
@@ -3068,3 +3069,44 @@ dropping other guests, free time in wall-clock time, no
   (and only its own); all of round 2 undone fails all 14.
 - Counts (Linux sandbox, Python 3.13): 2173 passed, 48 skipped (master
   f1eb136: 2124 passed, 48 skipped).
+## Fix: lecture summaries 400 on Sonnet 5.5 (2026-10-20)
+
+- **Bug:** `lecture.summarize()` forced its `save_lecture_notes` tool with
+  `tool_choice={"type": "tool"}`. Claude Sonnet 5.5 (the default
+  `[assistant] model`, which the lecture job uses), Opus 5.5, Fable 5.1 and Mythos 5.1
+  answer a forced `tool_choice` (`tool` or `any`) with a 400, so every
+  lecture failed at the summary step with `BadRequestError`.
+- **Fix:** the summary uses structured outputs instead
+  (`output_config.format` with a JSON schema, `NOTES_SCHEMA`; every object
+  sets `additionalProperties: false`), which the claude-api docs name as
+  the replacement when a forced call only existed to get JSON back. No
+  tools are sent. The reply's text block is parsed; a refusal, a
+  `max_tokens` cut or text that isn't a JSON object raises a RuntimeError
+  without quoting the reply, so the job fails as before with the
+  transcript kept, and a retry re-runs only the summary. `max_tokens` is
+  now 16000 (adaptive thinking, on by default on Sonnet 5.5, shares it)
+  with a 600 s timeout for this one background request.
+  `requirements.txt` now needs `anthropic>=0.77` (the first SDK whose
+  `messages.create` takes `output_config`; 0.76 doesn't).
+- **Other call sites:** no other `tool_choice` in `assistant/` (chat, tutor,
+  history, memory and family all leave it at the default `auto`).
+- **Tests:** the `fake_client` fixture (`tests/conftest.py`) now raises the
+  API's 400 for a forced `tool_choice` on the models that reject it, and
+  for an `output_config` schema with an object lacking
+  `additionalProperties: false`. New in `test_lecture.py`: summarize on
+  Sonnet 5.5 / Opus 5.5 / Fable 5.1, the whole pipeline on the default
+  model, six bad replies (not JSON, not an object, no text, tool block
+  only, `max_tokens`, refusal) failing without echoing the reply, a failed
+  summary kept for a retry that doesn't re-transcribe, the schema check,
+  and the fake's own 400. Lecture replies in `test_lecture.py`,
+  `test_webfeatures.py` and `test_features_deploy.py` now have the
+  structured-output shape (thinking block, then JSON text). With only
+  `lecture.py` reverted, the model tests and the default-model pipeline
+  test fail with `BadRequestError: tool_choice: type "tool" and "any" are
+  not supported for this model.`
+- Counts (Linux sandbox, Python 3.13): 2137 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped).
+- Deploy: this update changes `requirements.txt` (anthropic>=0.77), so the
+  auto-updater skips it. Stop the assistant and run `python -m assistant
+  --update`, or `.\.venv\Scripts\python.exe -m pip install -r
+  requirements.txt`, then restart.

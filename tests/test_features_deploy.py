@@ -22,7 +22,8 @@ from assistant.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
 from tests.test_cloud import PROXY, PUBLIC, at, via_proxy  # noqa: E402
 from tests.test_failover_webapp import APP, CROSS, PI, settings  # noqa: E402
-from tests.test_lecture import NOTES, FakeWhisper, assignments_mock, fake_windows  # noqa: E402
+from tests.test_lecture import (NOTES, FakeWhisper, assignments_mock,  # noqa: E402
+                                fake_windows, notes_reply)
 from tests.test_tutor import photo  # noqa: E402
 from tests.test_webapp import TOKEN, FakeTranscriber  # noqa: E402
 
@@ -200,8 +201,7 @@ def test_filed_lecture_is_added_to_its_conversation(store, fake_client, tmp_path
     uid = uploads.start(course="PHYS 141", conversation_id=cid)
     uploads.append(uid, 0, b"audio")
     uploads.finish(uid)
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     feats.pipeline.submit(uid)
     feats.pipeline.wait(10)
     msgs = store.get(cid)["messages"]
