@@ -348,3 +348,14 @@ def test_separate_instance_starts_with_its_own_env_file(tmp_path, monkeypatch):
     assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.mom"]) == 0
     monkeypatch.setenv("NOTION_TOKEN", "kyles")  # Kyle's own instance: unchanged
     assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+
+
+def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):
+    """conftest's _logs_in_tmp: setup_logging as cli.main reaches it (the
+    module attribute, default config, run from the repo) writes under
+    tmp_path, so a test run can't put fake ERROR lines in the running
+    app's logs/assistant.log."""
+    from assistant import config as config_mod
+
+    path = config_mod.setup_logging(load_config(None, None))
+    assert path is not None and tmp_path in path.parents
