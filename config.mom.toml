@@ -1,0 +1,70 @@
+# A second, separate instance in Mandarin Chinese, for a family member to
+# try on her phone (README: "A Chinese instance for someone else").
+#
+#   python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
+#
+# None of Kyle's connections are used: no Notion, no Pinecone memory or notes,
+# no dev team, its own history, sessions and log, and its own Google sign-in
+# (Calendar and Gmail drafts), made from the phone with the menu's
+# "连接 Google 账户" button. Put this machine's real addresses in
+# config.mom.local.toml (gitignored), e.g.:
+#
+#   [webapp]
+#   public_origin = "https://your-pc.your-tailnet.ts.net:8443"
+#   allowed_origins = ["https://your-pc.your-tailnet.ts.net:8443"]
+
+[assistant]
+language = "zh"               # Mandarin: Chinese prompt, speech and phone page
+# timezone = "Asia/Shanghai"  # her time zone, if it isn't this computer's
+
+[stt]
+model = "small"               # multilingual Whisper (".en" models can't hear Chinese)
+
+[tts]
+engine = "piper"              # python -m assistant --download-voice zh_CN-huayan-medium
+piper_voice = "voices/zh_CN-huayan-medium.onnx"
+fallback = "print"            # no voice yet: the phone's own (Chinese) voice reads replies
+
+[calendar]                    # her Google account, signed in from the phone
+credentials = "data/mom/google_client.json"  # a *Web application* OAuth client
+token = "data/mom/google_token.json"         # written by the phone sign-in
+
+[notion]
+enabled = false
+
+[memory]
+enabled = false
+
+[notes]
+enabled = false
+
+[web]
+browser = false               # never open pages on this computer
+
+[failover]
+role = ""
+
+[history]
+path = "data/mom/history.sqlite"
+
+[webapp]
+port = 8766                   # Kyle's own instance keeps 8765
+sessions_file = "data/mom/web_sessions.json"
+google_connect = true
+public_origin = ""            # set in config.mom.local.toml (see above)
+allowed_origins = []          # set in config.mom.local.toml if a proxy rewrites Host
+
+[update]
+enabled = false
+
+[lecture]
+enabled = false
+
+[tutor]
+enabled = false
+
+[devteam]
+enabled = false
+
+[logging]
+file = "logs/mom.log"

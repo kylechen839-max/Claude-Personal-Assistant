@@ -11,7 +11,7 @@ import time
 
 import anthropic
 
-from assistant import audio
+from assistant import audio, i18n
 from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
@@ -22,11 +22,32 @@ EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
 YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
              "affirmative", "confirm", "confirmed", "absolutely", "definitely"}
 NO_WORDS = {"no", "nope", "don't", "dont", "not", "cancel", "stop", "wait"}
+# Chinese (Mandarin) answers. A single character means too much on its own
+# (还是明天吧, 好像错了, 是谁, 对了还有一个), so a yes is the whole answer, from
+# this short list: each part between punctuation, after leading fillers
+# (嗯/哦/啊/呃), must be one of these ("嗯，好的", "好，删吧"). Anything else,
+# including a lone 嗯, a question or 不好, is a no.
+ZH_EXIT_WORDS = {"再见", "拜拜", "再会"}
+ZH_YES_ANSWERS = frozenset({
+    "是", "是的", "对", "对的", "好", "好的", "好啊", "好吧", "行", "可以", "确定",
+    "确认", "没问题", "删吧", "删除吧", "加吧"})
+ZH_FILLERS = "嗯哦啊呃"
+CJK = re.compile(r"[\u4e00-\u9fff]")
 log = logging.getLogger(__name__)
 
 
 def is_exit(text: str) -> bool:
-    return text.lower().strip(" .!?,") in EXIT_WORDS
+    word = text.lower().strip(" .!?,。！？，、~～")
+    return word in EXIT_WORDS or word in ZH_EXIT_WORDS
+
+
+def zh_is_yes(text: str) -> bool:
+    """Whole-answer Chinese yes: every part is on ZH_YES_ANSWERS."""
+    if "?" in text or "？" in text:  # "确定？" asks back; it isn't an answer
+        return False
+    parts = [p.lstrip(ZH_FILLERS) for p in re.split(r"[\s\W_]+", text)]
+    parts = [p for p in parts if p]
+    return bool(parts) and all(p in ZH_YES_ANSWERS for p in parts)
 
 
 def download_voice_command(name: str, output_fn=print) -> int:
@@ -58,7 +79,10 @@ def is_yes(text: str) -> bool:
     words = set(re.findall(r"[a-z']+", text.lower()))
     phrase = " ".join(re.findall(r"[a-z']+", text.lower()))
     yes = bool(words & YES_WORDS) or phrase in {"go ahead", "do it", "please do"}
-    return yes and not (words & NO_WORDS)
+    no = bool(words & NO_WORDS)
+    if CJK.search(text):  # "好的" yes; "不好", "好不好", "可以吗？", "是谁" no
+        return zh_is_yes(text)
+    return yes and not no
 
 
 def parse_args(argv=None):
@@ -81,6 +105,9 @@ def parse_args(argv=None):
                              'such as en_US-lessac-medium (into voices/)')
     parser.add_argument("--config", default="config.toml",
                         help="settings file (default: config.toml)")
+    parser.add_argument("--env-file", default=".env",
+                        help="secrets file (default: .env); e.g. .env.mom for "
+                             "a second, separate instance")
     parser.add_argument("--keyword-path",
                         help="openWakeWord .onnx model for the 'Hey Claude' wake word")
     parser.add_argument("--timings", action="store_true",
@@ -142,24 +169,24 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
     if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
-        return "Sorry, I can't reach the internet right now."
+        return i18n.t("no_internet")
     if isinstance(e, anthropic.AuthenticationError):
         log.error("Authentication error: %s", e)
         output_fn(f"API error: {e}")
-        return "Sorry, my Anthropic API key isn't working. Please check it."
+        return i18n.t("bad_key")
     if isinstance(e, anthropic.RateLimitError):
         log.warning("Rate limited: %s", e)
         output_fn(f"API error: {e}")
-        return "I'm getting too many requests right now. Try again in a minute."
+        return i18n.t("rate_limited")
     if isinstance(e, anthropic.APIError):
         log.error("API error: %s", e)
         output_fn(f"API error: {e}")
-        return "Sorry, something went wrong talking to Claude."
+        return i18n.t("api_error")
     # anything else: keep the session alive
     log.error("Unexpected error answering a %d-character request",
               len(user_text), exc_info=e)
     output_fn(f"Error: {e}")
-    return "Sorry, something went wrong."
+    return i18n.t("error")
 
 
 def run_text(chat: ClaudeChat, input_fn=None, output_fn=print,
@@ -302,7 +329,7 @@ def run_turn(chat: ClaudeChat, tts, transcriber, recording, output_fn,
         log.exception("Error handling a command")
         output_fn("(Something went wrong; still listening)")
         try:
-            tts.speak("Sorry, something went wrong.")
+            tts.speak(i18n.t("error"))
         except Exception:
             log.exception("TTS failed too")
         return True
@@ -373,7 +400,7 @@ def handle_command(chat: ClaudeChat, tts, transcriber, recording,
     if not user_text:
         return bool(heard)  # just "Hey Claude": still listening
     if is_exit(user_text):
-        tts.speak("Goodbye!")
+        tts.speak(i18n.t("goodbye"))
         end_conversation(chat, output_fn)
         return False
     reply = get_reply(chat, user_text, output_fn)
@@ -407,18 +434,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     """Register every service that is enabled and has credentials."""
     registry = ToolRegistry()
     tz = config["assistant"]["timezone"] or None
-    cal = config["calendar"]
-    from assistant.tools.calendar import GoogleCalendar, has_credentials
-
-    if cal["enabled"] and has_credentials(cal["credentials"], cal["token"]):
-        registry.register(*GoogleCalendar(
-            credentials_path=cal["credentials"], token_path=cal["token"],
-            calendar_id=cal["calendar_id"], timezone=tz,
-            save_token=cal["save_token"]).tools())
-    elif cal["enabled"]:
-        output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
-                  "GOOGLE_TOKEN_JSON not set)")
-    register_gmail(registry, config, output_fn)
+    register_google(registry, config, output_fn)
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from assistant.tools.notion import NotionAssignments
 
@@ -436,6 +452,37 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         if web["browser"]:
             registry.register(*web_tools.browser_tools())
     return registry
+
+
+def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> None:
+    """Calendar and Gmail tools. With [webapp] google_connect (the phone's
+    "connect Google" button) only once that sign-in saved a token: without
+    one, Calendar would start a browser sign-in on this computer."""
+    cal = config["calendar"]
+    if not cal["enabled"]:
+        return
+    from assistant.tools.calendar import GoogleCalendar, has_credentials
+    from assistant.tools.google_auth import load_token_info
+
+    if config["webapp"]["google_connect"]:
+        try:
+            ready = load_token_info(cal["token"]) is not None
+        except (OSError, ValueError):
+            ready = False
+        if not ready:
+            output_fn("(Google tools off until the phone app's "
+                      "\"connect Google\" sign-in finishes)")
+            return
+    elif not has_credentials(cal["credentials"], cal["token"]):
+        output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
+                  "GOOGLE_TOKEN_JSON not set)")
+        register_gmail(registry, config, output_fn)
+        return
+    registry.register(*GoogleCalendar(
+        credentials_path=cal["credentials"], token_path=cal["token"],
+        calendar_id=cal["calendar_id"], timezone=config["assistant"]["timezone"] or None,
+        save_token=cal["save_token"]).tools())
+    register_gmail(registry, config, output_fn)
 
 
 def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
@@ -557,7 +604,7 @@ def voice_confirm(tts, record_fn, transcriber, output_fn=print):
     """Ask out loud, record the answer, and treat only a clear yes as yes."""
     def confirm(question: str) -> bool:
         output_fn(f"Claude: {question}")
-        tts.speak(f"{question} Please say yes or no.")
+        tts.speak(question + i18n.t("say_yes_no"))
         recording = record_fn()
         answer = transcriber.transcribe(recording) if recording is not None else ""
         output_fn(f"You: {answer}")
@@ -598,7 +645,7 @@ def build_chat(config: dict, tools=None, memory=None,
     chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
-                      recorder=recorder)
+                      recorder=recorder, language=a["language"])
     if recorder is not None and recorder.client_fn is None:
         recorder.client_fn = lambda: chat.client
     return chat
@@ -651,10 +698,23 @@ def continue_conversation(chat: ClaudeChat, conversation_id: str,
 
 
 def main(argv=None) -> int:
-    from assistant.config import load_config, setup_logging
+    from assistant.config import inherited_env_conflicts, load_config, setup_logging
 
     args = parse_args(argv)
-    config = load_config(args.config)
+    inherited = dict(os.environ)  # before load_dotenv adds the env file
+    config = load_config(args.config, env_file=args.env_file)
+    if args.env_file != ".env" or config["webapp"]["google_connect"]:
+        # a separate instance (e.g. --env-file .env.mom): nothing of the
+        # owner's may leak in from the shell that started it
+        leaked = inherited_env_conflicts(inherited, args.env_file)
+        if leaked:
+            print(f"Refusing to start: {', '.join(leaked)} "
+                  f"{'is' if len(leaked) == 1 else 'are'} set in this shell, "
+                  f"not by {args.env_file}, and would point this instance at "
+                  "someone else's data. Start it from a clean shell (see "
+                  "README.md, \"A Chinese instance\").")
+            return 1
+    i18n.set_language(config["assistant"]["language"])
     if args.role:
         config["failover"]["role"] = args.role
     log_file = setup_logging(config)
@@ -699,7 +759,8 @@ def main(argv=None) -> int:
                 show_voice_timings()
 
             return webapp.serve(config, host=args.host, port=args.port,
-                                tts_name=tts_name, show_token=args.show_token)
+                                tts_name=tts_name, show_token=args.show_token,
+                                env_file=args.env_file)
         from assistant.history import open_store
 
         tools = build_tools(config)
@@ -731,7 +792,8 @@ def main(argv=None) -> int:
             threading.Thread(target=tts.warm_up, name="tts-warm-up",
                              daemon=True).start()
         transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
-                                  stt_cfg["compute_type"])
+                                  stt_cfg["compute_type"],
+                                  language=config["assistant"]["language"])
         if args.mode == "voice":
             mic = audio.resolve_mic_device(config["wake"]["mic_device"])
 

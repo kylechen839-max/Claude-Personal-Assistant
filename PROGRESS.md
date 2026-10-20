@@ -1490,6 +1490,101 @@ screens are staged by setting the same attributes the JS sets (no mic).
   restarts, inbox creation, registration, prompt. Not run against the real
   CLI or Notion from this sandbox.
 
+## Chinese MVP for a second user (`config.mom.toml`)
+
+- **A separate instance**: `python -m assistant --mode web --config
+  config.mom.toml --env-file .env.mom`. New `--env-file` flag (secrets and
+  the generated `WEB_TOKEN` go to that file); `config.mom.toml` turns off
+  Notion, memory, notes, lecture, tutor, dev team, failover, updates and the
+  PC browser tool, and keeps its own history, sessions, Google files
+  (`data/mom/`), port 8766 and `logs/mom.log`. `*.local.toml` and `.env.*`
+  are gitignored.
+- **Language** (`[assistant] language = "zh"`, new `assistant/i18n.py`):
+  a Chinese system prompt in the same voice style (`chat.SYSTEM_PROMPT_ZH`;
+  the English tool prompts say "the user" instead of Kyle, plus "always
+  reply in Simplified Chinese"); Whisper with `language="zh"` and a Mandarin
+  initial prompt (the multilingual `small` model); the assistant's own
+  sentences (goodbye, errors, "please say yes or no", decline, no answer,
+  Calendar and Gmail draft questions with Chinese dates) in Chinese; a
+  whole-answer Chinese yes (`cli.zh_is_yes`, used by `cli.is_yes` and
+  `voice_session.is_explicit_yes`; see round 2 below) and 再见/拜拜 to end; sentence splitting on
+  。！？； without a following space, 」』） closers, Chinese commas for long
+  runs and the first clause.
+- **Phone page**: the server sends `<html lang="zh-CN">`; new
+  `web/i18n.js` translates the fixed English strings (text, placeholder,
+  aria-label, title, `confirm()`) at load and as app.js / voice.js change
+  them (MutationObserver), exact matches only. History screens stay
+  English. `sw.js` cache `hey-claude-shell-v5`, `/i18n.js` in the shell.
+- **Google from the phone** (`[webapp] google_connect`, `public_origin`,
+  new `assistant/google_web.py`): a menu button runs the OAuth web flow
+  (PKCE, offline access) in the phone's browser; the callback is
+  authenticated by a single-use, in-memory state (max 4, 10 min) because
+  the session cookie is SameSite=Strict; the token is written with
+  `write_private` and Calendar + Gmail (drafts only) are added to the
+  running app in one dict update. With `google_connect` on, Google tools
+  stay off until that token exists (no browser sign-in on the PC).
+  `cli.register_google` now holds the Calendar + Gmail registration.
+- Tests: new `tests/test_google_web.py` (7: 401 without a session, 403
+  cross-origin, consent URL with PKCE and the redirect URI, unknown state /
+  `error=` / replay give 400 and no file, good callback saves the token and
+  adds the tools to an existing session, bounded and expiring states, INFO
+  logs without code/state/token), `tests/test_i18n.py` (Chinese yes/no and
+  exit words, sentences, Calendar/Gmail questions, a Chinese voice
+  confirmation end to end, the no-answer status), and additions to
+  test_config_cli (config.mom.toml with Kyle's keys set: no Notion, no
+  memory, no Calendar before sign-in; `--env-file`; language reaches the web
+  app), test_sentences, test_stt, test_chat, test_webapp, test_docs and
+  `tests/js/i18n.test.mjs` (7, node:vm). Each regression test was checked
+  to fail with its source change reverted. The page and the button were
+  also checked once in headless Chromium against a local server (Chinese
+  labels under the CSP, the button opening Google's consent URL with a
+  code challenge); not on a real phone, and no real Google sign-in.
+- Counts: pytest 1498 -> 1573 passed, 46 skipped (unchanged; the same
+  model-download and live-service tests). JS: i18n 7 new (dashboard 111,
+  router 33 unchanged).
+- Known gaps: the push-to-talk page's spoken confirmation suffix in phone-
+  voice mode stays English ("Please say yes or no", app.js); conversation
+  titles and summaries may come out in English (the title prompt is English); Chinese
+  speech recognition and the huayan voice are untested on real audio here
+  (huggingface.co is blocked in the sandbox).
+- Round 2 (review fixes):
+  - **Chinese yes is the whole answer.** Round 1 counted any 是/好/对/行
+    anywhere, so 还是明天吧, 好像错了, 是谁, 是什么, 好，等一下, 对了还有一个
+    and 我是说错的那个 confirmed. Now `cli.zh_is_yes` splits the answer at
+    punctuation and spaces, drops leading 嗯/哦/啊/呃 from each part, and
+    every remaining part must be one of 是, 是的, 对, 对的, 好, 好的, 好啊,
+    好吧, 行, 可以, 确定, 确认, 没问题, 删吧, 删除吧, 加吧 ("嗯，好的" and
+    "好，删吧" are yes; a lone 嗯, 不好, 好不好, 可以吗, 没有, 不要 are no).
+    Both `cli.is_yes` (buttons/typed and the web confirm) and
+    `voice_session.is_explicit_yes` use it; any CJK answer goes through it
+    alone, so English yes words cannot rescue a Chinese sentence. English
+    is unchanged.
+  - **A separate instance refuses the owner's inherited variables.** With
+    `--env-file` other than `.env`, or `[webapp] google_connect` on,
+    `cli.main` snapshots the environment before `load_dotenv` and refuses
+    to start (exit 1, variable names only) if any of
+    `config.ISOLATED_ENV_VARS` (GOOGLE_TOKEN_JSON, GOOGLE_CLIENT_JSON,
+    GOOGLE_TOKEN, GOOGLE_CREDENTIALS, HISTORY_PATH, WEB_TOKEN, NOTION_TOKEN,
+    NOTION_ASSIGNMENTS_DB, PINECONE_API_KEY, PINECONE_INDEX) was already set
+    with a value the env file doesn't give it. README says to start her
+    instance from a clean shell. (The sandbox itself has PINECONE_API_KEY
+    set, which is how an existing `--env-file .env.mom` test found the
+    check: that test now clears the caller's variables.)
+  - Tests: test_i18n +33 (the judge's eight sentences and nine more are no
+    in both checks; every allowlisted answer, with punctuation and leading
+    fillers, is yes in both), test_config_cli +12 (each of the ten variables
+    refuses `--env-file .env.mom` and the message names it without the
+    value; google_connect with the default `.env` refuses an inherited
+    GOOGLE_TOKEN_JSON; values from `.env.mom` itself, and Kyle's own
+    default start, still run). With the source changes reverted, 12 of the
+    new i18n cases fail (the judge's eight sentences, "yes 好像错了", and
+    删吧/删除吧/加吧, which were never yes) and all 11 refusal tests fail;
+    the rest (already-no answers such as 可以吗, and the start-normally
+    test) are guards that pass on both.
+  - Counts: pytest 1573 -> 1618 passed, 46 skipped (unchanged); round 3 (a question like 确定？ is never a yes) 1622 passed, 46 skipped. JS: i18n 7
+    passed.
+
+
 ## Voice fixes from Kyle's testing (2026-10-19)
 
 - **Slow end of turn.** The endpointer only counted clearly silent frames

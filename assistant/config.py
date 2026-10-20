@@ -32,6 +32,7 @@ DEFAULTS: dict = {
         "api_max_retries": 3,
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
+        "language": "en",  # "en", or "zh" (Mandarin: prompt, speech, phone page)
     },
     "tts": {
         "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
@@ -111,6 +112,10 @@ DEFAULTS: dict = {
                                     # address(es) (TRUSTED_PROXY)
         "allowed_origins": [],      # extra https://... origins, if a proxy
                                     # rewrites the Host header
+        "google_connect": False,    # "connect Google" button in the phone app
+                                    # (needs a Web application OAuth client)
+        "public_origin": "",        # https://... the phone opens; Google
+                                    # returns to <public_origin>/google/callback
     },
     # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
     "cloud": {
@@ -218,6 +223,30 @@ ENV_OVERRIDES = {
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
 }
+
+
+# Variables that point at the owner's own data or accounts. A separate
+# instance (--env-file other than .env, e.g. .env.mom) or one where someone
+# connects their own Google account must not inherit them from the shell:
+# load_dotenv never overrides a variable that is already set, and
+# google_auth reads GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON before any file.
+ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
+                     "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
+                     "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
+                     "PINECONE_INDEX")
+
+
+def inherited_env_conflicts(inherited, env_file: str | Path | None) -> list[str]:
+    """Names (never values) of ISOLATED_ENV_VARS that were already set in the
+    environment before env_file was loaded, unless env_file sets the same
+    value (a wrapper that loaded this very file first)."""
+    from_file = {}
+    if env_file and Path(env_file).exists():
+        from dotenv import dotenv_values
+
+        from_file = dotenv_values(env_file)
+    return [var for var in ISOLATED_ENV_VARS
+            if inherited.get(var) and inherited[var] != from_file.get(var)]
 
 
 def _merge(base: dict, override: dict) -> dict:

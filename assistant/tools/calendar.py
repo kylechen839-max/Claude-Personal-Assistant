@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, time, timedelta
 
+from assistant import i18n
 from assistant.tools import UNTRUSTED_MARK, Tool
 # Sign-in lives in google_auth (shared with Gmail); re-exported here so
 # `python -m assistant.tools.calendar` and older imports keep working.
@@ -166,22 +167,28 @@ class GoogleCalendar:
                 calendarId=self.calendar_id,
                 eventId=tool_input["event_id"]).execute()
             info = self._summarize(event)
-            when = info["date"] + (f" at {info['start']}" if "start" in info else "")
-            return f"Do you want me to delete {info['title']} on {when}?"
+            if i18n.is_zh():
+                start, _ = self._event_times(event)
+                when = (i18n.spoken_datetime(start) if isinstance(start, datetime)
+                        else f"{start.month}月{start.day}日")
+            else:
+                when = info["date"] + (f" at {info['start']}" if "start" in info else "")
+            return i18n.t("cal_delete", title=info["title"], when=when)
         except Exception:
-            return "Do you want me to delete that event?"
+            return i18n.t("cal_delete_any")
 
     def _spoken_when(self, iso: str) -> str:
         dt = parse_datetime(iso, self.tz)
+        if i18n.is_zh():
+            return i18n.spoken_datetime(dt)
         return f"{spoken_date(dt.date())} at {spoken_time(dt)}"
 
     def describe_for_create(self, tool_input: dict) -> str:
         try:
             when = self._spoken_when(tool_input["start"])
-            return (f"Do you want me to add {tool_input['title']} on {when} "
-                    "to your calendar?")
+            return i18n.t("cal_create", title=tool_input["title"], when=when)
         except Exception:
-            return "Do you want me to add that event to your calendar?"
+            return i18n.t("cal_create_any")
 
     def describe_for_move(self, tool_input: dict) -> str:
         try:
@@ -190,9 +197,9 @@ class GoogleCalendar:
                 eventId=tool_input["event_id"]).execute()
             title = event.get("summary", "that event")
             when = self._spoken_when(tool_input["new_start"])
-            return f"Do you want me to move {title} to {when}?"
+            return i18n.t("cal_move", title=title, when=when)
         except Exception:
-            return "Do you want me to move that event?"
+            return i18n.t("cal_move_any")
 
     def tools(self) -> list[Tool]:
         iso = ("ISO 8601 local date-time without offset, e.g. "

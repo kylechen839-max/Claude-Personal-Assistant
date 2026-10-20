@@ -36,8 +36,9 @@ from typing import Callable
 
 import numpy as np
 
-from assistant import audio
-from assistant.cli import get_reply, is_exit, loggable_reply, strip_wake_phrase
+from assistant import audio, i18n
+from assistant.cli import (CJK, get_reply, is_exit, loggable_reply,
+                           strip_wake_phrase, zh_is_yes)
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -50,7 +51,8 @@ VOICE_STAGES = (("transcript", "transcript"),
                 ("audio", "first audio sent"),
                 ("reply", "whole reply"))
 
-QUESTION_SUFFIX = " Please say yes or no."
+def question_suffix() -> str:
+    return i18n.t("say_yes_no")  # " Please say yes or no." in English
 
 
 # --- speech synthesis -----------------------------------------------------------
@@ -138,6 +140,8 @@ def is_explicit_yes(text: str) -> bool:
     """Only a clear, short yes confirms a spoken question: "yes", "yeah,
     delete it", "go ahead". Anything with other content ("okay, and what
     about Friday?", "yes but not that one", a new question) is a no."""
+    if CJK.search(text):
+        return zh_is_yes(text)  # "好的", "是的，删吧"; not "是谁", "好，等一下"
     words = re.findall(r"[a-z']+", text.lower())
     if not words or len(words) > 6:
         return False
@@ -147,8 +151,8 @@ def is_explicit_yes(text: str) -> bool:
 
 
 def decline_message(question: str) -> str:
-    return ("OK, I won't delete it." if "delete" in question.lower()
-            else "OK, I won't do that.")
+    return i18n.t("wont_delete" if "delete" in question.lower() or "删除" in question
+                  else "wont_do")
 
 
 # --- backends -------------------------------------------------------------------
@@ -174,7 +178,7 @@ class ChatBackend:
         self.conv.on_confirm(question)
         answered = self._answered.wait(self.confirm_timeout)
         if not answered:
-            self.conv.on_status("No answer, so I didn't do it.")
+            self.conv.on_status(i18n.t("no_answer"))
         return answered and self._yes
 
     def answer(self, yes: bool) -> bool:
@@ -466,13 +470,13 @@ class VoiceConversation:
             self.pending = PendingConfirm(turn.id, question)
         turn.flush()  # "Okay." before the question, in order
         self._send({"type": "confirm", "turn": turn.id, "question": question})
-        turn.sentences.put(Chunk(question + QUESTION_SUFFIX, 0, reply=False,
+        turn.sentences.put(Chunk(question + question_suffix(), 0, reply=False,
                                  question=True))
 
     def on_status(self, text: str) -> None:
         with self.lock:
             turn = self.current
-            if text.startswith("No answer"):
+            if text == i18n.t("no_answer"):  # the backend gave up waiting
                 self.pending = None
         self._send({"type": "status", "turn": turn.id if turn else None, "text": text})
 
@@ -584,7 +588,7 @@ class VoiceConversation:
             goodbye = self._turn_body(turn, timer)
         except Exception:
             log.exception("Voice turn failed")
-            message = "Sorry, something went wrong."
+            message = i18n.t("error")
             self._send({"type": "error", "turn": turn.id, "message": message})
             turn.sentences.put(Chunk(message, 0, reply=False))
         finally:
@@ -619,7 +623,7 @@ class VoiceConversation:
         if not text or turn.stop.is_set():
             return False
         if is_exit(text):
-            turn.sentences.put(Chunk("Goodbye!", 0, reply=False))
+            turn.sentences.put(Chunk(i18n.t("goodbye"), 0, reply=False))
             return True
         streamed = []
 
