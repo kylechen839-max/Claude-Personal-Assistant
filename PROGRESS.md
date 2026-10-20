@@ -59,6 +59,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_family.py` | 27 | family invites: accounts, one-time links, isolation, sign-out, removal, logs |
+| `tests/js/family.test.mjs` | 6 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 111 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
@@ -1608,3 +1610,81 @@ screens are staged by setting the same attributes the JS sets (no mic).
   speech. Service worker cache bumped to v4 so phones pick it up.
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
+
+
+## Family invites, piece A: accounts and isolation (2026-10-20)
+
+On the cloud server the owner taps ⚙ -> **Invite someone** (name,
+language, time zone) and gets a one-time link
+`https://<site>/#invite=hcinv.<token>`; opening it signs that phone in as
+the new person, with their own history and reply language and nothing of
+Kyle's. Piece B (their own Google, per-session speech language,
+Render/Docker changes) comes separately.
+
+- `assistant/family.py` (new): `Family` keeps `<dir>/users.json` (written
+  with `google_auth.write_private`) with each person's id, name, language,
+  time zone, status (invited/active), and only the SHA-256 of their invite
+  token. Invite, new link, redeem (under the lock, with the session made
+  inside it, so a removal can't race in), remove (sign-out, close the
+  database, delete `<dir>/<id>/`, retried on Windows). `context(uid)` builds
+  their tools (web search/fetch only; `_register_tools` is piece B's hook
+  for their Google tools), their own `HistoryStore` (opened directly, not
+  `history.open_store`, and with no sync event log) and a chat factory
+  (`ClaudeChat` with their language, name and time zone, no memory). Routes
+  `POST /api/invites`, `GET /api/users`, `DELETE /api/users/{id}`,
+  `POST /api/users/{id}/invite` (owner only) and the public
+  `POST /api/invite/accept`, whose wrong/expired/used invites count toward
+  the shared `LoginLimiter`.
+- `webapp.py`: `SessionStore` maps sessions to family users (persisted;
+  `create(user_id)`, `user()`, `revoke_user()`), now saved with
+  `write_private` instead of a fixed `.tmp` name. `WebAssistant` builds a
+  family member's session from their context (own registry in
+  `SessionTools`); `Session` has `.user`, `.language`, `.history`.
+  `require_owner` (404 for family) guards invites, lecture, tutor and
+  Google connect. `/api/login` from a browser holding a family cookie now
+  makes a fresh owner session. Sign out everywhere is per person (the
+  owner's keeps family signed in; the epoch only rotates when nobody else
+  is signed in). Reply audio ids are bound to their session. The page's
+  `lang` follows the signed-in person. `/api/state` adds `owner`, `family`,
+  `language`.
+- `history_web.py`: a family session uses its own store and no memory.
+  `webfeatures.py`: every route is owner-only.
+- `chat.py`: `ClaudeChat(user_name=..., timezone=...)`: an English family
+  member's prompts (the voice style included) say their name instead of
+  Kyle; the date line is in their time zone.
+- `cloud.py`: `INVITE_POST` is public with the login call's slots and
+  timeout but no WEB_TOKEN body check; `/family.js` is public.
+- Page: `family.js` (new) reads `#invite=`, clears it with
+  `history.replaceState`, POSTs it, marks the phone as a family account (no
+  failover router) and reloads; the owner's menu has Invite someone, the
+  list (status, New link, Remove) and the share sheet with a clipboard
+  fallback. A family member's page hides the Lecture/Tutor tabs. Chinese
+  strings in `i18n.js`; service worker cache v6.
+- Config: `[family]` `enabled` (false; the server profile sets true and
+  `dir = "/data/users"`), `dir`, `max_users` 10, `invite_days` 30,
+  `zh_stt_model`, `zh_piper_voice` (for piece B). Invite tokens and
+  `#invite=` links are masked in logs.
+- Tests: `test_family.py` (27): invites need the owner (401 signed out, 404
+  for family); `users.json` holds the hash, not the token, mode 600; an
+  invite works once (used/expired/wrong -> 401, then 429; WEB_TOKEN still
+  works); new link replaces the old; family registry and API calls have
+  only web tools, no memory, no Kyle in the prompt; family gets 404 on the
+  owner's conversation, lecture, tutor, invites, users, Google; family
+  sign-out-everywhere leaves the owner in and vice versa; removal signs out
+  and deletes the folder and entries; owner sign-in on a family browser;
+  another session's audio id -> 404; page language per person; no names,
+  tokens or links at INFO. `test_cloud.py` +2 (accept through CloudGuard;
+  wrong invites lock out that address, WEB_TOKEN still works),
+  `test_docs.py` +1 (`[family]` mirrored in config.toml),
+  `tests/js/family.test.mjs` (6, node:vm). Updated: `test_webapp.py`
+  (`/api/state` keys, `/family.js` public, cache v6, the save-failure test
+  now breaks `os.replace` since the file goes through `write_private`).
+  Each fix was checked by restoring only that source from master `f1c2501`
+  (or undoing only that line) and rerunning: the history guard (family saw
+  the owner's conversation), `require_owner` in webfeatures (5 routes),
+  the login fix, the audio binding, family sign-out-everywhere, the page
+  language (2), the redaction patterns, `chat.py` (2) and `cloud.py` (2)
+  all fail without their change.
+- Counts (Linux sandbox, Python 3.13): pytest 1622 -> 1652 passed, 46
+  skipped (unchanged). JS: family 6, i18n 7, backend-router 33,
+  voice-core 14, agent-dashboard 111, all passing.

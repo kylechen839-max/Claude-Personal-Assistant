@@ -791,6 +791,8 @@ class WebAssistant:
             if s.thread:
                 s.thread.join(timeout=10)
             self._end(s)
+        if self.family is not None:
+            self.family.close()  # family members' history files
         self._tts_pool.shutdown(wait=False)
 
     # turns

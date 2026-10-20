@@ -512,6 +512,34 @@ remove the app at myaccount.google.com -> Security -> Third-party access.
 `[webapp] google_connect` and `public_origin` are off and empty in your own
 `config.toml`, so your instance is unchanged.
 
+## Invite family (cloud)
+
+On the Render server you can give someone their own account on your
+assistant, with their own conversation history and language (English or
+Chinese), without sharing `WEB_TOKEN`. The server profile turns this on
+(`[family] enabled`); on a PC it is off unless you set it.
+
+1. Signed in with your token, open ⚙ -> **Invite someone**, enter their
+   name and language (and their time zone, e.g. `Asia/Shanghai`), then
+   **Create invite link**. The phone's share sheet opens (or the link is
+   copied). Send it to them however you like.
+2. They open the link on their phone: it signs that phone in as them and
+   reloads the page in their language. Share -> Add to Home Screen.
+3. The link works once and for `invite_days` (30 days). If it expired, or
+   they get a new phone, tap **New link** next to their name (the old link
+   stops working).
+4. **Remove** signs them out everywhere and deletes their conversations.
+
+What they get: chat and voice with Claude, web search, and their own
+history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
+synced to your Pi or PC). What they never get: your Notion, Pinecone memory
+and notes, Google Calendar and Gmail, the dev team, the lecture recorder and
+tutor, your history, failover, or the invite menu. Their **Sign out
+everywhere** signs out only their own phones; yours signs out only yours.
+Settings: `[family]` in `config.toml` (`dir`, `max_users`, `invite_days`).
+Their own Google account and Chinese speech recognition and voice come
+later (`zh_stt_model`, `zh_piper_voice` are reserved for that).
+
 ## Run it in the cloud (Render)
 
 The phone web app can also run 24/7 on a small paid server at

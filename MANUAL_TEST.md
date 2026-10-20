@@ -406,6 +406,20 @@ for all of this except the Google sign-in.
 - [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 
+- [ ] **Invite family.** On your iPhone (signed in to the cloud app), ⚙ ->
+      Invite someone -> a name, 中文, Create invite link.
+  - Should: the share sheet opens with the link (or it says it was copied);
+    the person shows as "Invited".
+- [ ] Open that link on a second phone (or a private Safari tab).
+  - Should: the page reloads in Chinese with an empty chat, no Lecture or
+    Tutor tabs, no Invite menu; a question is answered in Chinese; History
+    shows only its own conversation. Your list shows them as "Active".
+- [ ] Open the same link again in another private tab.
+  - Should: "expired or already used", and the login page.
+- [ ] On your phone tap Remove next to them.
+  - Should: their phone is signed out on its next tap; your chat and
+    history are unchanged.
+
 ---
 
 ## Email, notes, lectures, tutor (optional, ~20 min)

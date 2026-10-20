@@ -330,6 +330,50 @@ Render fills `X-Forwarded-For` (if it ever arrives without the real client,
 the per-address limit acts like the global one; the global cap still holds).
 Someone who steals the unlocked phone has the assistant, as with any app.
 
+## Family accounts (`family.py`, cloud)
+
+The owner (WEB_TOKEN) can invite people to their own accounts on the cloud
+server (`[family] enabled`, on in the server profile).
+
+- **Invite links.** `POST /api/invites` (owner only) makes
+  `hcinv.` + 256 random bits. Only its SHA-256 is stored (`users.json`,
+  written privately and atomically with `google_auth.write_private`); the
+  token is shown once, in the link's `#invite=` fragment, which browsers
+  never send to a server (the page has `Referrer-Policy: no-referrer`).
+  `family.js` clears it from the address bar before POSTing it to
+  `/api/invite/accept`. A link works once and for `invite_days`; a new link
+  replaces the old one. Tokens and `#invite=` links are masked in logs;
+  INFO lines name only user ids and counts, never names.
+- **Accepting.** `/api/invite/accept` is public (CloudGuard `INVITE_POST`:
+  the login call's slots and timeout, but no WEB_TOKEN body check). Wrong,
+  expired or used invites go through the same `LoginLimiter` as wrong
+  tokens (per-address lockout, global slowdown); a valid one always works,
+  and so does the owner's WEB_TOKEN. Redeeming and creating the session
+  happen under the family lock, so a DELETE can't race in between.
+- **Isolation.** A family session (`SessionStore.users`) gets its own
+  `ToolRegistry` with only Anthropic's web search and fetch (no browser,
+  Notion, memory, notes, history tools, Google or dev team), its own
+  `HistoryStore` at `<dir>/<id>/history.sqlite` with no sync event log,
+  and no Pinecone memory. Owner-only routes (`require_owner`: invites and
+  users, lecture, tutor, Google connect) answer 404 to it, as if absent.
+  History routes use the session's own store, so the owner's conversation
+  ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
+  session that made it. Failover tokens and Bearer WEB_TOKEN are always the
+  owner. Signing in with WEB_TOKEN in a browser holding a family cookie
+  makes a new owner session (never upgrades theirs).
+- **Removing** someone signs out their sessions and live voice sockets,
+  drops their conversations without summarizing, closes their database and
+  deletes their folder (retried on Windows).
+- **Sign out everywhere** is per person: the owner's signs out the owner's
+  browsers and access tokens; family members stay signed in (they have no
+  token to sign in again; remove them to cut them off). The cookie epoch is
+  rotated only when nobody else is left signed in, since rotating it would
+  sign everyone out. A family member's signs out only their own browsers.
+
+Left as is: a family member's session lasts 90 days from its last use, like
+the owner's; a family member who is also on the owner's phone shares that
+phone's cookie jar (one account per browser at a time).
+
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
 For a second user's instance, `[webapp] google_connect` adds a "connect
