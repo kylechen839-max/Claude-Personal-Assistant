@@ -7,6 +7,7 @@
 //                   speechStart, speechConfirmed (barge-in), speechEnd, misfire
 //   TurnController- the turn-taking state machine:
 //                   listening -> thinking -> speaking -> (barge-in) -> listening
+//                   with a follow-up window ("still listening") after a reply
 //   packFrame / unpackFrame / floatToPcm16 - the socket's binary framing
 "use strict";
 
@@ -144,10 +145,19 @@
   // States: idle, listening, thinking, speaking, paused, ended.
   // `effects` (all optional): setState(state), send(msg), sendUtterance(turn,
   // audio), stopPlayback() -> {index, fraction}, caption(who, text, append),
-  // mark(name, turn) for timings, ended(reason).
+  // mark(name, turn) for timings, ended(reason), followUp(open) when the
+  // follow-up window opens/closes, setTimer(fn, ms) / clearTimer(id).
+  // `options`: bargeIn (false: talking over a playing reply doesn't stop
+  // it; the mic is ignored while it plays), followUpMs (after a reply has
+  // played, show/sound "still listening" this long; 0 = off).
   class TurnController {
-    constructor(effects = {}) {
+    constructor(effects = {}, options = {}) {
       this.fx = effects;
+      this.bargeInOn = options.bargeIn !== false;
+      this.followUpMs = Math.max(0, Number(options.followUpMs) || 0);
+      this.followUp = false; // the follow-up window is open
+      this.followUpTimer = null;
+      this.replyPlayed = false; // audio of the active turn's reply was played
       this.state = "idle";
       this.turn = 0; // last utterance id sent
       this.activeTurn = null; // turn whose reply is coming or playing
@@ -161,8 +171,34 @@
     }
     _set(state) {
       if (this.state === state) return;
+      if (state !== "listening") this._closeFollowUp();
       this.state = state;
       if (this.fx.setState) this.fx.setState(state);
+    }
+
+    // After a reply has played: keep listening for a follow-up, and say so
+    // (a soft cue, "Still listening"). Silence just closes it again.
+    _replyFinished() {
+      const played = this.replyPlayed;
+      this.replyPlayed = false;
+      this._set("listening");
+      if (!played || !this.followUpMs || this.awaitingAnswer || !this.live) return;
+      this._closeFollowUp();
+      this.followUp = true;
+      this._do("followUp", true);
+      const set = this.fx.setTimer || ((fn, ms) => setTimeout(fn, ms));
+      this.followUpTimer = set(() => { this.followUpTimer = null; this._closeFollowUp(); },
+        this.followUpMs);
+    }
+    _closeFollowUp() {
+      if (this.followUpTimer !== null) {
+        const clear = this.fx.clearTimer || ((id) => clearTimeout(id));
+        clear(this.followUpTimer);
+        this.followUpTimer = null;
+      }
+      if (!this.followUp) return;
+      this.followUp = false;
+      this._do("followUp", false);
     }
     _do(name, ...args) { if (this.fx[name]) return this.fx[name](...args); return undefined; }
 
@@ -174,9 +210,12 @@
     // --- from the VAD ---
     onVad(ev) {
       if (!this.live || this.muted) return;
+      // barge-in off: while a reply plays, what the mic hears is its echo
+      if (!this.bargeInOn && this.state === "speaking") return;
       switch (ev.type) {
         case "speechStart":
           this.userSpeaking = true;
+          this._closeFollowUp(); // he's talking: the window did its job
           break;
         case "speechConfirmed":
           if (this.state === "speaking" || this.state === "thinking") this.bargeIn();
@@ -194,6 +233,7 @@
     bargeIn() {
       const pos = this._do("stopPlayback") || { index: 0, fraction: 0 };
       this.playing = false;
+      this.replyPlayed = false; // cut off: no "still listening" cue after it
       if (this.activeTurn !== null) {
         this._do("send", { type: "interrupt", turn: this.activeTurn,
           index: pos.index || 0, fraction: pos.fraction || 0 });
@@ -215,6 +255,7 @@
       if (!this.awaitingAnswer) {
         this.activeTurn = this.turn;
         this.serverDone = false;
+        this.replyPlayed = false;
       }
       this._set("thinking");
     }
@@ -259,6 +300,7 @@
           if (!this.live || this.state === "paused") return false;
           if (t !== this.activeTurn) return false;
           this.playing = true;
+          if (!ev.question) this.replyPlayed = true;
           if (!this.userSpeaking) this._set("speaking");
           // the spoken text, for subtitles when no text delta showed it
           if (ev.text) this._do("caption", "audio", ev.text, true);
@@ -269,7 +311,7 @@
         case "turn_done":
           if (t === this.activeTurn) {
             this.serverDone = true;
-            if (!this.playing && this.live) this._set("listening");
+            if (!this.playing && this.live) this._replyFinished();
           }
           break;
       }
@@ -280,7 +322,9 @@
     onPlaybackIdle() {
       this.playing = false;
       if (this.state !== "speaking") return;
-      this._set(this.serverDone || this.awaitingAnswer ? "listening" : "thinking");
+      if (this.awaitingAnswer) this._set("listening"); // the yes/no question
+      else if (this.serverDone) this._replyFinished();
+      else this._set("thinking");
     }
 
     pause() {

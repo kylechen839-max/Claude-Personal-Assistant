@@ -23,6 +23,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_stt.py` | 4 | stage 3 |
 | `test_wakeword.py` | 15 | stage 4 |
 | `test_follow_up.py` | 14 | follow-up mode |
+| `test_barge_in.py` | 43 | barge-in on the PC loop (talk over a reply), with follow-ups |
 | `test_tools.py` | 27 | stage 5 |
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
@@ -58,6 +59,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_build_feature_skill.py` | 8 | the `/build-feature` skill's dashboard writes (runs, agents, the chat mirror) and the watchdog prompt (`docs/WATCHDOG.md`) |
+| `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
+| `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
+| `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
@@ -1946,3 +1950,639 @@ Render/Docker changes) comes separately.
   `devteam.py` and `devhub.py` restored. Full suite: 9 failed, 1611 passed,
   44 skipped, 16 errors (the 25 are the sandbox's eSpeak/PortAudio/wake
   model tests, as in the baseline); JS 53/53 (`tests/js/*.test.mjs`).
+## Family copies start by themselves
+
+- `scripts/install_family_tasks.ps1`: one Task Scheduler task per family
+  instance (`config.<name>.toml` + `.env.<name>`; `config.toml` and
+  `*.local.toml` never count), `\HeyClaude\Family-<name>`, run hidden at
+  sign-in with a minute's restart after a crash; `-Restart` after an update,
+  `-Uninstall`. Stops a hand-started copy first. Kyle's own tasks untouched.
+- Tests: `tests/ps/install_family_tasks.tests.ps1` (instance discovery and
+  command, run by `test_preflight.py` where PowerShell exists, i.e. the
+  Windows CI job) and a text check; the existing parse check covers it too.
+
+## Phone page: menu closes on an outside tap; swipe down hides the keyboard
+
+- New `assistant/web/ui.js` (all pages): the settings menu closes on a tap
+  anywhere outside it, or Escape, like other apps; a downward swipe of
+  40 px or more while typing blurs the field so iOS closes the keyboard.
+  Served at `/ui.js` (public on the cloud, like the other page files),
+  cached by the service worker (v10).
+- Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
+
+## Chat attachments: the "+" button (2026-10-20)
+
+- **What:** a **+** left of the phone app's text field opens a sheet (Take
+  photo / Photo library / Choose file). Picked files show as chips above
+  the field (thumbnail or file name, × to remove; + disabled at 4) and go
+  with the next typed message or push-to-talk recording as `attachment`
+  parts of `/api/turn`'s form. Photo-only messages work too. Hands-free
+  voice mode is unchanged (out of scope).
+- **Server:** new `assistant/attachments.py` sniffs the type from the first
+  bytes (JPEG, PNG, WebP, GIF, PDF, UTF-8 text without control bytes),
+  caps the count (4) and sizes (photos `[tutor] max_image_mb`, PDF/text new
+  `[webapp] max_attachment_mb` = 10, both under `max_upload_mb`; text 200k
+  characters), and builds Anthropic blocks: photos through the tutor's
+  `prepare_image` (now with an `allowed` map so GIF becomes PNG; the
+  tutor's own behaviour is unchanged) as base64 `image` blocks, PDFs as
+  base64 `document` blocks, text as `document` blocks with a text source
+  (so the memory summary's `transcript()` never includes file text).
+  Bad files get a friendly 400 before anything reaches Claude.
+- **Chat:** `ClaudeChat.ask(..., attachments=[blocks])` sends them before
+  the text; saved history and the event log get only a marker
+  (`[photo]`, `[file: name.pdf]`), so resume and summaries see plain text.
+  The turn is tainted (`untrusted_attachments`, before any tool runs; only
+  `reset()` clears it), replies stay out of the DEBUG log while an
+  attachment is in history, `_trim_history` now accepts a user turn with
+  attachments as the first message (`is_user_turn`, also used by
+  `/api/state`'s turn count), and older attachments become a text marker
+  once the conversation's base64 passes 20 MB (the API caps requests at
+  32 MB). INFO logs: count, kinds and sizes only.
+- **Page:** `assistant/web/attachments.js` (public like `family.js`, also
+  in CloudGuard's `PUBLIC_GET` so it loads before sign-in) holds the tray
+  and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
+  now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
+  is unchanged). Chinese strings for every new label and the server's
+  messages in `i18n.js`. Phone cache v11 with `/attachments.js` in the
+  shell.
+- **Cloud:** `/api/turn` was already an upload path capped at
+  `max_upload_mb` (4 MB there); the form parser now allows 6 files (the
+  recording, 4 attachments, one more to say "at most 4").
+- **Tests:** `tests/test_attachments.py` (28): sniffing and names, EXIF
+  stripped, block shapes, limits; `/api/turn` with photo + text, PDF + text
+  file, photo only, push-to-talk + photo; friendly 400s (5 files, wrong
+  magic, oversized PDF and photo, a form with 8 files); history marker and
+  no bytes in SQLite; summary has Kyle's words only and is stored
+  untrusted; a `confirm_if_untrusted` tool asks after an attachment (and
+  not before); caplog: no names or contents at INFO, no reply at DEBUG;
+  trimming keeps an attachment turn first; old attachments give way;
+  family member's own chat and store; CloudGuard accepts a small photo,
+  413s an oversized PDF, serves `/attachments.js` before sign-in; page and
+  i18n checks. `tests/js/attachments.test.mjs` (6, node:vm): kinds, the
+  4-file limit, chips/×/disabled +, shrunk JPEG sent, a broken photo
+  dropped. Checked failing with the source change reverted: taint line
+  (4 fail), marker (2), trim (1), private log (1), drop-old (1), control
+  byte sniff (2), webapp.py from master (18), the `PUBLIC_GET` entry (1),
+  JS limit/disable (2).
+- **Counts** (Linux sandbox, Python 3.13): pytest 1710 -> 1738 passed,
+  46 skipped. JS: attachments 6, agent-dashboard 126, backend-router 33,
+  devhub 12, family 9, i18n 11, voice-core 14, all passing. Real iPhone
+  camera/picker behaviour is not tested here (MANUAL_TEST "Attachments").
+- **Round 2 (judge's five low findings, all fixed):**
+  1. A failed turn no longer strips older attachments:
+     `_drop_old_attachments` returns what it replaced and `ask()`'s
+     rollback puts the blocks back (`test_a_failed_turn_keeps_the_older_
+     attachments`; fails with the chat.py change reverted).
+  2. Claude's 400 on an attachment turn (`anthropic.BadRequestError`) now
+     says "That file is too long for Claude (PDFs up to 100 pages)."
+     (`i18n.py` `file_too_long`, Chinese too) instead of the generic API
+     error; the turn is still rolled back and a 400 without files is still
+     the generic error. INFO/WARNING logs the count and HTTP status only.
+     PDFs with more than 100 `/Type /Page` objects are refused before
+     upload to Claude ("A PDF is over 100 pages"; a lower bound, see
+     SECURITY.md). Tests: `test_a_file_claude_refuses_gets_its_own_
+     sentence` (en, zh; fails with webapp.py or i18n.py reverted),
+     `test_pdfs_over_100_pages_are_refused_up_front` (fails with
+     attachments.py reverted).
+  3. A malformed form says plain "bad request"; "attach at most 4 files"
+     only when Starlette's error is "Too many files"
+     (`test_only_too_many_files_says_attach_at_most`; fails with that hunk
+     reverted).
+  4. The Chinese page shows the marker line of a message as `[照片]` /
+     `[文件：name]` (i18n.js `translateMarkers`, only when the markers are
+     the whole last line); history keeps the English marker. Two new
+     i18n tests (both fail with i18n.js reverted).
+  5. Rows for the attachment test files above, and
+     `tests/js/app-send.test.mjs`, which loads the real `app.js` in
+     node:vm: picked files go with a message, chips clear only on an ok
+     response (fails if `res.ok &&` is removed), and a typed or tapped
+     yes/no goes to `/api/confirm` as JSON without files (fails if
+     `!confirming &&` is removed from `pendingFiles`). app.js unchanged.
+  - Phone cache stays v11 (this branch's new version, not released yet).
+  - Counts (Linux sandbox, Python 3.13): pytest 1740 -> 1745 passed,
+    48 skipped. JS: attachments 6, i18n 11 -> 13, ui 4, app-send 2 (new),
+    all passing.
+- **Round 3 (judge's three low findings plus an older cloud bug, all
+  fixed):**
+  1. Page count from the page tree root, not by counting `/Type /Page`:
+     `attachments.pdf_pages()` takes the direct `/Count` of the last
+     `/Type /Pages` object without a `/Parent`. An annotated 60-page PDF
+     whose incremental save rewrites 45 pages (105 page definitions) is 60
+     pages and accepted; an incremental save that trims 150 to 90 pages is
+     accepted, one that grows 90 to 120 is refused; a root in a compressed
+     object stream or with an indirect count gives None (Claude decides).
+     SECURITY.md's "lower bound" sentence is replaced. Tests:
+     `test_an_annotated_pdf_is_not_counted_twice` and the reworked
+     `test_pdfs_over_100_pages_are_refused_up_front` (two-level tree,
+     `/Type/Pages`, indirect count); both fail with the round-2 `findall`
+     count.
+  2. One `finditer` pass, no list of matches: the root's count is only
+     known at the end (the last definition wins), so there is no early
+     stop, but memory stays constant. `test_page_counting_streams_its_
+     matches`: a 10 MB file of `/Parent ` words peaks under 1 MB in
+     tracemalloc (fails if the matches are collected into a list); a
+     5000-digit `/Count` is ignored, never parsed. Measured here: 0.5 s
+     for that file, 0.7 s for 10 MB of object headers (sandbox, not a Pi).
+  3. A 400 on a turn with files says "too long" only when Claude's reason
+     mentions pages, "too long" or tokens (`webapp.FILE_TOO_LONG`); any
+     other 400 (protected or broken PDF) says "Claude couldn't read that
+     file." (`i18n.py` `file_unreadable`, Chinese in i18n.py and i18n.js).
+     `test_only_a_length_400_says_too_long` (4 reasons; the two
+     unreadable ones fail with that line reverted), plus the i18n.js
+     string in the JS test (fails without it).
+  4. On the cloud, `/i18n.js` and `/history.js` got a 401 before sign-in
+     (the login page stayed English for a Chinese family member until a
+     reload); both are page code with no personal data and are now in
+     `cloud.PUBLIC_GET`. `/backend-router.js` is only imported by app.js
+     with failover on and was already in `FAILOVER_PUBLIC_GET`.
+     `test_every_file_the_login_page_loads_is_public_on_the_cloud` reads
+     every `src`/`href` in index.html and checks a fresh cloud app never
+     401s them (fails with the cloud.py change reverted).
+  - Counts (Linux sandbox, Python 3.13): pytest 1745 -> 1752 passed,
+    48 skipped. JS: attachments 6, i18n 13, ui 4, app-send 2, all
+    passing.
+
+## Memory review: see and delete what it remembers
+
+- `assistant/memory_review.py` (`MemoryReview`): lists the assistant's own
+  vectors in its Pinecone namespace by id prefix (`index.list` with
+  `voice-` and `note-`, then `index.fetch` in batches of 100, at most
+  1000), sorts newest first by `created_at` (both writers already store
+  it; vectors without one show as "date unknown", last), groups them by
+  week (Monday, in `[assistant] timezone`) with kind (summary / note) and
+  the `untrusted` flag. Deletes one (must exist and be ours) or a week
+  (exactly the ids the page showed that are still in that week).
+- Phone app: `memory.js` + **Memory** in the settings menu (owner with
+  memory on; `/api/state` has `memory`), `memory_web.py` routes
+  (`GET /api/memory`, `POST /api/memory/{id}/delete`,
+  `POST /api/memory/delete-week`), owner-only (family 404). Chinese strings
+  in `i18n.js`. `/memory.js` is public on the cloud like the other page
+  files and in the service worker shell (cache v12).
+- Voice: read-only `review_memory` tool ("what did you remember about me
+  this week?"; `week: "last"` too). "Forget that..." reuses `delete_note`,
+  which now also takes `voice-` ids (summaries) and asks first; its
+  question is in `i18n.py` (Chinese too).
+- Weekly nudge: `[memory] weekly_review = false` by default. When on,
+  `ClaudeChat` asks `MemoryReview.nudge` at the start of each conversation;
+  at most once in 7 days, and only with notes this week, a system prompt
+  line asks Claude to open with "I saved N notes this week, want to review
+  them?". Last offer time in `[memory] review_state_file` (atomic private
+  write; `/data/...` on the cloud). With no notes it looks again after an
+  hour at most; a Pinecone error never blocks the reply.
+- Tests: `tests/test_memory_review.py` (27: listing, local-week grouping
+  and sorting, batching and the cap, delete one, delete week by exact ids,
+  the voice tool and its untrusted mark, "forget that" asking through
+  `delete_note`, nudge off/on/once a week/restart/no notes/errors, first
+  turn only, wiring, caplog for the module and routes, routes 401/403/404,
+  family 404 with no Pinecone call, 502 without details),
+  `tests/test_notes.py` +2 (summary delete asks first; Chinese question;
+  the foreign-id refusal now uses a non-assistant id),
+  `tests/js/memory.test.mjs` (8, node:vm: menu visibility, rendering and
+  badges, delete and delete-week confirmations and exact POST bodies,
+  every string has Chinese). Each failed with its source change reverted
+  (owner_of -> session_of, whole-week delete, no chat hook, nudge every
+  turn, old note prefix, no untrusted flag, default on, family flag, no
+  confirm in the page).
+- Review round 2: **listing works with the pinned SDK.** `pinecone>=7`
+  (10.0.0 here) yields `ListResponse` pages from `Index.list()` (ids in
+  `page.vectors[i].id`), not lists of ids, so the Memory screen,
+  `review_memory`, the nudge and delete-week saw nothing, and on master
+  `list_recent_notes` was always empty too. New shared
+  `memory.list_ids`/`page_ids` read both shapes (and dicts) and are used by
+  `memory_review.py` and `QuickNotes._ids`. `FakeIndex.list` now yields
+  ListResponse-shaped pages. The 1000 cap now sorts on the save time after
+  the prefix (ids without one last), so a quick note newer than some
+  summaries is kept. Tests: `test_notes.py` +2 (a real `pinecone` Index
+  with a mocked `_http`: recent notes listed; `page_ids` shapes),
+  `test_memory_review.py` +1 (the same real Index: 5 listed, this week's
+  2) and the cap test now asserts which ids survive. With the old list
+  code `test_notes.py` fails 2 and `test_memory_review.py` 15; with the old
+  sort the cap test fails. Service worker cache v11.
+- Counts (Linux sandbox, Python 3.13): pytest 1743 passed, 48 skipped, plus
+  `test_end_to_end.py::test_hey_claude_whats_on_my_calendar_tomorrow`, which
+  failed once in the full run (eSpeak-generated audio, shorter than 1 s) and
+  passed 4 of 4 reruns; it doesn't touch memory code (master about 1712
+  passed, 48 skipped); node 203 .mjs + 14 voice-core, all passing.
+
+## Smart home through Home Assistant (off by default)
+
+- New `assistant/tools/home_assistant.py`: `ha_list` (devices by area or
+  domain, with state; the list is cached for `[home_assistant]
+  cache_seconds`), `ha_state` (one device; numeric attributes only) and
+  `ha_control` (on/off/toggle, brightness, colour temperature, thermostat
+  temperature and mode, fan speed, cover open/close/stop/position, media
+  play/pause/next/volume, lock/unlock, alarm arm/disarm when allowlisted,
+  and `run` for allowlisted scripts/scenes/automations). REST API with a
+  long-lived token (`HA_URL`, `HA_TOKEN` in `.env`) via `requests`; areas
+  come from one read-only `/api/template` render. Spoken names are matched
+  to friendly names, entity ids and areas (exact, then all words, then
+  fuzzy; Chinese names too); more than one match asks which one.
+- Safety: `[home_assistant] domains` allowlist; a fixed action-to-service
+  map (no service parameter, so no `homeassistant.restart`); scripts only
+  by entity id in `[home_assistant] scripts`. Locks, alarm panels, garage
+  doors/gates (device class or name) and `secure_entities` always ask,
+  are excluded from whole-room calls, and the handler re-checks that the
+  yes covered this exact call. Unlocking/opening is refused without a
+  question while the conversation is tainted; other changes ask then.
+  Free-text states (notification sensors) taint the conversation.
+- `ToolRegistry.dispatch` (small, additive): a `confirm_prompt` may return
+  None (no question for this input), and `UNTRUSTED_CONTEXT` is now set
+  while the question is built too. Existing tools are unchanged.
+- Registered in `cli.build_tools` (`register_home_assistant`), so the PC,
+  Pi and the owner's web/voice sessions get it; family members never do.
+  Startup warns about a plain-http `HA_URL` outside the home network.
+  `HA_TOKEN` is redacted in logs; `HA_URL`/`HA_TOKEN` are isolated from
+  other instances; `config.mom.toml` keeps it off. English and Chinese
+  questions and error messages in `i18n.py`.
+- Tests: `tests/test_home_assistant.py` (114, all offline with a fake
+  `requests.Session` returning real `/api/states` shapes): listing and
+  matching, the exact service payload of each action, ambiguity, cache,
+  lock/garage/alarm confirmation, refusal while tainted (also end to end
+  through `ClaudeChat`), disallowed domains and services, room calls
+  skipping secure devices, HA down/401/403/400/502 spoken nicely, Chinese
+  strings, caplog (no names or token at INFO), registration off by
+  default, family isolation. Plus one dispatch test in `test_tools.py`.
+  Checked that the safety tests fail with the gates removed.
+- Review round 2 (8 judge findings, each with a test that fails when the
+  fix is reverted):
+  - While tainted, every change needs a yes checked in the handler too.
+    A Home Assistant hiccup while asking still asks, about the words said;
+    that yes never covers a lock. The cache expiring mid-question is fine.
+  - Friendly and room names are cut to one line of 60 characters, and a
+    name that looks like a sentence taints the conversation.
+  - A non-admin token works: the admin-only room lookup's 401/403 means
+    "no rooms". README recommends a dedicated non-admin user.
+  - An exact room match wins ("Bedroom 1" never brings in "Bedroom 2").
+  - Locks and garage doors are never reached by spelling similarity.
+  - Switches and covers named door, lock, 门 or 门锁 count as secure.
+  - New tests: one yes covers one call, and a 3xx from a service call is
+    not "done".
+  - A room-wide question says "and N more" (Chinese too).
+- Review round 3 (4 findings, each with a test that fails when reverted):
+  - Run-together names count as secure again ("Garagedoor", "GateOpener",
+    "FrontDoor", "doorlock", "Smartlock"); indoor, outdoor, doorbell and
+    clock don't.
+  - 门 now counts only in 门锁, 大门, 车库门, 闸门 or at the end of a name,
+    so 门口灯 and 门铃 aren't secure.
+  - Ambiguous answers with a suspicious name are marked untrusted (now
+    tested).
+  - A yes given while Home Assistant was unreachable never covers a lock;
+    the answer now says so and asks Kyle to try again (English and
+    Chinese).
+  - `tests/test_home_assistant.py` now has 128 tests.
+- Full suite: 1845 passed, 48 skipped (baseline 1712 passed, 48 skipped).
+- Final review LOWs: 锁, 门禁, deadbolt and 门 ending a word count as
+  secure (4 cases, failing on the round-3 pattern); the area is not
+  checked, on purpose, and README/SECURITY say to list neutral-named
+  relays in `secure_entities`.
+  Not tried against a real Home Assistant (none in the sandbox).
+
+## Spotify by voice (2026-10-20)
+
+- "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+  "what's playing?", "turn it up", "play it on my phone". New
+  `assistant/tools/spotify.py` drives the Spotify Web API player (Premium
+  only) with nine tools: spotify_play (Kyle's own playlists first, then
+  the catalog; a mood or genre plays a playlist, a song name plays that
+  song), spotify_pause, spotify_resume, spotify_next, spotify_previous,
+  spotify_volume, spotify_now_playing, spotify_devices and
+  spotify_transfer (by name, or "phone", "PC", 手机, 电脑, "this
+  computer"). No tool changes playlists or the library. Playback control
+  never asks for a yes; catalog names and device names are marked
+  untrusted.
+- Sign-in: Authorization Code with PKCE, no client secret
+  (`SPOTIFY_CLIENT_ID` in `.env`), minimum scopes. Once with
+  `python -m assistant.tools.spotify` (paste back the 127.0.0.1 address)
+  or the phone's owner-only "Connect Spotify" (`assistant/spotify_web.py`,
+  `assistant/web/spotify.js`, modelled on `google_web.py`: single-use
+  state map, bounded, 10-minute expiry). Token written with
+  `write_private`; refreshed a minute before expiry, re-read from the
+  file first (the wake-word process and the web app share it). If a
+  refresh is refused because the other process just rotated the refresh
+  token, the file is read again and its token (or, once, its new refresh
+  token) is used, so the race no longer reads as "sign-in expired"; a
+  token file briefly locked by a Windows replace is read again too. A 401
+  is retried once after a refresh; nothing else is retried. Three scopes:
+  user-read-playback-state, user-modify-playback-state,
+  playlist-read-private.
+- Errors read nicely in English and Chinese (i18n.py): no Premium, nothing
+  open anywhere, which device (several open), volume not allowed (phones),
+  sign-in expired, busy (429), offline. With no active device it plays on
+  this computer's Spotify, or the only one open.
+- Wake mode pauses Spotify on this computer at the wake word (in the
+  background, so recording isn't delayed) and resumes it when back to
+  waiting for "Hey Claude", unless Kyle used a Spotify control meanwhile
+  (`[spotify] pause_while_listening`, `local_device`; `cli.run_wake`
+  gained an `on_idle` hook, and the wake-mode wiring moved from `main`
+  into `cli.run_wake_mode` so it is tested).
+- `[spotify]` is off by default (config.py and config.toml); tools are
+  registered only when enabled and signed in. Family members never get
+  them (their own registry) and get 404 from the connect routes.
+- `requests` was already a dependency, so no Spotify library was added.
+- Tests: `tests/test_spotify.py` (63: PKCE, consent URL scopes, CLI
+  sign-in, private token file, refresh and rotation, a 401 retry, the
+  other process's token, each tool's request and result, Premium / no
+  device / which device / volume / 429 / offline errors, no double skip,
+  Chinese strings and device words, registration on and off, INFO logs
+  without the query or names, pause-while-listening and its races, the
+  two-process refresh race and a locked token file, untrusted device
+  names, volume up from 0, and the wake loop's wiring: idle between two
+  wakes with and without a follow-up window, a failing idle hook, pause
+  before the chime, `run_wake_mode`),
+  `tests/test_spotify_web.py` (10: owner only, state/PKCE, token saved
+  privately, tools added live, replay and refusal write nothing, bounded
+  states, family gets nothing, page and shell files),
+  `tests/js/spotify.test.mjs` (7). Measured in the sandbox, not real
+  hardware: full suite 1785 passed, 48 skipped (+73 on the master baseline of 1712 / 48); JS 202
+  passed. Phone cache v13 (`/spotify.js` added to the shell).
+- Final review LOWs: idle between wakes with `follow_up_seconds = 0` is
+  now tested; a token file that is unreadable for permission reasons is
+  retried only on Windows (a root-owned file on the Pi used to cost 1 s per
+  call and log "locked"). +2 tests, each failing with its fix reverted.
+
+## Phone app: each person picks their reply voice
+
+- New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the
+  settings menu has **Reply voice**, with the voices this server really has
+  in the person's language (Piper files in `[tts] voices_dir` with their
+  language from the file name, Kokoro if set up and never with the server
+  profile, the system voice from `[tts] fallback`, and ElevenLabs only with
+  `ELEVENLABS_API_KEY`: listed from `GET /v1/voices`, cached an hour,
+  tagged "paid", a voice ID can be typed in). **Preview** plays a short
+  sample sentence (English or Chinese), cached.
+- Saved per person: the owner's in `[tts] voice_file`
+  (`data/voice_choice.json`; `/data/` on the cloud, `data/mom/` for the
+  Chinese instance), a family member's in `<family dir>/<id>/voice.json`
+  (written only while they are listed; deleted with their folder). Family
+  members get ElevenLabs only with `[tts] family_paid_voices = true`.
+- The session's voice is used from the next reply on: `WebAssistant.synthesize(text,
+  session)` (reply audio and the voice WebSocket) asks
+  `VoicePicker.engine_for(user, language)`. Engines are built once per voice
+  and kept (4 at most, least recently used out); Kokoro voices share one
+  loaded model (`KokoroTTS(shared=...)`). A voice that is gone falls back
+  to the default with one INFO line; a chosen engine that fails mid-reply
+  falls back to the default for that sentence.
+- Endpoints: `GET /api/voices`, `POST /api/voices`, `POST
+  /api/voices/preview` (session-bound, same-site, CloudGuard sign-in wall;
+  `/api/voice` is already the voice WebSocket, hence the plural).
+  `/api/state` has `voice_picker`. New settings `[tts] picker`,
+  `voices_dir`, `voice_file`, `family_paid_voices`. Phone cache v15
+  (`/voice-picker.js` added to the shell and to CloudGuard's public page
+  files).
+- Tests: `tests/test_voice_picker.py` (27: listing with a fake voices dir,
+  Kokoro and a mocked ElevenLabs API, per-person saving where member A
+  doesn't change B or the owner, preview audio and its cache, fallback on
+  an unknown or removed voice with one log line, engine cache and shared
+  Kokoro model, removal, routes behind CloudGuard), `tests/test_voice_ws.py`
+  +1 (voice mode renders in the person's voice), `tests/js/voice-picker.test.mjs`
+  (8). Each fails with its source change reverted. Full suite: 1740 passed,
+  48 skipped (was 1712 / 48); JS: 217 node tests pass (sandbox, not real
+  hardware).
+- Review round 2:
+  - Picking the default Piper voice reuses the default engine (no second
+    model load).
+  - Previews: callers asking for the same clip at once share one render;
+    each session may have one preview rendering at a time and 10 a minute
+    (429 past that).
+  - A chosen voice whose engine fails is dropped and skipped for 5 minutes
+    (one warning), rather than retried on every sentence; picking it again
+    retries it.
+  - A typed-in ElevenLabs ID that isn't in the cached list is checked once
+    with `GET /v1/voices/{id}`: unknown -> 400, ElevenLabs unreachable ->
+    503, nothing saved.
+  - The new tests read and write text as UTF-8 (Windows), with a test that
+    checks it.
+  - Tests: `tests/test_voice_picker.py` +9 (36). Each fails with its fix
+    reverted. Full suite: 1749 passed, 48 skipped; JS 217 pass.
+- Round 3: a preview of a typed-in ElevenLabs ID is checked with ElevenLabs
+  first (unknown: 404 like any unknown preview voice, unreachable: 503;
+  nothing rendered or cached), and a test covers a second caller waiting on
+  a failing render. Tests +2 (38); full suite 1751 passed, 48 skipped.
+
+## Family invites, piece B: their own Google and speech language (2026-10-20)
+
+A family member is now self-service: they connect their own Google from
+their own phone, and a Chinese speaker's voice turns use Chinese speech
+recognition and the Mandarin voice, with the assistant's own sentences in
+their language, on the same shared cloud server as Kyle.
+
+- **Their own Google** (`google_web.py`, `family.py`): one sign-in flow for
+  the owner ([webapp] google_connect, as before) and family members.
+  `GoogleConnect(family=..., owner=...)` answers `/api/google/status` and
+  `/connect` about the caller's own account; `POST /api/google/disconnect`
+  (family only) deletes their token and tools. A member's token goes to
+  `<dir>/<id>/google_token.json` (`Family.save_google`, `write_private`,
+  under the family lock, refused once removed) and their Calendar and
+  Gmail tools (`Family._google_tools`, through the piece-A hook
+  `_register_tools`) read only that file: `environ={}` (never
+  `GOOGLE_TOKEN_JSON`), `save_token=False` (never a sign-in on the server),
+  their `primary` calendar, their time zone, descriptions about them. Gmail
+  stays drafts-only (`NoSendGmail`), deletes and drafts ask first. Tools
+  join their open conversations in place (`_refresh_tools`: add, then
+  remove). The OAuth state is bound to who started it and their session,
+  and to the browser by `hc_google` (Lax, path `/google/callback`, 10 min,
+  nonce hashed with the state); the callback also needs the session still
+  signed in as that person. Per-person cap 4 pending, 32 in all. Family
+  sign-in uses a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` or `[family] google_client`) and the server's
+  own address (`PUBLIC_ORIGIN`, new env override). On the cloud the owner
+  gets 404 on these routes (his Google is `GOOGLE_TOKEN_JSON`).
+- **Speech per session** (`webapp.SpeechByLanguage`): language ->
+  (Whisper model, Piper voice) for sessions whose language isn't the
+  server's; made on first use and cached per model/voice, not per session.
+  `WebAssistant.transcribe/transcribe_upload/synthesize(..., language)`;
+  push-to-talk, `/api/confirm`, reply audio (the language stored with each
+  reply id in piece A) and the voice socket (`voice_ws`) pass the
+  session's. Still one STT lock and one TTS thread. `family_speech(config)`
+  uses `[family] zh_stt_model` (`small`, `ZH_WHISPER_MODEL`) and
+  `zh_piper_voice`, fallback "print" (the phone's own voice, never English
+  eSpeak reading Chinese).
+- **i18n per session** (`i18n.py`): `t(key, lang)`, `is_zh(lang)`,
+  `current()`, `using(lang)` (a ContextVar). Each push-to-talk turn,
+  `chat_stream` run and voice-conversation worker runs in its session's
+  language, so error sentences and tool confirmation questions (calendar,
+  Gmail) are in the language of the person answering; `VoiceConversation
+  (language=...)`; the busy-turn sentence and the failed-callback page are
+  translated too. Fixes the piece-A limitation that `i18n.t` was
+  server-wide.
+- **Page**: a family member's page gets `data-google` when their Google is
+  set up; the first-run guide's step now says to connect *their own*
+  account; a **Disconnect Google account** button (family, connected).
+  Service worker cache v11.
+- **Cloud/Render/Docker**: CloudGuard lets `/google/callback` through
+  without the session cookie; `cloud.build_app` passes Google and the
+  language. Dockerfile `FAMILY_ZH=1` bakes in Whisper `small` (about
+  480 MB) and `zh_CN-huayan-medium` (about 60 MB; published sizes, not
+  measured here: Hugging Face is blocked in the sandbox); `render.yaml`
+  adds `PUBLIC_ORIGIN`, `GOOGLE_WEB_CLIENT_JSON` (secrets) and
+  `ZH_WHISPER_MODEL`; `/data/users` is on the disk (server profile). Memory
+  with a Chinese speaker active is estimated at 0.5-0.7 GB on top of the
+  measured 564 MB, not measured; Standard (2 GB) stays the plan.
+- Config: `[family] google` (true), `google_client` (""), comments for
+  `zh_stt_model` / `zh_piper_voice`; `PUBLIC_ORIGIN`, `ZH_WHISPER_MODEL`
+  env overrides. `client_config("")` no longer reads the current folder.
+- Tests: `tests/test_family_google.py` (23): A's token separate from B's
+  and Kyle's, and their tools build credentials from their own refresh
+  token with `GOOGLE_TOKEN_JSON` set; the owner has no connect on the
+  cloud; another session's state, a browser without the binding cookie, a
+  signed-out session and a removed person are refused (nothing written,
+  token endpoint never called); failed page in her language; tools only
+  after connecting (and in her open session at once), no owner tool or
+  "Kyle" in what Claude is sent; Gmail drafts-only, deletes ask; disconnect;
+  removal deletes the token, not others'; no secrets, state, code or names
+  at INFO (caplog); off without a web client or with a Desktop one; zh
+  push-to-talk and reply audio use the zh model and voice, en uses the
+  server's, two zh speakers share one; zh voice socket; lazy and cached
+  models; `i18n.t` follows the session language (threads isolated); push-
+  to-talk and calendar-question sentences per person; voice sentences;
+  build_assistant wiring; busy sentence; `client_config("")`. A test-only
+  guard fails any Google token refresh (a first draft without `expiry` in
+  the fake token made one real refresh request with a fake client id; no
+  account was involved). `test_cloud.py` +2 (the callback passes the guard
+  and family status works there; Dockerfile/render.yaml match the config).
+  `tests/js/i18n.test.mjs` +3 (Disconnect, its failure and "no", the guide
+  wording). Updated: `test_family.py` (the owner-only Google test now
+  checks a family member never gets Kyle's connected Google),
+  `test_google_web.py` (status has `disconnect`), `test_voice_ws.py` and
+  `test_family.py` fakes take the language, `test_webapp.py` cache v18,
+  `test_docs.py` allows `--build-arg`, `conftest.py` also clears
+  `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` / `GOOGLE_WEB_CLIENT_JSON`.
+  Each source change was undone alone and its tests failed: `environ={}`,
+  the nonce check, the session check, registering and refreshing the
+  tools, the turn's `i18n.using`, transcribe and synthesize per language,
+  `voice_ws` language, the CloudGuard path, the disconnect delete, the
+  callback language, `question_suffix` language, the description rewrite,
+  the Dockerfile and render.yaml entries, `family_speech` wiring, the page
+  tag, the busy sentence, the `client_config` guard, and the JS button and
+  guide text.
+- Counts (Linux sandbox, Python 3.13): pytest 1712 -> 1737 passed, 48
+  skipped (unchanged). JS: i18n 14, family 9, backend-router 33, ui 4,
+  devhub 12, voice-core 14, agent-dashboard 126, all passing.
+- Round 2 (judge, no security defect):
+  - `owner_of` is back in `create_app` (other branches' owner-only routes
+    use it; `session_of` there would hand family Kyle's data), also as
+    `app.state.owner_of`.
+  - A family member's expired, revoked, scope-short or missing token now
+    says "Reconnect Google from the app's settings" (EN/ZH,
+    `i18n` `google_reconnect`, in the turn's language) instead of Kyle's PC
+    sign-in, token.json or `GOOGLE_TOKEN_JSON` advice, and logs a warning
+    without that advice: `get_credentials(..., in_app=True)`,
+    `MissingScopes(in_app=)`, `GoogleCalendar`/`GmailInbox(in_app=)`, set
+    by `Family._google_tools`. Kyle's messages are unchanged.
+  - New tests (each fails with only its change undone): `owner_of` (owner
+    200, family 404, nobody 401); the in-app refresh message and log (EN and
+    ZH), scope and missing-token messages; `save_google`'s re-check (the
+    person removed while Google answers: 400, no file); the binding
+    cookie's HttpOnly, Secure, SameSite=lax, Path, Max-Age=600; the voice
+    socket twin of the Chinese calendar question (`chat_stream`'s
+    `using`); `VoiceConversation._work`'s `using` (kept: a backend that
+    answers in the worker thread, ChatBackend, needs it).
+  - Docs: BLOCKERS says `PUBLIC_ORIGIN` must be the exact https address
+    family members open and that the zh memory figure is to be measured;
+    MANUAL_TEST marks the home-screen-app sign-in as release-gating.
+  - Counts (Linux sandbox, Python 3.13): pytest 1737 -> 1744 passed, 48
+    skipped. JS unchanged (i18n 14, family 9, all files passing).
+
+## Interrupt by talking (barge-in) and follow-ups, PC and phone (2026-10-20)
+
+- **PC wake-word loop** (`assistant/wakeword.py` `BargeInSpeaker`,
+  `EchoGate`): while a reply plays, a helper thread reads the mic. `[wake]
+  barge_in = "wake_word"` (default): "Hey Claude" over a reply stops it at
+  once, chimes and records the new request. `"voice"`: plain talking does
+  too, once there are `barge_in_ms` (400 ms) of speech mostly
+  `barge_in_echo_ratio` (2.5x) louder than the reply's own echo; the echo is
+  measured over the first 250 ms of each reply's sound and follows a reply
+  that gets gradually louder (levels smoothed over ~100 ms so syllable gaps
+  don't break "sustained"). `"off"`: as before (mic closed while speaking).
+  - Stopping: `audio.play` waits on a stop event instead of `sd.wait()`
+    (`audio.stop_playback()` from the mic thread stops the sound and keeps
+    the rest of the reply silent); Kokoro stops rendering the remaining
+    sentences; pyttsx3 is stopped from its own `started-word` callback (the
+    only safe place to call `engine.stop()`), hooked only when barge-in is on.
+  - The interrupting request is the next turn of the same conversation
+    (`cli.run_wake`), timed as "Turn timings from barge-in". History keeps
+    about the part of the reply that was heard (`ClaudeChat.mark_interrupted`,
+    estimated at 2.7 words/s of sound). "Hey Claude, stop" / "never mind" /
+    "别说了" just stops (Claude isn't asked). Talking over a yes/no question
+    is a no and the words aren't used as the answer. A reply that says
+    "Claude" itself can't wake the loop with its own voice. The follow-up
+    window works as before after the interrupting request's answer.
+  - `--audio-file` with barge-in on reads the file in real time
+    (`FileSource(pace=1.0)`), so the watcher hears the part of the file that
+    goes with each reply, as a mic would.
+- **Phone voice mode** (`voice-core.js` `TurnController`, `voice.js`):
+  barge-in was already there (it stops playback, tells the server, which
+  cancels the Claude stream and the remaining TTS, and history keeps the
+  heard part). New: `[voice] barge_in = "off"` for car speakers that defeat
+  echo cancellation (the mic is ignored while a reply plays; listening
+  resumes right after), and `[voice] follow_up_seconds` (5): after a reply
+  has played, a soft low note (the existing "thinking" earcon, the same note
+  as the PC's follow-up blip) and **Still listening…** (还在听…) with the
+  mic meter lit; silence quietly puts back **Listening**. No cue after a
+  barge-in, a yes/no question or a turn without audio. Phone cache v19
+  (`i18n.js` changed; master was already at v10).
+- Tests: new `tests/test_barge_in.py` (23): eSpeak-rendered speech through
+  the real FileSource (paced 8x), WakeListener, VAD and BargeInSpeaker, with
+  a fake sounddevice so "playing" takes time and is stopped through
+  `audio.play`: talking over a reply stops it (played < 2.4 of 3 s) and is
+  sent as the next turn without the wake word; an untouched reply plays in
+  full; the reply's own echo (mixed into the "mic" at 0.25x, above the
+  VAD's threshold) doesn't stop it while Kyle over the same echo does;
+  "wake_word" mode ignores plain talk and stops on the wake word (with the
+  chime); a reply saying "Hey Claude" can't wake itself; "stop" just stops;
+  a follow-up within the window after a barge-in turn is heard and one
+  after it is not; talking over a delete question deletes nothing; "off"
+  never opens the mic while speaking; the gate, `audio.play` stopping,
+  pyttsx3 and Kokoro stopping, config and wiring, INFO logs without text
+  (caplog). `tests/js/voice-core.test.js` +7 (follow-up window open/close
+  by silence or speech, not after barge-in/question/no audio, off, pause
+  and end, barge-in on/off). `tests/test_voice_ws.py` +1 and the `ready`
+  settings check. Existing follow-up tests (`test_follow_up.py`) unchanged
+  and passing. Full run (Linux sandbox, Python 3.13): 1736 passed, 48
+  skipped (before: 1712 passed, 48 skipped); `voice-core.test.js` 21 (was
+  14). `test_barge_in.py` takes ~20 s (the files are paced in real time
+  /8); it also passed under full 4-core CPU load. Not measured on real
+  hardware: how loud the echo is from Kyle's speakers, so whether "voice"
+  works without headphones is MANUAL_TEST step 4b.
+
+### Round 2 (judge findings)
+
+1. A request said over "Bye!" was kept and sent to Claude after the next
+   bare "Hey Claude": the goodbye now drops it, and every new wake clears
+   any leftover interruption (`cli.run_wake`, `handle_command`).
+2. "voice" echo measuring ignored audio latency: the gate now skips the
+   streams' output + input latency (`MicSource.latency`,
+   `audio.output_latency()`; 0.35 s when unknown) before measuring. The
+   pipeline echo test now has the echo arrive ~300 ms after the sound
+   starts (calibration margin ~8 frames on the late side, any amount early).
+3. pyttsx3 off Windows (eSpeak's blocking `aplay`): with barge-in on, replies
+   are rendered to a file and played through `audio.play`, so they stop;
+   if rendering fails it logs and plays the usual, unstoppable way. README
+   lists which engines can be stopped.
+4. Tests now check the stop flag is cleared after a cut reply and the next
+   wake chime really reaches the speaker.
+5. Chinese replies: the heard part is estimated at ~4 characters/s.
+6. The "no request" message says what interrupted (wake word or voice).
+7. `[wake] barge_in` is normalised (`false`/"" = "off", `true` =
+   "wake_word", any case, "wake-word") and anything else stops startup with
+   a clear message (`wakeword.barge_in_mode`).
+- CI margins: the pipeline tests now pace at 6x (was 8x) with 6 s replies;
+  "cut off" means under 4 s (cuts measured at 1.2-1.7 s), so there is about
+  0.4 s of real-time headroom instead of about 0.1 s.
+- Tests: `test_barge_in.py` 39 (was 23), each fix's test fails with that
+  fix reverted. Full run (Linux sandbox): 1752 passed, 48 skipped (round 1:
+  1736; master: 1712); JS files all pass (`voice-core.test.js` 21).
+  `test_barge_in.py` passes under full 4-core CPU load; there, eSpeak now
+  and then wrote no clip file at all, so the shared `tts_clip` test helper
+  also retries on a missing file (it already retried on an empty one).
+- Round 3: the echo is measured for 600 ms (was 250) after the reported
+  latency, so an echo up to ~0.5 s later than reported (Bluetooth, drivers)
+  isn't taken for talking (the judge's Kokoro simulation: all replies played
+  through); README says so next to the echo-ratio advice. pyttsx3's
+  "Audio saved to ..." is no longer printed on every reply. New tests: an
+  echo 250 ms later than reported, the quiet render, and the leftover
+  interruption cleared at a new wake (`test_barge_in.py` 42; 43 after the merge with Spotify, which adds `test_idle_hook_waits_for_the_barge_in_turn`: the back-to-idle hook (Spotify resume) fires only after a barge-in turn). The pipeline
+  echo is now 0.2x (still above the VAD threshold), since a longer
+  measurement sees more of the reply's loud parts. Full run: 1755 passed,
+  48 skipped; JS files all pass.
+

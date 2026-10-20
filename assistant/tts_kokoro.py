@@ -62,16 +62,22 @@ CLAUSE_ENDS = ",;:-–—"
 
 class KokoroTTS:
     """`synthesize(text)` -> (float32 samples, 24000). The model loads on
-    first use (or `warm_up()`); calls are serialized by a lock."""
+    first use (or `warm_up()`); calls are serialized by a lock. With
+    `shared` (another KokoroTTS), this one speaks in its own voice with that
+    one's model and lock, so a second voice doesn't load the model again
+    (the phone app's voice picker)."""
 
     def __init__(self, model: str | Path, voices: str | Path,
-                 voice: str = DEFAULT_VOICE, speed: float = 1.0):
+                 voice: str = DEFAULT_VOICE, speed: float = 1.0,
+                 shared: "KokoroTTS | None" = None):
         self.model_path = Path(model)
         self.voices_path = Path(voices)
         self.voice = voice or DEFAULT_VOICE
         self.speed = min(2.0, max(0.5, float(speed or 1.0)))
         self._kokoro = None
-        self._lock = threading.Lock()  # warm-up may run in another thread
+        self._shared = shared
+        # warm-up may run in another thread
+        self._lock = shared._lock if shared is not None else threading.Lock()
         self.on_audio_start = None
 
     @property
@@ -79,7 +85,8 @@ class KokoroTTS:
         if self._kokoro is None:
             from kokoro_onnx import Kokoro
 
-            k = Kokoro(str(self.model_path), str(self.voices_path))
+            k = (self._shared.kokoro if self._shared is not None
+                 else Kokoro(str(self.model_path), str(self.voices_path)))
             if self.voice not in k.get_voices():
                 log.warning("Kokoro has no voice %r, using %s", self.voice,
                             DEFAULT_VOICE)
@@ -122,27 +129,43 @@ class KokoroTTS:
 
         pending: queue.Queue = queue.Queue(maxsize=2)
         done = object()
+        quit_render = threading.Event()  # interrupted: render no more
+
+        def put(item) -> bool:
+            while not quit_render.is_set():
+                try:
+                    pending.put(item, timeout=0.1)
+                    return True
+                except queue.Full:
+                    continue
+            return False
 
         def render():
             try:
                 for sentence in split_sentences(text) or [text]:
-                    pending.put(self.synthesize(sentence))
+                    if quit_render.is_set() or not put(self.synthesize(sentence)):
+                        return
             except BaseException as e:  # re-raised in the playing thread
-                pending.put(e)
-            pending.put(done)
+                put(e)
+            put(done)
 
         threading.Thread(target=render, name="kokoro-render", daemon=True).start()
         started = False
-        while (item := pending.get()) is not done:
-            if isinstance(item, BaseException):
-                raise item
-            samples, sr = item
-            if not len(samples):
-                continue
-            if not started and self.on_audio_start:
-                self.on_audio_start()
-            started = True
-            audio.play(samples, sr)
+        try:
+            while (item := pending.get()) is not done:
+                if isinstance(item, BaseException):
+                    raise item
+                if audio.playback_stopped():
+                    return  # barge-in: don't wait for the rest to render
+                samples, sr = item
+                if not len(samples):
+                    continue
+                if not started and self.on_audio_start:
+                    self.on_audio_start()
+                started = True
+                audio.play(samples, sr)
+        finally:
+            quit_render.set()
 
 
 def kokoro_problem(model: str | Path | None, voices: str | Path | None) -> str | None:
@@ -162,6 +185,19 @@ def kokoro_problem(model: str | Path | None, voices: str | Path | None) -> str |
         return (f"onnxruntime {onnxruntime.__version__} is too old for Kokoro's "
                 "int8 model (needs 1.25+; older versions output noise)")
     return None
+
+
+def voice_names(voices: str | Path) -> list[str]:
+    """The voices in a voices-v1.0.bin (a NumPy .npz: only its file list is
+    read, not the voices), or ENGLISH_VOICES if it can't be read."""
+    try:
+        with np.load(Path(voices), allow_pickle=False) as data:
+            names = sorted(data.files)
+    except Exception as e:
+        log.warning("Couldn't list the Kokoro voices in %s (%s)", voices,
+                    type(e).__name__)
+        return list(ENGLISH_VOICES)
+    return [n for n in names if re.fullmatch(r"[a-z]{2}_\w+", n)]
 
 
 def _version(text: str) -> tuple[int, ...]:

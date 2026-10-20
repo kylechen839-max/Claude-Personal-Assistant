@@ -15,6 +15,70 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Fix: a conversation could break for good ("Sorry, something went wrong
+  talking to Claude" on every turn) after hands-free voice shared it: a
+  thinking block signed for another request was sent back. Earlier turns'
+  thinking blocks are no longer sent.
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  PDFs up to 100 pages. New setting `[webapp] max_attachment_mb` (10).
+  A file Claude can't open (password-protected or broken PDF) says so;
+  long PDFs are counted by their page tree, so annotated PDFs aren't refused.
+- Cloud: the sign-in page now loads its translations before sign-in, so a
+  Chinese family member's login page is in Chinese right away.
+- Memory review: a Memory screen in the phone app (settings menu, owner
+  only) lists conversation summaries and notes saved in Pinecone, newest
+  first, grouped by week, with date, kind and an "untrusted" badge, plus
+  Delete and "Delete all from this week" (both confirm). By voice, "what
+  did you remember about me this week?" and "forget that..." (spoken yes
+  first). Optional weekly nudge (`[memory] weekly_review`, off).
+- Fix: "list my recent notes" was always empty with pinecone 7+
+  (`Index.list` pages are `ListResponse` objects).
+- Smart home control through Home Assistant (off by default): "turn off
+  the bedroom lights", "set the thermostat to 70", "is the front door
+  locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home
+  Assistant REST API with a long-lived token (`HA_URL`/`HA_TOKEN` in `.env`,
+  `[home_assistant] enabled = true`). Only allowlisted device kinds and a
+  fixed set of actions; scripts only if allowlisted. Locks, garage doors
+  and alarms always ask first, and unlocking or opening is refused while
+  web or email content is in the conversation. Owner only.
+- Spotify by voice (off by default, Premium required): "play my study
+  playlist", "pause", "skip", "what's playing?", "turn it up", "play it
+  on my phone". Your own playlists are searched first. Sign in once with
+  `python -m assistant.tools.spotify` or the owner-only Connect Spotify
+  (PKCE, read-and-control scopes only; nothing changes playlists or the
+  library). In wake-word mode, music on this PC pauses at "Hey Claude"
+  and resumes after. Family members don't get Spotify yet.
+- Reply voice in the phone app's settings: each person (you, each family
+  member, separate instances like Mom's) picks their voice from what that
+  server has in their language (Piper, Kokoro, the system voice, and your
+  ElevenLabs voices tagged paid if `ELEVENLABS_API_KEY` is set; family
+  only with `[tts] family_paid_voices`). Preview plays a sample. New
+  `[tts]` settings `picker`, `voices_dir`, `voice_file`, `family_paid_voices`.
+- Family members are self-service on the cloud server: each can connect
+  their own Google Calendar and Gmail (drafts only; deletes ask first) from
+  their own phone, kept separate from Kyle's and deleted on Disconnect or
+  removal; the sign-in is bound to the person's session and browser.
+  Chinese-speaking members get Chinese speech recognition (Whisper small)
+  and the Mandarin voice, loaded on first use, and the assistant's own
+  sentences follow each person's language on a shared server. The cloud
+  image bundles the Chinese models (`FAMILY_ZH=0` leaves them out);
+  render.yaml adds `PUBLIC_ORIGIN` and `GOOGLE_WEB_CLIENT_JSON`.
+  A family member whose Google sign-in expires is told, in their language,
+  to reconnect Google from the app's settings.
+- Interrupt by talking: on the PC, say "Hey Claude" while it is answering
+  and it stops and listens (`[wake] barge_in = "wake_word"`, default);
+  `barge_in = "voice"` lets you just talk (echo gate; best with headphones
+  or an echo-cancelling speakerphone). "Hey Claude, stop" just stops;
+  Claude remembers roughly the part you heard; talking over a yes/no
+  question is a no; a reply saying "Claude" can't wake itself. On the
+  phone, a soft cue and "Still listening…" (还在听…) show the follow-up
+  window; `[voice] barge_in = "off"` for car speakers.
+  Every voice can be stopped mid-reply (pyttsx3 on Linux/Pi renders each
+  reply first), and `[wake] barge_in` accepts `false` or any case.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

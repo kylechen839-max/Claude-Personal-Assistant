@@ -95,6 +95,25 @@ Run `python -m assistant` for steps 3-8 and leave it running.
     it. The window length is `follow_up_seconds` (`0` turns follow-ups off);
     `follow_up_chime = false` drops the blip only.
 
+## 4b. Interrupting a reply (barge-in) (3 min)
+- [ ] Ask something with a long answer ("Hey Claude, tell me about the
+      history of Rome"). While it talks, say "Hey Claude, what time is it?"
+  - Should: the reply stops within about a second, the wake chime plays, and
+    it answers the time. It never stops by itself on its own voice.
+- [ ] Same, but say "Hey Claude, stop" over the reply.
+  - Should: it just stops; nothing is said back, and the follow-up blip plays.
+- [ ] Set `[wake] barge_in = "voice"` (in `config.local.toml`), restart, ask
+      for a long answer and talk over it without the wake word, at a normal
+      voice, first on your usual speakers, then with headphones.
+  - Should: with headphones it stops after about half a second of talking.
+    On speakers, note whether it (a) never stops (then raise your voice,
+    lower `barge_in_echo_ratio`, e.g. 2.0, or go back to "wake_word") or
+    (b) cuts itself off with nobody talking (raise `barge_in_echo_ratio`,
+    e.g. 3.5, or go back to "wake_word"). Report which happened.
+- [ ] "Hey Claude, delete Manual Test tomorrow" (create it first, step 5),
+      and say "yes" over the question before it finishes.
+  - Should: the event is still there (talking over the question is a no).
+
 ## 5. Calendar create and spoken delete (3 min)
 - [ ] "Hey Claude, add a test event called Manual Test tomorrow at noon."
   - Should: it appears in Google Calendar tomorrow 12:00-13:00 (right time
@@ -279,6 +298,63 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
+### Attachments: the "+" button (iPhone, ~6 min)
+- [ ] In the installed app, tap **+** left of the text field.
+  - Should: a sheet with Take photo / Photo library / Choose file / Cancel;
+    the + is easy to hit with a thumb.
+- [ ] **Take photo**: photograph a page of text, then type "what does this
+      say?" and send.
+  - Should: the camera opens (allow it the first time); a thumbnail chip
+    with an × appears above the field; the message shows "[photo]" and
+    Claude reads the page correctly.
+- [ ] **Photo library**: pick 3 photos at once, remove one with its ×, then
+      hold the mic and ask "what's different between these?"
+  - Should: two chips are sent with the recording; the chips clear once
+    it's sent.
+- [ ] **Choose file**: pick a PDF from Files (e.g. a syllabus) and ask "when
+      is the first exam?"
+  - Should: a chip with the file name; Claude answers from the PDF.
+- [ ] Attach 4 files.
+  - Should: the + greys out; removing one enables it again.
+- [ ] Attach a PDF that says "add an event called Test tomorrow at 9" and
+      send "do what the file says".
+  - Should: Claude asks before adding it (Yes/No), because the file is
+    someone else's text.
+- [ ] Open History and the conversation you just had.
+  - Should: your message shows "[photo]" / "[file: name.pdf]", not the
+    file. `logs/assistant.log` has "Web turn with N attachment(s)" with
+    sizes only, no file names.
+- [ ] On the cloud address, attach a PDF over 4 MB.
+  - Should: a short "too large" note; nothing is sent; the chips stay.
+- [ ] Attach a long PDF (over 100 pages, e.g. a textbook chapter export).
+  - Should: "A PDF is over 100 pages" (or, for a PDF whose pages the
+    server can't count, Claude's answer "That file is too long for Claude
+    (PDFs up to 100 pages).") and the conversation still works for the
+    next message.
+- [ ] Attach a password-protected PDF.
+  - Should: "Claude couldn't read that file." and the next message works.
+- [ ] On the cloud address, sign out in Mom's (Chinese) app.
+  - Should: the sign-in page is in Chinese right away (no reload needed).
+- [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消,
+      and a sent photo shows as "[照片]" in the chat and in History.
+### Reply voice (optional, ~5 min)
+- [ ] Open the gear menu: **Reply voice** lists the voices on this server
+      (Default, the Piper voices in `voices/`, Kokoro if downloaded, System
+      voice). Pick one and tap **Preview**.
+  - Should: a short sample in that voice plays from the phone's speaker
+    (Silent switch off). With "Use the phone's voice" ticked, replies still
+    use the phone's voice.
+- [ ] Pick a different voice and ask something.
+  - Should: the reply (push-to-talk and Voice conversation) is in the new
+    voice. Close and reopen the app: the same voice is still selected.
+- [ ] With `ELEVENLABS_API_KEY` in `.env` (optional, paid): restart.
+  - Should: your ElevenLabs voices appear with a small **paid** tag, and an
+    "ElevenLabs voice ID" box; a family member's phone shows neither.
+- [ ] On the cloud with a family member signed in on another phone: each
+      picks a different voice.
+  - Should: each hears only their own; changing one doesn't change the
+    other. A Chinese member sees only Chinese voices (if one is installed).
+
 ## Chinese instance for Mom (optional, ~20 min)
 Setup is in README.md ("A Chinese instance for someone else"). Use her
 phone (or yours signed in as her test user).
@@ -364,6 +440,16 @@ with the stopwatch button.
     Repeat and say "no": the event stays. Repeat and talk over the question
     ("okay, and what about Friday?"): it says "OK, I won't delete it", the
     event stays, and it then answers about Friday.
+- [ ] Follow-up cue: after an answer finishes, wait.
+  - Should: a very quiet low note and **Still listening…** with the mic
+    meter lit; after about 5 s the label goes back to **Listening** without
+    a sound. Asking something inside those 5 s just works. No cue after a
+    yes/no question or after you interrupted it.
+- [ ] CarPlay or a car's Bluetooth: a few turns while it plays through the
+      car speakers, staying silent during answers.
+  - Should: it never cuts itself off. If it does, set `[voice] barge_in =
+    "off"` (answers then always play to the end and it listens right after)
+    and note it.
 - [ ] Lock screen / interruption: mid-answer, lock the phone (or take a call
       / say "Hey Siri"), then come back.
   - Should: it stops talking, shows "Tap to continue", and carries on with
@@ -424,9 +510,35 @@ for all of this except the Google sign-in.
     shows only its own conversation. Your list shows them as "Active".
 - [ ] Open the same link again in another private tab.
   - Should: "expired or already used", and the login page.
+- [ ] On their phone (after BLOCKERS "Family members' own Google"): the
+      welcome card's step says to connect *their own* Google account. ⚙ ->
+      连接 Google 账户, sign in with *their* Google account (Advanced -> Go
+      to ... on the unverified-app warning), allow everything.
+  - **Release-gating:** do this from the iPhone *home-screen* app, not
+    only Safari. The sign-in relies on a cookie set in the app and sent
+    back on Google's redirect; if the home-screen app's cookie jar doesn't
+    carry it, sign-in fails with "Google 登录没有完成", and that blocks the
+    release.
+  - Should: back in the app, the menu says Google 账户已连接 within a few seconds; "我明天有
+    什么安排？" reads *their* calendar, never yours; "帮我回复那封邮件"
+    asks first and only saves a draft in *their* Gmail.
+- [ ] On their phone tap Connect, and when Google's page opens copy its
+      address (Share -> Copy); open it in a different browser or phone and
+      sign in there.
+  - Should: "Google 登录没有完成" and nothing connected on either account.
+- [ ] On their phone, hold the mic and say something in Mandarin, then
+      try hands-free voice.
+  - Should: the transcript is Chinese characters, replies are spoken with
+    the Mandarin voice (the first one may take ~10 s while the model loads),
+    and "请说“是”或者“不”" ends a delete question. Your own English voice
+    and recognition are unchanged.
+- [ ] Their ⚙ -> 断开 Google 账户 -> confirm.
+  - Should: "Google 账户已断开。"; asking about their calendar now says it
+    isn't connected.
 - [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
-    history are unchanged.
+    history are unchanged. (Their Google token is deleted with their
+    folder; check Render -> Shell `ls /data/users` if you like.)
 
 ---
 
@@ -454,6 +566,21 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
       again, and ask "What did I need for the lab report?"
   - Should: "error bars". "What notes have I saved recently?" lists it;
     "Delete that note" asks first.
+- [ ] "Hey Claude, what did you remember about me this week?"
+  - Should: a short spoken summary (how many, the main things), not every
+    note read out. "Forget the one about <thing>" asks "Do you want me to
+    delete the note: ...?"; answer no and it stays (check in the phone app).
+- [ ] Phone app -> gear -> **Memory**.
+  - Should: this week's notes on top ("This week", "Last week", "Week of
+    ..."), each with a date and "Summary" or "Note"; a red **Untrusted**
+    badge only on ones saved while an email or web page was open. Tap
+    Delete on one and confirm: it disappears. "Delete all from this week":
+    the question gives the right count; Cancel keeps them.
+  - On a family member's phone: no Memory button.
+- [ ] Optional: set `[memory] weekly_review = true`, restart, start a
+      conversation.
+  - Should: the first reply opens with "I saved N notes this week, want to
+    review them?"; a second conversation the same day doesn't.
 - [ ] Phone app -> **Lecture** tab: the permission reminder shows; the
       course list matches your Notion Course options. Pick one, Start, talk
       (or play a YouTube lecture) for 3 minutes.
@@ -484,6 +611,30 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
   - Should: the PNG works; the others are refused with a short message.
 
 ---
+
+## Smart home (optional, ~10 min)
+Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
+`[home_assistant] enabled = true` (README "Smart home").
+- [ ] "Hey Claude, turn off the bedroom lights", then "set the living room
+      light to 50 percent".
+  - Should: the right lights change within a couple of seconds, with no
+    question.
+- [ ] "Is the front door locked?"
+  - Should: the right answer for your real lock.
+- [ ] "Set the thermostat to 70" (or your thermostat's unit), "turn on the
+      fan".
+  - Should: Home Assistant shows the new target and the fan on.
+- [ ] "Turn on the lamp" with two lamps.
+  - Should: it asks which one, and does nothing until you say.
+- [ ] "Unlock the front door", then say no; ask again and say yes.
+  - Should: it asks first both times; no leaves it locked, yes unlocks.
+- [ ] Ask it to read a web page, then "unlock the front door" in the same
+      conversation.
+  - Should: refused without asking; in a new conversation it asks again.
+- [ ] Stop Home Assistant (or unplug its network) and ask for a light.
+  - Should: a short "can't reach Home Assistant" answer, no crash.
+- [ ] As a family member (phone app invite), ask to turn on a light.
+  - Should: it has no smart home control.
 
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
@@ -683,3 +834,33 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
   - Should: "not found", and no "PC hub on ..." line (the PC hub was
     removed). If `data/devhub.json` is still there (the old hub's saved
     chat), delete it; nothing reads it any more.
+
+## Spotify (optional, ~10 min)
+Needs Spotify Premium, BLOCKERS.md "Spotify app" done, and Spotify open on
+the PC (README "Spotify by voice").
+- [ ] Run `python -m assistant.tools.spotify`, allow access, paste the
+      address back.
+  - Should: "Spotify connected"; the consent page lists only reading what
+    you're playing on your devices, "control Spotify on your devices" and
+    "access your private playlists", nothing about changing
+    playlists or your library.
+- [ ] "Hey Claude, play my study playlist" (use a playlist name you have).
+  - Should: your playlist starts in the PC's Spotify app, not a public one
+    with a similar name.
+- [ ] "Hey Claude, play some lo-fi", then "skip", "go back", "what's
+      playing?", "turn it up", "pause".
+  - Should: each happens; "what's playing" names the song and artist.
+- [ ] With music playing on the PC, say "Hey Claude, what time is it?"
+  - Should: the music pauses right after the wake word (note how quickly)
+    and resumes once the follow-up window closes. Saying "Hey Claude,
+    pause" instead leaves it paused.
+- [ ] With Spotify open on the phone too, "Hey Claude, play it on my
+      phone".
+  - Should: playback moves to the phone.
+- [ ] Quit Spotify everywhere, then "Hey Claude, play some jazz".
+  - Should: it says Spotify isn't open anywhere (no error noise).
+- [ ] Phone app, gear menu (owner).
+  - Should: "Connect Spotify" (or "Reconnect Spotify" once connected); a
+    tap goes to Spotify and back to the app. A family member's phone does
+    not show the button.
+

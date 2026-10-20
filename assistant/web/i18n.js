@@ -3,9 +3,10 @@
 // aria-label, title) at load and whenever app.js / voice.js change it, and the
 // questions passed to confirm(). Only exact known strings are replaced, so
 // messages and replies are left as they are. With lang="en" it does nothing.
-// Also: the "Connect Google account" menu button ([webapp] google_connect:
-// the server marks <html data-google>), shown only when /api/google/status
-// says it is set up.
+// Also: the "Connect Google account" menu button ([webapp] google_connect,
+// or a family member's own account: the server marks <html data-google>),
+// shown only when /api/google/status says it is set up, and "Disconnect
+// Google account" when the status allows it (family members).
 "use strict";
 
 (function (root) {
@@ -42,6 +43,7 @@
     "Captions": "字幕",
     "Latency timings": "延迟时间",
     "Listening": "正在听",
+    "Still listening…": "还在听…",
     "Thinking…": "正在思考…",
     "Speaking": "正在说话",
     "Paused": "已暂停",
@@ -84,6 +86,16 @@
     "Google account connected.": "Google 账户已连接。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
+    "Connect Spotify": "连接 Spotify",
+    "Reconnect Spotify": "重新连接 Spotify",
+    "Spotify connected.": "Spotify 已连接。",
+    "Opening Spotify…": "正在打开 Spotify…",
+    "Couldn't start the Spotify sign-in.": "无法开始 Spotify 登录。",
+    "Disconnect Google account": "断开 Google 账户",
+    "Disconnect your Google account? I won't see your calendar or email any more.":
+      "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
+    "Google account disconnected.": "Google 账户已断开。",
+    "Couldn't disconnect. Try again.": "没能断开，请再试一次。",
     "Invite someone": "邀请家人",
     "Name": "名字",
     "Language": "语言",
@@ -101,6 +113,35 @@
       "这个邀请链接已过期或已经用过了，请再要一个新的。",
     "this invite link has expired or was already used": "这个邀请链接已过期或已经用过了。",
     "Couldn't reach the server. Open the link again.": "连不上服务器，请再打开一次链接。",
+    // the Memory screen (memory.js)
+    "Memory": "记忆",
+    "Summary": "对话摘要",
+    "Note": "笔记",
+    "Untrusted": "来源不可信",
+    "Saved while a web page or email was in the conversation": "保存时对话里有网页或邮件内容",
+    "Date unknown": "日期未知",
+    "Last week": "上周",
+    "Delete all from this week": "删除本周的全部记忆",
+    "Delete all from that week": "删除那一周的全部记忆",
+    "Delete all with no date": "删除所有日期未知的记忆",
+    "Delete this memory? This can't be undone.": "要删除这条记忆吗？删除后无法恢复。",
+    "Nothing saved yet.": "还没有保存任何记忆。",
+    "Showing the newest 1000 only.": "只显示最新的 1000 条。",
+    "couldn't reach long-term memory; try again": "连不上长期记忆，请再试一次。",
+    "not found": "找不到。",
+    // reply-voice picker (voice-picker.js)
+    "Reply voice": "回复的声音",
+    "Preview": "试听",
+    "paid": "付费",
+    "ElevenLabs voice ID": "ElevenLabs 声音 ID",
+    "Use this voice": "使用这个声音",
+    "Saved.": "已保存。",
+    "Couldn't play the preview.": "无法播放试听。",
+    "unknown voice": "没有这个声音。",
+    "System voice": "系统声音",
+    "couldn't save the voice; try again": "声音没有保存成功，请再试一次。",
+    "too many previews; try again in a minute": "试听次数太多，请一分钟后再试。",
+    "couldn't check that voice with ElevenLabs; try again": "无法向 ElevenLabs 确认这个声音，请再试一次。",
     // tabs, settings, history, lecture and tutor screens
     "Backends": "服务器",
     "Use": "使用",
@@ -199,6 +240,28 @@
     "\"Add a doctor's appointment Friday at 10am.\"": "“星期五上午十点加一个看医生的预约。”",
     "\"Any new email today?\"": "“今天有新邮件吗？”",
     "\"Help me reply to that email.\" (I only write a draft; you send it.)": "“帮我回复那封邮件。”（我只写草稿，你自己发送。）",
+    // attachments ("+" left of the text field, attachments.js / attachments.py)
+    "Add photos or files": "添加照片或文件",
+    "Add to your message": "添加到消息",
+    "Photo library": "照片图库",
+    "Choose file": "选择文件",
+    "Attachments": "附件",
+    "You can attach up to 4 files.": "最多可以附加 4 个文件。",
+    "Only photos, PDFs and text files can be attached.": "只能附加照片、PDF 和文本文件。",
+    "Attach at most 4 files to a message": "每条消息最多附加 4 个文件。",
+    "bad request (attach at most 4 files)": "请求有误（最多附加 4 个文件）。",
+    "bad request": "请求有误。",
+    "A PDF is over 100 pages": "有一个 PDF 超过 100 页。",
+    "That file is too long for Claude (PDFs up to 100 pages).":
+      "这个文件太长了，Claude 处理不了（PDF 最多 100 页）。",
+    "Claude couldn't read that file.": "Claude 读不了这个文件。",
+    "Only photos (JPEG, PNG, WebP, GIF), PDFs and text files can be attached":
+      "只能附加照片（JPEG、PNG、WebP、GIF）、PDF 和文本文件。",
+    "A photo couldn't be read": "有一张照片读不出来。",
+    "That file is empty": "这个文件是空的。",
+    "A text file is too long to send": "文本文件太长，发不了。",
+    "too large": "文件太大了。",
+    "request too large": "文件太大了。",
     // first-run guide (data-google instances: a family member's own app)
     "Enter the sign-in code you were sent. You only need to do this once on this phone.":
       "请输入发给你的登录码。这部手机只需要输入一次。",
@@ -208,11 +271,13 @@
       "with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there."]:
       "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
       "再点“添加到主屏幕”，以后从主屏幕打开。",
-    ["Connect your Google account so I can see your calendar and email: tap the gear at " +
-      "the top right, then \"Connect Google account\". If Google says it hasn't verified " +
+    ["Connect your own Google account so I can see your calendar and email: tap the gear at " +
+      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
       "app was made by your family, not a company."]:
-      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”。" +
+      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
   };
@@ -232,8 +297,29 @@
     [/^Uploaded (.+)$/, "已上传 $1"],
     [/^offline, retrying in (\d+) s$/, "离线，$1 秒后重试"],
     [/^(.+) \(in use\)$/, "$1（正在使用）"],
+    [/^A photo is over ([\d.]+) MB$/, "有一张照片超过 $1 MB。"],
+    [/^A file is over ([\d.]+) MB$/, "有一个文件超过 $1 MB。"],
+    [/^Week of (.+)$/, "$1 那一周"],
+    [/^Deleted (\d+)\.$/, "已删除 $1 条。"],
+    [/^Delete all (\d+) notes? from this week\? This can't be undone\.$/, "要删除本周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? from last week\? This can't be undone\.$/, "要删除上周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? from the week of (.+)\? This can't be undone\.$/, "要删除 $2 那一周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? with no date\? This can't be undone\.$/, "要删除日期未知的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Default \((.+)\)$/, "默认（$1）"],
+    [/^(.+) · paid$/, "$1 · 付费"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
+  // The line a message with attachments ends with, "[photo] [file: a.pdf]"
+  // (attachments.js summary(), and the marker saved in history): shown in
+  // Chinese, kept in English where it is stored.
+  const MARKER = /\[photo\]|\[file: [^\]\n]+\]/;
+  const MARKER_LINE = new RegExp(`(^|\\n)((?:${MARKER.source})(?: (?:${MARKER.source}))*)(\\s*)$`);
+
+  function translateMarkers(text) {
+    return text.replace(MARKER_LINE, (all, lead, line, trail) => lead + line
+      .replace(/\[photo\]/g, "[照片]")
+      .replace(/\[file: ([^\]\n]+)\]/g, "[文件：$1]") + trail);
+  }
 
   // The Chinese for a known English string (whitespace kept), else `text`.
   function translate(text) {
@@ -246,7 +332,7 @@
         if (re.test(key)) { out = key.replace(re, rep); break; }
       }
     }
-    if (out === undefined) return text;
+    if (out === undefined) return translateMarkers(text);
     // keep the spacing, except next to full-width punctuation ("，在电脑的")
     const lead = /^[，。、：；）]/.test(out) ? "" : text.match(/^\s*/)[0];
     const trail = /[（]$/.test(out) ? "" : text.match(/\s*$/)[0];
@@ -303,8 +389,10 @@
   // --- first-run guide: the steps only she can do on her phone ---
   const STEP_HOME = "Add this app to your home screen: in Safari, tap the Share button (the " +
     "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
-  const STEP_GOOGLE = "Connect your Google account so I can see your calendar and email: tap " +
-    "the gear at the top right, then \"Connect Google account\". If Google says it hasn't " +
+  // (a family member's own account on the shared server, google_web.py)
+  const STEP_GOOGLE = "Connect your own Google account so I can see your calendar and email: tap " +
+    "the gear at the top right, then \"Connect Google account\", and sign in with your own " +
+    "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
 
@@ -357,6 +445,7 @@
   function setupGoogle(win, doc) {
     const btn = doc.getElementById("google-connect");
     const hint = doc.getElementById("google-status");
+    const unlink = doc.getElementById("google-disconnect");
     if (!btn) return null;
     const say = (text) => (isActive(doc) ? translate(text) : text);
     const login = doc.getElementById("login-text");
@@ -386,6 +475,7 @@
         renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
+        if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
         if (hint) {
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = say("Google account connected.");
@@ -410,6 +500,29 @@
       btn.disabled = false;
       if (hint) hint.textContent = say("Couldn't start the Google sign-in.");
     });
+    if (unlink) {
+      unlink.addEventListener("click", async () => {
+        const ask = say("Disconnect your Google account? I won't see your calendar or email any more.");
+        if (typeof win.confirm === "function" && !win.confirm(ask)) return;
+        unlink.disabled = true;
+        let ok = false;
+        try {
+          const res = await win.fetch("/api/google/disconnect", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" }, body: "{}",
+          });
+          ok = res.ok;
+        } catch (e) { /* shown below */ }
+        unlink.disabled = false;
+        if (ok) {
+          await refresh();
+          if (hint) { hint.hidden = false; hint.textContent = say("Google account disconnected."); }
+        } else if (hint) {
+          hint.hidden = false;
+          hint.textContent = say("Couldn't disconnect. Try again.");
+        }
+      });
+    }
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
     refresh();

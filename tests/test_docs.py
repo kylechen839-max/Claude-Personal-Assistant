@@ -24,12 +24,13 @@ OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--user", "--uninstall", "--now", "--bg", "--https",  # + tailscale serve
                "--keep", "--ff-only", "--short", "--oneline",  # git (updates)
                "--test",  # node --test
-               "--cloud"}  # claude -p --cloud (the dev team voice link)
+               "--cloud",  # claude -p --cloud (the dev team voice link)
+               "--build-arg"}  # docker build (FAMILY_ZH=0)
 OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "resume_conversation",  # tool names, not settings
                      "email_summary", "read_email", "draft_reply",
                      "remember_note", "recall_notes", "list_recent_notes",
-                     "delete_note",
+                     "delete_note", "ha_list", "ha_state", "ha_control",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

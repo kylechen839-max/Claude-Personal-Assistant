@@ -147,3 +147,47 @@ def test_chinese_prompt_says_what_it_can_do(fake_client):
     full = ClaudeChat(client=fake_client, tools=tools, language="zh").build_system()
     assert ZH_HELP_EMAIL in full and ZH_HELP_CONNECT not in full
     assert "你能帮我做什么" not in ClaudeChat(client=fake_client, tools=tools).build_system()
+
+
+FOREIGN = {"type": "thinking", "thinking": "...", "signature": "sig-from-another-conversation"}
+
+
+def test_earlier_thinking_blocks_are_not_sent_back():
+    """A thinking block signed for another conversation (hands-free voice
+    sharing the phone's conversation, a continued history) made every later
+    request fail: 400 "Invalid `signature` in `thinking` block". Earlier
+    turns go without them; the current turn's tool loop keeps its own."""
+    from assistant.chat import request_messages
+
+    own = {"type": "thinking", "thinking": "plan", "signature": "this-turn"}
+    history = [
+        {"role": "user", "content": "what's on tomorrow?"},
+        {"role": "assistant", "content": [FOREIGN, {"type": "text", "text": "Two things."}]},
+        {"role": "user", "content": "move the first one"},
+        {"role": "assistant", "content": [own, {"type": "tool_use", "id": "t1",
+                                                 "name": "move_event", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                      "content": "ok"}]},
+    ]
+    sent = request_messages(history)
+    assert sent[1]["content"] == [{"type": "text", "text": "Two things."}]
+    assert sent[3]["content"][0] == own  # this turn's tool loop needs it
+    assert history[1]["content"][0] == FOREIGN  # stored history untouched
+    only = [{"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [FOREIGN]},
+            {"role": "user", "content": "again"}]
+    assert request_messages(only)[1]["content"] == [{"type": "text", "text": "(no reply)"}]
+
+
+def test_a_conversation_with_a_foreign_thinking_block_keeps_working(fake_client):
+    from assistant.chat import ClaudeChat
+    from tests.conftest import make_response, text_block
+
+    chat = ClaudeChat(client=fake_client, model="m")
+    chat.history = [{"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": [FOREIGN, {"type": "text", "text": "Hello."}]}]
+    fake_client.queue.append(make_response(text_block("Sure.")))
+    assert chat.ask("and tomorrow?") == "Sure."
+    sent = fake_client.calls[0]["messages"]
+    assert not any(isinstance(b, dict) and b.get("type") == "thinking"
+                   for m in sent if isinstance(m["content"], list) for b in m["content"])

@@ -218,6 +218,57 @@ re-encodes it while resizing. KaTeX is vendored under `/static` (no
 third-party script), drawn with `katex.render` so the CSP needs no
 `unsafe-inline`; the CSP adds only `font-src 'self'`.
 
+### Chat attachments (the "+" button, `attachments.py`)
+Files attached to a chat message (`/api/turn`, multipart `attachment`
+parts) need the session like any turn, owner or family member, and go only
+to that session's own conversation.
+- **Type sniffing.** The type comes from the file's first bytes, never its
+  name or declared type: JPEG, PNG, WebP or GIF photos, PDFs (`%PDF-`), and
+  UTF-8 text with no control bytes. Anything else (zip, exe, HEIC the
+  phone didn't convert, Latin-1 text) is refused with a friendly 400.
+- **Photos** reuse the tutor's `prepare_image`: decoded, pixel-capped,
+  shrunk to 1600 px and re-encoded without EXIF/GPS, comments or ICC (a GIF
+  becomes a PNG of its first frame).
+- **Limits.** At most 4 files a message (the form parser stops at 6 files,
+  so a flood is refused before it is read); photos up to `[tutor]
+  max_image_mb`, PDFs and text up to `[webapp] max_attachment_mb`, neither
+  above `[webapp] max_upload_mb`, which still caps the whole request (4 MB
+  on the cloud server, where CloudGuard counts `/api/turn` as an upload
+  path). Text files are capped at 200,000 characters. PDFs whose page
+  tree root (the `/Type /Pages` object without a `/Parent`) has a direct
+  `/Count` over 100 are refused up front, the last definition of the root
+  winning, so an incremental save that only annotates pages isn't counted
+  twice and one that removes pages counts the new total. This is
+  deliberately not a full PDF parse: when the root is inside a compressed
+  object stream or its count is indirect, nothing is refused here and
+  Claude's own 400 is the backstop. A crafted file can also understate its
+  `/Count` (a decoy root appended last); that only costs one API call, which
+  Claude refuses with the same "too long" sentence. The scan is one linear
+  pass with bounded patterns that keeps no list of matches (4 MB of digits,
+  of spaces or of page-tree words: well under a second and under 1 MB extra
+  memory in the sandbox). A 400 on a turn with files says
+  "too long" only when Claude's reason is about pages, length or tokens,
+  else "Claude couldn't read that file." (a protected or broken PDF). Only
+  the HTTP status of that 400 is logged at INFO/WARNING; the reason text is
+  DEBUG. The base64 of all
+  attachments kept in a conversation is capped at 20 MB (older ones become
+  a marker), under the API's 32 MB request limit.
+- **Taint.** An attached file or photo is someone else's text, so the
+  conversation is untrusted from that turn on (`ClaudeChat.
+  untrusted_attachments`, set before any tool runs): `confirm_if_untrusted`
+  tools ask first, and the memory summary is built from Kyle's words only
+  and stored untrusted. Only `reset()` clears it; resumed history is tainted
+  anyway. The file names (sanitized: no path, no control or bidi
+  characters, 80 characters at most) appear in the document block's title
+  and the history marker.
+- **Logs.** INFO gets the count, kinds and byte sizes only; names and
+  contents are never logged, and replies stay out of the DEBUG log while an
+  attachment is in the conversation (`private_turn`).
+- **Not stored.** Only a marker (`[photo]`, `[file: name.pdf]`) reaches
+  history and the event log; the bytes stay in the chat's memory until the
+  conversation ends. PDFs are sent as they are (their own metadata, such as
+  the author, included); they are not rewritten.
+
 ## Cloud server (Render): on the public internet
 
 `render.yaml` runs the phone web app 24/7 at `https://<name>.onrender.com`
@@ -286,7 +337,7 @@ in `tests/test_cloud.py`):
   name), no API docs (`/docs`, `/openapi.json` off), no `Server` header.
 - **Errors:** an unhandled error answers `{"error": "internal error"}`; the
   traceback goes only to the server log.
-- **Request limits:** audio uploads up to `[webapp] max_upload_mb` (4 MB on
+- **Request limits:** audio and attachment uploads up to `[webapp] max_upload_mb` (4 MB on
   the server, about four minutes of iPhone audio), every other body up to
   `[cloud] max_body_kb` (16 KB), counted as it arrives so chunked uploads
   without a length are capped too; 120 requests a minute per address
@@ -351,11 +402,13 @@ server (`[family] enabled`, on in the server profile).
   and so does the owner's WEB_TOKEN. Redeeming and creating the session
   happen under the family lock, so a DELETE can't race in between.
 - **Isolation.** A family session (`SessionStore.users`) gets its own
-  `ToolRegistry` with only Anthropic's web search and fetch (no browser,
-  Notion, memory, notes, history tools, Google or dev team), its own
+  `ToolRegistry` with only Anthropic's web search and fetch, plus their
+  own Google once they connect it (below); no browser, Notion, memory,
+  notes, history tools, Kyle's Google or dev team; its own
   `HistoryStore` at `<dir>/<id>/history.sqlite` with no sync event log,
   and no Pinecone memory. Owner-only routes (`require_owner`: invites and
-  users, lecture, tutor, Google connect) answer 404 to it, as if absent.
+  users, lecture, tutor) answer 404 to it, as if absent; the Google routes
+  answer about the caller's own account only.
   History routes use the session's own store, so the owner's conversation
   ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
   session that made it. Failover tokens and Bearer WEB_TOKEN are always the
@@ -380,9 +433,83 @@ server (`[family] enabled`, on in the server profile).
   rotated only when nobody else is left signed in, since rotating it would
   sign everyone out. A family member's signs out only their own browsers.
 
+- **Their own Google** (`[family] google`, piece B). A family member
+  signs in to their own Google account through the same flow as the
+  owner's (`google_web.py`, below) with a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` / `[family] google_client`) and the server's
+  own address. The token goes to `<dir>/<id>/google_token.json`
+  (`write_private`, under the family lock, refused once they are removed)
+  and is only ever read from there: their Calendar and Gmail tools get
+  `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
+  never read for them, and `save_token=False`, so a missing or revoked
+  token is an error, never a sign-in started on the server. Kyle's tools
+  read only his own token, never `<dir>`. The tools go only into their own
+  registry (shared by their sessions; added before stale ones are removed,
+  so a running turn never sees none), with the descriptions about them,
+  not Kyle; the calendar is their `primary`. Gmail stays drafts-only
+  (`NoSendGmail`), deletes and drafts ask first, created/moved events ask
+  once anything untrusted is in the conversation, as for Kyle.
+  **Disconnect** (`POST /api/google/disconnect`, family sessions only)
+  deletes the file and the tools; removing them deletes their folder,
+  token included. Not done, on purpose: the token isn't revoked at Google
+  on disconnect (deleting it from the server is what stops the assistant;
+  they can also remove "Hey Claude" at myaccount.google.com/permissions).
+- **Speech and sentences in their language.** A Chinese-speaking member's
+  recordings go to the Chinese Whisper model and replies to the Mandarin
+  voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),
+  through the same single STT lock and TTS thread as everyone else's, so
+  concurrency and memory stay bounded. `i18n.t` takes the session's
+  language, and each turn's thread runs `i18n.using(its language)`, so a
+  tool's confirmation question is asked in the language of the person who
+  will answer it.
+
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
+
+## Reply-voice picker (`voice_picker.py`)
+
+Everyone signed in (the owner, or a family member) can pick the voice the
+server reads their replies with (`[tts] picker`, on by default).
+
+- **Routes.** `GET /api/voices`, `POST /api/voices` and
+  `POST /api/voices/preview` need a session (`require_session`: cookie or
+  Bearer, same-site; on the cloud CloudGuard's sign-in wall and its 16 KB
+  body cap for non-upload routes). Not `/api/voice`: that is the voice
+  WebSocket. A removed family member's session is gone (401).
+- **Only voices the server has.** A choice is accepted only if it is in
+  this person's list: a Piper name must match
+  `lang_REGION-name-quality` (no `/` or `..`, so no other file can be
+  named) and have its `.onnx.json`; Kokoro only if set up (never with the
+  server profile); ElevenLabs IDs must be 8-64 letters and digits. A hand-
+  edited or stale choice falls back to the default with one INFO line (the
+  voice id and the person's id; nothing they said).
+- **Per person.** The owner's choice is in `[tts] voice_file` (on the
+  cloud `/data/`), a family member's in `<family dir>/<id>/voice.json`,
+  both written with `google_auth.write_private` (temp file in the same
+  folder, rename retried on Windows). A family member's file is written
+  under the family lock and only while they are listed, so it can't be
+  written back after `remove()` deleted their folder. Choosing the default
+  deletes the file. Nobody can see or change anyone else's choice.
+- **Money.** ElevenLabs voices are listed only with `ELEVENLABS_API_KEY`
+  set, and offered to family members only with `[tts]
+  family_paid_voices = true` (off by default: they would spend the owner's
+  plan). The voice list is fetched at most hourly (failures: every 5
+  minutes); the key goes only in the `xi-api-key` header and is never
+  logged. Preview clips are cached (the last 8), so tapping Preview again
+  costs nothing. Callers asking for the same clip at once share one render,
+  and each session may have one preview rendering at a time and 10 a
+  minute (429). A typed-in voice ID that isn't in the list is checked once
+  with `GET /v1/voices/{id}` before it is saved (unknown: 400; ElevenLabs
+  unreachable: 503, nothing saved).
+- **Failures.** A chosen voice whose engine fails is dropped and skipped
+  for 5 minutes (one warning with the voice id and error type), so a broken
+  voice isn't retried, and its timeout paid, on every sentence.
+- **Bounded.** At most 4 extra engines are kept loaded (least recently
+  used out; Kokoro voices share one model), 8 preview clips, 64 cached
+  choices, 50 Piper files and 100 ElevenLabs voices looked at.
+- Voice names from ElevenLabs are cut to one printable line of 60
+  characters and shown with `textContent` only.
 
 ## PC hub: removed (2026-10-20)
 
@@ -397,20 +524,29 @@ no longer read or written; delete it by hand to drop its saved transcript
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
 For a second user's instance, `[webapp] google_connect` adds a "connect
-Google" button. `POST /api/google/connect` needs the signed-in session and
+Google" button; on the cloud server family members get the same button for
+their own account (above). `POST /api/google/connect` needs the signed-in session and
 same-origin (the usual `/api/` guard); it returns Google's consent URL with
 a PKCE challenge, `access_type=offline` and the redirect
 `<public_origin>/google/callback`.
 
-- **The callback is authenticated by `state` alone, on purpose.** The
+- **The callback is authenticated by `state` and a binding cookie.** The
   session cookie is `SameSite=Strict`, so the browser does not send it on
-  Google's cross-site redirect back. The state is random, created only for
-  a signed-in session, kept in memory only (at most 4 at once, 10 minutes)
-  and used once: an unknown, expired, replayed or `error=` callback gets a
-  400 and writes nothing. The PKCE verifier never leaves the server, so a
-  code seen elsewhere can't be redeemed. Nobody without the web token can
-  create a state, so a stranger can't attach their Google account to her
-  instance.
+  Google's cross-site redirect back (CloudGuard lets `/google/callback`
+  through without it). The state is random, created only for a signed-in
+  session, kept in memory only (at most 4 per person and 32 in all, 10
+  minutes), bound to who started it (the owner or one family member, and
+  their session id) and used once: an unknown, expired, replayed or
+  `error=` callback gets a 400 and writes nothing. Starting also sets
+  `hc_google`, an HttpOnly, Secure, `SameSite=Lax` cookie (Lax: sent on
+  Google's top-level redirect; path `/google/callback`, 10 minutes) with a
+  random nonce whose SHA-256 is kept with the state. The callback must
+  carry it (constant-time compare), and the starting session must still be
+  signed in as the same person (and, for family, still listed). So a
+  consent link one person forwards to another can't attach the second
+  person's Google to the first person's account, nor anyone's to Kyle's.
+  The PKCE verifier never leaves the server, so a code seen elsewhere
+  can't be redeemed.
 - The token is written with `write_private` (temp file in the same folder,
   then an atomic replace). The OAuth code is masked by the log redaction if
   the server's access log ever records the callback URL; the assistant logs
@@ -437,6 +573,115 @@ a PKCE challenge, `access_type=offline` and the redirect
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
 
+## Smart home (`tools/home_assistant.py`)
+
+Home Assistant controls physical things, including the front door, so its
+limits are in code, not in the prompt.
+
+- **Off by default** (`[home_assistant] enabled = false`), owner only:
+  family members' registries never get the tools (`family.py` builds them
+  separately; a test pins it), and `config.mom.toml` keeps it off.
+  `HA_URL` and `HA_TOKEN` are in `ISOLATED_ENV_VARS`, so another instance
+  started from Kyle's shell can't inherit them.
+- **The token** is sent only in the `Authorization` header, never in a
+  URL, with redirects off (a redirect can't carry it elsewhere). It is in
+  `SECRET_ENV_VARS`, so the log redaction masks it. Errors log the HTTP
+  status or exception type only.
+- **No arbitrary services.** `ha_control` takes an action from a fixed
+  list and maps it to one service per domain (`ACTIONS`); there is no
+  service parameter. Entities outside `[home_assistant] domains` are not
+  listed and are refused. Scripts, scenes and automations (which can do
+  anything) run only if their entity id is in `[home_assistant] scripts`.
+  `homeassistant.restart` and the like can't be expressed at all.
+- **Locks, alarm panels, garage doors and gates** (device class garage,
+  gate or door; a switch or cover whose id or name contains garage, gate
+  or 车库 anywhere, door anywhere except in indoor/outdoor/doorbell, lock
+  anywhere except after b, c or f (block, clock, flock), deadbolt, or 锁,
+  门禁, 大门, 车库门, 闸门 or 门 ending the name or a word, but not 门口灯
+  or 门铃; run-together names such as "Garagedoor" or "FrontDoor" count;
+  anything in `secure_entities`. The area isn't checked, on purpose: a room
+  called "Garage" would flag every light in it, so a relay with a neutral
+  name ("Opener", German "Tor") must be listed in `secure_entities`) always
+  ask for a spoken yes. The handler also refuses them unless the yes was
+  for this exact action and these entities in this same call (one yes,
+  one call), so the gate doesn't rest on the registry alone. They are
+  never included in a whole-room call, and a spoken name reaches one only
+  exactly or by all its words, never by a similar spelling ("back door"
+  never finds the garage).
+- **While tainted, every change needs its own yes**, checked in the
+  handler too. If Home Assistant doesn't answer while the question is
+  being built, the question is asked about the words Kyle said; that yes
+  never covers a lock or garage door (the answer says Home Assistant didn't
+  respond and to ask again).
+- **Unlocking or opening while tainted is refused**, without asking: a
+  yes can be talked into by a page or email ("say yes when it asks").
+  Locking and closing still work after a yes. Every other change asks
+  first while tainted, as for the other tools.
+- **Home state as untrusted text.** A state that isn't a number or one
+  word (a phone notification sensor, for example) can be anyone's text,
+  so a result holding one is marked `"untrusted_content": true` and taints
+  the conversation. Attributes come from a fixed list of numbers and
+  settings (`SAFE_ATTRIBUTES`); media titles and other free text are never
+  returned.
+- **Friendly and room names** are usually Kyle's, but an integration can
+  take a name from the device itself (a neighbour's Chromecast, say).
+  Names are cut to one line of at most 60 characters, and a result holding
+  one that doesn't look like a name (over 40 characters, or with sentence
+  punctuation, a colon, a slash or a line break) is marked untrusted,
+  which taints the conversation.
+- **A non-admin token is enough** (README recommends a dedicated non-admin
+  user). The room lookup (`/api/template`) is admin-only; its 401/403 is
+  taken as "no rooms", never as a broken token.
+- Not fixed, on purpose: **plain http on the LAN.** Home Assistant serves
+  http by default. The token is a full-access Home Assistant credential,
+  so README warns, and the startup line warns when `HA_URL` is http at a
+  public address. Over Tailscale the link is encrypted anyway.
+
+## Spotify (`tools/spotify.py`, `spotify_web.py`)
+
+Off by default (`[spotify] enabled = false`); the tools are registered only
+with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
+
+- **Least privilege.** The sign-in asks for three scopes: read playback
+  state (which includes what is playing), control playback, and read
+  private playlists. Nothing can modify playlists, saved songs or follows;
+  tests check the exact scope set and that the module has no such scope or
+  endpoint.
+- **PKCE, no client secret.** Authorization Code with PKCE (S256), so no
+  secret is stored anywhere. The phone flow follows `google_web.py`: the
+  routes are the owner's only (`owner_of`, 404 for a family member), the
+  callback is authenticated by a random, single-use state (at most 4
+  pending, 10 minutes, created only on a signed-in owner's request), and an unknown,
+  replayed or `error=` callback writes nothing. The verifier never leaves
+  the server.
+- **Token storage.** `[spotify] token` is written with `write_private`
+  (temp file in the same folder, atomic replace, retried on Windows; 0600
+  on Linux/Pi). Access tokens go in the `Authorization` header only, never
+  a URL. A refresh may rotate the refresh token, and the wake-word process
+  and the web app may share the file, so an expired token is re-read from
+  the file before refreshing; if a refresh is refused because the other
+  process just rotated the refresh token, the file is read again and its
+  token (or its new refresh token, once) is used instead of reporting an
+  expired sign-in. A token file briefly locked by a Windows replace is
+  read again too. Log lines carry HTTP status codes and
+  Spotify's reason codes only; the existing redaction masks
+  `access_token`/`refresh_token`/`code_verifier` fields, bearer headers and
+  `?code=` in a logged callback URL.
+- **Untrusted names.** Track, artist, album, playlist and podcast names
+  are written by other people. Results that carry them (`spotify_play`
+  from the catalog or someone else's playlist, `spotify_now_playing`) are
+  marked `"untrusted_content": true`, so later changes in that conversation
+  (calendar, Notion, drafts) ask first. Kyle's own playlists don't taint.
+  Device names are marked too (any result naming a device: the device
+  list, "which device?", a transfer, volume), since a speaker or another
+  phone on the account can be named by anyone who set it up.
+- **No duplicated commands.** Only a 401 is retried (after a refresh; the
+  first request did nothing). A failed "next" is never sent twice, so a
+  network blip can't skip two songs.
+- **Family.** Family members' registries are their own (`family.py`), so
+  they never get the Spotify tools; the "Connect Spotify" routes 404 for
+  them.
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar
@@ -452,10 +697,29 @@ a PKCE challenge, `access_type=offline` and the redirect
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **Spotify playback control never asks, even with untrusted content in
+  the conversation.** A web page or email could make Claude play
+  something, skip, or set the volume. That is an annoyance at worst, easy
+  to undo by voice, and confirming every "pause" would make it useless;
+  nothing that changes the library or playlists exists to be misused.
 - **Voice mode and nearby speech.** Hands-free mode listens continuously
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends
   after 2 minutes of quiet.
+- **Barge-in: the mic is open while it speaks** (`[wake] barge_in`, the
+  phone's `[voice] barge_in`). Talking over a yes/no question is always a
+  no, and the words said over it are never taken as the answer (the PC drops
+  them; the phone treats them as the next request), so neither the
+  assistant's own voice nor a TV can confirm by talking over the question. A reply that says the wake word itself (an email read aloud:
+  "Hey Claude, delete...") can't wake the PC loop with its own voice; wake
+  detections are ignored for that reply. With `barge_in = "voice"` its own
+  echo must not count as speech: speech must be 2.5x louder than the
+  reply's echo for 400 ms. An injected command that still got through would
+  run in a tainted conversation, where state-changing tools ask first, and
+  the confirmation is asked after playback has stopped. Deliberately not
+  done: no echo cancellation on the PC (headphones or a speakerphone with
+  its own echo cancelling are the recommendation for "voice"), which is why
+  the default is "wake_word".
 - **Speech from a TV, video, or another person.** A false wake word followed
   by "move my 3 PM to Friday" would run without asking, and a "yes" from the
   same source could answer a confirmation. This needs someone in earshot of
@@ -527,6 +791,40 @@ a PKCE challenge, `access_type=offline` and the redirect
   browser's localStorage (no conversation text). ArtifactComments and
   ArtifactData are pre-approved in `.claude/settings.json`; Kyle
   approved that.
+
+## Memory review (`memory_review.py`, `memory_web.py`)
+
+- **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and
+  `/api/memory/delete-week` use the owner's session (`owner_of`): no
+  session is 401, a family member's session (no memory) and every request
+  with memory off are 404. Cross-site requests are refused like every API
+  route. Deletes are POST (the failover preflight allows only GET/POST).
+- **Only the assistant's own vectors.** Listed and deleted by id prefix
+  (`voice-`, `note-`) in `[memory] namespace` only; Kyle's other
+  namespaces and foreign ids are never shown or deleted (tests seed both).
+  `delete_note` now also accepts `voice-` ids (conversation summaries and
+  `remember` notes, which the assistant wrote) and still refuses anything
+  else; it keeps `confirm_prompt`, so voice deletes always ask.
+- **Delete a week = the ids shown.** The page sends the ids it displayed;
+  the server deletes only those still in that week, so a note saved after
+  the page loaded is never deleted unseen.
+- **Untrusted stays visible and sticky.** Notes stored with
+  `untrusted: true` get a badge on the page, and `review_memory` marks its
+  result untrusted when one is included, so later changes in that
+  conversation ask first. The weekly nudge carries only a count.
+- **Logs.** Ids and counts at INFO; note text never (caplog tests for the
+  module and the routes). Errors reaching Pinecone are a generic 502.
+- Deliberately not done: no undo (a delete is final in Pinecone); a
+  conversation in history keeps its transcript when its memory summary is
+  deleted here (delete the conversation in History for both).
+
+- **The Mandarin voice in the cloud image has no pinned checksum.** The
+  Dockerfile fetches `zh_CN-huayan-medium` (and Whisper `small`) over HTTPS
+  from the official rhasspy / Systran repositories at build time, the same
+  way as the English voice and `base.en`; a SHA-256 couldn't be pinned
+  because Hugging Face is blocked in the build sandbox. Nothing is
+  downloaded at run time (`HF_HUB_OFFLINE=1`). Pinning both voices to a
+  repository revision and hash is a follow-up.
 
 ## Conversation history
 

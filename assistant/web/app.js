@@ -35,7 +35,7 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
-  for (const id of ["history-view", "transcript-view"]) {  // history.js
+  for (const id of ["history-view", "transcript-view", "memory-view"]) {  // history.js, memory.js
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
@@ -56,6 +56,11 @@ function setBusy(value) {
   els.text.disabled = value && !confirming;
   els.mic.disabled = value && !confirming;
 }
+
+// Files picked with "+" (attachments.js) go with the next message, never
+// with a yes/no answer.
+const tray = () => (window.HeyClaudeAttach && window.HeyClaudeAttach.tray) || null;
+const pendingFiles = () => !confirming && tray() !== null && tray().count() > 0;
 
 function setConfirm(question) {
   confirming = Boolean(question);
@@ -313,8 +318,9 @@ function handleEvent(ev) {
   }
 }
 
-async function send(body) {
-  // body: {text} | FormData with "audio"
+async function send(body, sentFiles) {
+  // body: {text} | FormData with "audio" and/or "text" and "attachment"s.
+  // sentFiles: called once the server took the turn (clears the chips).
   const answering = confirming;
   const url = answering ? "/api/confirm" : "/api/turn";
   let options;
@@ -328,10 +334,12 @@ async function send(body) {
   }
   if (answering) els.confirm.hidden = true;
   setBusy(true);
-  setStatus(body instanceof FormData ? "Listening back…" : "Thinking…");
+  setStatus(body instanceof FormData && body.has("audio") ? "Listening back…" : "Thinking…");
   if (router) router.beginTurn();  // no backend switch until the reply is done
   try {
-    await readEvents(await request(url, options));
+    const res = await request(url, options);
+    if (res.ok && sentFiles) sentFiles();
+    await readEvents(res);
   } catch (e) {
     addMessage("note", e.message || String(e));
     setStatus("");
@@ -348,10 +356,13 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
+    const elsewhere = ["history-view", "transcript-view", "memory-view"].some((id) => $(id) && !$(id).hidden);
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
+    if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
+    if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
+    if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
@@ -434,13 +445,27 @@ $("logout-all").addEventListener("click", () => {
 });
 
 // --- text ---
-els.textForm.addEventListener("submit", (e) => {
+els.textForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = els.text.value.trim();
-  if (!text || (busy && !confirming)) return;
+  const files = pendingFiles();
+  if ((!text && !files) || (busy && !confirming)) return;
   unlockAudio();
+  if (!files) {
+    els.text.value = "";
+    send({ text });
+    return;
+  }
+  setBusy(true);  // no second send while photos are still being shrunk
+  await tray().whenReady();
+  setBusy(false);
+  if (!tray().count() && !text) return;  // the only photo couldn't be opened
   els.text.value = "";
-  send({ text });
+  const form = new FormData();
+  if (text) form.append("text", text);
+  tray().appendTo(form);
+  addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
+  send(form, () => tray().clear());
 });
 
 els.yes.addEventListener("click", () => { unlockAudio(); send({ text: "yes" }); });
@@ -575,6 +600,14 @@ async function startRecording() {
     if (blob.size < 1000) { setStatus("Too short. Try again."); return; }
     const form = new FormData();
     form.append("audio", blob, `speech.${extensionFor(type)}`);
+    if (pendingFiles()) {  // push-to-talk takes the pending files along
+      tray().whenReady().then(() => {
+        tray().appendTo(form);
+        if (tray().count()) addMessage("me", tray().summary());
+        send(form, () => tray().clear());
+      });
+      return;
+    }
     send(form);
   });
   recorder.start();
@@ -628,6 +661,8 @@ if ("serviceWorker" in navigator) {
   // A family invite link ("#invite=", family.js): sign in as that person.
   const family = window.HeyClaudeFamily;
   if (family) family.configure({ request });  // the owner's invites: through the router too
+  if (window.HeyClaudeMemory) window.HeyClaudeMemory.configure({ request, show });  // memory.js
+  if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.configure({ request, player });
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {
