@@ -86,6 +86,9 @@ token = "data/mom/spotify_token.json"
 [family]
 dir = "data/mom/users"
 
+[teamchat]                     # off for her anyway (cli.py forces it)
+digest_state_file = "data/mom/teamchat_digests.json"
+
 [watch]
 label = "Mom's app"           # in the watchdog's alerts and Kyle's banner
 status_file = "data/mom/watch_status.json"

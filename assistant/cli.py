@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 
 import anthropic
 
@@ -533,6 +534,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
     register_devteam(registry, config, output_fn)
     register_home_assistant(registry, config, output_fn)
+    register_teamchat(registry, config, output_fn)
     register_spotify(registry, config, output_fn)
     web = config["web"]
     if web["enabled"]:
@@ -635,6 +637,35 @@ def register_home_assistant(registry: ToolRegistry, config: dict,
         secure_entities=ha["secure_entities"],
         cache_seconds=float(ha["cache_seconds"]),
         timeout=float(ha["timeout"])).tools())
+    return True
+
+
+def register_teamchat(registry: ToolRegistry, config: dict, output_fn=print,
+                      environ=os.environ, session=None) -> bool:
+    """chat_* tools (read Slack, Discord, GitHub; file a digest in Notion),
+    for each [teamchat] service that is on and has its token in .env. The
+    owner's registry only: family members never get them (family.py)."""
+    tc = config["teamchat"]
+    if not tc["enabled"]:
+        return False
+    from assistant.tools.teamchat import teamchat_from_config
+
+    notion = None
+    if config["notion"]["enabled"] and environ.get("NOTION_TOKEN"):
+        from assistant.tools.notion import NotionAssignments
+
+        notion = NotionAssignments(config["notion"]["database_id"],
+                                   token=environ["NOTION_TOKEN"],
+                                   timezone=config["assistant"]["timezone"] or None)
+    chat, missing = teamchat_from_config(config, environ=environ, session=session,
+                                         notion=notion)
+    for label, var in missing:  # only services that are turned on
+        output_fn(f"({label} tools off: {var} not set)")
+    if not chat.providers:
+        return False
+    if notion is None:
+        output_fn("(Team chat digests off: they need NOTION_TOKEN)")
+    registry.register(*chat.tools())
     return True
 
 
@@ -911,22 +942,37 @@ def continue_conversation(chat: ClaudeChat, conversation_id: str,
     return True
 
 
+def separate_instance(env_file: str) -> bool:
+    """True for a copy run with its own env file (Mom's, Kai's): any path but
+    this folder's .env, however it is spelled ("./.env", an absolute path)."""
+    return Path(env_file).resolve() != Path(".env").resolve()
+
+
 def main(argv=None) -> int:
     from assistant.config import inherited_env_conflicts, load_config, setup_logging
 
     args = parse_args(argv)
     inherited = dict(os.environ)  # before load_dotenv adds the env file
     config = load_config(args.config, env_file=args.env_file)
-    if args.env_file != ".env" or config["webapp"]["google_connect"]:
+    separate = separate_instance(args.env_file)
+    if separate or config["webapp"]["google_connect"]:
         # a separate instance (e.g. --env-file .env.mom): nothing of the
         # owner's may leak in from the shell that started it
         leaked = inherited_env_conflicts(inherited, args.env_file)
         if leaked:
-            print(f"Refusing to start: {', '.join(leaked)} "
-                  f"{'is' if len(leaked) == 1 else 'are'} set in this shell, "
-                  f"not by {args.env_file}, and would point this instance at "
-                  "someone else's data. Start it from a clean shell (see "
-                  "README.md, \"A Chinese instance\").")
+            message = (f"Refusing to start: {', '.join(leaked)} "
+                       f"{'is' if len(leaked) == 1 else 'are'} set in this shell, "
+                       f"not by {args.env_file}, and would point this instance at "
+                       "someone else's data. Start it from a clean shell (see "
+                       "README.md, \"A Chinese instance\").")
+            print(message)
+            # also in this instance's log: a family task runs hidden
+            # (pythonw), where nobody sees stdout
+            try:
+                setup_logging(config)
+                log.error(message)
+            except Exception:  # a log that can't be opened: stdout only
+                pass
             return 1
     i18n.set_language(config["assistant"]["language"])
     if args.role:
@@ -937,6 +983,11 @@ def main(argv=None) -> int:
         candidate_config(config, args.config)
     log_file = setup_logging(config)
     usage.configure(config["assistant"]["usage_file"])  # API token totals
+    if separate and config["teamchat"]["enabled"]:
+        # a family member's instance: Kyle's team chat tokens may be in the
+        # environment it inherits, and the chat tools are his alone
+        config["teamchat"]["enabled"] = False
+        log.info("Team chat off: a separate instance (--env-file %s)", args.env_file)
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"

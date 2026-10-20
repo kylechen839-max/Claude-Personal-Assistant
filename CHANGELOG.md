@@ -13,6 +13,21 @@
   counts are logged without any text, and your phone app's state shows a
   monthly cost estimate (`month_usd`, owner only). New `BACKLOG.md` lists
   the work left before a public release.
+- Team chat connectors (off by default, owner only): Claude can read Slack
+  channels and threads (user token), Discord channels and threads (bot) and
+  GitHub issues, pull requests and discussions, search them, list and read
+  shared text files (up to 50 KB) and sum them up. Nothing is ever posted.
+  "Save that as a digest" files the summary as a page in a Notion "Chat
+  Digests" database after a spoken yes, once per service, channel and day.
+  New `[teamchat]` settings; tokens `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`,
+  `GITHUB_TOKEN` in `.env`. A family instance never uses them, and a
+  refusal to start is now written to that instance's log.
+- Fixed: lecture notes failed on the default model (Claude Sonnet 5.5) with
+  an HTTP 400, because it rejects forced tool calls. Summaries now use
+  structured outputs (a JSON schema), with more room for the model's
+  thinking and a longer timeout for this background request. This update
+  changes `requirements.txt` (anthropic 0.77 or newer), so the auto-updater
+  skips it: stop the assistant and run `python -m assistant --update`.
 - Health checks: a watchdog (`python -m assistant.watch`, the
   `\HeyClaude\Watch` task every 5 minutes, or the Pi's
   `hey-claude-watch.timer`) checks your app and every family copy:

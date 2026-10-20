@@ -537,8 +537,8 @@ def test_titles_tutor_and_lecture_calls_are_metered(fake_client):
         make_response(text_block('{"title": "Dentist", "summary": "s"}'),
                       usage=make_usage(100, 10)),
         make_response(text_block("Try the chain rule."), usage=make_usage(200, 20)),
-        make_response(tool_use_block("save_lecture_notes", NOTES), stop_reason="tool_use",
-                      usage=make_usage(300, 30)),
+        # lecture notes come back as structured output (JSON text)
+        make_response(text_block(json.dumps(NOTES)), usage=make_usage(300, 30)),
     ]
     fake_client.with_options.return_value = fake_client  # as the SDK's client
     assert ask_title(fake_client, [{"role": "user", "text": "move the dentist"}],
@@ -566,3 +566,16 @@ def test_a_web_session_types_its_server_tools_for_the_routed_model():
         tools.check_mode = check
         assert tools.schemas(FAST)[-1]["type"] == haiku
         assert tools.schemas()[-1]["type"] == "web_search_20260209"
+
+
+def test_a_cut_off_lecture_summary_is_still_metered(fake_client):
+    """The tokens of a refused or cut-off summary are billed too, so they
+    are recorded before summarize() raises."""
+    from assistant.lecture import summarize
+
+    fake_client.queue = [make_response(text_block('{"key_'), stop_reason="max_tokens",
+                                       usage=make_usage(400, 40))]
+    with pytest.raises(RuntimeError, match="cut off"):
+        summarize(fake_client, MAIN, "the transcript")
+    month = usage.METER.months[datetime.now().strftime("%Y-%m")]
+    assert (month[MAIN]["calls"], month[MAIN]["input"]) == (1, 400)

@@ -549,8 +549,9 @@ Four features on top of the seven stages (branch `claude/features`).
   offset, repeats ignored, size caps), a background job (one at a time,
   resumes after restart) that decodes with PyAV in 10-minute windows
   (faster-whisper's own file decoder fails with PyAV 19, and windows keep
-  memory flat), transcribes with progress, summarizes with a forced Claude
-  tool call, finds or creates "Lecture Notes" next to Assignments, and
+  memory flat), transcribes with progress, summarizes with Claude
+  structured outputs (a JSON schema; see "Fix: lecture summaries 400 on
+  Sonnet 5.5"), finds or creates "Lecture Notes" next to Assignments, and
   files a page with inline/block equations, idempotently (Lecture ID
   property + local page record; a retry appends only missing blocks). Assignment-like action items
   are offered with Add buttons. Tested: resume after a lost chunk,
@@ -2919,6 +2920,152 @@ chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
   (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
   252).
 
+## Team chat connectors: Slack, Discord, GitHub (off by default)
+
+Kyle asked for connectors where Claude "can look through something like a
+team chat or an engineering chat" and summarize the ideas and files. This
+is phase A (read and file a digest) plus phase B (registration, config,
+i18n, docs).
+
+- New `assistant/tools/teamchat.py`: `TeamChat` over one provider per
+  service, with `chat_channels`, `chat_read` (a channel or one thread;
+  the last 24 hours, `hours`, or a `day` from `timeutil.resolve_day` on
+  the turn's clock), `chat_search`, `chat_files`, `chat_read_file` and
+  `chat_save_digest`. Claude does the summarizing. Providers in
+  `teamchat_slack.py` (Web API, user token: history, replies, search,
+  files, user names), `teamchat_discord.py` (REST, bot token: guild
+  channels, messages, threads, guild search, attachments) and
+  `teamchat_github.py` (REST issues, pull requests and comments; GraphQL
+  for Discussions). Plain `requests`, injectable `session=`, `timeout`,
+  redirects off, one typed `ChatError` per failure, logging only status
+  codes and exception types. No new dependencies.
+- No posting: there is no tool that writes to Slack, Discord or GitHub.
+  `chat_save_digest` files Claude's summary in Notion ("Chat Digests",
+  found or created beside Assignments like Lecture Notes, or `[teamchat]
+  digest_database_id`), always after a spoken yes, keyed
+  `chat:<service>:<channel>:<date>` in a Digest ID property so a retry
+  finds the page instead of filing a second. `ChatDigestsDB` subclasses
+  `lecture.LectureNotesDB`; `lecture.py` got a small additive refactor
+  (`key_prop`, `blocked_help` and `_schema()` on the class, same
+  behaviour for lectures).
+- Safety: every read tool is `untrusted_output` and `private`, and each
+  result carries the `untrusted_content` mark and a note, so a chat read
+  makes later changes ask. Bounds: 100 messages, 300 characters each,
+  12,000 characters per result (oldest dropped first), 20 files, text
+  files up to 50 KB from files.slack.com / cdn.discordapp.com /
+  media.discordapp.net only (Slack token to files.slack.com only, none
+  to Discord's CDN). `[teamchat] channels` and `github_repos` allowlists
+  (a TOML string is one entry); Slack DMs dropped from search and files;
+  a Discord thread must belong to the named channel. A 401 stops that
+  service until restart; a 429 is waited out without calling. Discord's
+  empty-content messages (Message Content Intent off) are reported as
+  `intent_off`, not "no messages"; guild search's 202 "still indexing"
+  says to retry.
+- `cli.register_teamchat` (called from `build_tools`, so PC, Pi and the
+  owner's web sessions; never family members) prints `(Slack tools off:
+  SLACK_USER_TOKEN not set)` only for a service that is turned on.
+  `config.py` `[teamchat]` defaults and `config.toml` mirror; the three
+  tokens are in `SECRET_ENV_VARS` (round 2: not `ISOLATED_ENV_VARS`), and the log
+  redaction masks Slack, GitHub and Discord token shapes. EN/ZH digest
+  questions in `i18n.py`. `.env.example`, README "Team chat" (setup per
+  service; one sentence on LinkedIn, which doesn't let apps read
+  messages or feeds), SECURITY, MANUAL_TEST, BLOCKERS.
+- Tests: new `tests/test_teamchat.py` (72, offline, fake `requests`
+  sessions with the services' real response shapes: Slack `ok:false`
+  errors and 429 Retry-After, `has_more`/`next_cursor`, Discord
+  newest-first arrays, empty-content messages, 202 code 110000, 401/403,
+  GitHub REST plus a mocked GraphQL POST): end-to-end taint through
+  `ClaudeChat` (`test_chat_read_marks_conversation_untrusted`), untrusted
+  marks on every read, a DEBUG caplog check with no message text, file
+  text, names or tokens at any level, clamped bounds (including
+  `max_messages=0` and `hours=0`), the TOML-string allowlist, file host,
+  type, size, redirect and sign-in-page refusals, digest retry by key
+  across a restart, a declined digest writing nothing, registration and
+  family isolation, token redaction and isolation. `conftest.py` also
+  clears the three token variables (GITHUB_TOKEN is often set in a dev
+  shell or CI). `test_family.py` OWNER_TOOLS and `test_docs.py`
+  OTHER_IDENTIFIERS list the new tool names.
+- Each source change was reverted one at a time (with `__pycache__`
+  cleared) and its tests failed: 32 reverts, all failing as expected.
+  Family isolation needs no code (family registries are built from an
+  allowlist), so that test pins the behaviour rather than a change.
+- Counts (Linux sandbox, Python 3.13): 2196 passed, 48 skipped (master
+  f1eb136 here: 2124 passed, 48 skipped).
+- Review round 2 (8 judge findings, each with a test that fails when its
+  fix is reverted, `__pycache__` cleared between reverts):
+  1. The chat tokens are out of `ISOLATED_ENV_VARS` (still secret): a
+     `GITHUB_TOKEN` in Kyle's user environment would silently stop the
+     family apps. An instance with an `--env-file` other than `.env` turns
+     team chat off instead. The existing refusal (a really isolated
+     variable inherited) is now also written to that instance's log, as
+     its task runs hidden under pythonw. README "A Chinese instance" lists
+     `HA_URL`/`HA_TOKEN` too; `install_family_tasks.ps1`'s header is true
+     again.
+  2. Search hits and file lists arrive newest first; they are sorted
+     oldest first before the 12,000-character cut, so the newest survive.
+  3. An unknown service name is logged as "?", not as typed.
+  4. The digest key uses the resolved service and channel id, so "#eng",
+     "eng" and "C111" (service implied) file one page.
+  5. GitHub issue search sends two queries, with `is:issue` and
+     `is:pull-request` (GitHub's issue search now needs one), merged
+     without duplicates. MANUAL_TEST has a GitHub search check.
+  6. Slack `no_permission` is "no access" for that channel or file, no
+     longer a dead token.
+  7. A Discord search hit inside a thread counts for its parent channel
+     (from the response's `threads`), allowlist included. A search cut to
+     3 servers x 20 channels (Discord) or 5 repos (GitHub) says
+     `"partial": true` with the reason. Plus a test for the GitHub
+     no-repos guard.
+  8. A streamed download answered with an error status is closed.
+  Docs: Slack DMs are "never passed to Claude or logged" (search and
+  files.list do return some to the process, which drops them).
+- Counts after round 2 (Linux sandbox, `GITHUB_TOKEN` unset): 2213
+  passed, 48 skipped; `tests/test_teamchat.py` has 89.
+- Next (phase C, not built): a scheduled daily digest that files itself
+  and pushes a notification to the phone, run on one machine only (the
+  leader check).
+## Fix: lecture summaries 400 on Sonnet 5.5 (2026-10-20)
+
+- **Bug:** `lecture.summarize()` forced its `save_lecture_notes` tool with
+  `tool_choice={"type": "tool"}`. Claude Sonnet 5.5 (the default
+  `[assistant] model`, which the lecture job uses), Opus 5.5, Fable 5.1 and Mythos 5.1
+  answer a forced `tool_choice` (`tool` or `any`) with a 400, so every
+  lecture failed at the summary step with `BadRequestError`.
+- **Fix:** the summary uses structured outputs instead
+  (`output_config.format` with a JSON schema, `NOTES_SCHEMA`; every object
+  sets `additionalProperties: false`), which the claude-api docs name as
+  the replacement when a forced call only existed to get JSON back. No
+  tools are sent. The reply's text block is parsed; a refusal, a
+  `max_tokens` cut or text that isn't a JSON object raises a RuntimeError
+  without quoting the reply, so the job fails as before with the
+  transcript kept, and a retry re-runs only the summary. `max_tokens` is
+  now 16000 (adaptive thinking, on by default on Sonnet 5.5, shares it)
+  with a 600 s timeout for this one background request.
+  `requirements.txt` now needs `anthropic>=0.77` (the first SDK whose
+  `messages.create` takes `output_config`; 0.76 doesn't).
+- **Other call sites:** no other `tool_choice` in `assistant/` (chat, tutor,
+  history, memory and family all leave it at the default `auto`).
+- **Tests:** the `fake_client` fixture (`tests/conftest.py`) now raises the
+  API's 400 for a forced `tool_choice` on the models that reject it, and
+  for an `output_config` schema with an object lacking
+  `additionalProperties: false`. New in `test_lecture.py`: summarize on
+  Sonnet 5.5 / Opus 5.5 / Fable 5.1, the whole pipeline on the default
+  model, six bad replies (not JSON, not an object, no text, tool block
+  only, `max_tokens`, refusal) failing without echoing the reply, a failed
+  summary kept for a retry that doesn't re-transcribe, the schema check,
+  and the fake's own 400. Lecture replies in `test_lecture.py`,
+  `test_webfeatures.py` and `test_features_deploy.py` now have the
+  structured-output shape (thinking block, then JSON text). With only
+  `lecture.py` reverted, the model tests and the default-model pipeline
+  test fail with `BadRequestError: tool_choice: type "tool" and "any" are
+  not supported for this model.`
+- Counts (Linux sandbox, Python 3.13): 2137 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped).
+- Deploy: this update changes `requirements.txt` (anthropic>=0.77), so the
+  auto-updater skips it. Stop the assistant and run `python -m assistant
+  --update`, or `.\.venv\Scripts\python.exe -m pip install -r
+  requirements.txt`, then restart.
+
 ## Cost: prompt caching, Haiku routing and usage tracking (2026-10-20)
 
 Kyle: "build Haiku routing and caching right now."
@@ -3059,3 +3206,13 @@ Kyle: "build Haiku routing and caching right now."
   cleared) and the 27 round-1 reverts, re-run on this tree, all fail.
 - Counts (Linux sandbox, Python 3.13): 2199 passed, 48 skipped (round 1:
   2153; master f1eb136: 2124 passed, 48 skipped).
+- Merge with master (team chat connectors, structured-output lecture
+  notes): `summarize()` now records usage before its refusal/max_tokens
+  checks, so a cut-off summary's tokens are still counted (new test
+  `test_a_cut_off_lecture_summary_is_still_metered`, fails with the record
+  after the checks); the metering test uses the JSON-text reply; Mom's
+  config keeps `[teamchat] digest_state_file` under `data/mom/`; the chat
+  tools are not in `READ_ONLY_TOOLS`, so a Haiku turn that calls one goes
+  to the main model. Counts (Linux sandbox): 2352 passed, 57 skipped, plus
+  the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
+  wake model); JS 232 pass.
