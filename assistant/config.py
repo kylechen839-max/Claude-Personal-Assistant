@@ -182,6 +182,14 @@ DEFAULTS: dict = {
                 "repo_dir": "",             # where to run the CLI; "" = here
                 "timeout": 60,
                 "state_file": "data/devteam.json"},
+    "family": {                     # invite family members (cloud web app)
+        "enabled": False,           # the server profile turns it on
+        "dir": "data/users",        # users.json + one folder per person
+        "max_users": 10,
+        "invite_days": 30,          # an invite link works this long, once
+        "zh_stt_model": "small",    # Whisper for Chinese speakers (piece B)
+        "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",  # (piece B)
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }
@@ -201,6 +209,7 @@ SERVER_PROFILE: dict = {
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
+    "family": {"enabled": True, "dir": "/data/users"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -308,6 +317,8 @@ _SECRET_PATTERNS = [
     re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
     re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
     re.compile(r"\bhc1\.[\w.-]+"),             # failover access tokens
+    re.compile(r"\bhcinv\.[\w-]+"),            # family invite tokens
+    re.compile(r"(#invite=)[^&\s\"']+"),         # ... and invite links
     # OAuth / API fields in JSON, dict reprs, form bodies and URLs
     re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
                r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"

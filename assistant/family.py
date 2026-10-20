@@ -19,8 +19,8 @@ Piece B (per-user Google, speech language) adds to `Family._register_tools`
 and `UserContext`; nothing here needs to change shape for it.
 """
 
-from __future__ import annotations
-
+# No `from __future__ import annotations`: FastAPI must see the real
+# Request class in the route signatures (imported inside register()).
 import hashlib
 import hmac
 import json
@@ -336,3 +336,128 @@ def _rmtree(folder: Path, attempts: int = 20) -> None:
                 log.exception("Family: could not delete a user folder")
                 raise
             time.sleep(0.1)
+
+
+# ---------- HTTP (added by webapp.create_app) ----------
+
+def invite_url(origin: str, token: str) -> str:
+    """The link to send: the token rides in the #fragment, which browsers
+    never send to a server (family.js reads it, clears it and POSTs it)."""
+    return f"{origin.rstrip('/')}/#invite={token}"
+
+
+def register(app, family: "Family | None", web, assistant, error) -> None:
+    """The owner's family routes and the public invite acceptance:
+
+      POST   /api/invites             {name, language, timezone?} -> {url, expires_at}
+      GET    /api/users               the invited people (owner only)
+      DELETE /api/users/{id}          sign them out, delete their history
+      POST   /api/users/{id}/invite   a new link (the old one stops working)
+      POST   /api/invite/accept       {invite} -> session cookie (public)
+
+    Owner routes answer 404 to a family member (and with [family] off).
+    Wrong, expired or used invites count toward the sign-in lockout."""
+    from fastapi import Depends, Request
+    from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
+
+    from assistant import webapp
+
+    async def body_of(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    def origin_of(request: Request) -> str:
+        configured = family.config["webapp"].get("public_origin") if family else ""
+        if configured:
+            return configured
+        # same-origin POST from the page: the browser's Origin is this site
+        origin = request.headers.get("origin")
+        if origin and origin.startswith("https://"):
+            return origin
+        return f"https://{request.url.netloc}"
+
+    def link(request: Request, user: dict, token: str):
+        return {"user": user, "url": invite_url(origin_of(request), token),
+                "expires_at": user["invite_expires"]}
+
+    def off():
+        return error("not found", 404) if family is None else None
+
+    @app.post("/api/invites")
+    async def create_invite(request: Request, session=Depends(webapp.require_owner)):
+        if (e := off()) is not None:
+            return e
+        body = await body_of(request)
+        try:
+            user, token = await run_in_threadpool(
+                family.invite, body.get("name"), body.get("language") or "en",
+                body.get("timezone") or "")
+        except FamilyError as e:
+            return error(str(e), e.status)
+        return link(request, user, token)
+
+    @app.get("/api/users")
+    def list_users(session=Depends(webapp.require_owner)):
+        if (e := off()) is not None:
+            return e
+        return {"users": family.members(), "max_users": family.max_users}
+
+    @app.post("/api/users/{uid}/invite")
+    async def new_link(uid: str, request: Request,
+                       session=Depends(webapp.require_owner)):
+        if (e := off()) is not None:
+            return e
+        try:
+            user, token = await run_in_threadpool(family.reinvite, uid)
+        except FamilyError as e:
+            return error(str(e), e.status)
+        return link(request, user, token)
+
+    def sign_out(uid: str) -> None:
+        """Called with the family lock held, before their files go."""
+        sids = web.store.revoke_user(uid)
+        live = getattr(app.state, "voice_conversations", {})
+        for sid in sids:
+            entry = live.get(sid)
+            if entry is not None:
+                try:
+                    entry[0].end("signed_out")
+                except Exception:
+                    log.exception("Family: hanging up a voice conversation failed")
+        assistant.drop_user(uid)
+
+    @app.delete("/api/users/{uid}")
+    async def remove_user(uid: str, session=Depends(webapp.require_owner)):
+        if (e := off()) is not None:
+            return e
+        try:
+            removed = await run_in_threadpool(family.remove, uid, sign_out)
+        except OSError:
+            return error("couldn't delete their files; try again", 500)
+        if not removed:
+            return error("not found", 404)
+        return {"ok": True}
+
+    @app.post("/api/invite/accept")
+    async def accept(request: Request):
+        if (e := off()) is not None:
+            return e
+        given = (await body_of(request)).get("invite")
+        sid = await run_in_threadpool(family.redeem, given, web.store.create)
+        if sid is None:  # wrong, expired or already used: like a wrong token
+            ip = web.client_ip(request)
+            if web.limiter.blocked(ip):
+                return error("too many attempts; try again later", 429)
+            delay = web.limiter.fail(ip)
+            log.warning("Web: a wrong, expired or used invite")
+            if delay:
+                await webapp._wait(delay)
+            return error("this invite link has expired or was already used", 401)
+        response = JSONResponse({"ok": True})
+        webapp.set_session_cookie(response, web.token, sid, web.store.epoch)
+        log.info("Web: family sign-in ok (%s)", web.store.user(sid))
+        return response

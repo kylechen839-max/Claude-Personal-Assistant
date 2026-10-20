@@ -351,6 +351,7 @@ async function refreshState() {
     const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
+    if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
@@ -624,7 +625,13 @@ if ("serviceWorker" in navigator) {
 }
 
 (async function start() {
-  try { await detectFailover(); } catch (e) { router = null; }
+  // A family invite link ("#invite=", family.js): sign in as that person.
+  const family = window.HeyClaudeFamily;
+  if (family && await family.acceptInvite(window)) return;  // the page reloads
+  // A family member's phone talks to this server only (no Pi/PC failover).
+  if (!(family && family.isFamilyAccount(window))) {
+    try { await detectFailover(); } catch (e) { router = null; }
+  }
   if (router) { await router.select(); renderBackends(); }
   // A sign-in link may carry the token after "#token=" (never sent to the server).
   const match = location.hash.match(/token=([^&]+)/);

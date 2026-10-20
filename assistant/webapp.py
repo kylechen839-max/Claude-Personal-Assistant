@@ -1739,6 +1739,11 @@ def build_assistant(config: dict, tts_name: str | None = None,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
                           recorder=recorder, language=a["language"])
 
+    family = None
+    if config["family"]["enabled"]:
+        from assistant.family import Family
+
+        family = Family(config, client=client)  # invited people (family.py)
     stt = config["stt"]
     tts_cfg = config["tts"]
     return WebAssistant(chat_factory,
@@ -1748,7 +1753,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
                         confirm_timeout=config["webapp"]["confirm_timeout"],
-                        history=store, memory=memory)
+                        history=store, memory=memory, family=family)
 
 
 def serve(config: dict, host: str | None = None, port: int | None = None,

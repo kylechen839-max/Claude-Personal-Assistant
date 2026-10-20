@@ -159,6 +159,14 @@ claude_command = "claude"
 repo_dir = ""                 # folder to run Claude Code in ("" = this one)
 timeout = 60
 
+[family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
+enabled = false               # the server profile (Render) turns it on
+dir = "data/users"            # users.json + one history folder per person (Render: /data/users)
+max_users = 10                # people you can invite
+invite_days = 30              # an invite link works this many days, and only once
+zh_stt_model = "small"        # Whisper model for Chinese-speaking family members
+zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

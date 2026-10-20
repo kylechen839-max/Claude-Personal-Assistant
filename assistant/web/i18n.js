@@ -84,11 +84,29 @@
     "Google account connected.": "Google 账户已连接。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
+    "Invite someone": "邀请家人",
+    "Name": "名字",
+    "Language": "语言",
+    "Time zone": "时区",
+    "Create invite link": "生成邀请链接",
+    "Invite link": "邀请链接",
+    "Invite link ready.": "邀请链接已准备好。",
+    "Invite link copied.": "邀请链接已复制。",
+    "Copy the invite link below.": "请复制下面的邀请链接。",
+    "Active": "已加入",
+    "Invited": "已邀请",
+    "New link": "新链接",
+    "Remove": "移除",
+    "This invite link has expired or was already used. Ask for a new one.":
+      "这个邀请链接已过期或已经用过了，请再要一个新的。",
+    "this invite link has expired or was already used": "这个邀请链接已过期或已经用过了。",
+    "Couldn't reach the server. Open the link again.": "连不上服务器，请再打开一次链接。",
   };
   const PATTERNS = [
     [/^Working: (.+)…$/, "正在处理：$1…"],
     [/^Error (\d+)$/, "错误 $1"],
     [/^Microphone unavailable: (.*)$/, "麦克风不可用：$1"],
+    [/^Remove (.+)\? This deletes their conversations\.$/, "要移除$1吗？这会删除他们的对话记录。"],
     [/^Voice mode couldn't start: (.*)$/, "语音模式无法启动：$1"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];

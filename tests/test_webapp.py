@@ -147,7 +147,8 @@ def test_login_sets_a_strict_cookie(make_app):
     assert TOKEN.lower() not in cookie  # the cookie is signed, not the token
     assert client.get("/api/state").json() == {
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
-        "history": False, "conversation": None}
+        "history": False, "conversation": None, "owner": True, "family": False,
+        "language": "en"}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -681,6 +682,7 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
           "/silence.wav", "/healthz", "/backend-router.js", "/i18n.js",
+          "/family.js",  # accepts an #invite= link before sign-in
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
@@ -700,7 +702,8 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
                for m in r.methods if r.path not in PUBLIC
                and not r.path.startswith("/icon-")
                and r.path not in ("/static/vad/{name}", "/earcons/{name}.wav")
-               and r.path not in ("/api/login", "/api/logout")]
+               and r.path not in ("/api/login", "/api/logout",
+                                  "/api/invite/accept")]  # sign-in routes
     assert len(private) >= 5
     for path, method in private:
         url = path.replace("{rid}", "1-x")
@@ -1182,21 +1185,22 @@ def test_limiter_memory_is_bounded_under_a_flood():
 
 
 def test_a_failed_save_of_a_sign_out_is_retried(tmp_path, caplog):
-    from pathlib import Path
+    import os
 
     path = tmp_path / "sessions.json"
     store = webapp.SessionStore(path)
     keep, gone = store.create(), store.create()
-    real_replace = Path.replace
+    real_replace = os.replace
     broken = {"on": True}
 
-    def flaky_replace(self, target):
+    def flaky_replace(src, dst):
         if broken["on"]:
             raise OSError("disk full")
-        return real_replace(self, target)
+        return real_replace(src, dst)
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(Path, "replace", flaky_replace)
+        # the file is written with google_auth.write_private (os.replace)
+        mp.setattr(os, "replace", flaky_replace)
         with caplog.at_level("ERROR"):
             store.revoke(gone)
         assert "sign-out may be undone" in caplog.text
@@ -1342,4 +1346,4 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and "hey-claude-shell-v5" in sw
+    assert '"/i18n.js"' in sw and "hey-claude-shell-v6" in sw
