@@ -89,5 +89,7 @@ body.voice-open { overflow: hidden; }
 }
 
 .voice-meter { margin-top: .6rem; }
+/* the follow-up window after a reply: the meter is lit while it waits */
+.voice.follow-up .voice-meter { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .voice[data-state="connecting"] .voice-meter, .voice[data-state="ended"] .voice-meter,
 .voice.muted .voice-meter { opacity: .35; }

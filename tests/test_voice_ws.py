@@ -137,6 +137,17 @@ def test_forwarded_host_needs_a_trusted_proxy(make_voice):
         assert json.loads(ws.receive_text())["type"] == "ready"
 
 
+def test_client_settings_barge_in_and_follow_up():
+    """[voice] barge_in = "off" (or false) and follow_up_seconds reach the page."""
+    v = voice_ws.voice_settings({"barge_in": "off", "follow_up_seconds": 2.5})
+    assert voice_ws.client_settings(v)["barge_in"] is False
+    assert voice_ws.client_settings(v)["follow_up_ms"] == 2500
+    v = voice_ws.voice_settings({"barge_in": False, "follow_up_seconds": 0})
+    assert voice_ws.client_settings(v)["barge_in"] is False
+    assert voice_ws.client_settings(v)["follow_up_ms"] == 0
+    assert voice_ws.client_settings(voice_ws.voice_settings(None))["barge_in"] is True
+
+
 def test_origin_rules():
     ok = voice_ws.origin_allowed
     assert ok({"origin": "https://pc.tail1234.ts.net", "host": "pc.tail1234.ts.net"})
@@ -161,6 +172,8 @@ def test_streamed_turn_over_the_socket(make_voice):
         assert ready["type"] == "ready"
         assert ready["settings"]["silence_ms"] == 700
         assert ready["settings"]["barge_in_ms"] == 250
+        assert ready["settings"]["barge_in"] is True
+        assert ready["settings"]["follow_up_ms"] == 5000
         ws.send_bytes(utterance(1))
         msgs = receive(ws, "turn_done")
         ws.send_text(json.dumps({"type": "end"}))

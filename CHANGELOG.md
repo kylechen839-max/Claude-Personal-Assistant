@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Interrupt by talking: on the PC, say "Hey Claude" while it is answering
+  and it stops and listens (`[wake] barge_in = "wake_word"`, default);
+  `barge_in = "voice"` lets you just talk (echo gate; best with headphones
+  or an echo-cancelling speakerphone). "Hey Claude, stop" just stops;
+  Claude remembers roughly the part you heard; talking over a yes/no
+  question is a no; a reply saying "Claude" can't wake itself. On the
+  phone, a soft cue and "Still listening…" (还在听…) show the follow-up
+  window; `[voice] barge_in = "off"` for car speakers.
+  Every voice can be stopped mid-reply (pyttsx3 on Linux/Pi renders each
+  reply first), and `[wake] barge_in` accepts `false` or any case.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

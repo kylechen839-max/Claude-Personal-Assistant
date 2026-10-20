@@ -33,11 +33,12 @@ def tts_clip(tmp_path, text, name):
     engine = Pyttsx3TTS(rate=160)  # kept alive until the file is read
     for attempt in range(3):
         # pyttsx3's eSpeak driver now and then leaves an empty file (its
-        # callback hits a dead weakref); rendering again fixes it
+        # callback hits a dead weakref), or none at all on a busy machine;
+        # rendering again fixes it
         engine.save_to_file(text, path)
         try:
             clip = audio.load_audio(path)
-        except EOFError:
+        except (EOFError, FileNotFoundError):
             clip = np.zeros(0, dtype=np.float32)
         if len(clip):
             break

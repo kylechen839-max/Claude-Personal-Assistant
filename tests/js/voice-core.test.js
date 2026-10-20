@@ -250,3 +250,154 @@ test("audio chunk text reaches the subtitles", () => {
   c.onServer({ type: "audio", turn: 1, index: 0, text: "Pretty light today." });
   assert.deepEqual(log.captions.at(-1), { who: "audio", text: "Pretty light today.", append: true });
 });
+
+// --- follow-up window and the barge-in option ---
+
+function timedHarness(options) {
+  const log = { states: [], sent: [], utterances: [], stops: 0, followUps: [] };
+  const timers = new Map();
+  let nextId = 1;
+  const fx = {
+    setState: (s) => log.states.push(s),
+    send: (m) => log.sent.push(m),
+    sendUtterance: (turn, audio) => log.utterances.push({ turn, audio }),
+    stopPlayback: () => { log.stops++; return { index: 0, fraction: 0.3 }; },
+    followUp: (open) => log.followUps.push(open),
+    setTimer: (fn, ms) => { const id = nextId++; timers.set(id, { fn, ms }); return id; },
+    clearTimer: (id) => timers.delete(id),
+  };
+  const c = new VC.TurnController(fx, options);
+  const fire = () => { for (const [id, t] of [...timers]) { timers.delete(id); t.fn(); } };
+  return { c, log, timers, fire };
+}
+
+function playReply(c, turn) {
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn, index: 0 });
+  c.onServer({ type: "turn_done", turn });
+  c.onPlaybackIdle();
+}
+
+test("follow-up: after a reply plays, the window opens; silence closes it quietly", () => {
+  const { c, log, timers, fire } = timedHarness({ followUpMs: 5000 });
+  c.start();
+  playReply(c, 1);
+  assert.equal(c.state, "listening");
+  assert.equal(c.followUp, true);
+  assert.deepEqual(log.followUps, [true]);
+  assert.deepEqual([...timers.values()].map((t) => t.ms), [5000]);
+  fire(); // 5 s of silence
+  assert.equal(c.followUp, false);
+  assert.deepEqual(log.followUps, [true, false]);
+  assert.equal(c.state, "listening"); // still a conversation; no sound, no send
+  assert.equal(log.sent.length, 0);
+});
+
+test("follow-up: speaking in the window is the next turn, no wake word", () => {
+  const { c, log, timers } = timedHarness({ followUpMs: 5000 });
+  c.start();
+  playReply(c, 1);
+  c.onVad({ type: "speechStart" });
+  assert.deepEqual(log.followUps, [true, false]); // closed as he started
+  assert.equal(timers.size, 0);
+  c.onVad(speechEnd());
+  assert.equal(log.utterances.length, 2);
+  assert.equal(c.state, "thinking");
+});
+
+test("follow-up: not after a barge-in, a yes/no question, or a reply with no audio", () => {
+  const { c, log } = timedHarness({ followUpMs: 5000 });
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onVad({ type: "speechConfirmed" }); // barge-in
+  assert.equal(c.state, "listening");
+  assert.deepEqual(log.followUps, []);
+  // a delete question: waiting for the answer is not a follow-up window
+  c.onVad(speechEnd()); // turn 2
+  c.onServer({ type: "confirm", turn: 2, question: "Delete it?" });
+  c.onServer({ type: "audio", turn: 2, index: 0, question: true });
+  c.onPlaybackIdle();
+  assert.equal(c.state, "listening");
+  assert.deepEqual(log.followUps, []);
+  c.onVad(speechEnd()); // "yes"
+  c.onServer({ type: "confirm_answer", turn: 2, text: "yes" });
+  assert.equal(c.awaitingAnswer, false);
+  c.onServer({ type: "audio", turn: 2, index: 1 }); // "Done."
+  c.onServer({ type: "turn_done", turn: 2 });
+  c.onPlaybackIdle();
+  assert.deepEqual(log.followUps, [true]); // only after the final reply
+  // a turn that sent no audio (nothing heard) opens no window
+  const quiet = timedHarness({ followUpMs: 5000 });
+  quiet.c.start();
+  quiet.c.onVad(speechEnd());
+  quiet.c.onServer({ type: "turn_done", turn: 1 });
+  assert.equal(quiet.c.state, "listening");
+  assert.deepEqual(quiet.log.followUps, []);
+});
+
+test("follow-up: off with followUpMs 0; pause and end close an open window", () => {
+  const off = timedHarness({ followUpMs: 0 });
+  off.c.start();
+  playReply(off.c, 1);
+  assert.deepEqual(off.log.followUps, []);
+  const { c, log, timers } = timedHarness({ followUpMs: 5000 });
+  c.start();
+  playReply(c, 1);
+  c.pause();
+  assert.deepEqual(log.followUps, [true, false]);
+  assert.equal(timers.size, 0);
+  c.resume();
+  playReply(c, 2);
+  c.end();
+  assert.deepEqual(log.followUps, [true, false, true, false]);
+});
+
+test("follow-up: a reply that ends before turn_done still opens the window", () => {
+  const { c, log } = timedHarness({ followUpMs: 3000 });
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onPlaybackIdle(); // played; the server isn't done yet
+  assert.equal(c.state, "thinking");
+  assert.deepEqual(log.followUps, []);
+  c.onServer({ type: "turn_done", turn: 1 });
+  assert.equal(c.state, "listening");
+  assert.deepEqual(log.followUps, [true]);
+});
+
+test("barge-in on (default): talking over the reply stops it and cancels the turn", () => {
+  const { c, log } = timedHarness({});
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  assert.equal(log.stops, 1);
+  assert.deepEqual(log.sent, [{ type: "interrupt", turn: 1, index: 0, fraction: 0.3 }]);
+  // the rest of the cancelled turn's audio is never played
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 1 }), false);
+  c.onVad(speechEnd());
+  assert.equal(log.utterances.at(-1).turn, 2);
+});
+
+test("barge-in off: the mic is ignored while a reply plays, heard again after", () => {
+  const { c, log } = timedHarness({ bargeIn: false, followUpMs: 5000 });
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  assert.equal(c.state, "speaking");
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  c.onVad(speechEnd()); // its own echo, as a whole "utterance"
+  assert.equal(log.stops, 0);
+  assert.equal(log.sent.length, 0);
+  assert.equal(log.utterances.length, 1);
+  assert.equal(c.state, "speaking");
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle();
+  assert.equal(c.state, "listening");
+  assert.deepEqual(log.followUps, [true]);
+  c.onVad(speechEnd()); // the follow-up is heard
+  assert.equal(log.utterances.length, 2);
+});

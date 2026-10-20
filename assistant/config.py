@@ -57,6 +57,12 @@ DEFAULTS: dict = {
         "no_speech_timeout": 5,
         "follow_up_seconds": 5,  # listen this long after a reply; 0 = off
         "follow_up_chime": True,  # soft blip when the follow-up window opens
+        # talking over a reply stops it: "wake_word" (say the wake word; fine
+        # with speakers), "voice" (any speech louder than the reply's echo;
+        # headphones or an echo-cancelling speakerphone) or "off"
+        "barge_in": "wake_word",
+        "barge_in_ms": 400,  # "voice": this much speech over a reply stops it
+        "barge_in_echo_ratio": 2.5,  # "voice": that much louder than its echo
         "vad_min_threshold": 0.015,
         "mic_device": "",  # sounddevice name or index; "" = default
     },
@@ -142,7 +148,9 @@ DEFAULTS: dict = {
         "silence_ms": 700,          # this long a pause ends your turn
         "min_utterance_ms": 300,    # shorter sounds are ignored
         "max_utterance_s": 30,      # a turn is cut off after this long
+        "barge_in": "voice",        # talking over a reply stops it; "off" = never
         "barge_in_ms": 250,         # talk this long over a reply to stop it
+        "follow_up_seconds": 5,     # "still listening" cue after a reply; 0 = off
         "vad_threshold": 0.5,       # Silero speech probability, 0-1
         "idle_timeout": 120,        # seconds of quiet before it ends
         "max_session_minutes": 30,

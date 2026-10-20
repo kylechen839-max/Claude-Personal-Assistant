@@ -122,27 +122,43 @@ class KokoroTTS:
 
         pending: queue.Queue = queue.Queue(maxsize=2)
         done = object()
+        quit_render = threading.Event()  # interrupted: render no more
+
+        def put(item) -> bool:
+            while not quit_render.is_set():
+                try:
+                    pending.put(item, timeout=0.1)
+                    return True
+                except queue.Full:
+                    continue
+            return False
 
         def render():
             try:
                 for sentence in split_sentences(text) or [text]:
-                    pending.put(self.synthesize(sentence))
+                    if quit_render.is_set() or not put(self.synthesize(sentence)):
+                        return
             except BaseException as e:  # re-raised in the playing thread
-                pending.put(e)
-            pending.put(done)
+                put(e)
+            put(done)
 
         threading.Thread(target=render, name="kokoro-render", daemon=True).start()
         started = False
-        while (item := pending.get()) is not done:
-            if isinstance(item, BaseException):
-                raise item
-            samples, sr = item
-            if not len(samples):
-                continue
-            if not started and self.on_audio_start:
-                self.on_audio_start()
-            started = True
-            audio.play(samples, sr)
+        try:
+            while (item := pending.get()) is not done:
+                if isinstance(item, BaseException):
+                    raise item
+                if audio.playback_stopped():
+                    return  # barge-in: don't wait for the rest to render
+                samples, sr = item
+                if not len(samples):
+                    continue
+                if not started and self.on_audio_start:
+                    self.on_audio_start()
+                started = True
+                audio.play(samples, sr)
+        finally:
+            quit_render.set()
 
 
 def kokoro_problem(model: str | Path | None, voices: str | Path | None) -> str | None:

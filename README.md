@@ -91,6 +91,44 @@ mode off, and then a conversation ends on "goodbye" or after
 chimes). Ctrl+C quits. Deleting a calendar event always asks "yes or no?"
 first; that answer goes to the question, not to the follow-up window.
 
+**Interrupting a reply (barge-in):** say "Hey Claude" while it is talking
+and it stops at once, plays the chime and listens to your new request, like
+an Echo. "Hey Claude, stop" (or "never mind", "别说了") just stops it
+without asking Claude anything. Setting `[wake] barge_in`:
+- `"wake_word"` (default): only the wake word interrupts. Safe with
+  ordinary speakers: the wake model doesn't fire on the assistant's voice.
+- `"voice"`: just start talking. It listens while it speaks and stops when
+  it hears `barge_in_ms` (400 ms) of speech that is `barge_in_echo_ratio`
+  (2.5) times louder than its own voice coming back from the speakers
+  (measured at the start of every reply, so it adapts to the volume). Best
+  with headphones or an echo-cancelling USB speakerphone; with speakers next
+  to the mic it may not hear you over itself (raise the volume of your voice,
+  not the speaker), or may cut itself off (raise `barge_in_echo_ratio`).
+  The echo is measured over the first 600 ms after the sound card's reported
+  latency, so it allows for an echo that comes back up to about half a
+  second later than reported. Bluetooth speakers often lag more than that
+  (and more than they report): if a reply on a Bluetooth speaker cuts
+  itself off within its first second, use wired speakers, headphones or
+  `"wake_word"`; raising `barge_in_echo_ratio` doesn't fix a late echo.
+- `"off"`: the mic stays closed while it speaks, as before (`false` works
+  too; the value isn't case-sensitive).
+
+Every voice can be stopped mid-reply: Kokoro, Piper, eSpeak and ElevenLabs
+play through the app's own player; pyttsx3 is stopped from its word
+callback on Windows (SAPI), and on Linux / the Pi each reply is first
+rendered to a file and then played (eSpeak's own playback can't be cut
+short), which adds a moment before it starts. The echo is measured after
+the sound card's reported output + input latency (0.35 s if it reports
+none), so a slow card doesn't make the reply's echo count as you talking.
+
+What you said takes over as the next turn of the same conversation, and
+Claude remembers only about the part of its answer you heard (estimated from
+how long it played). Talking over a "yes or no?" question is always a no;
+ask again if you meant yes. A reply that itself says "Claude" (reading out
+an email, say) can't wake the assistant with its own voice: the wake word is
+ignored for that reply. With `--audio-file` and barge-in on, the file is
+read in real time while replies play, the way a mic would hear it.
+
 **Timings:** every turn writes one line to `logs/assistant.log`, e.g.
 `Turn timings from wake: end of speech +2.10 s, transcript +0.60 s, Claude
 reply +1.80 s, first audio +0.10 s; wake to first audio 4.60 s (end of
@@ -211,6 +249,7 @@ you are most likely to tune:
 | `[wake] vad_min_threshold` | 0.015 | Minimum loudness counted as speech; raise in a noisy room |
 | `[wake] no_speech_timeout` | 5 | Seconds to wait for a command after the wake word |
 | `[wake] follow_up_seconds` | 5 | Follow-up window after a reply; 0 = off |
+| `[wake] barge_in` | "wake_word" | Interrupt a reply: "wake_word", "voice" (just talk; headphones) or "off" |
 | `[wake] mic_device` | "" | Mic index (0 included) or part of its name, for wake and push-to-talk; `--check` lists them and shows the one that will open |
 | `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
 | `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
@@ -407,7 +446,15 @@ Claude as a new request.
 - Hearing itself: the page asks the browser for echo cancellation, noise
   suppression and auto gain, and needs a more confident detection while a
   reply plays. If it still interrupts itself on the speaker, raise
-  `vad_threshold` (e.g. 0.7) or use earphones.
+  `vad_threshold` (e.g. 0.7) or use earphones; in a car whose speakers it
+  keeps hearing, `barge_in = "off"` makes replies play to the end (the mic
+  is ignored while one plays, and listens again right after).
+- Follow-ups: when a reply has finished playing it plays a soft low note and
+  shows **Still listening…** (还在听…) with the mic meter lit for
+  `follow_up_seconds` (5; `0` = no cue). Just ask the next thing. If you say
+  nothing the label quietly goes back to **Listening**; the conversation
+  stays open until `idle_timeout`. There is no cue after a yes/no question
+  (it is waiting for your answer) or after you interrupted a reply.
 - Voice detection runs on the phone: the Silero VAD neural model in
   WebAssembly (onnxruntime-web, served by the app itself from
   `assistant/web/vad/`, about 14 MB, cached after the first load). If it

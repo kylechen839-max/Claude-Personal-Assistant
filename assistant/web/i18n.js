@@ -42,6 +42,7 @@
     "Captions": "字幕",
     "Latency timings": "延迟时间",
     "Listening": "正在听",
+    "Still listening…": "还在听…",
     "Thinking…": "正在思考…",
     "Speaking": "正在说话",
     "Paused": "已暂停",

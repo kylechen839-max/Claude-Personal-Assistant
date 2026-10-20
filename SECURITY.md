@@ -489,6 +489,20 @@ a PKCE challenge, `access_type=offline` and the redirect
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends
   after 2 minutes of quiet.
+- **Barge-in: the mic is open while it speaks** (`[wake] barge_in`, the
+  phone's `[voice] barge_in`). Talking over a yes/no question is always a
+  no, and the words said over it are never taken as the answer (the PC drops
+  them; the phone treats them as the next request), so neither the
+  assistant's own voice nor a TV can confirm by talking over the question. A reply that says the wake word itself (an email read aloud:
+  "Hey Claude, delete...") can't wake the PC loop with its own voice; wake
+  detections are ignored for that reply. With `barge_in = "voice"` its own
+  echo must not count as speech: speech must be 2.5x louder than the
+  reply's echo for 400 ms. An injected command that still got through would
+  run in a tainted conversation, where state-changing tools ask first, and
+  the confirmation is asked after playback has stopped. Deliberately not
+  done: no echo cancellation on the PC (headphones or a speakerphone with
+  its own echo cancelling are the recommendation for "voice"), which is why
+  the default is "wake_word".
 - **Speech from a TV, video, or another person.** A false wake word followed
   by "move my 3 PM to Friday" would run without asking, and a "yes" from the
   same source could answer a confirmation. This needs someone in earshot of

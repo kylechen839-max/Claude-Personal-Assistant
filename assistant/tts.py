@@ -60,6 +60,9 @@ class Pyttsx3TTS:
         self.sapi_files = on_windows if sapi_files is None else sapi_files
         self._engine = None
         self.on_audio_start = None
+        # set by barge-in: obey audio.stop_playback() (on Windows from the
+        # started-word callback; elsewhere replies are rendered, then played)
+        self.stoppable = False
 
     def _new_engine(self):
         from pyttsx3.engine import Engine  # pyttsx3.init() would reuse one
@@ -82,16 +85,58 @@ class Pyttsx3TTS:
         return self._engine
 
     def speak(self, text: str) -> None:
+        if audio.playback_stopped():
+            return
+        if self.stoppable and sys.platform != "win32" and self._speak_rendered(text):
+            return
         engine = self.engine
         hook = self.on_audio_start
-        token = (engine.connect("started-utterance", lambda name=None: hook())
-                 if hook else None)
+
+        def on_word(name=None, location=None, length=None):
+            # barge-in (audio.stop_playback() from the mic thread): pyttsx3
+            # may only be stopped from its own loop, i.e. from a callback
+            if audio.playback_stopped():
+                engine.stop()
+
+        tokens = []
+        if self.stoppable:
+            tokens.append(engine.connect("started-word", on_word))
+        if hook:
+            tokens.append(engine.connect("started-utterance", lambda name=None: hook()))
         try:
             engine.say(text)
             engine.runAndWait()
         finally:
-            if token is not None:
+            for token in tokens:
                 engine.disconnect(token)
+
+    def _speak_rendered(self, text: str) -> bool:
+        """Barge-in off Windows: eSpeak's driver plays through a blocking
+        `aplay` that engine.stop() can't cut short, so render to a file and
+        play it with audio.play, which stop_playback() does stop. False if
+        rendering failed (then it is spoken the usual, unstoppable way)."""
+        import contextlib
+        import io
+        import tempfile
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "say.wav"
+                # the eSpeak driver prints "Audio saved to ..." every time
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.save_to_file(text, path)
+                samples, sr = audio.read_wav(path)
+        except Exception:
+            log.warning("pyttsx3 couldn't render to a file; this reply can't "
+                        "be interrupted", exc_info=True)
+            return False
+        if not len(samples):
+            log.warning("pyttsx3 rendered no audio; this reply can't be interrupted")
+            return False
+        if self.on_audio_start:
+            self.on_audio_start()
+        audio.play(samples, sr)
+        return True
 
     def save_to_file(self, text: str, path: str | Path) -> None:
         if self.sapi_files:
