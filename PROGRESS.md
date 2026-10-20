@@ -59,6 +59,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
+| `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
+| `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
@@ -1902,6 +1905,138 @@ Render/Docker changes) comes separately.
   cached by the service worker (v10).
 - Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
 
+## Chat attachments: the "+" button (2026-10-20)
+
+- **What:** a **+** left of the phone app's text field opens a sheet (Take
+  photo / Photo library / Choose file). Picked files show as chips above
+  the field (thumbnail or file name, × to remove; + disabled at 4) and go
+  with the next typed message or push-to-talk recording as `attachment`
+  parts of `/api/turn`'s form. Photo-only messages work too. Hands-free
+  voice mode is unchanged (out of scope).
+- **Server:** new `assistant/attachments.py` sniffs the type from the first
+  bytes (JPEG, PNG, WebP, GIF, PDF, UTF-8 text without control bytes),
+  caps the count (4) and sizes (photos `[tutor] max_image_mb`, PDF/text new
+  `[webapp] max_attachment_mb` = 10, both under `max_upload_mb`; text 200k
+  characters), and builds Anthropic blocks: photos through the tutor's
+  `prepare_image` (now with an `allowed` map so GIF becomes PNG; the
+  tutor's own behaviour is unchanged) as base64 `image` blocks, PDFs as
+  base64 `document` blocks, text as `document` blocks with a text source
+  (so the memory summary's `transcript()` never includes file text).
+  Bad files get a friendly 400 before anything reaches Claude.
+- **Chat:** `ClaudeChat.ask(..., attachments=[blocks])` sends them before
+  the text; saved history and the event log get only a marker
+  (`[photo]`, `[file: name.pdf]`), so resume and summaries see plain text.
+  The turn is tainted (`untrusted_attachments`, before any tool runs; only
+  `reset()` clears it), replies stay out of the DEBUG log while an
+  attachment is in history, `_trim_history` now accepts a user turn with
+  attachments as the first message (`is_user_turn`, also used by
+  `/api/state`'s turn count), and older attachments become a text marker
+  once the conversation's base64 passes 20 MB (the API caps requests at
+  32 MB). INFO logs: count, kinds and sizes only.
+- **Page:** `assistant/web/attachments.js` (public like `family.js`, also
+  in CloudGuard's `PUBLIC_GET` so it loads before sign-in) holds the tray
+  and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
+  now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
+  is unchanged). Chinese strings for every new label and the server's
+  messages in `i18n.js`. Phone cache v11 with `/attachments.js` in the
+  shell.
+- **Cloud:** `/api/turn` was already an upload path capped at
+  `max_upload_mb` (4 MB there); the form parser now allows 6 files (the
+  recording, 4 attachments, one more to say "at most 4").
+- **Tests:** `tests/test_attachments.py` (28): sniffing and names, EXIF
+  stripped, block shapes, limits; `/api/turn` with photo + text, PDF + text
+  file, photo only, push-to-talk + photo; friendly 400s (5 files, wrong
+  magic, oversized PDF and photo, a form with 8 files); history marker and
+  no bytes in SQLite; summary has Kyle's words only and is stored
+  untrusted; a `confirm_if_untrusted` tool asks after an attachment (and
+  not before); caplog: no names or contents at INFO, no reply at DEBUG;
+  trimming keeps an attachment turn first; old attachments give way;
+  family member's own chat and store; CloudGuard accepts a small photo,
+  413s an oversized PDF, serves `/attachments.js` before sign-in; page and
+  i18n checks. `tests/js/attachments.test.mjs` (6, node:vm): kinds, the
+  4-file limit, chips/×/disabled +, shrunk JPEG sent, a broken photo
+  dropped. Checked failing with the source change reverted: taint line
+  (4 fail), marker (2), trim (1), private log (1), drop-old (1), control
+  byte sniff (2), webapp.py from master (18), the `PUBLIC_GET` entry (1),
+  JS limit/disable (2).
+- **Counts** (Linux sandbox, Python 3.13): pytest 1710 -> 1738 passed,
+  46 skipped. JS: attachments 6, agent-dashboard 126, backend-router 33,
+  devhub 12, family 9, i18n 11, voice-core 14, all passing. Real iPhone
+  camera/picker behaviour is not tested here (MANUAL_TEST "Attachments").
+- **Round 2 (judge's five low findings, all fixed):**
+  1. A failed turn no longer strips older attachments:
+     `_drop_old_attachments` returns what it replaced and `ask()`'s
+     rollback puts the blocks back (`test_a_failed_turn_keeps_the_older_
+     attachments`; fails with the chat.py change reverted).
+  2. Claude's 400 on an attachment turn (`anthropic.BadRequestError`) now
+     says "That file is too long for Claude (PDFs up to 100 pages)."
+     (`i18n.py` `file_too_long`, Chinese too) instead of the generic API
+     error; the turn is still rolled back and a 400 without files is still
+     the generic error. INFO/WARNING logs the count and HTTP status only.
+     PDFs with more than 100 `/Type /Page` objects are refused before
+     upload to Claude ("A PDF is over 100 pages"; a lower bound, see
+     SECURITY.md). Tests: `test_a_file_claude_refuses_gets_its_own_
+     sentence` (en, zh; fails with webapp.py or i18n.py reverted),
+     `test_pdfs_over_100_pages_are_refused_up_front` (fails with
+     attachments.py reverted).
+  3. A malformed form says plain "bad request"; "attach at most 4 files"
+     only when Starlette's error is "Too many files"
+     (`test_only_too_many_files_says_attach_at_most`; fails with that hunk
+     reverted).
+  4. The Chinese page shows the marker line of a message as `[照片]` /
+     `[文件：name]` (i18n.js `translateMarkers`, only when the markers are
+     the whole last line); history keeps the English marker. Two new
+     i18n tests (both fail with i18n.js reverted).
+  5. Rows for the attachment test files above, and
+     `tests/js/app-send.test.mjs`, which loads the real `app.js` in
+     node:vm: picked files go with a message, chips clear only on an ok
+     response (fails if `res.ok &&` is removed), and a typed or tapped
+     yes/no goes to `/api/confirm` as JSON without files (fails if
+     `!confirming &&` is removed from `pendingFiles`). app.js unchanged.
+  - Phone cache stays v11 (this branch's new version, not released yet).
+  - Counts (Linux sandbox, Python 3.13): pytest 1740 -> 1745 passed,
+    48 skipped. JS: attachments 6, i18n 11 -> 13, ui 4, app-send 2 (new),
+    all passing.
+- **Round 3 (judge's three low findings plus an older cloud bug, all
+  fixed):**
+  1. Page count from the page tree root, not by counting `/Type /Page`:
+     `attachments.pdf_pages()` takes the direct `/Count` of the last
+     `/Type /Pages` object without a `/Parent`. An annotated 60-page PDF
+     whose incremental save rewrites 45 pages (105 page definitions) is 60
+     pages and accepted; an incremental save that trims 150 to 90 pages is
+     accepted, one that grows 90 to 120 is refused; a root in a compressed
+     object stream or with an indirect count gives None (Claude decides).
+     SECURITY.md's "lower bound" sentence is replaced. Tests:
+     `test_an_annotated_pdf_is_not_counted_twice` and the reworked
+     `test_pdfs_over_100_pages_are_refused_up_front` (two-level tree,
+     `/Type/Pages`, indirect count); both fail with the round-2 `findall`
+     count.
+  2. One `finditer` pass, no list of matches: the root's count is only
+     known at the end (the last definition wins), so there is no early
+     stop, but memory stays constant. `test_page_counting_streams_its_
+     matches`: a 10 MB file of `/Parent ` words peaks under 1 MB in
+     tracemalloc (fails if the matches are collected into a list); a
+     5000-digit `/Count` is ignored, never parsed. Measured here: 0.5 s
+     for that file, 0.7 s for 10 MB of object headers (sandbox, not a Pi).
+  3. A 400 on a turn with files says "too long" only when Claude's reason
+     mentions pages, "too long" or tokens (`webapp.FILE_TOO_LONG`); any
+     other 400 (protected or broken PDF) says "Claude couldn't read that
+     file." (`i18n.py` `file_unreadable`, Chinese in i18n.py and i18n.js).
+     `test_only_a_length_400_says_too_long` (4 reasons; the two
+     unreadable ones fail with that line reverted), plus the i18n.js
+     string in the JS test (fails without it).
+  4. On the cloud, `/i18n.js` and `/history.js` got a 401 before sign-in
+     (the login page stayed English for a Chinese family member until a
+     reload); both are page code with no personal data and are now in
+     `cloud.PUBLIC_GET`. `/backend-router.js` is only imported by app.js
+     with failover on and was already in `FAILOVER_PUBLIC_GET`.
+     `test_every_file_the_login_page_loads_is_public_on_the_cloud` reads
+     every `src`/`href` in index.html and checks a fresh cloud app never
+     401s them (fails with the cloud.py change reverted).
+  - Counts (Linux sandbox, Python 3.13): pytest 1745 -> 1752 passed,
+    48 skipped. JS: attachments 6, i18n 13, ui 4, app-send 2, all
+    passing.
+
 ## Phone app: each person picks their reply voice
 
 - New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the
@@ -1928,7 +2063,7 @@ Render/Docker changes) comes separately.
   /api/voices/preview` (session-bound, same-site, CloudGuard sign-in wall;
   `/api/voice` is already the voice WebSocket, hence the plural).
   `/api/state` has `voice_picker`. New settings `[tts] picker`,
-  `voices_dir`, `voice_file`, `family_paid_voices`. Phone cache stays v10
+  `voices_dir`, `voice_file`, `family_paid_voices`. Phone cache v14
   (`/voice-picker.js` added to the shell and to CloudGuard's public page
   files).
 - Tests: `tests/test_voice_picker.py` (27: listing with a fake voices dir,
