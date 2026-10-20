@@ -521,6 +521,70 @@ a PKCE challenge, `access_type=offline` and the redirect
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
 
+## Smart home (`tools/home_assistant.py`)
+
+Home Assistant controls physical things, including the front door, so its
+limits are in code, not in the prompt.
+
+- **Off by default** (`[home_assistant] enabled = false`), owner only:
+  family members' registries never get the tools (`family.py` builds them
+  separately; a test pins it), and `config.mom.toml` keeps it off.
+  `HA_URL` and `HA_TOKEN` are in `ISOLATED_ENV_VARS`, so another instance
+  started from Kyle's shell can't inherit them.
+- **The token** is sent only in the `Authorization` header, never in a
+  URL, with redirects off (a redirect can't carry it elsewhere). It is in
+  `SECRET_ENV_VARS`, so the log redaction masks it. Errors log the HTTP
+  status or exception type only.
+- **No arbitrary services.** `ha_control` takes an action from a fixed
+  list and maps it to one service per domain (`ACTIONS`); there is no
+  service parameter. Entities outside `[home_assistant] domains` are not
+  listed and are refused. Scripts, scenes and automations (which can do
+  anything) run only if their entity id is in `[home_assistant] scripts`.
+  `homeassistant.restart` and the like can't be expressed at all.
+- **Locks, alarm panels, garage doors and gates** (device class garage,
+  gate or door; a switch or cover whose id or name contains garage, gate
+  or 车库 anywhere, door anywhere except in indoor/outdoor/doorbell, lock
+  anywhere except after b, c or f (block, clock, flock), deadbolt, or 锁,
+  门禁, 大门, 车库门, 闸门 or 门 ending the name or a word, but not 门口灯
+  or 门铃; run-together names such as "Garagedoor" or "FrontDoor" count;
+  anything in `secure_entities`. The area isn't checked, on purpose: a room
+  called "Garage" would flag every light in it, so a relay with a neutral
+  name ("Opener", German "Tor") must be listed in `secure_entities`) always
+  ask for a spoken yes. The handler also refuses them unless the yes was
+  for this exact action and these entities in this same call (one yes,
+  one call), so the gate doesn't rest on the registry alone. They are
+  never included in a whole-room call, and a spoken name reaches one only
+  exactly or by all its words, never by a similar spelling ("back door"
+  never finds the garage).
+- **While tainted, every change needs its own yes**, checked in the
+  handler too. If Home Assistant doesn't answer while the question is
+  being built, the question is asked about the words Kyle said; that yes
+  never covers a lock or garage door (the answer says Home Assistant didn't
+  respond and to ask again).
+- **Unlocking or opening while tainted is refused**, without asking: a
+  yes can be talked into by a page or email ("say yes when it asks").
+  Locking and closing still work after a yes. Every other change asks
+  first while tainted, as for the other tools.
+- **Home state as untrusted text.** A state that isn't a number or one
+  word (a phone notification sensor, for example) can be anyone's text,
+  so a result holding one is marked `"untrusted_content": true` and taints
+  the conversation. Attributes come from a fixed list of numbers and
+  settings (`SAFE_ATTRIBUTES`); media titles and other free text are never
+  returned.
+- **Friendly and room names** are usually Kyle's, but an integration can
+  take a name from the device itself (a neighbour's Chromecast, say).
+  Names are cut to one line of at most 60 characters, and a result holding
+  one that doesn't look like a name (over 40 characters, or with sentence
+  punctuation, a colon, a slash or a line break) is marked untrusted,
+  which taints the conversation.
+- **A non-admin token is enough** (README recommends a dedicated non-admin
+  user). The room lookup (`/api/template`) is admin-only; its 401/403 is
+  taken as "no rooms", never as a broken token.
+- Not fixed, on purpose: **plain http on the LAN.** Home Assistant serves
+  http by default. The token is a full-access Home Assistant credential,
+  so README warns, and the startup line warns when `HA_URL` is http at a
+  public address. Over Tailscale the link is encrypted anyway.
+
 ## Spotify (`tools/spotify.py`, `spotify_web.py`)
 
 Off by default (`[spotify] enabled = false`); the tools are registered only

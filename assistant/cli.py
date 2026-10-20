@@ -459,6 +459,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     elif config["notion"]["enabled"]:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
     register_devteam(registry, config, output_fn)
+    register_home_assistant(registry, config, output_fn)
     register_spotify(registry, config, output_fn)
     web = config["web"]
     if web["enabled"]:
@@ -536,6 +537,31 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
         output_fn("(Dev team replies off: NOTION_TOKEN not set; messages still go out)")
     link = link_from_config(config, team["state_file"])
     registry.register(*link.tools())
+    return True
+
+
+def register_home_assistant(registry: ToolRegistry, config: dict,
+                            output_fn=print) -> bool:
+    """ha_list / ha_state / ha_control, when [home_assistant] is on and
+    HA_URL (or [home_assistant] url) and HA_TOKEN are set. The owner's
+    registry only: family members never get it (family.py)."""
+    ha = config["home_assistant"]
+    if not ha["enabled"]:
+        return False
+    url = ha["url"] or os.environ.get("HA_URL", "")
+    if not (url and os.environ.get("HA_TOKEN")):
+        output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
+        return False
+    from assistant.tools.home_assistant import HomeAssistant, plain_http_off_lan
+
+    if plain_http_off_lan(url):
+        output_fn("(Warning: Home Assistant is at a plain http:// address outside "
+                  "your home network, so its token travels unencrypted; use https)")
+    registry.register(*HomeAssistant(
+        url=url, domains=ha["domains"], scripts=ha["scripts"],
+        secure_entities=ha["secure_entities"],
+        cache_seconds=float(ha["cache_seconds"]),
+        timeout=float(ha["timeout"])).tools())
     return True
 
 

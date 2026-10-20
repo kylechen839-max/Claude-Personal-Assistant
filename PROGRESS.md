@@ -2099,6 +2099,79 @@ Render/Docker changes) comes separately.
   passed 4 of 4 reruns; it doesn't touch memory code (master about 1712
   passed, 48 skipped); node 203 .mjs + 14 voice-core, all passing.
 
+## Smart home through Home Assistant (off by default)
+
+- New `assistant/tools/home_assistant.py`: `ha_list` (devices by area or
+  domain, with state; the list is cached for `[home_assistant]
+  cache_seconds`), `ha_state` (one device; numeric attributes only) and
+  `ha_control` (on/off/toggle, brightness, colour temperature, thermostat
+  temperature and mode, fan speed, cover open/close/stop/position, media
+  play/pause/next/volume, lock/unlock, alarm arm/disarm when allowlisted,
+  and `run` for allowlisted scripts/scenes/automations). REST API with a
+  long-lived token (`HA_URL`, `HA_TOKEN` in `.env`) via `requests`; areas
+  come from one read-only `/api/template` render. Spoken names are matched
+  to friendly names, entity ids and areas (exact, then all words, then
+  fuzzy; Chinese names too); more than one match asks which one.
+- Safety: `[home_assistant] domains` allowlist; a fixed action-to-service
+  map (no service parameter, so no `homeassistant.restart`); scripts only
+  by entity id in `[home_assistant] scripts`. Locks, alarm panels, garage
+  doors/gates (device class or name) and `secure_entities` always ask,
+  are excluded from whole-room calls, and the handler re-checks that the
+  yes covered this exact call. Unlocking/opening is refused without a
+  question while the conversation is tainted; other changes ask then.
+  Free-text states (notification sensors) taint the conversation.
+- `ToolRegistry.dispatch` (small, additive): a `confirm_prompt` may return
+  None (no question for this input), and `UNTRUSTED_CONTEXT` is now set
+  while the question is built too. Existing tools are unchanged.
+- Registered in `cli.build_tools` (`register_home_assistant`), so the PC,
+  Pi and the owner's web/voice sessions get it; family members never do.
+  Startup warns about a plain-http `HA_URL` outside the home network.
+  `HA_TOKEN` is redacted in logs; `HA_URL`/`HA_TOKEN` are isolated from
+  other instances; `config.mom.toml` keeps it off. English and Chinese
+  questions and error messages in `i18n.py`.
+- Tests: `tests/test_home_assistant.py` (114, all offline with a fake
+  `requests.Session` returning real `/api/states` shapes): listing and
+  matching, the exact service payload of each action, ambiguity, cache,
+  lock/garage/alarm confirmation, refusal while tainted (also end to end
+  through `ClaudeChat`), disallowed domains and services, room calls
+  skipping secure devices, HA down/401/403/400/502 spoken nicely, Chinese
+  strings, caplog (no names or token at INFO), registration off by
+  default, family isolation. Plus one dispatch test in `test_tools.py`.
+  Checked that the safety tests fail with the gates removed.
+- Review round 2 (8 judge findings, each with a test that fails when the
+  fix is reverted):
+  - While tainted, every change needs a yes checked in the handler too.
+    A Home Assistant hiccup while asking still asks, about the words said;
+    that yes never covers a lock. The cache expiring mid-question is fine.
+  - Friendly and room names are cut to one line of 60 characters, and a
+    name that looks like a sentence taints the conversation.
+  - A non-admin token works: the admin-only room lookup's 401/403 means
+    "no rooms". README recommends a dedicated non-admin user.
+  - An exact room match wins ("Bedroom 1" never brings in "Bedroom 2").
+  - Locks and garage doors are never reached by spelling similarity.
+  - Switches and covers named door, lock, 门 or 门锁 count as secure.
+  - New tests: one yes covers one call, and a 3xx from a service call is
+    not "done".
+  - A room-wide question says "and N more" (Chinese too).
+- Review round 3 (4 findings, each with a test that fails when reverted):
+  - Run-together names count as secure again ("Garagedoor", "GateOpener",
+    "FrontDoor", "doorlock", "Smartlock"); indoor, outdoor, doorbell and
+    clock don't.
+  - 门 now counts only in 门锁, 大门, 车库门, 闸门 or at the end of a name,
+    so 门口灯 and 门铃 aren't secure.
+  - Ambiguous answers with a suspicious name are marked untrusted (now
+    tested).
+  - A yes given while Home Assistant was unreachable never covers a lock;
+    the answer now says so and asks Kyle to try again (English and
+    Chinese).
+  - `tests/test_home_assistant.py` now has 128 tests.
+- Full suite: 1845 passed, 48 skipped (baseline 1712 passed, 48 skipped).
+- Final review LOWs: 锁, 门禁, deadbolt and 门 ending a word count as
+  secure (4 cases, failing on the round-3 pattern); the area is not
+  checked, on purpose, and README/SECURITY say to list neutral-named
+  relays in `secure_entities`.
+  Not tried against a real Home Assistant (none in the sandbox).
+
 ## Spotify by voice (2026-10-20)
 
 - "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",

@@ -540,6 +540,30 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 
 ---
 
+## Smart home (optional, ~10 min)
+Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
+`[home_assistant] enabled = true` (README "Smart home").
+- [ ] "Hey Claude, turn off the bedroom lights", then "set the living room
+      light to 50 percent".
+  - Should: the right lights change within a couple of seconds, with no
+    question.
+- [ ] "Is the front door locked?"
+  - Should: the right answer for your real lock.
+- [ ] "Set the thermostat to 70" (or your thermostat's unit), "turn on the
+      fan".
+  - Should: Home Assistant shows the new target and the fan on.
+- [ ] "Turn on the lamp" with two lamps.
+  - Should: it asks which one, and does nothing until you say.
+- [ ] "Unlock the front door", then say no; ask again and say yes.
+  - Should: it asks first both times; no leaves it locked, yes unlocks.
+- [ ] Ask it to read a web page, then "unlock the front door" in the same
+      conversation.
+  - Should: refused without asking; in a new conversation it asks again.
+- [ ] Stop Home Assistant (or unplug its network) and ask for a light.
+  - Should: a short "can't reach Home Assistant" answer, no crash.
+- [ ] As a family member (phone app invite), ask to turn on a light.
+  - Should: it has no smart home control.
+
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again
