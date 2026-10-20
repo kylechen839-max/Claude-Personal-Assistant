@@ -470,6 +470,51 @@ a PKCE challenge, `access_type=offline` and the redirect
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
 
+## Spotify (`tools/spotify.py`, `spotify_web.py`)
+
+Off by default (`[spotify] enabled = false`); the tools are registered only
+with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
+
+- **Least privilege.** The sign-in asks for three scopes: read playback
+  state (which includes what is playing), control playback, and read
+  private playlists. Nothing can modify playlists, saved songs or follows;
+  tests check the exact scope set and that the module has no such scope or
+  endpoint.
+- **PKCE, no client secret.** Authorization Code with PKCE (S256), so no
+  secret is stored anywhere. The phone flow follows `google_web.py`: the
+  routes are the owner's only (`owner_of`, 404 for a family member), the
+  callback is authenticated by a random, single-use state (at most 4
+  pending, 10 minutes, created only on a signed-in owner's request), and an unknown,
+  replayed or `error=` callback writes nothing. The verifier never leaves
+  the server.
+- **Token storage.** `[spotify] token` is written with `write_private`
+  (temp file in the same folder, atomic replace, retried on Windows; 0600
+  on Linux/Pi). Access tokens go in the `Authorization` header only, never
+  a URL. A refresh may rotate the refresh token, and the wake-word process
+  and the web app may share the file, so an expired token is re-read from
+  the file before refreshing; if a refresh is refused because the other
+  process just rotated the refresh token, the file is read again and its
+  token (or its new refresh token, once) is used instead of reporting an
+  expired sign-in. A token file briefly locked by a Windows replace is
+  read again too. Log lines carry HTTP status codes and
+  Spotify's reason codes only; the existing redaction masks
+  `access_token`/`refresh_token`/`code_verifier` fields, bearer headers and
+  `?code=` in a logged callback URL.
+- **Untrusted names.** Track, artist, album, playlist and podcast names
+  are written by other people. Results that carry them (`spotify_play`
+  from the catalog or someone else's playlist, `spotify_now_playing`) are
+  marked `"untrusted_content": true`, so later changes in that conversation
+  (calendar, Notion, drafts) ask first. Kyle's own playlists don't taint.
+  Device names are marked too (any result naming a device: the device
+  list, "which device?", a transfer, volume), since a speaker or another
+  phone on the account can be named by anyone who set it up.
+- **No duplicated commands.** Only a 401 is retried (after a refresh; the
+  first request did nothing). A failed "next" is never sent twice, so a
+  network blip can't skip two songs.
+- **Family.** Family members' registries are their own (`family.py`), so
+  they never get the Spotify tools; the "Connect Spotify" routes 404 for
+  them.
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar
@@ -485,6 +530,11 @@ a PKCE challenge, `access_type=offline` and the redirect
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **Spotify playback control never asks, even with untrusted content in
+  the conversation.** A web page or email could make Claude play
+  something, skip, or set the volume. That is an annoyance at worst, easy
+  to undo by voice, and confirming every "pause" would make it useless;
+  nothing that changes the library or playlists exists to be misused.
 - **Voice mode and nearby speech.** Hands-free mode listens continuously
   while it is open, so speech from a TV can become a turn (as with a false
   wake word below). It only runs while the view is open on screen and ends

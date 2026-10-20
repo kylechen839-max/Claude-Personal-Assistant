@@ -352,6 +352,7 @@ async function refreshState() {
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
+    if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);

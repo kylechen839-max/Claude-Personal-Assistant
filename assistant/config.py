@@ -188,6 +188,17 @@ DEFAULTS: dict = {
                 "hub_sessions": [],         # coordinator session ids; [] = coordinator_session
                 "poll_seconds": 4,          # how often the hub reads Notion, at most
                 "hub_state_file": "data/devhub.json"},
+    "spotify": {                    # play, pause, skip by voice (Premium; README "Spotify")
+        "enabled": False,           # needs SPOTIFY_CLIENT_ID and a one-time sign-in
+        "token": "data/spotify_token.json",  # written privately; delete to disconnect
+        # where the browser lands after `python -m assistant.tools.spotify`
+        # (add it to your Spotify app's redirect URIs, exactly)
+        "redirect_uri": "http://127.0.0.1:8888/callback",
+        "pause_while_listening": True,  # wake word: pause music on this computer, resume after
+        "local_device": "",         # this computer's Spotify device name; "" = its hostname
+        "volume_step": 15,          # "turn it up" / "down" by this much (percent)
+        "timeout": 10,              # seconds per Spotify request
+    },
     "family": {                     # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person

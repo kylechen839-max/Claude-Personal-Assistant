@@ -38,7 +38,7 @@ def make_response(*blocks, stop_reason="end_turn"):
 def _env_vars() -> tuple[str, ...]:
     from assistant.config import ENV_OVERRIDES
 
-    return (*ENV_OVERRIDES, "WEB_TOKEN")
+    return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID")
 
 
 @pytest.fixture(autouse=True)

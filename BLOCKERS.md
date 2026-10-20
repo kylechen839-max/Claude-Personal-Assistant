@@ -72,6 +72,15 @@ Only what is still open for Kyle. None of it blocks the code.
       CI to sign: create the Environment `stable-signing` (deployments from
       `master` only, you as required reviewer) and store
       `STABLE_SIGNING_KEY` there, **never as a repository secret**.
+- [ ] **Spotify app (only if you want Spotify by voice, ~5 min; needs
+      Premium).** Only you can: at developer.spotify.com create an app
+      (Web API) with redirect URIs `http://127.0.0.1:8888/callback` and
+      `https://<your-pc>.<tailnet>.ts.net/spotify/callback` (the phone
+      button; your `[webapp] public_origin` + `/spotify/callback`), add
+      your account under User Management, put its Client ID in `.env` as
+      `SPOTIFY_CLIENT_ID`, set `[spotify] enabled = true` in
+      `config.local.toml`, and run `python -m assistant.tools.spotify` once
+      (README "Spotify by voice"). Until then the Spotify tools stay off.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

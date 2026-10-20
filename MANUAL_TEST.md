@@ -676,3 +676,33 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
     `node.exe` for Claude Code is left in Task Manager, and the same
     window takes another message straight away (no "one message at a
     time").
+
+## Spotify (optional, ~10 min)
+Needs Spotify Premium, BLOCKERS.md "Spotify app" done, and Spotify open on
+the PC (README "Spotify by voice").
+- [ ] Run `python -m assistant.tools.spotify`, allow access, paste the
+      address back.
+  - Should: "Spotify connected"; the consent page lists only reading what
+    you're playing on your devices, "control Spotify on your devices" and
+    "access your private playlists", nothing about changing
+    playlists or your library.
+- [ ] "Hey Claude, play my study playlist" (use a playlist name you have).
+  - Should: your playlist starts in the PC's Spotify app, not a public one
+    with a similar name.
+- [ ] "Hey Claude, play some lo-fi", then "skip", "go back", "what's
+      playing?", "turn it up", "pause".
+  - Should: each happens; "what's playing" names the song and artist.
+- [ ] With music playing on the PC, say "Hey Claude, what time is it?"
+  - Should: the music pauses right after the wake word (note how quickly)
+    and resumes once the follow-up window closes. Saying "Hey Claude,
+    pause" instead leaves it paused.
+- [ ] With Spotify open on the phone too, "Hey Claude, play it on my
+      phone".
+  - Should: playback moves to the phone.
+- [ ] Quit Spotify everywhere, then "Hey Claude, play some jazz".
+  - Should: it says Spotify isn't open anywhere (no error noise).
+- [ ] Phone app, gear menu (owner).
+  - Should: "Connect Spotify" (or "Reconnect Spotify" once connected); a
+    tap goes to Spotify and back to the app. A family member's phone does
+    not show the button.
+
