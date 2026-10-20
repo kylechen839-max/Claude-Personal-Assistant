@@ -35,7 +35,7 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
-  for (const id of ["history-view", "transcript-view"]) {  // history.js
+  for (const id of ["history-view", "transcript-view", "memory-view"]) {  // history.js, memory.js
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
@@ -356,10 +356,11 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    const elsewhere = ["history-view", "transcript-view"].some((id) => $(id) && !$(id).hidden);
+    const elsewhere = ["history-view", "transcript-view", "memory-view"].some((id) => $(id) && !$(id).hidden);
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
+    if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
     if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
@@ -659,6 +660,7 @@ if ("serviceWorker" in navigator) {
   // A family invite link ("#invite=", family.js): sign in as that person.
   const family = window.HeyClaudeFamily;
   if (family) family.configure({ request });  // the owner's invites: through the router too
+  if (window.HeyClaudeMemory) window.HeyClaudeMemory.configure({ request, show });  // memory.js
   if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.configure({ request, player });
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).

@@ -650,10 +650,13 @@ class WebAssistant:
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
                  max_sessions: int = 20, clock=time.monotonic,
-                 history=None, memory=None, family=None):
+                 history=None, memory=None, family=None, memory_review=None):
         self.chat_factory = chat_factory
         self.history = history  # a HistoryStore (conversation history) or None
         self.memory = memory    # PineconeMemory, for semantic search and deletes
+        # memory_review.MemoryReview (the Memory screen); made from `memory`
+        # on first use when not given
+        self.memory_review = memory_review
         self.family = family    # family.Family (invited people), or None
         # sid -> family user id or None (owner); create_app sets it to the
         # session store's user()
@@ -1507,6 +1510,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("backend-router.js", "text/javascript"),
                         ("family.js", "text/javascript"),
                         ("attachments.js", "text/javascript"),
+                        ("memory.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
@@ -1654,6 +1658,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 "history": assistant.history_of(s)[0] is not None,
                 "owner": s.user is None,
                 "family": s.user is None and family is not None,
+                "memory": s.user is None and getattr(assistant, "memory", None) is not None,
                 "language": s.language,
                 "voice_picker": getattr(assistant, "voices", None) is not None,
                 "conversation": s.chat.conversation_id,
@@ -1744,6 +1749,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    from assistant import memory_web
+
+    memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+
     if getattr(assistant, "voices", None) is not None:
         from assistant import voice_picker
 
@@ -1863,7 +1872,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
     from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
-                               build_tools, register_notes)
+                               build_memory_review, build_tools,
+                               register_memory_review, register_notes)
     from assistant.history import Recorder, open_store
     import anthropic
 
@@ -1877,6 +1887,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
     register_notes(tools, memory, config)
+    review = build_memory_review(config, memory)
+    register_memory_review(tools, review)
     store = open_store(config)  # conversation history (None if off)
     add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1886,10 +1898,13 @@ def build_assistant(config: dict, tts_name: str | None = None,
         recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
                             client_fn=lambda: client,
                             title_model=config["history"]["title_model"])
-        return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
+        chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
                           recorder=recorder, language=a["language"])
+        if review is not None:  # [memory] weekly_review (off by default)
+            chat.review_nudge = review.nudge
+        return chat
 
     family = None
     if config["family"]["enabled"]:
@@ -1905,7 +1920,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                              tools=tools,
                              conversation_timeout=a["conversation_timeout"],
                              confirm_timeout=config["webapp"]["confirm_timeout"],
-                             history=store, memory=memory, family=family)
+                             history=store, memory=memory, family=family,
+                             memory_review=review)
     if tts_cfg["picker"]:
         from assistant.voice_picker import VoicePicker
 

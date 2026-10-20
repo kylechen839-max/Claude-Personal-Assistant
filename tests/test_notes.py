@@ -36,11 +36,14 @@ class FakeIndex:
         return SimpleNamespace(matches=matches[:top_k])
 
     def list(self, prefix, namespace):
+        """Paged like pinecone 7+: ListResponse-shaped pages whose
+        `.vectors` items have `.id` (not lists of id strings)."""
         ids = [i for (ns, i) in self.vectors if ns == namespace
                and i.startswith(prefix)]
-        yield ids[:2]  # paged, like the real client
-        if ids[2:]:
-            yield ids[2:]
+        for start in range(0, len(ids) or 1, 2):
+            yield SimpleNamespace(vectors=[SimpleNamespace(id=i)
+                                           for i in ids[start:start + 2]],
+                                  namespace=namespace)
 
     def fetch(self, ids, namespace):
         return SimpleNamespace(vectors={
@@ -118,8 +121,89 @@ def test_delete_asks_first_and_only_touches_notes(notes):
     assert asked == ["Do you want me to delete the note: The lab report needs "
                      "error bars?"]
     reg.confirm = lambda q: True
-    result, err = reg.dispatch("delete_note", {"note_id": "voice-20261017-abc"})
+    # only the assistant's own vectors: never Kyle's project notes
+    notes.index.upsert([{"id": "project-chunk-17", "values": [1.0, 0.0],
+                         "metadata": {"text": "thesis outline"}}], "voice-assistant")
+    result, err = reg.dispatch("delete_note", {"note_id": "project-chunk-17"})
     assert err and "isn't a saved note" in result
+    assert ("voice-assistant", "project-chunk-17") in notes.index.vectors
+
+
+def test_delete_note_also_forgets_a_conversation_summary(notes):
+    """review_memory lists summaries (ids "voice-...") too; "forget that"
+    deletes one through delete_note, after a spoken yes."""
+    notes.index.upsert([{"id": "voice-20261019T120000-abcdef", "values": [1.0, 0.0],
+                         "metadata": {"text": "2026-10-19: Kyle hates cilantro.",
+                                      "kind": "conversation_summary"}}],
+                       "voice-assistant")
+    asked = []
+    reg = ToolRegistry(confirm=lambda q: asked.append(q) or False)
+    reg.register(*notes.tools())
+    reg.dispatch("delete_note", {"note_id": "voice-20261019T120000-abcdef"})
+    assert asked == ["Do you want me to delete the note: 2026-10-19: Kyle hates cilantro.?"]
+    assert ("voice-assistant", "voice-20261019T120000-abcdef") in notes.index.vectors
+    reg.confirm = lambda q: True
+    result, err = reg.dispatch("delete_note", {"note_id": "voice-20261019T120000-abcdef"})
+    assert not err and "deleted" in result
+    assert ("voice-assistant", "voice-20261019T120000-abcdef") not in notes.index.vectors
+
+
+def test_delete_question_in_chinese(notes):
+    from assistant import i18n
+
+    note_id = notes.remember_note("实验报告要加误差线")["note"]["id"]
+    i18n.set_language("zh")
+    try:
+        assert notes.describe_for_delete({"note_id": note_id}) == \
+            "要我删除这条记忆吗：实验报告要加误差线？"
+        assert notes.describe_for_delete({"note_id": "note-missing"}) == "要我删除这条记忆吗？"
+    finally:
+        i18n.set_language("en")
+
+
+def real_index(pages: dict, metadata: dict):
+    """A real pinecone Index whose HTTP calls are mocked: `pages` maps a
+    prefix to the ids /vectors/list returns, `metadata` id -> metadata."""
+    import json
+
+    pinecone = pytest.importorskip("pinecone")
+    index = pinecone.Pinecone(api_key="x").Index(host="https://x-abc.svc.pinecone.io")
+
+    def get(path, timeout=None, params=None):
+        if path == "/vectors/list":
+            body = {"vectors": [{"id": i} for i in pages.get(params["prefix"], [])],
+                    "namespace": params.get("namespace", ""), "usage": {"readUnits": 1}}
+        else:
+            body = {"vectors": {i: {"id": i, "values": [0.1], "metadata": metadata[i]}
+                                for i in params["ids"] if i in metadata},
+                    "namespace": params.get("namespace", ""), "usage": {"readUnits": 1}}
+        return SimpleNamespace(content=json.dumps(body).encode(), headers={},
+                               status_code=200)
+
+    index._http = MagicMock()
+    index._http.get.side_effect = get
+    return index
+
+
+def test_page_ids_reads_every_sdk_shape():
+    from assistant.memory import page_ids
+
+    assert page_ids(["note-1", "note-2"]) == ["note-1", "note-2"]  # older SDKs
+    assert page_ids(SimpleNamespace(vectors=[SimpleNamespace(id="note-1")])) == ["note-1"]
+    assert page_ids({"vectors": [{"id": "note-1"}]}) == ["note-1"]
+    assert page_ids("note-1") == ["note-1"]
+
+
+def test_list_recent_notes_with_the_real_sdk_list():
+    """pinecone 7+ Index.list() yields ListResponse pages; every id was
+    dropped before, so 'my recent notes' was always empty."""
+    index = real_index(
+        {"note-": ["note-20261019T130000-bbbbbb"]},
+        {"note-20261019T130000-bbbbbb": {"text": "Lab report needs error bars",
+                                         "kind": "note"}})
+    memory = MagicMock(namespace="voice-assistant", index=index)
+    found = QuickNotes(memory, timezone="America/New_York").list_recent_notes()
+    assert [n["text"] for n in found["notes"]] == ["Lab report needs error bars"]
 
 
 def test_bad_notes_are_refused(notes):

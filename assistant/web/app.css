@@ -324,6 +324,17 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .more-btn { margin: .75rem auto 1.5rem; display: block; border-radius: var(--r-pill); background: var(--surface-2);
   color: var(--text-2); font-size: .9375rem; }
 .status.center { padding: 1.5rem var(--pad); font-size: .9375rem; line-height: 1.45; }
+/* ---------- memory (memory.js) ---------- */
+.mem-head { display: flex; align-items: baseline; gap: .5rem; padding-right: var(--pad); }
+.mem-head h2 { flex: 1; }
+.mem-delete-week, .mem-delete { background: none; padding: 0 .5rem; min-height: 44px; font-size: .875rem;
+  font-weight: 600; color: var(--bad-ink); }
+.mem-item { padding: .7rem 1rem .8rem; }
+.mem-item + .mem-item { border-top: 1px solid var(--line); }
+.mem-top { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.mem-when { flex: 1; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; }
+.mem-untrusted { background: var(--bad-soft); color: var(--bad-ink); }
+.mem-text { margin: .25rem 0 0; font-size: .9375rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .status.center:empty { display: none; }
 .conv-list:empty + .status.center:not(:empty) { padding-top: 4.5rem; color: var(--text-2); }
 .conv-list:empty + .status.center:not(:empty)::before { content: ""; display: block; width: 52px; height: 52px; margin: 0 auto 1rem;
