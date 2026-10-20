@@ -107,6 +107,7 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
   e.g. Checking CI on PR #4>", at}`; idle is `{state: "idle", at}`.
 - On pickup: your FIRST action on any chat message (a wake, or one found at turn end) is to write `status: {state: "working", text: "Reading your message", seen_ref: <nonce>, at}`.
   The page shows Kyle "Seen by coordinator" from `seen_ref`.
+  Make it the very first tool call of the turn, before any clock or watch check: stamp `at` with the comment's "Sent to Claude at" time, then continue.
 - At the start of EVERY turn, set `status` working with a step text, and check `ArtifactComments action:"watch"` lists the dashboard; re-arm it if it's missing. Watches can silently disappear.
   On a chat wake, that start-of-turn write is the pickup write above: one write that carries `seen_ref`, then the watch check.
 - At the end of EVERY turn, read the dashboard comment threads (ArtifactComments read), answer any comment sent to you that is still awaiting a reply, then set `status` idle. Comment wakes that arrive mid-turn can be lost.
