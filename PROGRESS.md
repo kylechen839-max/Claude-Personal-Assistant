@@ -1869,3 +1869,14 @@ Render/Docker changes) comes separately.
   patterns for the dynamic ones ("12 messages", "Actions for …",
   "Transcribing 40%"). Only the "Hey Claude" name stays in English.
 - Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
+
+## Family copies start by themselves
+
+- `scripts/install_family_tasks.ps1`: one Task Scheduler task per family
+  instance (`config.<name>.toml` + `.env.<name>`; `config.toml` and
+  `*.local.toml` never count), `\HeyClaude\Family-<name>`, run hidden at
+  sign-in with a minute's restart after a crash; `-Restart` after an update,
+  `-Uninstall`. Stops a hand-started copy first. Kyle's own tasks untouched.
+- Tests: `tests/ps/install_family_tasks.tests.ps1` (instance discovery and
+  command, run by `test_preflight.py` where PowerShell exists, i.e. the
+  Windows CI job) and a text check; the existing parse check covers it too.
