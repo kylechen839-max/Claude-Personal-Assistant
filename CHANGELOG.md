@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: lecture notes failed on the default model (Claude Sonnet 5.5) with
+  an HTTP 400, because it rejects forced tool calls. Summaries now use
+  structured outputs (a JSON schema), with more room for the model's
+  thinking and a longer timeout for this background request. This update
+  changes `requirements.txt` (anthropic 0.77 or newer), so the auto-updater
+  skips it: stop the assistant and run `python -m assistant --update`.
 - Health checks: a watchdog (`python -m assistant.watch`, the
   `\HeyClaude\Watch` task every 5 minutes, or the Pi's
   `hey-claude-watch.timer`) checks your app and every family copy:
