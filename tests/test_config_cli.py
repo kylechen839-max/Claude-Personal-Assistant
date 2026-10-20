@@ -209,7 +209,7 @@ def test_config_local_toml_is_gitignored():
     assert "config.local.toml" in (root / ".gitignore").read_text().splitlines()
 
 
-def test_mom_config_turns_every_connection_off(monkeypatch):
+def test_mom_config_turns_every_connection_off(monkeypatch, tmp_path):
     """config.mom.toml: a separate Chinese instance with none of Kyle's
     connections, even when his keys are in the environment."""
     monkeypatch.setenv("NOTION_TOKEN", "secret")
@@ -224,6 +224,9 @@ def test_mom_config_turns_every_connection_off(monkeypatch):
                  cfg["history"]["path"], cfg["webapp"]["sessions_file"]):
         assert path.startswith("data/mom/"), path
     assert cfg["logging"]["file"] == "logs/mom.log"
+    # On a PC where she already connected Google, data/mom/google_token.json
+    # exists; point at a token that doesn't, for the "not signed in yet" case.
+    cfg["calendar"]["token"] = str(tmp_path / "google_token.json")
     assert cli.build_memory(cfg, lambda *_: None) is None
     names = {s["name"] for s in cli.build_tools(cfg, lambda *_: None).schemas()}
     assert not names & {"list_assignments", "update_assignment_status",
