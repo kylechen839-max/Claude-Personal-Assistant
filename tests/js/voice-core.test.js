@@ -78,15 +78,141 @@ test("barge-in stops playback, reports position, ignores the rest of the turn", 
   assert.equal(c.state, "speaking");
 });
 
-test("talking while it thinks cancels that turn", () => {
+// Kyle's phone, 2026-10-20: barge-in fired "after 0 chunk(s)" on almost
+// every turn: speech (trailing words, noise, our own cue) while it was still
+// thinking cancelled the reply before any of it was heard.
+test("talking while it thinks never cancels: held and sent after the reply", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd()); // turn 1
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  assert.equal(c.state, "thinking");
+  assert.equal(log.stops, 0);
+  assert.deepEqual(log.sent, []); // no interrupt
+  const held = speechEnd();
+  c.onVad(held); // "...and Friday"
+  assert.equal(log.utterances.length, 1); // held, not sent over the reply
+  assert.equal(c.state, "thinking");
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 0 }), true); // reply plays
+  assert.equal(c.state, "speaking");
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 2); // now it is the next turn
+  assert.equal(log.utterances[1].turn, 2);
+  assert.equal(log.utterances[1].audio, held.audio);
+  assert.equal(c.state, "thinking");
+  assert.deepEqual(log.sent, []);
+});
+
+test("barge-in only once the reply's audio started, by speech begun after that", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd()); // turn 1
+  c.onVad({ type: "speechStart" }); // trailing words, before any audio
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 0 }), true);
+  c.onVad({ type: "speechConfirmed" });
+  assert.equal(log.stops, 0); // began before the audio: not talking over it
+  c.onVad(speechEnd());
+  assert.equal(log.utterances.length, 1); // held
+  assert.equal(c.state, "speaking"); // the reply played on meanwhile
+  // now he really talks over it
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  assert.equal(log.stops, 1);
+  assert.deepEqual(log.sent, [{ type: "interrupt", turn: 1, index: 1, fraction: 0.5 }]);
+  c.onVad(speechEnd());
+  assert.equal(log.utterances.length, 2);
+  // the held words were superseded by the barge-in: never sent later
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onServer({ type: "audio", turn: 2, index: 0 });
+  c.onServer({ type: "turn_done", turn: 2 });
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 2);
+  assert.equal(c.state, "listening");
+});
+
+test("speech before the audio that runs past the end of the reply is the next turn", () => {
   const { c, log } = harness();
   c.start();
   c.onVad(speechEnd());
   c.onVad({ type: "speechStart" });
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  assert.equal(c.state, "thinking"); // he's talking; the audio plays
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle(); // finished while he was still talking
+  c.onVad(speechEnd());
+  assert.equal(log.stops, 0);
+  assert.deepEqual(log.sent, []);
+  assert.equal(log.utterances.length, 2); // not stuck in "thinking"
+  assert.equal(c.state, "thinking");
+  assert.equal(c.activeTurn, 2);
+});
+
+test("speech after a yes, before the rest of the reply, does not cancel it", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd()); // "delete the dentist"
+  c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onVad(speechEnd()); // "yes"
+  c.onServer({ type: "confirm_answer", turn: 1, utterance: 2, text: "yes", yes: true });
+  assert.equal(c.state, "thinking");
+  c.onVad({ type: "speechStart" });
   c.onVad({ type: "speechConfirmed" });
-  assert.deepEqual(log.sent[0], { type: "interrupt", turn: 1, index: 1, fraction: 0.5 });
-  assert.equal(c.state, "listening");
-  assert.equal(c.onServer({ type: "audio", turn: 1, index: 0 }), false);
+  assert.deepEqual(log.sent, []);
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 1 }), true);
+});
+
+test("barge-in off: speech while it thinks doesn't cancel either", () => {
+  const { c, log } = timedHarness({ bargeIn: false });
+  c.start();
+  c.onVad(speechEnd());
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  c.onVad(speechEnd());
+  assert.equal(log.stops, 0);
+  assert.deepEqual(log.sent, []);
+  assert.equal(log.utterances.length, 1);
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 0 }), true);
+});
+
+test("pause and end drop a held utterance", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onVad(speechEnd()); // held
+  c.pause(); // leaving the app still stops the turn
+  assert.equal(log.sent[0].type, "interrupt");
+  c.resume();
+  c.onServer({ type: "turn_done", turn: 1 });
+  assert.equal(log.utterances.length, 1);
+});
+
+test("endpointer: the app's own sound can't start an utterance", () => {
+  const ep = new VC.Endpointer({ silenceMs: 300, minUtteranceMs: 100, confirmMs: 64, prePadMs: 64 });
+  const events = [];
+  const feed = (n, prob) => { for (let i = 0; i < n; i++) events.push(...ep.process(frame(0.1), prob)); };
+  ep.holdOff(200); // a cue: 7 frames of 32 ms
+  feed(7, 0.95); // the mic hears it as loud as speech
+  assert.deepEqual(events, []);
+  feed(1, 0.95); // after it: speech starts again
+  assert.equal(events[0].type, "speechStart");
+  // speech already under way is not cut by a cue
+  feed(2, 0.95);
+  ep.holdOff(200);
+  feed(4, 0.95);
+  feed(12, 0.0);
+  assert.deepEqual(events.map((e) => e.type), ["speechStart", "speechConfirmed", "speechEnd"]);
+});
+
+test("voice.js holds the endpointer off while an earcon or the cue plays", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  const play = src.slice(src.indexOf("    play(name) {"), src.indexOf("    onState(prev, state)"));
+  assert.match(play, /endpointer\.holdOff\(/);
+  assert.match(src, /if \(open\) earcons\.play\("thinking"\)/); // the follow-up cue goes through it
 });
 
 test("short speech end during playback still counts as barge-in", () => {
@@ -400,4 +526,208 @@ test("barge-in off: the mic is ignored while a reply plays, heard again after", 
   assert.deepEqual(log.followUps, [true]);
   c.onVad(speechEnd()); // the follow-up is heard
   assert.equal(log.utterances.length, 2);
+});
+
+// --- round 2 (judge findings) ---
+
+test("muting while he talked over a finished reply doesn't leave it 'thinking'", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd()); // turn 1
+  c.onVad({ type: "speechStart" }); // still talking when the audio comes
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle(); // played to the end while he talked
+  assert.equal(c.state, "thinking");
+  c.setMuted(true);
+  c.setMuted(false);
+  assert.equal(c.state, "listening");
+  c.onVad({ type: "speechStart" });
+  c.onVad(speechEnd()); // the next question
+  assert.deepEqual(log.sent, []); // no interrupt: the reply was heard in full
+  assert.equal(log.utterances.length, 2);
+  assert.equal(c.activeTurn, 2);
+});
+
+test("speech in a gap between chunks is held, not a barge-in", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onPlaybackIdle(); // chunk 0 played, the next one isn't there yet
+  assert.equal(c.state, "thinking");
+  assert.equal(c.replyAudible, false);
+  c.onVad({ type: "speechStart" });
+  c.onVad({ type: "speechConfirmed" });
+  c.onVad(speechEnd());
+  assert.deepEqual(log.sent, []);
+  assert.equal(log.stops, 0);
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 1 }), true);
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 2); // asked after the reply
+});
+
+test("words held from before a yes/no question are dropped, never sent later", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd()); // "delete the dentist"
+  c.onVad(speechEnd()); // "...yes" while it thinks: held
+  assert.notEqual(c.held, null);
+  c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+  assert.equal(c.held, null);
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onVad(speechEnd()); // the real answer
+  c.onServer({ type: "confirm_answer", turn: 1, utterance: 2, text: "yes", yes: true });
+  c.onServer({ type: "audio", turn: 1, index: 1 }); // "Done. Anything else?"
+  c.onServer({ type: "turn_done", turn: 1 });
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 2); // no third turn
+  assert.equal(c.state, "listening");
+});
+
+test("speech while a question is open but not heard yet is dropped", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+  c.onVad(speechEnd()); // "yes" before the question was played
+  assert.equal(c.held, null);
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onVad(speechEnd()); // the answer
+  c.onServer({ type: "confirm_answer", turn: 1, utterance: 2, text: "no", yes: false });
+  c.onServer({ type: "turn_done", turn: 1 });
+  assert.equal(log.utterances.length, 2);
+  assert.deepEqual(log.sent, []);
+});
+
+test("speech right after the answer doesn't cut the rest of the reply", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onVad(speechEnd()); // "yes"
+  c.onVad({ type: "speechStart" }); // "...go ahead"
+  c.onVad({ type: "speechConfirmed" });
+  c.onVad(speechEnd());
+  assert.deepEqual(log.sent, []);
+  assert.equal(c.questionCut, false);
+  c.onServer({ type: "confirm_answer", turn: 1, utterance: 2, text: "yes", yes: true });
+  assert.equal(c.onServer({ type: "audio", turn: 1, index: 1 }), true); // "Done."
+});
+
+test("stricter VAD whenever reply audio plays, even while the state says thinking", () => {
+  const { c } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  assert.equal(c.replyAudible, false);
+  c.onVad({ type: "speechStart" }); // talking as the audio starts
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  assert.equal(c.state, "thinking");
+  assert.equal(c.replyAudible, true);
+  c.onPlaybackIdle();
+  assert.equal(c.replyAudible, false);
+  const fs = require("node:fs");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  assert.match(src, /endpointer\.process\(frame, prob, controller\.replyAudible\)/);
+  assert.doesNotMatch(src, /endpointer\.strict/);
+});
+
+// --- round 3 (judge findings) ---
+
+for (const end of ["speechEnd", "misfire"]) {
+  test(`a question that played under his speech (${end}) still takes the answer after it`, () => {
+    const { c, log } = harness();
+    c.start();
+    c.onVad(speechEnd()); // "delete the dentist"
+    c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+    c.onVad({ type: "speechStart" }); // he starts just before the question audio
+    c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+    assert.equal(c.state, "thinking"); // it plays under him
+    c.onPlaybackIdle(); // the question ended
+    c.onVad(end === "speechEnd" ? speechEnd() : { type: "misfire" });
+    assert.equal(log.utterances.length, 1); // the early words are no answer
+    assert.equal(c.state, "listening"); // not stuck "Thinking…"
+    c.onVad({ type: "speechStart" });
+    c.onVad({ type: "speechConfirmed" });
+    c.onVad(speechEnd()); // "yes", after hearing it
+    assert.equal(log.utterances.length, 2); // sent, as the answer
+    assert.equal(c.activeTurn, 1);
+    assert.deepEqual(log.sent, []);
+    assert.equal(c.state, "thinking"); // waiting for confirm_answer, not "listening"
+    c.onServer({ type: "confirm_answer", turn: 1, utterance: 2, text: "yes", yes: true });
+    assert.equal(c.onServer({ type: "audio", turn: 1, index: 1 }), true);
+  });
+}
+
+test("a question left unanswered closes with its turn: the next words are a new turn", () => {
+  const { c, log } = harness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "confirm", turn: 1, question: "Delete Dentist?" });
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onServer({ type: "turn_done", turn: 1 }); // the server gave up waiting
+  assert.equal(c.awaitingAnswer, false);
+  assert.equal(c.state, "listening");
+  c.onVad(speechEnd());
+  assert.equal(c.activeTurn, 2);
+  assert.equal(log.utterances.length, 2);
+});
+
+function clockHarness() {
+  const h = harness();
+  let t = 0;
+  let tails = 0;
+  h.c.fx.now = () => t;
+  h.c.fx.echoTail = () => { tails++; };
+  return { ...h, at: (ms) => { t = ms; }, tails: () => tails };
+}
+
+test("the reply's echo in a pause between sentences is not queued as a turn", () => {
+  const { c, log, at, tails } = clockHarness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onPlaybackIdle(); // pause between sentences
+  assert.equal(tails(), 1); // the mic is held off for the echo's tail
+  at(0);
+  c.onVad({ type: "speechStart" }); // echo of the sentence's end
+  at(100);
+  c.onServer({ type: "audio", turn: 1, index: 1 }); // the next one, under it
+  c.onServer({ type: "turn_done", turn: 1 });
+  at(1000);
+  c.onVad(speechEnd()); // 1 s "utterance", 900 ms of it over reply audio
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 1); // dropped, never asked
+  assert.equal(c.state, "listening");
+  assert.deepEqual(log.sent, []);
+});
+
+test("real speech in a pause between sentences is still asked after the reply", () => {
+  const { c, log, at } = clockHarness();
+  c.start();
+  c.onVad(speechEnd());
+  c.onServer({ type: "audio", turn: 1, index: 0 });
+  c.onPlaybackIdle();
+  at(0);
+  c.onVad({ type: "speechStart" });
+  at(900);
+  c.onServer({ type: "audio", turn: 1, index: 1 }); // overlaps only the last 100 ms
+  c.onServer({ type: "turn_done", turn: 1 });
+  at(1000);
+  c.onVad(speechEnd());
+  c.onPlaybackIdle();
+  assert.equal(log.utterances.length, 2);
+  assert.deepEqual(log.sent, []);
+});
+
+test("voice.js holds the mic off for the echo tail when playback stops", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  assert.match(src, /echoTail: \(\) => \{ if \(endpointer\) endpointer\.holdOff\(CUE_TAIL_MS\); \}/);
 });

@@ -478,7 +478,13 @@ silence_ms` (700 ms) it sends what you said, and the answer starts playing
 as soon as its first sentence is ready (the rest is still being written).
 Talk over it and it stops at once (barge-in, after `barge_in_ms` = 250 ms of
 speech); what you say next is the new question, and Claude remembers only
-the part of its answer you actually heard. The conversation keeps going
+the part of its answer you actually heard. Barge-in only counts once the
+answer has started playing: anything you say while it is still thinking
+(a last word, "and on Friday") never cancels it; it is asked as the next
+question once the answer has played (but never while a yes/no question is
+open: then only the answer after the question counts). Talking in the
+short pause between two of its sentences doesn't count as a barge-in
+either. The app's own sounds can't start or stop a turn. The conversation keeps going
 turn after turn until you tap **End**, say "goodbye", or stay quiet for
 `idle_timeout` (2 minutes); then it is summarized to memory like the voice
 loop. Deletes still ask out loud. Let the question finish, then say

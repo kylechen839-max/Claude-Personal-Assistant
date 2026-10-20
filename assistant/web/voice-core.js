@@ -55,7 +55,14 @@
       this.frameMs = opts.frameMs || (FRAME_SAMPLES / SAMPLE_RATE) * 1000;
       this.setOptions(opts);
       this.prePad = [];
+      this.holdFrames = 0;
       this.reset();
+    }
+    // The app is playing one of its own sounds (an earcon, the follow-up
+    // cue) for `ms`: what the mic hears then can't start an utterance.
+    // Speech already under way carries on.
+    holdOff(ms) {
+      this.holdFrames = Math.max(this.holdFrames, Math.ceil(Math.max(0, ms) / this.frameMs));
     }
     setOptions(opts) {
       this.threshold = opts.threshold ?? this.threshold ?? 0.5;
@@ -81,11 +88,13 @@
       const events = [];
       const positive = prob >= (strict ? this.strictThreshold : this.threshold);
       const negative = prob < this.threshold - 0.15;
+      const held = this.holdFrames > 0;
+      if (held) this.holdFrames--;
       if (!this.speaking) {
         this.prePad.push(frame);
         const keep = Math.ceil(this.prePadMs / this.frameMs);
         while (this.prePad.length > keep) this.prePad.shift();
-        if (positive) {
+        if (positive && !held) {
           this.speaking = true;
           this.frames = this.prePad.slice();
           this.prePad = [];
@@ -146,10 +155,23 @@
   // `effects` (all optional): setState(state), send(msg), sendUtterance(turn,
   // audio), stopPlayback() -> {index, fraction}, caption(who, text, append),
   // mark(name, turn) for timings, ended(reason), followUp(open) when the
-  // follow-up window opens/closes, setTimer(fn, ms) / clearTimer(id).
+  // follow-up window opens/closes, setTimer(fn, ms) / clearTimer(id),
+  // echoTail() when playback stops (the mic still hears the last of it),
+  // now() -> ms (default Date.now).
   // `options`: bargeIn (false: talking over a playing reply doesn't stop
   // it; the mic is ignored while it plays), followUpMs (after a reply has
   // played, show/sound "still listening" this long; 0 = off).
+  //
+  // Barge-in (talking over a reply stops it and cancels the turn) only
+  // counts once the reply's audio has started, and only for speech that
+  // began after that. Speech while it is still thinking (Kyle's trailing
+  // words, room noise) never cancels the turn: the utterance is held and
+  // sent as the next turn once the reply is over (newest wins; a real
+  // barge-in, a yes/no question, pause or end drops it). While a question
+  // is open it isn't held at all: it is never an answer, then or later.
+  // Speech that began in a pause between sentences counts the same way,
+  // except that if the next sentence played under most of it, it was the
+  // reply's echo and is dropped.
   class TurnController {
     constructor(effects = {}, options = {}) {
       this.fx = effects;
@@ -158,6 +180,14 @@
       this.followUp = false; // the follow-up window is open
       this.followUpTimer = null;
       this.replyPlayed = false; // audio of the active turn's reply was played
+      this.audioStarted = false; // the active turn's audio has started playing
+      this.speechOverAudio = false; // the current speech began after that
+      this.held = null; // an utterance said while it was thinking (next turn)
+      this.speechInGap = false; // the current speech began between sentences
+      this.overlapMs = 0; // ...and this much of it had reply audio under it
+      this.audibleSince = null;
+      this.questionAudio = false; // the open question's audio was played
+      this.answerSent = false; // an answer to it is on its way
       this.state = "idle";
       this.turn = 0; // last utterance id sent
       this.activeTurn = null; // turn whose reply is coming or playing
@@ -182,6 +212,12 @@
       const played = this.replyPlayed;
       this.replyPlayed = false;
       this._set("listening");
+      if (this.held) {
+        const audio = this.held;
+        this.held = null;
+        // never an answer to a question that is still open
+        if (!this.awaitingAnswer && !this.userSpeaking) { this._utterance(audio); return; }
+      }
       if (!played || !this.followUpMs || this.awaitingAnswer || !this.live) return;
       this._closeFollowUp();
       this.followUp = true;
@@ -201,11 +237,42 @@
       this._do("followUp", false);
     }
     _do(name, ...args) { if (this.fx[name]) return this.fx[name](...args); return undefined; }
+    _now() { return this.fx.now ? this.fx.now() : Date.now(); }
+    // reply audio started/stopped while he talks: how much of his speech it covered
+    _audible(on) {
+      if (on && this.userSpeaking && this.audibleSince === null) this.audibleSince = this._now();
+      if (!on && this.audibleSince !== null) {
+        this.overlapMs += this._now() - this.audibleSince;
+        this.audibleSince = null;
+      }
+    }
+
+    // Never sit in "thinking" with nothing coming: nothing plays, he isn't
+    // talking, and the server is done or waiting for his yes/no.
+    _settle() {
+      if (this.state !== "thinking" || this.playing || this.userSpeaking) return;
+      if (this.awaitingAnswer) {
+        if (this.questionAudio && !this.answerSent) this._set("listening"); // heard: answer it
+      } else if (this.serverDone) {
+        this._replyFinished();
+      }
+    }
 
     start() { this._set("listening"); }
     get live() { return !["idle", "paused", "ended"].includes(this.state); }
+    get busy() { return this.state === "thinking" || this.state === "speaking"; }
+    get canBargeIn() {
+      return this.bargeInOn && this.busy && this.audioStarted && this.speechOverAudio;
+    }
+    // Reply audio is coming out of the speaker (also while the state shows
+    // "thinking" because he was talking when it started): the VAD should
+    // ask for more certainty, so its echo doesn't count as speech.
+    get replyAudible() { return this.state === "speaking" || this.playing; }
 
-    setMuted(muted) { this.muted = muted; if (muted) this.userSpeaking = false; }
+    setMuted(muted) {
+      this.muted = muted;
+      if (muted) this._speechOver(); // he can't be talking now: catch the state up
+    }
 
     // --- from the VAD ---
     onVad(ev) {
@@ -214,26 +281,51 @@
       if (!this.bargeInOn && this.state === "speaking") return;
       switch (ev.type) {
         case "speechStart":
-          this.userSpeaking = true;
+          this._speechBegan();
           this._closeFollowUp(); // he's talking: the window did its job
           break;
         case "speechConfirmed":
-          if (this.state === "speaking" || this.state === "thinking") this.bargeIn();
+          this._speechBegan();
+          if (this.canBargeIn) this.bargeIn();
           break;
         case "misfire":
-          this.userSpeaking = false;
+          this._speechOver();
           break;
         case "speechEnd":
-          this.userSpeaking = false;
+          this._speechBegan();
           this._utterance(ev.audio);
+          this._speechOver();
           break;
       }
     }
 
+    // Speech began (or an event shows it did): does it talk over the reply?
+    _speechBegan() {
+      if (this.userSpeaking) return;
+      this.userSpeaking = true;
+      // talking over the reply only while its audio is playing, not in a
+      // gap (or after it) while the state still says "thinking"
+      this.speechOverAudio = this.busy && this.audioStarted && this.replyAudible;
+      this.speechInGap = this.busy && this.audioStarted && !this.replyAudible;
+      this.overlapMs = 0;
+      this.audibleSince = null;
+    }
+    _speechOver() {
+      this.userSpeaking = false;
+      this.speechOverAudio = false;
+      this.speechInGap = false;
+      this.audibleSince = null;
+      // audio that came while he was talking played on; catch the state up
+      if (this.state === "thinking" && this.audioStarted && this.playing) this._set("speaking");
+      this._settle();
+    }
+
     bargeIn() {
       const pos = this._do("stopPlayback") || { index: 0, fraction: 0 };
+      this._audible(false);
       this.playing = false;
       this.replyPlayed = false; // cut off: no "still listening" cue after it
+      this.held = null; // newer speech than what was held
       if (this.activeTurn !== null) {
         this._do("send", { type: "interrupt", turn: this.activeTurn,
           index: pos.index || 0, fraction: pos.fraction || 0 });
@@ -245,17 +337,39 @@
     }
 
     _utterance(audio) {
-      if (this.state === "speaking" || this.state === "thinking") {
+      if (this.busy) {
+        if (!this.canBargeIn) {
+          if (this.awaitingAnswer) {
+            // A yes/no question is open but not heard yet (or was just
+            // answered): this is neither the answer nor safe to replay later.
+            this._do("mark", "dropped", this.activeTurn);
+            return;
+          }
+          this._audible(false);
+          const lengthMs = ((audio && audio.length) || 0) / SAMPLE_RATE * 1000;
+          if (this.speechInGap && this.overlapMs > lengthMs / 2) {
+            // began between sentences, the next one played under most of
+            // it: the reply's own echo, not Kyle
+            this._do("mark", "dropped_echo", this.activeTurn);
+            return;
+          }
+          // still thinking (or barge-in is off): keep it for after the reply
+          this.held = audio;
+          this._do("mark", "held", this.activeTurn);
+          return;
+        }
         // the speech was too short to count as a barge-in yet; it does now
         this.bargeIn();
       }
       this.turn += 1;
       this._do("mark", "speech_end", this.turn);
       this._do("sendUtterance", this.turn, audio);
-      if (!this.awaitingAnswer) {
+      if (this.awaitingAnswer) this.answerSent = true;
+      else {
         this.activeTurn = this.turn;
         this.serverDone = false;
         this.replyPlayed = false;
+        this.audioStarted = false;
       }
       this._set("thinking");
     }
@@ -287,11 +401,18 @@
         case "confirm":
           this.awaitingAnswer = true;
           this.questionCut = false;
+          this.questionAudio = false;
+          this.answerSent = false;
+          // words held from before the question must never become an
+          // answer, nor a "yes" to whatever comes after it
+          this.held = null;
           this._do("caption", "assistant", ev.question, false);
           break;
         case "confirm_answer":
           this.awaitingAnswer = false;
           this.questionCut = false;
+          this.answerSent = false;
+          this.audioStarted = false; // what's said next is a new stretch of reply
           this._do("caption", "user", ev.text || "", false);
           if (this.live && !this.userSpeaking) this._set("thinking");
           break;
@@ -300,7 +421,10 @@
           if (!this.live || this.state === "paused") return false;
           if (t !== this.activeTurn) return false;
           this.playing = true;
-          if (!ev.question) this.replyPlayed = true;
+          this.audioStarted = true;
+          this._audible(true);
+          if (ev.question) this.questionAudio = true;
+          else this.replyPlayed = true;
           if (!this.userSpeaking) this._set("speaking");
           // the spoken text, for subtitles when no text delta showed it
           if (ev.text) this._do("caption", "audio", ev.text, true);
@@ -311,6 +435,9 @@
         case "turn_done":
           if (t === this.activeTurn) {
             this.serverDone = true;
+            // the server closes an unanswered question with its turn
+            this.awaitingAnswer = false;
+            this.answerSent = false;
             if (!this.playing && this.live) this._replyFinished();
           }
           break;
@@ -320,21 +447,26 @@
 
     // --- from playback ---
     onPlaybackIdle() {
+      this._audible(false);
       this.playing = false;
-      if (this.state !== "speaking") return;
+      if (this.live) this._do("echoTail");
+      if (this.state !== "speaking") { this._settle(); return; } // ended under his speech
       if (this.awaitingAnswer) this._set("listening"); // the yes/no question
       else if (this.serverDone) this._replyFinished();
       else this._set("thinking");
     }
 
     pause() {
-      if (this.state === "speaking" || this.state === "thinking") this.bargeIn();
+      // leaving the app stops the reply even before its audio (not a barge-in)
+      if (this.busy) this.bargeIn();
+      this.held = null;
       this.userSpeaking = false;
       this._set("paused");
     }
     resume() { if (this.state === "paused") this._set("listening"); }
     end() {
       if (this.state === "ended") return;
+      this.held = null;
       this._do("stopPlayback");
       this._do("send", { type: "end" });
       this._set("ended");

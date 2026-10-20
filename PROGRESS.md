@@ -2522,3 +2522,109 @@ their language, on the same shared cloud server as Kyle.
   measurement sees more of the reply's loud parts. Full run: 1755 passed,
   48 skipped; JS files all pass.
 
+
+## Fix: phone barge-in cancelled replies before any audio (2026-10-20)
+
+Kyle's phone log (12:47 and 12:52 UTC): "Voice barge-in on turn N after 0
+chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
+- **Root cause (page):** `voice-core.js` `TurnController` treated any
+  confirmed speech in the **thinking** state as a barge-in
+  (`onVad` "speechConfirmed" and `_utterance`, there since the MVP). So
+  Kyle's trailing words, room noise or the echo of the app's own "thinking"
+  note / follow-up cue cancelled the turn before its first audio chunk.
+  `[voice] barge_in = "off"` didn't help: it only ignored the mic in the
+  **speaking** state.
+- **Root cause (server):** the cancel closes the Claude stream from another
+  thread. A closed socket can read as a plain end of stream rather than an
+  error (reproduced against a local SSE server: the SDK's `text_stream`
+  ends quietly and `get_final_message()` returns `stop_reason=None` with
+  only the thinking block received so far, signature ""). `ClaudeChat`
+  stored that fragment as the reply, so the next request carried an
+  unsigned thinking block (the 400s that PR #26 works around).
+- **Fix, page:** barge-in needs the reply's audio to have started and
+  speech that began after that, with the same `barge_in_ms` rule as before.
+  Speech while it is still thinking (or with barge-in off, between
+  chunks) is **held and sent as the next turn** once the reply has played
+  (one slot, newest wins; a real barge-in, pause or End drops it; never
+  sent while a yes/no question is open). Chosen over "ignore" so "...and
+  on Friday" isn't lost, and over "append to the turn" because that needs
+  the running turn cancelled. Audio that arrives while Kyle is still
+  talking plays on and the state catches up when he stops. The
+  `Endpointer` gets `holdOff(ms)`: `voice.js` calls it for every earcon and
+  the follow-up cue (sound length + 250 ms), so they can't start an
+  utterance. Pausing (app in the background) still stops a thinking turn.
+  Phone cache v20.
+- **Fix, server:** `ClaudeChat._create` checks the final message: no
+  `stop_reason` means the stream ended early; when cancelled that is the
+  normal `_Cancelled` path (history gets "[interrupted: Kyle started talking
+  before I said anything]", no thinking block), otherwise `StreamEndedEarly`
+  drops the turn from history like any failed request. The barge-in log
+  line also says how many chunks had been sent ("(0 sent)").
+- Tests (round 1): `tests/js/voice-core.test.js` 28 (was 21): "talking while it
+  thinks cancels that turn" is replaced by its opposite (held, sent after
+  the reply, no interrupt), plus barge-in only by speech begun after the
+  audio started, speech running past the end of the reply (no stuck
+  "thinking"), speech after a yes, barge-in off while thinking, pause/End
+  drop a held utterance, `Endpointer.holdOff`, and the earcon wiring in
+  `voice.js`. `tests/test_voice.py` +2: a 0-chunk cancel whose stream ends
+  quietly with a thinking-only fragment (`FakeStream(quiet_close=True)`)
+  leaves valid history and a clean next request, with the INFO line
+  checked by caplog; a stream that ends early without a cancel is not
+  kept. Each fails with its source change reverted. (Final counts are
+  under round 3.) Not checked on a real phone: how often trailing words or room noise now get
+  held as a next turn (MANUAL_TEST "Talk while it is still thinking").
+
+### Round 2 (judge findings)
+
+1. Muting while Kyle was talking over a reply that then finished left the
+   state "thinking", and his next words sent an interrupt for a reply he
+   had heard in full: `setMuted(true)` now runs the same catch-up as the
+   end of speech. Speech only counts as talking over the reply while its
+   audio is audible (`replyAudible`: playing, or "speaking"); speech in a
+   gap between chunks is held like speech while it thinks.
+2. Words held before a yes/no question could be sent as a new turn after
+   it (an early "yes" agreeing to whatever came next): a `confirm` drops
+   the held words, and while a question is open (asked, or just answered)
+   speech that isn't the answer is dropped, not held. Speech right after
+   the answer no longer barges in either (that is covered by 1 and the
+   drop; a separate `audioStarted` reset on the answer turned out to be
+   redundant, so it isn't in).
+3. The stricter VAD threshold now applies whenever reply audio plays
+   (`controller.replyAudible`, read per frame in `voice.js`), also while
+   the state shows "thinking" because he was talking when it started.
+- Merged origin/master (b1e40b9, #25 and #26) by fast-forward; CHANGELOG
+  keeps both Fix entries.
+- Tests: `voice-core.test.js` 34 (+6), each failing with its fix reverted
+  (the after-the-answer test fails with fixes 1 and 2 reverted together).
+
+### Round 3 (judge findings)
+
+1. A yes/no question that played under Kyle's speech (he started just
+   before its audio) left the page on "Thinking…": the question's end and
+   his speech's end both did nothing, so his real "yes" was dropped until
+   the 60 s timeout. New `_settle()` rule, run when speech ends, on mute
+   and when playback goes idle: in "thinking" with nothing playing and him
+   not talking, a heard question with no answer sent yet goes to
+   "listening", and a finished turn ends the reply. The page now knows the
+   question's audio was played (`questionAudio`) and that an answer is on
+   its way (`answerSent`, so it stays "thinking" until `confirm_answer`).
+   Sweep: a turn that ends with its question unanswered (the server gave
+   up) now clears `awaitingAnswer`, so the next words are a new turn
+   instead of an answer to nothing.
+2. The reply's own echo in a pause between sentences could be queued as
+   the next turn. Each time playback goes idle the page calls `echoTail`
+   (`voice.js`: `endpointer.holdOff(CUE_TAIL_MS)`, as for the earcons), and
+   speech that began in such a pause is dropped when reply audio played
+   under more than half of it (timed with `performance.now()`).
+3. PROGRESS: the stale round-1 counts are gone; README says a pause between
+   sentences doesn't count as barge-in either.
+- Tests: `voice-core.test.js` 40 (+6): the question-under-speech sequence
+  (speechEnd and misfire), an unanswered question closing with its turn,
+  echo in a pause dropped, real speech in a pause still asked, and the
+  `echoTail` wiring. Each fails with its fix reverted, except the
+  `_settle()` call in `onPlaybackIdle`, which is defensive: no reachable
+  sequence leaves "thinking" with playback ending and him silent, so no
+  test fails without it.
+- Final counts (Linux sandbox, Python 3.13): 2114 passed, 48 skipped
+  (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
+  252).

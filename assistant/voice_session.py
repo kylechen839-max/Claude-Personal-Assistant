@@ -400,12 +400,13 @@ class VoiceConversation:
                     self._decline(pending, "interrupted")
                 return
             turn.played = (int(played_index), float(played_fraction))
+            sent = len(turn.chunks)  # 0: stopped before any audio (e.g. a pause)
             if turn.finished:
                 self._truncate(turn)
             else:
                 self._cancel(turn)
-        log.info("Voice barge-in on turn %s after %s chunk(s) + %.0f%%", turn_id,
-                 played_index, 100 * float(played_fraction))
+        log.info("Voice barge-in on turn %s after %s chunk(s) + %.0f%% (%d sent)", turn_id,
+                 played_index, 100 * float(played_fraction), sent)
 
     def chunk_played(self, turn_id: int, index: int) -> None:
         """The page finished playing chunk `index` of `turn_id` (it reports
