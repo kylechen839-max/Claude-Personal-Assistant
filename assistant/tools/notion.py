@@ -5,9 +5,9 @@ from __future__ import annotations
 import difflib
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-from assistant.tools import Tool
+from assistant.tools import Tool, timeutil
 from assistant.tools.timeutil import local_zone, parse_datetime, spoken_date, spoken_time
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class NotionAssignments:
 
     def list_assignments(self, days_ahead: int = 14, include_done: bool = False,
                          include_overdue: bool = True) -> dict:
-        today = datetime.now(self.tz).date()
+        today = timeutil.now(self.tz).date()
         conditions = [{"property": self.due_prop, "date": {
             "on_or_before": (today + timedelta(days=days_ahead)).isoformat()}}]
         if not include_overdue:

@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo
+
+# The moment the current chat turn started (ClaudeChat.ask sets it). The
+# system prompt's "current date" and every "today"/"tomorrow" a tool works
+# out in that turn come from this one reading, so a question asked at
+# 23:59:59 can't straddle midnight between the prompt and the tool call.
+TURN_NOW: ContextVar[datetime | None] = ContextVar("turn_now", default=None)
 
 
 def local_zone(name: str | None = None) -> tzinfo:
@@ -15,6 +22,15 @@ def local_zone(name: str | None = None) -> tzinfo:
         return tzlocal.get_localzone()
     except Exception:
         return datetime.now().astimezone().tzinfo
+
+
+def now(tz: tzinfo | None = None) -> datetime:
+    """The current turn's moment (TURN_NOW) in `tz`, or the clock outside a
+    turn. `tz` None: this machine's zone."""
+    turn = TURN_NOW.get()
+    if turn is None:
+        return datetime.now(tz) if tz is not None else datetime.now().astimezone()
+    return turn.astimezone(tz)
 
 
 def zone_name(tz: tzinfo) -> str | None:
@@ -31,7 +47,7 @@ def resolve_day(day: str, tz: tzinfo) -> date:
     'friday' / 'this friday' is the coming Friday, or today if it is Friday.
     'next friday' is always after today: on a Friday it means a week out.
     """
-    today = datetime.now(tz).date()
+    today = now(tz).date()
     d = " ".join((day or "today").strip().lower().split())
     if d == "today":
         return today

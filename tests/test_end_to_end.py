@@ -55,6 +55,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from assistant import audio, cli  # noqa: E402
+from assistant import chat as chat_module  # noqa: E402
 from assistant.stt import Transcriber, rough_match  # noqa: E402
 from tests.test_wakeword import HERE, HEY_CLAUDE_MODEL, tts_clip  # noqa: E402
 
@@ -121,7 +122,14 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
 
         monkeypatch.setattr(cli, "Transcriber", KnownTranscript)
 
-    tomorrow = datetime.now(ZoneInfo(TZ)).date() + timedelta(days=1)
+    # "Now" is pinned to 23:59:59 in New York, the worst moment. The test
+    # used to read the clock here and the assistant again seconds later
+    # (after the wake-word scan and Whisper), so a run that crossed midnight
+    # in New York expected the wrong "tomorrow". The assistant reads it once
+    # per turn (ClaudeChat.ask -> timeutil.TURN_NOW), from chat._now.
+    asked = datetime(2026, 10, 19, 23, 59, 59, tzinfo=ZoneInfo(TZ))
+    monkeypatch.setattr(chat_module, "_now", lambda timezone=None: asked)
+    tomorrow = asked.date() + timedelta(days=1)
     two_pm = datetime.combine(tomorrow, datetime.min.time(), ZoneInfo(TZ)) \
         + timedelta(hours=14)
     event = {"id": "ev9", "summary": "Physics lab", "organizer": {"self": True},

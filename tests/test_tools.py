@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 from datetime import datetime, timedelta
@@ -269,6 +270,41 @@ def test_resolve_day_weekdays(monkeypatch, today_iso, day, expected):
         resolve_day("next week", ZoneInfo(TZ))
 
 
+def test_tomorrow_is_read_once_per_turn_across_midnight(monkeypatch, fake_client):
+    """Kyle asks at 23:59:59 New York time and the clock passes midnight
+    before Claude's tool call runs. "Tomorrow" must be the day after the
+    date the system prompt gave Claude (one reading of "now" per turn), not
+    the day after that."""
+    from assistant import chat as chat_module
+    from assistant.tools import timeutil
+
+    asked = datetime(2026, 10, 19, 23, 59, 59, tzinfo=ZoneInfo(TZ))  # a Monday
+    seconds = itertools.count()
+
+    class Ticking(datetime):
+        @classmethod
+        def now(cls, tz=None):  # every reading is a second after the last
+            t = asked + timedelta(seconds=next(seconds))
+            return t.astimezone(tz) if tz else t.astimezone().replace(tzinfo=None)
+
+    monkeypatch.setattr(chat_module, "datetime", Ticking)
+    monkeypatch.setattr(timeutil, "datetime", Ticking)
+    service, events = make_service(items=[DENTIST])
+    tools = ToolRegistry()
+    tools.register(*GoogleCalendar(service=service, timezone=TZ).tools())
+    fake_client.queue = [
+        make_response(tool_use_block("list_calendar_events", {"day": "tomorrow"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Tomorrow you have the dentist."))]
+    chat = ClaudeChat(client=fake_client, tools=tools, timezone=TZ)
+    chat.ask("What's on my calendar tomorrow?")
+    assert "Monday, October 19, 2026, 11:59 PM" in fake_client.calls[0]["system"]
+    kw = events.list.call_args.kwargs
+    assert kw["timeMin"] == "2026-10-20T00:00:00-04:00"
+    assert kw["timeMax"] == "2026-10-21T00:00:00-04:00"
+    assert timeutil.TURN_NOW.get() is None  # nothing pinned after the turn
+
+
 # ---------- Notion ----------
 def page(id, name, status="Not started", due="2026-10-20", course="CS II"):
     return {"id": id, "properties": {
@@ -309,6 +345,24 @@ def test_notion_list_assignments_filters():
     a = out["assignments"][0]
     assert a["name"] == "Homework 6" and a["course"] == "CS II"
     assert a["due"] == "Monday, October 19 at 11:59 PM"  # UTC -> local
+
+
+def test_notion_today_is_the_turns_today():
+    """Inside a chat turn "today" (and so overdue / due soon) comes from the
+    turn's one reading of the clock, like the calendar's "tomorrow"."""
+    from assistant.tools import timeutil
+
+    client = make_notion([page("p1", "Homework 6", due="2026-10-19")])
+    asked = datetime(2026, 10, 19, 23, 59, 59, tzinfo=ZoneInfo(TZ))
+    token = timeutil.TURN_NOW.set(asked)
+    try:
+        out = NotionAssignments("db", client=client, timezone=TZ).list_assignments(7)
+    finally:
+        timeutil.TURN_NOW.reset(token)
+    flt = client.data_sources.query.call_args.kwargs["filter"]["and"]
+    assert {"property": "Due", "date": {"on_or_before": "2026-10-26"}} in flt
+    assert out["today"] == "Monday, October 19"
+    assert "overdue" not in out["assignments"][0]  # due today, not yesterday
 
 
 def test_notion_update_status_by_name():
