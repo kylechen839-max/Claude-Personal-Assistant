@@ -154,7 +154,6 @@ main[data-view="grid"]{height:100%;gap:10px}
 :root[data-theme="dark"] [data-hue="4"]{--hue:#fb7185}:root[data-theme="dark"] [data-hue="5"]{--hue:#e879f9}
 :root[data-theme="dark"] [data-hue="6"]{--hue:#c4b5fd}:root[data-theme="dark"] [data-hue="7"]{--hue:#67e8f9}
 .tile-head{position:relative;flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:3px 7px;min-width:0;padding:7px 8px 6px 4px}
-.tile[data-max] .tile-head{padding-right:92px}
 .title{flex:1 1 7em;min-width:0;display:flex;flex-direction:column}
 .tile-head h2{font-size:.9rem;line-height:1.25}
 .coord .tile-head h2{font-size:1rem}
@@ -165,8 +164,6 @@ main[data-view="grid"]{height:100%;gap:10px}
 .wacts{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;font-size:.8rem}
 .wacts a{font-size:.8rem}
 .max{padding:1px 7px;font-size:.85rem;color:var(--muted);border:1px solid var(--line);background:var(--card)}
-.restore{position:absolute;top:6px;right:8px;z-index:2;padding:3px 12px;font-size:.8rem;color:var(--card);background:var(--accent);
-  border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .grip{flex:none;padding:2px 5px;color:var(--muted);cursor:grab;touch-action:none}
 .grip[aria-pressed="true"]{color:var(--accent);background:var(--done-bg)}
 .resize{position:absolute;right:2px;bottom:2px;z-index:2;width:22px;height:22px;padding:0;color:#9aa4b0;cursor:nwse-resize;
@@ -342,6 +339,25 @@ dl{gap:3px 16px}
   button,a,li.run,.tile,.composer textarea{transition:color .16s var(--ease),background-color .16s var(--ease),
     border-color .2s var(--ease),box-shadow .22s var(--ease),opacity .2s var(--ease)}}
 /* ---- end design polish ---- */
+/* Chat attachments: chips over the box and in Kyle's bubbles. */
+.atts{display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px 0}
+.msg .atts{padding:6px 0 0}
+.att{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 8px;font-size:.78rem;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.att .thumb{width:40px;height:40px;object-fit:cover;border-radius:4px}
+.att-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em}
+.att-meta{color:var(--muted)}
+.att-meta[data-level="bad"]{color:var(--silent)}
+.att-x{padding:0 4px;color:var(--muted);background:transparent;border:0}
+/* Reply: the button on a selected message and the quote over the box. */
+.msg{position:relative}
+.replybtn{position:absolute;top:-12px;right:6px;z-index:2;padding:2px 10px;font-size:.76rem;color:var(--card);background:var(--accent);border-radius:999px}
+.quote{display:flex;align-items:flex-start;gap:8px;margin:6px 12px 0;padding:4px 8px;font-size:.8rem;color:var(--muted);border-left:3px solid var(--line)}
+.quote-text{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.quote-x{padding:0 4px;color:var(--muted);background:transparent;border:0}
+.msg .plain blockquote{margin:0 0 4px;padding-left:10px;border-left:3px solid var(--line);color:var(--muted)}
+/* Close idle agents and its auto toggle. */
+#grid-close-idle,#grid-autoclose{color:var(--accent);background:var(--card);border:1px solid var(--line);font-size:.8rem;padding:4px 12px;border-radius:8px;font-weight:550}
+#grid-autoclose[aria-pressed="true"]{background:var(--done-bg);box-shadow:var(--press)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>
 <main id="main" data-view="runs">
@@ -393,6 +409,8 @@ dl{gap:3px 16px}
 <button type="button" id="grid-showall">Show all</button>
 </div>
 </details>
+<button type="button" id="grid-close-idle" disabled>Close idle agents</button>
+<button type="button" id="grid-autoclose" aria-pressed="false">Auto-close idle agents</button>
 <button type="button" id="grid-reset">Reset layout</button>
 </div>
 <div id="coords" aria-label="Windows"></div>
@@ -773,6 +791,9 @@ dl{gap:3px 16px}
   const LAYOUT_RAW_MAX = 64e3;
   const FILTER_KEY = "agentDashboard.filter";
   const COORD_KEY = "agentDashboard.coordinator"; // one session_url (validated, so bounded) or ""
+  const AUTOCLOSE_KEY = "agentDashboard.autoClose"; // "1" (on) or "0"
+  // Agent states "Close idle agents" and auto-close hide (never running or queued).
+  const IDLE_STATES = ["done", "failed", "stopped", "silent"];
   const COORD_FEATURE_MAX = 60;
   // Auto-tiling: about square, at most 6 columns, none narrower than MIN_W
   // (the CSS rows are at least 180 px tall).
@@ -786,6 +807,29 @@ dl{gap:3px 16px}
   const CHAT_SUBS = 8;      // conversations subscribed at once
   const PENDING_MAX = 20;   // Kyle's own unconfirmed messages kept per session
   const SEND_MAX = 4000;    // UTF-8 bytes per comment (the shell allows 4 KiB)
+  // Attachments: pasted or dropped into the chat box, stored with assets.upload.
+  const QUOTE_MAX = 1000;   // characters of a quoted reply that are sent
+  const QUOTE_SHOW = 200;   // characters of it the chip shows
+  const ATTACH_MAX = 5;     // files per message
+  const ATTACH_NAME_MAX = 80;
+  const ATTACH_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "video/mp4",
+    "video/webm", "application/pdf", "font/woff2", "font/woff", "font/ttf", "font/otf", "text/csv",
+    "text/markdown", "application/json", "text/plain", "text/css", "text/javascript"];
+  const ATTACH_EXT = {png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+    svg: "image/svg+xml", mp4: "video/mp4", webm: "video/webm", pdf: "application/pdf", woff2: "font/woff2",
+    woff: "font/woff", ttf: "font/ttf", otf: "font/otf", csv: "text/csv", md: "text/markdown",
+    markdown: "text/markdown", json: "application/json", txt: "text/plain", log: "text/plain", css: "text/css",
+    js: "text/javascript", mjs: "text/javascript"};
+  const ATTACH_COPY = {
+    too_large: "Too large to attach (20 MB max; 2 MB for SVG, 16 MB for CSS and JavaScript).",
+    unsupported_type: "This file type can't be attached.",
+    invalid_request: "Couldn't read this file (empty, or text that isn't UTF-8).",
+    quota_or_state: "The dashboard's file storage is full or unavailable right now.",
+    rate_limited: "Too many uploads at once. Remove it and try again in a moment.",
+    upstream_auth: "claude.ai couldn't confirm your sign-in. Reload the page, then attach it again.",
+    off: "Attachments aren't available on this page.",
+    upstream_error: "Couldn't upload this file.",
+  };
   const CHAT_KINDS = ["update", "reply", "question", "report", "activity"];
   const ACTIVITY_MAX = 200;
   const CHECK_WORD = /^(?:✓|ran|passed|done|finished|completed|merged|pushed|approved|fixed|opened|created|green)\b/i;
@@ -830,6 +874,8 @@ dl{gap:3px 16px}
   const $coords = document.getElementById("coords");
   const $gridHidden = document.getElementById("grid-hidden");
   const $gridReset = document.getElementById("grid-reset");
+  const $closeIdle = document.getElementById("grid-close-idle");
+  const $autoClose = document.getElementById("grid-autoclose");
   const $gridTray = document.getElementById("grid-tray");
   const $gridTraySum = document.getElementById("grid-tray-sum");
   const $gridTrayList = document.getElementById("grid-tray-list");
@@ -1078,7 +1124,8 @@ dl{gap:3px 16px}
   }
 
   // ---- layout: window order and size, per viewer, in localStorage ----
-  // id -> {o: order, c: columns 1-3, r: rows 1-2, h: 1 when hidden},
+  // id -> {o: order, c: columns 1-3, r: rows 1-2, h: 1 when hidden,
+  // k: the idle state an agent window was restored by hand in},
   // stored as {v: 2, tiles}. Read on the first Grid render, written only
   // when a drag, a keyboard move, a resize, a hide or a restore finishes. A v1 layout (orders per board) keeps only
   // its sizes.
@@ -1096,6 +1143,7 @@ dl{gap:3px 16px}
     const r = number(v.r);
     if (r !== null) e.r = clampInt(r, 1, 2);
     if (v.h === 1) e.h = 1;
+    if (IDLE_STATES.includes(v.k)) e.k = v.k;
     return Object.keys(e).length ? e : null;
   }
 
@@ -1177,6 +1225,7 @@ dl{gap:3px 16px}
       delete layout[t.id].h;
       if (!Object.keys(layout[t.id]).length) delete layout[t.id];
     }
+    if (!hide) keepShown(t);
     saveLayout();
     if (!hide && t.coord) t.stick = true;
     renderGrid();
@@ -1197,9 +1246,69 @@ dl{gap:3px 16px}
       delete layout[id].h;
       if (!Object.keys(layout[id]).length) delete layout[id];
     }
+    for (const t of hiddenTiles) keepShown(t);
     saveLayout();
     renderGrid();
     announce(n ? `Showing ${n} hidden window${n === 1 ? "" : "s"} again.` : "Nothing was hidden.");
+  }
+
+  // ---- idle agents: "Close idle agents" and the opt-in auto-close ----
+  // Both use h: 1 above and touch only agent windows on screen (so the
+  // picker and filter apply); coordinator windows are never closed. A
+  // window restored by hand keeps k: its state then, and auto-close leaves
+  // it shown until that state changes.
+  function isIdle(t) { return !t.coord && IDLE_STATES.includes(t.el.dataset.state); }
+  function keepShown(t) { if (isIdle(t)) entry(t.id).k = t.el.dataset.state; }
+  function closeTile(t) {
+    if ((drag && drag.t === t) || (resizing && resizing.t === t)) endPointer();
+    if (grabbed === t.id) setGrab(null);
+    if (maximized === t.key) maximized = null;
+    const e = entry(t.id);
+    e.h = 1;
+    delete e.k;
+  }
+  function closeIdle() {
+    if (layout === null) layout = loadLayout();
+    const list = workTiles.filter(isIdle);
+    if (!list.length) return;
+    for (const t of list) closeTile(t);
+    saveLayout();
+    renderGrid();
+    announce(`Closed ${list.length} idle agent window${list.length === 1 ? "" : "s"}.`);
+    focusEl($gridTraySum);
+  }
+  let autoClose = null;
+  function loadAutoClose() {
+    try { return window.localStorage.getItem(AUTOCLOSE_KEY) === "1"; } catch (_) { return false; }
+  }
+  function setAutoClose(on) {
+    autoClose = !!on;
+    try { window.localStorage.setItem(AUTOCLOSE_KEY, autoClose ? "1" : "0"); } catch (_) { /* storage blocked */ }
+    renderGrid();
+    if (!autoClose) announce("Auto-close idle agents is off.");
+    else if (!/^Auto-closed/.test($gridLive.textContent)) announce("Auto-close idle agents is on.");
+  }
+  // On render: drop a stale k (the state changed), and with auto-close on
+  // hide idle agent windows, except one in a drag, grab or maximize.
+  // Returns [layout changed, windows hidden].
+  function autoCloseTiles(tiles) {
+    let dirty = false;
+    let hid = 0;
+    for (const t of tiles) {
+      if (t.coord) continue;
+      const e = layout[t.id];
+      if (e && e.k !== undefined && e.k !== t.el.dataset.state) {
+        delete e.k;
+        if (!Object.keys(e).length) delete layout[t.id];
+        dirty = true;
+      }
+      if (!autoClose || !isIdle(t) || isHidden(t.id) || (layout[t.id] && layout[t.id].k !== undefined)) continue;
+      if ((drag && drag.t === t) || (resizing && resizing.t === t) || grabbed === t.id || maximized === t.key) continue;
+      closeTile(t);
+      dirty = true;
+      hid += 1;
+    }
+    return [dirty, hid];
   }
 
   // The toolbar's "Hidden (N)" menu: one entry per hidden window, with its
@@ -1306,7 +1415,7 @@ dl{gap:3px 16px}
       head: el("div", "tile-head"), grip: el("button", "grip", "⠿"), chip: el("span", "chip"), titleBox: el("div", "title"),
       kicker: el("p", "kicker"), h2: el("h2"), badge: el("span", "badge"), round: el("span", "round"),
       qchip: el("span", "qchip", "question"), acts: el("div", "wacts"), open: link("Open session", SESSION_PREFIX),
-      prBox: el("span", "wacts"), prKey: "", hide: el("button", "hide", "–"), max: el("button", "max", "⤢"), restore: el("button", "restore", "Restore"),
+      prBox: el("span", "wacts"), prKey: "", hide: el("button", "hide", "–"), max: el("button", "max", "⤢"), restore: el("button", "max restore", "⤡"),
       body: el("div", "tile-body"), resize: el("button", "resize", "◢"), title: ""};
     t.el.id = coord ? id : "agent-" + safeId(id);
     if (coord) t.el.dataset.role = "coordinator";
@@ -1317,8 +1426,8 @@ dl{gap:3px 16px}
     t.qchip.hidden = true;
     t.restore.hidden = true;
     t.titleBox.append(t.kicker, t.h2);
-    t.acts.append(t.open, t.prBox, t.hide, t.max);
-    t.head.append(t.grip, t.chip, t.titleBox, t.badge, t.round, t.qchip, t.acts, t.restore);
+    t.acts.append(t.open, t.prBox, t.hide, t.max, t.restore);
+    t.head.append(t.grip, t.chip, t.titleBox, t.badge, t.round, t.qchip, t.acts);
     t.el.append(t.head, t.body, t.resize);
     t.grip.addEventListener("pointerdown", (e) => dragStart(t, e));
     t.grip.addEventListener("keydown", (e) => gripKey(t, e));
@@ -1354,6 +1463,24 @@ dl{gap:3px 16px}
       t.send.type = "button";
       t.form.append(t.input, t.send);
       t.form.hidden = true;
+      // Reply: a quote of selected transcript text, shown over the box.
+      t.quote = "";
+      t.quoteBox = el("div", "quote");
+      t.quoteBox.hidden = true;
+      t.quoteText = el("span", "quote-text");
+      t.quoteX = el("button", "quote-x", "×");
+      t.quoteX.type = "button";
+      t.quoteX.setAttribute("aria-label", "Clear quote");
+      t.quoteBox.append(t.quoteText, t.quoteX);
+      t.replyBtn = el("button", "replybtn", "Reply");
+      t.replyBtn.type = "button";
+      t.replyBtn.hidden = true;
+      t.replyText = "";
+      t.attBox = el("div", "atts");
+      t.attBox.setAttribute("aria-label", "Attachments");
+      t.attBox.hidden = true;
+      t.atts = [];
+      t.attSeq = 0;
       t.sendHint = el("p", "hint");
       t.sendHint.setAttribute("aria-live", "polite");
       t.dline = el("div", "dline");
@@ -1382,7 +1509,7 @@ dl{gap:3px 16px}
       pdot.setAttribute("aria-hidden", "true");
       t.presText = el("span", "ptext");
       t.pres.append(pdot, t.presText);
-      t.chat.append(t.chatNote, t.logWrap, t.work, t.pres, t.form, t.sendHint);
+      t.chat.append(t.chatNote, t.logWrap, t.work, t.pres, t.quoteBox, t.attBox, t.form, t.sendHint);
       t.body.append(t.runLine, t.dyn, t.chat);
       t.bubbles = Object.create(null);
       t.openActs = Object.create(null);
@@ -1393,11 +1520,36 @@ dl{gap:3px 16px}
       t.log.addEventListener("scroll", () => { if (nearBottom(t.log)) t.pill.hidden = true; });
       t.pill.addEventListener("click", () => { scrollEnd(t.log); t.pill.hidden = true; });
       t.input.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && t.quote) {
+          if (e.preventDefault) e.preventDefault();  // handled: it doesn't also restore a maximized window
+          setQuote(t, "");
+          return;
+        }
         if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
         if (e.preventDefault) e.preventDefault();
         sendChat(t);
       });
       t.send.addEventListener("click", () => sendChat(t));
+      // mousedown would clear the selection before the click lands.
+      t.replyBtn.addEventListener("mousedown", (e) => { if (e.preventDefault) e.preventDefault(); });
+      t.replyBtn.addEventListener("click", () => {
+        const q = t.replyText;
+        hideReply(t);
+        if (q) { setQuote(t, q); focusEl(t.input); }
+      });
+      t.quoteX.addEventListener("click", () => { setQuote(t, ""); focusEl(t.input); });
+      // Paste or drop files into the box: only Kyle's gesture uploads.
+      t.input.addEventListener("paste", (e) => {
+        const files = e && e.clipboardData ? e.clipboardData.files : null;
+        if (files && files.length) attachFiles(t, files);
+      });
+      t.form.addEventListener("dragover", (e) => { if (assets && e.preventDefault) e.preventDefault(); });
+      t.form.addEventListener("drop", (e) => {
+        if (!assets) return;
+        if (e.preventDefault) e.preventDefault();
+        const files = e.dataTransfer ? e.dataTransfer.files : null;
+        if (files && files.length) attachFiles(t, files);
+      });
     }
     return t;
   }
@@ -1436,6 +1588,8 @@ dl{gap:3px 16px}
     t.max.setAttribute("aria-label", `Maximize ${h.title}`);
     t.max.title = "Maximize (Esc restores)";
     t.restore.setAttribute("aria-label", `Restore ${h.title}`);
+    t.restore.setAttribute("aria-pressed", "true");
+    t.restore.title = "Restore (Esc)";
   }
 
   function fillCoord(t, p, now, hue) {
@@ -1506,6 +1660,8 @@ dl{gap:3px 16px}
 
   function drawGrid() {
     if (filter === null) filter = loadFilter();
+    if (autoClose === null) autoClose = loadAutoClose();
+    $autoClose.setAttribute("aria-pressed", String(autoClose));
     $filterActive.setAttribute("aria-pressed", String(filter === "active"));
     $filterAll.setAttribute("aria-pressed", String(filter === "all"));
     if (rows === null) {
@@ -1520,6 +1676,7 @@ dl{gap:3px 16px}
       $gridHidden.hidden = true;
       $gridCount.textContent = "";
       $gridTray.hidden = true;
+      $closeIdle.disabled = true;
       return;
     }
     if (layout === null) layout = loadLayout();
@@ -1559,6 +1716,7 @@ dl{gap:3px 16px}
       }
     }
     tileEls = nextTiles;
+    const [layoutDirty, autoHid] = autoCloseTiles(tiles);
     // Hidden windows stay built (draft, delivery state, transcript) and
     // their chats stay subscribed; they just leave the workspace.
     hiddenTiles = tiles.filter((t) => isHidden(t.id));
@@ -1598,6 +1756,10 @@ dl{gap:3px 16px}
     knownTiles = [...workTiles, ...hiddenTiles].map((t) => t.id);
     knownAll = agents === null ? null
       : [...rows.map((r) => "coord-" + safeId(r._id)), ...agents.map((a) => String(a._id))];
+    // Saved once, after knownAll covers windows new in this snapshot.
+    if (layoutDirty) saveLayout();
+    if (autoHid) announce(`Auto-closed ${autoHid} idle agent window${autoHid === 1 ? "" : "s"}.`);
+    $closeIdle.disabled = !workTiles.some(isIdle);
 
     const active = g.panels.filter((p) => p.active).length;
     const parts = [];
@@ -1622,6 +1784,9 @@ dl{gap:3px 16px}
     setGrab(null);
     endPointer();
     maximized = t ? t.key : null;
+    // Leaving a maximized window counts as keeping it: auto-close must not
+    // hide the window Kyle was just reading.
+    if (!t && prev && isIdle(prev)) { keepShown(prev); saveLayout(); }
     renderGrid();
     if (t) {
       if (t.coord) t.stick = true;
@@ -1851,6 +2016,7 @@ dl{gap:3px 16px}
   // data/users/<id>/chat-<session>/msgs. Both are looked up on the first
   // Grid show only.
   let comments = null;
+  let assets = null;        // the assets namespace, or null: no attachment UI
   let setupStarted = false;
   let setupDone = false;
   let uid = null;           // Kyle's user id (null: none, so no transcript)
@@ -1871,6 +2037,9 @@ dl{gap:3px 16px}
       let ns = null;
       try { ns = await window.claude?.use?.("comments"); } catch (_) { ns = null; }
       comments = ns || null;
+      let an = null;
+      try { an = await window.claude?.use?.("assets"); } catch (_) { an = null; }
+      assets = an || null;
       let id = null;
       try {
         const user = await window.claude?.use?.("user");
@@ -1976,6 +2145,9 @@ dl{gap:3px 16px}
     const show = !!comments && !sendOff && sendState === "available";
     t.form.hidden = !show;
     t.send.disabled = sending;
+    fillQuote(t);
+    t.input.placeholder = assets ? "Reply to the coordinator… (paste or drop files)" : "Reply to the coordinator…";
+    fillAtts(t);
     let hint = t.hintText;
     let bad = t.hintBad;
     if (sendOff) { hint = SEND_OFF; bad = false; }
@@ -2013,6 +2185,11 @@ dl{gap:3px 16px}
     for (const m of mine) {
       items.push({key: "l " + m.nonce, from: "kyle", kind: "reply", text: m.text, at: m.at, ref: m.nonce, state: m.state});
     }
+    // Kyle's attachment chips come only from this visit's upload() results,
+    // by nonce; the mirrored copy shows them too. Text is never a url.
+    const attsOf = Object.create(null);
+    for (const m of pendingBy[key] || []) if (m.atts && m.atts.length) attsOf[m.nonce] = m.atts;
+    for (const m of items) if (m.from === "kyle" && m.ref && attsOf[m.ref]) m.atts = attsOf[m.ref];
     if (open) t.el.dataset.question = ""; else delete t.el.dataset.question;
     t.qchip.hidden = !open;
     const next = Object.create(null);
@@ -2034,7 +2211,7 @@ dl{gap:3px 16px}
         continue;
       }
       const kind = m.kind === "question" ? (m === open ? "question" : "asked") : m.kind;
-      const sig = [m.from, kind, m.at, m.state, m.text].join("\u0001");
+      const sig = [m.from, kind, m.at, m.state, m.text, m.atts ? m.atts.length : 0].join("\u0001");
       let b = t.bubbles[m.key];
       if (!b || b.sig !== sig) b = {sig, el: bubble(m, kind)};
       next[m.key] = b;
@@ -2194,8 +2371,198 @@ dl{gap:3px 16px}
     const who = m.from === "kyle" ? "You" : "Coordinator" + (m.kind === "update" ? "" : ` · ${m.kind}`);
     meta.append(el("span", "who", who), el("span", "at", m.at === null ? "?" : stamp(m.at)));
     if (m.state) meta.append(el("span", "state", m.state));
-    b.append(meta, m.from === "kyle" ? el("div", "plain", m.text) : renderMarkdown(m.text));
+    b.append(meta, m.from === "kyle" ? kyleText(m.text) : renderMarkdown(m.text));
+    if (m.atts && m.atts.length) {
+      const box = el("div", "atts");
+      box.append(...m.atts.map((a) => attChip(a, null)));
+      b.append(box);
+    }
     return b;
+  }
+
+  // Kyle's own text: plain, except leading "> " lines (a Reply quote),
+  // which show as a blockquote. Elements and textContent only.
+  function kyleText(src) {
+    const lines = String(src).split("\n");
+    let n = 0;
+    while (n < lines.length && /^>( |$)/.test(lines[n])) n += 1;
+    if (!n) return el("div", "plain", src);
+    const box = el("div", "plain");
+    box.append(el("blockquote", "", lines.slice(0, n).map((l) => l.replace(/^> ?/, "")).join("\n")));
+    const rest = lines.slice(n).join("\n").replace(/^\n+/, "");
+    if (rest) box.append(el("div", "", rest));
+    return box;
+  }
+
+  // ---- Reply: quote text selected inside one message of a transcript ----
+  // On each selection change, a selection inside a single message of one
+  // coordinator window's transcript shows that window's Reply button in
+  // the message; anything else hides every Reply button.
+  function msgOf(t, node) {
+    let n = node;
+    for (let i = 0; n && i < 60; i += 1) {
+      if (n.parentNode === t.log) return n.className === "msg" ? n : null;
+      n = n.parentNode;
+    }
+    return null;
+  }
+  function hideReply(t) {
+    t.replyBtn.hidden = true;
+    t.replyText = "";
+  }
+  function onSelection() {
+    let sel = null;
+    try { sel = window.getSelection ? window.getSelection() : null; } catch (_) { sel = null; }
+    const raw = sel && !sel.isCollapsed && sel.rangeCount ? String(sel.toString()) : "";
+    const quote = text(raw, QUOTE_MAX, true);
+    for (const key of Object.keys(tileEls)) {
+      const t = tileEls[key];
+      if (!t.coord || !t.replyBtn) continue;
+      const m = quote ? msgOf(t, sel.anchorNode) : null;
+      if (!m || m !== msgOf(t, sel.focusNode)) { if (!t.replyBtn.hidden) hideReply(t); continue; }
+      t.replyText = quote;
+      if (t.replyBtn.parentNode !== m) m.append(t.replyBtn);
+      t.replyBtn.hidden = false;
+    }
+  }
+  function setQuote(t, q) {
+    t.quote = q ? text(q, QUOTE_MAX, true) : "";
+    fillQuote(t);
+  }
+  function fillQuote(t) {
+    t.quoteBox.hidden = !t.quote || t.form.hidden;
+    const shown = t.quote.length > QUOTE_SHOW ? t.quote.slice(0, QUOTE_SHOW - 1) + "…" : t.quote;
+    setText(t.quoteText, shown);
+  }
+  // The quote as markdown: "> " on each line, then a blank line.
+  function quoteLines(q) { return q.split("\n").map((l) => "> " + l).join("\n") + "\n\n"; }
+
+  // ---- attachments: paste or drop into the chat box ----
+  // Each file is uploaded with assets.upload at Kyle's paste or drop (never
+  // at load, never retried) and shows as a chip. Send appends one
+  // "[attachment: ...]" line per uploaded file; the coordinator opens it by
+  // asset id. A chip removed before its message is sent deletes its asset.
+  function attType(f) {
+    const raw = typeof f.type === "string" ? f.type.split(";")[0].trim().toLowerCase() : "";
+    if (ATTACH_TYPES.includes(raw)) return raw;
+    const m = /\.([a-z0-9]{1,8})$/i.exec(typeof f.name === "string" ? f.name : "");
+    const ext = m ? m[1].toLowerCase() : "";
+    return has(ATTACH_EXT, ext) ? ATTACH_EXT[ext] : "";
+  }
+  function attLimit(type) {
+    if (type === "image/svg+xml") return 2 * 1048576;
+    if (type === "text/css" || type === "text/javascript") return 16 * 1048576;
+    return 20 * 1048576;
+  }
+  function attName(v) { return text(v, ATTACH_NAME_MAX).replace(/\[/g, "(").replace(/\]/g, ")") || "file"; }
+  function sizeText(n) {
+    if (!(typeof n === "number" && Number.isFinite(n) && n >= 0)) return "? B";
+    if (n < 1024) return `${Math.floor(n)} B`;
+    if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1048576).toFixed(1)} MB`;
+  }
+  // A display url only as upload() gave it: same-origin path or https.
+  function attUrl(v) {
+    return typeof v === "string" && v.length <= 500 && /^(?:https:\/\/|\/(?!\/))[^\s"'<>\\]*$/.test(v) ? v : "";
+  }
+
+  function attachFiles(t, files) {
+    if (!assets || !t.panel || !t.panel.session) return;
+    const list = [];
+    for (let i = 0; i < files.length && i < 50; i += 1) if (files[i]) list.push(files[i]);
+    const room = ATTACH_MAX - t.atts.filter((a) => a.state !== "error").length;
+    const take = list.slice(0, Math.max(0, room));
+    t.atts = t.atts.filter((a) => a.state !== "error");
+    for (const f of take) {
+      t.attSeq += 1;
+      const type = attType(f);
+      const size = typeof f.size === "number" ? f.size : null;
+      const a = {key: t.attSeq, name: attName(f.name), type, size, id: "", url: "", state: "uploading", why: ""};
+      t.atts.push(a);
+      if (!type) { a.state = "error"; a.why = ATTACH_COPY.unsupported_type; continue; }
+      if (size !== null && size > attLimit(type)) { a.state = "error"; a.why = ATTACH_COPY.too_large; continue; }
+      if (size === 0) { a.state = "error"; a.why = ATTACH_COPY.invalid_request; continue; }
+      uploadOne(t, a, f);
+    }
+    t.hintText = list.length > take.length ? `Up to ${ATTACH_MAX} files per message; ${list.length - take.length} not attached.` : "";
+    t.hintBad = false;
+    renderGrid();
+  }
+
+  async function uploadOne(t, a, f) {
+    let res = null;
+    try {
+      res = await assets.upload(f, {type: a.type});
+    } catch (e) {
+      const code = e && typeof e.code === "string" ? e.code : "upstream_error";
+      a.state = "error";
+      a.why = has(ATTACH_COPY, code) ? ATTACH_COPY[code]
+        : ["not_granted", "capability_disabled", "capability_removed"].includes(code) ? ATTACH_COPY.off : ATTACH_COPY.upstream_error;
+      renderGrid();
+      return;
+    }
+    const id = res && typeof res.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(res.id) ? res.id : "";
+    if (!id) { a.state = "error"; a.why = ATTACH_COPY.upstream_error; renderGrid(); return; }
+    if (a.removed) { forgetAsset(id); return; }  // removed while uploading, never sent
+    a.id = id;
+    a.url = attUrl(res.url);
+    if (typeof res.contentType === "string" && ATTACH_TYPES.includes(res.contentType)) a.type = res.contentType;
+    if (typeof res.sizeBytes === "number" && Number.isFinite(res.sizeBytes)) a.size = res.sizeBytes;
+    a.state = "ready";
+    renderGrid();
+  }
+
+  // Kyle's × on an unsent chip: the asset is deleted (nothing points at it).
+  // After a send that may have been posted, × only drops the chip: the
+  // delivered comment could still point at the file.
+  function removeAtt(t, a) {
+    t.atts = t.atts.filter((x) => x !== a);
+    a.removed = true;
+    if (a.id && !a.maybeSent) forgetAsset(a.id);
+    renderGrid();
+    focusEl(t.input);
+  }
+  function forgetAsset(id) {
+    try { Promise.resolve(assets.delete(id)).catch(() => { /* already gone or not allowed */ }); } catch (_) { /* gone */ }
+  }
+
+  // One chip: a thumbnail (image types with an upload() url only), the
+  // name, type and size or the per-file problem, and × when removable.
+  function attChip(a, t) {
+    const c = el("span", "att");
+    c.dataset.state = a.state;
+    if (a.state === "ready" && a.url && a.type.startsWith("image/")) {
+      const img = el("img", "thumb");
+      img.src = a.url;
+      img.alt = "";
+      img.loading = "lazy";
+      c.append(img);
+    }
+    c.append(el("span", "att-name", a.name));
+    const info = a.state === "error" ? a.why : a.state === "uploading" ? "uploading…" : `${a.type}, ${sizeText(a.size)}`;
+    const meta = el("span", "att-meta", info);
+    if (a.state === "error") meta.dataset.level = "bad";
+    c.append(meta);
+    if (t) {
+      const x = el("button", "att-x", "×");
+      x.type = "button";
+      x.setAttribute("aria-label", `Remove ${a.name}`);
+      x.addEventListener("click", () => removeAtt(t, a));
+      c.append(x);
+    }
+    return c;
+  }
+  function fillAtts(t) {
+    const show = !!assets && !t.form.hidden && t.atts.length > 0;
+    t.attBox.hidden = !show;
+    const sig = t.atts.map((a) => [a.key, a.state, a.id, a.why].join("\u0002")).join("\u0001");
+    if (t.attSig === sig) return;
+    t.attSig = sig;
+    t.attBox.replaceChildren(...t.atts.map((a) => attChip(a, t)));
+  }
+  // The lines Send appends: one per uploaded file.
+  function attLines(list) {
+    return list.map((a) => `\n[attachment: ${a.name} (${a.type}, ${sizeText(a.size)}) asset:${a.id}]`).join("");
   }
 
   // ---- sending ----
@@ -2259,12 +2626,26 @@ dl{gap:3px 16px}
     const p = t.panel;
     if (!p || !p.session || !comments || sendOff || sending || sendState !== "available") return;
     const draft = t.input.value;
-    const body = cleanSend(draft);
-    if (!body.trim()) return;
+    const quote = t.quote;
+    const said = cleanSend(draft);
+    const atts = t.atts.filter((a) => a.state === "ready");
+    const body = quote && (said.trim() || atts.length) ? cleanSend(quoteLines(quote)) + said : said;
+    if (t.atts.some((a) => a.state === "uploading")) {
+      t.hintText = "Wait for the attachments to finish uploading.";
+      t.hintBad = false;
+      renderGrid();
+      return;
+    }
+    if (!body.trim() && !atts.length) return;
     const key = p.session;
     const nonce = nonce6();
-    const full = `[run ${p.runId} #${nonce}] ` + body;
-    const textOut = capUtf8(full, SEND_MAX);
+    // A quote starts on its own line, so it reads as a blockquote.
+    const prefix = `[run ${p.runId} #${nonce}] ` + (body !== said ? "\n" : "");
+    const full = prefix + body;
+    // The attachment lines are counted first, so they always fit.
+    const tail = attLines(atts);
+    const head = capUtf8(full, SEND_MAX - utf8Len(tail));
+    const textOut = head + tail;
     const thread = threads[key];
     sending = true;
     // The anchor is read now, at the gesture, on the window's title.
@@ -2275,7 +2656,8 @@ dl{gap:3px 16px}
     const mine = pendingBy[key] || (pendingBy[key] = []);
     const known = Object.create(null);  // mirror docs already here: none of them answers this message
     for (const d of (chats[key] && chats[key].docs) || []) known["d " + String(d._id)] = true;
-    const msg = {nonce, text: textOut.slice(full.length - body.length), at: Date.now(), state: "sending", known};
+    const msg = {nonce, text: head.slice(prefix.length), at: Date.now(), state: "sending", known,
+      atts: atts.map((a) => ({name: a.name, type: a.type, size: a.size, url: a.url, id: a.id, state: "ready"}))};
     mine.push(msg);
     if (mine.length > PENDING_MAX) mine.splice(0, mine.length - PENDING_MAX);
     t.hintText = "";
@@ -2284,6 +2666,9 @@ dl{gap:3px 16px}
     // Clear the box at once: the bubble shows "Sending…" while claude.ai
     // confirms; a failed send puts the draft back.
     t.input.value = "";
+    const keptAtts = t.atts;
+    t.atts = [];
+    t.quote = "";
     renderGrid();
     let hint = "";
     let bad = false;
@@ -2294,11 +2679,13 @@ dl{gap:3px 16px}
       msg.state = "sent";
       msg.sentAt = Date.now();
       unavailableSeen = 0;
-      if (textOut.length < full.length) hint = "Sent, cut to fit 4 KB.";
+      if (head.length < full.length) hint = "Sent, cut to fit 4 KB.";
     } catch (e) {
       const code = e && typeof e.code === "string" ? e.code : "upstream_error";
       msg.state = "not sent";
       if (!t.input.value) t.input.value = draft;
+      if (!t.atts.length) t.atts = keptAtts;
+      if (!t.quote) t.quote = quote;
       if (SEND_STOP.includes(code)) sendOff = true;
       else if (code === "unavailable") {
         unavailableSeen += 1;
@@ -2307,7 +2694,10 @@ dl{gap:3px 16px}
       else if (code === "not_found") { delete threads[key]; hint = SEND_COPY.not_found; bad = true; }
       else if (code === "consent_required" || code === "rate_limited" || code === "claude_unavailable") {
         hint = SEND_COPY[code]; bad = true;
-      } else { msg.state = "may have been sent"; hint = SEND_COPY.upstream_error; bad = true; }
+      } else {
+        msg.state = "may have been sent"; hint = SEND_COPY.upstream_error; bad = true;
+        for (const a of keptAtts) a.maybeSent = true;
+      }
       if (code === "claude_unavailable") { sending = false; checkSend(true); }
       const why = hint || SEND_OFF;
       msg.reason = /^(Not sent|May have)/.test(why) ? why : "Not sent: " + why;
@@ -2630,11 +3020,14 @@ dl{gap:3px 16px}
   $viewGrid.addEventListener("click", () => setView("grid", true));
   $gridReset.addEventListener("click", resetLayout);
   $gridShowAll.addEventListener("click", showAll);
+  $closeIdle.addEventListener("click", closeIdle);
+  $autoClose.addEventListener("click", () => setAutoClose(!(autoClose === null ? loadAutoClose() : autoClose)));
   $filterActive.addEventListener("click", () => setFilter("active"));
   $filterAll.addEventListener("click", () => setFilter("all"));
   $coordPick.addEventListener("change", () => setCoord($coordPick.value));
   $coordForget.addEventListener("click", () => setCoord(""));
   document.addEventListener("keydown", onDocKey);
+  document.addEventListener("selectionchange", onSelection);
   try { window.addEventListener("resize", () => { if (view === "grid") renderGrid(); }); } catch (_) { /* no window events */ }
 
   // ---- "Get desktop app": the launchers in desktop/, saved as a zip ----
@@ -2764,7 +3157,7 @@ dl{gap:3px 16px}
     FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX, VIEW_KEY,
     classifyAgent, groupCoordinators, STATUS_LINES_MAX, OUTCOME_MAX,
     AGENT_PHASE: Object.freeze({...AGENT_PHASE}), LAYOUT_KEY, LAYOUT_MAX,
-    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, COORD_KEY, CHAT_MAX, CHAT_LIMIT, hiddenIds,
+    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, COORD_KEY, AUTOCLOSE_KEY, CHAT_MAX, CHAT_LIMIT, hiddenIds,
     launcherText,
   });
 

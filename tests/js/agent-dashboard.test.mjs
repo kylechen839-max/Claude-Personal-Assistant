@@ -64,6 +64,8 @@ class FakeEl {
   append(...nodes) {
     for (const n of nodes) {
       assert.ok(n instanceof FakeEl, 'only elements are appended');
+      if (n.parentNode && n.parentNode !== this) n.parentNode.children = n.parentNode.children.filter((c) => c !== n);
+      n.parentNode = this;
       this.children.push(n);
     }
   }
@@ -159,6 +161,25 @@ function fakeDownloads() {
   return { ns, calls, replies };
 }
 
+// The assets namespace: upload() records each file and answers from
+// replies (default: an id and a same-origin url); delete() records ids.
+function fakeAssets() {
+  const calls = { upload: [], delete: [], list: 0 };
+  const replies = [];
+  const ns = {
+    upload(blob, opts) {
+      calls.upload.push([blob, opts]);
+      const next = replies.shift();
+      const id = `a${String(calls.upload.length).padStart(31, '0')}`;
+      return next ? next(blob, opts)
+        : Promise.resolve({ id, url: `/_blob/${id}`, sizeBytes: blob.size, contentType: opts.type });
+    },
+    delete(id) { calls.delete.push(id); return Promise.resolve({ deleted: true }); },
+    list() { calls.list += 1; return Promise.resolve({ assets: [], usage: {} }); },
+  };
+  return { ns, calls, replies };
+}
+
 const PAGE_IDS = {
   summary: 'p', conn: 'p', runs: 'ul', empty: 'p',
   main: 'main', 'view-nav': 'nav', 'runs-view': 'section', 'grid-view': 'section', 'view-runs': 'button', 'view-grid': 'button',
@@ -167,6 +188,7 @@ const PAGE_IDS = {
   'grid-foot': 'footer', 'grid-tray': 'details', 'grid-tray-sum': 'summary', 'grid-tray-list': 'div',
   'grid-showall': 'button', 'grid-coord': 'select', 'grid-coord-note': 'p', 'grid-coord-forget': 'button', getapp: 'div', 'getapp-btn': 'button', 'getapp-menu': 'div', 'getapp-hint': 'p',
   'getapp-dash-win': 'button', 'getapp-dash-mac': 'button', 'getapp-hub-win': 'button', 'getapp-hub-mac': 'button',
+  'grid-close-idle': 'button', 'grid-autoclose': 'button',
 };
 
 function memStorage(initial = {}) {
@@ -180,7 +202,7 @@ function memStorage(initial = {}) {
 }
 
 async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComments(), storage = undefined,
-  hash = undefined, user = 'u_test', userNs = true, downloads = fakeDownloads() } = {}) {
+  hash = undefined, user = 'u_test', userNs = true, downloads = fakeDownloads(), assets = null } = {}) {
   const ids = {};
   for (const [id, tag] of Object.entries(PAGE_IDS)) ids[id] = new FakeEl(tag);
   ids['grid-view'].hidden = true;
@@ -217,7 +239,10 @@ async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComme
     clearTimeout: (id) => { if (id && timers[id - 1]) timers[id - 1].cleared = true; },
     setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; },
     DOMParser: class { parseFromString(html) { return { body: parseTags(html) }; } },
+    getSelection: () => sel,
   };
+  // The current text selection (null: none); select() sets it and fires selectionchange.
+  let sel = null;
   // The window hears pointermove/up/cancel (a captured pointer's events
   // bubble there) and resize; win() delivers one to every listener the page added.
   const winListeners = {};
@@ -236,6 +261,7 @@ async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComme
         if (cap === 'comments') return comments && comments.ns;
         if (cap === 'user') return userNs ? { id: async () => { userCalls.id += 1; return user; } } : null;
         if (cap === 'downloads') return downloads && downloads.ns;
+        if (cap === 'assets') return assets && assets.ns;
         return null;
       },
     };
@@ -251,7 +277,8 @@ async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComme
   vm.runInContext(SCRIPT, ctx, { filename: 'index.html' });
   await new Promise((r) => setImmediate(r));
   const pending = () => timers.filter((t) => !t.cleared);
-  return { api: sandbox.AgentDashboard, ids, db, comments, uses, userCalls, timers, pending, intervals, win, winListeners,
+  const select = (s) => { sel = s; doc('selectionchange'); };
+  return { select, api: sandbox.AgentDashboard, ids, db, comments, assets, uses, userCalls, timers, pending, intervals, win, winListeners,
     doc, docListeners, setNow, document };
 }
 
@@ -975,10 +1002,17 @@ test('maximize: one window fills the workspace; handles hidden; drag a no-op; Es
   const page = await layoutPage({ storage });
   const a2 = tile(page, 'agent-a2');
   const max = byClass(a2, 'max')[0];
-  const restore = byClass(a2, 'restore')[0];
+  const restore = byClass(a2, 'max restore')[0];
   assert.equal(max.getAttribute('aria-label'), 'Maximize builder');
   assert.equal(max.getAttribute('aria-pressed'), 'false');
   assert.equal(restore.hidden, true);
+  // Restore is an icon button like maximize, in the same place in the title bar.
+  assert.equal(restore.tagName, 'BUTTON');
+  assert.equal(restore.textContent, '⤡');
+  assert.equal(restore.getAttribute('aria-label'), 'Restore builder');
+  assert.equal(restore.getAttribute('aria-pressed'), 'true');
+  const acts = byClass(a2, 'wacts')[0].children;
+  assert.equal(acts.indexOf(restore), acts.indexOf(max) + 1, 'next to maximize');
   // A grab in progress is dropped by maximize.
   const g1 = gripOf(tile(page, 'agent-a1'));
   g1.dispatch('keydown', { key: 'Enter' });
@@ -1231,7 +1265,7 @@ test('desktop only: no compact or bare chrome, the header, toolbar and footer st
   assert.equal('bare' in main.dataset, false);
   assert.equal(page.ids['view-nav'].hidden, false, 'the toolbar stays while maximized');
   assert.equal(page.ids['grid-toolbar'].hidden, false);
-  const restore = byClass(coord, 'restore')[0];
+  const restore = byClass(coord, 'max restore')[0];
   assert.equal(restore.hidden, false);
   restore.click();
   assert.equal(restore.hidden, true);
@@ -2557,6 +2591,318 @@ test('presence: the pill shows in task, maybe, idle or unknown, with no message 
   assert.deepEqual(pill(none).slice(0, 2), ['unknown', 'Status unknown']);
 });
 
+// ---- chat attachments: paste or drop, assets.upload, chips, lines ----
+
+const file = (name, type, size = 1234) => ({ name, type, size });
+const paste = (c, ...files) => c.input.dispatch('paste', { clipboardData: { files } });
+// The composer's chip row (bubbles have their own .atts, without the label).
+const attBox = (page, i = 0) => byClass(chatOf(page, i).panel, 'atts').find((e) => e.getAttribute('aria-label') === 'Attachments');
+const chipsOf = (page, i = 0) => byClass(attBox(page, i), 'att');
+
+test('attachments: paste uploads each file at the gesture and shows a chip with name, type and size', async () => {
+  const assets = fakeAssets();
+  const page = await chatPage({ assets });
+  assert.equal(used(page, 'assets'), 1, 'looked up with the chat, on the first Grid show');
+  assert.deepEqual(assets.calls.upload, [], 'nothing uploaded at load');
+  const c = chatOf(page);
+  assert.equal(attBox(page).hidden, true);
+  paste(c, file('shot.png', 'image/png', 2048), file('notes.md', '', 10), file('data.csv', 'text/csv;charset=utf-8', 5));
+  await settle();
+  assert.deepEqual(assets.calls.upload.map(([f, o]) => [f.name, o.type]),
+    [['shot.png', 'image/png'], ['notes.md', 'text/markdown'], ['data.csv', 'text/csv']]);
+  assert.equal(attBox(page).hidden, false);
+  assert.deepEqual(chipsOf(page).map((x) => [byClass(x, 'att-name')[0].textContent, byClass(x, 'att-meta')[0].textContent]),
+    [['shot.png', 'image/png, 2 KB'], ['notes.md', 'text/markdown, 10 B'], ['data.csv', 'text/csv, 5 B']]);
+  // Drop works too; at most 5 per message.
+  byClass(c.panel, 'composer')[0].dispatch('drop', { dataTransfer: { files: [file('a.pdf', 'application/pdf'),
+    file('b.pdf', 'application/pdf'), file('c.pdf', 'application/pdf')] } });
+  await settle();
+  assert.equal(assets.calls.upload.length, 5);
+  assert.equal(chipsOf(page).length, 5);
+  assert.match(c.hint.textContent, /Up to 5 files per message; 1 not attached/);
+  // A text paste (no files) uploads nothing.
+  c.input.dispatch('paste', { clipboardData: { files: [] } });
+  assert.equal(assets.calls.upload.length, 5);
+  assert.equal(assets.calls.list, 0);
+  assert.deepEqual(dbWrites(page), []);
+});
+
+test('attachments: send appends one line per file, inside the 4000-byte cap; the bubble shows the chips', async () => {
+  const assets = fakeAssets();
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('shot.png', 'image/png', 3 * 1048576), file('spec.pdf', 'application/pdf', 900));
+  await settle();
+  const [id1, id2] = [1, 2].map((n) => `a${String(n).padStart(31, '0')}`);
+  type(c, 'x'.repeat(5000));
+  enter(c);
+  await settle();
+  const out = sentText(page);
+  assert.ok(page.api.utf8Len(out) <= 4000, 'under the cap');
+  assert.ok(out.endsWith(`\n[attachment: shot.png (image/png, 3.0 MB) asset:${id1}]\n[attachment: spec.pdf (application/pdf, 900 B) asset:${id2}]`), out.slice(-200));
+  assert.match(c.hint.textContent, /cut to fit/);
+  assert.equal(attBox(page).hidden, true, 'the chips leave the box once sent');
+  const b = bubbles(page).at(-1);
+  assert.deepEqual(byClass(b, 'att-name').map((e) => e.textContent), ['shot.png', 'spec.pdf']);
+  assert.equal(byClass(b, 'att-x').length, 0, 'a sent chip has no ×');
+  // Attachments alone (no text) still send.
+  paste(c, file('only.txt', 'text/plain', 3));
+  await settle();
+  enter(c);
+  await settle();
+  assert.match(sentText(page), /\] \n\[attachment: only\.txt \(text\/plain, 3 B\) asset:a0+3\]$/);
+  assert.deepEqual(assets.calls.delete, [], 'a sent asset is never deleted');
+});
+
+test('attachments: images get a thumbnail from upload()\'s url; other files and odd urls do not', async () => {
+  const assets = fakeAssets();
+  assets.replies.push(undefined, undefined, () => Promise.resolve({ id: 'b'.repeat(32), url: 'javascript:alert(1)', sizeBytes: 5, contentType: 'image/gif' }));
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('a.png', 'image/png'), file('b.pdf', 'application/pdf'), file('c.gif', 'image/gif'));
+  await settle();
+  const imgs = (x) => x.find((e) => e.tagName === 'IMG');
+  const [png, pdf, gif] = chipsOf(page);
+  assert.equal(imgs(png).length, 1);
+  assert.equal(imgs(png)[0].src, `/_blob/a${'0'.repeat(30)}1`);
+  assert.equal(imgs(pdf).length, 0);
+  assert.equal(imgs(gif).length, 0, 'a url that is not a same-origin path or https is never used');
+  // Text in the chat that looks like a url never becomes an image.
+  chatSnap(page, [mirror('k1', { from: 'kyle', text: '[attachment: x.png (image/png, 1 B) asset:/_blob/evil]' })]);
+  assert.equal(imgs(bubbles(page).at(-1)).length, 0);
+});
+
+test('attachments: each rejection shows a calm message on its own chip; nothing is retried', async () => {
+  const assets = fakeAssets();
+  const reject = (code) => () => Promise.reject({ code, message: 'raw platform text' });
+  assets.replies.push(reject('quota_or_state'), reject('not_granted'), reject('unsupported_type'), reject('store_unavailable'));
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('a.png', 'image/png'), file('b.png', 'image/png'), file('c.png', 'image/png'), file('d.png', 'image/png'));
+  await settle();
+  const metas = chipsOf(page).map((x) => byClass(x, 'att-meta')[0]);
+  assert.deepEqual(metas.map((m) => m.textContent), [
+    "The dashboard's file storage is full or unavailable right now.",
+    "Attachments aren't available on this page.",
+    "This file type can't be attached.",
+    "Couldn't upload this file.",
+  ]);
+  assert.ok(metas.every((m) => m.dataset.level === 'bad'));
+  assert.ok(!chipsOf(page).some((x) => /raw platform text/.test(x.textContent)));
+  // Checked before uploading: too large, unknown type, empty.
+  paste(c, file('big.svg', 'image/svg+xml', 3 * 1048576), file('x.exe', 'application/x-msdownload'), file('e.txt', 'text/plain', 0));
+  await settle();
+  assert.equal(assets.calls.upload.length, 4, 'never uploaded, and nothing retried');
+  assert.deepEqual(chipsOf(page).map((x) => byClass(x, 'att-meta')[0].textContent), [
+    'Too large to attach (20 MB max; 2 MB for SVG, 16 MB for CSS and JavaScript).',
+    "This file type can't be attached.",
+    "Couldn't read this file (empty, or text that isn't UTF-8).",
+  ]);
+  for (const t of page.pending()) assert.doesNotMatch(String(t.fn), /upload/);
+  // A failed file is never sent.
+  type(c, 'hi');
+  enter(c);
+  await settle();
+  assert.doesNotMatch(sentText(page), /attachment/);
+});
+
+test('attachments: no assets grant means no attachment UI and no upload', async () => {
+  const page = await chatPage();
+  assert.equal(used(page, 'assets'), 1);
+  const c = chatOf(page);
+  assert.equal(c.input.placeholder, 'Reply to the coordinator…');
+  paste(c, file('a.png', 'image/png'));
+  const drop = byClass(c.panel, 'composer')[0].dispatch('drop', { dataTransfer: { files: [file('a.png', 'image/png')] } });
+  await settle();
+  assert.equal(drop.defaultPrevented, undefined, 'the drop is left to the browser');
+  assert.equal(attBox(page).hidden, true);
+  assert.equal(attBox(page).children.length, 0);
+  const withAssets = await chatPage({ assets: fakeAssets() });
+  assert.match(chatOf(withAssets).input.placeholder, /paste or drop files/);
+});
+
+test('attachments: × removes a chip and deletes its unsent asset, also one still uploading', async () => {
+  const assets = fakeAssets();
+  let finish;
+  assets.replies.push(undefined, () => new Promise((r) => { finish = r; }));
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('a.png', 'image/png'), file('b.png', 'image/png'));
+  await settle();
+  const [a, b] = chipsOf(page);
+  assert.equal(byClass(b, 'att-meta')[0].textContent, 'uploading…');
+  assert.equal(byClass(a, 'att-x')[0].getAttribute('aria-label'), 'Remove a.png');
+  byClass(a, 'att-x')[0].click();
+  await settle();
+  assert.deepEqual(assets.calls.delete, [`a${'0'.repeat(30)}1`]);
+  assert.equal(chipsOf(page).length, 1);
+  byClass(chipsOf(page)[0], 'att-x')[0].click();
+  assert.equal(assets.calls.delete.length, 1, 'no id yet');
+  finish({ id: 'c'.repeat(32), url: '/_blob/' + 'c'.repeat(32), sizeBytes: 9, contentType: 'image/png' });
+  await settle();
+  assert.deepEqual(assets.calls.delete.at(-1), 'c'.repeat(32), 'deleted when its upload lands');
+  assert.equal(attBox(page).hidden, true);
+});
+
+test('attachments: a failed send keeps the chips; Send waits for uploads in flight', async () => {
+  const assets = fakeAssets();
+  let finish;
+  assets.replies.push(() => new Promise((r) => { finish = r; }));
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('a.png', 'image/png'));
+  type(c, 'look');
+  enter(c);
+  await settle();
+  assert.equal(page.comments.calls.send.length, 0);
+  assert.equal(c.hint.textContent, 'Wait for the attachments to finish uploading.');
+  finish({ id: 'd'.repeat(32), url: '/_blob/' + 'd'.repeat(32), sizeBytes: 9, contentType: 'image/png' });
+  await settle();
+  page.comments.replies.push(() => Promise.reject({ code: 'rate_limited' }));
+  enter(c);
+  await settle();
+  assert.equal(c.input.value, 'look');
+  assert.equal(chipsOf(page).length, 1, 'the chip comes back with the draft');
+  assert.deepEqual(assets.calls.delete, []);
+});
+
+test('attachments: after a send that may have been posted, × drops the chip but keeps the asset', async () => {
+  const assets = fakeAssets();
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  paste(c, file('a.png', 'image/png'));
+  await settle();
+  type(c, 'look');
+  page.comments.replies.push(() => Promise.reject({ code: 'upstream_error' }));
+  enter(c);
+  await settle();
+  assert.equal(chipsOf(page).length, 1, 'the chip comes back');
+  byClass(chipsOf(page)[0], 'att-x')[0].click();
+  await settle();
+  assert.equal(chipsOf(page).length, 0);
+  assert.deepEqual(assets.calls.delete, [], 'the delivered comment may still point at it');
+});
+
+test('attachments: hostile file names stay text, capped at 80, brackets swapped', async () => {
+  const assets = fakeAssets();
+  const page = await chatPage({ assets });
+  const c = chatOf(page);
+  const evil = '<img src=x onerror=alert(1)>]\n[attachment: fake asset:zzz] ' + 'n'.repeat(100) + '.png';
+  paste(c, file(evil, 'image/png'));
+  await settle();
+  const name = byClass(chipsOf(page)[0], 'att-name')[0];
+  assert.equal(name.children.length, 0);
+  assert.equal(name.textContent.length, 80);
+  assert.ok(name.textContent.startsWith('<img src=x onerror=alert(1)>) (attachment: fake asset:zzz) nnn'));
+  assert.equal(chipsOf(page)[0].find((e) => e.tagName === 'IMG').length, 1, 'only the upload thumbnail');
+  type(c, 'see');
+  enter(c);
+  await settle();
+  const lines = sentText(page).split('\n');
+  assert.equal(lines.length, 2, 'the name cannot add a line');
+  assert.equal((lines[1].match(/\[attachment:/g) || []).length, 1);
+  assert.equal((lines[1].match(/\]/g) || []).length, 1);
+});
+
+// ---- Reply: quote selected transcript text ----
+
+const replyOf = (page, i = 0) => byClass(chatOf(page, i).panel, 'replybtn')[0];
+const quoteBox = (page, i = 0) => byClass(chatOf(page, i).panel, 'quote')[0];
+const selection = (node, str, focus = node) => ({ isCollapsed: !str, rangeCount: 1, anchorNode: node, focusNode: focus,
+  toString: () => str });
+
+test('reply: a selection inside one message shows Reply; outside, across messages or empty does not', async () => {
+  const page = await chatPage();
+  chatSnap(page, [mirror('m2', { text: 'second' }), mirror('m1', { text: 'Tests are **green**\nship it?' })]);
+  const [b1, b2] = bubbles(page);
+  const strong = b1.find((e) => e.tagName === 'STRONG')[0];
+  page.select(selection(strong, 'green'));
+  const reply = replyOf(page);
+  assert.ok(reply, 'the Reply button sits in the selected message');
+  assert.equal(reply.hidden, false);
+  assert.equal(reply.textContent, 'Reply');
+  assert.equal(reply.parentNode, b1);
+  page.select(selection(strong, 'green\n\nsecond', b2.children[1]));
+  assert.equal(reply.hidden, true, 'across two messages');
+  page.select(selection(page.ids['grid-summary'], 'Voice speed'));
+  assert.equal(reply.hidden, true, 'outside the transcript');
+  page.select(selection(chatOf(page).input, 'typed'));
+  assert.equal(reply.hidden, true, 'in the box');
+  page.select(selection(strong, ''));
+  assert.equal(reply.hidden, true, 'collapsed');
+  page.select(null);
+  assert.equal(reply.hidden, true);
+});
+
+test('reply: clicking Reply shows a quote chip (200 shown); the sent text starts with > lines; Esc and × clear it', async () => {
+  const page = await chatPage();
+  chatSnap(page, [mirror('m1', { text: 'line one\nline two' })]);
+  const c = chatOf(page);
+  const b = bubbles(page)[0];
+  page.select(selection(b.children[1], 'line one\nline two'));
+  const down = replyOf(page).dispatch('mousedown');
+  assert.equal(down.defaultPrevented, true, 'keeps the selection');
+  replyOf(page).click();
+  assert.equal(replyOf(page).hidden, true);
+  assert.equal(quoteBox(page).hidden, false);
+  assert.equal(byClass(quoteBox(page), 'quote-text')[0].textContent, 'line one\nline two');
+  assert.ok(c.input.focused > 0);
+  type(c, 'do it');
+  enter(c);
+  await settle();
+  assert.match(sentText(page), /^\[run [^\]]+ #[a-z0-9]{6}\] \n> line one\n> line two\n\ndo it$/);
+  assert.equal(quoteBox(page).hidden, true, 'cleared after a good send');
+  const mine = bubbles(page).at(-1);
+  const bq = mine.find((e) => e.tagName === 'BLOCKQUOTE');
+  assert.equal(bq.length, 1);
+  assert.equal(bq[0].textContent, 'line one\nline two');
+  assert.ok(mine.textContent.endsWith('do it'));
+  // A long quote: 200 characters on the chip, 1000 sent; Esc clears it.
+  const long = 'q'.repeat(1500);
+  page.select(selection(b.children[1], long));
+  replyOf(page).click();
+  assert.equal(byClass(quoteBox(page), 'quote-text')[0].textContent.length, 200);
+  const esc = c.input.dispatch('keydown', { key: 'Escape' });
+  assert.equal(esc.defaultPrevented, true);
+  assert.equal(quoteBox(page).hidden, true);
+  page.select(selection(b.children[1], long));
+  replyOf(page).click();
+  type(c, 'ok');
+  enter(c);
+  await settle();
+  const q = sentText(page).split('\n')[1];
+  assert.equal(q.length, 2 + 1000);
+  // × clears it too.
+  page.select(selection(b.children[1], 'x'));
+  replyOf(page).click();
+  byClass(quoteBox(page), 'quote-x')[0].click();
+  assert.equal(quoteBox(page).hidden, true);
+  type(c, 'plain');
+  enter(c);
+  await settle();
+  assert.doesNotMatch(sentText(page), /\n>/);
+});
+
+test('reply: a failed send puts back both the quote chip and the draft; hostile quotes stay text', async () => {
+  const page = await chatPage();
+  chatSnap(page, [mirror('m1', { text: 'pick one' })]);
+  const c = chatOf(page);
+  page.select(selection(bubbles(page)[0].children[1], '<img src=x onerror=alert(1)>'));
+  replyOf(page).click();
+  assert.equal(byClass(quoteBox(page), 'quote-text')[0].children.length, 0);
+  page.comments.replies.push(() => Promise.reject({ code: 'rate_limited' }));
+  type(c, 'the first');
+  enter(c);
+  await settle();
+  assert.equal(c.input.value, 'the first');
+  assert.equal(quoteBox(page).hidden, false);
+  assert.equal(byClass(quoteBox(page), 'quote-text')[0].textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(bubbles(page).at(-1).find((e) => e.tagName === 'IMG').length, 0);
+  enter(c);
+  await settle();
+  assert.match(sentText(page), /\n> <img src=x onerror=alert\(1\)>\n\nthe first$/);
+});
+
 // ---- hidden windows: layout h: 1, per viewer, never in the db ----
 
 const hideOf = (t) => byClass(t, 'hide')[0];
@@ -2587,8 +2933,8 @@ test('hide: the window leaves the workspace and the count, the tray says Hidden 
   assert.deepEqual([...again.api.hiddenIds()], ['a2']);
   assert.deepEqual(dbWrites(page), []);
   for (const k of Object.keys(storage.store)) {
-    assert.ok(['agent-dashboard-view', LAYOUT, 'agentDashboard.filter', 'agentDashboard.coordinator'].includes(k),
-      `only the view, layout, filter and coordinator keys: ${k}`);
+    assert.ok(['agent-dashboard-view', LAYOUT, 'agentDashboard.filter', 'agentDashboard.coordinator', AUTOCLOSE].includes(k),
+      `only the view, layout, filter, coordinator and auto-close keys: ${k}`);
   }
 });
 
@@ -2684,6 +3030,168 @@ test('hidden flags: 250 entries load capped at 200; a gone id is pruned on save;
   hideOf(tile(page, 'agent-a1')).click();
   assert.deepEqual({ ...saved(storage).tiles }, { a1: { h: 1 }, a4: { h: 1 } });
   assert.deepEqual(dbWrites(page), []);
+});
+
+// ---- idle agents: "Close idle agents" and the opt-in auto-close ----
+
+const AUTOCLOSE = 'agentDashboard.autoClose';
+// The windows on screen, sorted (agent order follows state).
+const shown = (page) => [...order(page)].sort();
+const closeIdleBtn = (page) => page.ids['grid-close-idle'];
+const autoBtn = (page) => page.ids['grid-autoclose'];
+// One run: a1 running, a2 queued, a3 done, a4 failed, a5 running then silent.
+const idleAgents = () => [
+  agent('a1'), agent('a2', { state: 'queued' }),
+  agent('a3', { state: 'done', finished_at: iso(NOW - 2 * MIN), updated_at: iso(NOW - 2 * MIN) }),
+  agent('a4', { state: 'failed', finished_at: iso(NOW - 3 * MIN), updated_at: iso(NOW - 3 * MIN) }),
+  agent('a5', { started_at: iso(NOW - 200 * MIN) }),
+];
+async function idlePage(opts = {}) {
+  const page = await gridPage(opts);
+  runSnap(page, [runRow()]);
+  agentSnap(page, idleAgents());
+  return page;
+}
+
+test('close idle agents: hides done, failed and silent agents, never running, queued or coordinators', async () => {
+  const storage = memStorage();
+  const page = await idlePage({ storage });
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', 'agent-a3', 'agent-a4', 'agent-a5', C0]);
+  assert.equal(tile(page, 'agent-a5').dataset.state, 'silent');
+  assert.match(PAGE, /<button type="button" id="grid-close-idle" disabled>Close idle agents<\/button>/);
+  assert.match(PAGE, /<button type="button" id="grid-autoclose" aria-pressed="false">Auto-close idle agents<\/button>/);
+  assert.equal(closeIdleBtn(page).disabled, false);
+  closeIdleBtn(page).click();
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', C0]);
+  assert.equal(page.ids['grid-live'].textContent, 'Closed 3 idle agent windows.');
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (3)');
+  assert.deepEqual({ ...saved(storage).tiles }, { a3: { h: 1 }, a4: { h: 1 }, a5: { h: 1 } });
+  assert.equal(closeIdleBtn(page).disabled, true, 'nothing left to close');
+  // The run finishes: a1 and a2 are stopped (idle) and close; its done
+  // coordinator never does.
+  runSnap(page, [runRow({ phase: 'done', updated_at: iso(NOW - MIN) })]);
+  closeIdleBtn(page).click();
+  assert.deepEqual(shown(page), [C0]);
+  assert.equal(page.ids['grid-live'].textContent, 'Closed 2 idle agent windows.');
+  // The tray brings them back; Show all too.
+  trayItems(page)[0].click();
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (4)');
+  page.ids['grid-showall'].click();
+  assert.equal(page.ids['grid-tray'].hidden, true);
+  assert.deepEqual(dbWrites(page), []);
+});
+
+test('close idle agents: disabled with nothing to close, and before data', async () => {
+  const page = await gridPage();
+  assert.equal(closeIdleBtn(page).disabled, true, 'no rows yet');
+  runSnap(page, [runRow()]);
+  agentSnap(page, [agent('a1'), agent('a2', { state: 'queued' })]);
+  assert.equal(closeIdleBtn(page).disabled, true);
+  closeIdleBtn(page).click();
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', C0]);
+  agentSnap(page, [agent('a1', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }), agent('a2', { state: 'queued' })]);
+  assert.equal(closeIdleBtn(page).disabled, false);
+});
+
+test('close idle agents: only the windows the coordinator picker and the filter show', async () => {
+  const storage = memStorage();
+  const page = await gridPage({ storage });
+  runSnap(page, [runRow(),
+    runRow({ _docId: 'mon-run', feature: 'Session monitoring', session_url: MON, started_at: iso(NOW - 30 * MIN), updated_at: iso(NOW - 2 * MIN) }),
+    runRow({ _docId: 'old-run', feature: 'Old run', session_url: OLD, phase: 'done', started_at: iso(NOW - 3 * DAY), updated_at: iso(NOW - 2 * DAY) })]);
+  const doneAt = { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) };
+  agentSnap(page, [agent('a1', doneAt), agent('m1', { run_id: 'mon-run', ...doneAt }),
+    agent('o1', { run_id: 'old-run', state: 'done', finished_at: iso(NOW - 2 * DAY), updated_at: iso(NOW - 2 * DAY) })]);
+  pick(page, MON);
+  closeIdleBtn(page).click();
+  assert.deepEqual(Object.keys(saved(storage).tiles), ['m1'], 'only the picked session');
+  pick(page, '');
+  assert.ok(order(page).includes('agent-a1'));
+  // Active only hides Old run, so o1 is not touched.
+  closeIdleBtn(page).click();
+  assert.deepEqual(Object.keys(saved(storage).tiles).sort(), ['a1', 'm1']);
+  page.ids['grid-filter-all'].click();
+  assert.ok(order(page).includes('agent-o1'), 'All recent shows it again');
+  assert.equal(closeIdleBtn(page).disabled, false);
+});
+
+test('auto-close: off by default; on hides agents as they go idle; off stops it; persists per viewer', async () => {
+  const storage = memStorage();
+  const page = await gridPage({ storage });
+  runSnap(page, [runRow()]);
+  agentSnap(page, [agent('a1'), agent('a2')]);
+  assert.equal(autoBtn(page).getAttribute('aria-pressed'), 'false');
+  assert.equal(storage.store[AUTOCLOSE], undefined, 'nothing stored on load');
+  agentSnap(page, [agent('a1', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }), agent('a2')]);
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', C0], 'off: nothing closes by itself');
+  autoBtn(page).click();
+  assert.equal(storage.store[AUTOCLOSE], '1');
+  assert.equal(autoBtn(page).getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(shown(page), ['agent-a2', C0], 'turning it on closes the idle one');
+  assert.equal(page.ids['grid-live'].textContent, 'Auto-closed 1 idle agent window.');
+  agentSnap(page, [agent('a1', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }),
+    agent('a2', { state: 'failed', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) })]);
+  assert.deepEqual(shown(page), [C0], 'the coordinator never closes');
+  assert.deepEqual({ ...saved(storage).tiles }, { a1: { h: 1 }, a2: { h: 1 } });
+  // A reload keeps it on; a new idle agent closes on its first render.
+  const again = await gridPage({ storage });
+  runSnap(again, [runRow({ phase: 'done', updated_at: iso(NOW - MIN) })]);
+  agentSnap(again, [agent('a3', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) })]);
+  assert.equal(again.ids['grid-autoclose'].getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(shown(again), [C0]);
+  assert.equal(saved(storage).tiles.a3.h, 1, 'saved even though a3 is new in this snapshot');
+  again.ids['grid-autoclose'].click();
+  assert.equal(storage.store[AUTOCLOSE], '0');
+  again.ids['grid-showall'].click();
+  agentSnap(again, [agent('a3', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }),
+    agent('a4', { state: 'failed', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) })]);
+  assert.deepEqual(shown(again), ['agent-a3', 'agent-a4', C0], 'off again: nothing closes');
+  assert.deepEqual(dbWrites(again), []);
+});
+
+test('auto-close: a window restored by hand stays shown until its state changes', async () => {
+  const storage = memStorage({ [AUTOCLOSE]: '1' });
+  const page = await gridPage({ storage });
+  runSnap(page, [runRow()]);
+  agentSnap(page, [agent('a1', { started_at: iso(NOW - 200 * MIN) }), agent('a2')]);
+  assert.deepEqual(shown(page), ['agent-a2', C0], 'silent a1 auto-closed');
+  trayItems(page)[0].click();
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', C0]);
+  assert.deepEqual({ ...saved(storage).tiles.a1 }, { k: 'silent' });
+  // More snapshots and a reload: still shown.
+  agentSnap(page, [agent('a1', { started_at: iso(NOW - 200 * MIN) }), agent('a2')]);
+  const again = await gridPage({ storage });
+  runSnap(again, [runRow()]);
+  agentSnap(again, [agent('a1', { started_at: iso(NOW - 200 * MIN) }), agent('a2')]);
+  assert.deepEqual(shown(again), ['agent-a1', 'agent-a2', C0]);
+  // Its state changes (silent -> done): auto-close takes it again.
+  agentSnap(again, [agent('a1', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }), agent('a2')]);
+  assert.deepEqual(shown(again), ['agent-a2', C0]);
+  assert.deepEqual({ ...saved(storage).tiles.a1 }, { h: 1 });
+  // Show all keeps every restored idle window shown too.
+  again.ids['grid-showall'].click();
+  assert.deepEqual(shown(again), ['agent-a1', 'agent-a2', C0]);
+  // Running again, then silent again: that is a change, so it closes.
+  agentSnap(again, [agent('a1'), agent('a2')]);
+  assert.equal(saved(storage).tiles.a1, undefined, 'the stale mark is dropped');
+  agentSnap(again, [agent('a1', { started_at: iso(NOW - 200 * MIN) }), agent('a2')]);
+  assert.deepEqual(shown(again), ['agent-a2', C0]);
+});
+
+test('auto-close: leaving a maximized window that went idle keeps it shown', async () => {
+  const storage = memStorage({ [AUTOCLOSE]: '1' });
+  const page = await gridPage({ storage });
+  runSnap(page, [runRow()]);
+  agentSnap(page, [agent('a1'), agent('a2')]);
+  const a1 = tile(page, 'agent-a1');
+  byClass(a1, 'max')[0].click();
+  assert.ok('max' in a1.dataset);
+  agentSnap(page, [agent('a1', { state: 'done', finished_at: iso(NOW - MIN), updated_at: iso(NOW - MIN) }), agent('a2')]);
+  assert.ok('max' in a1.dataset, 'not closed while maximized');
+  page.doc('keydown', { key: 'Escape' });
+  assert.equal('max' in a1.dataset, false);
+  assert.deepEqual(shown(page), ['agent-a1', 'agent-a2', C0], 'still shown after Esc');
+  assert.deepEqual({ ...saved(storage).tiles.a1 }, { k: 'done' });
 });
 
 // ---- "Get desktop app": the launchers, saved through downloads ----

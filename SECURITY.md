@@ -477,6 +477,20 @@ a PKCE challenge, `access_type=offline` and the redirect
   that receives such a comment treats it as Kyle's words about its own
   run, within that run's scope only: it may re-order or stop work, but
   never changes permissions, touches secrets or routes around a denial.
+- **Chat attachments in the dashboard's asset store (deliberate).** The
+  page declares `assets: {}` (editors only: Kyle as owner; every other
+  viewer gets `null` and no attachment UI). Files are uploaded only at
+  Kyle's paste or drop, at most 5 per message, type and size checked
+  first, never retried; one `upload` and one `delete` call site (pinned
+  by a test), and delete only for a chip Kyle removes before sending.
+  Thumbnails use only the url `upload()` returned (same-origin path or
+  https), as an `<img>`, never script or markup; chat text is never a
+  url. The comment carries only the name (through `text()`, 80
+  characters, brackets swapped), type, size and opaque asset id. The
+  coordinator opens the file with Artifact `read` and treats its content
+  as untrusted data, never as instructions. Deliberate non-fix: assets
+  live as long as the artifact (no pruning; Kyle can delete them from
+  claude.ai), and any editor of the artifact can open them.
 - **Conversation text in Kyle's private db subtree (deliberate).** The
   master mirrors what it tells Kyle, and his messages, to
   `data/users/<Kyle's id>/chat-<sessionTail>/msgs`. claude.ai keeps

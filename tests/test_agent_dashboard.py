@@ -63,8 +63,12 @@ def test_page_never_writes():
     # The page never writes rows (runs, agents or the chat mirror): no set/
     # update/delete/add/acquire calls, Map, Set and classList included. Its
     # one write anywhere is the chat box's comment (see
-    # test_page_posts_comments_only_from_the_chat_box).
-    assert not re.search(r"\.(?:set|update|delete|add|acquire)\(", _page())
+    # test_page_posts_comments_only_from_the_chat_box). The one exception is
+    # assets.delete for an attachment Kyle removes before sending, pinned in
+    # test_page_uploads_and_deletes_assets_only_from_the_chat_box.
+    page = _page()
+    assert page.count("assets.delete(") == 1
+    assert not re.search(r"\.(?:set|update|delete|add|acquire)\(", page.replace("assets.delete(", ""))
 
 
 def test_page_has_both_dark_mode_selectors():
@@ -226,7 +230,7 @@ def test_watchdog_prompt_is_one_fenced_block():
 
 DASHBOARD_URL = "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
 DESKTOP = DASH / "desktop"
-MANIFEST = '{"db":{}, "user":{}, "comments":{}, "downloads":true}'
+MANIFEST = '{"db":{}, "user":{}, "comments":{}, "downloads":true, "assets":{}}'
 
 
 def test_readme_pins_the_manifest():
@@ -235,7 +239,8 @@ def test_readme_pins_the_manifest():
     assert [b.strip() for b in blocks] == [MANIFEST]
     # The full comments grant (for sendToClaude), no custom anchors, and
     # downloads for "Get desktop app".
-    assert json.loads(MANIFEST) == {"db": {}, "user": {}, "comments": {}, "downloads": True}
+    # assets (editors only, which Kyle is) for chat attachments.
+    assert json.loads(MANIFEST) == {"db": {}, "user": {}, "comments": {}, "downloads": True, "assets": {}}
 
 
 def _function(page: str, name: str) -> str:
@@ -267,6 +272,26 @@ def test_page_posts_comments_only_from_the_chat_box():
     assert "comments.anchorFor(t.h2)" in _function(page, "async function sendChat(")
 
 
+def test_page_uploads_and_deletes_assets_only_from_the_chat_box():
+    page = _page()
+    assert page.count('window.claude?.use?.("assets")') == 1
+    assert "use?.(\"assets\")" in _function(page, "function setupChat(")
+    # One upload call site, reached only from a paste or drop on the box.
+    assert page.count(".upload(") == 1
+    assert "assets.upload(f, {type: a.type})" in _function(page, "async function uploadOne(")
+    assert page.count("attachFiles(t, files);") == 2  # the paste and drop listeners
+    assert page.count("uploadOne(") == 2  # the definition and attachFiles
+    assert "uploadOne(t, a, f)" in _function(page, "function attachFiles(")
+    # One delete call site, for an unsent attachment; never list().
+    assert "assets.delete(id)" in _function(page, "function forgetAsset(")
+    assert page.count("forgetAsset(") == 3  # the definition, removeAtt, a removed upload
+    assert ".list(" not in page
+    # Thumbnails only from upload()'s url, never from chat text.
+    assert page.count(".src = ") == 1
+    assert "img.src = a.url;" in _function(page, "function attChip(")
+    assert "a.url = attUrl(res.url);" in _function(page, "async function uploadOne(")
+
+
 def test_page_never_logs_or_sends_on_a_timer_and_stores_only_three_keys():
     page = _page()
     assert "console." not in page
@@ -277,10 +302,10 @@ def test_page_never_logs_or_sends_on_a_timer_and_stores_only_three_keys():
     grid = _function(page, "function setView(")
     assert "setupChat()" in grid and "agentsLive.start(db)" in grid
     assert "agentsLive.pause()" in grid and "syncChats([])" in grid
-    # localStorage holds the view, the window layout, the filter and the
-    # coordinator pick, nothing else.
+    # localStorage holds the view, the window layout, the filter, the
+    # coordinator pick and the auto-close toggle, nothing else.
     keys = re.findall(r"localStorage\.(?:getItem|setItem|removeItem)\(([^,)]*)", page)
-    assert keys and set(keys) == {"VIEW_KEY", "LAYOUT_KEY", "FILTER_KEY", "COORD_KEY"}, keys
+    assert keys and set(keys) == {"VIEW_KEY", "LAYOUT_KEY", "FILTER_KEY", "COORD_KEY", "AUTOCLOSE_KEY"}, keys
     assert 'const VIEW_KEY = "agent-dashboard-view";' in page
     assert 'const LAYOUT_KEY = "agentDashboard.layout.v1";' in page
     assert 'const FILTER_KEY = "agentDashboard.filter";' in page
@@ -293,6 +318,10 @@ def test_page_never_logs_or_sends_on_a_timer_and_stores_only_three_keys():
     assert page.count("localStorage.setItem(COORD_KEY") == 1
     assert "localStorage.setItem(COORD_KEY" in _function(page, "function setCoord(")
     assert "safeLink(v, SESSION_PREFIX, SESSION_TAIL)" in _function(page, "function loadCoord(")
+    # Auto-close idle agents: "1" or "0", written only from its toggle.
+    assert 'const AUTOCLOSE_KEY = "agentDashboard.autoClose";' in page
+    assert page.count("localStorage.setItem(AUTOCLOSE_KEY") == 1
+    assert "localStorage.setItem(AUTOCLOSE_KEY" in _function(page, "function setAutoClose(")
 
 
 def test_page_renders_markdown_with_elements_only():

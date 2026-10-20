@@ -33,7 +33,7 @@ buttons at the top (the choice is remembered on that device):
 ## Manifest (the master sets it when publishing)
 
 ```json
-{"db":{}, "user":{}, "comments":{}, "downloads":true}
+{"db":{}, "user":{}, "comments":{}, "downloads":true, "assets":{}}
 ```
 
 `db` holds the `runs` and `agents` collections, and Kyle's private chat
@@ -43,7 +43,12 @@ path (`user.id()`). `comments` is the full grant, needed for
 Claude. claude.ai asks Kyle once for consent at the first send. The page
 declares no custom anchors and never reads threads (it can't).
 `downloads` lets **Get desktop app** save a launcher (looked up on the
-first click only). `tests/test_agent_dashboard.py` pins this block.
+first click only). `assets` (editors only, so Kyle as owner) stores files
+he pastes or drops into a coordinator's chat box: each is uploaded at
+that gesture, shown as a chip, and sent as one line
+`[attachment: <name> (<type>, <size>) asset:<id>]`; the coordinator opens
+it with the Artifact tool `read` and `path=<asset id>`.
+`tests/test_agent_dashboard.py` pins this block.
 
 Kyle's LLM Council chose this design on 2026-10-19 (see
 `council-transcript-20261019-1815.md`). If he isn't using it after two
@@ -222,7 +227,8 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
   a coloured square, a 3 px top bar and the coordinator's border.
 - **Maximize** (the ⤢ button) makes one window fill
   the workspace; the others are hidden, not removed. Esc or the window's
-  **Restore** button goes back, and focus returns to ⤢. It is not saved;
+  ⤡ button (same place and style, labelled "Restore <title>") goes back,
+  and focus returns to ⤢. It is not saved;
   if the window disappears, the workspace restores itself.
 - **Filter:** **Active only** (the default: every session with a needs
   you, running or silent row, else the newest one as "Last run") or
@@ -255,6 +261,18 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
   its chat stays subscribed. Hiding the maximized window restores the
   workspace; hiding one mid-drag cancels the drag. **Reset layout** also
   shows every hidden window again.
+- **Close idle agents** (toolbar) hides, in one click, every agent window
+  on screen whose state is done, failed, stopped or silent (never
+  running or queued, never a coordinator), as `h: 1`, saved once, and
+  says "Closed N idle agent windows". It follows the Coordinator picker
+  and the filter (windows not shown are left alone) and is greyed out
+  when there is nothing to close. They are in **Hidden (N)** like any
+  hidden window. **Auto-close idle agents** (off by default, kept per
+  viewer as `"1"`/`"0"` under `agentDashboard.autoClose`) does the same
+  on each render as agents go idle, skipping a window being dragged,
+  picked up or maximized. A window you restore by hand (Hidden menu or
+  Show all) stays shown until its state changes: the layout entry keeps
+  `k: <state>` for it and drops it on the next change.
 - **Moving and resizing.** Drag a window by the handle in
   its title bar, or Tab to the handle, press Enter, then the arrow keys
   (Enter again drops it). Drag the corner handle to resize: 1–3 columns
@@ -282,6 +300,29 @@ Each coordinator window with a session link has a transcript and a box.
   `[run <run_id> #<nonce>] ` plus the message, without control
   characters other than newline and tab, cut to 4000 UTF-8 bytes. One
   send at a time; never at load, on a timer or as a retry.
+- **Reply.** Select text inside one message of a coordinator's
+  transcript and a small **Reply** button shows on that message (a
+  selection anywhere else, or across two messages, shows none). It puts
+  a quote chip over the box (the first 200 characters, × to clear; Esc
+  in the box clears it too). Send puts the quote, at most 1000
+  characters, first as markdown: `> ` on each line, a blank line, then
+  your text (on its own line after the `[run …]` prefix). Your bubble
+  shows the quote as a blockquote. A good send clears the chip; a failed
+  one puts it back with the draft.
+- **Attachments.** Paste (a screenshot, say) or drop files on the box:
+  each is uploaded at once with `assets.upload` (at most 5 per message;
+  png, jpeg, gif, webp, svg, mp4, webm, pdf, fonts and the six text
+  types; 20 MB, 2 MB for SVG, 16 MB for CSS and JavaScript, checked
+  first) and shows as a chip with its name, type and size, and × to
+  remove it, which deletes the asset (`assets.delete`) as it was never
+  sent. Images get a thumbnail from the url `upload()` returned; chat
+  text is never used as a url. Send appends one line per file,
+  `[attachment: <name, at most 80 characters> (<type>, <size>) asset:<id>]`,
+  counted inside the 4000 bytes first, and Kyle's bubble shows the chips.
+  A rejected file gets a calm message on its chip (too large, type,
+  storage full, not available here); nothing is retried, and nothing is
+  uploaded, listed or deleted at load. With no `assets` grant
+  (`use("assets")` is null) there is no attachment UI.
 - **When it shows.** The page asks `canSendToClaude()` (posts nothing)
   on each Grid show, on maximize, when the page becomes visible again,
   after `claude_unavailable`, and at most once a minute. `available`

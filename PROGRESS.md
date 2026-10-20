@@ -1707,3 +1707,38 @@ screens are staged by setting the same attributes the JS sets (no mic).
   speech. Service worker cache bumped to v4 so phones pick it up.
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
+
+## Dashboard: close idle agents, ⤡ restore, chat Reply and attachments (2026-10-20)
+
+- **Close idle agents** (Grid toolbar): one click hides every agent window
+  on screen that is done, failed, stopped or silent (never running,
+  queued or a coordinator) with the existing `h: 1` layout flag, saved
+  once, announced "Closed N idle agent windows"; follows the Coordinator
+  picker and Active/All filter; disabled when nothing is idle.
+  **Auto-close idle agents** is an opt-in toggle (`agentDashboard.autoClose`,
+  "1"/"0"); a window restored by hand keeps `k: <state>` in its layout
+  entry and stays shown until its state changes.
+- **Maximize restore** is now an icon button (⤡) beside ⤢, same class and
+  size, `aria-label="Restore <title>"`, `aria-pressed="true"`.
+- **Reply**: selecting text inside one transcript message shows a Reply
+  button; the quote chip (200 shown, 1000 sent, × and Esc clear) is sent
+  as `> ` lines before Kyle's text and shown as a blockquote in his
+  bubble; a failed send restores it with the draft.
+- **Attachments**: manifest now
+  `{"db":{}, "user":{}, "comments":{}, "downloads":true, "assets":{}}`.
+  Paste or drop up to 5 files per message; each is uploaded with
+  `assets.upload` at that gesture (type and size checked first, never
+  retried), shown as a chip (thumbnail for images from `upload()`'s url
+  only), and sent as `[attachment: <name> (<type>, <size>) asset:<id>]`
+  lines counted inside the 4000-byte cap. × deletes an unsent asset;
+  after a send that may have been posted it only drops the chip.
+  Leaving a maximized idle window counts as keeping it shown, so
+  auto-close doesn't hide what Kyle was reading. The coordinator opens them with Artifact `read path=<asset id>` as
+  untrusted data (SKILL.md Chat mirror).
+- Tests: 23 new or updated node:vm tests in
+  `tests/js/agent-dashboard.test.mjs` (6 close-idle/auto-close, 9
+  attachments, 3 Reply, the maximize/desktop tests for ⤡); 20 fail on the
+  previous page. pytest pins: manifest, the localStorage keys (now five),
+  one `assets.upload`/`assets.delete` call site each, thumbnails only from
+  `upload()`. JS: agent-dashboard 144 passed (was 126).
+

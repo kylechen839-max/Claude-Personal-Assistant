@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Agent dashboard: "Close idle agents" in the Grid toolbar (never
+  coordinator windows) and an opt-in auto-close; the maximized window's
+  restore is now an icon button (⤡); select text in a chat message and
+  Reply to quote it; paste or drop images, PDFs and text files into the
+  chat box (up to 5 per message, kept in the dashboard's own file store).
 - Agent dashboard Grid: a Coordinator picker shows only the chosen
   coordinator session's windows (default All); the choice is kept per
   viewer, and Forget clears a pick whose session has no recent runs.

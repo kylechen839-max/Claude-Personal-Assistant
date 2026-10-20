@@ -546,9 +546,11 @@ The dashboard is desktop only (no phone layout).
     monospace body that is easy to read in both modes. They match what the
     master's session at claude.ai/code says. The artifact frame on
     claude.ai does not keep growing taller.
-- [ ] Press ⤢ on the coordinator window, then Esc; then ⤢ and Restore.
-  - Should: the window fills the workspace with its conversation; Esc
-    and Restore both put every window back.
+- [ ] Press ⤢ on the coordinator window, then Esc; then ⤢ and the ⤡
+      button that takes its place.
+  - Should: the window fills the workspace with its conversation; ⤡
+    looks like ⤢ (same size and spot); Esc and ⤡ both put every window
+    back.
 - [ ] Tap All recent, then Active only, and reload.
   - Should: All recent adds finished runs from the last two weeks; the
     choice survives the reload.
@@ -600,6 +602,23 @@ The dashboard is desktop only (no phone layout).
     "running" if that applies); the restored one comes back in its old
     place and size; Show all brings back the other. A coordinator hidden
     with a half-typed message still has it when restored.
+- [ ] With some agents done or failed, press Close idle agents; then
+      turn on Auto-close idle agents, restore one from Hidden, and wait
+      for the next agent to finish.
+  - Should: only finished/silent agent windows close (never the
+    coordinator or a running one) and the button greys out; with
+    auto-close on, finishing agents disappear into Hidden by themselves,
+    the one you restored stays, and the toggle is still on after a reload.
+- [ ] Select a few words in one of the coordinator's messages, press the
+      Reply button that appears, type "why?" and send.
+  - Should: Reply shows only for a selection inside one message; the
+    quote shows over the box; your bubble shows it as a grey quote above
+    "why?", and the coordinator answers about that text.
+- [ ] Paste a screenshot into a coordinator's chat box, drop a PDF on
+      it, then send "please look at these".
+  - Should: each shows as a chip (the screenshot with a thumbnail) and
+    × removes one; after Send your bubble shows the chips, and the
+    coordinator replies that it opened both files.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
 - [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
