@@ -228,6 +228,9 @@ class ClaudeChat:
         # returns a system prompt line offering a review, or None
         # (memory_review.MemoryReview.nudge)
         self.review_nudge = None
+        # A health check's conversation (webapp.WebAssistant.start_check):
+        # nothing is saved (no history, no memory summary, no review offer).
+        self.check_mode = False
 
     @property
     def client(self):
@@ -256,7 +259,7 @@ class ClaudeChat:
 
     @property
     def incognito(self) -> bool:
-        return bool(self.recorder and self.recorder.incognito)
+        return self.check_mode or bool(self.recorder and self.recorder.incognito)
 
     @property
     def conversation_id(self) -> str | None:
@@ -498,7 +501,7 @@ class ClaudeChat:
         return True
 
     def recall(self, user_text: str) -> list[str]:
-        if not self.memory:
+        if not self.memory or self.check_mode:  # a health check: no Pinecone query
             return []
         try:
             notes = self.memory.retrieve(user_text)
@@ -512,7 +515,7 @@ class ClaudeChat:
 
     def _nudge(self) -> str | None:
         """The weekly memory review offer, if one is due (never blocks)."""
-        if self.review_nudge is None:
+        if self.review_nudge is None or self.check_mode:
             return None
         try:
             return self.review_nudge()

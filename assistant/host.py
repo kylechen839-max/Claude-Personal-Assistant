@@ -22,6 +22,13 @@ logs/host-<mode>.log, and:
   then answer /healthz within `[update] health_seconds` (the wake loop must
   stay up for 20 s), or the update is rolled back and the old version
   restarted. A HEAD move made by hand (git checkout/pull) only restarts.
+- with `[watch] gate` on, new code goes live only after the go-live check
+  (assistant/watch.py: each instance's test conversation on a side port):
+  the updater runs it before HEAD is handed over; for a move by hand the
+  web host runs it first (the wake host waits for its verdict), and a
+  commit that fails is undone (`git reset --keep`) while the old version
+  keeps running. After each restart on new code it starts the watchdog,
+  which runs the test conversation against the live app right away.
 - touches logs/host-<mode>.alive every second, so an update that needs
   pip knows the assistant is running.
 """
@@ -128,6 +135,9 @@ class Host:
         self.crashes: list[float] = []
         self.health_wait = health_wait
         self.heartbeat = heartbeat
+        self.refused: str | None = None  # the last commit the go-live check refused
+        self.watcher = None  # starts the watchdog (launch_watch), or None
+        self.gate_retry = 0.0  # no go-live check before this (clock)
 
     def say(self, text: str) -> None:
         self.log.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [host] {text}\n")
@@ -182,13 +192,77 @@ class Host:
         self.sleep(WAKE_SETTLE)
         return self.child.poll() is None
 
+    def gate_allows(self, new: str) -> bool:
+        """With the go-live check on (Updater.gate, [watch] gate): may this
+        host restart on `new`, moved there by hand? The web host runs the
+        check itself (holding the update lock, so nothing else restarts on
+        `new` meanwhile); a failed `new` is undone and the old version keeps
+        running. The wake host waits for the web host's verdict."""
+        up = self.updater
+        if up is None or getattr(up, "gate", None) is None:
+            return True
+        verdict = up.gated(new)
+        if verdict is None and new == up.last_good():
+            verdict = True
+        if verdict is None and (self.mode == "web" or "web" not in up.hosts_running()):
+            if not up.acquire():
+                return False  # an update or the watchdog is busy; next poll
+            try:
+                self.say(f"go-live check of {new[:7]} on a side port")
+                ok, why = up.gate(new)
+                if ok is None:
+                    self.say(f"go-live check of {new[:7]} couldn't run ({why}); "
+                             "trying again in a minute")
+                    self.gate_retry = self.clock() + 60
+                    return False
+                up.mark_gated(new, ok)
+                verdict = ok
+                if not ok:
+                    self.refuse(new, why)
+            finally:
+                up.release()
+        if verdict is False and self.refused != new:
+            self.refused = new
+            self.say(f"!!! {new[:7]} failed its go-live check; staying on "
+                     f"{(self.child_sha or '?')[:7]}")
+        return bool(verdict)
+
+    def refuse(self, new: str, why: str) -> None:
+        """`new` failed: back to the code this host runs (when that's safe),
+        so a crash restart can't bring `new` up; tell the watchdog."""
+        from assistant import watch
+
+        undone, detail = watch.rollback_checkout(self.updater, new, self.child_sha,
+                                                 "go-live check failed")
+        self.say(f"!!! go-live check of {new[:7]} failed ({why}); "
+                 + (f"checkout back on {self.child_sha[:7]}" if undone
+                    else f"checkout left as is: {detail}"))
+        self.trigger_watch()
+
+    def trigger_watch(self) -> None:
+        """Run the watchdog now (test conversation included), in the
+        background: a restart on new code is checked right away."""
+        if self.mode != "web" or self.watcher is None:
+            return
+        try:
+            self.watcher()
+        except OSError as e:
+            self.say(f"couldn't start the watchdog: {type(e).__name__}")
+
     def restart_by_hand(self, new: str) -> None:
-        """HEAD moved without the updater (git checkout/pull): restart only."""
+        """HEAD moved without the updater (git checkout/pull): restart only,
+        once the go-live check passed (gate_allows)."""
+        if self.clock() < self.gate_retry or not self.gate_allows(new):
+            return
+        gated = getattr(self.updater, "gate", None) is not None
         self.say(f"code changed by hand {(self.child_sha or '?')[:7]} -> {new[:7]}; "
-                 "restarting (no update checks, no rollback)")
+                 + ("go-live check passed; restarting (no /healthz rollback)" if gated
+                    else "restarting (no update checks, no rollback)"))
         self.wait_until_idle()
         self.stop()
         self.start()
+        if self.mode == "web" and self.healthy(new):  # check it once it answers
+            self.trigger_watch()
 
     def restart_on(self, new: str) -> None:
         """HEAD moved to `new`: restart on it; roll back if it won't run."""
@@ -200,6 +274,7 @@ class Host:
         self.start()
         if self.healthy(new):
             self.say(f"running {new[:7]}")
+            self.trigger_watch()  # the test conversation, now, on the live app
             return
         self.say(f"!!! {new[:7]} did not come up")
         if old and self.updater:
@@ -277,6 +352,14 @@ class Host:
         return 0
 
 
+def launch_watch() -> None:
+    """python -m assistant.watch --functional, in the background, no window."""
+    flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    subprocess.Popen([console_python(), "-m", "assistant.watch", "--functional"],
+                     cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=flags)
+
+
 def parse(argv: list[str]) -> tuple[str, str] | None:
     mode = argv[0] if argv else ""
     port = argv[1] if len(argv) == 2 else str(DEFAULT_PORT)
@@ -306,7 +389,11 @@ def main(argv=None) -> int:
         host = Host(mode, build_command(mode, port), log, port,
                     health_wait=float(cfg["health_seconds"]),
                     heartbeat=ROOT / "logs" / f"host-{mode}.alive")
-        host.updater = Updater.from_config(cfg, python=console_python(), say=host.say)
+        from assistant.watch import updater_gate
+
+        host.updater = Updater.from_config(cfg, python=console_python(), say=host.say,
+                                           gate=updater_gate())
+        host.watcher = launch_watch
         if not wait_for_network():
             host.say("network not up after 120 s; starting anyway")
         try:

@@ -2522,3 +2522,171 @@ their language, on the same shared cloud server as Kyle.
   measurement sees more of the reply's loud parts. Full run: 1755 passed,
   48 skipped; JS files all pass.
 
+
+## Health and function checks, and safe go-live (2026-10-20)
+
+Kyle: "The app should not have undiscovered bugs that are discovered by the
+users when the app restarts", and "it should never get to the point where
+the app does not work when I try to use it". Three things went wrong that
+day and are now caught automatically: Mom's and Kai's apps died with a
+Claude session and returned 502 for hours; a real multi-turn conversation
+failed with an API 400 (thinking-block signatures) that no mocked test
+saw; hands-free barge-in misfired (fixed on its own branch; voice-core.js
+is untouched here).
+
+- **Watchdog** (`assistant/watch.py`, `python -m assistant.watch`; the
+  `\HeyClaude\Watch` task every 5 minutes via
+  `scripts/install_watch_task.ps1` or `install_family_tasks.ps1 -Watch`,
+  `deploy/hey-claude-watch.{service,timer}` via `scripts/install_watch.sh`
+  on the Pi). Finds every instance with install_family_tasks.ps1's rule.
+  Quick check: `/healthz`, the page and every script/stylesheet it loads,
+  served version vs HEAD, the phone address (`[webapp] public_origin` or
+  the `tailscale serve status --json` entry for the port). Test
+  conversation (smoke.py `--conversation`, `run_conversation`) after a
+  restart (new `/healthz` `started`, loopback only) or a new version, every
+  `functional_hours` (6), retried after `retry_minutes` (30): text with a
+  read-only tool, a follow-up that must recall a number from the first
+  turn, an audio turn (the existing fixture), a hands-free turn over
+  `/api/voice`, and a last text turn sent while the voice socket is still
+  open (the path that broke). Self-heal: restart once per failure
+  (`scripts/restart_instance.ps1`, or `[watch] restart_command`); still
+  failing on code newer than the last known good (the last commit whose
+  test conversation passed here, `logs/update-state.json` `last_good`):
+  `git reset --keep` to it (only an ancestor, never over local-only
+  commits; config/.env/data untouched), restart, reject the commit.
+  Outside causes (no internet, Claude down, rate limit, bad key) never roll
+  back. State in `data/watch_status.json` (private, atomic), every result
+  in `logs/watch.log`. Alerts only on a change of state and for one-off
+  events: the owner's banner (`/api/state` `health`, Kyle's own instance
+  and owner sessions only; `ui.js renderHealth`) and the dev team
+  coordinator (`CoordinatorLink.send(source="watch")`). Alert text is
+  labels, check names and fixed reasons (`smoke.Outcome.reason`), never
+  reply text or keys.
+- **Check session** (`POST /api/check-session`, `WebAssistant.start_check`):
+  a fresh session becomes one for good: no recorder (no history),
+  `ClaudeChat.check_mode` (no memory summary or review offer),
+  `SessionTools.check_mode` (only `tools.READ_ONLY_TOOLS` offered and run).
+  The smoke client uses it whenever the server has it and signs out at the
+  end; the conversation mode refuses to run without it.
+- **Go-live gate** (`watch.gate_check`, `candidate_check`): each instance is
+  started again on port + `side_port_offset` (100) as `--candidate` (no
+  history database, no saved sign-ins, no hub, no resumed lecture jobs,
+  its own log, keys stripped from its environment) and must pass the test
+  conversation before anything restarts on the commit. Used by the updater
+  (inside its lock, after the import/`--check` smoke), by the host
+  supervisor for a pull by hand (the web host checks; the wake host waits
+  for its verdict), by the watchdog when an app runs an older version than
+  HEAD, and by `scripts/deploy.ps1` / `deploy.sh` (`assistant/deploy.py`:
+  pull, gate, switch or refuse, then a live check). A failing commit is
+  undone and rejected; one that fails only for outside reasons is neither.
+  `install_family_tasks.ps1 -Restart` now goes through it. After the host
+  restarts on new code it starts the watchdog's test conversation at once.
+- **Claude down**: 5xx/overloaded after the retries now says "Claude is
+  unreachable right now. I retried a few times; please try again in a
+  minute." (`cli.CLAUDE_DOWN`, `i18n claude_down`), and the smoke check
+  counts it as an error reply.
+- **CI**: new `api-contract` job runs `tests/test_contract.py` with the
+  `ANTHROPIC_API_KEY` secret (skips cleanly without it) on pushes and PRs,
+  against the cheapest model (`CONTRACT_MODEL`, default claude-haiku-5-5)
+  and the default model; name it in master's required checks.
+
+How it was tested (offline, Linux sandbox, Python 3.13):
+- `tests/contract_fakes.py`: a contract-shaped Messages API fake (validates
+  role order, tool_use/tool_result pairing, thinking signatures bound to the
+  client, thinking first before tool results; answers with the SDK's own
+  `Message`/`ThinkingBlock` types, streamed or not).
+- `tests/test_contract.py` (2 offline + 4 live, skipped here): two
+  ClaudeChat instances sharing one history then a follow-up (fails with
+  the thinking fix reverted: 400 "Invalid `signature`"); the whole web
+  app conversation through smoke, voice socket included, checking that the
+  last text turn ran with the voice conversation open, nothing reached
+  history or memory and the write tool was never offered or run.
+- `tests/test_watch.py` (40): discovery, Tailscale mapping, `[watch]`
+  mirrored in config.toml, each quick-check failure, alerts only on a
+  change, restart once per failure, a restart that fixes it raises no
+  alert, test conversation after a restart and when due (and sets the last
+  known good), rollback to the last good, no rollback for outside causes or
+  over local commits, gate before switching, refusal when the gate fails,
+  a gate that can't tell, side-port candidate (port, flags, stripped
+  environment), the updater's gate (reject vs retry), host gating of a hand
+  pull and the wake host waiting, host starting the watchdog after a
+  restart, deploy refuse and switch paths, banner contents and staleness,
+  banner only on Kyle's instance and for the owner, no token or reply text
+  in alerts/logs/status (caplog), the coordinator channel, fixed reasons,
+  the check session server side, the smoke conversation (passes, keeps the
+  socket open, fails without the tool call or the recall, never runs
+  without a check session), the "Claude unreachable" sentence.
+- Revert proof: each of 25 source changes (plus the banner in ui.js) was reverted alone and its test
+  failed (list in the round's report); then restored.
+- `tests/js/ui.test.mjs` +1 (banner lines and element); `tests/ps/
+  restart_instance.tests.ps1` (7 checks, runs on Windows CI);
+  `deploy.sh`/`install_watch.sh` added to the bash parse check.
+- Full run (Linux sandbox, Python 3.13): 2157 passed, 58 skipped (master
+  b1e40b9: 2112 passed, 48 skipped). The 10 new skips: the 4 live contract
+  tests (no key here), and PowerShell/shellcheck checks of the new scripts
+  (not installed here; they run in CI). JS: 253 pass (was 252). The test
+  that changed: `test_get_reply_error_messages`' "other" case is now a 400
+  (still "went wrong") and a 500 case expects the new "unreachable" sentence.
+- Not measured: the test conversation's real cost and duration (no API key
+  in the sandbox; estimated ~30k input tokens per instance per check), the
+  side-port copy's startup time and memory on the PC (Whisper + Kokoro
+  loaded twice for a minute or two), and the Task Scheduler / systemd
+  installs (no Windows or systemd here). MANUAL_TEST "Health checks and
+  safe updates" covers them.
+
+### Round 2 (judge findings)
+
+1. Healing an app that is only starting: the host starts the watchdog only
+   after the hand-pulled app answers on the new version (`healthy`); no
+   heal while the update lock is held; an app that doesn't answer gets
+   `[watch] start_grace_seconds` (300, new setting) before a restart and
+   again after it; `restarted` is recorded only for a restart that ran, and
+   a rollback needs one. Tests: `test_host_starts_the_watchdog_only_once_the_hand_pulled_app_answers`,
+   `test_no_restart_or_rollback_while_an_update_holds_the_lock`,
+   `test_no_rollback_without_a_restart_that_ran`,
+   `test_down_app_gets_the_start_grace_and_a_long_wait_before_any_rollback`,
+   `test_a_slow_start_after_the_restart_is_waited_for`,
+   `test_family_copy_down_without_restart_rolls_back_nobody`.
+2. Phone-address (Tailscale) failures are reported but never heal or roll
+   back; no restart while a turn runs (`busy`). Tests:
+   `test_phone_address_failure_never_restarts_or_rolls_back`,
+   `test_never_restarts_in_the_middle_of_a_turn`.
+3. `rollback_checkout` re-reads HEAD and the branch under the lock and needs
+   HEAD on the bad commit. Tests: `test_rollback_rereads_head_and_leaves_a_new_local_commit`,
+   `test_rollback_checkout_needs_head_on_the_bad_commit_and_the_branch`.
+4. A busy side port (after stopping a leftover `--candidate`) and a copy
+   that doesn't start are inconclusive (`Check.outside`, gate None); a
+   failure is retried once before a commit is refused. Tests:
+   `test_a_busy_side_port_is_inconclusive_not_a_rejection`,
+   `test_a_copy_that_does_not_start_is_inconclusive`,
+   `test_gate_retries_once_before_rejecting`.
+5. `updater.take_lock`/`lock_stale`/`pid_alive`: a lock whose PID is dead is
+   stale at once (watch.lock and update.lock; `locked()` too); the watch
+   task's limit is 2 h (systemd 2h), the watch lock's age limit 3 h. Tests:
+   `test_a_killed_runs_lock_is_stale_at_once`, `test_the_watch_task_outlives_the_worst_gate`.
+6. `rolled_back` is set only after the lock was taken. Tests:
+   `test_rollback_lock_taken_after_the_restart_sets_nothing`,
+   `test_rollback_happens_once_the_lock_is_free`.
+7. `Updater.rollback` rejects only after the reset worked. Test:
+   `test_reject_only_when_the_reset_worked`.
+8. `Updater._state_lock`: state writes take a file lock (PID, stale when its
+   process is gone) plus a thread lock. Tests: `test_state_writes_wait_for_another_process`,
+   `test_state_writes_dont_lose_each_other`.
+9. `install_family_tasks.ps1 -Restart` runs deploy inside `Push-Location
+   $repoDir`. Test: `test_family_restart_runs_deploy_from_the_project_folder`.
+10. Check sessions skip the Pinecone search (`ClaudeChat.recall`). Tests:
+    `test_check_session_never_queries_memory`, and the contract web test
+    now asserts `memory.retrieve` was never called.
+11. `test_functional_check_after_a_restart_and_when_due` asserts the test
+    conversation is not due at 5 h and is at 6 h.
+- The judge's probes are folded into `tests/test_watch.py` with the
+  corrected expectations (the tests above). Each fix was reverted alone and
+  its test failed (22 reverts, bytecode caches cleared between them; the
+  functional_hours check by setting the default to 4). Two older tests now
+  pass the start grace between runs (`later()`), and the fake clock starts
+  at the real time so lock ages are measured right.
+- Full run after round 2 (Linux sandbox, Python 3.13): 2179 passed, 58
+  skipped (round 1: 2157 / 58; master b1e40b9: 2112 / 48); JS 253 pass.
+  `tests/test_watch.py` has 62 tests. ruff: no findings in the new files,
+  and none added to the files this work touched (the repo-wide count, 527,
+  is the same as master's).

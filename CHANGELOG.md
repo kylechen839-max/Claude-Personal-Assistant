@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Health checks: a watchdog (`python -m assistant.watch`, the
+  `\HeyClaude\Watch` task every 5 minutes, or the Pi's
+  `hey-claude-watch.timer`) checks your app and every family copy:
+  `/healthz`, the page and its scripts, the running version and the phone
+  address; after every restart or new version and every 6 hours, a real
+  test conversation (text with a read-only tool, a follow-up, voice
+  message, hands-free voice, text) that saves nothing and changes nothing.
+  An app that fails is restarted once, then rolled back to the last
+  version that passed. You hear about it once, when it breaks and when it
+  recovers: a banner in your phone app and a message to the dev team
+  coordinator. New `[watch]` settings.
+- Safe updates: new code goes live only after it passed that test
+  conversation on a side port (port + 100); otherwise the old version
+  keeps running. `scripts/deploy.ps1` / `deploy.sh` pull, check and switch
+  in one command; `install_family_tasks.ps1 -Restart` checks first too.
+- When the Claude API itself is down or overloaded, the app now says
+  "Claude is unreachable right now. I retried a few times; please try
+  again in a minute."
+- CI: `api-contract` runs a real multi-turn conversation (tool use,
+  thinking, two requests sharing a history, the voice socket) against the
+  Anthropic API when the `ANTHROPIC_API_KEY` secret is set.
 - Fix: a conversation could break for good ("Sorry, something went wrong
   talking to Claude" on every turn) after hands-free voice shared it: a
   thinking block signed for another request was sent back. Earlier turns'

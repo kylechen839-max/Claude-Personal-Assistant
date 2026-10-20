@@ -715,6 +715,65 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   they never get the Spotify tools; the "Connect Spotify" routes 404 for
   them.
 
+## Watchdog and go-live check (`watch.py`, `deploy.py`)
+
+- **The test conversation can't write.** It runs in a *check session*
+  (`POST /api/check-session`, `WebAssistant.start_check`): only a fresh,
+  idle session can become one, and only for good (it ends with sign-out).
+  Its recorder is dropped (no history), `ClaudeChat.check_mode` stops the
+  memory summary and the weekly review offer, and `SessionTools.check_mode`
+  offers and runs only `READ_ONLY_TOOLS` (an allowlist in
+  `tools/__init__.py`: calendar and assignment lists, Home Assistant and
+  Spotify reads; a new tool is never runnable there by default); anything
+  else Claude asks for is refused before its handler or its confirmation
+  question. It doesn't search Pinecone memory either. The smoke client refuses to run the conversation on a server
+  without check sessions. Any signed-in session may make itself one: it
+  only takes abilities away.
+- **Alerts carry no conversation text or secrets.** `smoke.Outcome.reason`
+  maps a failure to a fixed phrase (`smoke.REASONS`, `EXTERNAL`), an HTTP
+  status or an exception class name, never the reply or error text; the
+  alert, `logs/watch.log` and `data/watch_status.json` (written privately
+  and atomically) use only those, instance labels, versions and times. The
+  watchdog reads each instance's `WEB_TOKEN` from its env file with
+  `dotenv_values` (never into its own environment), sends it only to
+  `127.0.0.1`, and starts side-port copies with every key and data-path
+  variable removed from their environment, so each reads its own env file.
+- **The banner is the owner's only.** `/api/state` carries `health` only
+  for the owner's sessions, and only on Kyle's own instance (started with
+  `.env`, not a family copy or a side-port candidate): family members never
+  see the machine's ops status.
+- **Rollback can't lose work.** It uses `git reset --keep` (as the
+  updater), only to an ancestor of HEAD, and never when HEAD has commits
+  that exist only on this machine; config, `.env`, `data/` and `logs/` are
+  untouched. It holds the update lock, so hosts and the updater never act
+  meanwhile. Failures with outside causes (no internet, Claude down, rate
+  limits, a rejected key) never roll back or reject a commit.
+- **Healing can't fight an update or a person.** No restart or rollback
+  while the update lock is held (an update or deploy may stop the app on
+  purpose) or a turn is running; an app that doesn't answer gets
+  `start_grace_seconds` first. A rollback needs a restart that actually
+  ran and didn't help, re-reads HEAD and the branch under the lock (a commit
+  made meanwhile is never dropped), and rejects the commit only once the
+  reset worked. Phone-address (Tailscale) failures never heal or roll back.
+- **A fluke can't reject a commit for good.** A failing go-live check is
+  tried once more; a busy side port (after stopping a leftover
+  `--candidate` copy of that instance, matched by its own config and env
+  file) or a copy that exits before answering is inconclusive: the commit
+  is neither switched on nor rejected. Lock files hold their PID, so a
+  killed run's lock is stale at once; the watch task's limit (2 h) is
+  shorter than the lock's age limit (3 h). Writes to
+  `logs/update-state.json` take a lock, so concurrent writers can't lose
+  a rejected commit or the last known good.
+- **Side-port copies** listen on 127.0.0.1 only, don't open the history
+  database or the saved sign-ins, don't start the PC hub or lecture jobs,
+  and are stopped after the check.
+- **Deliberately not done:** the watchdog's coordinator alert goes through
+  Claude Code (`claude -p --cloud`), so its text (app names, versions,
+  fixed reasons) reaches Kyle's own cloud session; no third-party push
+  service (ntfy and the like) was added. The side-port copy shares Google
+  and Spotify token files with the running app (a refresh may rewrite
+  them, atomically, as either process already could).
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar

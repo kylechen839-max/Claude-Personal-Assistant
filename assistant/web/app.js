@@ -363,6 +363,7 @@ async function refreshState() {
     if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
     if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
     if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
+    if (window.HeyClaudeUI) window.HeyClaudeUI.renderHealth(document, state.health);  // ui.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
