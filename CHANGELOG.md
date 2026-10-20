@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  New setting `[webapp] max_attachment_mb` (10).
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

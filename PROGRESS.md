@@ -1869,3 +1869,62 @@ Render/Docker changes) comes separately.
   patterns for the dynamic ones ("12 messages", "Actions for …",
   "Transcribing 40%"). Only the "Hey Claude" name stays in English.
 - Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
+
+## Chat attachments: the "+" button (2026-10-20)
+
+- **What:** a **+** left of the phone app's text field opens a sheet (Take
+  photo / Photo library / Choose file). Picked files show as chips above
+  the field (thumbnail or file name, × to remove; + disabled at 4) and go
+  with the next typed message or push-to-talk recording as `attachment`
+  parts of `/api/turn`'s form. Photo-only messages work too. Hands-free
+  voice mode is unchanged (out of scope).
+- **Server:** new `assistant/attachments.py` sniffs the type from the first
+  bytes (JPEG, PNG, WebP, GIF, PDF, UTF-8 text without control bytes),
+  caps the count (4) and sizes (photos `[tutor] max_image_mb`, PDF/text new
+  `[webapp] max_attachment_mb` = 10, both under `max_upload_mb`; text 200k
+  characters), and builds Anthropic blocks: photos through the tutor's
+  `prepare_image` (now with an `allowed` map so GIF becomes PNG; the
+  tutor's own behaviour is unchanged) as base64 `image` blocks, PDFs as
+  base64 `document` blocks, text as `document` blocks with a text source
+  (so the memory summary's `transcript()` never includes file text).
+  Bad files get a friendly 400 before anything reaches Claude.
+- **Chat:** `ClaudeChat.ask(..., attachments=[blocks])` sends them before
+  the text; saved history and the event log get only a marker
+  (`[photo]`, `[file: name.pdf]`), so resume and summaries see plain text.
+  The turn is tainted (`untrusted_attachments`, before any tool runs; only
+  `reset()` clears it), replies stay out of the DEBUG log while an
+  attachment is in history, `_trim_history` now accepts a user turn with
+  attachments as the first message (`is_user_turn`, also used by
+  `/api/state`'s turn count), and older attachments become a text marker
+  once the conversation's base64 passes 20 MB (the API caps requests at
+  32 MB). INFO logs: count, kinds and sizes only.
+- **Page:** `assistant/web/attachments.js` (public like `family.js`, also
+  in CloudGuard's `PUBLIC_GET` so it loads before sign-in) holds the tray
+  and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
+  now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
+  is unchanged). Chinese strings for every new label and the server's
+  messages in `i18n.js`. Phone cache v9 with `/attachments.js` in the
+  shell.
+- **Cloud:** `/api/turn` was already an upload path capped at
+  `max_upload_mb` (4 MB there); the form parser now allows 6 files (the
+  recording, 4 attachments, one more to say "at most 4").
+- **Tests:** `tests/test_attachments.py` (28): sniffing and names, EXIF
+  stripped, block shapes, limits; `/api/turn` with photo + text, PDF + text
+  file, photo only, push-to-talk + photo; friendly 400s (5 files, wrong
+  magic, oversized PDF and photo, a form with 8 files); history marker and
+  no bytes in SQLite; summary has Kyle's words only and is stored
+  untrusted; a `confirm_if_untrusted` tool asks after an attachment (and
+  not before); caplog: no names or contents at INFO, no reply at DEBUG;
+  trimming keeps an attachment turn first; old attachments give way;
+  family member's own chat and store; CloudGuard accepts a small photo,
+  413s an oversized PDF, serves `/attachments.js` before sign-in; page and
+  i18n checks. `tests/js/attachments.test.mjs` (6, node:vm): kinds, the
+  4-file limit, chips/×/disabled +, shrunk JPEG sent, a broken photo
+  dropped. Checked failing with the source change reverted: taint line
+  (4 fail), marker (2), trim (1), private log (1), drop-old (1), control
+  byte sniff (2), webapp.py from master (18), the `PUBLIC_GET` entry (1),
+  JS limit/disable (2).
+- **Counts** (Linux sandbox, Python 3.13): pytest 1710 -> 1738 passed,
+  46 skipped. JS: attachments 6, agent-dashboard 126, backend-router 33,
+  devhub 12, family 9, i18n 11, voice-core 14, all passing. Real iPhone
+  camera/picker behaviour is not tested here (MANUAL_TEST "Attachments").

@@ -190,6 +190,23 @@
     "Incognito off: conversations are saved again.": "已关闭无痕模式：对话会再次保存。",
     "Can't reach the Pi, the PC or the cloud right now.": "现在连不上树莓派、电脑或云端。",
     "No sound is coming from this microphone. If you're on CarPlay or Bluetooth, try push-to-talk.": "这个麦克风没有声音。如果在用 CarPlay 或蓝牙，请改用按住说话。",
+    // attachments ("+" left of the text field, attachments.js / attachments.py)
+    "Add photos or files": "添加照片或文件",
+    "Add to your message": "添加到消息",
+    "Photo library": "照片图库",
+    "Choose file": "选择文件",
+    "Attachments": "附件",
+    "You can attach up to 4 files.": "最多可以附加 4 个文件。",
+    "Only photos, PDFs and text files can be attached.": "只能附加照片、PDF 和文本文件。",
+    "Attach at most 4 files to a message": "每条消息最多附加 4 个文件。",
+    "bad request (attach at most 4 files)": "请求有误（最多附加 4 个文件）。",
+    "Only photos (JPEG, PNG, WebP, GIF), PDFs and text files can be attached":
+      "只能附加照片（JPEG、PNG、WebP、GIF）、PDF 和文本文件。",
+    "A photo couldn't be read": "有一张照片读不出来。",
+    "That file is empty": "这个文件是空的。",
+    "A text file is too long to send": "文本文件太长，发不了。",
+    "too large": "文件太大了。",
+    "request too large": "文件太大了。",
     // first-run guide (data-google instances: a family member's own app)
     "Enter the sign-in code you were sent. You only need to do this once on this phone.":
       "请输入发给你的登录码。这部手机只需要输入一次。",
@@ -223,6 +240,8 @@
     [/^Uploaded (.+)$/, "已上传 $1"],
     [/^offline, retrying in (\d+) s$/, "离线，$1 秒后重试"],
     [/^(.+) \(in use\)$/, "$1（正在使用）"],
+    [/^A photo is over ([\d.]+) MB$/, "有一张照片超过 $1 MB。"],
+    [/^A file is over ([\d.]+) MB$/, "有一个文件超过 $1 MB。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
 

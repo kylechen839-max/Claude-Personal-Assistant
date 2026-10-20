@@ -23,8 +23,9 @@ for the public internet with no Tailscale in front:
 - X-Forwarded-For / -Proto count only when the connection comes from the
   host's TLS proxy (a private address); then plain http is redirected to
   https and HSTS is sent. Cookies are always Secure, HttpOnly, SameSite=Strict.
-- Request bodies are capped: audio uploads at [webapp] max_upload_mb,
-  everything else at [cloud] max_body_kb, chunked uploads included.
+- Request bodies are capped: audio and attachment uploads (/api/turn) at
+  [webapp] max_upload_mb, everything else at [cloud] max_body_kb, chunked
+  uploads included.
 - The voice WebSocket (/api/voice) gets the same checks before the
   handshake: rate limit, cookie or Bearer token (wrong ones count toward the
   lockout) and an Origin naming this site. X-Forwarded-Host, which the web
@@ -72,7 +73,9 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/static/features.js", "/static/features.css",
               "/static/katex/katex.min.js", "/static/katex/katex.min.css",
               # family invites: the page code that accepts an #invite= link
-              "/family.js"}
+              "/family.js",
+              # the chat's "+" (and the tutor's photo shrinking)
+              "/attachments.js"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it
@@ -675,6 +678,7 @@ def build_app(config: dict, web_assistant, token: str):
     from assistant.failover.tokens import TokenAuthority
 
     from assistant import webfeatures  # lecture recorder + homework tutor
+    from assistant.attachments import limits as attachment_limits
 
     failover = settings_from_config(config)
     features = webfeatures.Features(config, web_assistant)
@@ -685,7 +689,7 @@ def build_app(config: dict, web_assistant, token: str):
                             trusted_proxy=trust, limiter=limiter,
                             sessions_file=web["sessions_file"] or None,
                             voice=config.get("voice"), failover=failover,
-                            features=features)
+                            features=features, **attachment_limits(config))
     features.resume_jobs()  # lecture jobs cut off by a redeploy
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],
