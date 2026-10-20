@@ -86,12 +86,16 @@ search_namespaces = "*"       # "*" = read all namespaces, or a list like ["proj
 top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
+weekly_review = false         # true: once a week, the first conversation offers to review this week's notes
+review_state_file = "data/memory_review.json"  # when the last weekly review offer was made
 
 [webapp]                      # python -m assistant --mode web (phone page)
 host = "127.0.0.1"            # keep this: reach it through `tailscale serve`
 port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
+max_attachment_mb = 10        # per PDF/text file attached with "+" (photos: [tutor] max_image_mb;
+                              # the whole message must fit in max_upload_mb, 4 on the cloud server)
 max_audio_seconds = 60        # longest recording accepted
 sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
@@ -170,6 +174,15 @@ hub = false                   # the PC hub at http://127.0.0.1:8765/devteam (loo
 hub_sessions = []             # coordinator session ids for the hub's windows (at most 8; [] = coordinator_session)
 poll_seconds = 4              # the hub reads the Notion inbox at most this often
 hub_state_file = "data/devhub.json"  # the hub's transcript and pending replies
+
+[home_assistant]              # smart home by voice (README "Smart home"); owner only, never family
+enabled = false               # needs a Home Assistant install: HA_URL and HA_TOKEN in .env
+url = ""                      # HA_URL in .env overrides it, e.g. "http://homeassistant.local:8123"
+domains = ["light", "switch", "fan", "climate", "cover", "media_player", "sensor", "lock"]  # the only kinds it may touch
+scripts = []                  # script./scene./automation. entity ids it may run, e.g. ["scene.movie_time"]
+secure_entities = []          # more entity ids that always need a spoken yes (e.g. a garage relay)
+cache_seconds = 30            # how long the device list is kept
+timeout = 10                  # seconds per request
 
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on

@@ -371,6 +371,30 @@ HTTPS address that only your own devices can open:
    the token, and allow the microphone. Add it to the home screen (see
    below; on Android, Chrome menu -> Add to Home screen).
 
+### Attach photos and files
+
+The **+** left of the text field opens a sheet: **Take photo** (the camera),
+**Photo library**, or **Choose file** (PDF or a plain text / Markdown file).
+What you pick shows as chips above the field, each with an **×** to remove
+it, and goes to Claude with your next typed message or push-to-talk
+recording ("what does this say?"); a photo on its own can be sent too. Up to
+4 per message (the **+** greys out at 4). The phone shrinks photos to 1600
+px first; the server checks every file by its first bytes (not its name):
+JPEG, PNG, WebP or GIF photos up to `[tutor] max_image_mb` (8), re-encoded
+without EXIF/location; PDFs and UTF-8 text files up to `[webapp]
+max_attachment_mb` (10); a PDF may have at most 100 pages (Claude's limit),
+and a file Claude still finds too long gets "That file is too long for
+Claude" (a password-protected or broken PDF: "Claude couldn't read that
+file.") instead of a generic error. The whole message must also fit in `[webapp]
+max_upload_mb` (10; 4 on the cloud server, so send big PDFs through the PC).
+The files are sent to Anthropic with the message and kept only in memory for
+the conversation; saved history gets a marker such as `[photo]` or
+`[file: syllabus.pdf]`, never the file. Because an attached file is written
+by someone else, Claude asks before changing anything (calendar, Notion)
+for the rest of that conversation, as after reading a web page or an email.
+Family members can attach files too; theirs go only to their own
+conversation. The hands-free voice view doesn't take attachments.
+
 ### Install on iPhone
 
 1. Install the Tailscale app on the iPhone and sign in to the same account
@@ -399,7 +423,8 @@ redeploy signs everyone out. Scripts using the token as a Bearer token are
 cut off only by changing it: delete `WEB_TOKEN` from `.env` and restart, and
 a new one is created. Settings live in `config.toml` `[webapp]`: `port`
 (8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
-(10), `max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
+(10), `max_attachment_mb` (10, per attached PDF or text file),
+`max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
 other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
 `--check` reports whether the token is set. On the Pi it is the same: install
 Tailscale there and run the same two commands.
@@ -746,6 +771,30 @@ for your recent notes or to delete one (it asks first). With conversation
 history on, a saved note also shows up in that conversation. Notes need
 `[memory]` (Pinecone); `[notes] enabled` turns them off.
 
+### Review what it remembers
+"What did you remember about me this week?" gives a short spoken summary of
+this week's conversation summaries and notes ("...last week?" works too).
+"Forget the one about cilantro" deletes it after a spoken yes (the same
+`delete_note` as for notes, which now also takes conversation summaries).
+
+In the phone app, **Memory** in the settings menu lists everything the
+assistant saved in Pinecone, newest first and grouped by week, with the
+date, whether it is a conversation summary or a note, and an **Untrusted**
+badge on ones saved while a web page or email was in the conversation.
+Delete removes one; "Delete all from this week" removes that week's notes
+(both ask first). Only what the assistant wrote itself (ids starting with
+`voice-` or `note-` in `[memory] namespace`) is listed or deleted; your
+other Pinecone notes are never touched. Old vectors without a date show
+under "Date unknown". It is the owner's only: family members have no memory
+and don't see it.
+
+Optional weekly nudge: with `[memory] weekly_review = true`, once a week
+the first conversation that has notes from this week starts with "I saved N
+notes this week, want to review them?". Off by default; the time of the
+last offer is kept in `[memory] review_state_file`
+(`data/memory_review.json`). With failover, each backend keeps its own, so
+you may hear it once per backend.
+
 ### Record a lecture (phone app)
 In the phone app, open the **Lecture** tab, pick the course (the options
 come from the Course property of your Notion Assignments database), and
@@ -791,6 +840,66 @@ reply is spoken with the maths read naturally ("x squared over 2"). The
 phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
+
+## Smart home (Home Assistant)
+
+"Turn off the bedroom lights", "set the living room light to 50%", "is the
+front door locked?", "set the thermostat to 70", "turn on the fan". Off
+by default; it needs a running [Home Assistant](https://www.home-assistant.io/)
+on your network:
+
+1. In Home Assistant, create a dedicated user for the assistant
+   (Settings -> People -> Add person, allow login, **not** an
+   administrator), sign in as that user, then profile -> Security ->
+   Long-lived access tokens -> Create token. Copy it once. A non-admin
+   token can still switch devices but can't change Home Assistant's
+   settings; it can't read rooms, so the assistant then matches rooms by
+   device name ("Bedroom Lamp").
+2. In `.env`: `HA_URL=http://homeassistant.local:8123` (your address) and
+   `HA_TOKEN=<the token>`. The token is masked in the log.
+3. In `config.local.toml`:
+
+```toml
+[home_assistant]
+enabled = true
+```
+
+Restart; the startup line says so if the URL or token is missing.
+Claude gets three tools: `ha_list` (devices with their state, by room or
+kind, cached for `[home_assistant] cache_seconds`), `ha_state` (one
+device) and `ha_control`. Spoken names are matched to Home Assistant's
+friendly names and areas, loosely ("kitchen lite" still finds the
+kitchen light); if two devices fit ("the lamp"), it asks which one.
+
+Safety, in code rather than in the prompt:
+- Only the kinds of device in `[home_assistant] domains` (lights,
+  switches, fans, climate, covers, media players, sensors and locks by
+  default) are listed or touched, and only a fixed set of actions is
+  called (on, off, brightness, colour temperature, thermostat, fan speed,
+  open/close, play/pause/volume, lock/unlock). There is no way to call
+  any other service: no restart, no arbitrary scripts. A script, scene or
+  automation runs only if you list its entity id in `[home_assistant]
+  scripts`.
+- Locks, alarm panels, garage doors and gates (by Home Assistant's device
+  class, or a switch or cover with garage, gate, door or lock in its name,
+  even run together as in "Garagedoor", but not indoor, outdoor, doorbell
+  or clock; deadbolt; in Chinese 车库, 锁, 门禁, 大门, 闸门 or 门 ending
+  the name or a word), plus anything in `[home_assistant]
+  secure_entities` (put a relay there if its name says none of these: a
+  room called "Garage" doesn't count, nor non-English words like "Tor"), always ask for a spoken yes first, are never switched
+  for a whole room at once, and are only found by their exact name or all
+  of its words (never by a similar spelling).
+- Unlocking or opening one of those is refused outright while a web page
+  or email is in the conversation (start a new one). Other changes ask
+  first in that case, as everywhere else.
+- Home Assistant is Kyle's alone: family members never get these tools.
+  The Render cloud host can't reach a home network anyway.
+
+**Plain http.** Home Assistant usually serves http on the LAN, so the
+token travels unencrypted. That is fine inside your home network or over
+Tailscale; anywhere else use https (Nabu Casa or your own certificate).
+The assistant warns at startup when `HA_URL` is a plain http address
+outside the home network.
 
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
@@ -1233,7 +1342,7 @@ assistant/
   voice_ws.py   voice conversation WebSocket (/api/voice)
   voice_session.py  voice turns: streamed reply, sentence TTS, barge-in
   sentences.py  sentence splitter for streamed speech
-  web/          the page: index.html, app.js, app.css, sw.js; voice.js,
+  web/          the page: index.html, app.js, app.css, sw.js, attachments.js; voice.js,
                 voice-core.js, voice-worklet.js, voice.css; vad/ (vendored);
                 earcons/ (generated by earcons.py)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
@@ -1244,6 +1353,7 @@ assistant/
   webfeatures.py lecture recorder + tutor routes for the phone app
   lecture.py    chunked uploads, transcription job, Notion lecture notes
   tutor.py      homework photos: checks, EXIF removal, Socratic vision call
+  attachments.py  files attached with the chat's "+": type sniffing, limits
   mathspeech.py LaTeX read aloud
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX

@@ -60,6 +60,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
+| `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
+| `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
@@ -1903,6 +1906,273 @@ Render/Docker changes) comes separately.
   cached by the service worker (v10).
 - Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
 
+## Chat attachments: the "+" button (2026-10-20)
+
+- **What:** a **+** left of the phone app's text field opens a sheet (Take
+  photo / Photo library / Choose file). Picked files show as chips above
+  the field (thumbnail or file name, × to remove; + disabled at 4) and go
+  with the next typed message or push-to-talk recording as `attachment`
+  parts of `/api/turn`'s form. Photo-only messages work too. Hands-free
+  voice mode is unchanged (out of scope).
+- **Server:** new `assistant/attachments.py` sniffs the type from the first
+  bytes (JPEG, PNG, WebP, GIF, PDF, UTF-8 text without control bytes),
+  caps the count (4) and sizes (photos `[tutor] max_image_mb`, PDF/text new
+  `[webapp] max_attachment_mb` = 10, both under `max_upload_mb`; text 200k
+  characters), and builds Anthropic blocks: photos through the tutor's
+  `prepare_image` (now with an `allowed` map so GIF becomes PNG; the
+  tutor's own behaviour is unchanged) as base64 `image` blocks, PDFs as
+  base64 `document` blocks, text as `document` blocks with a text source
+  (so the memory summary's `transcript()` never includes file text).
+  Bad files get a friendly 400 before anything reaches Claude.
+- **Chat:** `ClaudeChat.ask(..., attachments=[blocks])` sends them before
+  the text; saved history and the event log get only a marker
+  (`[photo]`, `[file: name.pdf]`), so resume and summaries see plain text.
+  The turn is tainted (`untrusted_attachments`, before any tool runs; only
+  `reset()` clears it), replies stay out of the DEBUG log while an
+  attachment is in history, `_trim_history` now accepts a user turn with
+  attachments as the first message (`is_user_turn`, also used by
+  `/api/state`'s turn count), and older attachments become a text marker
+  once the conversation's base64 passes 20 MB (the API caps requests at
+  32 MB). INFO logs: count, kinds and sizes only.
+- **Page:** `assistant/web/attachments.js` (public like `family.js`, also
+  in CloudGuard's `PUBLIC_GET` so it loads before sign-in) holds the tray
+  and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
+  now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
+  is unchanged). Chinese strings for every new label and the server's
+  messages in `i18n.js`. Phone cache v11 with `/attachments.js` in the
+  shell.
+- **Cloud:** `/api/turn` was already an upload path capped at
+  `max_upload_mb` (4 MB there); the form parser now allows 6 files (the
+  recording, 4 attachments, one more to say "at most 4").
+- **Tests:** `tests/test_attachments.py` (28): sniffing and names, EXIF
+  stripped, block shapes, limits; `/api/turn` with photo + text, PDF + text
+  file, photo only, push-to-talk + photo; friendly 400s (5 files, wrong
+  magic, oversized PDF and photo, a form with 8 files); history marker and
+  no bytes in SQLite; summary has Kyle's words only and is stored
+  untrusted; a `confirm_if_untrusted` tool asks after an attachment (and
+  not before); caplog: no names or contents at INFO, no reply at DEBUG;
+  trimming keeps an attachment turn first; old attachments give way;
+  family member's own chat and store; CloudGuard accepts a small photo,
+  413s an oversized PDF, serves `/attachments.js` before sign-in; page and
+  i18n checks. `tests/js/attachments.test.mjs` (6, node:vm): kinds, the
+  4-file limit, chips/×/disabled +, shrunk JPEG sent, a broken photo
+  dropped. Checked failing with the source change reverted: taint line
+  (4 fail), marker (2), trim (1), private log (1), drop-old (1), control
+  byte sniff (2), webapp.py from master (18), the `PUBLIC_GET` entry (1),
+  JS limit/disable (2).
+- **Counts** (Linux sandbox, Python 3.13): pytest 1710 -> 1738 passed,
+  46 skipped. JS: attachments 6, agent-dashboard 126, backend-router 33,
+  devhub 12, family 9, i18n 11, voice-core 14, all passing. Real iPhone
+  camera/picker behaviour is not tested here (MANUAL_TEST "Attachments").
+- **Round 2 (judge's five low findings, all fixed):**
+  1. A failed turn no longer strips older attachments:
+     `_drop_old_attachments` returns what it replaced and `ask()`'s
+     rollback puts the blocks back (`test_a_failed_turn_keeps_the_older_
+     attachments`; fails with the chat.py change reverted).
+  2. Claude's 400 on an attachment turn (`anthropic.BadRequestError`) now
+     says "That file is too long for Claude (PDFs up to 100 pages)."
+     (`i18n.py` `file_too_long`, Chinese too) instead of the generic API
+     error; the turn is still rolled back and a 400 without files is still
+     the generic error. INFO/WARNING logs the count and HTTP status only.
+     PDFs with more than 100 `/Type /Page` objects are refused before
+     upload to Claude ("A PDF is over 100 pages"; a lower bound, see
+     SECURITY.md). Tests: `test_a_file_claude_refuses_gets_its_own_
+     sentence` (en, zh; fails with webapp.py or i18n.py reverted),
+     `test_pdfs_over_100_pages_are_refused_up_front` (fails with
+     attachments.py reverted).
+  3. A malformed form says plain "bad request"; "attach at most 4 files"
+     only when Starlette's error is "Too many files"
+     (`test_only_too_many_files_says_attach_at_most`; fails with that hunk
+     reverted).
+  4. The Chinese page shows the marker line of a message as `[照片]` /
+     `[文件：name]` (i18n.js `translateMarkers`, only when the markers are
+     the whole last line); history keeps the English marker. Two new
+     i18n tests (both fail with i18n.js reverted).
+  5. Rows for the attachment test files above, and
+     `tests/js/app-send.test.mjs`, which loads the real `app.js` in
+     node:vm: picked files go with a message, chips clear only on an ok
+     response (fails if `res.ok &&` is removed), and a typed or tapped
+     yes/no goes to `/api/confirm` as JSON without files (fails if
+     `!confirming &&` is removed from `pendingFiles`). app.js unchanged.
+  - Phone cache stays v11 (this branch's new version, not released yet).
+  - Counts (Linux sandbox, Python 3.13): pytest 1740 -> 1745 passed,
+    48 skipped. JS: attachments 6, i18n 11 -> 13, ui 4, app-send 2 (new),
+    all passing.
+- **Round 3 (judge's three low findings plus an older cloud bug, all
+  fixed):**
+  1. Page count from the page tree root, not by counting `/Type /Page`:
+     `attachments.pdf_pages()` takes the direct `/Count` of the last
+     `/Type /Pages` object without a `/Parent`. An annotated 60-page PDF
+     whose incremental save rewrites 45 pages (105 page definitions) is 60
+     pages and accepted; an incremental save that trims 150 to 90 pages is
+     accepted, one that grows 90 to 120 is refused; a root in a compressed
+     object stream or with an indirect count gives None (Claude decides).
+     SECURITY.md's "lower bound" sentence is replaced. Tests:
+     `test_an_annotated_pdf_is_not_counted_twice` and the reworked
+     `test_pdfs_over_100_pages_are_refused_up_front` (two-level tree,
+     `/Type/Pages`, indirect count); both fail with the round-2 `findall`
+     count.
+  2. One `finditer` pass, no list of matches: the root's count is only
+     known at the end (the last definition wins), so there is no early
+     stop, but memory stays constant. `test_page_counting_streams_its_
+     matches`: a 10 MB file of `/Parent ` words peaks under 1 MB in
+     tracemalloc (fails if the matches are collected into a list); a
+     5000-digit `/Count` is ignored, never parsed. Measured here: 0.5 s
+     for that file, 0.7 s for 10 MB of object headers (sandbox, not a Pi).
+  3. A 400 on a turn with files says "too long" only when Claude's reason
+     mentions pages, "too long" or tokens (`webapp.FILE_TOO_LONG`); any
+     other 400 (protected or broken PDF) says "Claude couldn't read that
+     file." (`i18n.py` `file_unreadable`, Chinese in i18n.py and i18n.js).
+     `test_only_a_length_400_says_too_long` (4 reasons; the two
+     unreadable ones fail with that line reverted), plus the i18n.js
+     string in the JS test (fails without it).
+  4. On the cloud, `/i18n.js` and `/history.js` got a 401 before sign-in
+     (the login page stayed English for a Chinese family member until a
+     reload); both are page code with no personal data and are now in
+     `cloud.PUBLIC_GET`. `/backend-router.js` is only imported by app.js
+     with failover on and was already in `FAILOVER_PUBLIC_GET`.
+     `test_every_file_the_login_page_loads_is_public_on_the_cloud` reads
+     every `src`/`href` in index.html and checks a fresh cloud app never
+     401s them (fails with the cloud.py change reverted).
+  - Counts (Linux sandbox, Python 3.13): pytest 1745 -> 1752 passed,
+    48 skipped. JS: attachments 6, i18n 13, ui 4, app-send 2, all
+    passing.
+
+## Memory review: see and delete what it remembers
+
+- `assistant/memory_review.py` (`MemoryReview`): lists the assistant's own
+  vectors in its Pinecone namespace by id prefix (`index.list` with
+  `voice-` and `note-`, then `index.fetch` in batches of 100, at most
+  1000), sorts newest first by `created_at` (both writers already store
+  it; vectors without one show as "date unknown", last), groups them by
+  week (Monday, in `[assistant] timezone`) with kind (summary / note) and
+  the `untrusted` flag. Deletes one (must exist and be ours) or a week
+  (exactly the ids the page showed that are still in that week).
+- Phone app: `memory.js` + **Memory** in the settings menu (owner with
+  memory on; `/api/state` has `memory`), `memory_web.py` routes
+  (`GET /api/memory`, `POST /api/memory/{id}/delete`,
+  `POST /api/memory/delete-week`), owner-only (family 404). Chinese strings
+  in `i18n.js`. `/memory.js` is public on the cloud like the other page
+  files and in the service worker shell (cache v12).
+- Voice: read-only `review_memory` tool ("what did you remember about me
+  this week?"; `week: "last"` too). "Forget that..." reuses `delete_note`,
+  which now also takes `voice-` ids (summaries) and asks first; its
+  question is in `i18n.py` (Chinese too).
+- Weekly nudge: `[memory] weekly_review = false` by default. When on,
+  `ClaudeChat` asks `MemoryReview.nudge` at the start of each conversation;
+  at most once in 7 days, and only with notes this week, a system prompt
+  line asks Claude to open with "I saved N notes this week, want to review
+  them?". Last offer time in `[memory] review_state_file` (atomic private
+  write; `/data/...` on the cloud). With no notes it looks again after an
+  hour at most; a Pinecone error never blocks the reply.
+- Tests: `tests/test_memory_review.py` (27: listing, local-week grouping
+  and sorting, batching and the cap, delete one, delete week by exact ids,
+  the voice tool and its untrusted mark, "forget that" asking through
+  `delete_note`, nudge off/on/once a week/restart/no notes/errors, first
+  turn only, wiring, caplog for the module and routes, routes 401/403/404,
+  family 404 with no Pinecone call, 502 without details),
+  `tests/test_notes.py` +2 (summary delete asks first; Chinese question;
+  the foreign-id refusal now uses a non-assistant id),
+  `tests/js/memory.test.mjs` (8, node:vm: menu visibility, rendering and
+  badges, delete and delete-week confirmations and exact POST bodies,
+  every string has Chinese). Each failed with its source change reverted
+  (owner_of -> session_of, whole-week delete, no chat hook, nudge every
+  turn, old note prefix, no untrusted flag, default on, family flag, no
+  confirm in the page).
+- Review round 2: **listing works with the pinned SDK.** `pinecone>=7`
+  (10.0.0 here) yields `ListResponse` pages from `Index.list()` (ids in
+  `page.vectors[i].id`), not lists of ids, so the Memory screen,
+  `review_memory`, the nudge and delete-week saw nothing, and on master
+  `list_recent_notes` was always empty too. New shared
+  `memory.list_ids`/`page_ids` read both shapes (and dicts) and are used by
+  `memory_review.py` and `QuickNotes._ids`. `FakeIndex.list` now yields
+  ListResponse-shaped pages. The 1000 cap now sorts on the save time after
+  the prefix (ids without one last), so a quick note newer than some
+  summaries is kept. Tests: `test_notes.py` +2 (a real `pinecone` Index
+  with a mocked `_http`: recent notes listed; `page_ids` shapes),
+  `test_memory_review.py` +1 (the same real Index: 5 listed, this week's
+  2) and the cap test now asserts which ids survive. With the old list
+  code `test_notes.py` fails 2 and `test_memory_review.py` 15; with the old
+  sort the cap test fails. Service worker cache v11.
+- Counts (Linux sandbox, Python 3.13): pytest 1743 passed, 48 skipped, plus
+  `test_end_to_end.py::test_hey_claude_whats_on_my_calendar_tomorrow`, which
+  failed once in the full run (eSpeak-generated audio, shorter than 1 s) and
+  passed 4 of 4 reruns; it doesn't touch memory code (master about 1712
+  passed, 48 skipped); node 203 .mjs + 14 voice-core, all passing.
+
+## Smart home through Home Assistant (off by default)
+
+- New `assistant/tools/home_assistant.py`: `ha_list` (devices by area or
+  domain, with state; the list is cached for `[home_assistant]
+  cache_seconds`), `ha_state` (one device; numeric attributes only) and
+  `ha_control` (on/off/toggle, brightness, colour temperature, thermostat
+  temperature and mode, fan speed, cover open/close/stop/position, media
+  play/pause/next/volume, lock/unlock, alarm arm/disarm when allowlisted,
+  and `run` for allowlisted scripts/scenes/automations). REST API with a
+  long-lived token (`HA_URL`, `HA_TOKEN` in `.env`) via `requests`; areas
+  come from one read-only `/api/template` render. Spoken names are matched
+  to friendly names, entity ids and areas (exact, then all words, then
+  fuzzy; Chinese names too); more than one match asks which one.
+- Safety: `[home_assistant] domains` allowlist; a fixed action-to-service
+  map (no service parameter, so no `homeassistant.restart`); scripts only
+  by entity id in `[home_assistant] scripts`. Locks, alarm panels, garage
+  doors/gates (device class or name) and `secure_entities` always ask,
+  are excluded from whole-room calls, and the handler re-checks that the
+  yes covered this exact call. Unlocking/opening is refused without a
+  question while the conversation is tainted; other changes ask then.
+  Free-text states (notification sensors) taint the conversation.
+- `ToolRegistry.dispatch` (small, additive): a `confirm_prompt` may return
+  None (no question for this input), and `UNTRUSTED_CONTEXT` is now set
+  while the question is built too. Existing tools are unchanged.
+- Registered in `cli.build_tools` (`register_home_assistant`), so the PC,
+  Pi and the owner's web/voice sessions get it; family members never do.
+  Startup warns about a plain-http `HA_URL` outside the home network.
+  `HA_TOKEN` is redacted in logs; `HA_URL`/`HA_TOKEN` are isolated from
+  other instances; `config.mom.toml` keeps it off. English and Chinese
+  questions and error messages in `i18n.py`.
+- Tests: `tests/test_home_assistant.py` (114, all offline with a fake
+  `requests.Session` returning real `/api/states` shapes): listing and
+  matching, the exact service payload of each action, ambiguity, cache,
+  lock/garage/alarm confirmation, refusal while tainted (also end to end
+  through `ClaudeChat`), disallowed domains and services, room calls
+  skipping secure devices, HA down/401/403/400/502 spoken nicely, Chinese
+  strings, caplog (no names or token at INFO), registration off by
+  default, family isolation. Plus one dispatch test in `test_tools.py`.
+  Checked that the safety tests fail with the gates removed.
+- Review round 2 (8 judge findings, each with a test that fails when the
+  fix is reverted):
+  - While tainted, every change needs a yes checked in the handler too.
+    A Home Assistant hiccup while asking still asks, about the words said;
+    that yes never covers a lock. The cache expiring mid-question is fine.
+  - Friendly and room names are cut to one line of 60 characters, and a
+    name that looks like a sentence taints the conversation.
+  - A non-admin token works: the admin-only room lookup's 401/403 means
+    "no rooms". README recommends a dedicated non-admin user.
+  - An exact room match wins ("Bedroom 1" never brings in "Bedroom 2").
+  - Locks and garage doors are never reached by spelling similarity.
+  - Switches and covers named door, lock, 门 or 门锁 count as secure.
+  - New tests: one yes covers one call, and a 3xx from a service call is
+    not "done".
+  - A room-wide question says "and N more" (Chinese too).
+- Review round 3 (4 findings, each with a test that fails when reverted):
+  - Run-together names count as secure again ("Garagedoor", "GateOpener",
+    "FrontDoor", "doorlock", "Smartlock"); indoor, outdoor, doorbell and
+    clock don't.
+  - 门 now counts only in 门锁, 大门, 车库门, 闸门 or at the end of a name,
+    so 门口灯 and 门铃 aren't secure.
+  - Ambiguous answers with a suspicious name are marked untrusted (now
+    tested).
+  - A yes given while Home Assistant was unreachable never covers a lock;
+    the answer now says so and asks Kyle to try again (English and
+    Chinese).
+  - `tests/test_home_assistant.py` now has 128 tests.
+- Full suite: 1845 passed, 48 skipped (baseline 1712 passed, 48 skipped).
+- Final review LOWs: 锁, 门禁, deadbolt and 门 ending a word count as
+  secure (4 cases, failing on the round-3 pattern); the area is not
+  checked, on purpose, and README/SECURITY say to list neutral-named
+  relays in `secure_entities`.
+  Not tried against a real Home Assistant (none in the sandbox).
+
 ## Interrupt by talking (barge-in) and follow-ups, PC and phone (2026-10-20)
 
 - **PC wake-word loop** (`assistant/wakeword.py` `BargeInSpeaker`,
@@ -1939,7 +2209,7 @@ Render/Docker changes) comes separately.
   has played, a soft low note (the existing "thinking" earcon, the same note
   as the PC's follow-up blip) and **Still listening…** (还在听…) with the
   mic meter lit; silence quietly puts back **Listening**. No cue after a
-  barge-in, a yes/no question or a turn without audio. Phone cache v11
+  barge-in, a yes/no question or a turn without audio. Phone cache v17
   (`i18n.js` changed; master was already at v10).
 - Tests: new `tests/test_barge_in.py` (23): eSpeak-rendered speech through
   the real FileSource (paced 8x), WakeListener, VAD and BargeInSpeaker, with

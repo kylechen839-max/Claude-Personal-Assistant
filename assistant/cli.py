@@ -500,6 +500,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     elif config["notion"]["enabled"]:
         output_fn("(Notion tools off: NOTION_TOKEN not set)")
     register_devteam(registry, config, output_fn)
+    register_home_assistant(registry, config, output_fn)
     web = config["web"]
     if web["enabled"]:
         from assistant.tools import web as web_tools
@@ -561,6 +562,31 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
     return True
 
 
+def register_home_assistant(registry: ToolRegistry, config: dict,
+                            output_fn=print) -> bool:
+    """ha_list / ha_state / ha_control, when [home_assistant] is on and
+    HA_URL (or [home_assistant] url) and HA_TOKEN are set. The owner's
+    registry only: family members never get it (family.py)."""
+    ha = config["home_assistant"]
+    if not ha["enabled"]:
+        return False
+    url = ha["url"] or os.environ.get("HA_URL", "")
+    if not (url and os.environ.get("HA_TOKEN")):
+        output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
+        return False
+    from assistant.tools.home_assistant import HomeAssistant, plain_http_off_lan
+
+    if plain_http_off_lan(url):
+        output_fn("(Warning: Home Assistant is at a plain http:// address outside "
+                  "your home network, so its token travels unencrypted; use https)")
+    registry.register(*HomeAssistant(
+        url=url, domains=ha["domains"], scripts=ha["scripts"],
+        secure_entities=ha["secure_entities"],
+        cache_seconds=float(ha["cache_seconds"]),
+        timeout=float(ha["timeout"])).tools())
+    return True
+
+
 def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
     """Gmail tools, if the Google token has the Gmail scopes. A token from
     before Gmail support doesn't: say how to grant them and leave them off."""
@@ -612,6 +638,25 @@ def add_memory_tools(tools: ToolRegistry, memory) -> None:
         from assistant.tools.memory_tools import memory_tools
 
         tools.register(*memory_tools(memory))
+
+
+def build_memory_review(config: dict, memory):
+    """The memory review (memory_review.py) for this memory, or None."""
+    if memory is None:
+        return None
+    from assistant.memory_review import MemoryReview
+
+    mem = config["memory"]
+    return MemoryReview(memory, timezone=config["assistant"]["timezone"] or None,
+                        weekly_review=mem["weekly_review"],
+                        state_file=mem["review_state_file"] or None)
+
+
+def register_memory_review(registry: ToolRegistry, review) -> None:
+    """The read-only review_memory tool ("what did you remember about me
+    this week?"); deleting one goes through delete_note (notes on)."""
+    if review is not None:
+        registry.register(*review.tools())
 
 
 def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
@@ -710,7 +755,7 @@ def barge_in_speaker(tts, listener, source, config: dict):
 
 
 def build_chat(config: dict, tools=None, memory=None,
-               recorder=None) -> ClaudeChat:
+               recorder=None, review=None) -> ClaudeChat:
     a = config["assistant"]
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                  timeout=a["api_timeout"])
@@ -718,6 +763,8 @@ def build_chat(config: dict, tools=None, memory=None,
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
                       recorder=recorder, language=a["language"])
+    if review is not None:  # [memory] weekly_review (off by default)
+        chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
         recorder.client_fn = lambda: chat.client
     return chat
@@ -839,10 +886,12 @@ def main(argv=None) -> int:
         memory = build_memory(config)
         add_memory_tools(tools, memory)
         register_notes(tools, memory, config)
+        review = build_memory_review(config, memory)
+        register_memory_review(tools, review)
         store = open_store(config)
         add_history_tools(tools, config, store, memory)
         recorder = build_recorder(config, store, args.mode, args.incognito)
-        chat = build_chat(config, tools, memory, recorder)
+        chat = build_chat(config, tools, memory, recorder, review)
         if chat.incognito:
             print("(Incognito: this session won't be saved)")
         elif recorder:

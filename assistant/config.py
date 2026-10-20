@@ -90,7 +90,10 @@ DEFAULTS: dict = {
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
-               "text_fields": ["text", "chunk_text", "content", "summary"]},
+               "text_fields": ["text", "chunk_text", "content", "summary"],
+               # once a week, offer to review this week's notes (memory_review.py)
+               "weekly_review": False,
+               "review_state_file": "data/memory_review.json"},
     "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
         "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
         "app_origin": "",           # where the phone app is installed from
@@ -110,6 +113,8 @@ DEFAULTS: dict = {
         "port": 8765,
         "confirm_timeout": 120,     # seconds to wait for a yes before "no"
         "max_upload_mb": 10,
+        "max_attachment_mb": 10,    # per PDF or text file attached to a chat
+                                    # message (photos: [tutor] max_image_mb)
         "max_audio_seconds": 60,    # longest recording accepted
         "sessions_file": "data/web_sessions.json",  # signed-in browsers
                                     # ("" = forget them on restart)
@@ -196,6 +201,17 @@ DEFAULTS: dict = {
                 "hub_sessions": [],         # coordinator session ids; [] = coordinator_session
                 "poll_seconds": 4,          # how often the hub reads Notion, at most
                 "hub_state_file": "data/devhub.json"},
+    "home_assistant": {             # smart home (README "Smart home"); owner only
+        "enabled": False,           # needs HA_URL and HA_TOKEN in .env
+        "url": "",                  # HA_URL overrides, e.g. http://homeassistant.local:8123
+        # the only kinds of device listed or controlled
+        "domains": ["light", "switch", "fan", "climate", "cover", "media_player",
+                    "sensor", "lock"],
+        "scripts": [],              # script./scene./automation. ids it may run
+        "secure_entities": [],      # more entity ids that always ask first
+        "cache_seconds": 30,        # device list kept this long
+        "timeout": 10,              # seconds per request
+    },
     "family": {                     # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
@@ -224,6 +240,7 @@ SERVER_PROFILE: dict = {
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
+    "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -245,6 +262,7 @@ ENV_OVERRIDES = {
     "CLOUD_CLIENT_IP_HEADER": ("cloud", "client_ip_header"),
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
+    "HA_URL": ("home_assistant", "url"),
 }
 
 
@@ -256,7 +274,7 @@ ENV_OVERRIDES = {
 ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
-                     "PINECONE_INDEX")
+                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN")
 
 
 def inherited_env_conflicts(inherited, env_file: str | Path | None) -> list[str]:
@@ -323,7 +341,7 @@ def load_config(path: str | Path | None = "config.toml",
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
-                   "GOOGLE_CLIENT_JSON")
+                   "GOOGLE_CLIENT_JSON", "HA_TOKEN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens

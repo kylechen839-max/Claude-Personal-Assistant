@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  PDFs up to 100 pages. New setting `[webapp] max_attachment_mb` (10).
+  A file Claude can't open (password-protected or broken PDF) says so;
+  long PDFs are counted by their page tree, so annotated PDFs aren't refused.
+- Cloud: the sign-in page now loads its translations before sign-in, so a
+  Chinese family member's login page is in Chinese right away.
+- Memory review: a Memory screen in the phone app (settings menu, owner
+  only) lists conversation summaries and notes saved in Pinecone, newest
+  first, grouped by week, with date, kind and an "untrusted" badge, plus
+  Delete and "Delete all from this week" (both confirm). By voice, "what
+  did you remember about me this week?" and "forget that..." (spoken yes
+  first). Optional weekly nudge (`[memory] weekly_review`, off).
+- Fix: "list my recent notes" was always empty with pinecone 7+
+  (`Index.list` pages are `ListResponse` objects).
+- Smart home control through Home Assistant (off by default): "turn off
+  the bedroom lights", "set the thermostat to 70", "is the front door
+  locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home
+  Assistant REST API with a long-lived token (`HA_URL`/`HA_TOKEN` in `.env`,
+  `[home_assistant] enabled = true`). Only allowlisted device kinds and a
+  fixed set of actions; scripts only if allowlisted. Locks, garage doors
+  and alarms always ask first, and unlocking or opening is refused while
+  web or email content is in the conversation. Owner only.
 - Interrupt by talking: on the PC, say "Hey Claude" while it is answering
   and it stops and listens (`[wake] barge_in = "wake_word"`, default);
   `barge_in = "voice"` lets you just talk (echo gate; best with headphones

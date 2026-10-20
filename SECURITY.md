@@ -218,6 +218,57 @@ re-encodes it while resizing. KaTeX is vendored under `/static` (no
 third-party script), drawn with `katex.render` so the CSP needs no
 `unsafe-inline`; the CSP adds only `font-src 'self'`.
 
+### Chat attachments (the "+" button, `attachments.py`)
+Files attached to a chat message (`/api/turn`, multipart `attachment`
+parts) need the session like any turn, owner or family member, and go only
+to that session's own conversation.
+- **Type sniffing.** The type comes from the file's first bytes, never its
+  name or declared type: JPEG, PNG, WebP or GIF photos, PDFs (`%PDF-`), and
+  UTF-8 text with no control bytes. Anything else (zip, exe, HEIC the
+  phone didn't convert, Latin-1 text) is refused with a friendly 400.
+- **Photos** reuse the tutor's `prepare_image`: decoded, pixel-capped,
+  shrunk to 1600 px and re-encoded without EXIF/GPS, comments or ICC (a GIF
+  becomes a PNG of its first frame).
+- **Limits.** At most 4 files a message (the form parser stops at 6 files,
+  so a flood is refused before it is read); photos up to `[tutor]
+  max_image_mb`, PDFs and text up to `[webapp] max_attachment_mb`, neither
+  above `[webapp] max_upload_mb`, which still caps the whole request (4 MB
+  on the cloud server, where CloudGuard counts `/api/turn` as an upload
+  path). Text files are capped at 200,000 characters. PDFs whose page
+  tree root (the `/Type /Pages` object without a `/Parent`) has a direct
+  `/Count` over 100 are refused up front, the last definition of the root
+  winning, so an incremental save that only annotates pages isn't counted
+  twice and one that removes pages counts the new total. This is
+  deliberately not a full PDF parse: when the root is inside a compressed
+  object stream or its count is indirect, nothing is refused here and
+  Claude's own 400 is the backstop. A crafted file can also understate its
+  `/Count` (a decoy root appended last); that only costs one API call, which
+  Claude refuses with the same "too long" sentence. The scan is one linear
+  pass with bounded patterns that keeps no list of matches (4 MB of digits,
+  of spaces or of page-tree words: well under a second and under 1 MB extra
+  memory in the sandbox). A 400 on a turn with files says
+  "too long" only when Claude's reason is about pages, length or tokens,
+  else "Claude couldn't read that file." (a protected or broken PDF). Only
+  the HTTP status of that 400 is logged at INFO/WARNING; the reason text is
+  DEBUG. The base64 of all
+  attachments kept in a conversation is capped at 20 MB (older ones become
+  a marker), under the API's 32 MB request limit.
+- **Taint.** An attached file or photo is someone else's text, so the
+  conversation is untrusted from that turn on (`ClaudeChat.
+  untrusted_attachments`, set before any tool runs): `confirm_if_untrusted`
+  tools ask first, and the memory summary is built from Kyle's words only
+  and stored untrusted. Only `reset()` clears it; resumed history is tainted
+  anyway. The file names (sanitized: no path, no control or bidi
+  characters, 80 characters at most) appear in the document block's title
+  and the history marker.
+- **Logs.** INFO gets the count, kinds and byte sizes only; names and
+  contents are never logged, and replies stay out of the DEBUG log while an
+  attachment is in the conversation (`private_turn`).
+- **Not stored.** Only a marker (`[photo]`, `[file: name.pdf]`) reaches
+  history and the event log; the bytes stay in the chat's memory until the
+  conversation ends. PDFs are sent as they are (their own metadata, such as
+  the author, included); they are not rewritten.
+
 ## Cloud server (Render): on the public internet
 
 `render.yaml` runs the phone web app 24/7 at `https://<name>.onrender.com`
@@ -286,7 +337,7 @@ in `tests/test_cloud.py`):
   name), no API docs (`/docs`, `/openapi.json` off), no `Server` header.
 - **Errors:** an unhandled error answers `{"error": "internal error"}`; the
   traceback goes only to the server log.
-- **Request limits:** audio uploads up to `[webapp] max_upload_mb` (4 MB on
+- **Request limits:** audio and attachment uploads up to `[webapp] max_upload_mb` (4 MB on
   the server, about four minutes of iPhone audio), every other body up to
   `[cloud] max_body_kb` (16 KB), counted as it arrives so chunked uploads
   without a length are capped too; 120 requests a minute per address
@@ -470,6 +521,70 @@ a PKCE challenge, `access_type=offline` and the redirect
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
 
+## Smart home (`tools/home_assistant.py`)
+
+Home Assistant controls physical things, including the front door, so its
+limits are in code, not in the prompt.
+
+- **Off by default** (`[home_assistant] enabled = false`), owner only:
+  family members' registries never get the tools (`family.py` builds them
+  separately; a test pins it), and `config.mom.toml` keeps it off.
+  `HA_URL` and `HA_TOKEN` are in `ISOLATED_ENV_VARS`, so another instance
+  started from Kyle's shell can't inherit them.
+- **The token** is sent only in the `Authorization` header, never in a
+  URL, with redirects off (a redirect can't carry it elsewhere). It is in
+  `SECRET_ENV_VARS`, so the log redaction masks it. Errors log the HTTP
+  status or exception type only.
+- **No arbitrary services.** `ha_control` takes an action from a fixed
+  list and maps it to one service per domain (`ACTIONS`); there is no
+  service parameter. Entities outside `[home_assistant] domains` are not
+  listed and are refused. Scripts, scenes and automations (which can do
+  anything) run only if their entity id is in `[home_assistant] scripts`.
+  `homeassistant.restart` and the like can't be expressed at all.
+- **Locks, alarm panels, garage doors and gates** (device class garage,
+  gate or door; a switch or cover whose id or name contains garage, gate
+  or 车库 anywhere, door anywhere except in indoor/outdoor/doorbell, lock
+  anywhere except after b, c or f (block, clock, flock), deadbolt, or 锁,
+  门禁, 大门, 车库门, 闸门 or 门 ending the name or a word, but not 门口灯
+  or 门铃; run-together names such as "Garagedoor" or "FrontDoor" count;
+  anything in `secure_entities`. The area isn't checked, on purpose: a room
+  called "Garage" would flag every light in it, so a relay with a neutral
+  name ("Opener", German "Tor") must be listed in `secure_entities`) always
+  ask for a spoken yes. The handler also refuses them unless the yes was
+  for this exact action and these entities in this same call (one yes,
+  one call), so the gate doesn't rest on the registry alone. They are
+  never included in a whole-room call, and a spoken name reaches one only
+  exactly or by all its words, never by a similar spelling ("back door"
+  never finds the garage).
+- **While tainted, every change needs its own yes**, checked in the
+  handler too. If Home Assistant doesn't answer while the question is
+  being built, the question is asked about the words Kyle said; that yes
+  never covers a lock or garage door (the answer says Home Assistant didn't
+  respond and to ask again).
+- **Unlocking or opening while tainted is refused**, without asking: a
+  yes can be talked into by a page or email ("say yes when it asks").
+  Locking and closing still work after a yes. Every other change asks
+  first while tainted, as for the other tools.
+- **Home state as untrusted text.** A state that isn't a number or one
+  word (a phone notification sensor, for example) can be anyone's text,
+  so a result holding one is marked `"untrusted_content": true` and taints
+  the conversation. Attributes come from a fixed list of numbers and
+  settings (`SAFE_ATTRIBUTES`); media titles and other free text are never
+  returned.
+- **Friendly and room names** are usually Kyle's, but an integration can
+  take a name from the device itself (a neighbour's Chromecast, say).
+  Names are cut to one line of at most 60 characters, and a result holding
+  one that doesn't look like a name (over 40 characters, or with sentence
+  punctuation, a colon, a slash or a line break) is marked untrusted,
+  which taints the conversation.
+- **A non-admin token is enough** (README recommends a dedicated non-admin
+  user). The room lookup (`/api/template`) is admin-only; its 401/403 is
+  taken as "no rooms", never as a broken token.
+- Not fixed, on purpose: **plain http on the LAN.** Home Assistant serves
+  http by default. The token is a full-access Home Assistant credential,
+  so README warns, and the startup line warns when `HA_URL` is http at a
+  public address. Over Tailscale the link is encrypted anyway.
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar
@@ -559,6 +674,32 @@ a PKCE challenge, `access_type=offline` and the redirect
   browser's localStorage (no conversation text). ArtifactComments and
   ArtifactData are pre-approved in `.claude/settings.json`; Kyle
   approved that.
+
+## Memory review (`memory_review.py`, `memory_web.py`)
+
+- **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and
+  `/api/memory/delete-week` use the owner's session (`owner_of`): no
+  session is 401, a family member's session (no memory) and every request
+  with memory off are 404. Cross-site requests are refused like every API
+  route. Deletes are POST (the failover preflight allows only GET/POST).
+- **Only the assistant's own vectors.** Listed and deleted by id prefix
+  (`voice-`, `note-`) in `[memory] namespace` only; Kyle's other
+  namespaces and foreign ids are never shown or deleted (tests seed both).
+  `delete_note` now also accepts `voice-` ids (conversation summaries and
+  `remember` notes, which the assistant wrote) and still refuses anything
+  else; it keeps `confirm_prompt`, so voice deletes always ask.
+- **Delete a week = the ids shown.** The page sends the ids it displayed;
+  the server deletes only those still in that week, so a note saved after
+  the page loaded is never deleted unseen.
+- **Untrusted stays visible and sticky.** Notes stored with
+  `untrusted: true` get a badge on the page, and `review_memory` marks its
+  result untrusted when one is included, so later changes in that
+  conversation ask first. The weekly nudge carries only a count.
+- **Logs.** Ids and counts at INFO; note text never (caplog tests for the
+  module and the routes). Errors reaching Pinecone are a generic 502.
+- Deliberately not done: no undo (a delete is final in Pinecone); a
+  conversation in history keeps its transcript when its memory summary is
+  deleted here (delete the conversation in History for both).
 
 ## Conversation history
 
