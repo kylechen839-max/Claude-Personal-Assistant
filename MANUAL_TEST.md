@@ -288,6 +288,10 @@ phone (or yours signed in as her test user).
     `.env.mom` (not `.env`) got the new `WEB_TOKEN`; the log is `logs/mom.log`.
 - [ ] On her phone (Tailscale, the PC shared with her) open
       `https://<pc>.<tailnet>.ts.net:8443`.
+  - Should: the sign-in screen says 请输入发给你的登录码; after signing in in
+    Safari, a card lists 1. 加到主屏幕 and 2. 连接 Google 账户 (with the
+    高级 → 转至… hint). Opened from the home screen, only the Google step is
+    left; after connecting Google the card is gone.
   - Should: the sign-in page is in Chinese (登录). After the token, the
     chat page, the gear menu and the voice screen are in Chinese.
 - [ ] Ask by voice: "你好，今天天气怎么样？"
