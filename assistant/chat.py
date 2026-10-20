@@ -608,7 +608,7 @@ class ClaudeChat:
         system = self.build_system(notes, nudge)
         for _ in range(self.max_tool_rounds + 1):
             kwargs = dict(model=self.model, max_tokens=self.max_tokens,
-                          system=system, messages=self.history)
+                          system=system, messages=request_messages(self.history))
             if self.tools:
                 kwargs["tools"] = self.tools.schemas()
             response = self._create(kwargs, on_text, cancel)
@@ -725,6 +725,29 @@ def is_user_turn(message: dict) -> bool:
         isinstance(content, list) and bool(content)
         and not any(isinstance(b, dict) and b.get("type") == "tool_result"
                     for b in content))
+
+
+THINKING_TYPES = ("thinking", "redacted_thinking")
+
+
+def request_messages(history: list[dict]) -> list[dict]:
+    """`history` as sent to Claude: thinking blocks are kept only in the
+    current turn (after Kyle's last message), where a tool loop needs them.
+    Earlier ones are dropped: the API ignores them anyway, and one signed
+    for another conversation (the voice session sharing this one, a
+    continued history) makes every later request fail with "Invalid
+    `signature` in `thinking` block"."""
+    last = max((i for i, m in enumerate(history) if is_user_turn(m)), default=-1)
+    out = []
+    for i, m in enumerate(history):
+        if i < last and m.get("role") == "assistant" and isinstance(m.get("content"), list) \
+                and any(isinstance(b, dict) and b.get("type") in THINKING_TYPES
+                        for b in m["content"]):
+            kept = [b for b in m["content"]
+                    if not (isinstance(b, dict) and b.get("type") in THINKING_TYPES)]
+            m = {**m, "content": kept or [{"type": "text", "text": "(no reply)"}]}
+        out.append(m)
+    return out
 
 
 def has_attachments(history: list[dict]) -> bool:

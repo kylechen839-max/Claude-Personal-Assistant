@@ -11,6 +11,10 @@
   reaches notes or Claude.
 - Tests: the Windows voice-latency test excludes only the OS test voice,
   and the end-to-end calendar test pins the clock.
+- Fix: a conversation could break for good ("Sorry, something went wrong
+  talking to Claude" on every turn) after hands-free voice shared it: a
+  thinking block signed for another request was sent back. Earlier turns'
+  thinking blocks are no longer sent.
 - Attach photos (camera or library), PDFs and text files to a chat message
   with the new + button left of the text field. Up to 4 per message, shown
   as removable chips, sent with the next typed or push-to-talk message.
