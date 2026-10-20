@@ -87,3 +87,7 @@ body.voice-open { overflow: hidden; }
   .voice-captions { min-height: 4.5rem; margin-bottom: .75rem; }
   .voice-reply { font-size: 1.125rem; max-height: 6.5em; }
 }
+
+.voice-meter { margin-top: .6rem; }
+.voice[data-state="connecting"] .voice-meter, .voice[data-state="ended"] .voice-meter,
+.voice.muted .voice-meter { opacity: .35; }

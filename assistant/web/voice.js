@@ -13,6 +13,7 @@
     user: $("voice-user"), reply: $("voice-reply"), captions: $("voice-captions"),
     end: $("voice-end"), mute: $("voice-mute"), ccToggle: $("voice-cc"),
     resume: $("voice-resume"), debug: $("voice-debug"), debugToggle: $("voice-timings"),
+    meter: $("voice-meter"),
   };
   if (!ui.open || !VC) return;
 
@@ -37,6 +38,10 @@
   let running = false;
   let frameQueue = Promise.resolve();
   let backlog = 0;
+  let quickVad = null; // energy VAD for frames the model can't keep up with
+  let replyIsStatus = false; // the reply line shows a status, not reply text
+  let audioCaption = false; // this reply's subtitles come from the audio chunks
+  let micHeardAt = 0; // last time the mic gave anything but digital silence
   let timings = {}; // turn -> {name: ms}
   let debugOn = false;
   let generation = 0; // bumped by finish(), so a start() still loading gives up
@@ -168,16 +173,63 @@
     if (who === "user") {
       ui.user.textContent = text;
       ui.reply.textContent = "";
+      replyIsStatus = false;
+      audioCaption = false;
     } else if (who === "assistant") {
-      ui.reply.textContent = append ? ui.reply.textContent + text : text;
+      // reply text replaces a status line ("list events…") instead of
+      // being appended to it
+      ui.reply.textContent = append && !replyIsStatus ? ui.reply.textContent + text : text;
+      replyIsStatus = false;
+      audioCaption = false;
+    } else if (who === "audio") {
+      // The sentence being spoken. Shown only when no reply text did (a
+      // missed or late text event), so subtitles never stay empty.
+      if (replyIsStatus || !ui.reply.textContent.trim()) {
+        ui.reply.textContent = text;
+        replyIsStatus = false;
+        audioCaption = true;
+      } else if (audioCaption) {
+        ui.reply.textContent += ` ${text}`;
+      }
     } else if (who === "status") {
       ui.reply.textContent = text.includes("_") ? `${text.replace(/_/g, " ")}…` : text;
+      replyIsStatus = true;
     }
+  }
+
+  function micLevel() {
+    if (!inAnalyser) return 0;
+    const data = new Uint8Array(inAnalyser.fftSize);
+    inAnalyser.getByteTimeDomainData(data);
+    let sum = 0;
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+      peak = Math.max(peak, Math.abs(v));
+    }
+    if (peak > 0) micHeardAt = performance.now();
+    return Math.min(1, Math.sqrt(sum / data.length) * 4);
   }
 
   function animate() {
     if (!running) return;
     const state = ui.view.dataset.state;
+    // The mic meter: how much sound is coming in, and whether it counts as
+    // speech (VAD), in every state.
+    const muted = ui.mute.getAttribute("aria-pressed") === "true";
+    const heard = muted ? 0 : micLevel();
+    if (ui.meter) {
+      ui.meter.style.setProperty("--mic", heard.toFixed(3));
+      ui.meter.classList.toggle("hearing", !!(endpointer && endpointer.speaking));
+    }
+    // A mic that gives exact digital silence isn't reaching us (seen with
+    // some car and Bluetooth audio routes): say so instead of waiting.
+    if (!muted && state === "listening" && micHeardAt && performance.now() - micHeardAt > 5000
+        && !replyIsStatus && !ui.reply.textContent) {
+      caption("status", "No sound is coming from this microphone. If you're on CarPlay or " +
+        "Bluetooth, try push-to-talk.");
+    }
     let level = 0;
     const analyser = state === "speaking" ? outAnalyser : state === "listening" ? inAnalyser : null;
     if (analyser && !(reducedMotion && reducedMotion.matches)) {
@@ -230,11 +282,13 @@
 
   function onFrame(frame) {
     if (!controller || !controller.live) return;
-    if (backlog > 8) return; // the device can't keep up: drop rather than lag
+    // The device can't keep up with the model: judge this frame by loudness
+    // instead of dropping it, so pauses are still timed in real time.
+    const quick = backlog > 8;
     backlog++;
     frameQueue = frameQueue.then(async () => {
       let prob = 0;
-      try { prob = await vad.process(frame); } catch (e) { prob = 0; }
+      try { prob = quick ? quickVad.process(frame) : await vad.process(frame); } catch (e) { prob = 0; }
       backlog--;
       for (const ev of endpointer.process(frame, prob, endpointer.strict)) controller.onVad(ev);
     });
@@ -302,7 +356,7 @@
     if (!running || !controller || controller.state === "paused") return;
     controller.pause();
     ui.resume.hidden = false;
-    ui.reply.textContent = why || "Paused. Tap to continue.";
+    caption("status", why || "Paused. Tap to continue.");
   }
 
   async function resume() {
@@ -345,8 +399,9 @@
     ui.reply.textContent = "";
     // iOS: audio and mic must start inside this tap.
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!ctx) ctx = new Ctx();
+    // the session type first, so the context opens on the play-and-record route
     if (navigator.audioSession) { try { navigator.audioSession.type = "play-and-record"; } catch (e) { /* old */ } }
+    if (!ctx) ctx = new Ctx();
     ctx.resume();
     const unlock = ctx.createBufferSource();
     unlock.buffer = ctx.createBuffer(1, 1, 22050);
@@ -365,6 +420,28 @@
       const stream = await micPromise;
       if (gen !== generation) { stream.getTracks().forEach((t) => t.stop()); return; }
       mic = stream;
+      micHeardAt = performance.now();
+      // A car or Bluetooth mic can run at another sample rate than the
+      // context opened at, and Safari then hands the context silence: reopen
+      // it at the mic's rate (allowed without a tap while the mic is live).
+      const rate = (stream.getAudioTracks()[0]?.getSettings?.() || {}).sampleRate;
+      if (rate && ctx.sampleRate !== rate) {
+        try {
+          const fresh = new Ctx({ sampleRate: rate });
+          // resume() can stay pending when the browser wants a tap: give up
+          // after a second and keep the context we have
+          await Promise.race([fresh.resume(), new Promise((r) => setTimeout(r, 1000))]);
+          if (fresh.state === "running") {
+            ctx.close().catch(() => {});
+            ctx = fresh;
+            earcons.load();
+          } else {
+            fresh.close().catch(() => {});
+          }
+        } catch (e) {
+          console.warn("Couldn't match the mic's sample rate:", e);
+        }
+      }
       await connect();
       if (cancelled()) return;
       if (settings.debug_panel && !debugOn && ui.debugToggle) ui.debugToggle.click();
@@ -394,6 +471,7 @@
       micNode.connect(capture);
       ui.state.textContent = "Loading…";
       vad = new VC.EnergyVAD();
+      quickVad = new VC.EnergyVAD();
       vadName = "energy";
       if (settings.vad !== "energy") {
         try { vad = await loadSilero(); vadName = "silero"; } catch (e) {
