@@ -232,6 +232,18 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
   press one. The toolbar also shows the window count ("5 windows · 2
   hidden") and "N agents without a run" (live agents whose run has no
   row at all).
+- **Coordinator** picker (a native select in the toolbar): **All** (the
+  default) or one coordinator session, listed by `session_url` and
+  labelled with its newest run's feature plus the last 6 characters of
+  the session. Picking one shows only that session's coordinator window
+  and its agents; it works together with the filter (under Active only,
+  an idle session shows as its "Last run") and with hiding. Kept per
+  viewer in localStorage under `agentDashboard.coordinator` (a checked
+  session link, or empty for All), written only when you change it. A
+  saved session that no longer has a row from the last 14 days falls
+  back to All for this visit, with a short note (judged on live rows
+  only, not a cached first snapshot); nothing is rewritten until you
+  press **Forget** next to the note, which clears the saved pick.
 - **Hiding a window.** The – button in a title bar (next to ⤢, labelled
   "Hide <title>") takes the window out of the workspace; the others
   re-tile. The toolbar's **Hidden (N)** menu lists hidden windows with

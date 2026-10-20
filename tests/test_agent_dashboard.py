@@ -277,9 +277,10 @@ def test_page_never_logs_or_sends_on_a_timer_and_stores_only_three_keys():
     grid = _function(page, "function setView(")
     assert "setupChat()" in grid and "agentsLive.start(db)" in grid
     assert "agentsLive.pause()" in grid and "syncChats([])" in grid
-    # localStorage holds the view, the window layout and the filter, nothing else.
+    # localStorage holds the view, the window layout, the filter and the
+    # coordinator pick, nothing else.
     keys = re.findall(r"localStorage\.(?:getItem|setItem|removeItem)\(([^,)]*)", page)
-    assert keys and set(keys) == {"VIEW_KEY", "LAYOUT_KEY", "FILTER_KEY"}, keys
+    assert keys and set(keys) == {"VIEW_KEY", "LAYOUT_KEY", "FILTER_KEY", "COORD_KEY"}, keys
     assert 'const VIEW_KEY = "agent-dashboard-view";' in page
     assert 'const LAYOUT_KEY = "agentDashboard.layout.v1";' in page
     assert 'const FILTER_KEY = "agentDashboard.filter";' in page
@@ -287,6 +288,11 @@ def test_page_never_logs_or_sends_on_a_timer_and_stores_only_three_keys():
     # The filter is written only from its buttons' clicks.
     assert page.count("localStorage.setItem(FILTER_KEY") == 1
     assert "localStorage.setItem(FILTER_KEY" in _function(page, "function setFilter(")
+    # The coordinator pick: a validated session link, written only on change.
+    assert 'const COORD_KEY = "agentDashboard.coordinator";' in page
+    assert page.count("localStorage.setItem(COORD_KEY") == 1
+    assert "localStorage.setItem(COORD_KEY" in _function(page, "function setCoord(")
+    assert "safeLink(v, SESSION_PREFIX, SESSION_TAIL)" in _function(page, "function loadCoord(")
 
 
 def test_page_renders_markdown_with_elements_only():
@@ -334,7 +340,8 @@ def test_grid_layout_rules():
                    'id="grid-filter-all" aria-pressed="false"', 'id="grid-count"', 'id="grid-head"',
                    'id="grid-toolbar"', 'id="grid-foot"', '<details id="grid-tray" hidden>',
                    '<summary id="grid-tray-sum">Hidden (0)</summary>', 'id="grid-tray-list"',
-                   'id="grid-showall"'):
+                   'id="grid-showall"', '<select id="grid-coord"><option value="">All</option></select>',
+                   '<p id="grid-coord-note" hidden></p>'):
         assert needed in page, needed
     # Each window's title bar has a hide button with its own label.
     assert 'hide: el("button", "hide", "–")' in page
@@ -419,6 +426,7 @@ def test_readme_agents_schema():
     assert "the watchdog never reads or writes `agents`" in flat
     assert "Send to Claude" in flat and "Open session" in flat
     assert "agentDashboard.layout.v1" in readme and "agentDashboard.filter" in readme
+    assert "agentDashboard.coordinator" in readme
     # The chat mirror schema the master writes and the page reads.
     chat = readme.split("## Chat mirror schema", 1)[1].split("\n## ", 1)[0]
     assert re.findall(r"^\| `(\w+)` \|", chat, re.M) == ["from", "kind", "text", "at", "run_id", "ref"]

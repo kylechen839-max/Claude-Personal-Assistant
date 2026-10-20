@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Agent dashboard Grid: a Coordinator picker shows only the chosen
+  coordinator session's windows (default All); the choice is kept per
+  viewer, and Forget clears a pick whose session has no recent runs.
 - PC hub: chat with your dev team coordinator(s) at
   http://127.0.0.1:8765/devteam on the PC (`[devteam] hub = true`).
   Messages go through Claude Code on your plan; markdown replies, step

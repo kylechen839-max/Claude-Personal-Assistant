@@ -516,6 +516,11 @@ The dashboard is desktop only (no phone layout).
 - [ ] Tap All recent, then Active only, and reload.
   - Should: All recent adds finished runs from the last two weeks; the
     choice survives the reload.
+- [ ] With two coordinators reporting (e.g. a /build-feature run and the
+      Session monitoring session), pick one under Coordinator, reload,
+      then pick All. Try it with the keyboard (Tab, then arrow keys).
+  - Should: only that session's windows show, the pick survives the
+    reload, and All brings every window back.
 - [ ] Drag an agent window onto the coordinator window, then drag a
       corner to make one wider and taller. Reload.
   - Should: the windows swap places and snap to the new size (at most 3

@@ -102,6 +102,10 @@ main[data-view="grid"]{height:100%;gap:10px}
 .seg button[aria-pressed="true"]{color:var(--fg);background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.14)}
 #grid-reset{margin-left:auto;color:var(--accent);background:var(--card);border:1px solid var(--line);font-size:.8rem;padding:3px 11px}
 #grid-view>footer{flex:none;margin:0}
+/* Coordinator picker: one session's windows, or All. */
+#grid-coord-label{display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--muted)}
+#grid-coord{max-width:22em;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:2px 6px}
+#grid-coord-note{font-size:.8rem;color:var(--muted);margin:0}
 /* "Get desktop app": the launcher chooser (its own small block). */
 #getapp{position:fixed;top:14px;right:16px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:340px;font-size:.8rem}
 #getapp-btn{color:var(--accent);background:var(--card);border:1px solid var(--line);padding:3px 11px}
@@ -377,6 +381,8 @@ dl{gap:3px 16px}
 <button type="button" id="grid-filter-active" aria-pressed="true">Active only</button>
 <button type="button" id="grid-filter-all" aria-pressed="false">All recent</button>
 </div>
+<label id="grid-coord-label">Coordinator <select id="grid-coord"><option value="">All</option></select></label>
+<p id="grid-coord-note" hidden></p><button type="button" id="grid-coord-forget" hidden>Forget</button>
 <p id="grid-count"></p>
 <p id="grid-conn"></p>
 <p id="grid-hidden" hidden></p>
@@ -421,6 +427,7 @@ dl{gap:3px 16px}
   const $empty = document.getElementById("empty");
 
   let rows = null;          // cloned rows from the last runs snapshot
+  let rowsCached = false;   // those rows are the db's cache, not yet live
   let agents = null;        // cloned rows from the last agents snapshot
   let db = null;
   let view = "runs";
@@ -714,6 +721,7 @@ dl{gap:3px 16px}
     what: "runs", list: "run list", noDb: NO_DB,
     rows(list, fromCache) {
       rows = list;
+      rowsCached = !!fromCache;
       setConn(fromCache ? "connecting…" : "live");
       render();
       if (view === "grid") renderGrid();
@@ -764,6 +772,8 @@ dl{gap:3px 16px}
   const LAYOUT_MAX = 200;
   const LAYOUT_RAW_MAX = 64e3;
   const FILTER_KEY = "agentDashboard.filter";
+  const COORD_KEY = "agentDashboard.coordinator"; // one session_url (validated, so bounded) or ""
+  const COORD_FEATURE_MAX = 60;
   // Auto-tiling: about square, at most 6 columns, none narrower than MIN_W
   // (the CSS rows are at least 180 px tall).
   const MAX_COLS = 6;
@@ -814,6 +824,9 @@ dl{gap:3px 16px}
   const $gridCount = document.getElementById("grid-count");
   const $filterActive = document.getElementById("grid-filter-active");
   const $filterAll = document.getElementById("grid-filter-all");
+  const $coordPick = document.getElementById("grid-coord");
+  const $coordNote = document.getElementById("grid-coord-note");
+  const $coordForget = document.getElementById("grid-coord-forget");
   const $coords = document.getElementById("coords");
   const $gridHidden = document.getElementById("grid-hidden");
   const $gridReset = document.getElementById("grid-reset");
@@ -932,7 +945,10 @@ dl{gap:3px 16px}
   // row within 14 days), newest first. A panel is about its newest live run
   // family: its title, elapsed time and status lines come from that family
   // only, and older finished runs of the same session are left out. Each
-  // agent sits in the panel holding its run's row.
+  // agent sits in the panel holding its run's row. opts.session: only that
+  // session's panel (and its agents); one with no visible row is ignored and
+  // reported as stale. sessions: every visible session, newest first, for
+  // the Coordinator picker.
   function groupCoordinators(rowsIn, agentsIn, now, opts) {
     const all = !!(opts && opts.all);
     const groups = [];
@@ -959,14 +975,24 @@ dl{gap:3px 16px}
       g.hidden = g.items.every(({c}) => c.state === "done" && c.updated !== null && now - c.updated > HIDE_DONE_MS);
       g.newest = g.families.length ? g.families[0].newest : -Infinity;
     }
+    const known = groups.filter((g) => g.session && !g.hidden).sort((a, b) => b.newest - a.newest);
+    const sessions = known.map((g) => {
+      const r0 = g.families[0].root.r;
+      const feature = text(r0.feature, COORD_FEATURE_MAX) || text(r0.run_id, COORD_FEATURE_MAX) || "?";
+      return {session: g.session, label: `${feature} · …${g.session.slice(-6)}`};
+    });
+    let pick = opts && typeof opts.session === "string" ? opts.session : "";
+    const stale = pick !== "" && !known.some((g) => g.session === pick);
+    if (stale) pick = "";
+    const pool = pick ? known.filter((g) => g.session === pick) : groups;
     let shown;
     let label = "";
     if (all) {
-      shown = groups.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest);
+      shown = pool.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest);
     } else {
-      shown = groups.filter((g) => g.active).sort((a, b) => b.newest - a.newest);
+      shown = pool.filter((g) => g.active).sort((a, b) => b.newest - a.newest);
       if (shown.length === 0) {
-        const last = groups.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest)[0];
+        const last = pool.filter((g) => !g.hidden).sort((a, b) => b.newest - a.newest)[0];
         shown = last ? [last] : [];
         label = "Last run";
       }
@@ -1038,7 +1064,7 @@ dl{gap:3px 16px}
       p.agents.sort((x, y) => (AGENT_RANK[x.c.state] - AGENT_RANK[y.c.state])
         || ((y.c.started ?? -Infinity) - (x.c.started ?? -Infinity)));
     }
-    return {panels, hidden};
+    return {panels, hidden, sessions, stale};
   }
 
   // Columns for n windows: about square, capped by MAX_COLS and by how many
@@ -1210,6 +1236,50 @@ dl{gap:3px 16px}
     filter = next;
     renderGrid();
     announce(filter === "all" ? "Showing all recent runs." : "Showing active runs only.");
+  }
+
+  // ---- coordinator picker: one session's windows, or All (default) ----
+  // Per viewer under COORD_KEY, written only when the choice changes. A
+  // saved session with no visible row falls back to All in memory, with a note.
+  let coordSel = null;
+  let coordNote = "";
+  let coordOpts = "";       // the picker's options last built, as a key
+  function loadCoord() {
+    let v = null;
+    try { v = window.localStorage.getItem(COORD_KEY); } catch (_) { v = null; }
+    return safeLink(v, SESSION_PREFIX, SESSION_TAIL) || "";
+  }
+  function setCoord(v) {
+    if (coordSel === null) coordSel = loadCoord();
+    const next = safeLink(v, SESSION_PREFIX, SESSION_TAIL) || "";
+    coordNote = "";
+    let saved = null;
+    try { saved = window.localStorage.getItem(COORD_KEY); } catch (_) { /* storage blocked */ }
+    // Compare with what is stored too: after a stale fallback the screen
+    // shows All while the dead pick is still saved.
+    if (next === coordSel && (saved || "") === next) { renderGrid(); return; }
+    coordSel = next;
+    try { window.localStorage.setItem(COORD_KEY, next); } catch (_) { /* storage blocked */ }
+    renderGrid();
+    announce(next ? "Showing one coordinator." : "Showing all coordinators.");
+  }
+  function fillCoordPick(sessions) {
+    // Rebuilt only when the list changes, so an open picker isn't reset.
+    const key = JSON.stringify(sessions);
+    if (key !== coordOpts) {
+      coordOpts = key;
+      const all = el("option", "", "All");
+      all.value = "";
+      $coordPick.replaceChildren(all, ...sessions.map((s) => {
+        const o = el("option", "", s.label);
+        o.value = s.session;
+        return o;
+      }));
+    }
+    $coordPick.value = coordSel;
+    $coordNote.textContent = coordNote;
+    $coordNote.hidden = !coordNote;
+    $coordForget.hidden = !coordNote;
   }
 
   function announce(msg) { $gridLive.textContent = msg; }
@@ -1454,7 +1524,15 @@ dl{gap:3px 16px}
     }
     if (layout === null) layout = loadLayout();
     const now = Date.now();
-    const g = groupCoordinators(rows, agents, now, {all: filter === "all"});
+    if (coordSel === null) coordSel = loadCoord();
+    const g = groupCoordinators(rows, agents, now, {all: filter === "all", session: coordSel});
+    // Only live rows can say a session is gone; a cached first snapshot
+    // shows All without dropping the pick.
+    if (g.stale && !rowsCached) {
+      coordSel = "";
+      coordNote = "That coordinator has no recent runs; showing All.";
+    }
+    fillCoordPick(g.sessions);
     const nextTiles = Object.create(null);
     const tiles = [];
     let running = 0;
@@ -2554,6 +2632,8 @@ dl{gap:3px 16px}
   $gridShowAll.addEventListener("click", showAll);
   $filterActive.addEventListener("click", () => setFilter("active"));
   $filterAll.addEventListener("click", () => setFilter("all"));
+  $coordPick.addEventListener("change", () => setCoord($coordPick.value));
+  $coordForget.addEventListener("click", () => setCoord(""));
   document.addEventListener("keydown", onDocKey);
   try { window.addEventListener("resize", () => { if (view === "grid") renderGrid(); }); } catch (_) { /* no window events */ }
 
@@ -2684,7 +2764,7 @@ dl{gap:3px 16px}
     FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX, VIEW_KEY,
     classifyAgent, groupCoordinators, STATUS_LINES_MAX, OUTCOME_MAX,
     AGENT_PHASE: Object.freeze({...AGENT_PHASE}), LAYOUT_KEY, LAYOUT_MAX,
-    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, CHAT_MAX, CHAT_LIMIT, hiddenIds,
+    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, COORD_KEY, CHAT_MAX, CHAT_LIMIT, hiddenIds,
     launcherText,
   });
 

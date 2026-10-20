@@ -1572,3 +1572,19 @@ screens are staged by setting the same attributes the JS sets (no mic).
   elsewhere, pending/_save wait for the lock); each fails on the previous
   code (the Windows timeout one hits the fake's "blocked forever on
   node.exe's pipes" under the old `subprocess.run`).
+- **Grid Coordinator picker:** a native `<select id="grid-coord">` in the
+  Grid toolbar lists every coordinator session with a visible row
+  (grouped by `session_url`, labelled with the newest run's feature and
+  the session's last 6 characters, through `text()`/`textContent`), plus
+  All (default). Picking one keeps only that session's coordinator window
+  and agents, together with Active only / All recent and hide. Stored per
+  viewer under `agentDashboard.coordinator` (a validated session link),
+  written only on change; a saved session with no visible row falls back
+  to All in memory with a note (live rows only; a cached first snapshot
+  keeps the pick). The page still never writes the db.
+  Tests: 4 new dashboard JS tests (pick/All, reload and stale fallback,
+  filter and hide, hostile feature text), all failing on the previous
+  page; the localStorage-keys and markup pins in
+  `tests/test_agent_dashboard.py` cover the new key. JS: dashboard 126
+  (was 122), devhub 12; `tests/test_agent_dashboard.py` +
+  `tests/test_docs.py`: 73 passed, 1 skipped (same as before).

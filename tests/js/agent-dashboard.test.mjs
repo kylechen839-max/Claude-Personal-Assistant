@@ -165,7 +165,7 @@ const PAGE_IDS = {
   'grid-head': 'header', 'grid-summary': 'p', 'grid-toolbar': 'div', 'grid-filter-active': 'button', 'grid-filter-all': 'button',
   'grid-count': 'p', 'grid-conn': 'p', coords: 'div', 'grid-hidden': 'p', 'grid-reset': 'button', 'grid-live': 'p',
   'grid-foot': 'footer', 'grid-tray': 'details', 'grid-tray-sum': 'summary', 'grid-tray-list': 'div',
-  'grid-showall': 'button', getapp: 'div', 'getapp-btn': 'button', 'getapp-menu': 'div', 'getapp-hint': 'p',
+  'grid-showall': 'button', 'grid-coord': 'select', 'grid-coord-note': 'p', 'grid-coord-forget': 'button', getapp: 'div', 'getapp-btn': 'button', 'getapp-menu': 'div', 'getapp-hint': 'p',
   'getapp-dash-win': 'button', 'getapp-dash-mac': 'button', 'getapp-hub-win': 'button', 'getapp-hub-mac': 'button',
 };
 
@@ -189,6 +189,8 @@ async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComme
   for (const id of ['getapp', 'getapp-menu', 'getapp-hint']) ids[id].hidden = true;
   ids['grid-filter-active'].setAttribute('aria-pressed', 'true');
   ids['grid-filter-all'].setAttribute('aria-pressed', 'false');
+  ids['grid-coord-note'].hidden = true;
+  ids['grid-coord-forget'].hidden = true;
   const timers = [];
   const intervals = [];
   // The document hears keydown (Esc) and visibilitychange; doc() delivers
@@ -1083,6 +1085,135 @@ test('filter: Active only by default; All recent shows every recent session; sto
   again.ids['grid-filter-active'].click();
   assert.equal(storage.store['agentDashboard.filter'], 'active');
   assert.equal(again.api.FILTER_KEY, 'agentDashboard.filter');
+});
+
+// ---- the coordinator picker ----
+
+const MON = 'https://claude.ai/code/session_monitorXYZ123';
+const OLD = 'https://claude.ai/code/session_oldrunABC456';
+const COORD = 'agentDashboard.coordinator';
+// Three sessions: Voice speed (active, agent a1), Session monitoring
+// (active, agent m1) and Old run (done two days ago, agent o1).
+async function coordPage(opts = {}) {
+  const page = await gridPage(opts);
+  runSnap(page, [
+    runRow(),
+    runRow({ _docId: 'mon-run', feature: 'Session monitoring', session_url: MON, started_at: iso(NOW - 30 * MIN), updated_at: iso(NOW - 2 * MIN) }),
+    runRow({ _docId: 'old-run', feature: 'Old run', session_url: OLD, phase: 'done', started_at: iso(NOW - 3 * DAY), updated_at: iso(NOW - 2 * DAY) }),
+  ]);
+  agentSnap(page, [agent('a1'), agent('m1', { run_id: 'mon-run' }),
+    agent('o1', { run_id: 'old-run', state: 'done', finished_at: iso(NOW - 2 * DAY), updated_at: iso(NOW - 2 * DAY) })]);
+  return page;
+}
+const pick = (page, v) => { page.ids['grid-coord'].value = v; page.ids['grid-coord'].dispatch('change'); };
+const optionsOf = (page) => page.ids['grid-coord'].children.map((o) => [o.value, o.textContent]);
+
+test('coordinator picker: lists each session, picking one shows only its windows, All restores', async () => {
+  const storage = memStorage();
+  const page = await coordPage({ storage });
+  assert.deepEqual(optionsOf(page), [['', 'All'], [MON, 'Session monitoring · …XYZ123'],
+    [SESSION, 'Voice speed · …cT5KUt'], [OLD, 'Old run · …ABC456']]);
+  assert.equal(page.ids['grid-coord'].value, '');
+  assert.deepEqual(panels(page).map(h2Of), ['Session monitoring', 'Voice speed']);
+  assert.equal(storage.store[COORD], undefined, 'nothing stored on load');
+  pick(page, MON);
+  assert.deepEqual(panels(page).map(h2Of), ['Session monitoring']);
+  assert.deepEqual(order(page), ['coord-mon-run', 'agent-m1']);
+  assert.equal(page.ids['grid-count'].textContent, '2 windows');
+  assert.equal(storage.store[COORD], MON);
+  assert.equal(page.ids['grid-coord'].value, MON);
+  assert.equal(page.ids['grid-coord-note'].hidden, true);
+  pick(page, '');
+  assert.deepEqual(panels(page).map(h2Of), ['Session monitoring', 'Voice speed']);
+  assert.equal(page.ids['grid-count'].textContent, '4 windows');
+  assert.equal(storage.store[COORD], '');
+  // A value that isn't a session link is All.
+  pick(page, 'javascript:alert(1)');
+  assert.equal(page.ids['grid-coord'].value, '');
+  assert.equal(page.api.COORD_KEY, COORD);
+  assert.deepEqual(dbWrites(page), []);
+});
+
+test('coordinator picker: persists across reload; a stale one falls back to All with a note, unsaved', async () => {
+  const storage = memStorage();
+  const page = await coordPage({ storage });
+  pick(page, SESSION);
+  const again = await coordPage({ storage });
+  assert.equal(again.ids['grid-coord'].value, SESSION);
+  assert.deepEqual(order(again), [C0, 'agent-a1']);
+  // A cached first snapshot without the session shows All but keeps the pick.
+  const cached = await gridPage({ storage });
+  cached.db.handlers('runs').next({ ...snap([runRow({ _docId: 'mon-run', feature: 'Session monitoring', session_url: MON })]),
+    metadata: { fromCache: true } });
+  assert.equal(cached.ids['grid-coord-note'].hidden, true);
+  runSnap(cached, [runRow()]);
+  assert.deepEqual(panels(cached).map(h2Of), ['Voice speed']);
+  assert.equal(cached.ids['grid-coord'].value, SESSION);
+  // A session whose rows are gone (or older than 14 days) falls back.
+  storage.store[COORD] = 'https://claude.ai/code/session_goneGONE';
+  const stale = await coordPage({ storage });
+  assert.equal(stale.ids['grid-coord'].value, '');
+  assert.deepEqual(panels(stale).map(h2Of), ['Session monitoring', 'Voice speed']);
+  assert.equal(stale.ids['grid-coord-note'].hidden, false);
+  assert.match(stale.ids['grid-coord-note'].textContent, /no recent runs; showing All/);
+  assert.equal(storage.store[COORD], 'https://claude.ai/code/session_goneGONE', 'never written on load');
+  // Forget clears the dead pick from storage; the note goes and stays gone.
+  assert.equal(stale.ids['grid-coord-forget'].hidden, false);
+  stale.ids['grid-coord-forget'].click();
+  assert.equal(storage.store[COORD], '', 'Forget clears the saved pick');
+  assert.equal(stale.ids['grid-coord-note'].hidden, true);
+  assert.equal(stale.ids['grid-coord-forget'].hidden, true);
+  const fresh = await coordPage({ storage });
+  assert.equal(fresh.ids['grid-coord-note'].hidden, true, 'no note on the next visit');
+  storage.store[COORD] = 'https://claude.ai/code/session_goneGONE';
+  // Picking again clears the note.
+  pick(stale, MON);
+  assert.equal(stale.ids['grid-coord-note'].hidden, true);
+  // Garbage in storage is All, quietly.
+  storage.store[COORD] = '<img src=x>';
+  const junk = await coordPage({ storage });
+  assert.equal(junk.ids['grid-coord'].value, '');
+  assert.equal(junk.ids['grid-coord-note'].hidden, true);
+});
+
+test('coordinator picker: combines with Active only / All recent and with hide', async () => {
+  const storage = memStorage();
+  const page = await coordPage({ storage });
+  // Old run is done: under Active only it shows as its session's last run.
+  pick(page, OLD);
+  assert.deepEqual(order(page), ['coord-old-run', 'agent-o1']);
+  assert.match(page.ids['grid-summary'].textContent, /^Nothing running · last run below/);
+  page.ids['grid-filter-all'].click();
+  assert.deepEqual(order(page), ['coord-old-run', 'agent-o1']);
+  assert.equal(page.ids['grid-summary'].textContent, 'Nothing running');
+  pick(page, '');
+  assert.deepEqual(panels(page).map(h2Of), ['Session monitoring', 'Voice speed', 'Old run']);
+  page.ids['grid-filter-active'].click();
+  // Hide m1, then pick its session: the tray holds it, the other session's windows are gone.
+  byClass(tile(page, 'agent-m1'), 'hide')[0].click();
+  pick(page, MON);
+  assert.deepEqual(order(page), ['coord-mon-run']);
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (1)');
+  assert.equal(page.ids['grid-count'].textContent, '1 window · 1 hidden');
+  // Another session: m1 is neither shown nor in the tray.
+  pick(page, SESSION);
+  assert.deepEqual(order(page), [C0, 'agent-a1']);
+  assert.equal(page.ids['grid-tray'].hidden, true);
+  // Back to All: m1 is still hidden (the layout kept it).
+  pick(page, '');
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (1)');
+  assert.equal(windows(page).some((t) => t.id === 'agent-m1'), false);
+});
+
+test('coordinator picker: hostile feature text stays text', async () => {
+  const page = await gridPage();
+  const evil = '<img src=x onerror=alert(1)>\u0000\nnext';
+  runSnap(page, [runRow({ feature: evil })]);
+  const opt = page.ids['grid-coord'].children[1];
+  assert.equal(opt.tagName, 'OPTION');
+  assert.equal(opt.children.length, 0);
+  assert.equal(opt.textContent, '<img src=x onerror=alert(1)> next · …cT5KUt');
+  assert.equal(page.ids['grid-coord'].find((e) => e.tagName === 'IMG').length, 0);
 });
 
 // ---- desktop only: no phone layout ----
@@ -2456,7 +2587,8 @@ test('hide: the window leaves the workspace and the count, the tray says Hidden 
   assert.deepEqual([...again.api.hiddenIds()], ['a2']);
   assert.deepEqual(dbWrites(page), []);
   for (const k of Object.keys(storage.store)) {
-    assert.ok(['agent-dashboard-view', LAYOUT, 'agentDashboard.filter'].includes(k), `only the view, layout and filter keys: ${k}`);
+    assert.ok(['agent-dashboard-view', LAYOUT, 'agentDashboard.filter', 'agentDashboard.coordinator'].includes(k),
+      `only the view, layout, filter and coordinator keys: ${k}`);
   }
 });
 
