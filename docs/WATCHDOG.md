@@ -1,5 +1,10 @@
 # Dashboard watchdog
 
+The dashboard page and its row schemas live in the private
+kylechen839-max/agent-dashboard repo (`dashboard/`); this prompt stays here
+because the watchdog runs in a session on this repo, next to the master's
+skill and `.claude/settings.json`.
+
 A run whose session dies (crash, lost container, usage limit) stops
 writing, so its row would just sit on "building". The page already flags
 that row as silent from `updated_at`. The watchdog makes it definite: once

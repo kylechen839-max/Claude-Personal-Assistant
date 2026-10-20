@@ -143,7 +143,11 @@ as the work. Never put secrets, tokens or personal data in this file.
   master or stable, and denies
   reading `.env` and the Google token files, force-pushes and
   `reset --hard`.
-- **Dashboard** (`tools/agent-dashboard/`, added 2026-10-19):
+- **Dashboard** (added 2026-10-19; since 2026-10-20 the page, its
+  README with the row schemas, launchers and tests live in the private
+  kylechen839-max/agent-dashboard repo, `dashboard/`; the watchdog prompt
+  stays here in `docs/WATCHDOG.md`, the master's side in SKILL.md, and
+  `tests/test_build_feature_skill.py` checks both):
   - Kyle watches runs at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G,
     one row per `/build-feature` run, or per piece when a run is split
     (`run_id` + `-<piece-slug>`, own `if_version` chain and limits).
@@ -168,7 +172,7 @@ as the work. Never put secrets, tokens or personal data in this file.
     and the hourly keep-alive trigger auto-disabled itself (access
     denied), so don't count on it.
   - The page's logic is tested by running its own script in node:vm
-    (`tests/js/agent-dashboard.test.mjs`); string checks on the HTML alone
+    (agent-dashboard repo, `tests/js/agent-dashboard.test.mjs`); string checks on the HTML alone
     let real regressions through. Arrays made inside the vm are from another realm:
     spread them (`[...x]`) before `assert.deepEqual`.
   - The page's Grid is a flat window workspace (`#coords`, auto-tiled):
@@ -189,19 +193,17 @@ as the work. Never put secrets, tokens or personal data in this file.
     Window order, size and the filter live in the viewer's localStorage,
     never the db. Hidden windows: layout `h:1`, per viewer, never in the
     db; a hidden coordinator keeps its chat and draft.
-    Desktop launchers are in `tools/agent-dashboard/desktop/`; the page's
+    Desktop launchers are in the agent-dashboard repo's `dashboard/desktop/`; the page's
     "Get desktop app" saves the same text (as a one-file zip: downloads
     refuses .cmd/.command), checked against the files by pytest.
-  - **The dashboard and the PC hub are desktop-only** (2026-10-20: the
+  - **The dashboard is desktop-only** (2026-10-20: the
     dashboard's phone layout was removed). "Phone-first" is about the Hey
     Claude app; on the phone Kyle reaches the coordinator by voice
     (`message_dev_team`).
-  - **PC hub** (`assistant/devhub.py`, `/devteam` on the PC's web app):
-    chat with the coordinator(s) through `claude -p --cloud` plus the
-    Notion inbox, on its own link (`data/devhub.json`, `hub-` ids) so voice
-    `check_dev_team` never takes a hub reply. Loopback bind and loopback,
-    unproxied requests only. The coordinator writes a pickup row first and
-    a `presence-<sessionTail>` row at the start and end of every turn.
+  - **The PC hub was removed** (2026-10-20, Kyle scrapped it): no
+    `/devteam` page, `devhub.py` or `[devteam] hub*` settings. Don't
+    rebuild it without his ask; `assistant/devteam.py` is only the voice
+    link now (`hc-` reply ids, spoken replies).
   - Lesson (2026-10-19): the first Grid and chat were built on a "Claude
     Code Remote" connector that doesn't exist on Kyle's account, so they
     never worked. Before building on a connector or other account-side
@@ -220,7 +222,7 @@ as the work. Never put secrets, tokens or personal data in this file.
   - Lesson (2026-10-20): a master wrote estimated dashboard times that
     ran ahead of the clock. Take every `at`/`updated_at` from
     `date -u +%Y-%m-%dT%H:%M:%SZ` at write time; never estimate.
-  - `test_page_never_writes` rejects any `.set(`/`.update(`/`.delete(`/
+  - `test_page_never_writes` (agent-dashboard repo) rejects any `.set(`/`.update(`/`.delete(`/
     `.add(` in the page, Map and Set included; keep page state in arrays
     or plain objects.
 

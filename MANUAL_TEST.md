@@ -546,7 +546,8 @@ phone app installed from the cloud URL with Tailscale on.
 
 ## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
-(see tools/agent-dashboard/README.md).
+(the page, its README and its desktop launchers are in the private
+kylechen839-max/agent-dashboard repo, under `dashboard/`).
 The dashboard is desktop only (no phone layout).
 - [ ] Open it on the PC in Chrome or Edge, signed in to claude.ai.
   - Should: a summary line at the top (for example "1 running") and one
@@ -643,12 +644,13 @@ The dashboard is desktop only (no phone layout).
     coordinator replies that it opened both files.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
-- [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
+- [ ] On Windows, double-click dashboard/desktop/open-dashboard.cmd
+      from the agent-dashboard repo.
   - Should: the dashboard opens in its own Chrome or Edge window with no
     address bar, already signed in to claude.ai, and can be pinned to the
     taskbar.
-- [ ] On a Mac, double-click tools/agent-dashboard/desktop/open-dashboard.command
-      (the first time, right-click it and choose Open).
+- [ ] On a Mac, double-click dashboard/desktop/open-dashboard.command
+      from the agent-dashboard repo (the first time, right-click it and choose Open).
   - Should: the same, in its own Chrome or Edge window, already signed
     in, and no Finder window opens.
 - [ ] On the dashboard, press Get desktop app (top right), then Windows
@@ -659,39 +661,25 @@ The dashboard is desktop only (no phone layout).
     and double-click; the launcher opens the dashboard in its own window.
     Declining the save shows no error.
 
-## PC hub (optional, ~10 min)
+## Dev team by voice (optional, ~10 min)
 Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
-`[devteam] hub = true` with your coordinator in `hub_sessions` in
-`config.local.toml` (README "PC hub").
-- [ ] Start the web app on the PC, double-click
-      tools/agent-dashboard/desktop/open-hub.cmd and sign in with the
-      access token.
-  - Should: an app window with one coordinator window per session, a
-    presence pill ("Idle" or "In task: …") and an empty chat box.
-- [ ] Type "status?" and press Enter while the coordinator is idle.
-  - Should: the box clears at once; the line under your message goes
-    Sending…, Queued, then "Coordinator · working: Reading your message"
-    within a minute, then the markdown reply appears full width. Note
-    whether an idle session started the turn by itself (not verified
-    before).
-- [ ] Send a message while the coordinator is mid-task.
-  - Should: it shows Queued (and a Queued badge) until the coordinator
-    reads it at the end of its step.
+`[devteam] enabled = true` with `coordinator_session` in `config.local.toml`
+(docs/COORDINATOR_LINK.md).
+- [ ] While the coordinator session is idle, say "Hey Claude, ask the dev
+      team for a status update", then a minute later "did the dev team
+      answer?".
+  - Should: it says the message was sent, then reads the coordinator's
+    reply. Note whether the idle session started the turn by itself (not
+    verified before).
 - [ ] Let the coordinator's cloud session expire (a day idle), then send.
   - Should: note whether the CLI revives it or says it is gone (not
-    verified before); a failure shows "Not sent: …" and your text comes
-    back in the box.
-- [ ] Ask "check_dev_team" by voice after a hub conversation.
-  - Should: Hey Claude never reads out a hub reply.
-- [ ] Hide a window, wait for a reply, then restore it from Hidden.
-  - Should: the menu marks it "new reply"; restored, the reply is there.
-- [ ] From the phone over `tailscale serve`, open https://<pc>/devteam.
-  - Should: "not found".
-- [ ] Press Clear in a window and confirm.
-  - Should: the conversation disappears and stays gone after a reload.
-- [ ] Unplug the network (or turn off Wi-Fi), send from a hub window and
-      wait for `[devteam] timeout` (60 s by default).
-  - Should: the message shows "Not sent: … didn't answer in time", no
-    `node.exe` for Claude Code is left in Task Manager, and the same
-    window takes another message straight away (no "one message at a
-    time").
+    verified before); a failure is said in one plain sentence.
+- [ ] Unplug the network (or turn off Wi-Fi), send a message and wait for
+      `[devteam] timeout` (60 s by default).
+  - Should: Hey Claude says Claude Code didn't answer in time, and no
+    `node.exe` for Claude Code is left in Task Manager.
+- [ ] On the PC, after updating, open http://127.0.0.1:8765/devteam and
+      check the web app's startup lines.
+  - Should: "not found", and no "PC hub on ..." line (the PC hub was
+    removed). If `data/devhub.json` is still there (the old hub's saved
+    chat), delete it; nothing reads it any more.

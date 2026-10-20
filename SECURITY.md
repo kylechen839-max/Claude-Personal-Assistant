@@ -384,48 +384,15 @@ Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
 
-## PC hub (`/devteam`): loopback only
+## PC hub: removed (2026-10-20)
 
-The hub (assistant/devhub.py) lets a signed-in browser on the PC queue
-messages into Kyle's coordinator sessions, which can start coding work, so
-it is kept to the PC itself:
-
-- It is built only when `[devteam] hub = true` and the web app binds a
-  loopback address; the cloud server profile and any `0.0.0.0` bind never
-  have it.
-- Every `/devteam` page and `/api/devteam/*` route answers 404 unless the
-  peer is loopback, there is no `X-Forwarded-For` and no
-  `Tailscale-User-Login` header, and no configured trusted proxy vouches
-  for the request. `tailscale serve` adds those headers, so the phone and
-  the tailnet never reach it.
-- The `/api/devteam/*` routes need the owner's sign-in
-  (`require_owner`: a family member's session gets 404; the same cookie, `WebAuth`, `LoginLimiter`, CSP and
-  cross-origin guard; a cross-origin POST gets 403). The sign-in form on
-  the page posts to the existing `/api/login`.
-- Messages go to the CLI on stdin, never on its command line. Coordinator
-  replies are shown as text (markdown built with createElement and
-  textContent; http(s) links only). The page has no inline script
-  (`script-src 'self'`).
-- One message in flight per window; at most 8 windows, 200 messages a
-  window, 12000 characters a message or reply. No message or reply text
-  is logged at INFO. A CLI that hangs past `[devteam] timeout` has its
-  whole process tree killed (`taskkill /T` on Windows), so the window is
-  freed.
-- With `trusted_proxy` set the hub fails closed (every request 404) and
-  `serve` warns at startup that it is disabled.
-- **At rest:** the transcript and pending reply ids are in
-  `hub_state_file` (`data/devhub.json`), written privately (0600 on
-  Linux/macOS; Windows uses the folder's permissions) and atomically.
-  Clear rewrites the file without that window's messages, and a session
-  dropped from `hub_sessions` is removed from the file at the next start
-  (with its pending reply ids); older copies of
-  the text may remain in free disk blocks until overwritten, as with any
-  file delete.
-
-Left as is: `/devteam`, `/devteam.js` and `/devteam.css` are served to a
-loopback request without a sign-in, because they hold no data and the page
-has to show the sign-in form. A DNS-rebinding page could load them, but it
-has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
+The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was
+removed: no route, module or `[devteam] hub*` setting is left
+(`tests/test_devteam.py::test_pc_hub_is_gone`). Kyle reaches the
+coordinator by voice (`message_dev_team`, under the same `confirm_if_untrusted`
+rule as before) or from the dashboard. An old `data/devhub.json` on the PC is
+no longer read or written; delete it by hand to drop its saved transcript
+(MANUAL_TEST.md).
 
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
@@ -520,7 +487,8 @@ a PKCE challenge, `access_type=offline` and the redirect
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
 - **The dev-team dashboard posts Kyle's chat messages as comments.** The
-  page (tools/agent-dashboard) declares the full `comments` grant so each
+  page (now in the private kylechen839-max/agent-dashboard repo, whose
+  SECURITY.md covers it) declares the full `comments` grant so each
   coordinator window's chat box can call `comments.sendToClaude`. There is
   exactly one call site, run only from Kyle's own Send press or Enter,
   one call at a time, never at load, on a timer or as a retry (a test

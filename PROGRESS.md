@@ -3,12 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
-Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
-shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 124
-JavaScript tests (node:test: `voice-core.test.js` and
-`agent-dashboard.test.mjs`, both also run by pytest).
+**Current test count:** 1611 passed, 44 skipped (Linux build sandbox,
+Python 3.13, 2026-10-20; that sandbox had no eSpeak or PortAudio, so 25
+audio tests failed or errored there, as before this change), plus 67
+JavaScript tests (node:test: `voice-core.test.js` 14, run by pytest too,
+and `backend-router` 33, `family` 9, `i18n` 11).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
 builds and smoke-tests the cloud Docker image. The
@@ -58,10 +57,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_build_feature_skill.py` | 8 | the `/build-feature` skill's dashboard writes (runs, agents, the chat mirror) and the watchdog prompt (`docs/WATCHDOG.md`) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
-| `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1915,3 +1913,36 @@ Render/Docker changes) comes separately.
   tools), and tells her how to connect Google if it isn't yet.
 - Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
   Phone cache v9.
+
+## Dashboard moved out, PC hub removed (2026-10-20)
+
+- The agent dashboard page (`tools/agent-dashboard/`: the page, its README
+  with the row schemas, desktop launchers) and its tests
+  (`tests/js/agent-dashboard.test.mjs`, the page checks in
+  `tests/test_agent_dashboard.py`) now live in the private
+  kylechen839-max/agent-dashboard repo (`dashboard/`). The watchdog prompt
+  moved to `docs/WATCHDOG.md`, since the watchdog runs in a session on this
+  repo; SKILL.md points at both.
+- Kyle scrapped the PC hub: `assistant/devhub.py`, `web/devteam.*`, its
+  `create_app(hub=)` hook and startup lines, the `[devteam] hub`,
+  `hub_sessions`, `poll_seconds` and `hub_state_file` settings, the hub
+  sections of README, MANUAL_TEST, SECURITY, PRIVACY and
+  docs/COORDINATOR_LINK.md, and the skill's hub and presence-row steps are
+  gone. `assistant/devteam.py` keeps only the voice link
+  (`message_dev_team` / `check_dev_team`): the hub's message source, window
+  sessions, 12000-character replies and presence reads were dropped; the
+  private atomic state file, the state lock and the whole-tree kill on a
+  CLI timeout stay (they protect the voice link too). A new Notion inbox
+  gets the statuses answered, working and blocked (no `idle`). An old
+  `config.local.toml` with the hub keys still loads (they are ignored).
+- Tests: the skill and watchdog checks moved to
+  `tests/test_build_feature_skill.py` (8; the phase list and the page's
+  +15 min thresholds are pinned there, from the agent-dashboard repo's
+  README); `tests/test_devteam.py` lost the hub/presence tests and gained
+  `test_voice_message_header_prefix_and_cap`,
+  `test_replies_are_capped_for_speech`, `test_inbox_statuses`,
+  `test_pc_hub_is_gone` and `test_old_hub_settings_still_load` (29 tests).
+  `test_inbox_statuses` and `test_pc_hub_is_gone` fail with the old
+  `devteam.py` and `devhub.py` restored. Full suite: 9 failed, 1611 passed,
+  44 skipped, 16 errors (the 25 are the sandbox's eSpeak/PortAudio/wake
+  model tests, as in the baseline); JS 53/53 (`tests/js/*.test.mjs`).

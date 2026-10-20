@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The agent dashboard (page, row schemas, desktop launchers and their
+  tests) moved to its own private repo, kylechen839-max/agent-dashboard.
+  The dashboard watchdog prompt is now `docs/WATCHDOG.md`.
+- Removed the PC hub (`/devteam` on the PC's web app) and its `[devteam]
+  hub`, `hub_sessions`, `poll_seconds` and `hub_state_file` settings (old
+  values in `config.local.toml` are ignored). Talk to the dev team by voice
+  (`message_dev_team`) or from the dashboard. You can delete an old
+  `data/devhub.json`.
 - Agent dashboard: "Close idle agents" in the Grid toolbar (never
   coordinator windows) and an opt-in auto-close; the maximized window's
   restore is now an icon button (⤡); select text in a chat message and
@@ -11,7 +19,7 @@
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply
   language (English or Chinese), with web search only and none of the
-  owner's Notion, memory, Google, history, lecture/tutor, dev team or PC hub.
+  owner's Notion, memory, Google, history, lecture/tutor or dev team.
   Removing someone signs them out and deletes their data (retried later if a
   file is locked). Invites and removals are managed at the cloud server's own
   address. "Sign out everywhere" is now per person. A session the server
@@ -19,12 +27,6 @@
 - Agent dashboard Grid: a Coordinator picker shows only the chosen
   coordinator session's windows (default All); the choice is kept per
   viewer, and Forget clears a pick whose session has no recent runs.
-- PC hub: chat with your dev team coordinator(s) at
-  http://127.0.0.1:8765/devteam on the PC (`[devteam] hub = true`).
-  Messages go through Claude Code on your plan; markdown replies, step
-  updates and an In task / Idle pill come back through the Notion inbox.
-  Desktop- and loopback-only (off while TRUSTED_PROXY is set, with a
-  startup warning); launchers in `tools/agent-dashboard/desktop/open-hub.*`.
 - Agent dashboard: desktop-only (the phone layout is gone). Windows can be
   hidden and restored from "Hidden (N)" or Show all, the Runs view and
   window chrome got a calmer unified look, and "Get desktop app" saves the
