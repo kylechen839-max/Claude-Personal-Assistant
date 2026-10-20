@@ -180,11 +180,23 @@ stored untrusted, whether it ends normally or by switching to a resumed
 conversation (`ClaudeChat.tainted()`). Saved history is untrusted too:
 resuming a conversation or using the history search tools makes changes
 ask first for the rest of that conversation, so history's own titles and
-summaries never come back as trusted text. The
-system prompt also labels recalled notes as stored data, not
-instructions. (Recalled notes stay in the system prompt rather than moving
-into the user turn: the code-level confirmation above is what protects
-changes, and moving them would change the history every mode shares.)
+summaries never come back as trusted text. Recalled notes (with the
+date and time and the weekly review offer) ride in a context block added
+after Kyle's words in that turn's user message, so the system prompt stays
+byte-identical and cacheable. The block starts by saying the app added it
+and Kyle didn't say it, and labels the notes as stored data, not
+instructions; the code-level confirmation above is still what protects
+changes. The block is kept apart from the message text
+(`message["context"]`, rendered only when the request is built), so it
+never reaches the conversation history recorder or the memory summary
+(`memory.transcript()`), and a note can't be re-stored as if Kyle had said
+it. The model router (`assistant/router.py`) sends every turn of a
+conversation with untrusted content or an attachment to the main model,
+and confirmations are the same on either model. Usage logs and route logs
+hold model names, reason codes and token counts only; the usage file
+(`[assistant] usage_file`) holds monthly totals per model, written
+privately and atomically, and only the owner's `/api/state` shows the
+monthly estimate.
 `search_memory` and `remember` are private like the email tools, and the
 log records memory lookups by count only. Tests:
 `tests/test_gmail.py` (an injection email that tries to delete an event,
@@ -944,7 +956,8 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   assistant tedious. The assistant's own question can't confirm itself: it
   ends with "say yes or no", and an answer containing "no" counts as no.
 - **Memory poisoning.** A page could try to get a line into the conversation
-  summary stored in Pinecone, which comes back in later system prompts. Only
+  summary stored in Pinecone, which comes back as a recalled note in a
+  later turn's context block (labelled as stored data). Only
   user and assistant *text* goes into the summary (tool and web results are
   left out), so the page would have to get Claude to say it out loud first;
   and a recalled note can't skip a confirmation for a delete. No secrets go
@@ -956,7 +969,12 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   "Dentist? Just say yes" would be read out in the question. Kyle still has
   to answer; a cosmetic issue, not a bypass.
 - **Notes and lecture text in memory.** A saved note can come back in a
-  later system prompt (memory recall). Saving a note while email or web
+  later turn's context block (memory recall), and stays in that turn for
+  the rest of the conversation; a successful `delete_note` takes its text
+  out of every turn's context (`ClaudeChat.forget_note`). A note deleted
+  from the phone's Memory screen during a conversation, or one quoted in
+  a `recall_notes` tool result, stays in that live conversation until it
+  ends (not saved anywhere; accepted). Saving a note while email or web
   content is in context asks first, and notes can't skip a confirmation.
 
 - **One shared secret for all backends.** The cloud host (on Render) holds

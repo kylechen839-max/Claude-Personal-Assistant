@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Cheaper replies: short, simple questions are now answered by Claude Haiku
+  5.5 (`[assistant] fast_model`, `router = "auto"`). Anything that changes
+  your calendar, notes, email or home, needs a web lookup or real reasoning,
+  has an attachment or follows untrusted content stays on the main model,
+  and any change Haiku tries to make is handed to the main model before
+  anything runs. `CLAUDE_ROUTER=off` turns routing off. The tools and system
+  prompt are now cached by the API: the date, recalled notes and the weekly
+  review offer travel with each message instead. Each API call's token
+  counts are logged without any text, and your phone app's state shows a
+  monthly cost estimate (`month_usd`, owner only). New `BACKLOG.md` lists
+  the work left before a public release.
 - Google Calendar by voice now covers most of Google Calendar: event colors
   (Google's 11 colors or plain words) and your named event labels, plus your
   own color names in `[calendar] color_labels`; repeating events, edited one

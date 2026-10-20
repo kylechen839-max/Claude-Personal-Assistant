@@ -54,6 +54,9 @@ class PineconeMemory:
         self._index = index
         self._namespaces: list[str] | None = None
         self.last_untrusted = False  # set by retrieve()
+        # (vector id, text) of the notes retrieve() returned last, so a chat
+        # can drop a note it was given once delete_note removes it
+        self.last_matches: list[tuple[str, str]] = []
 
     @property
     def pc(self):
@@ -104,12 +107,14 @@ class PineconeMemory:
                 top_k=self.top_k, include_metadata=True)
         notes = []
         self.last_untrusted = False
+        self.last_matches = []
         for match in result.matches:
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
+                self.last_matches.append((getattr(match, "id", ""), notes[-1]))
                 # Written from untrusted text (e.g. an email): the turn that
                 # uses it must confirm changes (see ClaudeChat.recall).
                 self.last_untrusted |= meta.get("untrusted") is True

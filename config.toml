@@ -7,6 +7,13 @@ max_tokens = 1500            # a ceiling, not a target: room for thinking and we
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)
+# Simple, short questions go to the cheaper fast model; changes, lookups and
+# reasoning stay on `model` (assistant/router.py). "off" (or CLAUDE_ROUTER=off)
+# sends everything to `model`. CLAUDE_FAST_MODEL overrides fast_model.
+# fast_model = "claude-haiku-5-5"
+# router = "auto"
+# Monthly token counts and a rough cost estimate (owner only); "" = not kept.
+# usage_file = "data/usage.json"
 
 [tts]
 # "auto" (default): Kokoro if its files are downloaded, else Piper, else pyttsx3.

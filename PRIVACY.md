@@ -19,6 +19,13 @@ except to the services listed below, using your own keys.
 | **ElevenLabs** (only if `ELEVENLABS_API_KEY` is set) | The reply text to be spoken | Each reply |
 | **Hugging Face / GitHub releases** | Nothing about you: model downloads. Kokoro is checksum-verified at setup; Piper voices download at setup, and the Whisper and openWakeWord models on first use, without a checksum check | Once per model |
 
+Some requests are answered by Claude Haiku instead of Claude Sonnet; both are
+Anthropic models under the same API terms, and nothing goes to another
+provider. `data/usage.json` (`[assistant] usage_file`; "" = not kept) holds
+only monthly API token counts and a cost estimate per model: no conversation
+text, notes or names. Only the owner's phone app sees the estimate; Mom's
+instance keeps its own file under `data/mom/`.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own

@@ -14,7 +14,8 @@ from assistant.tools import Tool, ToolRegistry
 from assistant.tools.calendar import GoogleCalendar
 from assistant.tools.notion import NotionAssignments
 from assistant.tools.timeutil import resolve_day
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import (make_response, request_text, system_text, text_block,
+                            tool_use_block)
 
 TZ = "America/New_York"
 
@@ -107,8 +108,8 @@ def test_chat_runs_tool_calls(fake_client):
     assert reply == "You have the dentist at 3 PM tomorrow."
     first, second = fake_client.calls
     assert first["tools"][0]["name"] == "list_calendar_events"
-    assert "Use your tools" in first["system"]
-    assert "search the web" not in first["system"]  # no web tools registered
+    assert "Use your tools" in system_text(first)
+    assert "search the web" not in system_text(first)  # no web tools registered
     tool_result = second["messages"][2]["content"][0]
     assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "toolu_1"
     assert "Dentist" in tool_result["content"]
@@ -323,7 +324,7 @@ def test_tomorrow_is_read_once_per_turn_across_midnight(monkeypatch, fake_client
         make_response(text_block("Tomorrow you have the dentist."))]
     chat = ClaudeChat(client=fake_client, tools=tools, timezone=TZ)
     chat.ask("What's on my calendar tomorrow?")
-    assert "Monday, October 19, 2026, 11:59 PM" in fake_client.calls[0]["system"]
+    assert "Monday, October 19, 2026, 11:59 PM" in request_text(fake_client.calls[0])
     kw = events.list.call_args.kwargs
     assert kw["timeMin"] == "2026-10-20T00:00:00-04:00"
     assert kw["timeMax"] == "2026-10-21T00:00:00-04:00"

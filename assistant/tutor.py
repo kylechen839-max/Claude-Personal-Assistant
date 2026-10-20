@@ -15,6 +15,8 @@ import io
 import logging
 from dataclasses import dataclass, field
 
+from assistant import usage
+
 log = logging.getLogger(__name__)
 
 MAX_SIDE = 1600
@@ -130,6 +132,7 @@ class TutorSession:
         except Exception:
             self.history.pop()  # keep the history valid for a retry
             raise
+        usage.record(self.model, getattr(response, "usage", None))
         text = "".join(b.text for b in response.content
                        if b.type == "text").strip() or "Sorry, I couldn't read that."
         self.history.append({"role": "assistant", "content": text})

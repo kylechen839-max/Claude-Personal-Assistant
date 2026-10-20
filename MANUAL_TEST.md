@@ -969,3 +969,25 @@ the PC (README "Spotify by voice").
     tap goes to Spotify and back to the app. A family member's phone does
     not show the button.
 
+
+## Model routing and prompt caching (~5 min)
+Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
+- [ ] In text mode (`python -m assistant --mode text`), ask "what time is
+      it", then "what's tomorrow look like on my calendar" a minute later.
+  - Should: `logs/assistant.log` has `Route: claude-haiku-5-5 (simple)` for
+    the first and an `API usage claude-...: input=... cache_read=...` line
+    per request. From the second request on, `cache_read` is above 0
+    (the tools and system prompt are read from the cache). No words you
+    said are in those lines.
+- [ ] In a new conversation ask "explain why the sky is blue", then "what
+      time is it".
+  - Should: `Route: claude-sonnet-5-5 (keyword)`, then
+    `Route: claude-sonnet-5-5 (sticky)`: once a conversation needed Sonnet
+    it stays there.
+- [ ] Set `CLAUDE_ROUTER=off` and start again.
+  - Should: every route line says `claude-sonnet-5-5 (off)`.
+- [ ] Phone app as the owner: open the page's state (`/api/state` after
+      signing in).
+  - Should: it has `month_usd`, a small number that grows with use; a
+    family member's state does not have it. `data/usage.json` holds the
+    month's totals per model.

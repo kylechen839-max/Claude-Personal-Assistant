@@ -6,7 +6,7 @@ import pytest
 
 from assistant.chat import ClaudeChat
 from assistant.memory import PineconeMemory, transcript
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import make_response, request_text, text_block, tool_use_block
 
 
 def match(score, text, ns="projects"):
@@ -61,8 +61,8 @@ def test_chat_injects_notes_into_system_prompt(fake_client):
     fake_client.queue = [make_response(text_block("It's on October 28th."))]
     chat = ClaudeChat(client=fake_client, memory=mem)
     chat.ask("When is my Apple interview?")
-    system = fake_client.calls[0]["system"]
-    assert "long-term memory" in system and "Oct 28" in system
+    sent = request_text(fake_client.calls[0])  # system + the turn's context
+    assert "long-term memory" in sent and "Oct 28" in sent
 
 
 def test_memory_failure_does_not_block_reply(fake_client):
@@ -158,3 +158,13 @@ def test_retrieve_reads_other_text_fields():
     assert mem.retrieve("x") == ["from chunk", "from content"]
     mem.text_fields = ["content"]
     assert mem.retrieve("x") == ["from content"]
+
+
+def test_retrieve_remembers_which_vector_each_note_came_from():
+    """ClaudeChat.forget_note needs the id of a recalled note to take its
+    text out of the conversation once delete_note removes it."""
+    found = match(0.9, "locker code 1234")
+    found.id = "note-20261020T101010-abc123"  # Pinecone matches carry the id
+    mem, _, _ = make_memory([found, match(0.1, "too far")])
+    assert mem.retrieve("locker") == ["locker code 1234"]
+    assert mem.last_matches == [("note-20261020T101010-abc123", "locker code 1234")]

@@ -328,6 +328,8 @@ def summarize(client, model: str, transcript: str, course: str = "",
         output_config={"format": {"type": "json_schema", "schema": NOTES_SCHEMA}},
         messages=[{"role": "user", "content":
                    f"{header}\n\n<transcript>\n{text}\n</transcript>"}])
+    from assistant import usage  # API token counts (usage.py)
+    usage.record(model, getattr(response, "usage", None))
     if response.stop_reason == "refusal":
         raise RuntimeError("Claude declined to summarize this lecture")
     if response.stop_reason == "max_tokens":

@@ -23,7 +23,8 @@ from assistant.config import DEFAULTS, load_config, redact  # noqa: E402
 from assistant.history import HistoryStore, Recorder  # noqa: E402
 from assistant.tools import Tool, ToolRegistry  # noqa: E402
 from assistant.tts import PrintTTS  # noqa: E402
-from tests.conftest import make_response, text_block  # noqa: E402
+from tests.conftest import (make_response, request_text, sent_text,  # noqa: E402
+                            text_block)
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
 
 DAY = 86400
@@ -246,8 +247,8 @@ def test_a_family_member_has_web_tools_only(env, owner):
     names = {t["name"] for t in call.get("tools", [])}
     assert names <= {"web_search", "web_fetch"}
     assert not names & set(OWNER_TOOLS)
-    assert "Kyle" not in call["system"] and "Mom" in call["system"]
-    assert "secret project" not in call["system"]
+    assert "Kyle" not in sent_text(call) and "Mom" in request_text(call)
+    assert "secret project" not in sent_text(call)
     env.memory.retrieve.assert_not_called()  # no Pinecone for family
     session = next(s for s in env.assistant.sessions.values() if s.user == uid)
     assert session.registry.tools == {} and session.chat.memory is None
@@ -327,6 +328,23 @@ def test_family_never_gets_the_owners_google(fake_client, tmp_path):
     assert not any(t in fam.context(fam.members()[0]["id"]).registry.tools
                    for t in ("list_calendar_events", "email_summary"))
     fam.close()
+
+
+def test_only_the_owner_sees_the_api_cost(env, owner):
+    """usage.py: the monthly estimate is the owner's business; a family
+    member's /api/state never has it, even after their own turns."""
+    from assistant import usage
+    from tests.conftest import make_usage
+
+    mom, _ = env.member(owner, language="en")
+    env.fake_client.queue.append(make_response(text_block("Hi."),
+                                               usage=make_usage(1000, 100)))
+    assert mom.post("/api/turn", json={"text": "hello"}).status_code == 200
+    assert usage.month_usd() > 0
+    assert owner.get("/api/state").json()["month_usd"] == usage.month_usd()
+    assert "month_usd" not in mom.get("/api/state").json()
+    session = next(s for s in env.assistant.sessions.values() if s.user)
+    assert (session.chat.fast_model, session.chat.router) == ("claude-haiku-5-5", "auto")
 
 
 def test_page_language_follows_the_signed_in_person(env, owner):

@@ -20,7 +20,8 @@ from assistant.chat import ClaudeChat, has_web_content
 from assistant.tools import Tool, ToolRegistry
 from assistant.voice_session import (ChatBackend, VoiceConversation, fast_wav,
                                      fix_stream_wav, wav_duration)
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import (first_text, make_response, text_block, tool_use_block,
+                            without_context)
 from tests.voice_fakes import (Events, FakeSynth, FakeTranscriber, stream_client,
                                streamed)
 
@@ -49,8 +50,10 @@ def delete_tool(deleted):
 
 
 def user_texts(client):
-    return [m["content"] for call in client.stream_calls for m in call["messages"]
-            if m["role"] == "user" and isinstance(m["content"], str)]
+    from assistant.chat import is_user_turn
+
+    return [first_text(m["content"]) for call in client.stream_calls
+            for m in call["messages"] if is_user_turn(m)]
 
 
 # --- ClaudeChat streaming (ask with on_text/cancel), abort, mark_interrupted -------
@@ -160,7 +163,8 @@ def test_barge_in_cancels_generation_and_truncates_history():
                                 "First sentence here. Second one... [interrupted: "
                                 "Kyle started talking, so the rest of this reply "
                                 "was not said]"}]
-    assert chat.history[-2] == {"role": "user", "content": "tell me a story"}
+    assert without_context(chat.history)[-2] == {"role": "user",
+                                                 "content": "tell me a story"}
 
 
 def test_barge_in_after_reply_finished_still_truncates():
@@ -214,7 +218,7 @@ def test_cancel_before_any_audio_leaves_valid_history(caplog):
         done = events.wait_for("turn_done", turn=1)
     assert done["interrupted"] is True and done["chunks"] == 0
     assert events.of("audio") == [] and s1.closed.is_set()
-    assert chat.history == [
+    assert without_context(chat.history) == [
         {"role": "user", "content": "what's on tomorrow"},
         {"role": "assistant", "content": [{"type": "text", "text":
          "[interrupted: Kyle started talking before I said anything]"}]}]

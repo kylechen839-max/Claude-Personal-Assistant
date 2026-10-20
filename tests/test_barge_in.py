@@ -20,7 +20,7 @@ from assistant.tools import ToolRegistry
 from assistant.tools.calendar import GoogleCalendar
 from assistant.wakeword import (FRAME_LENGTH, BargeInSpeaker, EchoGate,
                                 EnergyVAD, FileSource, Interruption, WakeListener, heard_part)
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_follow_up import build, memory_chat, user_texts
 from tests.test_tools import DENTIST, make_service
 from tests.test_wakeword import ScriptedDetector, tts_clip
@@ -243,7 +243,7 @@ def test_talking_over_a_reply_stops_it_and_is_the_next_request(
     assert p.voice.played[1] >= REPLY - 0.05  # the answer to Friday, in full
     # the interruption was sent to Claude as the next turn, no wake word
     second = fake_client.calls[1]["messages"]
-    assert second[-1]["content"] == "And what about Friday?"
+    assert first_text(second[-1]["content"]) == "And what about Friday?"
     # history keeps only (about) what was heard, marked as interrupted
     assert "[interrupted" in second[1]["content"][-1]["text"]
     assert "Sam at five" not in second[1]["content"][-1]["text"]
