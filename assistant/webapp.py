@@ -1256,7 +1256,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only).
     `max_attachment_bytes` / `max_image_bytes`: per file attached to a
     turn (PDF or text / photo); the whole request stays under
-    `max_upload_bytes`."""
+    `max_upload_bytes`.
     `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner)."""
     from contextlib import asynccontextmanager
 
@@ -1935,8 +1935,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub, **attachment_limits(config))
-                     hub=hub, spotify=spotify)
+                     hub=hub, spotify=spotify, **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
