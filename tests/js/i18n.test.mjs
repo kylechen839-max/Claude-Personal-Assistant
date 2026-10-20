@@ -36,7 +36,8 @@ class El {
   set textContent(v) { this.childNodes = [new Text(v)]; }
 }
 
-function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true } = {}) {
+function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true,
+                      standalone = false } = {}) {
   const google = new El('button', { id: 'google-connect', hidden: '' }, ['Connect Google account']);
   const hint = new El('p', { id: 'google-status', hidden: '' });
   const menu = new El('details', { class: 'menu' }, [google, hint]);
@@ -46,8 +47,14 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   const reply = new El('div', { class: 'msg claude' }, ['Mute']);  // looks like a label
   const loginText = new El('p', {}, ['Enter your access token (', new El('code', {}, ['WEB_TOKEN']),
     ' in the PC\'s ', new El('code', {}, ['.env']), ').\n     You only need to do this once on this phone.']);
+  const guide = new El('section', { id: 'guide', hidden: '' });
+  const guideText = new El('p', { id: 'guide-text' });
+  const guideDone = new El('button', { id: 'guide-done' }, ['Got it']);
+  const loginP = new El('p', { id: 'login-text' }, ['Enter your access token']);
   const body = new El('body', {}, [loginText, menu, input, mic, status, reply]);
-  const byId = { 'google-connect': google, 'google-status': hint, text: input, status };
+  const byId = { 'google-connect': google, 'google-status': hint, text: input, status,
+                 guide, 'guide-text': guideText, 'guide-done': guideDone, 'login-text': loginP };
+  const stored = {};
   const observers = [];
   const fetches = [];
   const asked = [];
@@ -66,6 +73,8 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
     },
     confirm: (message) => { asked.push(message); return true; },
     location: { href: '/' },
+    navigator: { standalone },
+    sessionStorage: { getItem: (k) => stored[k] ?? null, setItem: (k, v) => { stored[k] = v; } },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
       if (url === '/api/google/status') return { ok: gstatus !== null, json: async () => gstatus };
@@ -80,7 +89,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   vm.runInContext(SCRIPT, win);
   const flush = () => new Promise((r) => setImmediate(r));
   const mutate = (records) => observers[0].fn(records);
-  return { win, google, hint, menu, input, mic, status, reply, loginText, observers,
+  return { win, guide, guideText, guideDone, loginP, google, hint, menu, input, mic, status, reply, loginText, observers,
            fetches, asked, flush, mutate };
 }
 
@@ -181,4 +190,38 @@ test('Google button: a failed or non-https answer never navigates', async () => 
     assert.equal(p.google.disabled, false);
     assert.equal(p.hint.textContent, '无法开始 Google 登录。');
   }
+});
+
+test('first-run guide: home screen and Google steps in Chinese, then gone', async () => {
+  const p = page('zh-CN');
+  await p.flush();
+  assert.equal(p.loginP.textContent, '请输入发给你的登录码。这部手机只需要输入一次。');
+  assert.equal(p.guide.hidden, false);
+  assert.match(p.guideText.textContent, /^欢迎！/);
+  assert.match(p.guideText.textContent, /1\. 把这个应用加到主屏幕/);
+  assert.match(p.guideText.textContent, /2\. 连接你的 Google 账户/);
+  assert.match(p.guideText.textContent, /点“高级”/);
+  p.guideDone.listeners.click[0]();
+  assert.equal(p.guide.hidden, true);
+  await p.win.document.getElementById('google-connect');  // refresh again: stays dismissed
+});
+
+test('first-run guide: only the steps still to do; none when all done', async () => {
+  const home = page('zh-CN', { standalone: true });
+  await home.flush();
+  assert.doesNotMatch(home.guideText.textContent, /主屏幕/);
+  assert.match(home.guideText.textContent, /1\. 连接你的 Google 账户/);
+  const done = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true } });
+  await done.flush();
+  assert.equal(done.guide.hidden, true);
+});
+
+test('first-run guide: not signed in yet shows nothing; no data-google never shows it', async () => {
+  const out = page('zh-CN', { gstatus: null });
+  await out.flush();
+  assert.equal(out.guide.hidden, true);
+  const owner = page('en', { google: false });
+  await owner.flush();
+  assert.equal(owner.guide.hidden, true);
+  assert.equal(owner.loginP.textContent, 'Enter your access token');
 });

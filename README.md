@@ -464,6 +464,14 @@ A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对�
 other answer is a no, including sentences that merely contain 是 or 好
 (还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
 
+Her app guides her itself: the sign-in screen asks for "the sign-in code you
+were sent", and after signing in a card lists only the steps still left for
+her (add the app to the home screen; connect Google, including what to tap
+on Google's "unverified app" screen). Each step disappears once done, and
+"知道了" (Got it) hides the card until she next opens the app. Steps before
+she can reach the app (installing Tailscale, accepting your share, opening
+the link) are yours to send her.
+
 One-time setup on the PC (PowerShell, in the project folder):
 
 1. **A Google OAuth client for the web** (your `credentials.json` is a

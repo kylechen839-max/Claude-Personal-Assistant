@@ -348,3 +348,9 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
   background: color-mix(in srgb, currentColor 45%, transparent); transition: width 60ms linear; }
 .mic-meter.hearing span { background: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .mic-meter span { transition: none; } }
+
+/* First-run guide for a family member's own app (i18n.js renderGuide) */
+.guide { margin: .75rem 1rem; padding: .9rem 1rem; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.guide[hidden] { display: none; }
+.guide-text { margin: 0 0 .7rem; white-space: pre-line; line-height: 1.5; }

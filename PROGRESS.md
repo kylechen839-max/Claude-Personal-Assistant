@@ -1608,3 +1608,14 @@ screens are staged by setting the same attributes the JS sets (no mic).
   speech. Service worker cache bumped to v4 so phones pick it up.
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
+
+## Mom's app guides her first steps
+
+- `assistant/web/i18n.js` (only on pages with the "Connect Google" button,
+  i.e. a family member's instance): the sign-in text asks for "the sign-in
+  code you were sent", and after sign-in a card lists only the steps still
+  to do: add to the home screen (hidden once opened from it) and connect
+  Google, with what to tap on Google's "unverified app" screen (hidden once
+  connected). "Got it" hides it for the visit. In Chinese on her page.
+- Tests: `tests/js/i18n.test.mjs` +3 (steps shown, only what's left, never
+  on Kyle's page or before sign-in). Phone cache v6.

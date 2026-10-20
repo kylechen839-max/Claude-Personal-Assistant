@@ -84,6 +84,22 @@
     "Google account connected.": "Google 账户已连接。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
+    // first-run guide (data-google instances: a family member's own app)
+    "Enter the sign-in code you were sent. You only need to do this once on this phone.":
+      "请输入发给你的登录码。这部手机只需要输入一次。",
+    "Welcome! A few one-time steps:": "欢迎！只需要做一次的几个步骤：",
+    "Got it": "知道了",
+    ["Add this app to your home screen: in Safari, tap the Share button (the square " +
+      "with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there."]:
+      "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
+      "再点“添加到主屏幕”，以后从主屏幕打开。",
+    ["Connect your Google account so I can see your calendar and email: tap the gear at " +
+      "the top right, then \"Connect Google account\". If Google says it hasn't verified " +
+      "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
+      "app was made by your family, not a company."]:
+      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”。" +
+      "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
+      "这个应用是你的家人做的，不是公司做的。",
   };
   const PATTERNS = [
     [/^Working: (.+)…$/, "正在处理：$1…"],
@@ -158,19 +174,64 @@
     }
   }
 
+  // --- first-run guide: the steps only she can do on her phone ---
+  const STEP_HOME = "Add this app to your home screen: in Safari, tap the Share button (the " +
+    "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
+  const STEP_GOOGLE = "Connect your Google account so I can see your calendar and email: tap " +
+    "the gear at the top right, then \"Connect Google account\". If Google says it hasn't " +
+    "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
+    "app was made by your family, not a company.";
+
+  function standalone(win) {
+    try {
+      return win.navigator?.standalone === true ||
+        !!(win.matchMedia && win.matchMedia("(display-mode: standalone)").matches);
+    } catch (e) { return false; }
+  }
+
+  function renderGuide(win, doc, st, say) {
+    const box = doc.getElementById("guide");
+    const text = doc.getElementById("guide-text");
+    if (!box || !text) return;
+    let dismissed = false;
+    try { dismissed = win.sessionStorage?.getItem("guideDismissed") === "1"; } catch (e) { /* private */ }
+    const steps = [];
+    if (!standalone(win)) steps.push(STEP_HOME);
+    if (st.enabled && !st.connected) steps.push(STEP_GOOGLE);
+    if (!steps.length || dismissed) { box.hidden = true; return; }
+    text.textContent = [say("Welcome! A few one-time steps:"),
+      ...steps.map((step, i) => `${i + 1}. ${say(step)}`)].join("\n");
+    box.hidden = false;
+  }
+
   // --- "Connect Google account" (google_web.py) ---
   function setupGoogle(win, doc) {
     const btn = doc.getElementById("google-connect");
     const hint = doc.getElementById("google-status");
     if (!btn) return null;
     const say = (text) => (isActive(doc) ? translate(text) : text);
+    const login = doc.getElementById("login-text");
+    if (login) {
+      login.textContent = say("Enter the sign-in code you were sent. You only need to do this once on this phone.");
+    }
+    const done = doc.getElementById("guide-done");
+    if (done) {
+      done.addEventListener("click", () => {
+        try { win.sessionStorage?.setItem("guideDismissed", "1"); } catch (e) { /* private */ }
+        const box = doc.getElementById("guide");
+        if (box) box.hidden = true;
+      });
+    }
 
+    let signedIn = false;
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
                                     { credentials: "same-origin", cache: "no-store" });
         if (!res.ok) return;  // not signed in yet, or the button is off
         const st = await res.json();
+        signedIn = true;
+        renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (hint) {
@@ -200,6 +261,12 @@
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
     refresh();
+    // After signing in the page doesn't reload: look again until it works.
+    let tries = 0;
+    const timer = typeof win.setInterval === "function" ? win.setInterval(() => {
+      if (signedIn || ++tries > 200) { win.clearInterval(timer); return; }
+      refresh();
+    }, 3000) : null;
     return { refresh };
   }
 

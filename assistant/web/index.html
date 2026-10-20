@@ -31,7 +31,7 @@
 <main id="login" class="login" hidden>
   <img class="login-icon" src="/icon.svg" alt="">
   <h1>Hey Claude</h1>
-  <p>Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
+  <p id="login-text">Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
      You only need to do this once on this phone.</p>
   <form id="login-form" autocomplete="off">
     <input id="token" type="password" placeholder="Access token" autocomplete="current-password"
@@ -83,6 +83,10 @@
       </div>
     </details>
   </header>
+  <section id="guide" class="guide" hidden>
+    <p id="guide-text" class="guide-text"></p>
+    <button id="guide-done" type="button">Got it</button>
+  </section>
 
   <section id="log" class="log" aria-live="polite"></section>
   <p id="status" class="status" aria-live="polite"></p>
