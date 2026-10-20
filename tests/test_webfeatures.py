@@ -15,8 +15,9 @@ from PIL import Image  # noqa: E402
 from assistant import webapp, webfeatures  # noqa: E402
 from assistant.config import load_config  # noqa: E402
 from assistant.lecture import ChunkedUploads, LectureNotesDB, LecturePipeline  # noqa: E402
-from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
-from tests.test_lecture import NOTES, FakeWhisper, assignments_mock, fake_windows  # noqa: E402
+from tests.conftest import make_response, text_block  # noqa: E402
+from tests.test_lecture import (NOTES, FakeWhisper, assignments_mock,  # noqa: E402
+                                fake_windows, notes_reply)
 from tests.test_tutor import photo  # noqa: E402
 from tests.test_webapp import login, make_app  # noqa: E402,F401
 
@@ -90,8 +91,7 @@ def test_lecture_upload_with_a_lost_chunk_then_notes(features_app, fake_client):
     assert put(500, b"b" * 500).json() == {"received": 1000}  # repeat: harmless
     assert put(1000, b"c" * 500).json() == {"received": 1500}
     assert put(0, b"x" * 1001).status_code == 413  # chunk cap
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     assert client.post(f"/api/lecture/{uid}/finish",
                        json={"total": 2000}).status_code == 409
     job = client.post(f"/api/lecture/{uid}/finish", json={"total": 1500}).json()

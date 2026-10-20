@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: lecture notes failed on the default model (Claude Sonnet 5.5) with
+  an HTTP 400, because it rejects forced tool calls. Summaries now use
+  structured outputs (a JSON schema), with more room for the model's
+  thinking and a longer timeout for this background request. This update
+  changes `requirements.txt` (anthropic 0.77 or newer), so the auto-updater
+  skips it: stop the assistant and run `python -m assistant --update`.
 - Fixed: asking about "tomorrow" just before midnight could list the day
   after tomorrow. The date is now read once per question, so the system
   prompt and the calendar and Notion tools agree.
