@@ -1746,6 +1746,31 @@ test('chat: one send in flight at a time; nothing sends at load, on a timer or b
   assert.equal(page.pending().length, 0, 'no retry timer');
 });
 
+test('chat: Enter clears the box at once, before claude.ai confirms; a failed send puts the draft back', async () => {
+  const page = await chatPage();
+  const c = chatOf(page);
+  let finish;
+  page.comments.replies.push(() => new Promise((resolve) => { finish = resolve; }));
+  type(c, 'merge it');
+  enter(c);
+  await settle();
+  assert.equal(page.comments.calls.send.length, 1);
+  assert.equal(c.input.value, '', 'the box is empty while the send is still in flight');
+  assert.equal(bubbles(page).at(-1).find((e) => e.className === 'state')[0].textContent, 'sending');
+  finish({ threadId: 'tx', commentId: 'cx' });
+  await settle();
+  assert.equal(c.input.value, '');
+  let fail;
+  page.comments.replies.push(() => new Promise((_, reject) => { fail = reject; }));
+  type(c, 'second');
+  enter(c);
+  await settle();
+  assert.equal(c.input.value, '');
+  fail({ code: 'rate_limited' });
+  await settle();
+  assert.equal(c.input.value, 'second', 'the draft comes back on failure');
+});
+
 const ERRORS = [
   // code, hint, draft kept, box hidden after
   ['consent_required', 'Not sent. Allow commenting when claude.ai asks, then press Send.', true, false],

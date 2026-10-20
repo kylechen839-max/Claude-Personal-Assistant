@@ -2085,6 +2085,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.hintText = "";
     t.hintBad = false;
     t.stick = true;
+    // Clear the box at once: the bubble shows "Sending…" while claude.ai
+    // confirms; a failed send puts the draft back.
+    t.input.value = "";
     renderGrid();
     let hint = "";
     let bad = false;
@@ -2095,11 +2098,11 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       msg.state = "sent";
       msg.sentAt = Date.now();
       unavailableSeen = 0;
-      if (t.input.value === draft) t.input.value = "";
       if (textOut.length < full.length) hint = "Sent, cut to fit 4 KB.";
     } catch (e) {
       const code = e && typeof e.code === "string" ? e.code : "upstream_error";
       msg.state = "not sent";
+      if (!t.input.value) t.input.value = draft;
       if (SEND_STOP.includes(code)) sendOff = true;
       else if (code === "unavailable") {
         unavailableSeen += 1;
