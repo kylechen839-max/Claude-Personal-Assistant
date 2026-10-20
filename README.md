@@ -939,6 +939,42 @@ app restarts on the same `127.0.0.1:8765` (`tailscale serve` is untouched).
 To undo: `.\scripts\install_windows_service.ps1 -Uninstall`, then
 re-create the old task by hand.
 
+## PC hub: chat with the dev team coordinator (desktop only)
+
+The PC hub is a page on this PC's web app where you type to your
+`/build-feature` coordinator session(s) and read their replies, Claude Code
+style (markdown replies, your messages in bubbles, an "In task" / "Idle"
+pill and a sending → queued → working → answered line under your latest
+message). It runs on your Claude plan: messages go out with the Claude
+Code CLI (`claude -p --cloud <id>`), and replies come back through the
+Notion "Hey Claude coordinator inbox" (docs/COORDINATOR_LINK.md).
+
+1. Sign in to Claude Code on the PC once: `claude auth login`.
+2. Put NOTION_TOKEN in `.env` (the integration must reach the page that
+   holds the Assignments database).
+3. In `config.local.toml`:
+
+   ```toml
+   [devteam]
+   hub = true
+   hub_sessions = ["session_..."]   # one window per coordinator, at most 8
+   poll_seconds = 4                 # read Notion at most this often
+   hub_state_file = "data/devhub.json"
+   ```
+
+4. Start the web app (`python -m assistant --mode web`) and open
+   http://127.0.0.1:8765/devteam, or double-click
+   `tools/agent-dashboard/desktop/open-hub.cmd` (Windows) or
+   `open-hub.command` (Mac) for its own app window. Sign in with the web
+   access token once.
+
+The hub only exists when the web app listens on 127.0.0.1, and every hub
+page and route answers 404 to a request that came through a proxy
+(`tailscale serve` included), so it is never on your phone or the cloud
+server. Each window has a – button to hide it (the toolbar's Hidden menu
+brings it back; the choice stays in this browser) and Clear, which deletes
+that window's transcript from `data/devhub.json`.
+
 ## Preflight: check everything in one pass
 
 ```powershell

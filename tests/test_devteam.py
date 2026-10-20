@@ -11,58 +11,7 @@ from assistant.config import DEFAULTS
 from assistant.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
                                session_id)
 from assistant.tools import ToolRegistry
-
-SID = "session_01DiUkqY2kzbUbDmW1w96rfi"
-
-
-class FakeRun:
-    def __init__(self, stdout="", stderr="", returncode=0, exc=None):
-        self.calls = []
-        self.result = SimpleNamespace(stdout=stdout, stderr=stderr,
-                                      returncode=returncode)
-        self.exc = exc
-
-    def __call__(self, args, **kw):
-        self.calls.append((args, kw))
-        if self.exc:
-            raise self.exc
-        return self.result
-
-
-def ok_run():
-    return FakeRun(stdout=json.dumps({"ok": True, "session_id": SID,
-                                      "url": f"https://claude.ai/code/{SID}"}))
-
-
-def row(rid, reply, status="answered", trashed=False):
-    return {"in_trash": trashed, "properties": {
-        "Reply ID": {"title": [{"plain_text": rid}]},
-        "Reply": {"rich_text": [{"plain_text": reply}]},
-        "Status": {"select": {"name": status}},
-        "Run": {"url": None}}}
-
-
-class FakeNotion:
-    def __init__(self, rows=(), existing=True):
-        self.rows = list(rows)
-        self.queries = []
-        self.created = []
-        self.existing = existing
-        self.data_sources = SimpleNamespace(query=self._query)
-        self.databases = SimpleNamespace(create=self._create)
-
-    def search(self, **kw):
-        if not self.existing:
-            return {"results": []}
-        return {"results": [{"id": "ds-inbox", "title": [{"plain_text": INBOX_TITLE}]}]}
-
-    def _query(self, **kw):
-        self.queries.append(kw)
-        return {"results": self.rows}
-
-    def _create(self, **kw):
-        self.created.append(kw)
-        return {"id": "db-new", "data_sources": [{"id": "ds-new"}]}
+from tests.devteam_fakes import SID, FakeNotion, FakeRun, ok_run, row
 
 
 def link(tmp_path, run=None, notion=None, **kw):
@@ -218,3 +167,72 @@ def test_prompt_mentions_dev_team(tmp_path):
     registry = ToolRegistry()
     registry.register(*link(tmp_path).tools())
     assert "message_dev_team" in ClaudeChat(client=object(), tools=registry).build_system()
+
+
+def test_hub_source_sets_header_prefix_and_cap(tmp_path):
+    run = ok_run()
+    team = link(tmp_path, run=run)
+    voice = team.send("x" * 5000)
+    assert voice["reply_id"].startswith("hc-")
+    assert run.calls[0][1]["input"].startswith(f"[Hey Claude voice | reply id {voice['reply_id']}]")
+    assert "x" * 4000 + "\n" in run.calls[0][1]["input"]
+    assert "x" * 4001 not in run.calls[0][1]["input"]
+    hub = team.send("y" * 13000, source="hub", session="cse_other1")
+    assert hub["reply_id"].startswith("hub-")
+    args, kw = run.calls[1]
+    assert args[3] == "cse_other1"  # the hub's window, not coordinator_session
+    assert kw["input"].startswith(f"[Hey Claude hub | reply id {hub['reply_id']}]")
+    assert "y" * 12000 + "\n" in kw["input"] and "y" * 12001 not in kw["input"]
+
+
+def test_replies_max_chars(tmp_path):
+    notion = FakeNotion()
+    team = link(tmp_path, notion=notion)
+    a = team.send("x")["reply_id"]
+    b = team.send("y")["reply_id"]
+    notion.rows = [row(a, "r" * 5000)]
+    assert len(team.replies()[0]["reply"]) == 1200  # voice: unchanged
+    notion.rows = [row(b, "s" * 15000)]
+    assert len(team.replies(max_chars=12000)[0]["reply"]) == 12000
+
+
+def test_presence_reads_the_newest_row(tmp_path):
+    notion = FakeNotion()
+    team = link(tmp_path, notion=notion)
+    assert team.presence() == {"status": "", "text": "", "at": ""}
+    tail = SID.split("_", 1)[1]
+    notion.rows = [row(f"presence-{tail}", "Running the judge " * 10, status="working",
+                       edited="2026-10-20T15:31:00.000Z"),
+                   row(f"presence-{tail}", "older", status="idle")]
+    got = team.presence()
+    assert got["status"] == "working" and got["at"] == "2026-10-20T15:31:00.000Z"
+    assert len(got["text"]) == 80
+    q = notion.queries[-1]
+    assert q["filter"] == {"or": [{"property": "Reply ID", "title": {"equals": f"presence-{tail}"}}]}
+    assert q["sorts"][0]["direction"] == "descending"
+    assert team.pending() == []  # reading presence never adds or pops a reply
+
+
+def test_inbox_has_the_idle_status(tmp_path):
+    notion = FakeNotion(existing=False)
+    team = link(tmp_path, notion=notion,
+                assignments=SimpleNamespace(parent_page_id=lambda: "p"))
+    team.presence()
+    options = notion.created[0]["initial_data_source"]["properties"]["Status"]["select"]["options"]
+    assert [o["name"] for o in options] == ["answered", "working", "blocked", "idle"]
+
+
+def test_state_is_written_privately_and_atomically(tmp_path, monkeypatch):
+    import tempfile
+
+    made = []
+    real = tempfile.mkstemp
+    monkeypatch.setattr(tempfile, "mkstemp", lambda **kw: made.append(kw) or real(**kw))
+    team = link(tmp_path)
+    team.send("x")
+    assert made and made[0]["dir"] == tmp_path  # a unique temp file next to it
+    assert list(tmp_path.iterdir()) == [tmp_path / "devteam.json"]
+    import os
+    import sys
+    if sys.platform != "win32":
+        assert os.stat(tmp_path / "devteam.json").st_mode & 0o777 == 0o600

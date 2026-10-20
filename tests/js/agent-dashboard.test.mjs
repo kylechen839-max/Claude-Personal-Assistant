@@ -8,8 +8,8 @@
 // what it decides and renders: silent/running/needs at the time limits,
 // safe links, row text that stays text, each db error code -> stop, back
 // off or retry, the Grid's flat window workspace (auto-tiling, spans,
-// maximize, filter, run colours, the phone's slim chrome, drag, resize,
-// keyboard, storage), the coordinator chat (send, errors, the mirrored
+// maximize, hide and restore, filter, run colours, drag, resize,
+// keyboard, storage; desktop only), the coordinator chat (send, errors, the mirrored
 // transcript) and the markdown renderer.
 
 import test from 'node:test';
@@ -144,12 +144,29 @@ function fakeComments({ can = 'available' } = {}) {
   return { ns, calls, replies, canReplies, state };
 }
 
+// The downloads namespace: save() records each request and answers from
+// replies (default: saved).
+function fakeDownloads() {
+  const calls = { save: [] };
+  const replies = [];
+  const ns = {
+    save(req) {
+      calls.save.push(req);
+      const next = replies.shift();
+      return next ? next(req) : Promise.resolve({ status: 'saved' });
+    },
+  };
+  return { ns, calls, replies };
+}
+
 const PAGE_IDS = {
   summary: 'p', conn: 'p', runs: 'ul', empty: 'p',
   main: 'main', 'view-nav': 'nav', 'runs-view': 'section', 'grid-view': 'section', 'view-runs': 'button', 'view-grid': 'button',
   'grid-head': 'header', 'grid-summary': 'p', 'grid-toolbar': 'div', 'grid-filter-active': 'button', 'grid-filter-all': 'button',
   'grid-count': 'p', 'grid-conn': 'p', coords: 'div', 'grid-hidden': 'p', 'grid-reset': 'button', 'grid-live': 'p',
-  'grid-foot': 'footer',
+  'grid-foot': 'footer', 'grid-tray': 'details', 'grid-tray-sum': 'summary', 'grid-tray-list': 'div',
+  'grid-showall': 'button', getapp: 'div', 'getapp-btn': 'button', 'getapp-menu': 'div', 'getapp-hint': 'p',
+  'getapp-dash-win': 'button', 'getapp-dash-mac': 'button', 'getapp-hub-win': 'button', 'getapp-hub-mac': 'button',
 };
 
 function memStorage(initial = {}) {
@@ -163,11 +180,13 @@ function memStorage(initial = {}) {
 }
 
 async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComments(), storage = undefined,
-  hash = undefined, narrow = undefined, user = 'u_test', userNs = true } = {}) {
+  hash = undefined, user = 'u_test', userNs = true, downloads = fakeDownloads() } = {}) {
   const ids = {};
   for (const [id, tag] of Object.entries(PAGE_IDS)) ids[id] = new FakeEl(tag);
   ids['grid-view'].hidden = true;
   ids['grid-hidden'].hidden = true;
+  ids['grid-tray'].hidden = true;
+  for (const id of ['getapp', 'getapp-menu', 'getapp-hint']) ids[id].hidden = true;
   ids['grid-filter-active'].setAttribute('aria-pressed', 'true');
   ids['grid-filter-all'].setAttribute('aria-pressed', 'false');
   const timers = [];
@@ -214,13 +233,15 @@ async function loadPage({ db = fakeDb(), withClaude = true, comments = fakeComme
         if (cap === 'db') return db.db;
         if (cap === 'comments') return comments && comments.ns;
         if (cap === 'user') return userNs ? { id: async () => { userCalls.id += 1; return user; } } : null;
+        if (cap === 'downloads') return downloads && downloads.ns;
         return null;
       },
     };
   }
   if (storage !== undefined) sandbox.localStorage = storage;
   if (hash !== undefined) sandbox.location = { hash };
-  if (narrow !== undefined) sandbox.matchMedia = () => ({ matches: narrow, addEventListener: () => {} });
+  // A phone-sized media query: the page is desktop-only and must not ask.
+  sandbox.matchMedia = () => { throw new Error('the dashboard is desktop-only; no media queries'); };
   sandbox.window = sandbox;
   const ctx = vm.createContext(sandbox);
   const setNow = (t) => vm.runInContext(`Date.now = () => ${t};`, ctx);
@@ -528,7 +549,6 @@ test('Runs is the default: only db is looked up, only the runs query, no Chat bu
   assert.equal(page.comments.calls.can, 0);
   assert.equal(page.comments.calls.send.length, 0);
   assert.equal(page.pending().length, 0);
-  assert.equal('compact' in page.ids.main.dataset, false);
   // Runs renders as before; a card keeps its Session and PR links only.
   runSnap(page, [runRow({ pr_url: `${PR}7` })]);
   assert.equal(page.ids.summary.textContent, 'Nothing needs you · 1 running');
@@ -655,7 +675,7 @@ test('grouping: pieces and the plain row share a window; agents follow it; unmat
   assert.deepEqual(visibleLinks(tiles[0]).map((a) => a.href), [SESSION]);
   // Counted: only the live agent whose run has no row at all ('other-run'
   // has a row, just no window).
-  assert.equal(page.ids['grid-hidden'].textContent, '1 agent hidden');
+  assert.equal(page.ids['grid-hidden'].textContent, '1 agent without a run');
   assert.equal(page.ids['grid-hidden'].hidden, false);
   assert.equal(page.ids['grid-summary'].textContent, '1 active run · 2 agents running');
   assert.equal(page.ids['grid-count'].textContent, '5 windows');
@@ -855,17 +875,18 @@ test('agents resource_exhausted backs off with doubling; Runs view cancels a pen
 
 // ---- the workspace: flat windows, auto-tiling, spans, run colours ----
 
-test('tileCols: about square, at most 6, clamped by width; one column on a phone', async () => {
+test('tileCols: about square, at most 6, clamped by width', async () => {
   const { api } = await loadPage();
-  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => api.tileCols(n, 0, false)), [1, 2, 2, 2, 3, 3, 3, 3, 3, 4]);
-  assert.equal(api.tileCols(10, 700, false), 2, '(700 + 10) / (260 + 10) = 2 columns fit');
-  assert.equal(api.tileCols(10, 1400, false), 4);
-  assert.equal(api.tileCols(50, 0, false), 6, 'never more than 6');
-  assert.equal(api.tileCols(50, 3000, false), 6);
-  assert.equal(api.tileCols(10, 100, false), 1, 'a very narrow frame still gets one column');
-  assert.equal(api.tileCols(10, NaN, false), 4, 'an unreadable width means no width cap');
-  assert.equal(api.tileCols(0, 0, false), 1);
-  assert.equal(api.tileCols(10, 1400, true), 1, 'narrow: one column');
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => api.tileCols(n, 0)), [1, 2, 2, 2, 3, 3, 3, 3, 3, 4]);
+  assert.equal(api.tileCols(10, 700), 2, '(700 + 10) / (260 + 10) = 2 columns fit');
+  assert.equal(api.tileCols(10, 1400), 4);
+  assert.equal(api.tileCols(50, 0), 6, 'never more than 6');
+  assert.equal(api.tileCols(50, 3000), 6);
+  assert.equal(api.tileCols(10, 100), 1, 'a very narrow frame still gets one column');
+  assert.equal(api.tileCols(10, 300), 1, 'the width cap: (300 + 10) / (260 + 10) = 1');
+  assert.equal(api.tileCols(10, NaN), 4, 'an unreadable width means no width cap');
+  assert.equal(api.tileCols(0, 0), 1);
+  assert.equal(api.tileCols.length, 2, 'no phone argument');
 });
 
 test('the workspace is #coords itself: flat windows in order, columns set, re-tiled on resize', async () => {
@@ -1064,44 +1085,26 @@ test('filter: Active only by default; All recent shows every recent session; sto
   assert.equal(again.api.FILTER_KEY, 'agentDashboard.filter');
 });
 
-// ---- the phone: one slim row, and nothing while a window is maximized ----
+// ---- desktop only: no phone layout ----
 
-test('phone: Grid collapses the header and toolbar into one row; a maximized window hides it; Restore brings it back', async () => {
-  const page = await layoutPage({ narrow: true });
+test('desktop only: no compact or bare chrome, the header, toolbar and footer stay while maximized', async () => {
+  const page = await layoutPage();
   const { main } = page.ids;
-  assert.ok('compact' in main.dataset);
-  assert.equal('bare' in main.dataset, false);
-  assert.equal(page.ids['grid-head'].hidden, true, 'no page header');
-  assert.equal(page.ids['grid-foot'].hidden, true, 'no footer text');
-  assert.equal(page.ids['view-nav'].hidden, false, 'the view switch stays');
-  assert.equal(page.ids['grid-toolbar'].hidden, false, 'the filter and count stay');
-  assert.equal(page.ids['grid-reset'].hidden, true);
-  assert.equal(page.ids['grid-count'].textContent, '5 windows');
-  assert.equal(page.ids.coords.dataset.cols, '1');
-  const coord = panels(page)[0];
-  assert.deepEqual([coord.dataset.cols, coord.dataset.rows], ['1', '1']);
-  byClass(coord, 'max')[0].click();
-  assert.ok('bare' in main.dataset);
-  assert.equal(page.ids['view-nav'].hidden, true);
-  assert.equal(page.ids['grid-toolbar'].hidden, true);
-  const restore = byClass(coord, 'restore')[0];
-  assert.equal(restore.hidden, false, 'a Restore button, since a phone has no Esc');
-  assert.equal(restore.textContent, 'Restore');
-  restore.click();
-  assert.equal('bare' in main.dataset, false);
-  assert.equal(page.ids['view-nav'].hidden, false);
-  assert.equal(page.ids['grid-toolbar'].hidden, false);
-  assert.equal(restore.hidden, true);
-  // Runs has its usual chrome.
-  page.ids['view-runs'].click();
   assert.equal('compact' in main.dataset, false);
-  assert.equal(page.ids['view-nav'].hidden, false);
-  // A desktop never gets the compact row.
-  const wide = await layoutPage({ narrow: false });
-  assert.equal('compact' in wide.ids.main.dataset, false);
-  assert.equal(wide.ids['grid-head'].hidden, false);
-  byClass(panels(wide)[0], 'max')[0].click();
-  assert.equal(wide.ids['view-nav'].hidden, false, 'desktop keeps its toolbar while maximized');
+  assert.equal(page.ids['grid-head'].hidden, false);
+  assert.equal(page.ids['grid-foot'].hidden, false);
+  assert.equal(page.ids['grid-reset'].hidden, false);
+  assert.equal(page.ids['grid-count'].textContent, '5 windows');
+  const coord = panels(page)[0];
+  byClass(coord, 'max')[0].click();
+  assert.equal('bare' in main.dataset, false);
+  assert.equal(page.ids['view-nav'].hidden, false, 'the toolbar stays while maximized');
+  assert.equal(page.ids['grid-toolbar'].hidden, false);
+  const restore = byClass(coord, 'restore')[0];
+  assert.equal(restore.hidden, false);
+  restore.click();
+  assert.equal(restore.hidden, true);
+  assert.doesNotMatch(PAGE, /data-compact|data-bare|safe-area-inset|matchMedia|max-width:600px|pointer:coarse/);
 });
 
 // ---- window layout: drag, resize, keyboard, storage ----
@@ -1292,30 +1295,6 @@ test('a throwing localStorage still renders, and moves still work in memory', as
   assert.equal(page.ids['grid-filter-all'].getAttribute('aria-pressed'), 'true', 'the filter works in memory');
   page.ids['grid-reset'].click();
   assert.deepEqual(order(page), DEFAULT);
-});
-
-test('narrow mode (phone or coarse pointer): no handles, no drag, no keyboard moves', async () => {
-  const storage = memStorage();
-  const page = await layoutPage({ storage, narrow: true });
-  const a3 = tile(page, 'agent-a3');
-  assert.equal(gripOf(a3).hidden, true);
-  assert.equal(resizeOf(a3).hidden, true);
-  assert.equal(page.ids['grid-reset'].hidden, true);
-  const g = gripOf(a3);
-  g.dispatch('pointerdown', { button: 0, pointerId: 1, clientX: 345, clientY: 40 });
-  page.win('pointerup', { pointerId: 1, clientX: 145, clientY: 40 });
-  g.dispatch('keydown', { key: 'Enter' });
-  g.dispatch('keydown', { key: 'ArrowLeft' });
-  resizeOf(a3).dispatch('keydown', { key: 'ArrowRight', shiftKey: true });
-  assert.deepEqual(order(page), DEFAULT);
-  assert.equal(a3.dataset.cols, '1');
-  assert.equal(storage.store[LAYOUT], undefined);
-  // Maximize still works on the phone.
-  byClass(a3, 'max')[0].click();
-  assert.ok('max' in a3.dataset);
-  // A wide screen with a fine pointer keeps the handles.
-  const wide = await layoutPage({ narrow: false });
-  assert.equal(gripOf(tile(wide, 'agent-a3')).hidden, false);
 });
 
 test('Reset layout clears the saved layout and restores the default order and sizes', async () => {
@@ -1511,7 +1490,7 @@ test('a second run in the same master session shows only its own time, lines and
   assert.ok(byClass(panels(page)[0], 'when').some((e) => e.textContent === 'elapsed 10 min'));
 });
 
-test('"N agents hidden" counts only live agents whose run has no row', async () => {
+test('"N agents without a run" counts only live agents whose run has no row', async () => {
   const page = await gridPage();
   runSnap(page, [runRow(), runRow({ _docId: 'old-run', feature: 'Old', session_url: undefined, phase: 'done',
     started_at: iso(NOW - 30 * DAY), updated_at: iso(NOW - 29 * DAY) })]);
@@ -1526,7 +1505,7 @@ test('"N agents hidden" counts only live agents whose run has no row', async () 
   agentSnap(page, list);
   assert.equal(page.ids['grid-hidden'].hidden, true, 'old runs and a retired orphan are not counted');
   agentSnap(page, [...list, agent('ghost.builder.r1', { run_id: 'ghost' }), agent('noid.builder.r1', { run_id: 7 })]);
-  assert.equal(page.ids['grid-hidden'].textContent, '2 agents hidden');
+  assert.equal(page.ids['grid-hidden'].textContent, '2 agents without a run');
 });
 
 // ==== the coordinator chat ====
@@ -2445,4 +2424,254 @@ test('presence: the pill shows in task, maybe, idle or unknown, with no message 
   // No user id: unknown.
   const none = await chatPage({ user: null });
   assert.deepEqual(pill(none).slice(0, 2), ['unknown', 'Status unknown']);
+});
+
+// ---- hidden windows: layout h: 1, per viewer, never in the db ----
+
+const hideOf = (t) => byClass(t, 'hide')[0];
+const trayItems = (page) => page.ids['grid-tray-list'].children;
+const dbWrites = (page) => Object.keys(page.db.calls.queries).filter((q) => /set|update|delete|add/i.test(q));
+
+test('hide: the window leaves the workspace and the count, the tray says Hidden (1), and it stays hidden after a reload', async () => {
+  const storage = memStorage();
+  const page = await layoutPage({ storage });
+  const a2 = tile(page, 'agent-a2');
+  const hide = hideOf(a2);
+  assert.equal(hide.textContent, '–');
+  assert.equal(hide.getAttribute('aria-label'), 'Hide builder');
+  hide.click();
+  assert.deepEqual(order(page), [C0, 'agent-a1', 'agent-a3', 'agent-a4']);
+  assert.equal(page.ids['grid-count'].textContent, '4 windows · 1 hidden');
+  assert.equal(page.ids['grid-tray'].hidden, false);
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (1)');
+  assert.equal(trayItems(page).length, 1);
+  assert.match(trayItems(page)[0].textContent, /builder/);
+  assert.equal(trayItems(page)[0].textContent.endsWith('running'), true, 'a running marker');
+  assert.deepEqual({ ...saved(storage).tiles.a2 }, { h: 1 });
+  assert.equal(saved(storage).v, 2);
+  assert.match(page.ids['grid-live'].textContent, /^Hid builder/);
+  const again = await layoutPage({ storage });
+  assert.deepEqual(order(again), [C0, 'agent-a1', 'agent-a3', 'agent-a4']);
+  assert.equal(again.ids['grid-tray-sum'].textContent, 'Hidden (1)');
+  assert.deepEqual([...again.api.hiddenIds()], ['a2']);
+  assert.deepEqual(dbWrites(page), []);
+  for (const k of Object.keys(storage.store)) {
+    assert.ok(['agent-dashboard-view', LAYOUT, 'agentDashboard.filter'].includes(k), `only the view, layout and filter keys: ${k}`);
+  }
+});
+
+test('restore: back in its saved place and size, h removed, the tray goes away', async () => {
+  const storage = memStorage();
+  const page = await layoutPage({ storage });
+  // Move a3 first and make it wide, then hide and restore it.
+  const g = gripOf(tile(page, 'agent-a3'));
+  g.dispatch('keydown', { key: 'Enter' });
+  g.dispatch('keydown', { key: 'ArrowLeft' });
+  g.dispatch('keydown', { key: 'Enter' });
+  resizeOf(tile(page, 'agent-a3')).dispatch('keydown', { key: 'ArrowRight', shiftKey: true });
+  const before = order(page);
+  assert.deepEqual(before, [C0, 'agent-a1', 'agent-a3', 'agent-a2', 'agent-a4']);
+  hideOf(tile(page, 'agent-a3')).click();
+  assert.equal(tile(page, 'agent-a3'), undefined);
+  trayItems(page)[0].click();
+  assert.deepEqual(order(page), before);
+  assert.equal(tile(page, 'agent-a3').dataset.cols, '2');
+  assert.deepEqual({ ...saved(storage).tiles.a3 }, { o: 2, c: 2, r: 1 });
+  assert.equal(page.ids['grid-tray'].hidden, true);
+  assert.equal(page.ids['grid-count'].textContent, '5 windows');
+  assert.equal(page.ids['grid-live'].textContent, 'Restored builder.');
+  assert.ok(byClass(tile(page, 'agent-a3'), 'max')[0].focused > 0, 'focus goes to the window');
+});
+
+test('Show all clears every h; Reset layout clears them too and says so', async () => {
+  const storage = memStorage();
+  const page = await layoutPage({ storage });
+  hideOf(tile(page, 'agent-a1')).click();
+  hideOf(tile(page, 'agent-a4')).click();
+  assert.equal(page.ids['grid-tray-sum'].textContent, 'Hidden (2)');
+  page.ids['grid-showall'].click();
+  assert.deepEqual(order(page), DEFAULT);
+  assert.deepEqual({ ...saved(storage).tiles }, {});
+  assert.equal(page.ids['grid-live'].textContent, 'Showing 2 hidden windows again.');
+  hideOf(tile(page, 'agent-a1')).click();
+  page.ids['grid-reset'].click();
+  assert.deepEqual(order(page), DEFAULT);
+  assert.equal(storage.store[LAYOUT], undefined);
+  assert.equal(page.ids['grid-live'].textContent, 'Layout reset; hidden windows are shown again.');
+});
+
+test('a hidden coordinator keeps its draft and its chat; the tray shows question', async () => {
+  const storage = memStorage();
+  const page = await chatPage({ storage });
+  const c = chatOf(page);
+  chatSnap(page, [mirror('u1', { text: 'Tests green' })]);
+  type(c, 'half-typed reply');
+  hideOf(c.panel).click();
+  assert.equal(panels(page).length, 0);
+  // A new mirrored question arrives while hidden: the chat stays subscribed.
+  chatSnap(page, [mirror('q1', { kind: 'question', text: 'Merge now?', at: iso(NOW) }), mirror('u1', { text: 'Tests green' })]);
+  assert.equal(trayItems(page)[0].textContent.endsWith('question'), true);
+  trayItems(page)[0].click();
+  const back = chatOf(page);
+  assert.equal(back.panel, c.panel, 'the same window, not a rebuilt one');
+  assert.equal(back.input.value, 'half-typed reply');
+  assert.deepEqual(bubbles(page).map(bubbleText), ['Tests green', 'Merge now?']);
+  assert.ok(back.input.focused > 0, 'focus goes to the chat box');
+  assert.equal(page.comments.calls.send.length, 0);
+});
+
+test('hiding the maximized window un-maximizes; hiding mid-drag cancels the drag', async () => {
+  const storage = memStorage();
+  const page = await layoutPage({ storage });
+  const a1 = tile(page, 'agent-a1');
+  byClass(a1, 'max')[0].click();
+  assert.ok('max' in page.ids.coords.dataset);
+  hideOf(a1).click();
+  assert.equal('max' in page.ids.coords.dataset, false);
+  assert.equal(tile(page, 'agent-a2').dataset.max, undefined);
+  const a3 = tile(page, 'agent-a3');
+  gripOf(a3).dispatch('pointerdown', { button: 0, pointerId: 7, clientX: 345, clientY: 40 });
+  assert.ok('dragging' in a3.dataset);
+  hideOf(a3).click();
+  assert.equal('dragging' in a3.dataset, false);
+  assert.equal((page.winListeners.pointermove ?? []).length, 0, 'the drag listeners are gone');
+  page.win('pointerup', { pointerId: 7, clientX: 45, clientY: 40 });
+  assert.deepEqual(order(page), [C0, 'agent-a2', 'agent-a4']);
+});
+
+test('hidden flags: 250 entries load capped at 200; a gone id is pruned on save; junk h is ignored', async () => {
+  const tiles = {};
+  for (let i = 0; i < 250; i += 1) tiles[`x${i}`] = { h: 1 };
+  tiles.a1 = { h: 1 };
+  const big = await layoutPage({ storage: memStorage({ [LAYOUT]: JSON.stringify({ v: 2, tiles }) }) });
+  assert.deepEqual(order(big), DEFAULT, 'a1 is past the 200 cap, so it is not hidden');
+  const storage = memStorage({ [LAYOUT]: JSON.stringify({ v: 2, tiles: {
+    gone: { h: 1 }, a1: { h: true }, a2: { h: '1' }, a3: { h: 2 }, a4: { h: 1 } } }) });
+  const page = await layoutPage({ storage });
+  assert.deepEqual(order(page), [C0, 'agent-a1', 'agent-a2', 'agent-a3']);
+  hideOf(tile(page, 'agent-a1')).click();
+  assert.deepEqual({ ...saved(storage).tiles }, { a1: { h: 1 }, a4: { h: 1 } });
+  assert.deepEqual(dbWrites(page), []);
+});
+
+// ---- "Get desktop app": the launchers, saved through downloads ----
+
+const DESKTOP = (name) => readFileSync(new URL(`../../tools/agent-dashboard/desktop/${name}`, import.meta.url), 'latin1');
+
+// The one stored file in a zip: [name, text, unix mode or 0].
+function unzipOne(bytes) {
+  const b = Buffer.from(bytes);
+  assert.equal(b.readUInt32LE(0), 0x04034b50, 'a local file header');
+  assert.equal(b.readUInt16LE(8), 0, 'stored, not compressed');
+  const size = b.readUInt32LE(18);
+  const nameLen = b.readUInt16LE(26);
+  const name = b.subarray(30, 30 + nameLen).toString('latin1');
+  const text = b.subarray(30 + nameLen, 30 + nameLen + size).toString('latin1');
+  const end = b.length - 22;
+  assert.equal(b.readUInt32LE(end), 0x06054b50, 'an end record');
+  assert.equal(b.readUInt16LE(end + 10), 1, 'exactly one file');
+  const cd = b.readUInt32LE(end + 16);
+  assert.equal(b.readUInt32LE(cd), 0x02014b50);
+  const crc = b.readUInt32LE(14);
+  assert.equal(b.readUInt32LE(cd + 16), crc);
+  const mode = b.readUInt32LE(cd + 38) >>> 16;
+  // The CRC is right (zlib's crc32, when this Node has it).
+  return [name, text, mode, crc];
+}
+
+test('get desktop app: nothing is looked up or saved at load; a choice saves exactly one launcher', async () => {
+  const downloads = fakeDownloads();
+  const page = await loadPage({ downloads });
+  assert.equal(page.ids.getapp.hidden, false, 'the button shows inside claude.ai');
+  assert.equal(page.uses.includes('downloads'), false, 'no lookup at load');
+  assert.equal(downloads.calls.save.length, 0);
+  page.ids['getapp-btn'].click();
+  assert.equal(page.ids['getapp-menu'].hidden, false);
+  assert.equal(page.ids['getapp-btn'].getAttribute('aria-expanded'), 'true');
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(downloads.calls.save.length, 1);
+  const req = downloads.calls.save[0];
+  assert.equal(req.filename, 'open-dashboard-windows.zip');
+  const [name, text, mode] = unzipOne(req.data);
+  assert.equal(name, 'open-dashboard.cmd');
+  assert.equal(text, DESKTOP('open-dashboard.cmd'), 'the same text as desktop/, CRLF');
+  assert.ok(text.includes('\r\n') && !text.replace(/\r\n/g, '').includes('\n'));
+  assert.equal(mode, 0);
+  assert.equal(page.ids['getapp-menu'].hidden, true);
+  assert.match(page.ids['getapp-hint'].textContent, /^Saved\. Unzip it and double-click open-dashboard\.cmd to open the agent dashboard in its own window\.$/);
+  // The Mac launcher: LF and executable; the hint says right-click, Open.
+  page.ids['getapp-btn'].click();
+  page.ids['getapp-dash-mac'].click();
+  await settle();
+  const mac = downloads.calls.save[1];
+  assert.equal(mac.filename, 'open-dashboard-mac.zip');
+  const [mname, mtext, mmode] = unzipOne(mac.data);
+  assert.equal(mname, 'open-dashboard.command');
+  assert.equal(mtext, DESKTOP('open-dashboard.command'));
+  assert.ok(!mtext.includes('\r'));
+  assert.equal(mmode, 0o100755);
+  assert.match(page.ids['getapp-hint'].textContent, /right-click it and choose Open/);
+  // The PC hub, from the same chooser and the same generator.
+  page.ids['getapp-hub-win'].click();
+  page.ids['getapp-hub-win'].click();  // a second click while the first save is open does nothing
+  await settle();
+  page.ids['getapp-hub-mac'].click();
+  await settle();
+  assert.deepEqual(downloads.calls.save.map((r) => r.filename).slice(2), ['open-hub-windows.zip', 'open-hub-mac.zip']);
+  for (const r of downloads.calls.save.slice(2)) {
+    const [n, t] = unzipOne(r.data);
+    assert.equal(t, DESKTOP(n));
+    assert.match(t, /http:\/\/127\.0\.0\.1:8765\/devteam/);
+  }
+  assert.equal(page.uses.filter((u) => u === 'downloads').length, 1, 'looked up once');
+});
+
+test('get desktop app: CRC-32 of the stored launcher is correct', async () => {
+  const downloads = fakeDownloads();
+  const page = await loadPage({ downloads });
+  page.ids['getapp-dash-mac'].click();
+  await settle();
+  const [, text, , crc] = unzipOne(downloads.calls.save[0].data);
+  const zlib = await import('node:zlib');
+  if (typeof zlib.crc32 === 'function') assert.equal(crc, zlib.crc32(Buffer.from(text, 'latin1')));
+  else {
+    let c = 0xffffffff;
+    for (const b of Buffer.from(text, 'latin1')) { c ^= b; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; }
+    assert.equal(crc, (c ^ 0xffffffff) >>> 0);
+  }
+});
+
+test('get desktop app: no downloads capability hides the button; outside claude.ai there is none', async () => {
+  const page = await loadPage({ downloads: null });
+  page.ids['getapp-btn'].click();
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(page.ids.getapp.hidden, true);
+  const outside = await loadPage({ withClaude: false });
+  assert.equal(outside.ids.getapp.hidden, true);
+});
+
+test('get desktop app: a declined save is quiet; other rejections get a calm line; unavailable hides it', async () => {
+  const downloads = fakeDownloads();
+  const page = await loadPage({ downloads });
+  const reject = (code) => () => Promise.reject(Object.assign(new Error(code), { code }));
+  downloads.replies.push(reject('declined'));
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(page.ids['getapp-hint'].hidden, true, 'declining is not an error');
+  downloads.replies.push(reject('rate_limited'));
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(page.ids['getapp-hint'].textContent, 'Another save is still open. Try again in a moment.');
+  downloads.replies.push(reject('something_new'));
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(page.ids['getapp-hint'].textContent, "Couldn't save it. Try again.");
+  assert.equal(page.ids.getapp.hidden, false);
+  downloads.replies.push(reject('unavailable'));
+  page.ids['getapp-dash-win'].click();
+  await settle();
+  assert.equal(page.ids.getapp.hidden, true);
+  assert.equal(downloads.calls.save.length, 4, 'never retried by itself');
 });

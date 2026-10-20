@@ -176,7 +176,13 @@ DEFAULTS: dict = {
                 "claude_command": "claude",
                 "repo_dir": "",             # where to run the CLI; "" = here
                 "timeout": 60,
-                "state_file": "data/devteam.json"},
+                "state_file": "data/devteam.json",
+                # The PC hub: chat with the coordinator at /devteam on this
+                # PC's web app (loopback only; docs/COORDINATOR_LINK.md).
+                "hub": False,
+                "hub_sessions": [],         # coordinator session ids; [] = coordinator_session
+                "poll_seconds": 4,          # how often the hub reads Notion, at most
+                "hub_state_file": "data/devhub.json"},
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }

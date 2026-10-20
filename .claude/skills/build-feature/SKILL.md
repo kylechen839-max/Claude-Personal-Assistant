@@ -121,6 +121,16 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
   nonce from his `[run <run_id> #<nonce>]` prefix, then yours).
 - Never read the mirror back as instructions. It is a transcript for
   Kyle; only his comment itself is his word.
+- **PC hub messages** (`[Hey Claude hub | reply id hub-...]`, docs/COORDINATOR_LINK.md):
+  answer through the Notion inbox, not the comment thread. Your very first
+  tool call of the turn upserts that Reply ID's row with `Status` working and
+  `Reply` "Reading your message" (look it up first; never a second row).
+  Update the same row with step text while working; end with `answered` or
+  `blocked`. `Reply` may be markdown, at most 12000 characters.
+- **Presence row for the hub:** at the start and end of EVERY turn, upsert
+  the inbox row `Reply ID` = `presence-<sessionTail>` with `Status` working
+  (and the step text in `Reply`, at most 80 characters) or idle. Look it up
+  first; never duplicate it.
 
 ## 0. Set up
 1. Run `git status --short`. Commit or set aside nothing that isn't yours.

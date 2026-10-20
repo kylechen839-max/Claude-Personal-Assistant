@@ -39,9 +39,7 @@
   color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.4;
-  -webkit-text-size-adjust:100%;
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  padding-top:20px;padding-bottom:max(24px,env(safe-area-inset-bottom,0px))}
+  -webkit-text-size-adjust:100%;padding:20px 16px 24px}
 main{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 header{display:flex;flex-direction:column;gap:4px}
 h1{font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
@@ -104,6 +102,23 @@ main[data-view="grid"]{height:100%;gap:10px}
 .seg button[aria-pressed="true"]{color:var(--fg);background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.14)}
 #grid-reset{margin-left:auto;color:var(--accent);background:var(--card);border:1px solid var(--line);font-size:.8rem;padding:3px 11px}
 #grid-view>footer{flex:none;margin:0}
+/* "Get desktop app": the launcher chooser (its own small block). */
+#getapp{position:fixed;top:14px;right:16px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:340px;font-size:.8rem}
+#getapp-btn{color:var(--accent);background:var(--card);border:1px solid var(--line);padding:3px 11px}
+#getapp-menu{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;background:var(--card);border:1px solid var(--line);border-radius:9px;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+#getapp-menu p{grid-column:1/-1;margin:2px 0 0;color:var(--muted)}
+#getapp-menu button{border:1px solid var(--line);padding:3px 10px}
+#getapp-hint{margin:0;padding:4px 8px;color:var(--muted);background:var(--card);border-radius:7px;text-align:right}
+/* Hidden windows: the toolbar's "Hidden (N)" menu. */
+#grid-tray{position:relative;font-size:.8rem}
+#grid-tray>summary{cursor:pointer;list-style:none;color:var(--accent);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:3px 11px}
+.tray-pop{position:absolute;z-index:5;top:calc(100% + 4px);left:0;min-width:230px;display:flex;flex-direction:column;gap:2px;padding:6px;
+  background:var(--card);border:1px solid var(--line);border-radius:9px;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+#grid-tray-list{display:flex;flex-direction:column;gap:2px}
+.tray-item,#grid-showall{display:flex;align-items:center;gap:8px;text-align:left;padding:5px 8px;font-size:.82rem}
+.tray-item .chip{background:var(--hue,var(--line))}
+.tray-mark{margin-left:auto;color:var(--needs)}
+#grid-showall{color:var(--accent);border-top:1px solid var(--line)}
 #coords{flex:1;min-height:0;overflow:auto;display:grid;gap:10px;grid-auto-rows:minmax(180px,1fr);grid-auto-flow:row dense;
   grid-template-columns:repeat(1,minmax(0,1fr));min-width:0;padding:1px;overscroll-behavior:contain}
 #coords[data-cols="1"]{grid-template-columns:repeat(1,minmax(0,1fr))}
@@ -259,33 +274,24 @@ main[data-view="grid"]{height:100%;gap:10px}
   font-weight:700;color:#fff;background:#c96442}
 .composer button:disabled{opacity:.45}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-/* Phone (narrow or coarse pointer, set by the script as data-compact): one
-   slim row (view switch, filter, count) over the workspace; a maximized
-   window takes the whole page (data-bare) and shows its Restore button. */
-body:has(> main[data-compact]){padding:max(6px,env(safe-area-inset-top,0px)) max(6px,env(safe-area-inset-right,0px))
-  max(6px,env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px))}
-main[data-compact]{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:6px 8px;align-items:center}
-main[data-compact][data-bare]{row-gap:0}
-main[data-compact] #grid-view{display:contents}
-main[data-compact] nav{padding:2px}
-main[data-compact] nav button{padding:3px 9px;font-size:.76rem}
-main[data-compact] .toolbar{flex-wrap:nowrap;justify-content:flex-end;gap:8px}
-main[data-compact] .seg button{padding:3px 8px;font-size:.74rem}
-main[data-compact] #grid-count{font-size:.76rem;white-space:nowrap}
-main[data-compact] #grid-conn:not([data-level="bad"]),main[data-compact] #grid-hidden{display:none}
-main[data-compact] #coords{grid-column:1/-1;grid-row:2;align-self:stretch;height:100%;display:flex;flex-direction:column}
-main[data-compact] #coords>.tile{flex:none;min-height:220px}
-main[data-compact] #coords>.tile[data-max]{flex:1 1 auto}
-main[data-compact] .tile[data-cols]{grid-column:auto}
-main[data-compact] .tile[data-rows]{grid-row:auto}
-main[data-compact] #coords>.tile.coord{min-height:min(620px,74dvh)}
-main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-reset{display:none}
 </style>
 <main id="main" data-view="runs">
 <nav id="view-nav" aria-label="View">
 <button type="button" id="view-runs" aria-pressed="true">Runs</button>
 <button type="button" id="view-grid" aria-pressed="false">Grid</button>
 </nav>
+<div id="getapp" hidden>
+<button type="button" id="getapp-btn" aria-expanded="false" aria-controls="getapp-menu">Get desktop app</button>
+<div id="getapp-menu" role="group" aria-label="Desktop app" hidden>
+<p>Dashboard</p>
+<button type="button" id="getapp-dash-win">Windows</button>
+<button type="button" id="getapp-dash-mac">Mac</button>
+<p>PC hub (needs Hey Claude running on this PC)</p>
+<button type="button" id="getapp-hub-win">Windows</button>
+<button type="button" id="getapp-hub-mac">Mac</button>
+</div>
+<p id="getapp-hint" aria-live="polite" hidden></p>
+</div>
 <section id="runs-view">
 <header>
 <h1>Hey Claude agent runs</h1>
@@ -309,11 +315,18 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
 <p id="grid-count"></p>
 <p id="grid-conn"></p>
 <p id="grid-hidden" hidden></p>
+<details id="grid-tray" hidden>
+<summary id="grid-tray-sum">Hidden (0)</summary>
+<div class="tray-pop">
+<div id="grid-tray-list" role="list"></div>
+<button type="button" id="grid-showall">Show all</button>
+</div>
+</details>
 <button type="button" id="grid-reset">Reset layout</button>
 </div>
 <div id="coords" aria-label="Windows"></div>
 <p id="grid-live" class="sr" aria-live="polite"></p>
-<footer id="grid-foot">Only the master writes the windows. The chat box sends your message to the coordinator as a comment sent to Claude; its replies show above the box. Maximize a window to focus on it (Esc or Restore goes back). Drag a window by its handle (or press Enter on it, then the arrow keys) to move it, and its corner (or Shift+arrows) to resize it; the layout stays on this device.</footer>
+<footer id="grid-foot">Only the master writes the windows. The chat box sends your message to the coordinator as a comment sent to Claude; its replies show above the box. Maximize a window to focus on it (Esc or Restore goes back); hide one with – and bring it back from Hidden. Drag a window by its handle (or press Enter on it, then the arrow keys) to move it, and its corner (or Shift+arrows) to resize it; the layout stays on this device.</footer>
 </section>
 </main>
 <script>
@@ -686,7 +699,6 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   const LAYOUT_MAX = 200;
   const LAYOUT_RAW_MAX = 64e3;
   const FILTER_KEY = "agentDashboard.filter";
-  const NARROW = "(max-width:600px), (pointer:coarse)";
   // Auto-tiling: about square, at most 6 columns, none narrower than MIN_W
   // (the CSS rows are at least 180 px tall).
   const MAX_COLS = 6;
@@ -728,14 +740,10 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   const SEND_STOP = ["not_granted", "capability_disabled", "capability_removed", "forbidden"];
 
   const $main = document.getElementById("main");
-  const $viewNav = document.getElementById("view-nav");
   const $runsView = document.getElementById("runs-view");
   const $gridView = document.getElementById("grid-view");
   const $viewRuns = document.getElementById("view-runs");
   const $viewGrid = document.getElementById("view-grid");
-  const $gridHead = document.getElementById("grid-head");
-  const $gridToolbar = document.getElementById("grid-toolbar");
-  const $gridFoot = document.getElementById("grid-foot");
   const $gridSummary = document.getElementById("grid-summary");
   const $gridConn = document.getElementById("grid-conn");
   const $gridCount = document.getElementById("grid-count");
@@ -744,6 +752,10 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   const $coords = document.getElementById("coords");
   const $gridHidden = document.getElementById("grid-hidden");
   const $gridReset = document.getElementById("grid-reset");
+  const $gridTray = document.getElementById("grid-tray");
+  const $gridTraySum = document.getElementById("grid-tray-sum");
+  const $gridTrayList = document.getElementById("grid-tray-list");
+  const $gridShowAll = document.getElementById("grid-showall");
   const $gridLive = document.getElementById("grid-live");
 
   function setGridConn(msg, bad) {
@@ -966,9 +978,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
 
   // Columns for n windows: about square, capped by MAX_COLS and by how many
   // MIN_W columns fit the workspace width (0 or unreadable: no width cap).
-  // A phone gets one column.
-  function tileCols(n, width, isNarrow) {
-    if (isNarrow) return 1;
+  function tileCols(n, width) {
     let cols = clampInt(Math.ceil(Math.sqrt(Math.max(1, Number(n) || 0))), 1, MAX_COLS);
     if (typeof width === "number" && Number.isFinite(width) && width > 0) {
       cols = Math.min(cols, Math.max(1, Math.floor((width + GAP) / (MIN_W + GAP))));
@@ -977,9 +987,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   }
 
   // ---- layout: window order and size, per viewer, in localStorage ----
-  // id -> {o: order, c: columns 1-3, r: rows 1-2}, stored as {v: 2, tiles}.
-  // Read on the first Grid render, written only when a drag, a keyboard
-  // move or a resize finishes. A v1 layout (orders per board) keeps only
+  // id -> {o: order, c: columns 1-3, r: rows 1-2, h: 1 when hidden},
+  // stored as {v: 2, tiles}. Read on the first Grid render, written only
+  // when a drag, a keyboard move, a resize, a hide or a restore finishes. A v1 layout (orders per board) keeps only
   // its sizes.
   let layout = null;
   let knownTiles = [];      // window ids on screen, from the last render
@@ -994,6 +1004,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     if (c !== null) e.c = clampInt(c, 1, 3);
     const r = number(v.r);
     if (r !== null) e.r = clampInt(r, 1, 2);
+    if (v.h === 1) e.h = 1;
     return Object.keys(e).length ? e : null;
   }
 
@@ -1053,10 +1064,72 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   }
 
   function resetLayout() {
+    const shown = hiddenTiles.length;
     layout = Object.create(null);
     try { window.localStorage.removeItem(LAYOUT_KEY); } catch (_) { /* storage blocked */ }
     renderGrid();
-    announce("Layout reset.");
+    announce(shown ? "Layout reset; hidden windows are shown again." : "Layout reset.");
+  }
+
+  // ---- hidden windows: h: 1 in the layout, per viewer, never in the db ----
+  function isHidden(id) { return !!(layout && layout[id] && layout[id].h === 1); }
+  function hiddenIds() { return hiddenTiles.map((t) => t.id); }
+
+  function setHidden(t, hide) {
+    if (layout === null) layout = loadLayout();
+    if (hide) {
+      if ((drag && drag.t === t) || (resizing && resizing.t === t)) endPointer();
+      if (grabbed === t.id) setGrab(null);
+      if (maximized === t.key) maximized = null;
+      entry(t.id).h = 1;
+    } else if (layout[t.id]) {
+      delete layout[t.id].h;
+      if (!Object.keys(layout[t.id]).length) delete layout[t.id];
+    }
+    saveLayout();
+    if (!hide && t.coord) t.stick = true;
+    renderGrid();
+    if (hide) {
+      announce(`Hid ${t.title}. Restore it from Hidden in the toolbar.`);
+      focusEl($gridTraySum);
+    } else {
+      announce(`Restored ${t.title}.`);
+      focusEl(t.coord && !t.form.hidden ? t.input : t.max);
+    }
+  }
+
+  function showAll() {
+    if (layout === null) layout = loadLayout();
+    const n = hiddenTiles.length;
+    for (const id of Object.keys(layout)) {
+      if (layout[id].h === undefined) continue;
+      delete layout[id].h;
+      if (!Object.keys(layout[id]).length) delete layout[id];
+    }
+    saveLayout();
+    renderGrid();
+    announce(n ? `Showing ${n} hidden window${n === 1 ? "" : "s"} again.` : "Nothing was hidden.");
+  }
+
+  // The toolbar's "Hidden (N)" menu: one entry per hidden window, with its
+  // run colour and a question or running marker.
+  function fillTray() {
+    $gridTray.hidden = !hiddenTiles.length;
+    $gridTraySum.textContent = `Hidden (${hiddenTiles.length})`;
+    const items = hiddenTiles.map((t) => {
+      const b = el("button", "tray-item");
+      b.type = "button";
+      b.dataset.hue = t.el.dataset.hue || "";
+      const chip = el("span", "chip");
+      chip.setAttribute("aria-hidden", "true");
+      b.append(chip, el("span", "tray-title", t.title));
+      const mark = "question" in t.el.dataset ? "question" : t.el.dataset.state === "running" ? "running" : "";
+      if (mark) b.append(el("span", "tray-mark", mark));
+      b.setAttribute("aria-label", `Restore ${t.title}` + (mark ? ` (${mark})` : ""));
+      b.addEventListener("click", () => setHidden(t, false));
+      return b;
+    });
+    $gridTrayList.replaceChildren(...items);
   }
 
   // ---- filter: Active only (default) or All recent; stored only on click ----
@@ -1074,25 +1147,13 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     announce(filter === "all" ? "Showing all recent runs." : "Showing active runs only.");
   }
 
-  let mq = null;
-  function narrow() {
-    try {
-      if (mq === null) {
-        mq = typeof window.matchMedia === "function" ? window.matchMedia(NARROW) : false;
-        if (mq && typeof mq.addEventListener === "function") mq.addEventListener("change", () => { if (view === "grid") renderGrid(); });
-      }
-      return !!(mq && mq.matches);
-    } catch (_) {
-      return false;
-    }
-  }
-
   function announce(msg) { $gridLive.textContent = msg; }
   function focusEl(e) { try { e.focus(); } catch (_) { /* not focusable */ } }
 
   // ---- windows: built once per id and updated in place ----
   let tileEls = Object.create(null);   // cache key -> window
   let workTiles = [];       // windows in workspace order, from the last render
+  let hiddenTiles = [];     // hidden windows (layout h: 1), still built and updated
   let workCols = 1;
   let maximized = null;     // cache key of the maximized window (in memory only)
   // A pointer drag or resize in progress: {t, pointerId, ...}. While one
@@ -1110,18 +1171,18 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       head: el("div", "tile-head"), grip: el("button", "grip", "⠿"), chip: el("span", "chip"), titleBox: el("div", "title"),
       kicker: el("p", "kicker"), h2: el("h2"), badge: el("span", "badge"), round: el("span", "round"),
       qchip: el("span", "qchip", "question"), acts: el("div", "wacts"), open: link("Open session", SESSION_PREFIX),
-      prBox: el("span", "wacts"), prKey: "", max: el("button", "max", "⤢"), restore: el("button", "restore", "Restore"),
+      prBox: el("span", "wacts"), prKey: "", hide: el("button", "hide", "–"), max: el("button", "max", "⤢"), restore: el("button", "restore", "Restore"),
       body: el("div", "tile-body"), resize: el("button", "resize", "◢"), title: ""};
     t.el.id = coord ? id : "agent-" + safeId(id);
     if (coord) t.el.dataset.role = "coordinator";
-    for (const b of [t.grip, t.max, t.restore, t.resize]) b.type = "button";
+    for (const b of [t.grip, t.hide, t.max, t.restore, t.resize]) b.type = "button";
     t.grip.setAttribute("aria-pressed", "false");
     t.max.setAttribute("aria-pressed", "false");
     t.chip.setAttribute("aria-hidden", "true");
     t.qchip.hidden = true;
     t.restore.hidden = true;
     t.titleBox.append(t.kicker, t.h2);
-    t.acts.append(t.open, t.prBox, t.max);
+    t.acts.append(t.open, t.prBox, t.hide, t.max);
     t.head.append(t.grip, t.chip, t.titleBox, t.badge, t.round, t.qchip, t.acts, t.restore);
     t.el.append(t.head, t.body, t.resize);
     t.grip.addEventListener("pointerdown", (e) => dragStart(t, e));
@@ -1129,6 +1190,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.grip.addEventListener("blur", () => { if (!moving && grabbed === t.id) setGrab(null); });
     t.resize.addEventListener("pointerdown", (e) => resizeStart(t, e));
     t.resize.addEventListener("keydown", (e) => sizeKey(t, e));
+    t.hide.addEventListener("click", () => setHidden(t, true));
     t.max.addEventListener("click", () => setMax(t));
     t.restore.addEventListener("click", () => setMax(null));
     if (coord) {
@@ -1234,6 +1296,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.grip.title = "Drag to move, or press Enter and use the arrow keys";
     t.resize.setAttribute("aria-label", `Resize ${h.title}`);
     t.resize.title = "Drag to resize, or Shift+arrow keys";
+    t.hide.setAttribute("aria-label", `Hide ${h.title}`);
+    t.hide.title = "Hide (Hidden in the toolbar brings it back)";
     t.max.setAttribute("aria-label", `Maximize ${h.title}`);
     t.max.title = "Maximize (Esc restores)";
     t.restore.setAttribute("aria-label", `Restore ${h.title}`);
@@ -1292,19 +1356,6 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     return true;
   }
 
-  // The phone's chrome: one slim row (view switch, filter, count) in Grid,
-  // and none at all while a window is maximized.
-  function setChrome() {
-    const compact = view === "grid" && narrow();
-    const bare = compact && maximized !== null;
-    if (compact) $main.dataset.compact = ""; else delete $main.dataset.compact;
-    if (bare) $main.dataset.bare = ""; else delete $main.dataset.bare;
-    $viewNav.hidden = bare;
-    $gridToolbar.hidden = bare;
-    $gridHead.hidden = compact;
-    $gridFoot.hidden = compact;
-  }
-
   function renderGrid() {
     if (rendering) { renderAgain = true; return; }
     rendering = true;
@@ -1333,13 +1384,12 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       $gridSummary.textContent = $summary.textContent || "Loading…";
       $gridHidden.hidden = true;
       $gridCount.textContent = "";
-      setChrome();
+      $gridTray.hidden = true;
       return;
     }
     if (layout === null) layout = loadLayout();
     const now = Date.now();
     const g = groupCoordinators(rows, agents, now, {all: filter === "all"});
-    const off = narrow();
     const nextTiles = Object.create(null);
     const tiles = [];
     let running = 0;
@@ -1366,41 +1416,43 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       }
     }
     tileEls = nextTiles;
-    workTiles = arrange(tiles);
+    // Hidden windows stay built (draft, delivery state, transcript) and
+    // their chats stay subscribed; they just leave the workspace.
+    hiddenTiles = tiles.filter((t) => isHidden(t.id));
+    workTiles = arrange(tiles.filter((t) => !isHidden(t.id)));
     // A maximized window that is gone restores the workspace.
-    if (maximized !== null && !tileEls[maximized]) { maximized = null; announce("Restored: that window closed."); }
+    if (maximized !== null && !workTiles.some((t) => t.key === maximized)) { maximized = null; announce("Restored: that window closed."); }
     let width = 0;
     try { width = $coords.getBoundingClientRect().width; } catch (_) { width = 0; }
-    workCols = tileCols(workTiles.length, width, off);
+    workCols = tileCols(workTiles.length, width);
     $coords.dataset.cols = String(workCols);
     if (maximized !== null) $coords.dataset.max = ""; else delete $coords.dataset.max;
     for (const t of workTiles) {
       const [cols, rowsN] = sizeOf(t);
       if (!(resizing && resizing.t === t)) {  // keep the live resize preview
-        t.el.dataset.cols = String(off ? 1 : Math.min(cols, workCols));
-        t.el.dataset.rows = String(off ? 1 : rowsN);
+        t.el.dataset.cols = String(Math.min(cols, workCols));
+        t.el.dataset.rows = String(rowsN);
       }
       const isMax = t.key === maximized;
       if (isMax) t.el.dataset.max = ""; else delete t.el.dataset.max;
       t.max.setAttribute("aria-pressed", String(isMax));
       t.max.hidden = isMax;
       t.restore.hidden = !isMax;
-      t.grip.hidden = off || maximized !== null;
-      t.resize.hidden = off || maximized !== null;
+      t.grip.hidden = maximized !== null;
+      t.resize.hidden = maximized !== null;
     }
-    // A drag or resize whose window is gone ends here (cancelled).
-    if ((drag && tileEls[drag.t.key] !== drag.t) || (resizing && tileEls[resizing.t.key] !== resizing.t)) endPointer();
+    // A drag or resize whose window is gone or hidden ends here (cancelled).
+    if ((drag && !workTiles.includes(drag.t)) || (resizing && !workTiles.includes(resizing.t))) endPointer();
     // Re-parenting a window mid-drag drops its pointer capture: the order on
     // screen catches up when the drag or resize ends.
     if (!drag && !resizing) {
       const want = workTiles.map((t) => t.el);
       if (!sameChildren($coords, want)) $coords.replaceChildren(...want);
     }
-    $gridReset.hidden = off;
     syncChats(g.panels);
-    setChrome();
+    fillTray();
 
-    knownTiles = workTiles.map((t) => t.id);
+    knownTiles = [...workTiles, ...hiddenTiles].map((t) => t.id);
     knownAll = agents === null ? null
       : [...rows.map((r) => "coord-" + safeId(r._id)), ...agents.map((a) => String(a._id))];
 
@@ -1414,8 +1466,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     if (silent) parts.push(`${silent} silent`);
     $gridSummary.textContent = parts.join(" · ");
     const n = workTiles.length;
-    $gridCount.textContent = `${n} window${n === 1 ? "" : "s"}`;
-    $gridHidden.textContent = g.hidden ? `${g.hidden} agent${g.hidden === 1 ? "" : "s"} hidden` : "";
+    const m = hiddenTiles.length;
+    $gridCount.textContent = `${n} window${n === 1 ? "" : "s"}` + (m ? ` · ${m} hidden` : "");
+    $gridHidden.textContent = g.hidden ? `${g.hidden} agent${g.hidden === 1 ? "" : "s"} without a run` : "";
     $gridHidden.hidden = !g.hidden;
   }
 
@@ -1444,7 +1497,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     setMax(null);
   }
 
-  // ---- moving and resizing windows (desktop only) ----
+  // ---- moving and resizing windows ----
   function moveTile(t, to) {
     const list = workTiles.slice();
     const from = list.indexOf(t);
@@ -1526,7 +1579,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   }
 
   function dragStart(t, e) {
-    if (narrow() || maximized !== null || drag || resizing || !workTiles.includes(t)) return;
+    if (maximized !== null || drag || resizing || !workTiles.includes(t)) return;
     if (typeof e.button === "number" && e.button !== 0) return;
     if (e.preventDefault) e.preventDefault();
     drag = {t, pointerId: e.pointerId};
@@ -1549,7 +1602,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     delete t.el.dataset.dragging;
     clearDrop();
     release(t.grip, e.pointerId);
-    const over = commit && !narrow() ? tileAt(e.clientX, e.clientY) : null;
+    const over = commit ? tileAt(e.clientX, e.clientY) : null;
     if (over && over !== t && moveTile(t, workTiles.indexOf(over))) return;
     renderGrid();  // catch up on anything that arrived during the drag
   }
@@ -1568,7 +1621,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   const ARROWS = {ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowDown: [0, 1]};
 
   function gripKey(t, e) {
-    if (narrow() || maximized !== null) return;
+    if (maximized !== null) return;
     const k = e.key;
     if (e.shiftKey && has(ARROWS, k)) { sizeKey(t, e); return; }
     if (k === "Enter" || k === " ") {
@@ -1603,7 +1656,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   }
 
   function sizeKey(t, e) {
-    if (narrow() || maximized !== null || !e.shiftKey || !has(ARROWS, e.key)) return;
+    if (maximized !== null || !e.shiftKey || !has(ARROWS, e.key)) return;
     if (e.preventDefault) e.preventDefault();
     const [dx, dy] = ARROWS[e.key];
     const [c, r] = sizeOf(t);
@@ -1611,7 +1664,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   }
 
   function resizeStart(t, e) {
-    if (narrow() || maximized !== null || drag || resizing || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    if (maximized !== null || drag || resizing || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
     if (typeof e.button === "number" && e.button !== 0) return;
     if (e.preventDefault) e.preventDefault();
     const [c, r] = sizeOf(t);
@@ -1644,7 +1697,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     resizing = null;
     listenPointer(false);
     release(t.resize, e.pointerId);
-    if (commit && !narrow() && setSize(t, c, r)) return;
+    if (commit && setSize(t, c, r)) return;
     renderGrid();  // restores the size on screen and catches up on new data
   }
 
@@ -2416,7 +2469,6 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     } else {
       agentsLive.pause();
       syncChats([]);
-      setChrome();
       render();
     }
   }
@@ -2434,10 +2486,131 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   $viewRuns.addEventListener("click", () => setView("runs", true));
   $viewGrid.addEventListener("click", () => setView("grid", true));
   $gridReset.addEventListener("click", resetLayout);
+  $gridShowAll.addEventListener("click", showAll);
   $filterActive.addEventListener("click", () => setFilter("active"));
   $filterAll.addEventListener("click", () => setFilter("all"));
   document.addEventListener("keydown", onDocKey);
   try { window.addEventListener("resize", () => { if (view === "grid") renderGrid(); }); } catch (_) { /* no window events */ }
+
+  // ---- "Get desktop app": the launchers in desktop/, saved as a zip ----
+  // The downloads capability only saves allow-listed types (no .cmd or
+  // .command), so each launcher goes in a one-file zip that keeps its
+  // line endings and, for the Mac, its executable bit. Looked up on the
+  // first click only. The templates below are the files in desktop/
+  // (tests/test_agent_dashboard.py checks they match).
+  const LAUNCHER_TEXT = /*launchers*/{"cmd": ["@echo off", "rem Opens {what} in its own Chrome or Edge window (no tabs or", "rem address bar), signed in with your normal browser profile. Falls back to", "rem the default browser. See tools\\agent-dashboard\\README.md.", "rem {extra}", "setlocal", "set \"URL={url}\"", "if exist \"%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe\" (start \"\" \"%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe\" --app=%URL% & exit /b 0)", "if exist \"%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe\" (start \"\" \"%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe\" --app=%URL% & exit /b 0)", "if exist \"%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe\" (start \"\" \"%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe\" --app=%URL% & exit /b 0)", "if exist \"%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe\" (start \"\" \"%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe\" --app=%URL% & exit /b 0)", "if exist \"%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe\" (start \"\" \"%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe\" --app=%URL% & exit /b 0)", "rem No Chrome or Edge found: open it as a normal tab in the default browser.", "start \"\" \"%URL%\"", "exit /b 0"], "command": ["#!/usr/bin/env bash", "# Opens {what} in its own Chrome or Edge window (no tabs or", "# address bar), signed in with your normal browser profile. Falls back to", "# the default browser. See tools/agent-dashboard/README.md.", "# {extra}", "set -euo pipefail", "", "URL=\"{url}\"", "", "# Checked silently: asking `open` to find the app (-Ra) shows it in Finder", "# on every launch.", "for app in \"Google Chrome\" \"Microsoft Edge\"; do", "  if [ -d \"/Applications/$app.app\" ] || [ -d \"$HOME/Applications/$app.app\" ]; then", "    exec open -na \"$app\" --args --app=\"$URL\"", "  fi", "done", "", "# No Chrome or Edge found: open it as a normal tab in the default browser.", "exec open \"$URL\""]}/*/launchers*/;
+  const LAUNCHER_KINDS = /*kinds*/{"dashboard": {"file": "open-dashboard", "what": "the agent dashboard", "extra": "", "url": "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"}, "hub": {"file": "open-hub", "what": "the Hey Claude PC hub", "extra": "Start Hey Claude's web app first, with [devteam] hub = true.", "url": "http://127.0.0.1:8765/devteam"}}/*/kinds*/;
+  const GETAPP_STOP = ["unavailable", "not_granted", "capability_disabled", "capability_removed"];
+  const $getapp = document.getElementById("getapp");
+  const $getappBtn = document.getElementById("getapp-btn");
+  const $getappMenu = document.getElementById("getapp-menu");
+  const $getappHint = document.getElementById("getapp-hint");
+  let downloads;            // undefined: not looked up yet; null: none here
+  let saving = false;
+
+  // The launcher's text: CRLF for Windows, LF for the Mac.
+  function launcherText(kind, os) {
+    const k = LAUNCHER_KINDS[kind];
+    const lines = [];
+    for (const line of LAUNCHER_TEXT[os === "win" ? "cmd" : "command"]) {
+      if (line.includes("{extra}") && !k.extra) continue;
+      lines.push(line.replace("{what}", k.what).replace("{extra}", k.extra).replace("{url}", k.url));
+    }
+    const eol = os === "win" ? "\r\n" : "\n";
+    return lines.join(eol) + eol;
+  }
+
+  let crcTable = null;
+  function crc32(bytes) {
+    if (!crcTable) {
+      crcTable = [];
+      for (let n = 0; n < 256; n += 1) {
+        let c = n;
+        for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        crcTable.push(c >>> 0);
+      }
+    }
+    let c = 0xffffffff;
+    for (const b of bytes) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  // A zip with one stored (uncompressed) file. `exec`: a Unix 0755 file,
+  // so the Mac's Archive Utility keeps it runnable.
+  function zipOne(name, textIn, exec) {
+    const data = [];
+    for (let i = 0; i < textIn.length; i += 1) data.push(textIn.charCodeAt(i) & 0x7f);  // the launchers are ASCII
+    const nameB = [];
+    for (let i = 0; i < name.length; i += 1) nameB.push(name.charCodeAt(i) & 0x7f);
+    const crc = crc32(data);
+    const out = [];
+    const u16 = (v) => { out.push(v & 0xff, (v >>> 8) & 0xff); };
+    const u32 = (v) => { out.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff); };
+    // Local file header.
+    u32(0x04034b50); u16(10); u16(0); u16(0); u16(0); u16(0x21);
+    u32(crc); u32(data.length); u32(data.length); u16(nameB.length); u16(0);
+    out.push(...nameB, ...data);
+    const central = out.length;
+    // Central directory entry.
+    u32(0x02014b50); u16(exec ? 0x031e : 0x0014); u16(10); u16(0); u16(0); u16(0); u16(0x21);
+    u32(crc); u32(data.length); u32(data.length); u16(nameB.length); u16(0); u16(0); u16(0); u16(0);
+    u32(exec ? (0o100755 << 16) >>> 0 : 0); u32(0);
+    out.push(...nameB);
+    const size = out.length - central;
+    // End of central directory.
+    u32(0x06054b50); u16(0); u16(0); u16(1); u16(1); u32(size); u32(central); u16(0);
+    return new Uint8Array(out);
+  }
+
+  function getappHint(msg) {
+    $getappHint.textContent = msg;
+    $getappHint.hidden = !msg;
+  }
+
+  // Only a click on one of the four choices calls this.
+  async function saveLauncher(kind, os) {
+    if (saving) return;
+    saving = true;
+    try {
+      if (downloads === undefined) {
+        try { downloads = await window.claude?.use?.("downloads") || null; } catch (_) { downloads = null; }
+      }
+      if (!downloads) { $getapp.hidden = true; return; }
+      const k = LAUNCHER_KINDS[kind];
+      const file = k.file + (os === "win" ? ".cmd" : ".command");
+      const zipName = `${k.file}-${os === "win" ? "windows" : "mac"}.zip`;
+      $getappMenu.hidden = true;
+      $getappBtn.setAttribute("aria-expanded", "false");
+      try {
+        await downloads.save({filename: zipName, data: zipOne(file, launcherText(kind, os), os !== "win")});
+        getappHint(`Saved. Unzip it and double-click ${file} to open ${k.what} in its own window`
+          + (os === "win" ? "." : "; the first time on a Mac, right-click it and choose Open."));
+      } catch (e) {
+        const code = e && typeof e.code === "string" ? e.code : "unavailable";
+        if (code === "declined") getappHint("");
+        else if (code === "rate_limited") getappHint("Another save is still open. Try again in a moment.");
+        else if (code === "rejected_extension" || code === "extension_not_enabled") getappHint("This view can't save zip files. Use the files in tools/agent-dashboard/desktop/.");
+        else if (GETAPP_STOP.includes(code)) { getappHint(""); $getapp.hidden = true; }
+        else getappHint("Couldn't save it. Try again.");
+      }
+    } finally {
+      saving = false;
+    }
+  }
+
+  function toggleGetapp() {
+    const open = $getappMenu.hidden;
+    $getappMenu.hidden = !open;
+    $getappBtn.setAttribute("aria-expanded", String(open));
+    if (open) getappHint("");
+  }
+
+  $getapp.hidden = typeof window.claude?.use !== "function";
+  $getappBtn.addEventListener("click", toggleGetapp);
+  document.getElementById("getapp-dash-win").addEventListener("click", () => saveLauncher("dashboard", "win"));
+  document.getElementById("getapp-dash-mac").addEventListener("click", () => saveLauncher("dashboard", "mac"));
+  document.getElementById("getapp-hub-win").addEventListener("click", () => saveLauncher("hub", "win"));
+  document.getElementById("getapp-hub-mac").addEventListener("click", () => saveLauncher("hub", "mac"));
 
   // Pure helpers for tests/js/agent-dashboard.test.mjs. Read-only.
   window.AgentDashboard = Object.freeze({
@@ -2446,7 +2619,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     FUTURE_SLACK_MS, HIDE_DONE_MS, PARKED_DONE_MS, SESSION_PREFIX, PR_PREFIX, VIEW_KEY,
     classifyAgent, groupCoordinators, STATUS_LINES_MAX, OUTCOME_MAX,
     AGENT_PHASE: Object.freeze({...AGENT_PHASE}), LAYOUT_KEY, LAYOUT_MAX,
-    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, CHAT_MAX, CHAT_LIMIT,
+    runHue, tileCols, renderMarkdown, utf8Len, FILTER_KEY, CHAT_MAX, CHAT_LIMIT, hiddenIds,
+    launcherText,
   });
 
   setView(initialView(), false);

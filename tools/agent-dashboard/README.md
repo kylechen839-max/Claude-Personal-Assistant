@@ -16,20 +16,24 @@ buttons at the top (the choice is remembered on that device):
   everything the coordinator tells him (see [Chat box](#chat-box)).
 
 - **URL:** https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (a claude.ai
-  artifact with the `db`, `user` and `comments` capabilities; open it
-  signed in, on the phone too, and add it to the Home Screen; on a PC it
-  can have its own window, see [Desktop window](#desktop-window)).
+  artifact with the `db`, `user`, `comments` and `downloads` capabilities;
+  open it signed in on a desktop browser; it can have its own window, see
+  [Desktop window](#desktop-window)). The page is desktop only: it has no
+  phone layout. On the phone, Hey Claude's voice link
+  (docs/COORDINATOR_LINK.md) reaches the same coordinator.
 - **Source:** `index.html` in this folder. The master publishes it to the
   artifact. Nothing here is served by the Hey Claude app.
 - **Watchdog:** `WATCHDOG.md`, an hourly trigger that marks runs whose
   session has died.
 - **Desktop launchers:** `desktop/open-dashboard.cmd` (Windows) and
-  `desktop/open-dashboard.command` (macOS).
+  `desktop/open-dashboard.command` (macOS), also offered by the page's
+  **Get desktop app** button; `desktop/open-hub.cmd` and
+  `desktop/open-hub.command` open the PC hub (see [PC hub](#pc-hub)).
 
 ## Manifest (the master sets it when publishing)
 
 ```json
-{"db":{}, "user":{}, "comments":{}}
+{"db":{}, "user":{}, "comments":{}, "downloads":true}
 ```
 
 `db` holds the `runs` and `agents` collections, and Kyle's private chat
@@ -38,7 +42,8 @@ path (`user.id()`). `comments` is the full grant, needed for
 `sendToClaude`: the chat box posts Kyle's message as a comment sent to
 Claude. claude.ai asks Kyle once for consent at the first send. The page
 declares no custom anchors and never reads threads (it can't).
-`tests/test_agent_dashboard.py` pins this block.
+`downloads` lets **Get desktop app** save a launcher (looked up on the
+first click only). `tests/test_agent_dashboard.py` pins this block.
 
 Kyle's LLM Council chose this design on 2026-10-19 (see
 `council-transcript-20261019-1815.md`). If he isn't using it after two
@@ -150,7 +155,7 @@ most 200 bytes, with the run part capped at 180.
   (an older run of the same session, or a run with no panel) is left
   out quietly. Only a live agent whose `run_id` matches no `runs` row at
   all (for example a row older than the newest 100) is counted, under
-  the grid: "2 agents hidden".
+  the grid: "2 agents without a run".
 - A tile shows the role, piece, round, a state badge, the start time,
   the duration (`now - started_at` while running, `finished_at -
   started_at` when finished) and the outcome. Tiles sort running, then
@@ -215,7 +220,7 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
 - **Run colour:** a hash of the run's root id picks one of 8 hues; the
   coordinator and every agent of the run (pieces included) share it, as
   a coloured square, a 3 px top bar and the coordinator's border.
-- **Maximize** (the ⤢ button, on the phone too) makes one window fill
+- **Maximize** (the ⤢ button) makes one window fill
   the workspace; the others are hidden, not removed. Esc or the window's
   **Restore** button goes back, and focus returns to ⤢. It is not saved;
   if the window disappears, the workspace restores itself.
@@ -224,9 +229,21 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
   **All recent** (every session with a row from the last 14 days).
   Retired agents (no change for 7 days) stay hidden. The choice is kept
   in localStorage under `agentDashboard.filter`, written only when you
-  press one. The toolbar also shows the window count and "N agents
-  hidden" (live agents whose run has no row at all).
-- **Moving and resizing (desktop only).** Drag a window by the handle in
+  press one. The toolbar also shows the window count ("5 windows · 2
+  hidden") and "N agents without a run" (live agents whose run has no
+  row at all).
+- **Hiding a window.** The – button in a title bar (next to ⤢, labelled
+  "Hide <title>") takes the window out of the workspace; the others
+  re-tile. The toolbar's **Hidden (N)** menu lists hidden windows with
+  their run colour and a "question" or "running" marker; click one to
+  restore it in its saved place and size (focus goes to its chat box, or
+  its ⤢), or **Show all**. Hiding is kept per viewer as `h: 1` in the
+  same layout entry (below), pruned with it; it never touches the db. A
+  hidden coordinator keeps its draft, delivery line and transcript, and
+  its chat stays subscribed. Hiding the maximized window restores the
+  workspace; hiding one mid-drag cancels the drag. **Reset layout** also
+  shows every hidden window again.
+- **Moving and resizing.** Drag a window by the handle in
   its title bar, or Tab to the handle, press Enter, then the arrow keys
   (Enter again drops it). Drag the corner handle to resize: 1–3 columns
   by 1–2 rows (the coordinator starts 2×2 when there are 3 or more
@@ -239,11 +256,6 @@ back-off on `resource_exhausted`, one retry after 5–30 s otherwise).
   board) keeps its sizes only. While a window is being dragged or
   resized, new data updates windows in place but doesn't move them.
   **Reset layout** clears it all. This is not a db write.
-- **Phone** (600 px wide or less, or a touch pointer): one column, no
-  handles and no Reset. The header and toolbar become one slim row (the
-  Runs/Grid switch, the filter, the window count; no footer), with
-  safe-area padding. A maximized window takes the whole page, that row
-  included, and shows its Restore button.
 
 ## Chat box
 
@@ -390,6 +402,15 @@ browser.
   site as an app). The browser makes the app window and a Start menu or
   Launchpad entry for you.
 
+- **Get desktop app** (top right of the page): choose Windows or Mac for
+  the dashboard, or for the PC hub ("needs Hey Claude running on this
+  PC"). The page saves a zip holding that one launcher, the same text as
+  `desktop/` (claude.ai saves only allow-listed file types, and `.cmd` /
+  `.command` are not on the list; the zip keeps the Windows file's CRLF
+  and the Mac file's executable bit). Unzip it and double-click the
+  launcher; on a Mac the first time, right-click → Open. Declining the
+  save is fine; if this view can't save files the button hides itself.
+
 The launchers never pass `--user-data-dir`: a separate profile would
 start signed out of claude.ai, so neither Runs nor Grid would load.
 
@@ -415,3 +436,17 @@ start signed out of claude.ai, so neither Runs nor Grid would load.
   pre-approved in `.claude/settings.json`.
 - Out of scope on purpose: kill/approve/archive buttons, reading rows
   aloud, the page reading threads.
+
+## PC hub
+
+A desktop-only page served by Hey Claude's own web app on the PC, at
+`http://127.0.0.1:8765/devteam`, for chatting with the coordinator(s)
+with replies in about the time Notion takes (docs/COORDINATOR_LINK.md).
+One window per session in `[devteam] hub_sessions` (at most 8), auto-tiled,
+with maximize (Esc restores) and the same hide/restore: hidden windows
+are kept per viewer in localStorage under `heyClaudeHub.layout.v1`
+(`{v: 1, tiles: {<session>: {h: 1}}}`, at most 8, pruned to the hub's
+windows); the server keeps polling, so a restored window is up to date,
+and the Hidden menu marks one with a new reply or a blocked message.
+Open it with `desktop/open-hub.cmd` or `desktop/open-hub.command` once the
+web app runs with `[devteam] hub = true`.

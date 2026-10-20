@@ -330,6 +330,43 @@ Render fills `X-Forwarded-For` (if it ever arrives without the real client,
 the per-address limit acts like the global one; the global cap still holds).
 Someone who steals the unlocked phone has the assistant, as with any app.
 
+## PC hub (`/devteam`): loopback only
+
+The hub (assistant/devhub.py) lets a signed-in browser on the PC queue
+messages into Kyle's coordinator sessions, which can start coding work, so
+it is kept to the PC itself:
+
+- It is built only when `[devteam] hub = true` and the web app binds a
+  loopback address; the cloud server profile and any `0.0.0.0` bind never
+  have it.
+- Every `/devteam` page and `/api/devteam/*` route answers 404 unless the
+  peer is loopback, there is no `X-Forwarded-For` and no
+  `Tailscale-User-Login` header, and no configured trusted proxy vouches
+  for the request. `tailscale serve` adds those headers, so the phone and
+  the tailnet never reach it.
+- The `/api/devteam/*` routes need the web app's sign-in
+  (`require_session`, the same cookie, `WebAuth`, `LoginLimiter`, CSP and
+  cross-origin guard; a cross-origin POST gets 403). The sign-in form on
+  the page posts to the existing `/api/login`.
+- Messages go to the CLI on stdin, never on its command line. Coordinator
+  replies are shown as text (markdown built with createElement and
+  textContent; http(s) links only). The page has no inline script
+  (`script-src 'self'`).
+- One message in flight per window; at most 8 windows, 200 messages a
+  window, 12000 characters a message or reply. No message or reply text
+  is logged at INFO.
+- **At rest:** the transcript and pending reply ids are in
+  `hub_state_file` (`data/devhub.json`), written privately (0600 on
+  Linux/macOS; Windows uses the folder's permissions) and atomically.
+  Clear rewrites the file without that window's messages; older copies of
+  the text may remain in free disk blocks until overwritten, as with any
+  file delete.
+
+Left as is: `/devteam`, `/devteam.js` and `/devteam.css` are served to a
+loopback request without a sign-in, because they hold no data and the page
+has to show the sign-in form. A DNS-rebinding page could load them, but it
+has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
+
 ## Not fixed, on purpose
 
 - **Calendar data from Kyle's own events.** Treating every calendar

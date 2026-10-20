@@ -76,10 +76,10 @@ def test_page_has_both_dark_mode_selectors():
     assert "tabular-nums" in page
 
 
-def test_page_body_gutters_use_safe_area():
+def test_page_body_gutters_are_plain_desktop_padding():
     page = _page()
-    assert "padding-left:max(16px,env(safe-area-inset-left,0px))" in page
-    assert "padding-right:max(16px,env(safe-area-inset-right,0px))" in page
+    assert "padding:20px 16px 24px}" in page
+    assert "safe-area" not in page  # desktop only: no phone layout
     assert re.search(r"body\{[^}]*background:var\(--", page)
 
 
@@ -167,9 +167,15 @@ def test_page_links_only_to_allowed_prefixes():
     assert f'"{PR_PREFIX}"' in page
     assert 'rel = "noopener noreferrer"' in page
     assert 'target = "_blank"' in page
-    # Every link URL in the script is one of the two prefixes.
-    urls = set(re.findall(r'"(https://[^"]*)"', page))
+    # Every link URL in the script is one of the two prefixes. The only
+    # other URLs are the desktop launchers' targets, which are file text
+    # for "Get desktop app", never links on the page.
+    head, rest = page.split("/*kinds*/", 1)
+    kinds, tail = rest.split("/*/kinds*/", 1)
+    urls = set(re.findall(r'"(https://[^"]*)"', head + tail))
     assert urls == {SESSION_PREFIX, PR_PREFIX}
+    assert set(re.findall(r'"(https?://[^"]*)"', kinds)) == {
+        DASHBOARD_URL, "http://127.0.0.1:8765/devteam"}
 
 
 def test_skill_writes_every_phase_except_dead():
@@ -220,15 +226,16 @@ def test_watchdog_prompt_is_one_fenced_block():
 
 DASHBOARD_URL = "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
 DESKTOP = DASH / "desktop"
-MANIFEST = '{"db":{}, "user":{}, "comments":{}}'
+MANIFEST = '{"db":{}, "user":{}, "comments":{}, "downloads":true}'
 
 
 def test_readme_pins_the_manifest():
     readme = (DASH / "README.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```json\n(.*?)```", readme, re.S)
     assert [b.strip() for b in blocks] == [MANIFEST]
-    # The full comments grant (for sendToClaude), no custom anchors.
-    assert json.loads(MANIFEST) == {"db": {}, "user": {}, "comments": {}}
+    # The full comments grant (for sendToClaude), no custom anchors, and
+    # downloads for "Get desktop app".
+    assert json.loads(MANIFEST) == {"db": {}, "user": {}, "comments": {}, "downloads": True}
 
 
 def _function(page: str, name: str) -> str:
@@ -317,18 +324,21 @@ def test_grid_layout_rules():
         assert f'[data-hue="{k}"]{{--hue:{lo}}}' in page
         assert f':root[data-theme="dark"] [data-hue="{k}"]{{--hue:{hi}}}' in page
         assert f':root:not([data-theme="light"]) [data-hue="{k}"]{{--hue:{hi}}}' in page
-    # The phone: one slim row, safe-area padding, one column of auto-height windows.
-    assert "main[data-compact] #grid-view{display:contents}" in page
-    assert "body:has(> main[data-compact]){padding:max(6px,env(safe-area-inset-top,0px))" in page
-    assert "main[data-compact] #coords>.tile{flex:none;min-height:220px}" in page
-    assert "main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-reset{display:none}" in page
+    # Desktop only: the phone layout is gone.
+    for phone in ("data-compact", "data-bare", "74dvh", "matchMedia", "pointer:coarse"):
+        assert phone not in page, phone
     assert "@media (prefers-reduced-motion: reduce){.badge-running .dot{animation:none}}" in page
     for needed in ('id="view-runs"', 'id="view-grid"', 'id="view-nav"', 'aria-pressed', 'id="grid-view" hidden',
                    'id="grid-summary"', 'id="grid-conn"', 'id="coords"', 'id="grid-hidden"',
                    'id="grid-reset"', 'id="grid-filter-active" aria-pressed="true"',
                    'id="grid-filter-all" aria-pressed="false"', 'id="grid-count"', 'id="grid-head"',
-                   'id="grid-toolbar"', 'id="grid-foot"'):
+                   'id="grid-toolbar"', 'id="grid-foot"', '<details id="grid-tray" hidden>',
+                   '<summary id="grid-tray-sum">Hidden (0)</summary>', 'id="grid-tray-list"',
+                   'id="grid-showall"'):
         assert needed in page, needed
+    # Each window's title bar has a hide button with its own label.
+    assert 'hide: el("button", "hide", "–")' in page
+    assert 't.hide.setAttribute("aria-label", `Hide ${h.title}`)' in page
     for gone in ('id="chat"', 'id="grid-refresh"', 'id="grid-action"', 'id="grid"', "boardEls", '"board"'):
         assert gone not in page, gone
     # Runs keeps its ids.
@@ -482,3 +492,46 @@ def test_mac_launcher_shellcheck():
     p = subprocess.run(["shellcheck", str(DESKTOP / "open-dashboard.command")],
                        capture_output=True, text=True)
     assert p.returncode == 0, p.stdout
+
+
+def _launcher_data(page: str, marker: str) -> dict:
+    return json.loads(page.split(f"/*{marker}*/", 1)[1].split(f"/*/{marker}*/", 1)[0])
+
+
+def _launcher(page: str, kind: str, os_: str) -> bytes:
+    """What "Get desktop app" saves, built from the page's own templates
+    the same way its launcherText() does."""
+    text, k = _launcher_data(page, "launchers"), _launcher_data(page, "kinds")[kind]
+    lines = [line.replace("{what}", k["what"]).replace("{extra}", k["extra"])
+             .replace("{url}", k["url"])
+             for line in text["cmd" if os_ == "win" else "command"]
+             if k["extra"] or "{extra}" not in line]
+    eol = "\r\n" if os_ == "win" else "\n"
+    return (eol.join(lines) + eol).encode("ascii")
+
+
+@pytest.mark.parametrize("kind, name", [("dashboard", "open-dashboard"), ("hub", "open-hub")])
+def test_the_page_saves_the_same_launchers_as_desktop(kind, name):
+    page = _page()
+    assert _launcher(page, kind, "win") == (DESKTOP / f"{name}.cmd").read_bytes()
+    assert _launcher(page, kind, "mac") == (DESKTOP / f"{name}.command").read_bytes()
+    kinds = _launcher_data(page, "kinds")
+    assert kinds["dashboard"]["url"] == DASHBOARD_URL
+    assert kinds["hub"]["url"] == "http://127.0.0.1:8765/devteam"
+    assert page.count('window.claude?.use?.("downloads")') == 1
+    assert page.count(".save(") == 1 and ".save(" in _function(page, "async function saveLauncher(")
+
+
+def test_hub_launchers_point_at_the_local_hub():
+    for name in ("open-hub.cmd", "open-hub.command"):
+        text = (DESKTOP / name).read_text(encoding="utf-8")
+        assert set(re.findall(r"https?://[^\s\"']+", text)) == {"http://127.0.0.1:8765/devteam"}
+        assert "--app=" in text
+    assert b"\r\n" in (DESKTOP / "open-hub.cmd").read_bytes()
+    assert b"\r" not in (DESKTOP / "open-hub.command").read_bytes()
+    if os.name != "nt":
+        assert os.stat(DESKTOP / "open-hub.command").st_mode & 0o111
+    if shutil.which("shellcheck"):
+        p = subprocess.run(["shellcheck", str(DESKTOP / "open-hub.command")],
+                           capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout

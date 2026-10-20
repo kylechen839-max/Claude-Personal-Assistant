@@ -1508,3 +1508,51 @@ screens are staged by setting the same attributes the JS sets (no mic).
   stdin, CLI error paths, reply status handling and de-duplication across
   restarts, inbox creation, registration, prompt. Not run against the real
   CLI or Notion from this sandbox.
+
+## PC hub, desktop-only dashboard, hide windows, Get desktop app
+
+- **PC hub** (`assistant/devhub.py`, `assistant/web/devteam.{html,js,css}`):
+  a desktop-only page at `http://127.0.0.1:8765/devteam` on the PC's web
+  app for chatting with the `/build-feature` coordinator(s). One window
+  per `[devteam] hub_sessions` entry (at most 8), auto-tiled, maximize/Esc,
+  hide/restore. Sending reuses `CoordinatorLink.send` (`claude -p --cloud`,
+  stdin) with `source="hub"` (header `[Hey Claude hub | …]`, `hub-` ids,
+  12000 characters); replies, the pickup row and a `presence-<sessionTail>`
+  row come from the Notion inbox, polled at most every `poll_seconds`
+  (one replies query and one presence query) and only while the page is
+  visible. Its own link and state file (`data/devhub.json`) keep voice
+  `check_dev_team` and the hub from taking each other's replies. Built only
+  with `hub = true` on a loopback bind; every route 404s unless the
+  request is from the PC itself (no proxy headers, no trusted proxy); the
+  `/api` routes need the normal sign-in. Markdown renderer ported from
+  the dashboard, with a parity test.
+- `assistant/devteam.py`: `send(source=, session=)`, `replies(max_chars=)`,
+  `presence()`/`presences()`, the `idle` status option, `link_from_config`
+  (now used by `cli.register_devteam` too), and private atomic state
+  writes through `google_auth.write_private`. Voice behaviour unchanged.
+- **Agent dashboard:** the phone layout is gone (compact/bare chrome,
+  safe-area padding, the narrow media query and every narrow() branch).
+  Each window has a – hide button; hidden windows are `h: 1` in the
+  existing layout entry (per viewer, capped at 200, pruned), listed in a
+  "Hidden (N)" toolbar menu with restore and Show all; a hidden
+  coordinator keeps its draft and its chat subscription. "N agents hidden"
+  is now "N agents without a run". **Get desktop app** saves the
+  `desktop/` launchers (dashboard or PC hub, Windows or Mac) through the
+  `downloads` capability as a one-file zip (claude.ai doesn't save `.cmd`
+  or `.command`); manifest now `{"db":{}, "user":{}, "comments":{}, "downloads":true}`.
+  New `desktop/open-hub.cmd` / `open-hub.command`.
+- Tests: `tests/test_devhub.py` (31: auth 401, proxied/non-loopback/
+  trusted-proxy 404, cross-origin 403, CSP, stdin and `--cloud`, not sent,
+  queued → working → answered/blocked, throttling, hub vs voice replies,
+  presence mapping, clear deletes from the file, bounds, caplog, off by
+  default and off a non-loopback bind, `serve`), 5 new in
+  `tests/test_devteam.py`, `tests/js/devhub.test.mjs` (12, incl. markdown
+  parity with the dashboard), 9 new dashboard JS tests (hide/restore/Show
+  all/reload/caps/drag/maximize/hidden chat; Get desktop app), launcher
+  and manifest pins in `tests/test_agent_dashboard.py`. The new tests fail
+  on the previous code (11 pytest, 13 JS). Full pytest: 1513 passed, 45
+  skipped, 9 failed and 16 errors (the same eSpeak/PortAudio sandbox
+  failures as before; baseline 1474 passed). JS: dashboard 122, devhub 12,
+  router 33, voice-core 12. Headless Chromium at 1400×900: hub and
+  dashboard render with no console errors once signed in. Not run against
+  the real CLI, Notion or claude.ai downloads from this sandbox.

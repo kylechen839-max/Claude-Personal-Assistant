@@ -2,12 +2,13 @@
 
 Kyle has one **coordinator**: a standing Claude Code cloud session running
 the `/build-feature` master role (`.claude/skills/build-feature/SKILL.md`).
-He reaches the same coordinator from two places:
+He reaches the same coordinator from three places:
 
 | From | How a message gets in | How the answer gets out |
 |---|---|---|
 | **Agent dashboard** (`tools/agent-dashboard/`) | "Message coordinator" (claude.ai comment, "Send to Claude"), or Open session | The session itself, and the dashboard's `runs` rows and `status_lines` |
 | **Hey Claude** (iPhone app, PC voice) | `claude -p --cloud <coordinator> --output-format json` on the home PC, message on stdin (`assistant/devteam.py`) | One row in the Notion database **Hey Claude coordinator inbox**, read by the app and spoken |
+| **PC hub** (`http://127.0.0.1:8765/devteam`, desktop only) | The same CLI command, from the hub's chat box (`assistant/devhub.py`) | The same inbox: a pickup row, step updates, then the markdown reply; plus a presence row per session |
 
 Nothing here uses the Claude API: the coordinator and its agents run on
 Kyle's Claude plan.
@@ -29,6 +30,44 @@ The text between the first line and the "Answer per" line is what Kyle said
 message he typed in the session: start a `/build-feature` run, steer one,
 answer a question about the team, and so on.
 
+## Messages from the PC hub
+
+Kyle types these in the hub on his PC. They look like this:
+
+```
+[Hey Claude hub | reply id hub-20261020-153000-a1b2]
+<Kyle's typed text>
+
+Answer per docs/COORDINATOR_LINK.md: one row in the Notion database "Hey Claude coordinator inbox" with Reply ID = hub-20261020-153000-a1b2.
+```
+
+Answer them in the same inbox, with three differences from voice:
+
+- **Pickup first.** The very first tool call of the turn upserts the row
+  (look it up by Reply ID first, never a second row) with
+  `Status` = `working` and `Reply` = `Reading your message`. Update the
+  same row with a short step text while working, and end with `answered`
+  or `blocked`.
+- **Markdown.** `Reply` may be markdown (headings, lists, code, tables,
+  http(s) links), at most 12000 characters. Notion keeps 2000 characters
+  per rich text segment; write longer replies as several segments, which
+  the hub joins. The spoken-only rule stays for `hc-` ids.
+- **Presence.** At the start and the end of EVERY turn, upsert the row
+  `Reply ID` = `presence-<sessionTail>` (`<sessionTail>` is the session id
+  after `session_` or `cse_`): `Status` `working` or `idle`, and `Reply`
+  the step text, at most 80 characters. Look it up first; never a second
+  row. The hub's pill reads it: In task (working, 5 minutes old or less),
+  In task (no update…) (working, 5 to 30 minutes old), otherwise Idle.
+
+The hub shows Kyle's message going sending → not sent (with the CLI's
+error) → queued (sent, no row yet) → working (the row says working, with
+its step) → answered or blocked.
+
+Not verified yet (MANUAL_TEST.md): whether a message sent to an idle
+session starts a turn by itself, and whether it revives an expired cloud
+VM. The CLI docs say a message sent while Claude is working queues until
+Claude reads it.
+
 ## Answering (the coordinator's side)
 
 For every `[Hey Claude voice | reply id ...]` message, write **one row** in
@@ -39,7 +78,7 @@ connector:
 |---|---|---|
 | `Reply ID` | title | The reply id from the first line, exactly. |
 | `Reply` | text | What Hey Claude should say: plain spoken sentences, at most about 600 characters. No markdown, lists, links, ids or code. |
-| `Status` | select | `answered` (done, or the answer to a question), `working` (accepted, still going), `blocked` (needs Kyle; say what he must do). |
+| `Status` | select | `answered` (done, or the answer to a question), `working` (accepted, still going), `blocked` (needs Kyle; say what he must do). `idle` is for presence rows only. |
 | `Run` | URL | Optional: the draft PR or the dashboard link. |
 
 - Write `working` right away when a request starts a run ("Got it, starting
@@ -72,7 +111,23 @@ connector:
    Claude Code must be installed there and signed in to Kyle's claude.ai
    account (`claude auth status`). Sending works only where the CLI is; the
    cloud server can still read replies.
-3. **Notion.** Nothing to do: the app creates the inbox next to the
+3. **PC hub (optional), same `config.local.toml`:**
+
+   ```toml
+   [devteam]
+   hub = true
+   hub_sessions = ["session_..."]   # one window per coordinator, at most 8
+   poll_seconds = 4
+   ```
+
+   Start the web app on the PC (`python -m assistant --mode web`, which
+   binds 127.0.0.1) and open `http://127.0.0.1:8765/devteam`, or use
+   `tools/agent-dashboard/desktop/open-hub.cmd` / `open-hub.command`. The
+   hub has its own state file, `hub_state_file` (`data/devhub.json`), and
+   `hub-` reply ids, so the voice tools never pick up a hub reply. It is
+   off on any non-loopback bind, and every hub route answers 404 to a
+   request that came through a proxy (`tailscale serve` included).
+4. **Notion.** Nothing to do: the app creates the inbox next to the
    Assignments database with its existing integration, and the coordinator
    reaches it through Kyle's Notion connector.
 

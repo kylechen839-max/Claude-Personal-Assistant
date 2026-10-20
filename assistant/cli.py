@@ -444,23 +444,15 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
     team = config["devteam"]
     if not team["enabled"]:
         return False
-    from assistant.devteam import CoordinatorLink, session_id
+    from assistant.devteam import link_from_config, session_id
 
     if not session_id(team["coordinator_session"]):
         output_fn("(Dev team tools off: [devteam] coordinator_session is not "
                   "a session id or claude.ai/code link)")
         return False
-    assignments = None
-    if os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]:
-        from assistant.tools.notion import NotionAssignments
-
-        assignments = NotionAssignments(config["notion"]["database_id"])
-    else:
+    if not (os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]):
         output_fn("(Dev team replies off: NOTION_TOKEN not set; messages still go out)")
-    link = CoordinatorLink(team["coordinator_session"],
-                           claude_command=team["claude_command"],
-                           repo_dir=team["repo_dir"], timeout=team["timeout"],
-                           state_file=team["state_file"], assignments=assignments)
+    link = link_from_config(config, team["state_file"])
     registry.register(*link.tools())
     return True
 
