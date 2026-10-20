@@ -9,7 +9,7 @@ from assistant.tools import ToolRegistry
 from assistant.tools.calendar import GoogleCalendar
 from assistant.tts import PrintTTS
 from assistant.wakeword import FileSource, WakeListener
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_tools import DENTIST, make_service
 from tests.test_wakeword import COMMAND, ScriptedDetector, session_file  # noqa: F401
 
@@ -147,7 +147,7 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
         """Asks for tomorrow's events, then reads the tool result back."""
         fake_client.calls.append({**kwargs, "messages": list(kwargs["messages"])})
         last = kwargs["messages"][-1]["content"]
-        if isinstance(last, str):
+        if chat_module.is_user_turn(kwargs["messages"][-1]):  # Kyle's question
             return make_response(tool_use_block("list_calendar_events",
                                                 {"day": "tomorrow"}),
                                  stop_reason="tool_use")
@@ -168,7 +168,7 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
     assert code == 0, out
 
     # the real wake word fired once and the command reached Claude
-    first_user_turns = [c["messages"][0]["content"] for c in fake_client.calls
+    first_user_turns = [first_text(c["messages"][0]["content"]) for c in fake_client.calls
                         if len(c["messages"]) == 1]
     assert len(first_user_turns) == 1, out
     assert rough_match(PHRASE, first_user_turns[0]), first_user_turns

@@ -48,7 +48,24 @@ def check_google_files(config: dict) -> list[Check]:
         Check(str(token), token.exists(), "found" if token.exists() else
               "missing (copy it from your PC, or run "
               "`python -m assistant.tools.calendar --headless`)", required=False),
-    ] + check_gmail_scopes(config)
+    ] + check_calendar_scopes(config) + check_gmail_scopes(config)
+
+
+def check_calendar_scopes(config: dict) -> list[Check]:
+    """An older token.json lacks the read-only calendar list and labels
+    scopes: the core Calendar tools work, labels and other calendars don't."""
+    from assistant.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
+                                             SIGN_IN_COMMAND, missing_scopes)
+
+    try:
+        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, config["calendar"]["token"])
+    except (OSError, ValueError) as e:
+        return [Check("Calendar labels access", False, f"token unreadable: {e}",
+                      required=False)]
+    return [Check("Calendar labels access", not lacking,
+                  "granted (read-only calendar list and labels)" if not lacking
+                  else "not granted yet (re-run the Google sign-in: "
+                  f"`{SIGN_IN_COMMAND}`)", required=False)]
 
 
 def check_gmail_scopes(config: dict) -> list[Check]:

@@ -141,6 +141,9 @@ console too.
 Things to try: "What's on my calendar tomorrow?", "What did we talk about yesterday?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
 "Mark Homework 6 as done", "Delete the study group tomorrow",
+"Make my dentist appointment red", "Add gym every Tuesday and Thursday at
+7 AM", "When am I free for an hour tomorrow?", "Accept the project sync
+invite",
 "What's the weather this afternoon?", "Who won the Braves game last night?",
 "What does this page say: emory.edu/...", "Open YouTube",
 "Pull up the Canvas page for Classical Mechanics".
@@ -260,7 +263,31 @@ you are most likely to tune:
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
+| `[assistant] fast_model` | "claude-haiku-5-5" | Cheaper model for short, simple questions; `CLAUDE_FAST_MODEL` overrides it |
+| `[assistant] router` | "auto" | "auto": simple turns go to `fast_model`, changes, lookups, reasoning, attachments and untrusted content stay on `model`; "off" (or `CLAUDE_ROUTER=off`): always `model` |
+| `[assistant] usage_file` | "data/usage.json" | Monthly API token totals and a rough cost estimate (the owner's phone app gets `month_usd`); "" = not kept |
 | `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
+
+**Cost: model routing and prompt caching.** Each turn picks its model
+before the request, with no extra API call (`assistant/router.py`): a short,
+simple question ("what time is it") goes to `fast_model` (Claude Haiku).
+Words that usually mean a change (add, move, book, set, turn off, lock,
+pause, forget, save, ...), a web lookup or reasoning, a long request, an
+attachment, or untrusted text (web, email, invites) earlier in the
+conversation send it to `model`. Words can miss a phrasing, so there is a
+second check: if Haiku answers with any tool call that isn't read-only
+(the list is `READ_ONLY_TOOLS` in `router.py`: calendar, assignment, email,
+notes and home *reads*), that answer is dropped before anything runs and
+`model` answers instead. Every change is therefore made by `model` (words
+Haiku said before its tool call may already have been spoken). Once a
+conversation needed `model` it stays there until it ends. Confirmations are
+the same on either model. The tools and system prompt are the same bytes on
+every request and are cached by the API (5 minutes); the date and recalled
+notes travel with each of your messages instead, and the weekly review
+offer with the first one only. Each Claude API call's token counts (chat,
+summaries, history titles, tutor, lecture notes: input, output, cache
+read/write, web searches) are logged at INFO in `logs/assistant.log`,
+without any text.
 
 ### Voices
 
@@ -598,10 +625,14 @@ One-time setup on the PC (PowerShell, in the project folder):
    your tailnet. It refuses to start, naming the variables (never their
    values), if `GOOGLE_TOKEN_JSON`, `GOOGLE_CLIENT_JSON`, `GOOGLE_TOKEN`,
    `GOOGLE_CREDENTIALS`, `HISTORY_PATH`, `WEB_TOKEN`, `NOTION_TOKEN`,
-   `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY` or `PINECONE_INDEX` is set in
-   the shell but not by `.env.mom`: `.env.mom` cannot override them, so her
-   instance would use your Google account, history or token. The same check
-   runs whenever `[webapp] google_connect` is on.
+   `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `HA_URL`
+   or `HA_TOKEN` is set in the shell but not by `.env.mom`: `.env.mom`
+   cannot override them, so her instance would use your Google account,
+   history, token or smart home. The refusal is printed and also written
+   to her log (`logs/mom.log`), since the sign-in task runs hidden. The
+   same check runs whenever `[webapp] google_connect` is on. Your team chat
+   tokens don't matter here: an instance started with an `--env-file`
+   other than `.env` never turns team chat on.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
@@ -798,6 +829,55 @@ lines show what Render's proxy sends; see BLOCKERS.md.
 
 ## Email, notes, lectures and homework help
 
+### Google Calendar by voice
+Beyond "what's on my calendar", the calendar tools cover most of what the
+Google Calendar app does:
+
+- **Colors and labels.** "Make it red", "Color the lab meeting Basil",
+  "Label it School". Google's 11 event colors work by name (Lavender, Sage,
+  Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil,
+  Tomato) or plain words like red or light blue. The named **event labels**
+  you made in Google Calendar work by their names too. Labels are read
+  from Google; create and rename them in the Google Calendar app.
+  `[calendar] color_labels` in `config.toml` adds your own words, e.g.
+  `color_labels = { Homework = "School", Gym = "Tangerine" }`.
+- **Repeating events.** "Add gym every Tuesday and Thursday at 7 AM for
+  ten weeks". To move, change or delete a repeating event, say whether you
+  mean just this one or all of them; deleting a whole series asks "delete
+  every ...?" first. Moving a weekly series to another weekday works; a
+  series on several weekdays or fixed dates of the month can only change
+  its time (otherwise it offers to make a new series).
+- **Reminders, busy/free and privacy.** "Remind me 10 minutes before and
+  at the start", "no reminders", "show me as free", "make it private".
+- **Guests and Meet.** "Invite ana@uni.edu", "Add a Meet link". Google
+  emails an invite, so adding or removing guests always asks first and
+  names every address. Moving or deleting an event doesn't ask Google to
+  email its guests; tell them yourself, or do it in Google Calendar.
+- **Invites.** "Accept the project sync invite", "Tell them maybe". This
+  always asks first, and reads out any note it would send.
+- **Free time and search.** "When am I free for an hour tomorrow
+  afternoon?", "When is my next dentist appointment?"
+- **Other calendars.** "What's on my Classes calendar?", "What's on all my
+  calendars this week?" (up to 10 calendars), "Which calendars do I have?"
+
+Labels and other calendars need two read-only permissions that a
+`token.json` from before this feature doesn't have. Everything else keeps
+working without them; to add them, sign in once more (the startup line and
+`--check` remind you):
+
+```powershell
+python -m assistant.tools.google_auth            # or add --headless without a browser
+```
+
+This needs `google-api-python-client` 2.199 or newer (event labels); the
+automatic updater doesn't install new requirements, so run
+`pip install -r requirements.txt` on the PC and the Pi after updating.
+
+Not covered: focus time, out of office and working location (Google only
+allows them on work or school accounts), file attachments, and Google's
+"quick add" text box. Creating, renaming or deleting labels and calendars
+is left to the Google Calendar app.
+
 ### Email triage by voice (Gmail)
 "Anything important in my email?", "Read the one from Professor Smith",
 "Reply that I'll add error bars." The assistant lists unread or important
@@ -967,6 +1047,85 @@ token travels unencrypted. That is fine inside your home network or over
 Tailscale; anywhere else use https (Nabu Casa or your own certificate).
 The assistant warns at startup when `HA_URL` is a plain http address
 outside the home network.
+
+## Team chat (Slack, Discord, GitHub)
+
+"What happened in #eng today?", "summarize the release thread", "any
+decisions about the launch in Discord this week?", "what's new in the
+issues on hey-claude?", "read the spec file Bob shared". Claude reads the
+channel, thread, search results or a shared text file and sums up the
+ideas, decisions, open questions and files. It never posts: there is no
+tool that writes to Slack, Discord or GitHub. "Save that as a digest"
+files Claude's summary as a page in your Notion (a "Chat Digests"
+database it creates beside Assignments, or `[teamchat]
+digest_database_id`), after a spoken yes, once per service, channel and
+day (asking again that day finds the same page and adds nothing). Off by
+default; owner only (family members never get these tools).
+
+LinkedIn isn't here: LinkedIn doesn't allow apps to read your messages or
+feed.
+
+Set up the services you use (each token is read only and goes in `.env`):
+
+1. **Slack** (a user token, so it reads what you can read): at
+   api.slack.com/apps, Create New App -> From scratch, in your team's
+   workspace. Under OAuth & Permissions -> User Token Scopes add
+   `channels:read`, `channels:history`, `groups:read`, `groups:history`,
+   `users:read`, `files:read` and `search:read` (no direct-message
+   scopes: DMs are never passed to Claude). Install to Workspace, then copy the
+   User OAuth Token (`xoxp-...`) into `.env` as `SLACK_USER_TOKEN=`.
+   **Never turn on Manage Distribution:** a distributed app that isn't in
+   the Slack Marketplace is limited to one history read a minute.
+2. **Discord** (a bot that a server admin adds): at
+   discord.com/developers/applications, New Application -> Bot -> Reset
+   Token, and copy it into `.env` as `DISCORD_BOT_TOKEN=`. On the same
+   page turn **on** Message Content Intent (without it Discord sends
+   messages with no text; the assistant says so) and turn **off** Public
+   Bot. Under OAuth2 -> URL Generator tick `bot` with View Channels and
+   Read Message History (permissions=66560) and have a server admin open
+   that link to add the bot.
+3. **GitHub**: github.com/settings/personal-access-tokens -> Generate new
+   token (fine-grained), only the repositories you want, with read-only
+   Issues, Pull requests, Discussions and Metadata. Put it in `.env` as
+   `GITHUB_TOKEN=`.
+4. In `config.local.toml`, turn it on with the services you set up:
+
+```toml
+[teamchat]
+enabled = true
+slack = true
+discord = false
+github = true
+channels = ["#eng", "general"]
+github_repos = ["kylechen839-max/Claude-Personal-Assistant"]
+```
+
+Restart; the startup line names any turned-on service whose token is
+missing. Claude gets `chat_channels`, `chat_read` (a channel or one
+thread, the last 24 hours by default, or a day such as "yesterday"),
+`chat_search`, `chat_files`, `chat_read_file` and, with Notion set up,
+`chat_save_digest`.
+
+Limits, in code:
+- `[teamchat] channels` lists the Slack and Discord channels it may read
+  (by name or id, Discord also as server/channel); `[]` means every
+  channel the token can see. `[teamchat] github_repos` does the same for
+  GitHub. Slack DMs and group DMs are never passed to Claude or logged
+  (Slack's search and file list return some; they are dropped). A search
+  that had to be cut (Discord: 20 channels in each of 3 servers; GitHub:
+  5 repos) says so; name a channel or repo to search it.
+- At most `[teamchat] max_messages` (100) messages per read, 300
+  characters of each, about 12,000 characters per answer, 20 files per
+  list, and only text files up to 50 KB, downloaded only from Slack's or
+  Discord's own file servers (the Slack token goes to files.slack.com
+  only; Discord's file links need none).
+- Everything read is other people's text, so once Claude has read chat,
+  any tool that changes something asks you first. Message text, file
+  text and tokens never go in the log.
+- After a refused token it stops calling that service until restart, and
+  when a service asks it to slow down it waits that long without calling
+  (Discord bans addresses that make too many bad requests).
+- `[teamchat] timeout` is the seconds per request.
 
 ## Spotify by voice
 
@@ -1516,6 +1675,8 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
+  router.py     per-turn model choice: Haiku for simple turns, else the main model
+  usage.py      API token counts per call, monthly totals and cost estimate
   tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
   tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
   tts_elevenlabs.py  optional ElevenLabs cloud voice
@@ -1577,5 +1738,6 @@ tests/          pytest suite (offline; live tests skip without keys);
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,
-`BLOCKERS.md` for what is still open for you, and `MANUAL_TEST.md` for the final
-hands-on checklist.
+`BLOCKERS.md` for what is still open for you, `MANUAL_TEST.md` for the final
+hands-on checklist, and [BACKLOG.md](BACKLOG.md) for planned work (such as
+the hybrid model, before a public release).

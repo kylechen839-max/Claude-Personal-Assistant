@@ -21,7 +21,8 @@ from assistant.attachments import AttachmentRejected, prepare, prepare_all  # no
 from assistant.chat import ClaudeChat  # noqa: E402
 from assistant.history import HistoryStore, Recorder  # noqa: E402
 from assistant.tools import Tool, ToolRegistry  # noqa: E402
-from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
+from tests.conftest import (make_response, own_blocks, text_block,  # noqa: E402
+                            tool_use_block)
 from tests.test_cloud import PUBLIC, login as cloud_login, make_cloud, slept, via_proxy  # noqa: E402,F401
 from tests.test_family import env, owner  # noqa: E402,F401
 from tests.test_tutor import photo  # noqa: E402
@@ -49,7 +50,7 @@ def gif():
 
 
 def user_content(fake_client, call=-1):
-    return fake_client.calls[call]["messages"][-1]["content"]
+    return own_blocks(fake_client.calls[call]["messages"][-1]["content"])
 
 
 # --- sniffing and limits --------------------------------------------------------
@@ -599,7 +600,7 @@ def test_family_attachments_go_to_their_own_chat(env, owner):
     assert r.status_code == 200
     call = next(c for c in env.fake_client.calls if c["messages"]
                 and isinstance(c["messages"][-1]["content"], list))
-    assert [b["type"] for b in call["messages"][-1]["content"]] == ["image", "text"]
+    assert [b["type"] for b in own_blocks(call["messages"][-1]["content"])] == ["image", "text"]
     uid = link["user"]["id"]
     session = next(s for s in env.assistant.sessions.values() if s.user == uid)
     conv = session.history.get(session.chat.conversation_id)

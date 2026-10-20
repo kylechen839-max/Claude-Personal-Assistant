@@ -7,6 +7,13 @@ max_tokens = 1500            # a ceiling, not a target: room for thinking and we
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)
+# Simple, short questions go to the cheaper fast model; changes, lookups and
+# reasoning stay on `model` (assistant/router.py). "off" (or CLAUDE_ROUTER=off)
+# sends everything to `model`. CLAUDE_FAST_MODEL overrides fast_model.
+# fast_model = "claude-haiku-5-5"
+# router = "auto"
+# Monthly token counts and a rough cost estimate (owner only); "" = not kept.
+# usage_file = "data/usage.json"
 
 [tts]
 # "auto" (default): Kokoro if its files are downloaded, else Piper, else pyttsx3.
@@ -62,6 +69,11 @@ enabled = true
 credentials = "credentials.json"
 token = "token.json"
 calendar_id = "primary"
+# Your own names for event colors ("make it School"): name = a Google color
+# (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite,
+# Blueberry, Basil, Tomato) or the name of one of your Google event labels.
+color_labels = {}
+# e.g. color_labels = { School = "Basil", Work = "Blueberry", Gym = "Tangerine" }
 
 [gmail]
 enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth
@@ -204,6 +216,18 @@ scripts = []                  # script./scene./automation. entity ids it may run
 secure_entities = []          # more entity ids that always need a spoken yes (e.g. a garage relay)
 cache_seconds = 30            # how long the device list is kept
 timeout = 10                  # seconds per request
+
+[teamchat]                    # read Slack, Discord and GitHub; Claude sums them up (README "Team chat"); owner only
+enabled = false               # then turn on the services you use; each needs its token in .env
+slack = false                 # SLACK_USER_TOKEN (a user token, xoxp-)
+discord = false               # DISCORD_BOT_TOKEN (a bot with Message Content Intent)
+github = false                # GITHUB_TOKEN (a fine-grained, read-only token)
+channels = []                 # Slack/Discord channels it may read, e.g. ["#eng", "general"]; [] = all the token sees
+github_repos = []             # repos it may read, e.g. ["kylechen839-max/Claude-Personal-Assistant"]; [] = all the token sees
+max_messages = 100            # messages per read or search (at most 100)
+timeout = 15                  # seconds per request
+digest_database_id = ""       # Notion database for chat digests; "" = find or create "Chat Digests" beside Assignments
+digest_state_file = "data/teamchat_digests.json"  # remembers that database's id
 
 [spotify]                     # "play my study playlist", "pause", "skip" (Spotify Premium; README "Spotify")
 enabled = false               # needs SPOTIFY_CLIENT_ID in .env and a one-time sign-in:

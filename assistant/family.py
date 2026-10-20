@@ -368,12 +368,17 @@ class Family:
         if info is None:
             return []
         from assistant.tools.calendar import GoogleCalendar
-        from assistant.tools.google_auth import GMAIL_SCOPES, granted_scopes
+        from assistant.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
+                                                 GMAIL_SCOPES, granted_scopes)
 
         token, tz = self.google_token(user["id"]), user.get("timezone") or None
+        # their labels and calendars only if their token allows it; never
+        # Kyle's [calendar] color_labels
         tools = GoogleCalendar(credentials_path="", token_path=token,
                                calendar_id="primary", timezone=tz,
-                               save_token=False, environ={}, in_app=True).tools()
+                               save_token=False, environ={}, in_app=True,
+                               extras=set(CALENDAR_EXTRA_SCOPES) <= granted_scopes(info)
+                               ).tools()
         if self.config["gmail"]["enabled"] and \
                 set(GMAIL_SCOPES) <= granted_scopes(info):
             from assistant.tools.gmail import GmailInbox
@@ -458,7 +463,8 @@ class Family:
                               max_tool_rounds=a["max_tool_rounds"], memory=None,
                               recorder=recorder, language=user["language"],
                               user_name=user["name"],
-                              timezone=user.get("timezone") or None)
+                              timezone=user.get("timezone") or None,
+                              fast_model=a["fast_model"], router=a["router"])
 
         return UserContext(user, registry, store, chat_factory)
 

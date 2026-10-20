@@ -20,7 +20,8 @@ from assistant import audio, webapp  # noqa: E402
 from assistant.chat import ClaudeChat  # noqa: E402
 from assistant.tools import Tool, ToolRegistry  # noqa: E402
 from assistant.tts import PrintTTS, Pyttsx3TTS  # noqa: E402
-from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
+from tests.conftest import (make_response, own_blocks, text_block,  # noqa: E402
+                            tool_use_block, without_context)
 
 TOKEN = "t" * 20 + "-test-token-0123456789abcdef"
 BASE = "https://testserver"  # the session cookie is Secure
@@ -156,7 +157,8 @@ def test_login_sets_a_strict_cookie(make_app):
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
         "history": False, "conversation": None, "owner": True, "family": False,
         "memory": False, "language": "en", "voice_picker": False,
-        "health": None}
+        "health": None,
+        "month_usd": 0}  # the owner's API cost estimate (usage.py)
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -325,7 +327,9 @@ def test_text_chat_round_trip(make_app, fake_client):
     assert evs[0]["text"] == "Hi Kyle." and evs[0]["audio"].startswith("/api/audio/")
     deltas = [e["text"] for e in events(r, deltas=True) if e["type"] == "delta"]
     assert len(deltas) == 2 and "".join(deltas) == "Hi Kyle."
-    assert fake_client.calls[0]["messages"][0] == {"role": "user", "content": "hello"}
+    sent = fake_client.calls[0]["messages"]
+    assert len(sent) == 1 and sent[0]["role"] == "user"
+    assert own_blocks(sent[0]["content"]) == [{"type": "text", "text": "hello"}]
     assert client.get("/api/state").json()["turns"] == 1
 
 
@@ -433,7 +437,9 @@ def test_each_browser_has_its_own_conversation(make_app, fake_client):
     events(first.post("/api/turn", json={"text": "one"}))
     events(second.post("/api/turn", json={"text": "two"}))
     assert len(assistant.sessions) == 2
-    assert fake_client.calls[1]["messages"] == [{"role": "user", "content": "two"}]
+    sent = fake_client.calls[1]["messages"]
+    assert len(sent) == 1 and sent[0]["role"] == "user"
+    assert own_blocks(sent[0]["content"]) == [{"type": "text", "text": "two"}]
 
 
 # --- delete confirmation --------------------------------------------------------------
@@ -922,8 +928,9 @@ def test_chat_stream_can_be_cancelled(make_app, fake_client):
         got.append(delta)
         cancel.set()  # barge in after the first piece
     assert got == ["One two t"]
-    assert s.chat.history == [{"role": "user", "content": "count"},
-                              {"role": "assistant", "content": "One two t"}]
+    assert without_context(s.chat.history) == [
+        {"role": "user", "content": "count"},
+        {"role": "assistant", "content": "One two t"}]
 
 
 def test_chat_stream_error_is_a_sentence(make_app, fake_client):

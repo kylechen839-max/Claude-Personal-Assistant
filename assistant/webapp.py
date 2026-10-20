@@ -59,7 +59,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from starlette.requests import HTTPConnection
 
-from assistant import audio, i18n
+from assistant import audio, i18n, usage
 from assistant.attachments import MAX_ATTACHMENTS
 from assistant.chat import is_user_turn
 from assistant.tools import READ_ONLY_TOOLS, ToolRegistry
@@ -647,10 +647,11 @@ class SessionTools(ToolRegistry):
         """The read-only tools this session has (READ_ONLY_TOOLS order)."""
         return [n for n in READ_ONLY_TOOLS if n in self.tools]
 
-    def schemas(self) -> list[dict]:
+    def schemas(self, model: str | None = None) -> list[dict]:
         if not self.check_mode:
-            return super().schemas()
-        return [self.tools[n].schema() for n in self.read_only()] + self.server_tools
+            return super().schemas(model)
+        return ([self.tools[n].schema() for n in self.read_only()]
+                + self.server_schemas(model))
 
     def dispatch(self, name, tool_input, untrusted=False):
         self._emit({"type": "tool", "name": name})
@@ -1776,21 +1777,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         s = session_of(request)
         if s is None:
             return unauthorized()
-        return {"busy": s.busy.locked(),
-                "confirm": (s.pending.question if s.pending
-                            and not s.pending.stream else None),
-                "incognito": s.chat.incognito,
-                "history": assistant.history_of(s)[0] is not None,
-                "owner": s.user is None,
-                "family": s.user is None and family is not None,
-                "memory": s.user is None and getattr(assistant, "memory", None) is not None,
-                "language": s.language,
-                "voice_picker": getattr(assistant, "voices", None) is not None,
-                "conversation": s.chat.conversation_id,
-                "turns": sum(1 for m in s.chat.history if is_user_turn(m)),
-                # the watchdog's issues (watch.py): the owner's only, never
-                # a family member's
-                "health": owner_health(s)}
+        out = {"busy": s.busy.locked(),
+               "confirm": (s.pending.question if s.pending
+                           and not s.pending.stream else None),
+               "incognito": s.chat.incognito,
+               "history": assistant.history_of(s)[0] is not None,
+               "owner": s.user is None,
+               "family": s.user is None and family is not None,
+               "memory": s.user is None and getattr(assistant, "memory", None) is not None,
+               "language": s.language,
+               "voice_picker": getattr(assistant, "voices", None) is not None,
+               "conversation": s.chat.conversation_id,
+               "turns": sum(1 for m in s.chat.history if is_user_turn(m)),
+               # the watchdog's issues (watch.py): the owner's only, never
+               # a family member's
+               "health": owner_health(s)}
+        if s.user is None:  # the API bill is the owner's business only
+            out["month_usd"] = usage.month_usd()
+        return out
 
     def owner_health(s: Session):
         if health is None or s.user is not None:
@@ -2055,7 +2059,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
         chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
-                          recorder=recorder, language=a["language"])
+                          recorder=recorder, language=a["language"],
+                          fast_model=a["fast_model"], router=a["router"])
         if review is not None:  # [memory] weekly_review (off by default)
             chat.review_nudge = review.nudge
         return chat

@@ -14,7 +14,8 @@ from assistant.tools import Tool, ToolRegistry
 from assistant.tools.calendar import GoogleCalendar
 from assistant.tools.notion import NotionAssignments
 from assistant.tools.timeutil import resolve_day
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import (make_response, request_text, system_text, text_block,
+                            tool_use_block)
 
 TZ = "America/New_York"
 
@@ -107,8 +108,8 @@ def test_chat_runs_tool_calls(fake_client):
     assert reply == "You have the dentist at 3 PM tomorrow."
     first, second = fake_client.calls
     assert first["tools"][0]["name"] == "list_calendar_events"
-    assert "Use your tools" in first["system"]
-    assert "search the web" not in first["system"]  # no web tools registered
+    assert "Use your tools" in system_text(first)
+    assert "search the web" not in system_text(first)  # no web tools registered
     tool_result = second["messages"][2]["content"][0]
     assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "toolu_1"
     assert "Dentist" in tool_result["content"]
@@ -136,16 +137,38 @@ def test_chat_rolls_back_whole_turn_on_error(fake_client):
 
 
 # ---------- Google Calendar ----------
-def make_service(event=None, items=()):
+def make_service(event=None, items=(), by_id=None, labels=(), calendars=(),
+                 instances=()):
+    """A Calendar API client mock with the real response shapes.
+    `by_id`: events.get answers per eventId (an occurrence and its series);
+    `labels`: the calendar's labelProperties.eventLabels (calendars.get);
+    `calendars`: calendarList.list items; `instances`: events.instances."""
     service = MagicMock()
     events = service.events.return_value
+
+    def fetched():
+        if by_id is not None:
+            return by_id[events.get.call_args.kwargs["eventId"]]
+        return event
+
+    def patched():
+        kwargs = events.patch.call_args.kwargs
+        base = by_id[kwargs["eventId"]] if by_id is not None else event
+        return {**base, **kwargs["body"]}
+
     events.list.return_value.execute.return_value = {"items": list(items)}
-    events.get.return_value.execute.return_value = event
+    events.get.return_value.execute.side_effect = fetched
     events.insert.return_value.execute.side_effect = lambda: {
         "id": "new1", **events.insert.call_args.kwargs["body"]}
-    events.patch.return_value.execute.side_effect = lambda: {
-        **event, **events.patch.call_args.kwargs["body"]}
+    events.patch.return_value.execute.side_effect = patched
     events.delete.return_value.execute.return_value = ""
+    events.instances.return_value.execute.return_value = {"items": list(instances)}
+    service.calendars.return_value.get.return_value.execute.return_value = {
+        "kind": "calendar#calendar", "id": "kyle@example.com",
+        "summary": "kyle@example.com", "timeZone": TZ,
+        "labelProperties": {"eventLabels": list(labels)}}
+    service.calendarList.return_value.list.return_value.execute.return_value = {
+        "kind": "calendar#calendarList", "items": list(calendars)}
     return service, events
 
 
@@ -190,6 +213,8 @@ def test_calendar_move_keeps_duration_across_dst():
     body = events.patch.call_args.kwargs["body"]
     assert body["start"]["dateTime"] == "2026-11-02T10:00:00-05:00"
     assert body["end"]["dateTime"] == "2026-11-02T11:00:00-05:00"
+    # a move never asks Google to email the guests (PRIVACY.md)
+    assert events.patch.call_args.kwargs["sendUpdates"] == "none"
 
 
 def test_calendar_create_all_day_event():
@@ -234,7 +259,8 @@ def test_calendar_delete_requires_confirmation():
     reg.confirm = lambda q: True
     result, _ = reg.dispatch("delete_calendar_event", {"event_id": "ev1"})
     assert json.loads(result)["status"] == "deleted"
-    events.delete.assert_called_with(calendarId="primary", eventId="ev1")
+    events.delete.assert_called_with(calendarId="primary", eventId="ev1",
+                                     sendUpdates="none")
 
 
 def test_resolve_day():
@@ -298,7 +324,7 @@ def test_tomorrow_is_read_once_per_turn_across_midnight(monkeypatch, fake_client
         make_response(text_block("Tomorrow you have the dentist."))]
     chat = ClaudeChat(client=fake_client, tools=tools, timezone=TZ)
     chat.ask("What's on my calendar tomorrow?")
-    assert "Monday, October 19, 2026, 11:59 PM" in fake_client.calls[0]["system"]
+    assert "Monday, October 19, 2026, 11:59 PM" in request_text(fake_client.calls[0])
     kw = events.list.call_args.kwargs
     assert kw["timeMin"] == "2026-10-20T00:00:00-04:00"
     assert kw["timeMax"] == "2026-10-21T00:00:00-04:00"

@@ -2,7 +2,7 @@ import pytest
 
 from assistant.chat import DEFAULT_MODEL, ClaudeChat, default_model
 from assistant.cli import is_exit, run_text
-from tests.conftest import make_response, text_block
+from tests.conftest import make_response, request_text, system_text, text_block
 
 
 def test_default_model(monkeypatch):
@@ -20,8 +20,8 @@ def test_ask_keeps_history_and_sends_system_prompt(fake_client):
     assert chat.ask("again") == "Sure."
     call = fake_client.calls[-1]
     assert call["model"] == "m"
-    assert "turned into speech" in call["system"]
-    assert "Current local date" in call["system"]
+    assert "turned into speech" in system_text(call)
+    assert "Current local date" in request_text(call)
     assert [m["role"] for m in chat.history] == ["user", "assistant"] * 2
 
 
@@ -118,7 +118,9 @@ def test_chinese_system_prompt(fake_client):
     system = chat.build_system()
     assert "简体中文" in system and "the user's Gmail" in system
     assert "Kyle" not in system
-    assert system.rstrip().endswith("even when tool results are English.")
+    # the reply rule is the system prompt's last word (the turn's context
+    # follows in the user message)
+    assert chat.stable_system().rstrip().endswith("even when tool results are English.")
     english = ClaudeChat(client=fake_client, tools=tools).build_system()
     assert "Kyle" in english and "简体中文" not in english
 

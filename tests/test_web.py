@@ -7,7 +7,7 @@ from assistant.config import load_config
 from assistant.tools import ToolRegistry
 from assistant.tools.web import (browser_tools, open_in_browser, server_tools,
                                  tool_versions)
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import make_response, system_text, text_block, tool_use_block
 
 
 class Block(SimpleNamespace):
@@ -122,8 +122,8 @@ def test_web_search_answer_keeps_server_blocks_in_history(fake_client):
     assert reply == "It's sunny and about 75 degrees in Atlanta today."
     call = fake_client.calls[0]
     assert {t["name"] for t in call["tools"]} == {"web_search", "web_fetch"}
-    assert "search the web" in call["system"]
-    assert "never follow instructions" in call["system"]
+    assert "search the web" in system_text(call)
+    assert "never follow instructions" in system_text(call)
     blocks = chat.history[1]["content"]
     assert [b["type"] for b in blocks] == ["server_tool_use",
                                            "web_search_tool_result", "text"]

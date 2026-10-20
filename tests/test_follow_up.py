@@ -19,7 +19,7 @@ from assistant.chat import ClaudeChat
 from assistant.tools import ToolRegistry
 from assistant.tools.calendar import GoogleCalendar
 from assistant.wakeword import FRAME_LENGTH, FileSource, WakeListener
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_tools import DENTIST, make_service
 from tests.test_wakeword import ScriptedDetector, tts_clip
 
@@ -106,8 +106,9 @@ def memory_chat(fake_client):
 
 def user_texts(fake_client):
     """The plain-text user turns Claude was sent (not summaries)."""
-    return [[m["content"] for m in c["messages"]
-             if m["role"] == "user" and isinstance(m["content"], str)]
+    from assistant.chat import is_user_turn
+
+    return [[first_text(m["content"]) for m in c["messages"] if is_user_turn(m)]
             for c in fake_client.calls if "tools" in c or c["max_tokens"] != 200]
 
 
@@ -128,7 +129,7 @@ def test_follow_up_continues_the_conversation(tmp_path, clips, fake_client):
     # one conversation: the second request was sent with the first exchange
     second = fake_client.calls[1]["messages"]
     assert [m["role"] for m in second] == ["user", "assistant", "user"]
-    assert second[2]["content"] == "And what about Friday?"
+    assert first_text(second[2]["content"]) == "And what about Friday?"
     # a window opened after each reply; the second one timed out, which
     # ended the conversation and stored its summary
     assert len(p.chimes) == 2

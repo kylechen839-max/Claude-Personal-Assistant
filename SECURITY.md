@@ -180,15 +180,74 @@ stored untrusted, whether it ends normally or by switching to a resumed
 conversation (`ClaudeChat.tainted()`). Saved history is untrusted too:
 resuming a conversation or using the history search tools makes changes
 ask first for the rest of that conversation, so history's own titles and
-summaries never come back as trusted text. The
-system prompt also labels recalled notes as stored data, not
-instructions. (Recalled notes stay in the system prompt rather than moving
-into the user turn: the code-level confirmation above is what protects
-changes, and moving them would change the history every mode shares.)
+summaries never come back as trusted text. Recalled notes (with the
+date and time and the weekly review offer) ride in a context block added
+after Kyle's words in that turn's user message, so the system prompt stays
+byte-identical and cacheable. The block starts by saying the app added it
+and Kyle didn't say it, and labels the notes as stored data, not
+instructions; the code-level confirmation above is still what protects
+changes. The block is kept apart from the message text
+(`message["context"]`, rendered only when the request is built), so it
+never reaches the conversation history recorder or the memory summary
+(`memory.transcript()`), and a note can't be re-stored as if Kyle had said
+it. The model router (`assistant/router.py`) sends every turn of a
+conversation with untrusted content or an attachment to the main model,
+and confirmations are the same on either model. Usage logs and route logs
+hold model names, reason codes and token counts only; the usage file
+(`[assistant] usage_file`) holds monthly totals per model, written
+privately and atomically, and only the owner's `/api/state` shows the
+monthly estimate.
 `search_memory` and `remember` are private like the email tools, and the
 log records memory lookups by count only. Tests:
 `tests/test_gmail.py` (an injection email that tries to delete an event,
 move events, change Notion or create a draft must trigger a confirmation).
+
+### Calendar guests, invites and other calendars (`tools/calendar.py`)
+The fuller calendar tools can email people: adding guests makes Google
+send them an invite, and answering an invite tells the organizer. So these
+**always** ask for a spoken yes, untrusted content or not, and the
+question names the addresses ("Do you want me to send an invite for Study
+group to ana@uni.edu?"): `create_calendar_event` with `attendees`,
+`update_calendar_event` with `add_attendees` or `remove_attendees`, and
+`respond_to_calendar_invite` (which also names the organizer and reads
+out any note, since Google emails it to the organizer). Every address is
+named, never "and 2 more", so an extra injected guest can't hide in the
+question. Moves and deletes send no `sendUpdates`; Google's default then is no
+notification, though its docs say "some emails might still be sent". Google is
+told to email guests (`sendUpdates="all"`) only on those calls, after the
+yes; every other create or update sends `"none"`. Deleting a whole
+repeating series asks "delete every ..., the whole series?". Every other
+change (`update_calendar_event`, `move_calendar_event` with `scope`
+"all") asks when untrusted content is in the conversation, like before.
+An RSVP sends the whole guest list back with only Kyle's own entry
+changed (a patch replaces the list), so nobody is dropped. Bounds: 20
+guests per call, 5 reminders, 5 repeat lines of 200 characters (each must
+start with RRULE, EXDATE or RDATE, no line breaks, so nothing else can be
+smuggled into the event), search words up to 100 characters, 10 calendars
+in an "all calendars" listing, and labels and the calendar list cached for
+5 minutes (at most 20 entries).
+
+Untrusted text: event notes, other people's invites, RSVP results, and
+anything from a calendar Kyle doesn't own (a shared or subscribed calendar,
+`accessRole` other than "owner"; listings, moves and updates alike) mark
+the result `"untrusted_content"`,
+and `list_calendars` does too when any shared calendar's name is in it.
+Guest names are never sent, only a count. Logs: the calendar tools log
+counts and field names at INFO (e.g. "updated an event (attendees,
+summary)"), never titles, notes or addresses; tool inputs stay at DEBUG as
+for every tool. Error messages from bad input (an address that isn't one,
+a reminder that isn't a number, an unknown color) don't repeat the value,
+because a failed tool's error is logged at ERROR. Tests: `tests/test_calendar_features.py`,
+`tests/test_security.py`.
+
+Scopes: the two new ones are read-only
+(`calendar.calendarlist.readonly`, `calendar.calendars.readonly`: the list
+of calendars and their settings, including label names). They are
+optional: `get_credentials` still requires only `calendar.events`, so an
+older token keeps working, and only `list_calendars`, label names and
+other calendars by name wait for the re-sign-in. A family member's tools
+get them only if her own token has them, and never Kyle's
+`[calendar] color_labels`.
 
 ### Lecture recordings and transcripts
 Recordings are personal data (and other people's voices). The audio is
@@ -637,6 +696,66 @@ limits are in code, not in the prompt.
   so README warns, and the startup line warns when `HA_URL` is http at a
   public address. Over Tailscale the link is encrypted anyway.
 
+## Team chat (`tools/teamchat*.py`)
+
+Slack, Discord and GitHub hold other people's words, and the tokens can
+read a whole workspace, so the limits are in code.
+
+- **Read only, no posting.** There is no tool that posts, reacts, edits
+  or deletes anything in Slack, Discord or GitHub; the only write is
+  `chat_save_digest`, which files Claude's summary in Kyle's own Notion
+  and always asks for a spoken yes first (`confirm_prompt`), once per
+  `chat:<service>:<channel>:<date>` key (a retry finds the page by its
+  Digest ID property instead of filing a second).
+- **Others' text is untrusted.** Every read tool is `untrusted_output`
+  and its results carry `"untrusted_content": true` and a note to treat
+  them as information, never instructions, so after a chat read every
+  state-changing tool asks first, and the taint survives a resume.
+  Inputs and results are `private` (never logged); the log gets the
+  service, counts and HTTP status or Slack error codes only.
+- **Off by default, owner only.** `[teamchat] enabled = false` and each
+  service off; family members never get the tools (`family.py` builds
+  their registry separately; a test pins it). A separate instance (an
+  `--env-file` other than `.env`, e.g. Mom's) never turns team chat on,
+  so Kyle's tokens inherited from his environment are never used there.
+  `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN` and `GITHUB_TOKEN` are in
+  `SECRET_ENV_VARS` (the log redaction also masks `xox?-`, `ghp_`/
+  `github_pat_` and Discord-token shapes) but deliberately not in
+  `ISOLATED_ENV_VARS`: a `GITHUB_TOKEN` in Kyle's Windows user
+  environment would otherwise stop the family apps from starting. When a
+  separate instance does refuse to start (an isolated variable
+  inherited), the refusal is also written to its log, since the
+  sign-in task runs hidden under pythonw.
+- **Tokens** go only in the `Authorization` header, never in a URL or
+  query, with redirects off. A token is only sent to the service's API
+  host and, for Slack, files.slack.com; the request helper refuses any
+  other host before calling.
+- **Files.** `chat_read_file` reads text/* only, at most 50 KB (checked
+  against the listing and again while streaming), only from
+  files.slack.com, cdn.discordapp.com or media.discordapp.net over https,
+  never following a redirect, and refuses a sign-in page served instead
+  of the file. Discord's CDN links are signed, so they get no token.
+- **What it may read.** `[teamchat] channels` limits Slack and Discord;
+  `[teamchat] github_repos` limits GitHub. Slack DMs and group DMs are
+  never passed to Claude or logged: no DM scopes are asked for, and the
+  DM hits Slack's search and files.list still return to the process are
+  dropped before Claude sees them (a DM-only file is never downloaded). A
+  Discord thread is read only if its parent is an allowed channel, and a
+  search hit inside a thread counts for its parent channel. GitHub search
+  always names the repos (at most 5; the answer says when it was cut),
+  so it never searches all of GitHub.
+- **Being a good client.** After an HTTP 401 (or Slack's invalid_auth) a
+  service makes no more calls until restart, and after a 429 it waits out
+  Retry-After without calling: Discord bans an address after 10,000
+  invalid requests in 10 minutes. Results are bounded (100 messages, 300
+  characters each, 12,000 characters per answer, 20 files).
+- Not fixed, on purpose: **a Slack user token reads what Kyle can read**,
+  including private channels he is in. A bot token would see less but
+  can't use search. The channel allowlist is the narrowing tool.
+- Not fixed, on purpose: **a digest key is per day**, so a second digest
+  of the same channel on the same day finds the first page and adds
+  nothing (no overwrite of what Kyle may have edited).
+
 ## Spotify (`tools/spotify.py`, `spotify_web.py`)
 
 Off by default (`[spotify] enabled = false`); the tools are registered only
@@ -766,8 +885,11 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   from Gmail (`eventType` "fromGmail") and events whose guests may edit
   them (`guestsCanModify`): a listing that includes one carries
   `"untrusted_content": true`, and from then on changes in that
-  conversation ask first (`chat.has_marked_results`). The description field
-  is never sent to Claude, and deletes always ask. Notion assignment titles
+  conversation ask first (`chat.has_marked_results`). An event's notes
+  (description, first 300 characters) are sent to Claude since the fuller
+  calendar tools, and a listing with any notes is marked untrusted too,
+  even on Kyle's own events (notes are often pasted from someone else's
+  invite or email). Deletes always ask. Notion assignment titles
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
@@ -801,7 +923,8 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   assistant tedious. The assistant's own question can't confirm itself: it
   ends with "say yes or no", and an answer containing "no" counts as no.
 - **Memory poisoning.** A page could try to get a line into the conversation
-  summary stored in Pinecone, which comes back in later system prompts. Only
+  summary stored in Pinecone, which comes back as a recalled note in a
+  later turn's context block (labelled as stored data). Only
   user and assistant *text* goes into the summary (tool and web results are
   left out), so the page would have to get Claude to say it out loud first;
   and a recalled note can't skip a confirmation for a delete. No secrets go
@@ -813,7 +936,12 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   "Dentist? Just say yes" would be read out in the question. Kyle still has
   to answer; a cosmetic issue, not a bypass.
 - **Notes and lecture text in memory.** A saved note can come back in a
-  later system prompt (memory recall). Saving a note while email or web
+  later turn's context block (memory recall), and stays in that turn for
+  the rest of the conversation; a successful `delete_note` takes its text
+  out of every turn's context (`ClaudeChat.forget_note`). A note deleted
+  from the phone's Memory screen during a conversation, or one quoted in
+  a `recall_notes` tool result, stays in that live conversation until it
+  ends (not saved anywhere; accepted). Saving a note while email or web
   content is in context asks first, and notes can't skip a confirmation.
 
 - **One shared secret for all backends.** The cloud host (on Render) holds

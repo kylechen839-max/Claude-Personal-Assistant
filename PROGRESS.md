@@ -36,6 +36,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_cloud.py` | 78 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
+| `test_calendar_features.py` | 39 | calendar colors, labels, repeats, guests, RSVP, free time, other calendars |
 | `test_docs.py` | 25 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
@@ -547,8 +548,9 @@ Four features on top of the seven stages (branch `claude/features`).
   offset, repeats ignored, size caps), a background job (one at a time,
   resumes after restart) that decodes with PyAV in 10-minute windows
   (faster-whisper's own file decoder fails with PyAV 19, and windows keep
-  memory flat), transcribes with progress, summarizes with a forced Claude
-  tool call, finds or creates "Lecture Notes" next to Assignments, and
+  memory flat), transcribes with progress, summarizes with Claude
+  structured outputs (a JSON schema; see "Fix: lecture summaries 400 on
+  Sonnet 5.5"), finds or creates "Lecture Notes" next to Assignments, and
   files a page with inline/block equations, idempotently (Lecture ID
   property + local page record; a retry appends only missing blocks). Assignment-like action items
   are offered with Add buttons. Tested: resume after a lost chunk,
@@ -2993,3 +2995,448 @@ chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
 - Final counts (Linux sandbox, Python 3.13): 2114 passed, 48 skipped
   (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
   252).
+
+## Google Calendar: colors, labels, repeats, guests, invites, free time (2026-10-20)
+
+Kyle asked for "all the features that Google Calendar offers", starting
+with event colors and the color labels. `tools/calendar.py` now has 8
+tools (the 4 existing names are kept; `preflight.py` and the family tests
+use them):
+- `list_calendar_events`: also search words (`query`, up to 100
+  characters) and `calendar` (a name, an id, or "all": up to 10 calendars,
+  50 events each, merged by time; one unreadable calendar is skipped and
+  counted). Each event now says its color or label name, whether it
+  repeats, Kyle's own RSVP, the number of other guests, the Meet link,
+  "free" when it doesn't block time, and the first 300 characters of its
+  notes.
+- `create_calendar_event` and the new `update_calendar_event`: color
+  (Google's 11 classic colors by name, plain words like "red", or a bare
+  colorId), Google's named **event labels** (`eventLabelId` with
+  `eventLabelVersion=1`, sent only when setting a label, since that
+  parameter without a label removes it; switching from a label to a
+  classic color clears the label first, then sets `colorId`), repeat rules
+  (RRULE/EXDATE/RDATE, 5 lines of 200 characters; timed repeats need a
+  named time zone, else a clear error), reminders (popup minutes 0-40320,
+  at most 5; `[0]` is a reminder at the start, `[]` none, omitted the
+  calendar default), guests (20 per call), a Meet link (fresh `requestId`
+  per call, `conferenceDataVersion=1`), busy/free, visibility, and on
+  updates title/place/notes, removing guests and "guests can modify".
+- `move_calendar_event`, `update_calendar_event`, `delete_calendar_event`:
+  `scope` "this" (the occurrence id that the listing returns) or "all"
+  (the series, through `recurringEventId`). A series move shifts the
+  first occurrence by the same wall-clock amount, so 10 AM stays 10 AM
+  across DST; moving a "BYDAY" series to another weekday is refused with
+  a hint to change the repeat instead.
+- New `respond_to_calendar_invite` (accepted/declined/tentative, optional
+  note): the full guest list goes back with only Kyle's entry changed.
+- New `find_free_time` (up to 14 days, a minimum length, from/to hours):
+  built from events.list (no new scope). Events shown as free and declined
+  invites don't count, all-day busy events block their day, and the math
+  is in UTC so DST days come out right.
+- New `list_calendars` (names, ids, main, access role, and the color
+  choices: classic, Kyle's labels, `[calendar] color_labels`). Only
+  registered when the token has the two new read-only scopes.
+
+Color names resolve in this order: `[calendar] color_labels` aliases (new
+setting, e.g. `{ School = "Basil" }`), the calendar's label names,
+Google's classic names, everyday words, a colorId. An unknown color is an
+error listing the choices. Labels and the calendar list are cached for 5
+minutes (20 entries).
+
+Scopes: `CALENDAR_EXTRA_SCOPES` (`calendar.calendarlist.readonly`,
+`calendar.calendars.readonly`) are added to the sign-in, but
+`CALENDAR_SCOPES` (what `get_credentials` requires) is still only
+`calendar.events`, so existing tokens keep working. `cli.register_google`
+passes `extras` and Kyle's `color_labels`; without the scopes it prints a
+re-sign-in hint, `--check` shows "Calendar labels access", and label
+names, calendars by name and `list_calendars` wait. `family.py` gives a
+member the extras only if her own token has them, and never Kyle's
+`color_labels`. `requirements.txt`: `google-api-python-client>=2.199`
+(the first release with `eventLabelVersion`).
+
+Safety: adding or removing guests and answering invites always ask, naming
+the addresses (or the organizer); Google is told to email guests
+(`sendUpdates="all"`) only on those calls, otherwise `"none"`. Deleting a
+series asks "delete every ..., the whole series?". Other changes ask when
+untrusted text is in the conversation. Event notes, other people's
+invites, RSVP results and calendars Kyle doesn't own (`accessRole` not
+"owner", or an id not in his list) mark results untrusted. INFO logs have
+counts and field names only. SECURITY.md has the details.
+
+Not covered (the README says so): focus time, out of office and working
+location (work or school accounts only), attachments and quickAdd, and
+creating or renaming labels and calendars.
+
+Tests: `tests/test_calendar_features.py` (26, new) covers every option
+above on a `MagicMock` client with real shapes (invites without
+`organizer.self`, occurrences with `recurringEventId` and
+`originalStartTime`, `labelProperties.eventLabels`, `calendarList` items
+with `accessRole`), the DST cases (a series move across the November
+change; free time on Nov 1, when midnight to 6 AM is seven hours), a
+caplog test that the new tools log no titles, notes or addresses at INFO,
+and a real-shape guard: the calls the tools make are replayed on
+`googleapiclient.discovery.build("calendar", "v3", static_discovery=True)`
+and constructed, never executed (an unknown parameter raises TypeError).
+`test_security.py` +6 (update in INJECTED_CALLS, invites ask without web
+content, RSVP asks, series delete says "every", a series update after a
+fetched page asks), `test_i18n.py` +1 (the Chinese questions),
+`test_family_google.py` +1 (flags, the extra-scope gate, no
+`color_labels` leak, no "Kyle" in the schemas), `test_gmail.py` +1
+(`test_old_token_keeps_calendar_core_tools`; the two sign-in scope pins
+now include the read-only extras), `test_doctor.py` +1. `make_service`
+in `test_tools.py` gained `by_id`, labels, the calendar list and
+instances. With the source change reverted, all 38 new or changed tests
+fail; separate mutations (no non-owner taint, reminder 0 rejected, RSVP
+dropping other guests, free time in wall-clock time, no
+`eventLabelVersion`, no invite question) are each caught.
+- Counts (Linux sandbox, Python 3.13): 2160 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped). JS unchanged. Not checked against
+  the real Google API (mocks only); MANUAL_TEST 5b covers that.
+
+### Round 2 (judge findings)
+
+1. A series move from an occurrence that had been moved on its own
+   shifted by the wrong amount (Tuesdays at 10, Nov 10 moved alone to
+   2 PM, "move all to 11" set the series to 7 AM). The shift and the
+   day check now measure from `originalStartTime` (falling back to
+   `start`).
+2. The invite and remove questions said "and 1 more" past three
+   addresses, so an injected 4th guest could hide. They now name every
+   address (at most 20 per call), in English and Chinese. When the event
+   can't be read, they still name them ("an invite for that event to ...").
+3. The RSVP question didn't read out the note that Google emails to the
+   organizer. New `cal_rsvp_note` / `cal_rsvp_note_any` (EN, ZH): "...and
+   send the note: {comment}?".
+4. A weekly series couldn't move to another weekday, and the refusal
+   pointed at a tool that can't do it. `follow_new_day`: a one-weekday
+   BYDAY is rewritten to the new weekday in the same patch. Several
+   weekdays, an nth weekday (`2TU`), BYMONTHDAY/BYYEARDAY/BYMONTH/BYWEEKNO/
+   BYSETPOS with a day change, and EXDATE/RDATE with any shift (their
+   dates would stop matching) are refused plainly: "Say the new days and
+   time and I'll make a new series, then delete the old one." A rule
+   with no BY part follows the start by itself.
+5. `find_free_time` offered hours already past. It now starts at the
+   turn's "now" (`timeutil.now`, so TURN_NOW pins it), rounded up to the
+   next 5 minutes, and skips days that are over.
+6. Bad input reached the log through the ERROR traceback (`Not an email
+   address: 'Ana Lopez'`, the reminder value, the unknown color). The
+   messages no longer repeat the value ("Guest 2 is not an email
+   address").
+7. PRIVACY.md: the Calendar row says Google emails invited or removed
+   guests and organizers (with the note) after a spoken yes, and the
+   Anthropic row lists colors, labels, guest counts, 300 characters of
+   notes, calendar names and guest addresses. The family paragraph no
+   longer says "nothing is ever sent".
+- Also: move and update results are marked untrusted on a calendar Kyle
+  doesn't own; if the second step of a label-to-color change fails, the
+  error says "the label was removed but the color wasn't set"; README,
+  SECURITY and MANUAL_TEST say moves and deletes don't ask Google to email
+  guests (Google's docs say some notices may still go out).
+- Tests: `test_calendar_features.py` 39 (+13): the judge's probes as
+  tests with the correct expectations (an already-moved occurrence; a
+  weekday move rewriting BYDAY, replacing round 1's "refused"
+  expectation), each refused rule kind (5 cases), EXDATE refused and a
+  daily rule following, every address named (6 guests, EN and ZH), the
+  RSVP note, free time with a pinned clock, a caplog test over the
+  formatted ERROR tracebacks, taint on another person's calendar, and the
+  label message. A file-wide fixture pins TURN_NOW so free time never
+  reads the real clock. Each change undone alone fails its test
+  (and only its own); all of round 2 undone fails all 14.
+- Counts (Linux sandbox, Python 3.13): 2173 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped).
+## Team chat connectors: Slack, Discord, GitHub (off by default)
+
+Kyle asked for connectors where Claude "can look through something like a
+team chat or an engineering chat" and summarize the ideas and files. This
+is phase A (read and file a digest) plus phase B (registration, config,
+i18n, docs).
+
+- New `assistant/tools/teamchat.py`: `TeamChat` over one provider per
+  service, with `chat_channels`, `chat_read` (a channel or one thread;
+  the last 24 hours, `hours`, or a `day` from `timeutil.resolve_day` on
+  the turn's clock), `chat_search`, `chat_files`, `chat_read_file` and
+  `chat_save_digest`. Claude does the summarizing. Providers in
+  `teamchat_slack.py` (Web API, user token: history, replies, search,
+  files, user names), `teamchat_discord.py` (REST, bot token: guild
+  channels, messages, threads, guild search, attachments) and
+  `teamchat_github.py` (REST issues, pull requests and comments; GraphQL
+  for Discussions). Plain `requests`, injectable `session=`, `timeout`,
+  redirects off, one typed `ChatError` per failure, logging only status
+  codes and exception types. No new dependencies.
+- No posting: there is no tool that writes to Slack, Discord or GitHub.
+  `chat_save_digest` files Claude's summary in Notion ("Chat Digests",
+  found or created beside Assignments like Lecture Notes, or `[teamchat]
+  digest_database_id`), always after a spoken yes, keyed
+  `chat:<service>:<channel>:<date>` in a Digest ID property so a retry
+  finds the page instead of filing a second. `ChatDigestsDB` subclasses
+  `lecture.LectureNotesDB`; `lecture.py` got a small additive refactor
+  (`key_prop`, `blocked_help` and `_schema()` on the class, same
+  behaviour for lectures).
+- Safety: every read tool is `untrusted_output` and `private`, and each
+  result carries the `untrusted_content` mark and a note, so a chat read
+  makes later changes ask. Bounds: 100 messages, 300 characters each,
+  12,000 characters per result (oldest dropped first), 20 files, text
+  files up to 50 KB from files.slack.com / cdn.discordapp.com /
+  media.discordapp.net only (Slack token to files.slack.com only, none
+  to Discord's CDN). `[teamchat] channels` and `github_repos` allowlists
+  (a TOML string is one entry); Slack DMs dropped from search and files;
+  a Discord thread must belong to the named channel. A 401 stops that
+  service until restart; a 429 is waited out without calling. Discord's
+  empty-content messages (Message Content Intent off) are reported as
+  `intent_off`, not "no messages"; guild search's 202 "still indexing"
+  says to retry.
+- `cli.register_teamchat` (called from `build_tools`, so PC, Pi and the
+  owner's web sessions; never family members) prints `(Slack tools off:
+  SLACK_USER_TOKEN not set)` only for a service that is turned on.
+  `config.py` `[teamchat]` defaults and `config.toml` mirror; the three
+  tokens are in `SECRET_ENV_VARS` (round 2: not `ISOLATED_ENV_VARS`), and the log
+  redaction masks Slack, GitHub and Discord token shapes. EN/ZH digest
+  questions in `i18n.py`. `.env.example`, README "Team chat" (setup per
+  service; one sentence on LinkedIn, which doesn't let apps read
+  messages or feeds), SECURITY, MANUAL_TEST, BLOCKERS.
+- Tests: new `tests/test_teamchat.py` (72, offline, fake `requests`
+  sessions with the services' real response shapes: Slack `ok:false`
+  errors and 429 Retry-After, `has_more`/`next_cursor`, Discord
+  newest-first arrays, empty-content messages, 202 code 110000, 401/403,
+  GitHub REST plus a mocked GraphQL POST): end-to-end taint through
+  `ClaudeChat` (`test_chat_read_marks_conversation_untrusted`), untrusted
+  marks on every read, a DEBUG caplog check with no message text, file
+  text, names or tokens at any level, clamped bounds (including
+  `max_messages=0` and `hours=0`), the TOML-string allowlist, file host,
+  type, size, redirect and sign-in-page refusals, digest retry by key
+  across a restart, a declined digest writing nothing, registration and
+  family isolation, token redaction and isolation. `conftest.py` also
+  clears the three token variables (GITHUB_TOKEN is often set in a dev
+  shell or CI). `test_family.py` OWNER_TOOLS and `test_docs.py`
+  OTHER_IDENTIFIERS list the new tool names.
+- Each source change was reverted one at a time (with `__pycache__`
+  cleared) and its tests failed: 32 reverts, all failing as expected.
+  Family isolation needs no code (family registries are built from an
+  allowlist), so that test pins the behaviour rather than a change.
+- Counts (Linux sandbox, Python 3.13): 2196 passed, 48 skipped (master
+  f1eb136 here: 2124 passed, 48 skipped).
+- Review round 2 (8 judge findings, each with a test that fails when its
+  fix is reverted, `__pycache__` cleared between reverts):
+  1. The chat tokens are out of `ISOLATED_ENV_VARS` (still secret): a
+     `GITHUB_TOKEN` in Kyle's user environment would silently stop the
+     family apps. An instance with an `--env-file` other than `.env` turns
+     team chat off instead. The existing refusal (a really isolated
+     variable inherited) is now also written to that instance's log, as
+     its task runs hidden under pythonw. README "A Chinese instance" lists
+     `HA_URL`/`HA_TOKEN` too; `install_family_tasks.ps1`'s header is true
+     again.
+  2. Search hits and file lists arrive newest first; they are sorted
+     oldest first before the 12,000-character cut, so the newest survive.
+  3. An unknown service name is logged as "?", not as typed.
+  4. The digest key uses the resolved service and channel id, so "#eng",
+     "eng" and "C111" (service implied) file one page.
+  5. GitHub issue search sends two queries, with `is:issue` and
+     `is:pull-request` (GitHub's issue search now needs one), merged
+     without duplicates. MANUAL_TEST has a GitHub search check.
+  6. Slack `no_permission` is "no access" for that channel or file, no
+     longer a dead token.
+  7. A Discord search hit inside a thread counts for its parent channel
+     (from the response's `threads`), allowlist included. A search cut to
+     3 servers x 20 channels (Discord) or 5 repos (GitHub) says
+     `"partial": true` with the reason. Plus a test for the GitHub
+     no-repos guard.
+  8. A streamed download answered with an error status is closed.
+  Docs: Slack DMs are "never passed to Claude or logged" (search and
+  files.list do return some to the process, which drops them).
+- Counts after round 2 (Linux sandbox, `GITHUB_TOKEN` unset): 2213
+  passed, 48 skipped; `tests/test_teamchat.py` has 89.
+- Next (phase C, not built): a scheduled daily digest that files itself
+  and pushes a notification to the phone, run on one machine only (the
+  leader check).
+## Fix: lecture summaries 400 on Sonnet 5.5 (2026-10-20)
+
+- **Bug:** `lecture.summarize()` forced its `save_lecture_notes` tool with
+  `tool_choice={"type": "tool"}`. Claude Sonnet 5.5 (the default
+  `[assistant] model`, which the lecture job uses), Opus 5.5, Fable 5.1 and Mythos 5.1
+  answer a forced `tool_choice` (`tool` or `any`) with a 400, so every
+  lecture failed at the summary step with `BadRequestError`.
+- **Fix:** the summary uses structured outputs instead
+  (`output_config.format` with a JSON schema, `NOTES_SCHEMA`; every object
+  sets `additionalProperties: false`), which the claude-api docs name as
+  the replacement when a forced call only existed to get JSON back. No
+  tools are sent. The reply's text block is parsed; a refusal, a
+  `max_tokens` cut or text that isn't a JSON object raises a RuntimeError
+  without quoting the reply, so the job fails as before with the
+  transcript kept, and a retry re-runs only the summary. `max_tokens` is
+  now 16000 (adaptive thinking, on by default on Sonnet 5.5, shares it)
+  with a 600 s timeout for this one background request.
+  `requirements.txt` now needs `anthropic>=0.77` (the first SDK whose
+  `messages.create` takes `output_config`; 0.76 doesn't).
+- **Other call sites:** no other `tool_choice` in `assistant/` (chat, tutor,
+  history, memory and family all leave it at the default `auto`).
+- **Tests:** the `fake_client` fixture (`tests/conftest.py`) now raises the
+  API's 400 for a forced `tool_choice` on the models that reject it, and
+  for an `output_config` schema with an object lacking
+  `additionalProperties: false`. New in `test_lecture.py`: summarize on
+  Sonnet 5.5 / Opus 5.5 / Fable 5.1, the whole pipeline on the default
+  model, six bad replies (not JSON, not an object, no text, tool block
+  only, `max_tokens`, refusal) failing without echoing the reply, a failed
+  summary kept for a retry that doesn't re-transcribe, the schema check,
+  and the fake's own 400. Lecture replies in `test_lecture.py`,
+  `test_webfeatures.py` and `test_features_deploy.py` now have the
+  structured-output shape (thinking block, then JSON text). With only
+  `lecture.py` reverted, the model tests and the default-model pipeline
+  test fail with `BadRequestError: tool_choice: type "tool" and "any" are
+  not supported for this model.`
+- Counts (Linux sandbox, Python 3.13): 2137 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped).
+- Deploy: this update changes `requirements.txt` (anthropic>=0.77), so the
+  auto-updater skips it. Stop the assistant and run `python -m assistant
+  --update`, or `.\.venv\Scripts\python.exe -m pip install -r
+  requirements.txt`, then restart.
+
+## Cost: prompt caching, Haiku routing and usage tracking (2026-10-20)
+
+Kyle: "build Haiku routing and caching right now."
+- **Caching.** The tools and the system prompt are now the same bytes on
+  every request of a chat (`ClaudeChat.stable_system()`), sent as one
+  system text block with `cache_control` (it caches the tools too: they
+  render first). What changed per turn moved out: the date and time,
+  recalled notes and the weekly review offer are `turn_context()`, kept on
+  the user message under `message["context"]` (not in its content) and
+  sent by `request_messages()` as a text block after Kyle's words, the
+  same bytes on every later request, so the conversation is append-only on
+  the wire. A second, rolling breakpoint goes on a copy of the last block
+  that can take one (walking back past server-tool blocks); `chat.history`
+  never gets a marker. Two breakpoints of the four allowed. No `thinking`
+  parameter is sent, as before. `build_system()` stays as
+  system + context for the callers and tests that read it. Messages-cache
+  misses, each once when it happens (accepted): trimming past
+  `max_history` (round 2: trimmed to about half, so once per
+  `max_history / 2` messages instead of every turn), a barge-in's
+  `mark_interrupted`, an old attachment turned into a marker, a model
+  switch (caches are per model), and (round 2) the request after a weekly
+  review offer and after a `delete_note`.
+- **Routing** (`assistant/router.py`): one model per user turn, picked in
+  `ask()` before the request and kept for its whole tool loop. The main
+  model when the router is off, there's no separate fast model, the turn
+  or the history has an attachment, the conversation is tainted, it was
+  already escalated (sticky until `reset()`), the words are long (over 15
+  words or 100 characters; Chinese over 30 characters) or hit a keyword
+  (changes, current information, reasoning, in English and Chinese).
+  Otherwise `fast_model` (Claude Haiku 5.5). The route is logged at INFO as
+  the model and a reason code only. `ToolRegistry.schemas(model)` gives a
+  Haiku turn the web search/fetch versions Haiku supports
+  (`web_search_20250305` / `web_fetch_20250910`). Conversation summaries
+  use the fast model. Confirmations don't change: the same tools and
+  questions on either model.
+- **Usage** (`assistant/usage.py`): every Messages API call of the chat
+  (and its summaries) logs its model and token counts (input, output,
+  cache read, cache write, web searches) at INFO, no text. Monthly totals
+  per model, with a rough $ estimate from the list prices (Sonnet 5.5
+  $2/$10, Haiku 5.5 $0.10/$0.50 up to 100K-token prompts and 5x above;
+  cache reads 0.1x, 5-minute writes 1.25x; web search fees counted, not
+  priced), go to `[assistant] usage_file` (default `data/usage.json`, the
+  server profile `/data/usage.json`, "" = in memory only), last 12 months,
+  through `google_auth.write_private`. `/api/state` has `month_usd` for the
+  owner only.
+- **Settings:** `[assistant] fast_model = "claude-haiku-5-5"`,
+  `router = "auto"`, `usage_file`; `CLAUDE_FAST_MODEL`, `CLAUDE_ROUTER`
+  (`off` is the kill switch). Wired in `cli.build_chat`, the web app's and
+  family's chat factories; `cli.main` configures the usage file.
+- **BACKLOG.md** (new): "Before public release: Hybrid model"; this
+  routing is its first step. Linked from README.
+- Tests: `tests/test_routing_caching.py` (28): byte-identical system with a
+  cache marker across two turns a minute apart (fails on master: the time
+  was in it), append-only wire across a tool round and a second turn with
+  exactly one rolling marker and none in history, copy-only marking that
+  walks back past server blocks, notes in the turn and never in system,
+  `transcript()` or the recorder, no "Kyle" in a zh/family context, 11
+  router word cases (EN and ZH, keyword and length), attachments / taint /
+  off / no fast model, stickiness until `reset()`, one model per tool loop,
+  Haiku web tool versions, a route log with no words (caplog), summaries
+  on the fast model, a usage log with numbers and no text (caplog), list
+  prices and the long-prompt tier, the usage file round trip with the
+  12-month cap, `usage_file = ""`, every call counted with its model, the
+  config and env wiring. `tests/test_family.py` +1: only the owner's
+  `/api/state` has `month_usd`, and family chats get the router settings.
+  `conftest.py`: `make_response(usage=)`, `make_usage`, `system_text`,
+  `request_text`, `first_text`, `own_blocks`, `without_context`, and an
+  autouse fixture that gives each test its own meter and keeps a
+  configured usage file in `tmp_path`. 30 existing tests changed shape
+  only (system is a block list; a sent user turn is [words, context]; the
+  history's user turns carry `context`); no assertion was dropped.
+  `test_docs.py` knows `month_usd` and `cache_read` (a state field and a
+  log field, not settings).
+- Revert check: 27 single-change reverts (each source change undone alone,
+  `__pycache__` cleared, its tests run, restored) all make their tests
+  fail.
+- Counts (Linux sandbox, Python 3.13): 2153 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped). Not measured against the real API
+  (offline): the cache hit rate and Haiku's answers are MANUAL_TEST
+  "Model routing and prompt caching".
+
+### Round 2 (judge findings)
+
+1. **Changes reached Haiku.** Two layers now. (a) More words send a turn
+   to the main model: put, book, push, clear, set, lock/unlock, open,
+   pause, resume, stop, skip, next, volume, dim, forget, remember, save,
+   message, tell (not "tell me"), send, finish, done, change, update,
+   "turn/switch ... on/off" with words between; Chinese 提醒 记住 打开 关
+   播放 推 加 设置 删. (b) The safety net: a Haiku response that calls any
+   tool not in `router.READ_ONLY_TOOLS` (calendar, assignment, email,
+   notes, memory, history, dev-team, home and Spotify *reads*; unknown
+   tools count as changes) is dropped before dispatch, never enters
+   history, and the main model answers the turn (`escalated` set; INFO
+   `Route: <model> (escalated_tool)`). Haiku words streamed before its
+   tool call may already have been shown or spoken (README says so).
+   Tests: the probe's 29 phrases (EN and ZH, plus 删掉明天的会) go to the
+   main model, 5 simple questions still go to Haiku, a Haiku
+   `create_calendar_event` never runs and the main model's does, the
+   read-only list. `test_family_google` voice test: queue shape only (the
+   dropped Haiku call, then the main model's).
+2. **Two processes overwrote each other's usage.** Each save takes an
+   O_EXCL lock file (as `updater.Updater.acquire`; stale after 10 s),
+   re-reads the file and adds only this process's calls since its last
+   save; a lock held past 2 s defers the save to the next call. Tests:
+   two meters on one file add up to 4.0 then 6.0 (the probe got 2.0), a
+   held lock defers without losing, a stale one is taken over.
+3. **Mom's instance shared Kyle's usage file.** `config.mom.toml` now puts
+   every data file under `data/mom/` (usage, memory review state,
+   lectures, dev team state, Spotify token, family users). Test: every
+   setting whose default is under `data/` points under
+   `data/<name>/` in each `config.<name>.toml` and differs from Kyle's.
+4. **The review offer was replayed** (and a test had been weakened). It is
+   kept as `message["nudge"]`, rendered only while its turn is the latest
+   (its tool loop included): one messages-cache miss on the next request,
+   once a week. The memory-review tests check the full sent messages
+   again (`conftest.sent_text`).
+5. **A deleted note kept going to the API.** `PineconeMemory.retrieve` keeps
+   `last_matches` (vector id, text); the chat remembers recalled notes per
+   conversation (bounded, cleared by `reset()`), and a successful
+   `delete_note` replaces that note's line in every turn's context with
+   "(a note that was deleted)" (one cache miss). A declined delete keeps
+   it. Notes otherwise stay in their own turn (append-only), checked by a
+   test. Not covered (SECURITY.md): a delete from the phone's Memory
+   screen during a live conversation, and note text inside a
+   `recall_notes` tool result.
+6. **Trimming rewrote the cache every turn.** Past `max_history` the
+   history is cut to about half (falling back to the old cut if one tool
+   loop fills the half), so the prefix holds for `max_history / 2`
+   messages. The round-1 "one-time miss" wording and the
+   `request_messages` docstring (the 5.5 models do keep earlier thinking;
+   it is stripped for the signature 400s) are corrected; the stripping
+   itself is unchanged.
+7. **Docs and metering.** History titles, the tutor and lecture notes now
+   call `usage.record` (lecture.py: only that line and its import);
+   usage.py and README name what is metered. SECURITY.md no longer says
+   notes come back "in later system prompts".
+- Revert check: 20 round-2 reverts (each fix undone alone, `__pycache__`
+  cleared) and the 27 round-1 reverts, re-run on this tree, all fail.
+- Counts (Linux sandbox, Python 3.13): 2199 passed, 48 skipped (round 1:
+  2153; master f1eb136: 2124 passed, 48 skipped).
+- Merge with master (team chat connectors, structured-output lecture
+  notes): `summarize()` now records usage before its refusal/max_tokens
+  checks, so a cut-off summary's tokens are still counted (new test
+  `test_a_cut_off_lecture_summary_is_still_metered`, fails with the record
+  after the checks); the metering test uses the JSON-text reply; Mom's
+  config keeps `[teamchat] digest_state_file` under `data/mom/`; the chat
+  tools are not in `READ_ONLY_TOOLS`, so a Haiku turn that calls one goes
+  to the main model. Counts (Linux sandbox): 2352 passed, 57 skipped, plus
+  the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
+  wake model); JS 232 pass.

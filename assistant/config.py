@@ -33,6 +33,10 @@ DEFAULTS: dict = {
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
         "language": "en",  # "en", or "zh" (Mandarin: prompt, speech, phone page)
+        # simple turns go to fast_model (router.py); "off" = always `model`
+        "fast_model": "claude-haiku-5-5",
+        "router": "auto",
+        "usage_file": "data/usage.json",  # monthly token totals ("" = not kept)
     },
     "tts": {
         "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
@@ -74,7 +78,10 @@ DEFAULTS: dict = {
     "calendar": {"enabled": True, "credentials": "credentials.json",
                  "token": "token.json", "calendar_id": "primary",
                  # write refreshed tokens back to token.json (never on a server)
-                 "save_token": True},
+                 "save_token": True,
+                 # your own names for event colors: name -> a Google color
+                 # (e.g. Basil) or one of your event labels
+                 "color_labels": {}},
     "gmail": {"enabled": True,  # uses the [calendar] credentials and token
               "max_summary": 15},   # most emails in one summary
     "notion": {"enabled": True,
@@ -240,6 +247,18 @@ DEFAULTS: dict = {
         "cache_seconds": 30,        # device list kept this long
         "timeout": 10,              # seconds per request
     },
+    "teamchat": {                   # read Slack, Discord, GitHub (README "Team chat"); owner only
+        "enabled": False,
+        "slack": False,             # needs SLACK_USER_TOKEN in .env
+        "discord": False,           # needs DISCORD_BOT_TOKEN in .env
+        "github": False,            # needs GITHUB_TOKEN in .env
+        "channels": [],             # Slack/Discord channels it may read; [] = all the token sees
+        "github_repos": [],         # owner/name repos it may read; [] = all the token sees
+        "max_messages": 100,        # per read or search (at most 100)
+        "timeout": 15,              # seconds per request
+        "digest_database_id": "",   # Notion database for digests; "" = find/create "Chat Digests"
+        "digest_state_file": "data/teamchat_digests.json",  # remembers that database's id
+    },
     "spotify": {                    # play, pause, skip by voice (Premium; README "Spotify")
         "enabled": False,           # needs SPOTIFY_CLIENT_ID and a one-time sign-in
         "token": "data/spotify_token.json",  # written privately; delete to disconnect
@@ -287,6 +306,7 @@ SERVER_PROFILE: dict = {
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
+    "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -294,6 +314,8 @@ PROFILES = {"server": SERVER_PROFILE}
 # Environment variables that override config values.
 ENV_OVERRIDES = {
     "CLAUDE_MODEL": ("assistant", "model"),
+    "CLAUDE_FAST_MODEL": ("assistant", "fast_model"),
+    "CLAUDE_ROUTER": ("assistant", "router"),  # "off" = always the main model
     "WAKEWORD_MODEL_PATH": ("wake", "keyword_path"),
     "NOTION_ASSIGNMENTS_DB": ("notion", "database_id"),
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),
@@ -323,6 +345,9 @@ ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
                      "PINECONE_INDEX", "HA_URL", "HA_TOKEN")
+# (Not the team chat tokens: a separate instance never registers the chat
+# tools (cli.main), so an inherited GITHUB_TOKEN, common in a developer's
+# environment, must not stop a family member's app from starting.)
 
 
 def inherited_env_conflicts(inherited, env_file: str | Path | None) -> list[str]:
@@ -389,7 +414,8 @@ def load_config(path: str | Path | None = "config.toml",
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
-                   "GOOGLE_CLIENT_JSON", "HA_TOKEN")
+                   "GOOGLE_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
+                   "DISCORD_BOT_TOKEN", "GITHUB_TOKEN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens
@@ -404,6 +430,9 @@ _SECRET_PATTERNS = [
                r"|code_verifier|api_key|apikey)[\"']?\s*[:=]\s*[\"']?)"
                r"[^\"'&,\s}]+"),
     re.compile(r"([?&]code=)[^&\s\"']+"),      # OAuth sign-in codes
+    re.compile(r"\bxox[abpe]-[\w-]+"),           # Slack tokens
+    re.compile(r"\b(?:github_pat_\w+|gh[pousr]_\w{30,})"),  # GitHub tokens
+    re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
 ]
 
 

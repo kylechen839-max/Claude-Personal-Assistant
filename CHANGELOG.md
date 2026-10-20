@@ -15,6 +15,45 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Cheaper replies: short, simple questions are now answered by Claude Haiku
+  5.5 (`[assistant] fast_model`, `router = "auto"`). Anything that changes
+  your calendar, notes, email or home, needs a web lookup or real reasoning,
+  has an attachment or follows untrusted content stays on the main model,
+  and any change Haiku tries to make is handed to the main model before
+  anything runs. `CLAUDE_ROUTER=off` turns routing off. The tools and system
+  prompt are now cached by the API: the date, recalled notes and the weekly
+  review offer travel with each message instead. Each API call's token
+  counts are logged without any text, and your phone app's state shows a
+  monthly cost estimate (`month_usd`, owner only). New `BACKLOG.md` lists
+  the work left before a public release.
+- Google Calendar by voice now covers most of Google Calendar: event colors
+  (Google's 11 colors or plain words) and your named event labels, plus your
+  own color names in `[calendar] color_labels`; repeating events, edited one
+  occurrence or the whole series (a weekly series can move to another
+  weekday); reminders; busy/free and private; inviting guests and adding a
+  Meet link (always asks first and names every address); accepting,
+  declining or "maybe" on invites (asks first and reads out any note);
+  finding free time (never hours already past); search; other calendars or
+  all of them; and "which calendars do I have?". Labels and other
+  calendars need a one-time Google sign-in again (two read-only
+  permissions). This update changes `requirements.txt`
+  (google-api-python-client 2.199+), so the auto-updater skips it: run
+  `python -m assistant --update`.
+- Team chat connectors (off by default, owner only): Claude can read Slack
+  channels and threads (user token), Discord channels and threads (bot) and
+  GitHub issues, pull requests and discussions, search them, list and read
+  shared text files (up to 50 KB) and sum them up. Nothing is ever posted.
+  "Save that as a digest" files the summary as a page in a Notion "Chat
+  Digests" database after a spoken yes, once per service, channel and day.
+  New `[teamchat]` settings; tokens `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`,
+  `GITHUB_TOKEN` in `.env`. A family instance never uses them, and a
+  refusal to start is now written to that instance's log.
+- Fixed: lecture notes failed on the default model (Claude Sonnet 5.5) with
+  an HTTP 400, because it rejects forced tool calls. Summaries now use
+  structured outputs (a JSON schema), with more room for the model's
+  thinking and a longer timeout for this background request. This update
+  changes `requirements.txt` (anthropic 0.77 or newer), so the auto-updater
+  skips it: stop the assistant and run `python -m assistant --update`.
 - Health checks: a watchdog (`python -m assistant.watch`, the
   `\HeyClaude\Watch` task every 5 minutes, or the Pi's
   `hey-claude-watch.timer`) checks your app and every family copy:

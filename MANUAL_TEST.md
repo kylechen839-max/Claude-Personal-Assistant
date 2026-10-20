@@ -129,6 +129,53 @@ Run `python -m assistant` for steps 3-8 and leave it running.
   - If your answer isn't heard: same mic/VAD settings as step 3 (it records
     the answer like a command).
 
+### 5b. Calendar colors, repeats, guests and invites (8 min)
+First run `pip install -r requirements.txt` and the Google sign-in once more
+(`python -m assistant.tools.google_auth`), and allow the two new read-only
+calendar permissions. Use test events only; delete them afterwards.
+- [ ] "Hey Claude, add Color Test tomorrow at 3 and make it Tomato."
+  - Should: the event shows red in Google Calendar (web and phone).
+- [ ] Make an event label in Google Calendar (an event's color menu, add a
+      label, e.g. "School"). Restart the assistant, then "Hey Claude, label
+      Color Test School."
+  - Should: the event shows the School label and its color.
+- [ ] "Hey Claude, make Color Test Basil." (from a label back to a color)
+  - Should: the label is gone and the event is green. Report if it keeps
+    the label or loses both.
+- [ ] "Hey Claude, add Repeat Test every Wednesday at 8 AM for 4 weeks."
+      Then "move just next week's Repeat Test to 9", then "move all of the
+      Repeat Tests to 10".
+  - Should: four Wednesdays; the first move changes one, the second moves
+    every one to 10:00 (the one you moved alone stays where you put it).
+    Then "move all of the Repeat Tests to Thursday": every one moves to
+    Thursday at 10.
+- [ ] "Hey Claude, delete every Repeat Test."
+  - Should: it asks "delete every Repeat Test, the whole series?"; say yes
+    and all four are gone.
+- [ ] "Hey Claude, remind me about Color Test 10 minutes before and at the
+      start."
+  - Should: Google Calendar shows two notifications, 10 minutes and 0
+    minutes ("at time of event").
+- [ ] "Hey Claude, add a Meet link to Color Test."
+  - Should: the event has a "Join with Google Meet" button.
+- [ ] Invite a second email address of yours: "Hey Claude, invite
+      <your other address> to Color Test."
+  - Should: it asks "send an invite for Color Test to <address>?" and
+    names the address; say yes, and the invite arrives at that address.
+- [ ] From the second address, invite your main account to an event. Then
+      "Hey Claude, what's on my calendar <that day>?" and "decline it".
+  - Should: it asks "decline <title> from <second address>?"; say yes. The
+    second account sees your "No". The guest list is otherwise unchanged.
+    Add a note ("decline it and tell them I'm away"): the question reads
+    the note out, and the second account sees it.
+- [ ] Move Color Test (with the second address still invited) to another
+      hour.
+  - Should: it moves, and the second address gets no update email (report
+    it if one arrives).
+- [ ] "Hey Claude, when am I free for an hour tomorrow?"
+  - Should: the gaps match your calendar (events marked "Free" don't
+    count).
+
 ## 6. Notion status (1 min)
 - [ ] "Hey Claude, what assignments are due this week?"
   - Should: matches the Upcoming view in Notion.
@@ -646,6 +693,30 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 - [ ] As a family member (phone app invite), ask to turn on a light.
   - Should: it has no smart home control.
 
+## Team chat (optional, ~10 min)
+Needs at least one of `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`
+in `.env` and `[teamchat] enabled = true` with that service turned on
+(README "Team chat"). One real read per service you set up:
+- [ ] Slack: "Hey Claude, what happened in #<a busy channel> today?"
+  - Should: a short summary naming who said what; nothing is posted in
+    Slack, and nothing from a DM shows up.
+- [ ] Discord: "Summarize #general in Discord from yesterday."
+  - Should: a summary. If it says the Message Content Intent is off, turn
+    it on in the developer portal (Bot page) and ask again.
+- [ ] GitHub: "What's new in the issues on <repo> this week?"
+  - Should: issues, pull requests and discussions with their numbers.
+- [ ] GitHub: "Search GitHub for <a word in a recent issue title>."
+  - Should: the matching issues and pull requests, not an error (GitHub's
+    issue search needs is:issue / is:pull-request, which it adds).
+- [ ] "Save that as a digest", say yes; then ask it to save it again.
+  - Should: one page in Notion's "Chat Digests"; the second time it says
+    the page is already there (still one page). Saying no saves nothing.
+- [ ] After a chat read, "add lunch with Sam tomorrow at noon".
+  - Should: it asks before adding (chat text is untrusted).
+- [ ] Open `logs/assistant.log`.
+  - Should: only counts and service names for these turns, no message
+    text and no token.
+
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again
@@ -905,3 +976,25 @@ the PC (README "Spotify by voice").
     tap goes to Spotify and back to the app. A family member's phone does
     not show the button.
 
+
+## Model routing and prompt caching (~5 min)
+Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
+- [ ] In text mode (`python -m assistant --mode text`), ask "what time is
+      it", then "what's tomorrow look like on my calendar" a minute later.
+  - Should: `logs/assistant.log` has `Route: claude-haiku-5-5 (simple)` for
+    the first and an `API usage claude-...: input=... cache_read=...` line
+    per request. From the second request on, `cache_read` is above 0
+    (the tools and system prompt are read from the cache). No words you
+    said are in those lines.
+- [ ] In a new conversation ask "explain why the sky is blue", then "what
+      time is it".
+  - Should: `Route: claude-sonnet-5-5 (keyword)`, then
+    `Route: claude-sonnet-5-5 (sticky)`: once a conversation needed Sonnet
+    it stays there.
+- [ ] Set `CLAUDE_ROUTER=off` and start again.
+  - Should: every route line says `claude-sonnet-5-5 (off)`.
+- [ ] Phone app as the owner: open the page's state (`/api/state` after
+      signing in).
+  - Should: it has `month_usd`, a small number that grows with use; a
+    family member's state does not have it. `data/usage.json` holds the
+    month's totals per model.

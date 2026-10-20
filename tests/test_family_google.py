@@ -312,6 +312,38 @@ def test_gmail_is_drafts_only_and_deletes_ask_for_family(g):
     assert inbox.save_token is False and inbox.environ == {}
 
 
+def test_family_calendar_tools_flags_and_extra_scope_gate(g):
+    """The new calendar tools reach a family member with the same
+    confirmations; list_calendars only on a token with the read-only extra
+    scopes; Kyle's color names never reach her."""
+    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES
+
+    g.fam.config["calendar"]["color_labels"] = {"KylesAlias": "Basil"}
+    mom, mom_id = g.member("Mom", "en")
+    connected(g, mom, mom_id, "mom")  # SCOPES: no extra calendar scopes
+    tools = g.fam.context(mom_id).registry.tools
+    assert {"update_calendar_event", "respond_to_calendar_invite",
+            "find_free_time"} <= set(tools)
+    assert "list_calendars" not in tools
+    assert tools["create_calendar_event"].confirm_prompt is not None  # guests
+    assert tools["update_calendar_event"].confirm_prompt is not None
+    assert tools["update_calendar_event"].confirm_if_untrusted is not None
+    assert tools["respond_to_calendar_invite"].confirm_prompt is not None
+    cal = tools["update_calendar_event"].handler.__self__
+    assert cal.extras is False and cal.color_labels == {}
+
+    g.fam.google_token(mom_id).write_text(json.dumps(
+        {**token_of("mom"), "scopes": SCOPES + CALENDAR_EXTRA_SCOPES}))
+    g.fam._refresh_tools(mom_id)
+    tools = g.fam.context(mom_id).registry.tools
+    assert "list_calendars" in tools
+    cal = tools["list_calendars"].handler.__self__
+    assert cal.extras is True and cal.color_labels == {}
+    text = json.dumps([t.schema() for t in tools.values()])
+    assert "KylesAlias" not in text and "Kyle" not in text
+    assert "Mom's" in tools["list_calendars"].description
+
+
 def test_disconnect_removes_the_token_and_the_tools(g):
     mom, mom_id = g.member("Mom")
     connected(g, mom, mom_id, "mom")
@@ -646,8 +678,12 @@ def test_a_calendar_question_by_voice_is_asked_in_her_language(g):
 
     mom, mom_id = g.member("Mom", "zh")
     connected(g, mom, mom_id, "mom")
-    g.client.queue.append(make_response(
-        tool_use_block("delete_calendar_event", {"event_id": "e1"}), stop_reason="tool_use"))
+    # "你好" goes to the fast model; its delete call is dropped (router.py)
+    # and the main model's own delete call asks the question
+    for _ in range(2):
+        g.client.queue.append(make_response(
+            tool_use_block("delete_calendar_event", {"event_id": "e1"}),
+            stop_reason="tool_use"))
     g.client.queue.append(make_response(text_block("好的，不删了。")))
     with patch("googleapiclient.discovery.build", side_effect=RuntimeError("offline")):
         with ws_connect(mom) as ws:
