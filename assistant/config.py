@@ -45,6 +45,11 @@ DEFAULTS: dict = {
         "kokoro_voices": "models/kokoro/voices-v1.0.bin",
         "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
         "elevenlabs_model": "eleven_flash_v2_5",
+        # phone app: each person picks their own reply voice (voice_picker.py)
+        "picker": True,
+        "voices_dir": "voices",          # the Piper voices offered
+        "voice_file": "data/voice_choice.json",  # the owner's pick ("" = not kept)
+        "family_paid_voices": False,     # family members may pick ElevenLabs
     },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
@@ -233,7 +238,7 @@ DEFAULTS: dict = {
 # stdout for the host's log viewer); no PC-only tools.
 SERVER_PROFILE: dict = {
     "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
-            "fallback": "espeak"},
+            "fallback": "espeak", "voice_file": "/data/voice_choice.json"},
     "wake": {"chime": False, "follow_up_seconds": 0},
     "calendar": {"save_token": False},
     "web": {"browser": False},

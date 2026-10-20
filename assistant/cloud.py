@@ -76,6 +76,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/family.js",
               # the chat's "+" (and the tutor's photo shrinking)
               "/attachments.js",
+              # the settings menu's reply-voice picker (its API needs sign-in)
+              "/voice-picker.js",
               # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
               "/ui.js",
               # the login page's language (Chinese for a family member) and

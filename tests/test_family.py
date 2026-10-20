@@ -332,7 +332,7 @@ def test_reply_audio_is_only_for_its_own_session(env, owner):
     other_owner_browser = env.client()
     login(other_owner_browser)
     assert other_owner_browser.get(reply["audio"]).status_code == 404
-    env.assistant.synthesize = lambda text: b"RIFF....WAVE"
+    env.assistant.synthesize = lambda text, session=None: b"RIFF....WAVE"
     assert owner.get(reply["audio"]).status_code == 200
 
 

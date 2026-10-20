@@ -362,6 +362,7 @@ async function refreshState() {
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
     if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
     if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
+    if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {
       setBusy(true);
@@ -661,6 +662,7 @@ if ("serviceWorker" in navigator) {
   const family = window.HeyClaudeFamily;
   if (family) family.configure({ request });  // the owner's invites: through the router too
   if (window.HeyClaudeMemory) window.HeyClaudeMemory.configure({ request, show });  // memory.js
+  if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.configure({ request, player });
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {

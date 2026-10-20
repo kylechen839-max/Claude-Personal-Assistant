@@ -122,6 +122,19 @@
     "Showing the newest 1000 only.": "只显示最新的 1000 条。",
     "couldn't reach long-term memory; try again": "连不上长期记忆，请再试一次。",
     "not found": "找不到。",
+    // reply-voice picker (voice-picker.js)
+    "Reply voice": "回复的声音",
+    "Preview": "试听",
+    "paid": "付费",
+    "ElevenLabs voice ID": "ElevenLabs 声音 ID",
+    "Use this voice": "使用这个声音",
+    "Saved.": "已保存。",
+    "Couldn't play the preview.": "无法播放试听。",
+    "unknown voice": "没有这个声音。",
+    "System voice": "系统声音",
+    "couldn't save the voice; try again": "声音没有保存成功，请再试一次。",
+    "too many previews; try again in a minute": "试听次数太多，请一分钟后再试。",
+    "couldn't check that voice with ElevenLabs; try again": "无法向 ElevenLabs 确认这个声音，请再试一次。",
     // tabs, settings, history, lecture and tutor screens
     "Backends": "服务器",
     "Use": "使用",
@@ -283,6 +296,8 @@
     [/^Delete all (\d+) notes? from last week\? This can't be undone\.$/, "要删除上周的全部 $1 条记忆吗？删除后无法恢复。"],
     [/^Delete all (\d+) notes? from the week of (.+)\? This can't be undone\.$/, "要删除 $2 那一周的全部 $1 条记忆吗？删除后无法恢复。"],
     [/^Delete all (\d+) notes? with no date\? This can't be undone\.$/, "要删除日期未知的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Default \((.+)\)$/, "默认（$1）"],
+    [/^(.+) · paid$/, "$1 · 付费"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
   // The line a message with attachments ends with, "[photo] [file: a.pdf]"

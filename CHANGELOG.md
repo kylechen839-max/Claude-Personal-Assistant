@@ -35,6 +35,12 @@
   (PKCE, read-and-control scopes only; nothing changes playlists or the
   library). In wake-word mode, music on this PC pauses at "Hey Claude"
   and resumes after. Family members don't get Spotify yet.
+- Reply voice in the phone app's settings: each person (you, each family
+  member, separate instances like Mom's) picks their voice from what that
+  server has in their language (Piper, Kokoro, the system voice, and your
+  ElevenLabs voices tagged paid if `ELEVENLABS_API_KEY` is set; family
+  only with `[tts] family_paid_voices`). Preview plays a sample. New
+  `[tts]` settings `picker`, `voices_dir`, `voice_file`, `family_paid_voices`.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

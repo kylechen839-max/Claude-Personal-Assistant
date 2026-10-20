@@ -318,6 +318,23 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: the sign-in page is in Chinese right away (no reload needed).
 - [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消,
       and a sent photo shows as "[照片]" in the chat and in History.
+### Reply voice (optional, ~5 min)
+- [ ] Open the gear menu: **Reply voice** lists the voices on this server
+      (Default, the Piper voices in `voices/`, Kokoro if downloaded, System
+      voice). Pick one and tap **Preview**.
+  - Should: a short sample in that voice plays from the phone's speaker
+    (Silent switch off). With "Use the phone's voice" ticked, replies still
+    use the phone's voice.
+- [ ] Pick a different voice and ask something.
+  - Should: the reply (push-to-talk and Voice conversation) is in the new
+    voice. Close and reopen the app: the same voice is still selected.
+- [ ] With `ELEVENLABS_API_KEY` in `.env` (optional, paid): restart.
+  - Should: your ElevenLabs voices appear with a small **paid** tag, and an
+    "ElevenLabs voice ID" box; a family member's phone shows neither.
+- [ ] On the cloud with a family member signed in on another phone: each
+      picks a different voice.
+  - Should: each hears only their own; changing one doesn't change the
+    other. A Chinese member sees only Chinese voices (if one is installed).
 
 ## Chinese instance for Mom (optional, ~20 min)
 Setup is in README.md ("A Chinese instance for someone else"). Use her

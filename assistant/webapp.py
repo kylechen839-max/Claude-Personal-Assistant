@@ -23,7 +23,8 @@ errors, strict headers, and an unauthenticated /healthz that says nothing.
 Reusable pieces (for other routes, e.g. a WebSocket voice mode):
   WebAssistant.transcribe_upload(bytes) -> text
   WebAssistant.chat_stream(session, text, cancel) -> iterator of text deltas
-  WebAssistant.synthesize(text) -> WAV bytes
+  WebAssistant.synthesize(text, session=None) -> WAV bytes (in that
+    person's voice, voice_picker.py)
   app.state.web.session_for(connection) -> Session | None (HTTP or WebSocket)
   app.state.web.cross_origin(connection) -> bool
   require_session (FastAPI dependency; 401, or close 1008 on a WebSocket)
@@ -662,6 +663,9 @@ class WebAssistant:
         self.user_of: Callable[[str], str | None] = lambda sid: None
         self.transcriber = transcriber
         self.tts = tts
+        # voice_picker.VoicePicker (each person's own reply voice), or None:
+        # everyone hears `tts`
+        self.voices = None
         self.tools = tools or ToolRegistry()
         self.conversation_timeout = conversation_timeout
         self.confirm_timeout = confirm_timeout
@@ -1017,9 +1021,34 @@ class WebAssistant:
         """A browser recording (any format) to text."""
         return self.transcribe(decode_upload(data, max_seconds))
 
-    def synthesize(self, text: str) -> bytes:
-        """`text` spoken by the configured TTS engine, as WAV bytes."""
-        return self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
+    def tts_for(self, session: Session | None):
+        """The engine for this person's replies: their own voice if they
+        picked one this server has, else the configured one."""
+        if self.voices is None or session is None:
+            return self.tts
+        try:
+            return self.voices.engine_for(session.user, session.language)
+        except Exception:
+            log.exception("Choosing a voice failed; using the default")
+            return self.tts
+
+    def render(self, engine, text: str) -> bytes:
+        """`text` spoken by `engine`, as WAV bytes (in the TTS thread)."""
+        return self._tts_pool.submit(render_wav, engine, text).result(timeout=120)
+
+    def synthesize(self, text: str, session: Session | None = None) -> bytes:
+        """`text` spoken in `session`'s voice (else the configured one), as
+        WAV bytes. A picked voice that fails falls back to the configured one."""
+        engine = self.tts_for(session)
+        if engine is self.tts:
+            return self.render(engine, text)
+        try:
+            return self.render(engine, text)
+        except Exception as e:
+            # dropped and skipped for a while (one log line), not retried
+            # on every sentence
+            self.voices.failed(engine, e)
+            return self.render(self.tts, text)
 
     def remember(self, text: str, session: Session | None = None) -> str:
         """An id for /api/audio/<id>, which only `session` may fetch."""
@@ -1043,7 +1072,7 @@ class WebAssistant:
             if rid in self.audio_cache:
                 return self.audio_cache[rid]
             text = entry[1]
-        data = self.synthesize(text)
+        data = self.synthesize(text, session)
         with self.lock:
             self.audio_cache[rid] = data
             while len(self.audio_cache) > 10:
@@ -1484,6 +1513,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("attachments.js", "text/javascript"),
                         ("memory.js", "text/javascript"),
                         ("spotify.js", "text/javascript"),
+                        ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -1632,6 +1662,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 "family": s.user is None and family is not None,
                 "memory": s.user is None and getattr(assistant, "memory", None) is not None,
                 "language": s.language,
+                "voice_picker": getattr(assistant, "voices", None) is not None,
                 "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history if is_user_turn(m))}
 
@@ -1723,6 +1754,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import memory_web
 
     memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+
+    if getattr(assistant, "voices", None) is not None:
+        from assistant import voice_picker
+
+        voice_picker.register(app, assistant, error)  # everyone's own reply voice
     if google is not None:
         from assistant import google_web
 
@@ -1883,15 +1919,20 @@ def build_assistant(config: dict, tts_name: str | None = None,
         family = Family(config, client=client)  # invited people (family.py)
     stt = config["stt"]
     tts_cfg = config["tts"]
-    return WebAssistant(chat_factory,
-                        Transcriber(stt["model"], stt["device"], stt["compute_type"],
-                                    language=a["language"]),
-                        make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
-                        tools=tools,
-                        conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"],
-                        history=store, memory=memory, family=family,
-                        memory_review=review)
+    assistant = WebAssistant(chat_factory,
+                             Transcriber(stt["model"], stt["device"], stt["compute_type"],
+                                         language=a["language"]),
+                             make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
+                             tools=tools,
+                             conversation_timeout=a["conversation_timeout"],
+                             confirm_timeout=config["webapp"]["confirm_timeout"],
+                             history=store, memory=memory, family=family,
+                             memory_review=review)
+    if tts_cfg["picker"]:
+        from assistant.voice_picker import VoicePicker
+
+        assistant.voices = VoicePicker(config, assistant.tts, family)
+    return assistant
 
 
 HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "
