@@ -136,16 +136,38 @@ def test_chat_rolls_back_whole_turn_on_error(fake_client):
 
 
 # ---------- Google Calendar ----------
-def make_service(event=None, items=()):
+def make_service(event=None, items=(), by_id=None, labels=(), calendars=(),
+                 instances=()):
+    """A Calendar API client mock with the real response shapes.
+    `by_id`: events.get answers per eventId (an occurrence and its series);
+    `labels`: the calendar's labelProperties.eventLabels (calendars.get);
+    `calendars`: calendarList.list items; `instances`: events.instances."""
     service = MagicMock()
     events = service.events.return_value
+
+    def fetched():
+        if by_id is not None:
+            return by_id[events.get.call_args.kwargs["eventId"]]
+        return event
+
+    def patched():
+        kwargs = events.patch.call_args.kwargs
+        base = by_id[kwargs["eventId"]] if by_id is not None else event
+        return {**base, **kwargs["body"]}
+
     events.list.return_value.execute.return_value = {"items": list(items)}
-    events.get.return_value.execute.return_value = event
+    events.get.return_value.execute.side_effect = fetched
     events.insert.return_value.execute.side_effect = lambda: {
         "id": "new1", **events.insert.call_args.kwargs["body"]}
-    events.patch.return_value.execute.side_effect = lambda: {
-        **event, **events.patch.call_args.kwargs["body"]}
+    events.patch.return_value.execute.side_effect = patched
     events.delete.return_value.execute.return_value = ""
+    events.instances.return_value.execute.return_value = {"items": list(instances)}
+    service.calendars.return_value.get.return_value.execute.return_value = {
+        "kind": "calendar#calendar", "id": "kyle@example.com",
+        "summary": "kyle@example.com", "timeZone": TZ,
+        "labelProperties": {"eventLabels": list(labels)}}
+    service.calendarList.return_value.list.return_value.execute.return_value = {
+        "kind": "calendar#calendarList", "items": list(calendars)}
     return service, events
 
 
@@ -190,6 +212,8 @@ def test_calendar_move_keeps_duration_across_dst():
     body = events.patch.call_args.kwargs["body"]
     assert body["start"]["dateTime"] == "2026-11-02T10:00:00-05:00"
     assert body["end"]["dateTime"] == "2026-11-02T11:00:00-05:00"
+    # a move never asks Google to email the guests (PRIVACY.md)
+    assert events.patch.call_args.kwargs["sendUpdates"] == "none"
 
 
 def test_calendar_create_all_day_event():
@@ -234,7 +258,8 @@ def test_calendar_delete_requires_confirmation():
     reg.confirm = lambda q: True
     result, _ = reg.dispatch("delete_calendar_event", {"event_id": "ev1"})
     assert json.loads(result)["status"] == "deleted"
-    events.delete.assert_called_with(calendarId="primary", eventId="ev1")
+    events.delete.assert_called_with(calendarId="primary", eventId="ev1",
+                                     sendUpdates="none")
 
 
 def test_resolve_day():

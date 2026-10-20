@@ -574,8 +574,30 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
     registry.register(*GoogleCalendar(
         credentials_path=cal["credentials"], token_path=cal["token"],
         calendar_id=cal["calendar_id"], timezone=config["assistant"]["timezone"] or None,
-        save_token=cal["save_token"]).tools())
+        save_token=cal["save_token"], color_labels=cal["color_labels"],
+        extras=calendar_extras(config, output_fn)).tools())
     register_gmail(registry, config, output_fn)
+
+
+def calendar_extras(config: dict, output_fn=print) -> bool:
+    """Has the Google token the read-only calendar list and labels scopes?
+    A token from before them hasn't: the core Calendar tools still work,
+    and this says how to add them."""
+    from assistant.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
+                                             SIGN_IN_COMMAND, load_token_info,
+                                             missing_scopes)
+
+    token = config["calendar"]["token"]
+    try:
+        if load_token_info(token) is None:
+            return False  # no sign-in yet (google_auth asks for them)
+        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, token)
+    except (OSError, ValueError):
+        return False
+    if lacking:
+        output_fn("(Calendar labels and other calendars off: not granted yet. "
+                  f"Run {SIGN_IN_COMMAND} once to sign in again.)")
+    return not lacking
 
 
 def register_spotify(registry: ToolRegistry, config: dict, output_fn=print,

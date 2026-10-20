@@ -190,6 +190,53 @@ log records memory lookups by count only. Tests:
 `tests/test_gmail.py` (an injection email that tries to delete an event,
 move events, change Notion or create a draft must trigger a confirmation).
 
+### Calendar guests, invites and other calendars (`tools/calendar.py`)
+The fuller calendar tools can email people: adding guests makes Google
+send them an invite, and answering an invite tells the organizer. So these
+**always** ask for a spoken yes, untrusted content or not, and the
+question names the addresses ("Do you want me to send an invite for Study
+group to ana@uni.edu?"): `create_calendar_event` with `attendees`,
+`update_calendar_event` with `add_attendees` or `remove_attendees`, and
+`respond_to_calendar_invite` (which also names the organizer and reads
+out any note, since Google emails it to the organizer). Every address is
+named, never "and 2 more", so an extra injected guest can't hide in the
+question. Moves and deletes send no `sendUpdates`; Google's default then is no
+notification, though its docs say "some emails might still be sent". Google is
+told to email guests (`sendUpdates="all"`) only on those calls, after the
+yes; every other create or update sends `"none"`. Deleting a whole
+repeating series asks "delete every ..., the whole series?". Every other
+change (`update_calendar_event`, `move_calendar_event` with `scope`
+"all") asks when untrusted content is in the conversation, like before.
+An RSVP sends the whole guest list back with only Kyle's own entry
+changed (a patch replaces the list), so nobody is dropped. Bounds: 20
+guests per call, 5 reminders, 5 repeat lines of 200 characters (each must
+start with RRULE, EXDATE or RDATE, no line breaks, so nothing else can be
+smuggled into the event), search words up to 100 characters, 10 calendars
+in an "all calendars" listing, and labels and the calendar list cached for
+5 minutes (at most 20 entries).
+
+Untrusted text: event notes, other people's invites, RSVP results, and
+anything from a calendar Kyle doesn't own (a shared or subscribed calendar,
+`accessRole` other than "owner"; listings, moves and updates alike) mark
+the result `"untrusted_content"`,
+and `list_calendars` does too when any shared calendar's name is in it.
+Guest names are never sent, only a count. Logs: the calendar tools log
+counts and field names at INFO (e.g. "updated an event (attendees,
+summary)"), never titles, notes or addresses; tool inputs stay at DEBUG as
+for every tool. Error messages from bad input (an address that isn't one,
+a reminder that isn't a number, an unknown color) don't repeat the value,
+because a failed tool's error is logged at ERROR. Tests: `tests/test_calendar_features.py`,
+`tests/test_security.py`.
+
+Scopes: the two new ones are read-only
+(`calendar.calendarlist.readonly`, `calendar.calendars.readonly`: the list
+of calendars and their settings, including label names). They are
+optional: `get_credentials` still requires only `calendar.events`, so an
+older token keeps working, and only `list_calendars`, label names and
+other calendars by name wait for the re-sign-in. A family member's tools
+get them only if her own token has them, and never Kyle's
+`[calendar] color_labels`.
+
 ### Lecture recordings and transcripts
 Recordings are personal data (and other people's voices). The audio is
 deleted right after it is transcribed unless `[lecture] keep_audio = true`;
@@ -859,8 +906,11 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   from Gmail (`eventType` "fromGmail") and events whose guests may edit
   them (`guestsCanModify`): a listing that includes one carries
   `"untrusted_content": true`, and from then on changes in that
-  conversation ask first (`chat.has_marked_results`). The description field
-  is never sent to Claude, and deletes always ask. Notion assignment titles
+  conversation ask first (`chat.has_marked_results`). An event's notes
+  (description, first 300 characters) are sent to Claude since the fuller
+  calendar tools, and a listing with any notes is marked untrusted too,
+  even on Kyle's own events (notes are often pasted from someone else's
+  invite or email). Deletes always ask. Notion assignment titles
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).

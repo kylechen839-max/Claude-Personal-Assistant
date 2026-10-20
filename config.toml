@@ -62,6 +62,11 @@ enabled = true
 credentials = "credentials.json"
 token = "token.json"
 calendar_id = "primary"
+# Your own names for event colors ("make it School"): name = a Google color
+# (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite,
+# Blueberry, Basil, Tomato) or the name of one of your Google event labels.
+color_labels = {}
+# e.g. color_labels = { School = "Basil", Work = "Blueberry", Gym = "Tangerine" }
 
 [gmail]
 enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth

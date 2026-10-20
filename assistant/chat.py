@@ -82,7 +82,9 @@ ZH_HELP_ALWAYS = ("everyday questions and explanations, translating between "
                   "recipes and cooking tips, simple math and unit conversions")
 ZH_HELP_WEB = "weather, news, opening hours and other things that need a web search"
 ZH_HELP_CALENDAR = ("her calendar: what's on today or tomorrow, adding an "
-                    "appointment or reminder, moving one (deleting always asks first)")
+                    "appointment or reminder (with a color, a repeat or a "
+                    "reminder time), moving one, finding a free hour, "
+                    "answering an invite (deleting always asks first)")
 ZH_HELP_EMAIL = ("her Gmail: what new email came in, reading one out, and "
                  "drafting a reply she then sends herself (you never send email)")
 ZH_HELP_CONNECT = ("Not connected yet: her calendar and Gmail. Tell her she can "

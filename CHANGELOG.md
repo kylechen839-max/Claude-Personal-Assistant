@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Google Calendar by voice now covers most of Google Calendar: event colors
+  (Google's 11 colors or plain words) and your named event labels, plus your
+  own color names in `[calendar] color_labels`; repeating events, edited one
+  occurrence or the whole series (a weekly series can move to another
+  weekday); reminders; busy/free and private; inviting guests and adding a
+  Meet link (always asks first and names every address); accepting,
+  declining or "maybe" on invites (asks first and reads out any note);
+  finding free time (never hours already past); search; other calendars or
+  all of them; and "which calendars do I have?". Labels and other
+  calendars need a one-time Google sign-in again (two read-only
+  permissions). This update changes `requirements.txt`
+  (google-api-python-client 2.199+), so the auto-updater skips it: run
+  `python -m assistant --update`.
 - Team chat connectors (off by default, owner only): Claude can read Slack
   channels and threads (user token), Discord channels and threads (bot) and
   GitHub issues, pull requests and discussions, search them, list and read
