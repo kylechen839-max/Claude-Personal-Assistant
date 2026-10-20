@@ -154,7 +154,7 @@ def test_login_sets_a_strict_cookie(make_app):
     assert client.get("/api/state").json() == {
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
         "history": False, "conversation": None, "owner": True, "family": False,
-        "language": "en"}
+        "memory": False, "language": "en"}
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
 
@@ -695,7 +695,8 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/static/vad/silero_vad_v5.onnx",
           # the voice view's earcons (assistant/earcons.py)
           "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
-          "/update-watch.js"]  # reloads the page after an update (host.py)
+          "/update-watch.js",  # reloads the page after an update (host.py)
+          "/memory.js"]  # the Memory screen's code (its data needs the owner)
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -1353,4 +1354,4 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v10" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v11" in sw and '"/ui.js"' in sw and '"/memory.js"' in sw
