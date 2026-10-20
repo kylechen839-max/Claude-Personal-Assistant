@@ -426,6 +426,16 @@ with the stopwatch button.
       and after its first sentence say "Stop, what time is it?"
   - Should: it goes quiet at once and answers the time. Then ask "What were
     you saying before?": it knows it was cut off and only what you heard.
+- [ ] Talk while it is still thinking: ask "What's on my calendar
+      tomorrow?", stop, and while the orb pulses (before any answer is
+      heard) add "and on Friday". Then, on the loudspeaker, ask a few short
+      questions in a row and stay quiet while it thinks.
+  - Should: the first answer is never cut off before you heard it; it
+    answers tomorrow, then Friday. The quiet thinking note and the "Still
+    listening" note never stop or start a turn by themselves. On the PC,
+    `logs/assistant.log` has no "Voice barge-in ... (0 sent)" lines for
+    these turns. (Afterwards remove the `[voice] barge_in = "off"` override
+    from `config.local.toml` if you still have it.)
 - [ ] Speaker vs. AirPods: ask a long question on the loudspeaker with the
       phone on a table, and stay silent while it answers. Repeat with
       AirPods.

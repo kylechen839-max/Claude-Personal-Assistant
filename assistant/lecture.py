@@ -594,6 +594,7 @@ class LecturePipeline:
         self.keep_audio = keep_audio
         self._whisper_factory = whisper_factory
         self._whisper = None
+        self._whisper_f32 = None  # only after a degenerate decode
         self.tz = timezone
         # Called with (job, notes, upload meta) once the Notion page exists.
         self.on_filed = on_filed
@@ -709,6 +710,20 @@ class LecturePipeline:
                                              compute_type=self.compute_type)
         return self._whisper
 
+    def _whisper_float32(self):
+        """A float32 copy of our own Whisper model for stt.redecode (None
+        with an injected factory, or when ours is float32 already)."""
+        if self._whisper_factory or self.compute_type == "float32":
+            return None
+        if self._whisper_f32 is None:
+            from faster_whisper import WhisperModel
+
+            log.info("Loading Whisper model %s in float32 for a retry",
+                     self.whisper_model)
+            self._whisper_f32 = WhisperModel(self.whisper_model, device=self.device,
+                                             compute_type="float32")
+        return self._whisper_f32
+
     def run(self, upload_id: str) -> LectureJob:
         """Run (or resume) every stage that hasn't finished yet."""
         job = self.job(upload_id)
@@ -765,23 +780,32 @@ class LecturePipeline:
             return datetime.now().date().isoformat()
 
     def _transcribe(self, job: LectureJob, d: Path, transcript_file: Path) -> None:
+        from assistant.stt import is_degenerate, redecode
+
         audio = d / AUDIO_FILE
         if not audio.exists():
             raise RuntimeError("The recording's audio is gone; record again")
         job.status, job.progress = "transcribing", 0.0
         self._save(job)
         pieces, last_save, seconds, done_before = [], 0.0, 0.0, 0.0
+        options = {"language": "en", "beam_size": 1, "vad_filter": True}
         for samples, start, fraction in self._windows(audio):
             window = len(samples) / SAMPLE_RATE
-            segments, _ = self.whisper.transcribe(samples, language="en",
-                                                  beam_size=1, vad_filter=True)
+            segments, _ = self.whisper.transcribe(samples, **options)
+            heard, degenerate = [], False
             for seg in segments:
-                pieces.append(seg.text.strip())
+                degenerate |= is_degenerate(seg.text)
+                heard.append(seg.text.strip())
                 within = min(1.0, float(seg.end) / window) if window else 1.0
                 job.progress = min(0.99, done_before + (fraction - done_before) * within)
                 if time.monotonic() - last_save > 2:
                     self._save(job)
                     last_save = time.monotonic()
+            if degenerate:  # "!!!!": decode this window again, never file it
+                heard = [seg.text.strip() for seg in redecode(
+                    self.whisper, samples, self._whisper_float32,
+                    what="a lecture window", **options)]
+            pieces.extend(heard)
             done_before, seconds = fraction, start + window
             job.progress = min(0.99, fraction)
             self._save(job)

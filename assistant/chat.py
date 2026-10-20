@@ -7,6 +7,8 @@ import os
 from contextvars import ContextVar
 from datetime import datetime
 
+from assistant.tools.timeutil import TURN_NOW
+
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
@@ -267,7 +269,9 @@ class ClaudeChat:
 
     def build_system(self, notes: list[str] | None = None,
                      nudge: str | None = None) -> str:
-        now = _now(self.timezone)
+        now = TURN_NOW.get()  # the turn's own moment (set in ask)
+        if now is None:
+            now = _now(self.timezone)
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
@@ -312,6 +316,9 @@ class ClaudeChat:
         "+", attachments.py) sent before the text; saved history gets only
         a marker such as "[photo]" (attachment_marker)."""
         token = _CURRENT_CHAT.set(self)
+        # "Now" is read once per turn: the prompt's date and the tools'
+        # "today"/"tomorrow" must agree even if midnight passes mid-turn.
+        clock = TURN_NOW.set(_now(self.timezone))
         try:
             notes = self.recall(user_text)
             nudge = self._nudge() if not self.history else None
@@ -369,6 +376,7 @@ class ClaudeChat:
             return reply
         finally:
             self._pending_resume = None
+            TURN_NOW.reset(clock)
             _CURRENT_CHAT.reset(token)
 
     # ---------- conversation history ----------
@@ -588,7 +596,16 @@ class ClaudeChat:
                     partial.append(delta)
                     if on_text:
                         on_text(delta)
-                return stream.get_final_message()
+                final = stream.get_final_message()
+                if final.stop_reason is None:
+                    # Ended before message_stop: a fragment (e.g. an unsigned
+                    # thinking block) that would break every later request.
+                    # abort() does this: a closed socket can read as a plain
+                    # end of stream, not an error.
+                    if cancel is not None and cancel.is_set():
+                        raise _Cancelled("".join(partial))
+                    raise StreamEndedEarly("the reply stream ended early")
+                return final
             except _Cancelled:
                 raise
             except Exception:
@@ -769,6 +786,12 @@ class _Cancelled(Exception):
     def __init__(self, partial: str):
         super().__init__("cancelled")
         self.partial = partial
+
+
+class StreamEndedEarly(Exception):
+    """A streamed response stopped before its end without being cancelled
+    (the connection dropped). The turn is dropped from history, as for any
+    failed request, so it can be retried."""
 
 
 def has_web_content(history: list[dict]) -> bool:

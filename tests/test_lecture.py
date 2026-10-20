@@ -468,6 +468,55 @@ def test_course_options_from_assignments():
     assert assignments.parent_page_id() == "fall-page"
 
 
+class DegenerateWhisper(FakeWhisper):
+    """Whisper's broken decode ("!" is token 0) for the second window's
+    first try, or for every try of it with `always`."""
+
+    def __init__(self, always=False):
+        super().__init__()
+        self.always = always
+
+    def transcribe(self, samples, **kw):
+        if len(self.calls) == 1 or (self.always and len(self.calls) == 2):
+            self.calls.append(kw)
+            return iter([SimpleNamespace(text=" !!!!!!!!!!!!", end=1.0),
+                         SimpleNamespace(text=" ! ! !", end=2.0)]), None
+        return super().transcribe(samples, **kw)
+
+
+def transcribe_job(tmp_path, fake_client, whisper):
+    p, up, uid, _, _, _ = pipeline(tmp_path, fake_client, whisper=whisper)
+    from assistant.lecture import LectureJob
+    p._save(LectureJob(id=uid))
+    job, d = p.job(uid), up.directory(uid)
+    p._transcribe(job, d, d / "transcript.txt")
+    return (d / "transcript.txt").read_text(), job
+
+
+@pytest.mark.parametrize("always", [False, True])
+def test_degenerate_window_is_decoded_again_and_never_filed(tmp_path, fake_client,
+                                                            caplog, always):
+    """A "!!!!" window (int8 NaN logits on some CPUs, or a bad sampled
+    fallback) is decoded once more, greedily; if it is still garbage it is
+    dropped. Either way no "!!!!" reaches the notes, and the logs give
+    lengths only."""
+    whisper = DegenerateWhisper(always)
+    with caplog.at_level(logging.INFO):
+        text, job = transcribe_job(tmp_path, fake_client, whisper)
+    assert "!" not in text
+    retry = whisper.calls[2]
+    assert retry["temperature"] == 0.0 and retry["condition_on_previous_text"] is False
+    assert retry["vad_filter"] is True and retry["language"] == "en"
+    assert len(whisper.calls) == 9  # 8 windows + one retry
+    assert text.split() == TRANSCRIPT_WORDS  # the garbage window adds nothing
+    assert job.progress == 1.0
+    logged = [r for r in caplog.records if r.name == "assistant.stt"]
+    assert any("decoding again" in r.getMessage() for r in logged)
+    assert any("dropped" in r.getMessage() for r in logged) is always
+    assert all("!" not in r.getMessage() and "Today" not in r.getMessage()
+               and "kinetic" not in r.getMessage() for r in logged)
+
+
 # ---------- real decoding of phone recordings ----------
 FIXTURE = str(Path(__file__).parent / "fixtures" / "hey_claude_sapi_david_140.wav")
 
@@ -516,7 +565,7 @@ def test_audio_windows_decodes_phone_formats(tmp_path, fmt, codec):
 
 
 @pytest.mark.slow
-def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client):
+def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client, caplog):
     """Generated speech -> WebM/Opus -> the real Whisper model."""
     from assistant.stt import Transcriber, rough_match
     from assistant.tts import Pyttsx3TTS
@@ -525,7 +574,7 @@ def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client):
     wav = tmp_path / "lecture.wav"
     Pyttsx3TTS(rate=160).save_to_file(phrase, wav)
     try:
-        model = Transcriber("base.en").model
+        Transcriber("base.en").model  # downloaded (CI) or skip
     except Exception as e:
         pytest.skip(f"Whisper base.en model unavailable: {type(e).__name__}")
     up = ChunkedUploads(tmp_path / "lec")
@@ -540,14 +589,19 @@ def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client):
     up.finish(uid, total=len(data))
     assignments, _ = assignments_mock()
     p = LecturePipeline(up, fake_client, LectureNotesDB(assignments),
-                        whisper_factory=lambda name: model)
+                        whisper_model="base.en")  # the product's own int8 model
     from assistant.lecture import LectureJob
     p._save(LectureJob(id=uid))
     job = p.job(uid)
     d = up.directory(uid)
-    p._transcribe(job, d, d / "transcript.txt")
+    with caplog.at_level(logging.DEBUG, logger="faster_whisper"):
+        p._transcribe(job, d, d / "transcript.txt")
     text = (d / "transcript.txt").read_text()
-    assert rough_match(phrase, text), text
+    # On a miss, say which fallback steps ran (temperatures, thresholds).
+    # No fixed seed: a "!!!!" window is the product's to catch (stt.redecode),
+    # and this test should keep showing it if that guard ever fails.
+    decoding = [r.getMessage() for r in caplog.records if r.name == "faster_whisper"]
+    assert rough_match(phrase, text), (text, decoding)
     assert job.duration_seconds and job.progress == 1.0
 
 

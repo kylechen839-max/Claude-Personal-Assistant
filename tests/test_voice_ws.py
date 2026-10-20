@@ -41,7 +41,7 @@ class Transcriber:
 @pytest.fixture
 def make_voice(monkeypatch):
     def make(*streams, heard=("what's on my calendar tomorrow",), memory=None,
-             synth=None, transcriber=None, tools=None, **voice):
+             synth=None, transcriber=None, tools=None, tts=None, **voice):
         client = stream_client(*streams)
 
         def chat_factory(registry):
@@ -49,7 +49,7 @@ def make_voice(monkeypatch):
                               memory=memory)
 
         assistant = webapp.WebAssistant(chat_factory, transcriber or Transcriber(*heard),
-                                         PrintTTS(), tools=tools)
+                                         tts or PrintTTS(), tools=tools)
         if synth:
             # (the session, and its language, are passed too: one voice here)
             monkeypatch.setattr(assistant, "synthesize",
@@ -248,8 +248,102 @@ def test_first_audio_latency(make_voice, capsys):
               f"frame {first * 1000:.0f} ms (server marks, s: {server})")
 
 
+class OSVoiceTimer:
+    """Times the OS voice where the product calls it: webapp.render_wav, on
+    the web app's own TTS thread (with its COM set-up on Windows). Records
+    (seconds, gave audio) per sentence rendered."""
+
+    def __init__(self, monkeypatch):
+        self.renders = []
+        real = webapp.render_wav
+
+        def timed(tts, text, *args, **kwargs):
+            started, ok = time.perf_counter(), False
+            try:
+                data = real(tts, text, *args, **kwargs)
+                ok = True
+                return data
+            finally:
+                self.renders.append((time.perf_counter() - started, ok))
+
+        monkeypatch.setattr(webapp, "render_wav", timed)
+
+    def until_first_audio(self) -> float:
+        """Seconds the OS voice spent before the first audio frame could go
+        out: every render up to the first that gave audio (a sentence whose
+        render failed is skipped by the speaker, and the next one is first)."""
+        total = 0.0
+        for seconds, ok in self.renders:
+            total += seconds
+            if ok:
+                break
+        return total
+
+
+def pipeline_seconds(timings: dict, voice: OSVoiceTimer) -> float:
+    """Utterance received -> first audio frame sent, minus the OS voice's
+    rendering: Whisper, Claude streaming, sentence split, queueing, framing."""
+    return timings["audio"] - voice.until_first_audio()
+
+
+class SlowOSVoice:
+    """An OS voice that takes `delay` s per file and writes nothing for the
+    first `empty` calls (SAPI/eSpeak occasionally write an empty file)."""
+
+    def __init__(self, delay, empty=0):
+        self.delay, self.empty, self.on_audio_start = delay, empty, None
+
+    def save_to_file(self, text, path):
+        time.sleep(self.delay)
+        if self.empty:
+            self.empty -= 1
+            Path(path).write_bytes(b"")
+            return
+        PrintTTS().save_to_file(text, path)
+
+
+class SlowTranscriber(Transcriber):
+    def __init__(self, delay, *texts):
+        super().__init__(*texts)
+        self.delay = delay
+
+    def transcribe(self, recording):
+        time.sleep(self.delay)
+        return super().transcribe(recording)
+
+
+@pytest.mark.parametrize("stt_s, voice_s, empty", [(0.0, 0.4, 0), (0.0, 0.4, 3),
+                                                   (0.6, 0.1, 0)])
+def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
+                                                   stt_s, voice_s, empty):
+    """The real-Whisper latency test below holds our pipeline to 2 s but not
+    the CI runner's OS voice (Windows SAPI took 3.3 s for one sentence once).
+    Every bit of OS-voice time before the first audio is taken out, including
+    a first sentence whose render failed (3 empty tries, then skipped), and
+    nothing else: a slow Whisper still counts."""
+    voice = OSVoiceTimer(monkeypatch)
+    _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
+                                  "Then lunch with Sam."),
+                         transcriber=SlowTranscriber(stt_s, "what's on tomorrow"),
+                         tts=SlowOSVoice(voice_s, empty))
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        msgs = receive(ws, "turn_done")
+    audio = [m for m in msgs if m["type"] == "audio"]
+    assert audio[0]["text"] == ("Then lunch with Sam." if empty else
+                                "Tomorrow you have the dentist at 3:30 PM.")
+    timings = msgs[-1]["timings"]
+    os_voice = voice_s * (empty + 1)  # every try before the first audio
+    assert timings["audio"] >= 0.9 * (stt_s + os_voice)  # coarse clocks on Windows
+    pipeline = pipeline_seconds(timings, voice)
+    assert 0.9 * stt_s <= pipeline < stt_s + 0.3  # < one 0.4 s render left in
+
+
 @pytest.mark.slow
-def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
+def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path,
+                                               monkeypatch):
     """The definition-of-done question as a voice-mode utterance, through
     real Whisper (base.en, CPU) and the real TTS route; Claude is mocked.
     Runs in CI, where the model is downloaded."""
@@ -267,20 +361,11 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
     speech = audio.load_audio(wav)
     if not len(speech):
         pytest.skip("the OS voice wrote an empty clip")
-    real = webapp.render_wav
     tts = Pyttsx3TTS()
-    synth_s = []  # how long the OS voice took per sentence
-
-    def synth(text):
-        t = time.perf_counter()
-        try:
-            return real(tts, text)
-        finally:
-            synth_s.append(time.perf_counter() - t)
-
+    voice = OSVoiceTimer(monkeypatch)  # in the product's own TTS thread
     _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
                                   "Then lunch with Sam."),
-                         transcriber=whisper, synth=synth)
+                         transcriber=whisper, tts=tts)
     login(http)
     with connect(http) as ws:
         ws.receive_text()
@@ -294,11 +379,11 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
         print(f"\n[voice latency, real Whisper + {type(tts).__name__}] utterance -> "
               f"first audio {msgs[-1]['timings']['audio']:.2f} s server-side "
               f"(transcript {msgs[-1]['timings']['transcript']:.2f} s, "
-              f"OS voice for the first sentence {synth_s[0]:.2f} s)")
+              f"OS voice before the first audio {voice.until_first_audio():.2f} s)")
     # The budget is for our pipeline (Whisper, streaming, sentence split,
     # framing), not for the test's OS voice: Windows SAPI on a shared CI
     # runner alone took 3.3 s once. The phone's real voice is Kokoro/Piper.
-    assert msgs[-1]["timings"]["audio"] - synth_s[0] < 2.0
+    assert pipeline_seconds(msgs[-1]["timings"], voice) < 2.0
 
 
 def test_barge_in_over_the_socket(make_voice):

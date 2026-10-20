@@ -1886,6 +1886,61 @@ Render/Docker changes) comes separately.
 - Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
   Phone cache v9.
 
+## Three flaky CI tests, root-caused (2026-10-20)
+
+- **Midnight in New York** (`test_end_to_end.py::test_definition_of_done_phrase`):
+  the test worked out "tomorrow" from the clock, and the assistant read the
+  clock again seconds later (after the wake-word scan and Whisper). The
+  assistant had the same race inside one turn: the system prompt's date
+  (`ClaudeChat.build_system`) and the calendar tool's "tomorrow"
+  (`timeutil.resolve_day`) were two readings, so a question at 23:59:59
+  could get the day after tomorrow. Now "now" is read once per turn:
+  `ClaudeChat.ask` sets `timeutil.TURN_NOW`, and the prompt, `resolve_day`
+  and Notion's "today" (`list_assignments`) all use it; outside a turn they
+  read the clock as before. The end-to-end test pins the clock to 23:59:59
+  New York time. Tests: `test_tools.py` +2 (a turn at 23:59:59 whose clock
+  ticks past midnight before the tool runs: "tomorrow" stays Tuesday, not
+  Wednesday; Notion's "today" inside a turn); both, and the pinned
+  end-to-end test, fail on the old code.
+- **Voice latency on Windows** (`test_first_audio_latency_with_real_whisper`):
+  the 2 s budget is for our pipeline (Whisper, streaming, sentence split,
+  framing); Windows SAPI, a test-only voice, took up to 3.3 s per sentence
+  on the runner. c5c428a subtracted the first sentence's SAPI time; now the
+  OS voice is timed where the product calls it (`webapp.render_wav` on the
+  web app's TTS thread, with its COM set-up), and every render before the
+  first audio is subtracted, including a first sentence whose render
+  failed and was skipped. Kokoro's ~0.4 s first audio isn't what this test
+  measures. Test: `test_voice_ws.py` +3 (fake slow voice and slow Whisper:
+  OS-voice time is excluded, a slow Whisper still counts; the failed-first-
+  render case fails with c5c428a's formula).
+- **Whisper "!!!!" on Windows** (`test_lecture.py::test_pipeline_transcribes_a_real_webm`):
+  "!" is token 0, so "!!!!" is a degenerate decode: NaN logits (int8
+  kernels misbehave on some CPUs) or a bad sampled temperature fallback.
+  Every Whisper path uses faster-whisper's default fallback, voice
+  `Transcriber.transcribe` included; what sets this test apart is
+  `vad_filter=True` and the WebM/Opus re-encode, which weakens the
+  sampling theory. The cause wasn't reproduced (no Whisper model in the
+  sandbox, CI logs can't be fetched), so the fix is a product guard that
+  holds whatever the cause: `stt.is_degenerate` (3+ characters, all "!";
+  "..." and "♪♪♪" are normal non-speech output and aren't retried) and `stt.redecode`, which decodes again greedily (temperature
+  0, no conditioning on the bad text) on a float32 copy of our own model,
+  loaded only then, and drops segments still degenerate. The lecture job
+  applies it per window, voice `Transcriber.transcribe` per utterance; INFO
+  logs give seconds and counts, never text. The webm test now uses the
+  pipeline's own model (so the float32 retry is in play), has no fixed
+  seed (it should still catch a product failure), and on a miss prints the
+  fallback steps faster-whisper logged. The decode path was checked: a
+  SAPI fixture through WebM/Opus and `audio_windows` comes back at 16 kHz,
+  same length, lag 0, correlation 0.986, no NaN (3 dB quieter: the test's
+  encoder opens a stereo stream). Tests: `test_lecture.py` +2 (a "!!!!"
+  window is decoded again and filed clean; one still garbage is dropped),
+  `test_stt.py` +3 (`is_degenerate`; retry on an injected model; retry in
+  float32 on our own, loaded once); all fail without the guard.
+- Counts (Linux sandbox, Python 3.13, no eSpeak or Whisper model, so not
+  the CI numbers): 9 failed, 1697 passed, 45 skipped, 16 errors, against
+  master's 9 failed, 1687 passed, 45 skipped, 16 errors; the same eSpeak
+  and wake-model audio set fails on both. The end-to-end test's mocked-stt
+  case passed here with two SAPI fixtures standing in for the eSpeak phrase.
 ## Family copies start by themselves
 
 - `scripts/install_family_tasks.ps1`: one Task Scheduler task per family
@@ -2721,3 +2776,109 @@ How it was tested (offline, Linux sandbox, Python 3.13):
   (the tests above). Each fix was reverted alone, with `__pycache__`
   cleared, and its test failed (10 reverts); the round-2 reverts were rerun
   against the new code and all 21 still fail.
+
+## Fix: phone barge-in cancelled replies before any audio (2026-10-20)
+
+Kyle's phone log (12:47 and 12:52 UTC): "Voice barge-in on turn N after 0
+chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
+- **Root cause (page):** `voice-core.js` `TurnController` treated any
+  confirmed speech in the **thinking** state as a barge-in
+  (`onVad` "speechConfirmed" and `_utterance`, there since the MVP). So
+  Kyle's trailing words, room noise or the echo of the app's own "thinking"
+  note / follow-up cue cancelled the turn before its first audio chunk.
+  `[voice] barge_in = "off"` didn't help: it only ignored the mic in the
+  **speaking** state.
+- **Root cause (server):** the cancel closes the Claude stream from another
+  thread. A closed socket can read as a plain end of stream rather than an
+  error (reproduced against a local SSE server: the SDK's `text_stream`
+  ends quietly and `get_final_message()` returns `stop_reason=None` with
+  only the thinking block received so far, signature ""). `ClaudeChat`
+  stored that fragment as the reply, so the next request carried an
+  unsigned thinking block (the 400s that PR #26 works around).
+- **Fix, page:** barge-in needs the reply's audio to have started and
+  speech that began after that, with the same `barge_in_ms` rule as before.
+  Speech while it is still thinking (or with barge-in off, between
+  chunks) is **held and sent as the next turn** once the reply has played
+  (one slot, newest wins; a real barge-in, pause or End drops it; never
+  sent while a yes/no question is open). Chosen over "ignore" so "...and
+  on Friday" isn't lost, and over "append to the turn" because that needs
+  the running turn cancelled. Audio that arrives while Kyle is still
+  talking plays on and the state catches up when he stops. The
+  `Endpointer` gets `holdOff(ms)`: `voice.js` calls it for every earcon and
+  the follow-up cue (sound length + 250 ms), so they can't start an
+  utterance. Pausing (app in the background) still stops a thinking turn.
+  Phone cache v20.
+- **Fix, server:** `ClaudeChat._create` checks the final message: no
+  `stop_reason` means the stream ended early; when cancelled that is the
+  normal `_Cancelled` path (history gets "[interrupted: Kyle started talking
+  before I said anything]", no thinking block), otherwise `StreamEndedEarly`
+  drops the turn from history like any failed request. The barge-in log
+  line also says how many chunks had been sent ("(0 sent)").
+- Tests (round 1): `tests/js/voice-core.test.js` 28 (was 21): "talking while it
+  thinks cancels that turn" is replaced by its opposite (held, sent after
+  the reply, no interrupt), plus barge-in only by speech begun after the
+  audio started, speech running past the end of the reply (no stuck
+  "thinking"), speech after a yes, barge-in off while thinking, pause/End
+  drop a held utterance, `Endpointer.holdOff`, and the earcon wiring in
+  `voice.js`. `tests/test_voice.py` +2: a 0-chunk cancel whose stream ends
+  quietly with a thinking-only fragment (`FakeStream(quiet_close=True)`)
+  leaves valid history and a clean next request, with the INFO line
+  checked by caplog; a stream that ends early without a cancel is not
+  kept. Each fails with its source change reverted. (Final counts are
+  under round 3.) Not checked on a real phone: how often trailing words or room noise now get
+  held as a next turn (MANUAL_TEST "Talk while it is still thinking").
+
+### Round 2 (judge findings)
+
+1. Muting while Kyle was talking over a reply that then finished left the
+   state "thinking", and his next words sent an interrupt for a reply he
+   had heard in full: `setMuted(true)` now runs the same catch-up as the
+   end of speech. Speech only counts as talking over the reply while its
+   audio is audible (`replyAudible`: playing, or "speaking"); speech in a
+   gap between chunks is held like speech while it thinks.
+2. Words held before a yes/no question could be sent as a new turn after
+   it (an early "yes" agreeing to whatever came next): a `confirm` drops
+   the held words, and while a question is open (asked, or just answered)
+   speech that isn't the answer is dropped, not held. Speech right after
+   the answer no longer barges in either (that is covered by 1 and the
+   drop; a separate `audioStarted` reset on the answer turned out to be
+   redundant, so it isn't in).
+3. The stricter VAD threshold now applies whenever reply audio plays
+   (`controller.replyAudible`, read per frame in `voice.js`), also while
+   the state shows "thinking" because he was talking when it started.
+- Merged origin/master (b1e40b9, #25 and #26) by fast-forward; CHANGELOG
+  keeps both Fix entries.
+- Tests: `voice-core.test.js` 34 (+6), each failing with its fix reverted
+  (the after-the-answer test fails with fixes 1 and 2 reverted together).
+
+### Round 3 (judge findings)
+
+1. A yes/no question that played under Kyle's speech (he started just
+   before its audio) left the page on "Thinking…": the question's end and
+   his speech's end both did nothing, so his real "yes" was dropped until
+   the 60 s timeout. New `_settle()` rule, run when speech ends, on mute
+   and when playback goes idle: in "thinking" with nothing playing and him
+   not talking, a heard question with no answer sent yet goes to
+   "listening", and a finished turn ends the reply. The page now knows the
+   question's audio was played (`questionAudio`) and that an answer is on
+   its way (`answerSent`, so it stays "thinking" until `confirm_answer`).
+   Sweep: a turn that ends with its question unanswered (the server gave
+   up) now clears `awaitingAnswer`, so the next words are a new turn
+   instead of an answer to nothing.
+2. The reply's own echo in a pause between sentences could be queued as
+   the next turn. Each time playback goes idle the page calls `echoTail`
+   (`voice.js`: `endpointer.holdOff(CUE_TAIL_MS)`, as for the earcons), and
+   speech that began in such a pause is dropped when reply audio played
+   under more than half of it (timed with `performance.now()`).
+3. PROGRESS: the stale round-1 counts are gone; README says a pause between
+   sentences doesn't count as barge-in either.
+- Tests: `voice-core.test.js` 40 (+6): the question-under-speech sequence
+  (speechEnd and misfire), an unanswered question closing with its turn,
+  echo in a pause dropped, real speech in a pause still asked, and the
+  `echoTail` wiring. Each fails with its fix reverted, except the
+  `_settle()` call in `onPlaybackIdle`, which is defensive: no reachable
+  sequence leaves "thinking" with playback ending and him silent, so no
+  test fails without it.
+- Final counts (Linux sandbox, Python 3.13): 2114 passed, 48 skipped
+  (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
+  252).

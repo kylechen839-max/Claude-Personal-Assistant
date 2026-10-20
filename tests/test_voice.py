@@ -4,6 +4,7 @@ ending and memory. Anthropic is a fake streaming client; Whisper and TTS are
 fakes, except one real eSpeak render."""
 
 import json
+import logging
 import shutil
 import sys
 import threading
@@ -183,6 +184,63 @@ def test_interrupt_before_any_audio_and_next_turn_continues():
     assert [m["role"] for m in chat.history] == ["user", "assistant", "user", "assistant"]
     assert "before I said anything" in chat.history[1]["content"][0]["text"]
     assert user_texts(client)[-1] == "actually, weather?"
+
+
+def thinking_block(text="Kyle wants his calendar"):
+    """A thinking block cut off mid-stream: its signature never arrived."""
+    block = {"type": "thinking", "thinking": text, "signature": ""}
+    return MagicMock(type="thinking", model_dump=lambda **k: dict(block))
+
+
+def has_thinking(messages):
+    return any(isinstance(m["content"], list) and
+               any(b.get("type") == "thinking" for b in m["content"]) for m in messages)
+
+
+def test_cancel_before_any_audio_leaves_valid_history(caplog):
+    """Kyle's phone, 2026-10-20: barge-ins "after 0 chunk(s)" while Claude
+    was still thinking. abort() closed the stream, which just ended (no
+    error), and the cut-off message, an unsigned thinking block and no
+    text, went into history as the reply ("replied 0 chars")."""
+    from tests.voice_fakes import FakeStream
+    s1 = FakeStream(["Tomorrow you have "], make_response(thinking_block(), stop_reason=None),
+                    hold_after=0, quiet_close=True)
+    client = stream_client(s1, streamed("Friday is free."))
+    conv, chat, events = make_conv(client, "what's on tomorrow", "and Friday?")
+    conv.utterance(1, SPEECH)
+    assert s1.held.wait(2)
+    with caplog.at_level("INFO", logger="assistant.voice_session"):
+        conv.interrupt(1, 0, 0.0)
+        done = events.wait_for("turn_done", turn=1)
+    assert done["interrupted"] is True and done["chunks"] == 0
+    assert events.of("audio") == [] and s1.closed.is_set()
+    assert chat.history == [
+        {"role": "user", "content": "what's on tomorrow"},
+        {"role": "assistant", "content": [{"type": "text", "text":
+         "[interrupted: Kyle started talking before I said anything]"}]}]
+    # the log says no audio had been sent; ids and counts only
+    line = next(r.getMessage() for r in caplog.records if "barge-in" in r.getMessage())
+    assert line == "Voice barge-in on turn 1 after 0 chunk(s) + 0% (0 sent)"
+    assert not any("tomorrow" in r.getMessage() for r in caplog.records
+                   if r.levelno >= logging.INFO)  # text only at DEBUG
+    # the conversation goes on: the next request is valid
+    conv.utterance(2, SPEECH)
+    events.wait_for("turn_done", turn=2)
+    sent = client.stream_calls[-1]["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert not has_thinking(sent) and not has_thinking(chat.history)
+
+
+def test_a_stream_that_ends_early_is_not_kept():
+    """Not cancelled, but the stream stopped before its end (connection
+    dropped): the fragment must not become the reply in history."""
+    from assistant.cli import get_reply
+    from tests.voice_fakes import FakeStream
+    cut = FakeStream([], make_response(thinking_block(), stop_reason=None))
+    chat = ClaudeChat(client=stream_client(cut), model="m")
+    reply = get_reply(chat, "hi", output_fn=lambda m: None, on_text=lambda d: None)
+    assert reply == "Sorry, something went wrong."
+    assert chat.history == []  # the turn can be asked again
 
 
 def test_stale_interrupt_is_ignored():

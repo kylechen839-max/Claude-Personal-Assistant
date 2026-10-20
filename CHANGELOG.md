@@ -23,10 +23,27 @@
 - CI: `api-contract` runs a real multi-turn conversation (tool use,
   thinking, two requests sharing a history, the voice socket) against the
   Anthropic API when the `ANTHROPIC_API_KEY` secret is set.
+- Fixed: asking about "tomorrow" just before midnight could list the day
+  after tomorrow. The date is now read once per question, so the system
+  prompt and the calendar and Notion tools agree.
+- Fixed: Whisper occasionally produced "!!!!" instead of words. Lecture
+  transcription and voice commands now detect it, decode that piece again
+  (greedily, in float32) and drop it if it is still garbage, so it never
+  reaches notes or Claude.
+- Tests: the Windows voice-latency test excludes only the OS test voice,
+  and the end-to-end calendar test pins the clock.
 - Fix: a conversation could break for good ("Sorry, something went wrong
   talking to Claude" on every turn) after hands-free voice shared it: a
   thinking block signed for another request was sent back. Earlier turns'
   thinking blocks are no longer sent.
+- Fix: hands-free voice on the phone cancelled replies before a word of
+  them was heard ("barge-in after 0 chunk(s)"): any speech, noise or the
+  app's own cue while Claude was still thinking counted as an interruption,
+  even with `[voice] barge_in = "off"`. Barge-in now needs speech that
+  starts after the answer's audio has started; what you say while it is
+  thinking is asked next, once the answer has played; the app's sounds
+  can't start a turn. A reply cut off that early no longer leaves a
+  fragment (an unsigned thinking block) in the conversation.
 - Attach photos (camera or library), PDFs and text files to a chat message
   with the new + button left of the text field. Up to 4 per message, shown
   as removable chips, sent with the next typed or push-to-talk message.

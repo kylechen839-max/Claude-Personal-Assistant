@@ -126,6 +126,10 @@ as the work. Never put secrets, tokens or personal data in this file.
   requests like the API and answers with the SDK's own types) in
   `tests/test_contract.py`; CI's `api-contract` job runs the same tests
   against the real API when the secret is set.
+- Dates: a chat turn reads "now" once (`timeutil.TURN_NOW`, set in
+  `ClaudeChat.ask`). Tests about "today"/"tomorrow" pin that clock
+  (`chat._now`) instead of reading the clock beside the product; one that
+  did failed whenever CI crossed midnight in New York.
 
 ## Environment (Linux cloud sandbox)
 - Setup:
