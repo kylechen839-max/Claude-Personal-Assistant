@@ -214,13 +214,16 @@ def test_invite_for_a_removed_person_fails(env, owner):
 # --- isolation ------------------------------------------------------------------
 
 def test_a_family_member_has_web_tools_only(env, owner):
+    env.config["web"]["location"] = {"city": "Kyle's town", "region": "", "country": "",
+                                     "timezone": ""}
     mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai")
     uid = link["user"]["id"]
     ctx = env.family.context(uid)
     assert ctx.registry.tools == {}
     assert {t["name"] for t in ctx.registry.server_tools} == {"web_search", "web_fetch"}
-    assert "user_location" not in json.dumps(ctx.registry.server_tools) or \
-        "Asia/Shanghai" in json.dumps(ctx.registry.server_tools)
+    search = next(t for t in ctx.registry.server_tools if t["name"] == "web_search")
+    # their time zone, never the owner's [web] location
+    assert search["user_location"] == {"type": "approximate", "timezone": "Asia/Shanghai"}
     env.fake_client.queue.append(make_response(text_block("Hi Mom.")))
     r = mom.post("/api/turn", json={"text": "hello"})
     assert r.status_code == 200
@@ -266,8 +269,8 @@ def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
 def test_owner_features_are_not_found_for_family(env, owner, method, path):
     mom, _ = env.member(owner)
     assert mom.request(method, path, json={}).status_code == 404
-    assert owner.request(method, path, json={}).status_code != 404 or \
-        path.startswith("/api/lecture/abc")
+    if path in ("/api/lecture/courses", "/api/lectures"):  # still the owner's
+        assert owner.request(method, path).status_code == 200
 
 
 def test_google_connect_is_the_owners_only(fake_client, tmp_path):
