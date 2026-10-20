@@ -813,3 +813,26 @@ def test_smoke_posts_never_follow_redirects():
     c = smoke.WebClient("https://hey.example.com", session=Session())
     assert c.login("t" * 32) == 307 and c.cookie is None
     assert sent[0]["allow_redirects"] is False
+
+
+def test_family_tasks_find_each_instance():
+    """install_family_tasks.ps1 finds config.<name>.toml + .env.<name> pairs
+    (never config.toml or *.local.toml) and runs each with its own files."""
+    import shutil
+
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell not available")
+    p = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                        "-File", str(ROOT / "tests" / "ps" / "install_family_tasks.tests.ps1"),
+                        "-Script", str(ROOT / "scripts" / "install_family_tasks.ps1")],
+                       capture_output=True, text=True, timeout=180)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stdout.count("PASS ") == 3, p.stdout
+
+
+def test_family_tasks_leave_the_owners_app_alone():
+    text = (ROOT / "scripts" / "install_family_tasks.ps1").read_text(encoding="utf-8")
+    assert "$prefix = 'Family-'" in text and "Family-*" not in text.replace('"$prefix*"', "")
+    assert "Unregister-HostTask" not in text and "'Web'" not in text
+    assert "*.local.toml" in text and "--env-file" in text

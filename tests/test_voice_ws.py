@@ -226,9 +226,18 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
         pytest.skip("the OS voice wrote an empty clip")
     real = webapp.render_wav
     tts = Pyttsx3TTS()
+    synth_s = []  # how long the OS voice took per sentence
+
+    def synth(text):
+        t = time.perf_counter()
+        try:
+            return real(tts, text)
+        finally:
+            synth_s.append(time.perf_counter() - t)
+
     _, http = make_voice(streamed("Tomorrow you have the dentist at 3:30 PM. ",
                                   "Then lunch with Sam."),
-                         transcriber=whisper, synth=lambda text: real(tts, text))
+                         transcriber=whisper, synth=synth)
     login(http)
     with connect(http) as ws:
         ws.receive_text()
@@ -241,8 +250,12 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path):
     with capsys.disabled():
         print(f"\n[voice latency, real Whisper + {type(tts).__name__}] utterance -> "
               f"first audio {msgs[-1]['timings']['audio']:.2f} s server-side "
-              f"(transcript {msgs[-1]['timings']['transcript']:.2f} s)")
-    assert msgs[-1]["timings"]["audio"] < 2.0
+              f"(transcript {msgs[-1]['timings']['transcript']:.2f} s, "
+              f"OS voice for the first sentence {synth_s[0]:.2f} s)")
+    # The budget is for our pipeline (Whisper, streaming, sentence split,
+    # framing), not for the test's OS voice: Windows SAPI on a shared CI
+    # runner alone took 3.3 s once. The phone's real voice is Kokoro/Piper.
+    assert msgs[-1]["timings"]["audio"] - synth_s[0] < 2.0
 
 
 def test_barge_in_over_the_socket(make_voice):
