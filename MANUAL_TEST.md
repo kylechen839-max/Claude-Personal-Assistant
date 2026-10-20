@@ -410,19 +410,21 @@ for all of this except the Google sign-in.
 - [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 
-- [ ] **Invite family.** On your iPhone (signed in to the cloud app), ⚙ ->
-      Invite someone -> a name, 中文, Create invite link.
+- [ ] **Invite family.** On your iPhone open the cloud server's own address
+      directly (`https://hey-claude.onrender.com/`, signed in with your
+      token), ⚙ -> Invite someone -> a name, 中文, Create invite link.
+      (Invites and Remove are managed there: with failover the app usually
+      talks to the Pi or PC, where family is off and the menu is hidden.)
   - Should: the share sheet opens with the link (or it says it was copied);
-    the person shows as "Invited". With failover set up (the badge shows
-    Cloud, Pi or PC), it works the same, and the link starts with the
-    cloud's address (`https://hey-claude.onrender.com/#invite=`).
+    the person shows as "Invited", and the link starts with the cloud's
+    address (`https://hey-claude.onrender.com/#invite=`).
 - [ ] Open that link on a second phone (or a private Safari tab).
   - Should: the page reloads in Chinese with an empty chat, no Lecture or
     Tutor tabs, no Invite menu; a question is answered in Chinese; History
     shows only its own conversation. Your list shows them as "Active".
 - [ ] Open the same link again in another private tab.
   - Should: "expired or already used", and the login page.
-- [ ] On your phone tap Remove next to them.
+- [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged.
 

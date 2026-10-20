@@ -180,6 +180,24 @@ test('with failover the owner\'s calls go through the router with the bearer tok
   assert.equal(t.els['invite-link'].value, url);
 });
 
+test('remove uses POST .../remove (a cross-origin DELETE fails the failover preflight)', async () => {
+  const user = { id: 'u 1', name: 'Mom', status: 'active' };
+  const t = load({ responses: {
+    '/api/users': { status: 200, body: { users: [user] } },
+    '/api/users/u%201/remove': { status: 200, body: { ok: true } },
+  } });
+  t.api.onState({ owner: true, family: true }, t.win, t.win.document);
+  await new Promise((r) => setTimeout(r, 0));
+  const li = t.els['family-list'].children[0];
+  assert.ok(li, 'the list shows Mom');
+  const remove = li.children.find((c) => c && c.className === 'danger');
+  await remove.fire('click');
+  const sent = t.fetches.find((f) => f.url === '/api/users/u%201/remove');
+  assert.ok(sent, JSON.stringify(t.fetches.map((f) => f.url)));
+  assert.equal(sent.opts.method, 'POST');
+  assert.ok(!t.fetches.some((f) => f.opts.method === 'DELETE'));
+});
+
 test('app.js hands its router-aware request() to family.js before anything else', () => {
   const app = readFileSync(new URL('../../assistant/web/app.js', import.meta.url), 'utf8');
   const configured = app.indexOf('family.configure({ request })');

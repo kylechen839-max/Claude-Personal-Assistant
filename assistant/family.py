@@ -408,7 +408,10 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
 
       POST   /api/invites             {name, language, timezone?} -> {url, expires_at}
       GET    /api/users               the invited people (owner only)
-      DELETE /api/users/{id}          sign them out, delete their history
+      POST   /api/users/{id}/remove   sign them out, delete their history
+                                      (also DELETE /api/users/{id}; the page
+                                      posts: the failover preflight allows
+                                      only GET and POST cross-origin)
       POST   /api/users/{id}/invite   a new link (the old one stops working)
       POST   /api/invite/accept       {invite} -> session cookie (public)
 
@@ -483,6 +486,7 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
                     log.exception("Family: hanging up a voice conversation failed")
         assistant.drop_user(uid)
 
+    @app.post("/api/users/{uid}/remove")
     @app.delete("/api/users/{uid}")
     async def remove_user(uid: str, session=Depends(webapp.require_owner)):
         if (e := off()) is not None:

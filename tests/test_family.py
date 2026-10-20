@@ -140,6 +140,19 @@ def test_inviting_needs_the_owner(env, owner):
     assert len(owner.get("/api/users").json()["users"]) == 2
 
 
+def test_remove_by_post_is_owner_only(env, owner):
+    """POST /api/users/{id}/remove: what the page uses (a cross-origin
+    DELETE fails the failover preflight)."""
+    link = env.invite(owner)
+    uid = link["user"]["id"]
+    mom, _ = env.member(owner, name="Dad", language="en")
+    assert env.client().post(f"/api/users/{uid}/remove", json={}).status_code == 401
+    assert mom.post(f"/api/users/{uid}/remove", json={}).status_code == 404
+    assert owner.post(f"/api/users/{uid}/remove", json={}).status_code == 200
+    assert uid not in [u["id"] for u in owner.get("/api/users").json()["users"]]
+    assert owner.post(f"/api/users/{uid}/remove", json={}).status_code == 404
+
+
 def test_users_file_holds_only_the_hash(env, owner):
     link = env.invite(owner)
     token = token_of(link["url"])

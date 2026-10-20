@@ -1845,3 +1845,19 @@ Render/Docker changes) comes separately.
   `/family.js` in the shell. Counts (Linux sandbox, Python 3.13): pytest
   1708 passed, 46 skipped. JS: family 8, i18n 10, backend-router 33,
   voice-core 14, devhub 12, agent-dashboard 126 (node's count), all passing.
+- Review round 3: **Remove now works cross-origin under failover.** The
+  failover preflight (`edge.py` `ALLOWED_METHODS`) allows only GET and
+  POST, so the page's `DELETE /api/users/{id}` got a 403 preflight when the
+  app talked to the cloud through the router. Added
+  `POST /api/users/{id}/remove` (the same owner-only handler; DELETE still
+  works same-origin) and `family.js` uses it. README "Invite family" and
+  MANUAL_TEST now say invites are managed at the cloud server's own
+  address: with failover the active backend is normally the Pi or PC,
+  where `[family]` is off, so the menu shows only while the cloud is active
+  (documented, no routing change). Tests: `test_family.py` +1 (POST remove:
+  owner 200, family session 404, no session 401), `test_failover_edge.py`
+  +1 (preflight from the app origin for the method and path read out of
+  `family.js`'s Remove handler: 403 with the old DELETE), `family.test.mjs`
+  +1 (Remove sends POST `.../remove`, never DELETE); all three failed
+  before the fix. Counts (Linux sandbox, Python 3.13): pytest 1710 passed,
+  46 skipped. JS: family 9, backend-router 33, all 190 node tests passing.

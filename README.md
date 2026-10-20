@@ -527,19 +527,27 @@ assistant, with their own conversation history and language (English or
 Chinese), without sharing `WEB_TOKEN`. The server profile turns this on
 (`[family] enabled`); on a PC it is off unless you set it.
 
-1. Signed in with your token, open ⚙ -> **Invite someone**, enter their
+Invites are managed from the cloud server's own address: open
+`https://<cloud>/` (e.g. `https://hey-claude.onrender.com/`) directly. With
+failover the app talks to whichever backend is active, normally your Pi or
+PC, where `[family]` is off, so the **Invite someone** menu only shows
+while the cloud is the active backend.
+
+1. Signed in with your token at the cloud's address, open ⚙ -> **Invite
+   someone**, enter their
    name and language (and their time zone, e.g. `Asia/Shanghai`), then
    **Create invite link**. The phone's share sheet opens (or the link is
    copied). Send it to them however you like. The link points at the
    server itself (`[webapp] public_origin`, else with failover the cloud's
-   address, `APP_ORIGIN`), even when your phone is talking to the Pi.
+   address, `APP_ORIGIN`).
 2. They open the link on their phone: it signs that phone in as them and
    reloads the page in their language. Share -> Add to Home Screen.
 3. The link works once and for `invite_days` (30 days). If it expired, or
    they get a new phone, tap **New link** next to their name (the old link
    stops working).
-4. **Remove** signs them out everywhere and deletes their conversations
-   (if a file can't be deleted right away, it is retried later).
+4. **Remove** (also at the cloud's address) signs them out everywhere and
+   deletes their conversations (if a file can't be deleted right away, it
+   is retried later).
 
 What they get: chat and voice with Claude, web search, and their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never

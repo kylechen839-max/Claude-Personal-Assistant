@@ -128,9 +128,9 @@
       remove.addEventListener("click", async () => {
         if (!win.confirm(`Remove ${user.name}? This deletes their conversations.`)) return;
         try {
-          // with a body: the server requires a Content-Length on every unsafe request
-          await call(`/api/users/${encodeURIComponent(user.id)}`, {
-            method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
+          // POST, not DELETE: with failover this goes cross-origin, and the
+          // backends' preflight allows only GET and POST
+          await post(`/api/users/${encodeURIComponent(user.id)}/remove`);
           refresh();
         } catch (e) { status.textContent = e.message; }
       });
