@@ -384,6 +384,49 @@ Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
 
+## PC hub (`/devteam`): loopback only
+
+The hub (assistant/devhub.py) lets a signed-in browser on the PC queue
+messages into Kyle's coordinator sessions, which can start coding work, so
+it is kept to the PC itself:
+
+- It is built only when `[devteam] hub = true` and the web app binds a
+  loopback address; the cloud server profile and any `0.0.0.0` bind never
+  have it.
+- Every `/devteam` page and `/api/devteam/*` route answers 404 unless the
+  peer is loopback, there is no `X-Forwarded-For` and no
+  `Tailscale-User-Login` header, and no configured trusted proxy vouches
+  for the request. `tailscale serve` adds those headers, so the phone and
+  the tailnet never reach it.
+- The `/api/devteam/*` routes need the owner's sign-in
+  (`require_owner`: a family member's session gets 404; the same cookie, `WebAuth`, `LoginLimiter`, CSP and
+  cross-origin guard; a cross-origin POST gets 403). The sign-in form on
+  the page posts to the existing `/api/login`.
+- Messages go to the CLI on stdin, never on its command line. Coordinator
+  replies are shown as text (markdown built with createElement and
+  textContent; http(s) links only). The page has no inline script
+  (`script-src 'self'`).
+- One message in flight per window; at most 8 windows, 200 messages a
+  window, 12000 characters a message or reply. No message or reply text
+  is logged at INFO. A CLI that hangs past `[devteam] timeout` has its
+  whole process tree killed (`taskkill /T` on Windows), so the window is
+  freed.
+- With `trusted_proxy` set the hub fails closed (every request 404) and
+  `serve` warns at startup that it is disabled.
+- **At rest:** the transcript and pending reply ids are in
+  `hub_state_file` (`data/devhub.json`), written privately (0600 on
+  Linux/macOS; Windows uses the folder's permissions) and atomically.
+  Clear rewrites the file without that window's messages, and a session
+  dropped from `hub_sessions` is removed from the file at the next start
+  (with its pending reply ids); older copies of
+  the text may remain in free disk blocks until overwritten, as with any
+  file delete.
+
+Left as is: `/devteam`, `/devteam.js` and `/devteam.css` are served to a
+loopback request without a sign-in, because they hold no data and the page
+has to show the sign-in form. A DNS-rebinding page could load them, but it
+has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
+
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
 For a second user's instance, `[webapp] google_connect` adds a "connect

@@ -288,6 +288,10 @@ phone (or yours signed in as her test user).
     `.env.mom` (not `.env`) got the new `WEB_TOKEN`; the log is `logs/mom.log`.
 - [ ] On her phone (Tailscale, the PC shared with her) open
       `https://<pc>.<tailnet>.ts.net:8443`.
+  - Should: the sign-in screen says 请输入发给你的登录码; after signing in in
+    Safari, a card lists 1. 加到主屏幕 and 2. 连接 Google 账户 (with the
+    高级 → 转至… hint). Opened from the home screen, only the Google step is
+    left; after connecting Google the card is gone.
   - Should: the sign-in page is in Chinese (登录). After the token, the
     chat page, the gear menu and the voice screen are in Chinese.
 - [ ] Ask by voice: "你好，今天天气怎么样？"
@@ -541,14 +545,15 @@ phone app installed from the cloud URL with Tailscale on.
 ## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
 (see tools/agent-dashboard/README.md).
-- [ ] Open it on the iPhone in Safari, signed in to claude.ai.
+The dashboard is desktop only (no phone layout).
+- [ ] Open it on the PC in Chrome or Edge, signed in to claude.ai.
   - Should: a summary line at the top (for example "1 running") and one
     card per run, or "No runs yet". Nothing is cut off at the sides.
-- [ ] Switch the phone between light and dark mode.
+- [ ] Switch the PC between light and dark mode.
   - Should: the page follows, and the coloured edges and labels stay easy
     to read in both.
-- [ ] Share -> Add to Home Screen, then open it from the icon.
-  - Should: the same list. Tapping Session or PR opens it in a new tab.
+- [ ] Click Session or PR on a card.
+  - Should: it opens in a new tab.
 - [ ] After a `/build-feature` run opens its draft PR, merge it in the
       GitHub UI while that session is still open.
   - Should: within a few minutes its card changes from "needs you" to
@@ -567,6 +572,11 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
 - [ ] Tap All recent, then Active only, and reload.
   - Should: All recent adds finished runs from the last two weeks; the
     choice survives the reload.
+- [ ] With two coordinators reporting (e.g. a /build-feature run and the
+      Session monitoring session), pick one under Coordinator, reload,
+      then pick All. Try it with the keyboard (Tab, then arrow keys).
+  - Should: only that session's windows show, the pick survives the
+    reload, and All brings every window back.
 - [ ] Drag an agent window onto the coordinator window, then drag a
       corner to make one wider and taller. Reload.
   - Should: the windows swap places and snap to the new size (at most 3
@@ -586,17 +596,30 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
     right, steps as small ✓ lines that collapse into "N steps ▸", and a
     turning ✻ while it works, readable in light and dark. Each message's time matches
     when it was really sent.
+- [ ] Glance at the coordinator window between and during tasks, then
+      send a message while it is mid-task.
+  - Should: the pill above the box says "In task: <step> · Nm" (green,
+    pulsing) while it works and "Idle · last active …" once its turn
+    ends. A message sent mid-task shows "Queued · coordinator is
+    mid-task…" until it is seen, never the amber "hasn't picked this up"
+    line.
 - [ ] When the master asks you something during a run you chatted in.
   - Should: its message is amber and the window shows a "question"
     chip, until you reply in the box.
 - [ ] Run `/build-feature` a second time in the same master session.
   - Should: the panel shows the new run's title, elapsed time and status
     lines only, not the earlier run's.
-- [ ] On the iPhone, open Grid.
-  - Should: one slim row at the top (Runs/Grid, the filter, the window
-    count) and one column of windows, no drag or resize handles. ⤢ makes
-    a window fill the whole screen, row included; Restore brings it back.
-    The box sends, and Open session opens the master's session.
+- [ ] On the PC, make the browser window narrow (about 500 px), then wide.
+  - Should: Grid drops to one column when narrow, keeps its header,
+    toolbar and drag handles, and goes back to several columns when wide.
+- [ ] Hide two windows with their – buttons, reload, open Hidden (2) in
+      the toolbar, restore one, then press Show all.
+  - Should: the two windows leave and the rest re-tile; the count says
+    "N windows · 2 hidden"; after the reload they are still hidden; the
+    Hidden menu lists them with their run colour (and "question" or
+    "running" if that applies); the restored one comes back in its old
+    place and size; Show all brings back the other. A coordinator hidden
+    with a half-typed message still has it when restored.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
 - [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
@@ -607,3 +630,47 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
       (the first time, right-click it and choose Open).
   - Should: the same, in its own Chrome or Edge window, already signed
     in, and no Finder window opens.
+- [ ] On the dashboard, press Get desktop app (top right), then Windows
+      (on the PC) or Mac (on the Mac) under Dashboard. Accept the save,
+      unzip it and double-click the launcher (Mac, first time: right-click
+      → Open).
+  - Should: claude.ai asks to save a small zip; the hint says to unzip
+    and double-click; the launcher opens the dashboard in its own window.
+    Declining the save shows no error.
+
+## PC hub (optional, ~10 min)
+Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
+`[devteam] hub = true` with your coordinator in `hub_sessions` in
+`config.local.toml` (README "PC hub").
+- [ ] Start the web app on the PC, double-click
+      tools/agent-dashboard/desktop/open-hub.cmd and sign in with the
+      access token.
+  - Should: an app window with one coordinator window per session, a
+    presence pill ("Idle" or "In task: …") and an empty chat box.
+- [ ] Type "status?" and press Enter while the coordinator is idle.
+  - Should: the box clears at once; the line under your message goes
+    Sending…, Queued, then "Coordinator · working: Reading your message"
+    within a minute, then the markdown reply appears full width. Note
+    whether an idle session started the turn by itself (not verified
+    before).
+- [ ] Send a message while the coordinator is mid-task.
+  - Should: it shows Queued (and a Queued badge) until the coordinator
+    reads it at the end of its step.
+- [ ] Let the coordinator's cloud session expire (a day idle), then send.
+  - Should: note whether the CLI revives it or says it is gone (not
+    verified before); a failure shows "Not sent: …" and your text comes
+    back in the box.
+- [ ] Ask "check_dev_team" by voice after a hub conversation.
+  - Should: Hey Claude never reads out a hub reply.
+- [ ] Hide a window, wait for a reply, then restore it from Hidden.
+  - Should: the menu marks it "new reply"; restored, the reply is there.
+- [ ] From the phone over `tailscale serve`, open https://<pc>/devteam.
+  - Should: "not found".
+- [ ] Press Clear in a window and confirm.
+  - Should: the conversation disappears and stays gone after a reload.
+- [ ] Unplug the network (or turn off Wi-Fi), send from a hub window and
+      wait for `[devteam] timeout` (60 s by default).
+  - Should: the message shows "Not sent: … didn't answer in time", no
+    `node.exe` for Claude Code is left in Task Manager, and the same
+    window takes another message straight away (no "one message at a
+    time").

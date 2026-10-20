@@ -158,6 +158,11 @@ coordinator_session = ""      # the coordinator's session_... id or claude.ai/co
 claude_command = "claude"
 repo_dir = ""                 # folder to run Claude Code in ("" = this one)
 timeout = 60
+state_file = "data/devteam.json"  # messages waiting for a reply (voice)
+hub = false                   # the PC hub at http://127.0.0.1:8765/devteam (loopback only)
+hub_sessions = []             # coordinator session ids for the hub's windows (at most 8; [] = coordinator_session)
+poll_seconds = 4              # the hub reads the Notion inbox at most this often
+hub_state_file = "data/devhub.json"  # the hub's transcript and pending replies
 
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on

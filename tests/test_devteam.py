@@ -3,6 +3,7 @@ and reading replies from the Notion inbox (mocked)."""
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -11,58 +12,7 @@ from assistant.config import DEFAULTS
 from assistant.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
                                session_id)
 from assistant.tools import ToolRegistry
-
-SID = "session_01DiUkqY2kzbUbDmW1w96rfi"
-
-
-class FakeRun:
-    def __init__(self, stdout="", stderr="", returncode=0, exc=None):
-        self.calls = []
-        self.result = SimpleNamespace(stdout=stdout, stderr=stderr,
-                                      returncode=returncode)
-        self.exc = exc
-
-    def __call__(self, args, **kw):
-        self.calls.append((args, kw))
-        if self.exc:
-            raise self.exc
-        return self.result
-
-
-def ok_run():
-    return FakeRun(stdout=json.dumps({"ok": True, "session_id": SID,
-                                      "url": f"https://claude.ai/code/{SID}"}))
-
-
-def row(rid, reply, status="answered", trashed=False):
-    return {"in_trash": trashed, "properties": {
-        "Reply ID": {"title": [{"plain_text": rid}]},
-        "Reply": {"rich_text": [{"plain_text": reply}]},
-        "Status": {"select": {"name": status}},
-        "Run": {"url": None}}}
-
-
-class FakeNotion:
-    def __init__(self, rows=(), existing=True):
-        self.rows = list(rows)
-        self.queries = []
-        self.created = []
-        self.existing = existing
-        self.data_sources = SimpleNamespace(query=self._query)
-        self.databases = SimpleNamespace(create=self._create)
-
-    def search(self, **kw):
-        if not self.existing:
-            return {"results": []}
-        return {"results": [{"id": "ds-inbox", "title": [{"plain_text": INBOX_TITLE}]}]}
-
-    def _query(self, **kw):
-        self.queries.append(kw)
-        return {"results": self.rows}
-
-    def _create(self, **kw):
-        self.created.append(kw)
-        return {"id": "db-new", "data_sources": [{"id": "ds-new"}]}
+from tests.devteam_fakes import SID, FakeNotion, FakeRun, ok_run, row
 
 
 def link(tmp_path, run=None, notion=None, **kw):
@@ -218,3 +168,143 @@ def test_prompt_mentions_dev_team(tmp_path):
     registry = ToolRegistry()
     registry.register(*link(tmp_path).tools())
     assert "message_dev_team" in ClaudeChat(client=object(), tools=registry).build_system()
+
+
+def test_hub_source_sets_header_prefix_and_cap(tmp_path):
+    run = ok_run()
+    team = link(tmp_path, run=run)
+    voice = team.send("x" * 5000)
+    assert voice["reply_id"].startswith("hc-")
+    assert run.calls[0][1]["input"].startswith(f"[Hey Claude voice | reply id {voice['reply_id']}]")
+    assert "x" * 4000 + "\n" in run.calls[0][1]["input"]
+    assert "x" * 4001 not in run.calls[0][1]["input"]
+    hub = team.send("y" * 13000, source="hub", session="cse_other1")
+    assert hub["reply_id"].startswith("hub-")
+    args, kw = run.calls[1]
+    assert args[3] == "cse_other1"  # the hub's window, not coordinator_session
+    assert kw["input"].startswith(f"[Hey Claude hub | reply id {hub['reply_id']}]")
+    assert "y" * 12000 + "\n" in kw["input"] and "y" * 12001 not in kw["input"]
+
+
+def test_replies_max_chars(tmp_path):
+    notion = FakeNotion()
+    team = link(tmp_path, notion=notion)
+    a = team.send("x")["reply_id"]
+    b = team.send("y")["reply_id"]
+    notion.rows = [row(a, "r" * 5000)]
+    assert len(team.replies()[0]["reply"]) == 1200  # voice: unchanged
+    notion.rows = [row(b, "s" * 15000)]
+    assert len(team.replies(max_chars=12000)[0]["reply"]) == 12000
+
+
+def test_presence_reads_the_newest_row(tmp_path):
+    notion = FakeNotion()
+    team = link(tmp_path, notion=notion)
+    assert team.presence() == {"status": "", "text": "", "at": ""}
+    tail = SID.split("_", 1)[1]
+    notion.rows = [row(f"presence-{tail}", "Running the judge " * 10, status="working",
+                       edited="2026-10-20T15:31:00.000Z"),
+                   row(f"presence-{tail}", "older", status="idle")]
+    got = team.presence()
+    assert got["status"] == "working" and got["at"] == "2026-10-20T15:31:00.000Z"
+    assert len(got["text"]) == 80
+    q = notion.queries[-1]
+    assert q["filter"] == {"or": [{"property": "Reply ID", "title": {"equals": f"presence-{tail}"}}]}
+    assert q["sorts"][0]["direction"] == "descending"
+    assert team.pending() == []  # reading presence never adds or pops a reply
+
+
+def test_inbox_has_the_idle_status(tmp_path):
+    notion = FakeNotion(existing=False)
+    team = link(tmp_path, notion=notion,
+                assignments=SimpleNamespace(parent_page_id=lambda: "p"))
+    team.presence()
+    options = notion.created[0]["initial_data_source"]["properties"]["Status"]["select"]["options"]
+    assert [o["name"] for o in options] == ["answered", "working", "blocked", "idle"]
+
+
+def test_state_is_written_privately_and_atomically(tmp_path, monkeypatch):
+    import tempfile
+
+    made = []
+    real = tempfile.mkstemp
+    monkeypatch.setattr(tempfile, "mkstemp", lambda **kw: made.append(kw) or real(**kw))
+    team = link(tmp_path)
+    team.send("x")
+    assert made and made[0]["dir"] == tmp_path  # a unique temp file next to it
+    assert list(tmp_path.iterdir()) == [tmp_path / "devteam.json"]
+    import os
+    import sys
+    if sys.platform != "win32":
+        assert os.stat(tmp_path / "devteam.json").st_mode & 0o777 == 0o600
+
+
+@pytest.fixture
+def tree_popen(monkeypatch):
+    from tests.devteam_fakes import TreePopen
+
+    TreePopen.made, TreePopen.tree_killed = [], set()
+    monkeypatch.setattr(subprocess, "Popen", TreePopen)
+    return TreePopen
+
+
+def test_windows_timeout_kills_the_whole_cli_tree(tmp_path, monkeypatch, tree_popen):
+    """npm claude.cmd: a timeout must taskkill /T the tree, or the read
+    after it blocks on node.exe and the send never returns."""
+    from assistant import devteam
+
+    monkeypatch.setattr(devteam, "_WINDOWS", True)
+    team = CoordinatorLink(SID, which=lambda c: f"/usr/bin/{c}", timeout=0.01,
+                           state_file=tmp_path / "devteam.json",
+                           notion_client=FakeNotion())
+    with pytest.raises(DevTeamError, match="in time"):
+        team.send("hello")
+    cli, kill = tree_popen.made[0], tree_popen.made[1]
+    assert kill.args == ["taskkill", "/T", "/F", "/PID", str(cli.pid)]
+    assert cli.kw["creationflags"] == devteam._NEW_GROUP
+    assert team.pending() == []
+
+
+def test_timeout_elsewhere_kills_the_process(tmp_path, monkeypatch):
+    from assistant import devteam
+
+    class Hung:
+        killed = False
+        pid, returncode = 7, None
+
+        def __init__(self, args, **kw):
+            self.kw = kw
+
+        def communicate(self, input=None, timeout=None):
+            if not Hung.killed:
+                raise subprocess.TimeoutExpired("claude", timeout)
+            return "", ""
+
+        def kill(self):
+            Hung.killed = True
+
+    monkeypatch.setattr(devteam, "_WINDOWS", False)
+    monkeypatch.setattr(subprocess, "Popen", Hung)
+    with pytest.raises(subprocess.TimeoutExpired):
+        devteam.run_cli(["claude"], input="x", timeout=0.01)
+    assert Hung.killed
+
+
+def test_pending_and_save_wait_for_the_state_lock(tmp_path):
+    """A send inserts its id under the lock; pending() (which rebuilds the
+    dict) and _save() (which dumps it) must wait for it, or the new id is
+    lost or the dump sees the dict change size mid-iteration."""
+    import threading
+
+    team = link(tmp_path)
+    for call in (team.pending, team._save):
+        done = threading.Event()
+        with team._lock:  # a send halfway through inserting its id
+            t = threading.Thread(target=lambda: (call(), done.set()))
+            t.start()
+            assert not done.wait(0.2), f"{call.__name__} ran without the lock"
+            team._state["pending"]["hc-new"] = datetime.now(timezone.utc).isoformat()
+        t.join(5)
+        assert done.is_set()
+    assert team.pending() == ["hc-new"]
+    assert "hc-new" in (tmp_path / "devteam.json").read_text()

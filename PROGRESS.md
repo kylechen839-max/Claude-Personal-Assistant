@@ -6,7 +6,7 @@ All seven stages are done. Run the tests with `pytest` from the project root
 **Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
 shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 123
+change, and the launcher shellcheck test skipped), plus 124
 JavaScript tests (node:test: `voice-core.test.js` and
 `agent-dashboard.test.mjs`, both also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
@@ -59,9 +59,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
-| `test_family.py` | 37 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
+| `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
-| `tests/js/agent-dashboard.test.mjs` | 111 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
+| `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1278,6 +1278,25 @@ still the default.
     one-minute interval.
   - JS tests: 106 → 111.
 
+### Dashboard chat presence and queued state (2026-10-20)
+- A presence pill above the box is always shown, from the index
+  document's `status`:
+  - In task with the step and minutes (green, pulsing, ≤30 min);
+  - In task with no update (amber, 30–120 min);
+  - Idle with last active (`idle`, or working older than 120 min);
+  - Status unknown (no status or no user id).
+- The working row no longer repeats the step.
+- A message that is Delivered but not Seen while the coordinator is in
+  a task shows "Queued · coordinator is mid-task…". The 2-minute amber
+  line now shows only when the coordinator isn't in a task.
+- The skill sets the status working at the start of every turn, idle at
+  the end, and re-arms a vanished comment watch. TEAM_MEMORY records
+  that watches can disappear.
+- Tests: JS 111 → 112 (one new pill test with the 30/120-minute edges,
+  plus four tests updated for the moved step text and the queued
+  state). All five fail on the previous page. `test_agent_dashboard.py`
+  pins the two new SKILL phrases.
+
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
   trained only on synthetic voices; tests use Windows SAPI recordings.
@@ -1492,6 +1511,86 @@ screens are staged by setting the same attributes the JS sets (no mic).
   restarts, inbox creation, registration, prompt. Not run against the real
   CLI or Notion from this sandbox.
 
+## PC hub, desktop-only dashboard, hide windows, Get desktop app
+
+- **PC hub** (`assistant/devhub.py`, `assistant/web/devteam.{html,js,css}`):
+  a desktop-only page at `http://127.0.0.1:8765/devteam` on the PC's web
+  app for chatting with the `/build-feature` coordinator(s). One window
+  per `[devteam] hub_sessions` entry (at most 8), auto-tiled, maximize/Esc,
+  hide/restore. Sending reuses `CoordinatorLink.send` (`claude -p --cloud`,
+  stdin) with `source="hub"` (header `[Hey Claude hub | …]`, `hub-` ids,
+  12000 characters); replies, the pickup row and a `presence-<sessionTail>`
+  row come from the Notion inbox, polled at most every `poll_seconds`
+  (one replies query and one presence query) and only while the page is
+  visible. Its own link and state file (`data/devhub.json`) keep voice
+  `check_dev_team` and the hub from taking each other's replies. Built only
+  with `hub = true` on a loopback bind; every route 404s unless the
+  request is from the PC itself (no proxy headers, no trusted proxy); the
+  `/api` routes need the normal sign-in. Markdown renderer ported from
+  the dashboard, with a parity test.
+- `assistant/devteam.py`: `send(source=, session=)`, `replies(max_chars=)`,
+  `presence()`/`presences()`, the `idle` status option, `link_from_config`
+  (now used by `cli.register_devteam` too), and private atomic state
+  writes through `google_auth.write_private`. Voice behaviour unchanged.
+- **Agent dashboard:** the phone layout is gone (compact/bare chrome,
+  safe-area padding, the narrow media query and every narrow() branch).
+  Each window has a – hide button; hidden windows are `h: 1` in the
+  existing layout entry (per viewer, capped at 200, pruned), listed in a
+  "Hidden (N)" toolbar menu with restore and Show all; a hidden
+  coordinator keeps its draft and its chat subscription. "N agents hidden"
+  is now "N agents without a run". **Get desktop app** saves the
+  `desktop/` launchers (dashboard or PC hub, Windows or Mac) through the
+  `downloads` capability as a one-file zip (claude.ai doesn't save `.cmd`
+  or `.command`); manifest now `{"db":{}, "user":{}, "comments":{}, "downloads":true}`.
+  New `desktop/open-hub.cmd` / `open-hub.command`.
+- Tests: `tests/test_devhub.py` (31: auth 401, proxied/non-loopback/
+  trusted-proxy 404, cross-origin 403, CSP, stdin and `--cloud`, not sent,
+  queued → working → answered/blocked, throttling, hub vs voice replies,
+  presence mapping, clear deletes from the file, bounds, caplog, off by
+  default and off a non-loopback bind, `serve`), 5 new in
+  `tests/test_devteam.py`, `tests/js/devhub.test.mjs` (12, incl. markdown
+  parity with the dashboard), 9 new dashboard JS tests (hide/restore/Show
+  all/reload/caps/drag/maximize/hidden chat; Get desktop app), launcher
+  and manifest pins in `tests/test_agent_dashboard.py`. The new tests fail
+  on the previous code (11 pytest, 13 JS). Full pytest: 1513 passed, 45
+  skipped, 9 failed and 16 errors (the same eSpeak/PortAudio sandbox
+  failures as before; baseline 1474 passed). JS: dashboard 122, devhub 12,
+  router 33, voice-core 12. Headless Chromium at 1400×900: hub and
+  dashboard render with no console errors once signed in. Not run against
+  the real CLI, Notion or claude.ai downloads from this sandbox.
+- **Review round 2 (four low findings):** a session dropped from
+  `hub_sessions` now leaves `data/devhub.json` at startup, with its
+  pending and seen reply ids; `CoordinatorLink` uses an RLock that
+  `pending()`, `_save()` and `_inbox()` take, so a hub poll can't lose an
+  id a send is adding or dump the dict mid-change; `serve` prints and logs
+  "the PC hub is disabled while TRUSTED_PROXY is set" instead of the hub
+  link; and the CLI runs through `devteam.run_cli` (Popen, a new process
+  group on Windows), which on a timeout runs `taskkill /T /F` on Windows
+  (`kill()` elsewhere) so npm `claude.cmd`'s node.exe can't keep the
+  window's send lock held. `send()`'s results and the voice tools are
+  unchanged. Tests: 3 new in `tests/test_devhub.py` (removed window on
+  disk, window freed after a Windows timeout, proxy warning), 3 new in
+  `tests/test_devteam.py` (taskkill /T and the process-group flag, kill
+  elsewhere, pending/_save wait for the lock); each fails on the previous
+  code (the Windows timeout one hits the fake's "blocked forever on
+  node.exe's pipes" under the old `subprocess.run`).
+- **Grid Coordinator picker:** a native `<select id="grid-coord">` in the
+  Grid toolbar lists every coordinator session with a visible row
+  (grouped by `session_url`, labelled with the newest run's feature and
+  the session's last 6 characters, through `text()`/`textContent`), plus
+  All (default). Picking one keeps only that session's coordinator window
+  and agents, together with Active only / All recent and hide. Stored per
+  viewer under `agentDashboard.coordinator` (a validated session link),
+  written only on change; a saved session with no visible row falls back
+  to All in memory with a note (live rows only; a cached first snapshot
+  keeps the pick). The page still never writes the db.
+  Tests: 4 new dashboard JS tests (pick/All, reload and stale fallback,
+  filter and hide, hostile feature text), all failing on the previous
+  page; the localStorage-keys and markup pins in
+  `tests/test_agent_dashboard.py` cover the new key. JS: dashboard 126
+  (was 122), devhub 12; `tests/test_agent_dashboard.py` +
+  `tests/test_docs.py`: 73 passed, 1 skipped (same as before).
+
 ## Chinese MVP for a second user (`config.mom.toml`)
 
 - **A separate instance**: `python -m assistant --mode web --config
@@ -1611,6 +1710,16 @@ screens are staged by setting the same attributes the JS sets (no mic).
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
 
+## Mom's app guides her first steps
+
+- `assistant/web/i18n.js` (only on pages with the "Connect Google" button,
+  i.e. a family member's instance): the sign-in text asks for "the sign-in
+  code you were sent", and after sign-in a card lists only the steps still
+  to do: add to the home screen (hidden once opened from it) and connect
+  Google, with what to tap on Google's "unverified app" screen (hidden once
+  connected). "Got it" hides it for the visit. In Chinese on her page.
+- Tests: `tests/js/i18n.test.mjs` +3 (steps shown, only what's left, never
+  on Kyle's page or before sign-in). Phone cache v6.
 
 ## Family invites, piece A: accounts and isolation (2026-10-20)
 
@@ -1725,3 +1834,14 @@ Render/Docker changes) comes separately.
     undone (the rmtree retry by making it not catch the error).
   - Counts (Linux sandbox, Python 3.13): pytest 1652 -> 1662 passed,
     46 skipped (unchanged). JS: family 8, i18n 7, backend-router 33.
+- Merged master (dev-team PC hub, the first-run guide) into this branch:
+  both sides kept. Service worker cache v7 (both sides were at v6) with
+  `/i18n.js` and `/family.js` in the shell; `i18n.js` has both the family
+  and the guide strings; `[devteam]` hub keys and `[family]` both in
+  `DEFAULTS`. The hub's `/api/devteam/*` routes now use `require_owner`
+  (a family member signed in on the PC's loopback app gets 404, not Kyle's
+  coordinator sessions). Tests: `test_family.py` +1 (fails with
+  `require_session` back in `devhub.py`); `test_webapp.py` pins v7 and
+  `/family.js` in the shell. Counts (Linux sandbox, Python 3.13): pytest
+  1708 passed, 46 skipped. JS: family 8, i18n 10, backend-router 33,
+  voice-core 14, devhub 12, agent-dashboard 126 (node's count), all passing.

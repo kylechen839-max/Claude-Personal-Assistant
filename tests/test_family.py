@@ -613,3 +613,24 @@ def test_invite_links_point_at_this_server(env, owner, monkeypatch, failover, ex
     env.config["webapp"]["public_origin"] = "https://public.example.com"
     r = owner.post("/api/invites", json={"name": "Dad"})
     assert r.json()["url"].startswith("https://public.example.com/#invite=")
+
+
+def test_the_pc_hub_is_the_owners_only(env, tmp_path):
+    """Merge of family accounts with the PC hub (/devteam): a family member
+    signed in on the PC's loopback web app must not reach Kyle's coordinator
+    sessions (require_owner, 404 as if absent)."""
+    from assistant import devhub
+    from tests.test_devhub import LOOPBACK, SID, make_hub
+
+    devhub.install(env.app, make_hub(tmp_path))
+    owner = TestClient(env.app, base_url=BASE, client=LOOPBACK)
+    login(owner)
+    link = env.invite(owner)
+    mom = TestClient(env.app, base_url=BASE, client=LOOPBACK)
+    assert mom.post("/api/invite/accept",
+                    json={"invite": token_of(link["url"])}).status_code == 200
+    assert mom.get("/api/devteam/state").status_code == 404
+    for path in ("/api/devteam/send", "/api/devteam/clear"):
+        r = mom.post(path, json={"session": SID, "text": "x"})
+        assert r.status_code == 404, path
+    assert owner.get("/api/devteam/state").status_code == 200

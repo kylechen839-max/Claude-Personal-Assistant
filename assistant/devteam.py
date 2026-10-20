@@ -31,13 +31,26 @@ log = logging.getLogger(__name__)
 
 INBOX_TITLE = "Hey Claude coordinator inbox"
 REPLY_ID, REPLY, STATUS, RUN = "Reply ID", "Reply", "Status", "Run"
-STATUSES = ("answered", "working", "blocked")
+STATUSES = ("answered", "working", "blocked", "idle")
 MAX_MESSAGE_CHARS = 4000
 MAX_REPLY_CHARS = 1200
+# Where a message comes from: the header the coordinator sees, the reply id
+# prefix and the longest message. Hub replies are markdown, up to 12000
+# characters; voice replies stay short and spoken (docs/COORDINATOR_LINK.md).
+SOURCES = {"voice": ("Hey Claude voice", "hc-", MAX_MESSAGE_CHARS),
+           "hub": ("Hey Claude hub", "hub-", 12000)}
+HUB_REPLY_CHARS = 12000
+PRESENCE_TEXT_CHARS = 80
 PENDING_DAYS = 7  # a message nobody answered stops counting as pending
 
 # session_..., cse_..., or a claude.ai/code/<id> URL (scheme and query optional)
 _SESSION = re.compile(r"^(?:(?:https://)?claude\.ai/code/)?((?:session|cse)_[A-Za-z0-9]+)(?:[?#].*)?$")
+
+
+def session_tail(session: str) -> str:
+    """The id after its session_/cse_ prefix: what the presence row and the
+    dashboard's chat paths are named after."""
+    return session.split("_", 1)[1] if "_" in session else session
 
 
 def session_id(value: str) -> str:
@@ -51,12 +64,42 @@ class DevTeamError(Exception):
     """Something Kyle can act on, said in one plain sentence."""
 
 
+_WINDOWS = os.name == "nt"
+# Windows only (subprocess has the name only there); 0 is a no-op elsewhere.
+_NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+
+
+def run_cli(args, *, input=None, timeout=None, cwd=None, **_):
+    """subprocess.run(capture_output=True, text=True) for the Claude Code
+    CLI, except that a timeout kills the whole process tree. On Windows the
+    npm `claude.cmd` is cmd.exe running node.exe: killing cmd.exe alone
+    leaves node.exe holding the pipes, and the read after it would block
+    until the CLI quits by itself (holding the hub window's lock)."""
+    proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, cwd=cwd,
+                            creationflags=_NEW_GROUP if _WINDOWS else 0)
+    try:
+        out, err = proc.communicate(input, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if _WINDOWS:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                               capture_output=True, timeout=10)
+            else:
+                proc.kill()
+            proc.communicate(timeout=5)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass  # give up quietly: the caller says "didn't answer in time"
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
 class CoordinatorLink:
     def __init__(self, coordinator: str, *, claude_command: str = "claude",
                  repo_dir: str = "", timeout: float = 60,
                  state_file: str | Path = "data/devteam.json",
                  assignments=None, notion_client=None, inbox_id: str = "",
-                 run=subprocess.run, which=shutil.which):
+                 run=None, which=shutil.which):
         self.session = session_id(coordinator)
         self.claude_command = claude_command
         self.repo_dir = repo_dir or None
@@ -65,8 +108,9 @@ class CoordinatorLink:
         self.assignments = assignments  # NotionAssignments: the parent page
         self._client = notion_client
         self.inbox_id = inbox_id        # data source id, found or created lazily
-        self._run, self._which = run, which
-        self._lock = threading.Lock()
+        self._run, self._which = run or run_cli, which
+        # Reentrant: the hub and replies() hold it around pending()/_save().
+        self._lock = threading.RLock()
         self._state = self._load()
 
     # ----- state: messages waiting for a reply -----
@@ -83,44 +127,51 @@ class CoordinatorLink:
     def _save(self) -> None:
         if not self.state_file:
             return
-        self._state["inbox_id"] = self.inbox_id
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._state))
-        tmp.replace(self.state_file)
+        from assistant.tools.google_auth import write_private
+
+        with self._lock:
+            self._state["inbox_id"] = self.inbox_id
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            # Private and atomic: the hub keeps Kyle's typed messages here.
+            write_private(self.state_file, json.dumps(self._state))
 
     def pending(self) -> list[str]:
         now = datetime.now(timezone.utc)
         keep = {}
-        for rid, sent in self._state["pending"].items():
-            try:
-                age = now - datetime.fromisoformat(sent)
-            except ValueError:
-                continue
-            if age.days < PENDING_DAYS:
-                keep[rid] = sent
-        self._state["pending"] = keep
+        with self._lock:  # a send may be adding an id from another thread
+            for rid, sent in self._state["pending"].items():
+                try:
+                    age = now - datetime.fromisoformat(sent)
+                except ValueError:
+                    continue
+                if age.days < PENDING_DAYS:
+                    keep[rid] = sent
+            self._state["pending"] = keep
         return sorted(keep)
 
     # ----- sending -----
-    def send(self, text: str) -> dict:
-        text = (text or "").strip()[:MAX_MESSAGE_CHARS]
+    def send(self, text: str, source: str = "voice", session: str = "") -> dict:
+        """Queue `text` into the coordinator's session (or `session`, one of
+        the hub's windows). `source` is "voice" or "hub"."""
+        header, prefix, cap = SOURCES[source]
+        text = (text or "").strip()[:cap]
+        session = session_id(session) or self.session
         if not text:
             raise DevTeamError("There's no message to send.")
-        if not self.session:
+        if not session:
             raise DevTeamError("No coordinator session is set ([devteam] "
                                "coordinator_session in config.local.toml).")
         exe = self._which(self.claude_command)
         if not exe:
             raise DevTeamError("Claude Code isn't installed on this computer, "
                                "so I can't reach the dev team from here.")
-        reply_id = (f"hc-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
+        reply_id = (f"{prefix}{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
                     f"{secrets.token_hex(2)}")
-        message = (f"[Hey Claude voice | reply id {reply_id}]\n{text}\n\n"
+        message = (f"[{header} | reply id {reply_id}]\n{text}\n\n"
                    f"Answer per docs/COORDINATOR_LINK.md: one row in the Notion "
                    f"database \"{INBOX_TITLE}\" with {REPLY_ID} = {reply_id}.")
         try:
-            proc = self._run([exe, "-p", "--cloud", self.session,
+            proc = self._run([exe, "-p", "--cloud", session,
                               "--output-format", "json"],
                              input=message, capture_output=True, text=True,
                              timeout=self.timeout, cwd=self.repo_dir)
@@ -156,8 +207,9 @@ class CoordinatorLink:
         if self.inbox_id:
             return self.inbox_id
         found = self._find_inbox() or self._create_inbox()
-        self.inbox_id = found
-        self._save()
+        with self._lock:
+            self.inbox_id = found
+            self._save()
         return found
 
     def _find_inbox(self) -> str:
@@ -186,9 +238,10 @@ class CoordinatorLink:
         log.info("Created the %s database in Notion", INBOX_TITLE)
         return db["data_sources"][0]["id"]
 
-    def replies(self) -> list[dict]:
+    def replies(self, max_chars: int = MAX_REPLY_CHARS) -> list[dict]:
         """New replies to messages still pending; answered ones stop being
-        pending (a "working" reply keeps the message pending)."""
+        pending (a "working" reply keeps the message pending). Voice keeps
+        the first MAX_REPLY_CHARS of a reply; the hub asks for more."""
         with self._lock:
             waiting = self.pending()
             if not waiting:
@@ -208,7 +261,7 @@ class CoordinatorLink:
                     continue
                 status = ((props.get(STATUS, {}).get("select") or {}).get("name")
                           or "answered")
-                reply = _text(props.get(REPLY, {}), "rich_text")[:MAX_REPLY_CHARS]
+                reply = _text(props.get(REPLY, {}), "rich_text")[:max_chars]
                 seen = self._state.setdefault("seen", {})
                 if seen.get(rid) == [status, reply]:
                     continue  # already told Kyle this one
@@ -220,6 +273,38 @@ class CoordinatorLink:
                             "run_url": (props.get(RUN, {}) or {}).get("url") or ""})
             self._save()
             return out
+
+    def presence(self, session: str = "") -> dict:
+        """The coordinator's presence row (Reply ID presence-<sessionTail>):
+        {"status": "working"|"idle"|"", "text", "at"}; "" status when there
+        is no row. Read-only: only the coordinator writes it."""
+        return self.presences([session or self.session])[session or self.session]
+
+    def presences(self, sessions: list[str]) -> dict:
+        """presence() for several sessions in one Notion query."""
+        names = {f"presence-{session_tail(s)}": s for s in sessions if s}
+        out = {s: {"status": "", "text": "", "at": ""} for s in sessions}
+        if not names:
+            return out
+        resp = self.client.data_sources.query(
+            data_source_id=self._inbox(),
+            filter={"or": [{"property": REPLY_ID, "title": {"equals": n}}
+                           for n in names]},
+            sorts=[{"timestamp": "last_edited_time", "direction": "descending"}],
+            page_size=100)
+        for page in resp.get("results", []):
+            if page.get("in_trash"):
+                continue
+            props = page.get("properties", {})
+            session = names.get(_text(props.get(REPLY_ID, {}), "title"))
+            if not session or out[session]["status"]:
+                continue  # the first (newest) row wins if one was duplicated
+            status = (props.get(STATUS, {}).get("select") or {}).get("name") or ""
+            out[session] = {
+                "status": status if status in ("working", "idle") else "",
+                "text": _text(props.get(REPLY, {}), "rich_text")[:PRESENCE_TEXT_CHARS],
+                "at": page.get("last_edited_time") or ""}
+        return out
 
     # ----- Claude tools -----
     def tools(self) -> list[Tool]:
@@ -271,6 +356,22 @@ class CoordinatorLink:
                  {"type": "object", "properties": {}},
                  check_dev_team, private=True),
         ]
+
+
+def link_from_config(config: dict, state_file: str | Path, coordinator: str = "",
+                     **kw) -> CoordinatorLink:
+    """A CoordinatorLink from [devteam]; replies need NOTION_TOKEN, and the
+    inbox is made next to the Assignments database when it is missing."""
+    team = config["devteam"]
+    assignments = None
+    if os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]:
+        from assistant.tools.notion import NotionAssignments
+
+        assignments = NotionAssignments(config["notion"]["database_id"])
+    return CoordinatorLink(coordinator or team["coordinator_session"],
+                           claude_command=team["claude_command"],
+                           repo_dir=team["repo_dir"], timeout=team["timeout"],
+                           state_file=state_file, assignments=assignments, **kw)
 
 
 def _parse_json(out: str) -> dict:

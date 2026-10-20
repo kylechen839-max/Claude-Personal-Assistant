@@ -464,6 +464,14 @@ A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对�
 other answer is a no, including sentences that merely contain 是 or 好
 (还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
 
+Her app guides her itself: the sign-in screen asks for "the sign-in code you
+were sent", and after signing in a card lists only the steps still left for
+her (add the app to the home screen; connect Google, including what to tap
+on Google's "unverified app" screen). Each step disappears once done, and
+"知道了" (Got it) hides the card until she next opens the app. Steps before
+she can reach the app (installing Tailscale, accepting your share, opening
+the link) are yours to send her.
+
 One-time setup on the PC (PowerShell, in the project folder):
 
 1. **A Google OAuth client for the web** (your `credentials.json` is a
@@ -1035,6 +1043,50 @@ The phone keeps working throughout, apart from a few seconds while the web
 app restarts on the same `127.0.0.1:8765` (`tailscale serve` is untouched).
 To undo: `.\scripts\install_windows_service.ps1 -Uninstall`, then
 re-create the old task by hand.
+
+## PC hub: chat with the dev team coordinator (desktop only)
+
+The PC hub is a page on this PC's web app where you type to your
+`/build-feature` coordinator session(s) and read their replies, Claude Code
+style (markdown replies, your messages in bubbles, an "In task" / "Idle"
+pill and a sending → queued → working → answered line under your latest
+message). It runs on your Claude plan: messages go out with the Claude
+Code CLI (`claude -p --cloud <id>`), and replies come back through the
+Notion "Hey Claude coordinator inbox" (docs/COORDINATOR_LINK.md).
+
+1. Sign in to Claude Code on the PC once: `claude auth login`.
+2. Put NOTION_TOKEN in `.env` (the integration must reach the page that
+   holds the Assignments database).
+3. In `config.local.toml`:
+
+   ```toml
+   [devteam]
+   hub = true
+   hub_sessions = ["session_..."]   # one window per coordinator, at most 8
+   poll_seconds = 4                 # read Notion at most this often
+   hub_state_file = "data/devhub.json"
+   ```
+
+4. Start the web app (`python -m assistant --mode web`) and open
+   http://127.0.0.1:8765/devteam, or double-click
+   `tools/agent-dashboard/desktop/open-hub.cmd` (Windows) or
+   `open-hub.command` (Mac) for its own app window. Sign in with the web
+   access token once.
+
+The hub only exists when the web app listens on 127.0.0.1, and every hub
+page and route answers 404 to a request that came through a proxy
+(`tailscale serve` included), so it is never on your phone or the cloud
+server. Each window has a – button to hide it (the toolbar's Hidden menu
+brings it back; the choice stays in this browser) and Clear, which deletes
+that window's transcript from `data/devhub.json`.
+
+The hub is off while `TRUSTED_PROXY` (`[webapp] trusted_proxy`) is set:
+every hub request answers 404, because a trusted proxy could vouch for a
+request from elsewhere, and the web app prints "the PC hub is disabled
+while TRUSTED_PROXY is set" at startup instead of the hub link. Open it on
+this PC from a web app started without the proxy setting. Dropping a
+session from `hub_sessions` deletes that window's transcript from the
+file at the next start.
 
 ## Preflight: check everything in one pass
 
