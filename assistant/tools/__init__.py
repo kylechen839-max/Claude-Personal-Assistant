@@ -30,8 +30,9 @@ class Tool:
     description: str
     input_schema: dict
     handler: Callable[..., Any]
-    # Given the tool input, return a yes/no question to ask before running.
-    confirm_prompt: Callable[[dict], str] | None = None
+    # Given the tool input, return a yes/no question to ask before running
+    # (or None when this input needs none, e.g. a light but not a lock).
+    confirm_prompt: Callable[[dict], str | None] | None = None
     # Same, but asked only when untrusted web content is in the conversation
     # (a fetched page could be trying to steer Claude into this action).
     confirm_if_untrusted: Callable[[dict], str] | None = None
@@ -90,17 +91,18 @@ class ToolRegistry:
         if tool is None:
             return f"Unknown tool: {name}", True
         try:
-            ask = tool.confirm_prompt or (tool.confirm_if_untrusted
-                                          if untrusted else None)
-            if ask is not None:
-                question = ask(tool_input)
-                if not self.confirm(question):
+            # set for the question too: a confirm_prompt may depend on it
+            token = UNTRUSTED_CONTEXT.set(bool(untrusted))
+            try:
+                ask = tool.confirm_prompt or (tool.confirm_if_untrusted
+                                              if untrusted else None)
+                # a prompt may return None: no question needed for this input
+                question = ask(tool_input) if ask is not None else None
+                if question is not None and not self.confirm(question):
                     log.info("User declined %s", name)
                     return json.dumps({"status": "cancelled",
                                        "message": "The user said no, so nothing "
                                                   "was changed."}), False
-            token = UNTRUSTED_CONTEXT.set(bool(untrusted))
-            try:
                 result = tool.handler(**tool_input)
             finally:
                 UNTRUSTED_CONTEXT.reset(token)

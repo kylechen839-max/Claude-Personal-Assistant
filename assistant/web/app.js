@@ -361,6 +361,7 @@ async function refreshState() {
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
     if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
+    if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
     if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
     setConfirm(state.confirm);
     if (state.busy && !state.confirm) {

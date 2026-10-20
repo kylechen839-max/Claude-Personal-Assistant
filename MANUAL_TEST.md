@@ -557,6 +557,30 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 
 ---
 
+## Smart home (optional, ~10 min)
+Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
+`[home_assistant] enabled = true` (README "Smart home").
+- [ ] "Hey Claude, turn off the bedroom lights", then "set the living room
+      light to 50 percent".
+  - Should: the right lights change within a couple of seconds, with no
+    question.
+- [ ] "Is the front door locked?"
+  - Should: the right answer for your real lock.
+- [ ] "Set the thermostat to 70" (or your thermostat's unit), "turn on the
+      fan".
+  - Should: Home Assistant shows the new target and the fan on.
+- [ ] "Turn on the lamp" with two lamps.
+  - Should: it asks which one, and does nothing until you say.
+- [ ] "Unlock the front door", then say no; ask again and say yes.
+  - Should: it asks first both times; no leaves it locked, yes unlocks.
+- [ ] Ask it to read a web page, then "unlock the front door" in the same
+      conversation.
+  - Should: refused without asking; in a new conversation it asks again.
+- [ ] Stop Home Assistant (or unplug its network) and ask for a light.
+  - Should: a short "can't reach Home Assistant" answer, no crash.
+- [ ] As a family member (phone app invite), ask to turn on a light.
+  - Should: it has no smart home control.
+
 ## Raspberry Pi (optional, ~15 min)
 Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again
@@ -748,3 +772,33 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
     `node.exe` for Claude Code is left in Task Manager, and the same
     window takes another message straight away (no "one message at a
     time").
+
+## Spotify (optional, ~10 min)
+Needs Spotify Premium, BLOCKERS.md "Spotify app" done, and Spotify open on
+the PC (README "Spotify by voice").
+- [ ] Run `python -m assistant.tools.spotify`, allow access, paste the
+      address back.
+  - Should: "Spotify connected"; the consent page lists only reading what
+    you're playing on your devices, "control Spotify on your devices" and
+    "access your private playlists", nothing about changing
+    playlists or your library.
+- [ ] "Hey Claude, play my study playlist" (use a playlist name you have).
+  - Should: your playlist starts in the PC's Spotify app, not a public one
+    with a similar name.
+- [ ] "Hey Claude, play some lo-fi", then "skip", "go back", "what's
+      playing?", "turn it up", "pause".
+  - Should: each happens; "what's playing" names the song and artist.
+- [ ] With music playing on the PC, say "Hey Claude, what time is it?"
+  - Should: the music pauses right after the wake word (note how quickly)
+    and resumes once the follow-up window closes. Saying "Hey Claude,
+    pause" instead leaves it paused.
+- [ ] With Spotify open on the phone too, "Hey Claude, play it on my
+      phone".
+  - Should: playback moves to the phone.
+- [ ] Quit Spotify everywhere, then "Hey Claude, play some jazz".
+  - Should: it says Spotify isn't open anywhere (no error noise).
+- [ ] Phone app, gear menu (owner).
+  - Should: "Connect Spotify" (or "Reconnect Spotify" once connected); a
+    tap goes to Spotify and back to the app. A family member's phone does
+    not show the button.
+

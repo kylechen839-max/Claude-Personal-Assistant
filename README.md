@@ -220,6 +220,7 @@ you are most likely to tune:
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
+| `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
 
 ### Voices
 
@@ -815,6 +816,130 @@ phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
 
+## Smart home (Home Assistant)
+
+"Turn off the bedroom lights", "set the living room light to 50%", "is the
+front door locked?", "set the thermostat to 70", "turn on the fan". Off
+by default; it needs a running [Home Assistant](https://www.home-assistant.io/)
+on your network:
+
+1. In Home Assistant, create a dedicated user for the assistant
+   (Settings -> People -> Add person, allow login, **not** an
+   administrator), sign in as that user, then profile -> Security ->
+   Long-lived access tokens -> Create token. Copy it once. A non-admin
+   token can still switch devices but can't change Home Assistant's
+   settings; it can't read rooms, so the assistant then matches rooms by
+   device name ("Bedroom Lamp").
+2. In `.env`: `HA_URL=http://homeassistant.local:8123` (your address) and
+   `HA_TOKEN=<the token>`. The token is masked in the log.
+3. In `config.local.toml`:
+
+```toml
+[home_assistant]
+enabled = true
+```
+
+Restart; the startup line says so if the URL or token is missing.
+Claude gets three tools: `ha_list` (devices with their state, by room or
+kind, cached for `[home_assistant] cache_seconds`), `ha_state` (one
+device) and `ha_control`. Spoken names are matched to Home Assistant's
+friendly names and areas, loosely ("kitchen lite" still finds the
+kitchen light); if two devices fit ("the lamp"), it asks which one.
+
+Safety, in code rather than in the prompt:
+- Only the kinds of device in `[home_assistant] domains` (lights,
+  switches, fans, climate, covers, media players, sensors and locks by
+  default) are listed or touched, and only a fixed set of actions is
+  called (on, off, brightness, colour temperature, thermostat, fan speed,
+  open/close, play/pause/volume, lock/unlock). There is no way to call
+  any other service: no restart, no arbitrary scripts. A script, scene or
+  automation runs only if you list its entity id in `[home_assistant]
+  scripts`.
+- Locks, alarm panels, garage doors and gates (by Home Assistant's device
+  class, or a switch or cover with garage, gate, door or lock in its name,
+  even run together as in "Garagedoor", but not indoor, outdoor, doorbell
+  or clock; deadbolt; in Chinese 车库, 锁, 门禁, 大门, 闸门 or 门 ending
+  the name or a word), plus anything in `[home_assistant]
+  secure_entities` (put a relay there if its name says none of these: a
+  room called "Garage" doesn't count, nor non-English words like "Tor"), always ask for a spoken yes first, are never switched
+  for a whole room at once, and are only found by their exact name or all
+  of its words (never by a similar spelling).
+- Unlocking or opening one of those is refused outright while a web page
+  or email is in the conversation (start a new one). Other changes ask
+  first in that case, as everywhere else.
+- Home Assistant is Kyle's alone: family members never get these tools.
+  The Render cloud host can't reach a home network anyway.
+
+**Plain http.** Home Assistant usually serves http on the LAN, so the
+token travels unencrypted. That is fine inside your home network or over
+Tailscale; anywhere else use https (Nabu Casa or your own certificate).
+The assistant warns at startup when `HA_URL` is a plain http address
+outside the home network.
+
+## Spotify by voice
+
+"Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+"what's playing?", "turn it up", "play it on my phone". The assistant
+remote-controls a Spotify app that is already open somewhere (the PC's
+desktop app, your phone, a speaker) through the Spotify Web API; it plays
+no audio itself. Your own playlists are searched first, then Spotify's
+catalog (a mood or genre plays a playlist, a song name plays that song).
+
+- **Spotify Premium is required.** Spotify only lets apps control playback
+  on Premium accounts; without it every command answers "Spotify only lets
+  apps control playback with a Premium account."
+- **Spotify has to be open on a device.** With nothing playing anywhere it
+  uses this computer's Spotify if it is open, or the only device that is;
+  with several it asks which one.
+- **Nothing changes your library.** Sign-in asks only for
+  user-read-playback-state, user-modify-playback-state and
+  playlist-read-private: no tool can edit
+  playlists, saved songs or follows. Playback control never asks for a
+  yes (it is harmless and easy to undo).
+- **Pauses while you talk.** With `[spotify] pause_while_listening = true`
+  (the default) the wake word pauses Spotify if it is playing on this
+  computer, and it resumes when the assistant goes back to waiting for
+  "Hey Claude" (not if you said "pause" meanwhile). This computer is the
+  Spotify device whose name is `[spotify] local_device`, or the computer's
+  hostname when that is empty. Only the wake-word mode does this; the phone
+  app plays its replies on the phone.
+- Family members (cloud invites) never get Spotify: not in this version.
+  Spotify is meant for the PC or Pi (wake word and its phone web app);
+  the cloud server's sign-in wall doesn't pass Spotify's redirect back, so
+  connect it on the PC.
+
+Setup, once (about 5 minutes):
+
+1. At developer.spotify.com -> Dashboard -> Create app (any name, "Web
+   API"). Under Redirect URIs add exactly `http://127.0.0.1:8888/callback`
+   (the `[spotify] redirect_uri` default), and, for the phone app's button,
+   `<public_origin>/spotify/callback` too (e.g.
+   `https://your-pc.your-tailnet.ts.net/spotify/callback`). In Development
+   mode, add your Spotify account's email under User Management.
+2. Copy the app's **Client ID** into `.env` as `SPOTIFY_CLIENT_ID=...`. No
+   client secret is used (the sign-in is PKCE).
+3. Turn it on in `config.local.toml`:
+
+   ```toml
+   [spotify]
+   enabled = true
+   ```
+4. Sign in, either on the PC or Pi:
+
+   ```powershell
+   python -m assistant.tools.spotify
+   ```
+
+   It prints a link (and opens it); after you allow access the browser
+   lands on a 127.0.0.1 address. If that page doesn't load (for example
+   the link was opened on another device), that's fine: copy the full
+   address from the address bar and paste it back. Or, in the phone app,
+   gear -> **Connect Spotify** (owner only; needs `[webapp] public_origin`).
+5. Restart the assistant. The sign-in is saved privately in
+   `[spotify] token` (`data/spotify_token.json`); delete that file to
+   disconnect, and remove the app's access at spotify.com -> Account ->
+   Manage apps.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
@@ -1273,7 +1398,8 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, history.py, tool registry
+                notion.py, notes.py, web.py, history.py, spotify.py, tool registry
+  spotify_web.py  the phone app's "Connect Spotify" (owner only)
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

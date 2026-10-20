@@ -2099,6 +2099,142 @@ Render/Docker changes) comes separately.
   passed 4 of 4 reruns; it doesn't touch memory code (master about 1712
   passed, 48 skipped); node 203 .mjs + 14 voice-core, all passing.
 
+## Smart home through Home Assistant (off by default)
+
+- New `assistant/tools/home_assistant.py`: `ha_list` (devices by area or
+  domain, with state; the list is cached for `[home_assistant]
+  cache_seconds`), `ha_state` (one device; numeric attributes only) and
+  `ha_control` (on/off/toggle, brightness, colour temperature, thermostat
+  temperature and mode, fan speed, cover open/close/stop/position, media
+  play/pause/next/volume, lock/unlock, alarm arm/disarm when allowlisted,
+  and `run` for allowlisted scripts/scenes/automations). REST API with a
+  long-lived token (`HA_URL`, `HA_TOKEN` in `.env`) via `requests`; areas
+  come from one read-only `/api/template` render. Spoken names are matched
+  to friendly names, entity ids and areas (exact, then all words, then
+  fuzzy; Chinese names too); more than one match asks which one.
+- Safety: `[home_assistant] domains` allowlist; a fixed action-to-service
+  map (no service parameter, so no `homeassistant.restart`); scripts only
+  by entity id in `[home_assistant] scripts`. Locks, alarm panels, garage
+  doors/gates (device class or name) and `secure_entities` always ask,
+  are excluded from whole-room calls, and the handler re-checks that the
+  yes covered this exact call. Unlocking/opening is refused without a
+  question while the conversation is tainted; other changes ask then.
+  Free-text states (notification sensors) taint the conversation.
+- `ToolRegistry.dispatch` (small, additive): a `confirm_prompt` may return
+  None (no question for this input), and `UNTRUSTED_CONTEXT` is now set
+  while the question is built too. Existing tools are unchanged.
+- Registered in `cli.build_tools` (`register_home_assistant`), so the PC,
+  Pi and the owner's web/voice sessions get it; family members never do.
+  Startup warns about a plain-http `HA_URL` outside the home network.
+  `HA_TOKEN` is redacted in logs; `HA_URL`/`HA_TOKEN` are isolated from
+  other instances; `config.mom.toml` keeps it off. English and Chinese
+  questions and error messages in `i18n.py`.
+- Tests: `tests/test_home_assistant.py` (114, all offline with a fake
+  `requests.Session` returning real `/api/states` shapes): listing and
+  matching, the exact service payload of each action, ambiguity, cache,
+  lock/garage/alarm confirmation, refusal while tainted (also end to end
+  through `ClaudeChat`), disallowed domains and services, room calls
+  skipping secure devices, HA down/401/403/400/502 spoken nicely, Chinese
+  strings, caplog (no names or token at INFO), registration off by
+  default, family isolation. Plus one dispatch test in `test_tools.py`.
+  Checked that the safety tests fail with the gates removed.
+- Review round 2 (8 judge findings, each with a test that fails when the
+  fix is reverted):
+  - While tainted, every change needs a yes checked in the handler too.
+    A Home Assistant hiccup while asking still asks, about the words said;
+    that yes never covers a lock. The cache expiring mid-question is fine.
+  - Friendly and room names are cut to one line of 60 characters, and a
+    name that looks like a sentence taints the conversation.
+  - A non-admin token works: the admin-only room lookup's 401/403 means
+    "no rooms". README recommends a dedicated non-admin user.
+  - An exact room match wins ("Bedroom 1" never brings in "Bedroom 2").
+  - Locks and garage doors are never reached by spelling similarity.
+  - Switches and covers named door, lock, 门 or 门锁 count as secure.
+  - New tests: one yes covers one call, and a 3xx from a service call is
+    not "done".
+  - A room-wide question says "and N more" (Chinese too).
+- Review round 3 (4 findings, each with a test that fails when reverted):
+  - Run-together names count as secure again ("Garagedoor", "GateOpener",
+    "FrontDoor", "doorlock", "Smartlock"); indoor, outdoor, doorbell and
+    clock don't.
+  - 门 now counts only in 门锁, 大门, 车库门, 闸门 or at the end of a name,
+    so 门口灯 and 门铃 aren't secure.
+  - Ambiguous answers with a suspicious name are marked untrusted (now
+    tested).
+  - A yes given while Home Assistant was unreachable never covers a lock;
+    the answer now says so and asks Kyle to try again (English and
+    Chinese).
+  - `tests/test_home_assistant.py` now has 128 tests.
+- Full suite: 1845 passed, 48 skipped (baseline 1712 passed, 48 skipped).
+- Final review LOWs: 锁, 门禁, deadbolt and 门 ending a word count as
+  secure (4 cases, failing on the round-3 pattern); the area is not
+  checked, on purpose, and README/SECURITY say to list neutral-named
+  relays in `secure_entities`.
+  Not tried against a real Home Assistant (none in the sandbox).
+
+## Spotify by voice (2026-10-20)
+
+- "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
+  "what's playing?", "turn it up", "play it on my phone". New
+  `assistant/tools/spotify.py` drives the Spotify Web API player (Premium
+  only) with nine tools: spotify_play (Kyle's own playlists first, then
+  the catalog; a mood or genre plays a playlist, a song name plays that
+  song), spotify_pause, spotify_resume, spotify_next, spotify_previous,
+  spotify_volume, spotify_now_playing, spotify_devices and
+  spotify_transfer (by name, or "phone", "PC", 手机, 电脑, "this
+  computer"). No tool changes playlists or the library. Playback control
+  never asks for a yes; catalog names and device names are marked
+  untrusted.
+- Sign-in: Authorization Code with PKCE, no client secret
+  (`SPOTIFY_CLIENT_ID` in `.env`), minimum scopes. Once with
+  `python -m assistant.tools.spotify` (paste back the 127.0.0.1 address)
+  or the phone's owner-only "Connect Spotify" (`assistant/spotify_web.py`,
+  `assistant/web/spotify.js`, modelled on `google_web.py`: single-use
+  state map, bounded, 10-minute expiry). Token written with
+  `write_private`; refreshed a minute before expiry, re-read from the
+  file first (the wake-word process and the web app share it). If a
+  refresh is refused because the other process just rotated the refresh
+  token, the file is read again and its token (or, once, its new refresh
+  token) is used, so the race no longer reads as "sign-in expired"; a
+  token file briefly locked by a Windows replace is read again too. A 401
+  is retried once after a refresh; nothing else is retried. Three scopes:
+  user-read-playback-state, user-modify-playback-state,
+  playlist-read-private.
+- Errors read nicely in English and Chinese (i18n.py): no Premium, nothing
+  open anywhere, which device (several open), volume not allowed (phones),
+  sign-in expired, busy (429), offline. With no active device it plays on
+  this computer's Spotify, or the only one open.
+- Wake mode pauses Spotify on this computer at the wake word (in the
+  background, so recording isn't delayed) and resumes it when back to
+  waiting for "Hey Claude", unless Kyle used a Spotify control meanwhile
+  (`[spotify] pause_while_listening`, `local_device`; `cli.run_wake`
+  gained an `on_idle` hook, and the wake-mode wiring moved from `main`
+  into `cli.run_wake_mode` so it is tested).
+- `[spotify]` is off by default (config.py and config.toml); tools are
+  registered only when enabled and signed in. Family members never get
+  them (their own registry) and get 404 from the connect routes.
+- `requests` was already a dependency, so no Spotify library was added.
+- Tests: `tests/test_spotify.py` (63: PKCE, consent URL scopes, CLI
+  sign-in, private token file, refresh and rotation, a 401 retry, the
+  other process's token, each tool's request and result, Premium / no
+  device / which device / volume / 429 / offline errors, no double skip,
+  Chinese strings and device words, registration on and off, INFO logs
+  without the query or names, pause-while-listening and its races, the
+  two-process refresh race and a locked token file, untrusted device
+  names, volume up from 0, and the wake loop's wiring: idle between two
+  wakes with and without a follow-up window, a failing idle hook, pause
+  before the chime, `run_wake_mode`),
+  `tests/test_spotify_web.py` (10: owner only, state/PKCE, token saved
+  privately, tools added live, replay and refusal write nothing, bounded
+  states, family gets nothing, page and shell files),
+  `tests/js/spotify.test.mjs` (7). Measured in the sandbox, not real
+  hardware: full suite 1785 passed, 48 skipped (+73 on the master baseline of 1712 / 48); JS 202
+  passed. Phone cache v13 (`/spotify.js` added to the shell).
+- Final review LOWs: idle between wakes with `follow_up_seconds = 0` is
+  now tested; a token file that is unreadable for permission reasons is
+  retried only on Windows (a root-owned file on the Pi used to cost 1 s per
+  call and log "locked"). +2 tests, each failing with its fix reverted.
+
 ## Phone app: each person picks their reply voice
 
 - New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the

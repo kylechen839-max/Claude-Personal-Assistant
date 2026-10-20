@@ -30,7 +30,8 @@ DAY = 86400
 # what the owner's registry has and a family member must never get
 OWNER_TOOLS = ("list_assignments", "update_assignment_status", "search_memory",
                "remember_note", "recall_notes", "search_conversations",
-               "resume_conversation", "message_dev_team", "list_events")
+               "resume_conversation", "message_dev_team", "list_events",
+               "ha_list", "ha_state", "ha_control")
 
 
 def owner_registry():
