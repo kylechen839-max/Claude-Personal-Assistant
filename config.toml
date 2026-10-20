@@ -81,6 +81,8 @@ search_namespaces = "*"       # "*" = read all namespaces, or a list like ["proj
 top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
+weekly_review = false         # true: once a week, the first conversation offers to review this week's notes
+review_state_file = "data/memory_review.json"  # when the last weekly review offer was made
 
 [webapp]                      # python -m assistant --mode web (phone page)
 host = "127.0.0.1"            # keep this: reach it through `tailscale serve`

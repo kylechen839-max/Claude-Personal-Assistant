@@ -597,6 +597,32 @@ a PKCE challenge, `access_type=offline` and the redirect
   ArtifactData are pre-approved in `.claude/settings.json`; Kyle
   approved that.
 
+## Memory review (`memory_review.py`, `memory_web.py`)
+
+- **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and
+  `/api/memory/delete-week` use the owner's session (`owner_of`): no
+  session is 401, a family member's session (no memory) and every request
+  with memory off are 404. Cross-site requests are refused like every API
+  route. Deletes are POST (the failover preflight allows only GET/POST).
+- **Only the assistant's own vectors.** Listed and deleted by id prefix
+  (`voice-`, `note-`) in `[memory] namespace` only; Kyle's other
+  namespaces and foreign ids are never shown or deleted (tests seed both).
+  `delete_note` now also accepts `voice-` ids (conversation summaries and
+  `remember` notes, which the assistant wrote) and still refuses anything
+  else; it keeps `confirm_prompt`, so voice deletes always ask.
+- **Delete a week = the ids shown.** The page sends the ids it displayed;
+  the server deletes only those still in that week, so a note saved after
+  the page loaded is never deleted unseen.
+- **Untrusted stays visible and sticky.** Notes stored with
+  `untrusted: true` get a badge on the page, and `review_memory` marks its
+  result untrusted when one is included, so later changes in that
+  conversation ask first. The weekly nudge carries only a count.
+- **Logs.** Ids and counts at INFO; note text never (caplog tests for the
+  module and the routes). Errors reaching Pinecone are a generic 502.
+- Deliberately not done: no undo (a delete is final in Pinecone); a
+  conversation in history keeps its transcript when its memory summary is
+  deleted here (delete the conversation in History for both).
+
 ## Conversation history
 
 Every conversation is saved to a SQLite file so it can be searched and
