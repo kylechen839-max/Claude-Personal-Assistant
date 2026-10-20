@@ -76,7 +76,8 @@ def make_app(fake_client, tmp_path):
         app_options = {k: kwargs.pop(k) for k in list(kwargs)
                        if k in ("limiter", "trusted_proxy", "max_audio_seconds",
                                 "sessions_file",
-                                "max_text_chars", "max_upload_bytes")}
+                                "max_text_chars", "max_upload_bytes",
+                                "max_attachment_bytes", "max_image_bytes")}
         assistant.__dict__.update(kwargs)  # e.g. conversation_timeout
         app = webapp.create_app(assistant, TOKEN, reap_interval=3600, **app_options)
         return assistant, TestClient(app, base_url=BASE)
@@ -696,6 +697,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           # the voice view's earcons (assistant/earcons.py)
           "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js",  # reloads the page after an update (host.py)
+          "/attachments.js",  # the chat's "+" (attachments.py checks the files)
           "/memory.js"]  # the Memory screen's code (its data needs the owner)
 
 
@@ -1354,4 +1356,6 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v11" in sw and '"/ui.js"' in sw and '"/memory.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v12" in sw and '"/ui.js"' in sw
+    assert '"/attachments.js"' in sw
+    assert '"/memory.js"' in sw

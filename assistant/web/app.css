@@ -186,6 +186,25 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .mic:disabled { opacity: .45; filter: saturate(.4); }
 .mic:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent-ink), 0 8px 22px -6px color-mix(in srgb, var(--accent) 70%, transparent); }
 #text-form button:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 5px var(--accent-ink); }
+/* "+" (attachments.js): left of the field; chips for the picked files above it */
+#text-form { padding-left: 3px; }
+#text-form input { padding-left: .25rem; }
+#text-form .attach-btn { background: none; color: var(--text-2); }
+#text-form .attach-btn svg { width: 22px; height: 22px; stroke-width: 2; }
+#text-form .attach-btn:active:not(:disabled) { background: var(--surface-2); }
+#text-form .attach-btn:disabled { opacity: .35; }
+.attach-chips { display: flex; gap: .5rem; width: 100%; margin-bottom: .5rem; overflow-x: auto; padding: 2px; }
+.attach-chips[hidden] { display: none; }
+.attach-chip { position: relative; flex: none; display: flex; align-items: center; height: 56px; max-width: 12rem;
+  border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line-strong); overflow: hidden; }
+.attach-chip img { width: 56px; height: 56px; object-fit: cover; display: block; }
+.attach-chip.image:not(:has(img))::before { content: ""; width: 56px; height: 56px; background: var(--surface-2); }
+.attach-name { padding: 0 2.4rem 0 .75rem; font-size: .8125rem; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-remove { position: absolute; top: 0; right: 0; width: 44px; height: 44px; min-height: 0;
+  display: grid; place-items: start end; padding: 4px 6px 0 0; background: none; color: var(--text);
+  font-size: 1.1rem; line-height: 1; }
+.attach-chip img + .attach-remove { color: #fff; text-shadow: 0 0 3px #000a; }
 @keyframes ripple { from { opacity: .35; transform: scale(1); } to { opacity: 0; transform: scale(1.75); } }
 #mic-hint { margin-top: .6rem; }
 @media (max-height: 700px) {

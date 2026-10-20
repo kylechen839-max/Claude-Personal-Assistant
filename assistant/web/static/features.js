@@ -354,29 +354,13 @@
       } catch (e) { /* no audio; the text is on screen */ }
     }
 
-    // Shrink to <= 1600 px and re-encode as JPEG (drops EXIF, saves data).
+    // Shrink to <= 1600 px and re-encode as JPEG (drops EXIF, saves data),
+    // with the chat's attachment code (/attachments.js).
     async function resize(file) {
-      const MAX = 1600;
-      let source;
-      try {
-        source = await createImageBitmap(file, { imageOrientation: "from-image" });
-      } catch (e) {
-        source = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => { const img = new Image(); img.onload = () => resolve(img);
-                                  img.onerror = reject; img.src = reader.result; };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-      }
-      const w = source.width, hgt = source.height, scale = Math.min(1, MAX / Math.max(w, hgt));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(w * scale);
-      canvas.height = Math.round(hgt * scale);
-      canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+      const { blob, canvas } = await window.HeyClaudeAttach.shrinkImage(file);
       preview.src = canvas.toDataURL("image/jpeg", 0.6);
       preview.hidden = false;
-      return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+      return blob;
     }
 
     async function picked(input) {

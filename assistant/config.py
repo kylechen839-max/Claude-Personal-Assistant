@@ -107,6 +107,8 @@ DEFAULTS: dict = {
         "port": 8765,
         "confirm_timeout": 120,     # seconds to wait for a yes before "no"
         "max_upload_mb": 10,
+        "max_attachment_mb": 10,    # per PDF or text file attached to a chat
+                                    # message (photos: [tutor] max_image_mb)
         "max_audio_seconds": 60,    # longest recording accepted
         "sessions_file": "data/web_sessions.json",  # signed-in browsers
                                     # ("" = forget them on restart)
