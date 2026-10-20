@@ -3069,6 +3069,110 @@ dropping other guests, free time in wall-clock time, no
   (and only its own); all of round 2 undone fails all 14.
 - Counts (Linux sandbox, Python 3.13): 2173 passed, 48 skipped (master
   f1eb136: 2124 passed, 48 skipped).
+## Team chat connectors: Slack, Discord, GitHub (off by default)
+
+Kyle asked for connectors where Claude "can look through something like a
+team chat or an engineering chat" and summarize the ideas and files. This
+is phase A (read and file a digest) plus phase B (registration, config,
+i18n, docs).
+
+- New `assistant/tools/teamchat.py`: `TeamChat` over one provider per
+  service, with `chat_channels`, `chat_read` (a channel or one thread;
+  the last 24 hours, `hours`, or a `day` from `timeutil.resolve_day` on
+  the turn's clock), `chat_search`, `chat_files`, `chat_read_file` and
+  `chat_save_digest`. Claude does the summarizing. Providers in
+  `teamchat_slack.py` (Web API, user token: history, replies, search,
+  files, user names), `teamchat_discord.py` (REST, bot token: guild
+  channels, messages, threads, guild search, attachments) and
+  `teamchat_github.py` (REST issues, pull requests and comments; GraphQL
+  for Discussions). Plain `requests`, injectable `session=`, `timeout`,
+  redirects off, one typed `ChatError` per failure, logging only status
+  codes and exception types. No new dependencies.
+- No posting: there is no tool that writes to Slack, Discord or GitHub.
+  `chat_save_digest` files Claude's summary in Notion ("Chat Digests",
+  found or created beside Assignments like Lecture Notes, or `[teamchat]
+  digest_database_id`), always after a spoken yes, keyed
+  `chat:<service>:<channel>:<date>` in a Digest ID property so a retry
+  finds the page instead of filing a second. `ChatDigestsDB` subclasses
+  `lecture.LectureNotesDB`; `lecture.py` got a small additive refactor
+  (`key_prop`, `blocked_help` and `_schema()` on the class, same
+  behaviour for lectures).
+- Safety: every read tool is `untrusted_output` and `private`, and each
+  result carries the `untrusted_content` mark and a note, so a chat read
+  makes later changes ask. Bounds: 100 messages, 300 characters each,
+  12,000 characters per result (oldest dropped first), 20 files, text
+  files up to 50 KB from files.slack.com / cdn.discordapp.com /
+  media.discordapp.net only (Slack token to files.slack.com only, none
+  to Discord's CDN). `[teamchat] channels` and `github_repos` allowlists
+  (a TOML string is one entry); Slack DMs dropped from search and files;
+  a Discord thread must belong to the named channel. A 401 stops that
+  service until restart; a 429 is waited out without calling. Discord's
+  empty-content messages (Message Content Intent off) are reported as
+  `intent_off`, not "no messages"; guild search's 202 "still indexing"
+  says to retry.
+- `cli.register_teamchat` (called from `build_tools`, so PC, Pi and the
+  owner's web sessions; never family members) prints `(Slack tools off:
+  SLACK_USER_TOKEN not set)` only for a service that is turned on.
+  `config.py` `[teamchat]` defaults and `config.toml` mirror; the three
+  tokens are in `SECRET_ENV_VARS` (round 2: not `ISOLATED_ENV_VARS`), and the log
+  redaction masks Slack, GitHub and Discord token shapes. EN/ZH digest
+  questions in `i18n.py`. `.env.example`, README "Team chat" (setup per
+  service; one sentence on LinkedIn, which doesn't let apps read
+  messages or feeds), SECURITY, MANUAL_TEST, BLOCKERS.
+- Tests: new `tests/test_teamchat.py` (72, offline, fake `requests`
+  sessions with the services' real response shapes: Slack `ok:false`
+  errors and 429 Retry-After, `has_more`/`next_cursor`, Discord
+  newest-first arrays, empty-content messages, 202 code 110000, 401/403,
+  GitHub REST plus a mocked GraphQL POST): end-to-end taint through
+  `ClaudeChat` (`test_chat_read_marks_conversation_untrusted`), untrusted
+  marks on every read, a DEBUG caplog check with no message text, file
+  text, names or tokens at any level, clamped bounds (including
+  `max_messages=0` and `hours=0`), the TOML-string allowlist, file host,
+  type, size, redirect and sign-in-page refusals, digest retry by key
+  across a restart, a declined digest writing nothing, registration and
+  family isolation, token redaction and isolation. `conftest.py` also
+  clears the three token variables (GITHUB_TOKEN is often set in a dev
+  shell or CI). `test_family.py` OWNER_TOOLS and `test_docs.py`
+  OTHER_IDENTIFIERS list the new tool names.
+- Each source change was reverted one at a time (with `__pycache__`
+  cleared) and its tests failed: 32 reverts, all failing as expected.
+  Family isolation needs no code (family registries are built from an
+  allowlist), so that test pins the behaviour rather than a change.
+- Counts (Linux sandbox, Python 3.13): 2196 passed, 48 skipped (master
+  f1eb136 here: 2124 passed, 48 skipped).
+- Review round 2 (8 judge findings, each with a test that fails when its
+  fix is reverted, `__pycache__` cleared between reverts):
+  1. The chat tokens are out of `ISOLATED_ENV_VARS` (still secret): a
+     `GITHUB_TOKEN` in Kyle's user environment would silently stop the
+     family apps. An instance with an `--env-file` other than `.env` turns
+     team chat off instead. The existing refusal (a really isolated
+     variable inherited) is now also written to that instance's log, as
+     its task runs hidden under pythonw. README "A Chinese instance" lists
+     `HA_URL`/`HA_TOKEN` too; `install_family_tasks.ps1`'s header is true
+     again.
+  2. Search hits and file lists arrive newest first; they are sorted
+     oldest first before the 12,000-character cut, so the newest survive.
+  3. An unknown service name is logged as "?", not as typed.
+  4. The digest key uses the resolved service and channel id, so "#eng",
+     "eng" and "C111" (service implied) file one page.
+  5. GitHub issue search sends two queries, with `is:issue` and
+     `is:pull-request` (GitHub's issue search now needs one), merged
+     without duplicates. MANUAL_TEST has a GitHub search check.
+  6. Slack `no_permission` is "no access" for that channel or file, no
+     longer a dead token.
+  7. A Discord search hit inside a thread counts for its parent channel
+     (from the response's `threads`), allowlist included. A search cut to
+     3 servers x 20 channels (Discord) or 5 repos (GitHub) says
+     `"partial": true` with the reason. Plus a test for the GitHub
+     no-repos guard.
+  8. A streamed download answered with an error status is closed.
+  Docs: Slack DMs are "never passed to Claude or logged" (search and
+  files.list do return some to the process, which drops them).
+- Counts after round 2 (Linux sandbox, `GITHUB_TOKEN` unset): 2213
+  passed, 48 skipped; `tests/test_teamchat.py` has 89.
+- Next (phase C, not built): a scheduled daily digest that files itself
+  and pushes a notification to the phone, run on one machine only (the
+  leader check).
 ## Fix: lecture summaries 400 on Sonnet 5.5 (2026-10-20)
 
 - **Bug:** `lecture.summarize()` forced its `save_lecture_notes` tool with

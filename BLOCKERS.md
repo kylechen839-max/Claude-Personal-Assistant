@@ -121,6 +121,18 @@ Only what is still open for Kyle. None of it blocks the code.
       Security); (3) put `HA_URL` and `HA_TOKEN` in `.env`; (4) set
       `[home_assistant] enabled = true` in `config.local.toml`. Then
       MANUAL_TEST.md "Smart home". No Home Assistant: nothing to do.
+- [ ] **Team chat (Slack, Discord, GitHub; only the ones you want).** The
+      tools are built and stay off until you make the tokens (README "Team
+      chat"): Slack: api.slack.com/apps -> Create New App -> From scratch in
+      the team workspace, add the user scopes, install, put the `xoxp-`
+      token in `.env` as `SLACK_USER_TOKEN` (never turn on Manage
+      Distribution). Discord: create an app -> Bot -> Reset Token into
+      `DISCORD_BOT_TOKEN`, turn on Message Content Intent, turn off Public
+      Bot, and have a server admin add it with the `bot` scope and
+      permissions=66560. GitHub: a fine-grained read-only token (Issues,
+      Pull requests, Discussions, Metadata) as `GITHUB_TOKEN`. Then
+      `[teamchat] enabled = true` plus `slack`/`discord`/`github = true` in
+      `config.local.toml`, and MANUAL_TEST.md "Team chat".
 - [ ] **Real-voice wake-word tuning.** The "Hey Claude" model was trained on
       synthetic voices only. Run MANUAL_TEST.md step 3 and set `[wake]
       sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what

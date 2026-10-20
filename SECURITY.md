@@ -717,6 +717,66 @@ limits are in code, not in the prompt.
   so README warns, and the startup line warns when `HA_URL` is http at a
   public address. Over Tailscale the link is encrypted anyway.
 
+## Team chat (`tools/teamchat*.py`)
+
+Slack, Discord and GitHub hold other people's words, and the tokens can
+read a whole workspace, so the limits are in code.
+
+- **Read only, no posting.** There is no tool that posts, reacts, edits
+  or deletes anything in Slack, Discord or GitHub; the only write is
+  `chat_save_digest`, which files Claude's summary in Kyle's own Notion
+  and always asks for a spoken yes first (`confirm_prompt`), once per
+  `chat:<service>:<channel>:<date>` key (a retry finds the page by its
+  Digest ID property instead of filing a second).
+- **Others' text is untrusted.** Every read tool is `untrusted_output`
+  and its results carry `"untrusted_content": true` and a note to treat
+  them as information, never instructions, so after a chat read every
+  state-changing tool asks first, and the taint survives a resume.
+  Inputs and results are `private` (never logged); the log gets the
+  service, counts and HTTP status or Slack error codes only.
+- **Off by default, owner only.** `[teamchat] enabled = false` and each
+  service off; family members never get the tools (`family.py` builds
+  their registry separately; a test pins it). A separate instance (an
+  `--env-file` other than `.env`, e.g. Mom's) never turns team chat on,
+  so Kyle's tokens inherited from his environment are never used there.
+  `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN` and `GITHUB_TOKEN` are in
+  `SECRET_ENV_VARS` (the log redaction also masks `xox?-`, `ghp_`/
+  `github_pat_` and Discord-token shapes) but deliberately not in
+  `ISOLATED_ENV_VARS`: a `GITHUB_TOKEN` in Kyle's Windows user
+  environment would otherwise stop the family apps from starting. When a
+  separate instance does refuse to start (an isolated variable
+  inherited), the refusal is also written to its log, since the
+  sign-in task runs hidden under pythonw.
+- **Tokens** go only in the `Authorization` header, never in a URL or
+  query, with redirects off. A token is only sent to the service's API
+  host and, for Slack, files.slack.com; the request helper refuses any
+  other host before calling.
+- **Files.** `chat_read_file` reads text/* only, at most 50 KB (checked
+  against the listing and again while streaming), only from
+  files.slack.com, cdn.discordapp.com or media.discordapp.net over https,
+  never following a redirect, and refuses a sign-in page served instead
+  of the file. Discord's CDN links are signed, so they get no token.
+- **What it may read.** `[teamchat] channels` limits Slack and Discord;
+  `[teamchat] github_repos` limits GitHub. Slack DMs and group DMs are
+  never passed to Claude or logged: no DM scopes are asked for, and the
+  DM hits Slack's search and files.list still return to the process are
+  dropped before Claude sees them (a DM-only file is never downloaded). A
+  Discord thread is read only if its parent is an allowed channel, and a
+  search hit inside a thread counts for its parent channel. GitHub search
+  always names the repos (at most 5; the answer says when it was cut),
+  so it never searches all of GitHub.
+- **Being a good client.** After an HTTP 401 (or Slack's invalid_auth) a
+  service makes no more calls until restart, and after a 429 it waits out
+  Retry-After without calling: Discord bans an address after 10,000
+  invalid requests in 10 minutes. Results are bounded (100 messages, 300
+  characters each, 12,000 characters per answer, 20 files).
+- Not fixed, on purpose: **a Slack user token reads what Kyle can read**,
+  including private channels he is in. A bot token would see less but
+  can't use search. The channel allowlist is the narrowing tool.
+- Not fixed, on purpose: **a digest key is per day**, so a second digest
+  of the same channel on the same day finds the first page and adds
+  nothing (no overwrite of what Kyle may have edited).
+
 ## Spotify (`tools/spotify.py`, `spotify_web.py`)
 
 Off by default (`[spotify] enabled = false`); the tools are registered only

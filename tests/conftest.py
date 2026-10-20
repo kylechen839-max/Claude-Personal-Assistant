@@ -93,7 +93,9 @@ def _env_vars() -> tuple[str, ...]:
 
     # and Kyle's Google sign-in (the server's), which family tests must not see
     return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID", TOKEN_ENV, CLIENT_ENV,
-            WEB_CLIENT_ENV)
+            WEB_CLIENT_ENV,
+            # team chat tokens (GITHUB_TOKEN is often set in a dev shell or CI)
+            "SLACK_USER_TOKEN", "DISCORD_BOT_TOKEN", "GITHUB_TOKEN")
 
 
 @pytest.fixture(autouse=True)

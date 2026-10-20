@@ -214,6 +214,18 @@ secure_entities = []          # more entity ids that always need a spoken yes (e
 cache_seconds = 30            # how long the device list is kept
 timeout = 10                  # seconds per request
 
+[teamchat]                    # read Slack, Discord and GitHub; Claude sums them up (README "Team chat"); owner only
+enabled = false               # then turn on the services you use; each needs its token in .env
+slack = false                 # SLACK_USER_TOKEN (a user token, xoxp-)
+discord = false               # DISCORD_BOT_TOKEN (a bot with Message Content Intent)
+github = false                # GITHUB_TOKEN (a fine-grained, read-only token)
+channels = []                 # Slack/Discord channels it may read, e.g. ["#eng", "general"]; [] = all the token sees
+github_repos = []             # repos it may read, e.g. ["kylechen839-max/Claude-Personal-Assistant"]; [] = all the token sees
+max_messages = 100            # messages per read or search (at most 100)
+timeout = 15                  # seconds per request
+digest_database_id = ""       # Notion database for chat digests; "" = find or create "Chat Digests" beside Assignments
+digest_state_file = "data/teamchat_digests.json"  # remembers that database's id
+
 [spotify]                     # "play my study playlist", "pause", "skip" (Spotify Premium; README "Spotify")
 enabled = false               # needs SPOTIFY_CLIENT_ID in .env and a one-time sign-in:
                               # python -m assistant.tools.spotify (or "Connect Spotify" in the phone app)
