@@ -312,7 +312,7 @@ class SlowTranscriber(Transcriber):
         return super().transcribe(recording)
 
 
-@pytest.mark.parametrize("stt_s, voice_s, empty", [(0.0, 0.4, 0), (0.0, 0.4, 3),
+@pytest.mark.parametrize("stt_s, voice_s, empty", [(0.0, 0.8, 0), (0.0, 0.8, 3),
                                                    (0.6, 0.1, 0)])
 def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
                                                    stt_s, voice_s, empty):
@@ -338,7 +338,14 @@ def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
     os_voice = voice_s * (empty + 1)  # every try before the first audio
     assert timings["audio"] >= 0.9 * (stt_s + os_voice)  # coarse clocks on Windows
     pipeline = pipeline_seconds(timings, voice)
-    assert 0.9 * stt_s <= pipeline < stt_s + 0.3  # < one 0.4 s render left in
+    # Nothing but our own pipeline is left: less than 3/4 of one OS-voice
+    # render. The renders are long (0.8 s) so that bound leaves a slow Windows
+    # runner room for thread hand-offs and logging the failed render's
+    # traceback (0.31 s once, against an old 0.3 s bound with 0.4 s renders).
+    # The turn's marks use time.monotonic (about 16 ms ticks on Windows), the
+    # renders time.perf_counter, so with no slow Whisper the difference can
+    # come out a few ms below zero (-0.005 s once): allow 50 ms of clock slack.
+    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
 
 
 @pytest.mark.slow

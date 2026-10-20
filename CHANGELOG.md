@@ -8,6 +8,32 @@
   thinking and a longer timeout for this background request. This update
   changes `requirements.txt` (anthropic 0.77 or newer), so the auto-updater
   skips it: stop the assistant and run `python -m assistant --update`.
+- Health checks: a watchdog (`python -m assistant.watch`, the
+  `\HeyClaude\Watch` task every 5 minutes, or the Pi's
+  `hey-claude-watch.timer`) checks your app and every family copy:
+  `/healthz`, the page and its scripts, the running version and the phone
+  address; after every restart or new version and every 6 hours, a real
+  test conversation (text with a read-only tool, a follow-up, voice
+  message, hands-free voice, text) that saves nothing and changes nothing.
+  An app that fails is restarted once, then rolled back to the last
+  version that passed. You hear about it once, when it breaks and when it
+  recovers: a banner in your phone app and a message to the dev team
+  coordinator. New `[watch]` settings.
+- Safe updates: new code goes live only after it passed that test
+  conversation on a side port (port + 100); otherwise the old version
+  keeps running. `scripts/deploy.ps1` / `deploy.sh` pull, check and switch
+  in one command; `install_family_tasks.ps1 -Restart` checks first too.
+- When the Claude API itself is down or overloaded, the app now says
+  "Claude is unreachable right now. I retried a few times; please try
+  again in a minute."
+- The watchdog waits the same 1/5/15/60-minute backoff as the hosts before
+  re-running a go-live check that couldn't tell, alerts once when the
+  automatic updater's go-live check keeps failing to run, and a check copy
+  killed by the system (e.g. out of memory on a Pi) no longer gets a commit
+  refused.
+- CI: `api-contract` runs a real multi-turn conversation (tool use,
+  thinking, two requests sharing a history, the voice socket) against the
+  Anthropic API when the `ANTHROPIC_API_KEY` secret is set.
 - Fixed: asking about "tomorrow" just before midnight could list the day
   after tomorrow. The date is now read once per question, so the system
   prompt and the calendar and Notion tools agree.

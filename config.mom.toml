@@ -72,3 +72,6 @@ enabled = false
 
 [logging]
 file = "logs/mom.log"
+
+[watch]
+label = "Mom's app"           # in the watchdog's alerts and Kyle's banner
