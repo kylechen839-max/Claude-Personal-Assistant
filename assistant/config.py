@@ -32,6 +32,7 @@ DEFAULTS: dict = {
         "api_max_retries": 3,
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
+        "language": "en",  # "en", or "zh" (Mandarin: prompt, speech, phone page)
     },
     "tts": {
         "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
@@ -111,6 +112,10 @@ DEFAULTS: dict = {
                                     # address(es) (TRUSTED_PROXY)
         "allowed_origins": [],      # extra https://... origins, if a proxy
                                     # rewrites the Host header
+        "google_connect": False,    # "connect Google" button in the phone app
+                                    # (needs a Web application OAuth client)
+        "public_origin": "",        # https://... the phone opens; Google
+                                    # returns to <public_origin>/google/callback
     },
     # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
     "cloud": {

@@ -279,6 +279,40 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
+## Chinese instance for Mom (optional, ~20 min)
+Setup is in README.md ("A Chinese instance for someone else"). Use her
+phone (or yours signed in as her test user).
+- [ ] `python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token`
+      while your own instance keeps running.
+  - Should: it listens on port 8766; your instance on 8765 still works;
+    `.env.mom` (not `.env`) got the new `WEB_TOKEN`; the log is `logs/mom.log`.
+- [ ] On her phone (Tailscale, the PC shared with her) open
+      `https://<pc>.<tailnet>.ts.net:8443`.
+  - Should: the sign-in page is in Chinese (登录). After the token, the
+    chat page, the gear menu and the voice screen are in Chinese.
+- [ ] Ask by voice: "你好，今天天气怎么样？"
+  - Should: her words appear in Chinese characters; the reply is one or two
+    short sentences in Simplified Chinese, spoken by the Chinese Piper voice
+    (or the phone's voice, if ticked or the voice wasn't downloaded).
+- [ ] Ask "我的日历上明天有什么？" before connecting Google.
+  - Should: she's told it can't see a calendar (no tools); nothing about
+    your calendar, Notion or memory.
+- [ ] Gear menu -> 连接 Google 账户 -> sign in with her Google account ->
+      Advanced -> continue -> allow Calendar and Gmail.
+  - Should: back in the app; the menu now shows 重新连接 Google 账户 and
+    "Google 账户已连接。"; `data/mom/google_token.json` exists; no browser
+    opened on the PC.
+- [ ] "我明天有什么安排？" and "帮我看看有没有重要的邮件。"
+  - Should: her own events and emails, in Chinese.
+- [ ] "明天下午三点加一个看牙医。" then say "不要".
+  - Should: a Chinese yes/no question is spoken; "不要" cancels (nothing
+    added). Repeat and say "好的": the event appears in her Google Calendar.
+- [ ] Ask it to draft a reply to one email; answer "可以吗？".
+  - Should: a question is not a yes: no draft. Answer "是的": a draft
+    appears in her Gmail Drafts, nothing is sent.
+- [ ] Say "再见".
+  - Should: "再见！" and the conversation ends.
+
 ## Voice conversation on the phone (optional, ~12 min)
 In the phone web app, tap **Voice conversation**. Turn the latency panel on
 with the stopwatch button.

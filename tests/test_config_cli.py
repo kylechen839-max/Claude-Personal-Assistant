@@ -207,3 +207,73 @@ def test_config_local_toml_is_gitignored():
 
     root = Path(__file__).resolve().parent.parent
     assert "config.local.toml" in (root / ".gitignore").read_text().splitlines()
+
+
+def test_mom_config_turns_every_connection_off(monkeypatch):
+    """config.mom.toml: a separate Chinese instance with none of Kyle's
+    connections, even when his keys are in the environment."""
+    monkeypatch.setenv("NOTION_TOKEN", "secret")
+    monkeypatch.setenv("PINECONE_API_KEY", "k")
+    cfg = load_config("config.mom.toml", None)
+    assert cfg["assistant"]["language"] == "zh" and cfg["stt"]["model"] == "small"
+    for section in ("notion", "memory", "notes", "lecture", "tutor", "devteam", "update"):
+        assert cfg[section]["enabled"] is False, section
+    assert cfg["failover"]["role"] == "" and cfg["web"]["browser"] is False
+    assert cfg["webapp"]["google_connect"] is True and cfg["webapp"]["port"] == 8766
+    for path in (cfg["calendar"]["credentials"], cfg["calendar"]["token"],
+                 cfg["history"]["path"], cfg["webapp"]["sessions_file"]):
+        assert path.startswith("data/mom/"), path
+    assert cfg["logging"]["file"] == "logs/mom.log"
+    assert cli.build_memory(cfg, lambda *_: None) is None
+    names = {s["name"] for s in cli.build_tools(cfg, lambda *_: None).schemas()}
+    assert not names & {"list_assignments", "update_assignment_status",
+                        "message_dev_team", "open_in_browser"}
+    assert "list_calendar_events" not in names  # no Google sign-in yet
+
+
+def test_google_connect_without_a_token_never_signs_in_here(tmp_path, monkeypatch):
+    """With google_connect, a client file but no token means no Google tools
+    (Calendar would otherwise open a browser sign-in on this computer)."""
+    monkeypatch.chdir(tmp_path)
+    cfg = load_config(None, None)
+    (tmp_path / "credentials.json").write_text("{}")
+    cfg["webapp"]["google_connect"] = True
+    out = []
+    names = {s["name"] for s in cli.build_tools(cfg, out.append).schemas()}
+    assert "list_calendar_events" not in names and "email_summary" not in names
+    assert any("connect Google" in m for m in out)
+    (tmp_path / "token.json").write_text('{"token": "x", "scopes": ['
+                                         '"https://www.googleapis.com/auth/calendar.events"]}')
+    assert "list_calendar_events" in {s["name"] for s in cli.build_tools(cfg, out.append).schemas()}
+    cfg["webapp"]["google_connect"] = False  # Kyle's setup: unchanged
+    (tmp_path / "token.json").unlink()
+    assert "list_calendar_events" in {s["name"] for s in cli.build_tools(cfg, out.append).schemas()}
+
+
+def test_env_file_flag(tmp_path, monkeypatch, capsys):
+    import assistant.config
+
+    assert cli.parse_args([]).env_file == ".env"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    real, seen = assistant.config.load_config, []
+
+    def load(path, env_file=".env"):
+        seen.append((path, env_file))
+        return real(None, None)
+    monkeypatch.setattr(assistant.config, "load_config", load)
+    assert cli.main(["--mode", "text", "--config", "config.mom.toml",
+                     "--env-file", ".env.mom"]) == 1  # no key in the test
+    assert seen == [("config.mom.toml", ".env.mom")]
+
+
+def test_main_passes_env_file_and_language_to_the_web_app(tmp_path, monkeypatch):
+    from assistant import i18n, webapp
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    (tmp_path / "zh.toml").write_text('[assistant]\nlanguage = "zh"\n')
+    seen = {}
+    monkeypatch.setattr(webapp, "serve", lambda config, **kw: seen.update(kw) or 0)
+    assert cli.main(["--mode", "web", "--config", "zh.toml", "--env-file", ".env.mom"]) == 0
+    assert seen["env_file"] == ".env.mom" and i18n.LANG == "zh"

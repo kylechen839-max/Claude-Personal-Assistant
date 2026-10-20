@@ -10,13 +10,19 @@ import numpy as np
 from assistant.audio import SAMPLE_RATE
 
 log = logging.getLogger(__name__)
+ZH_PROMPT = "以下是普通话的句子。"
 
 
 class Transcriber:
-    """Lazily loads a faster-whisper model and turns 16 kHz audio into text."""
+    """Lazily loads a faster-whisper model and turns 16 kHz audio into text.
+
+    `language`: "en" (the default) or "zh" (Mandarin; needs a multilingual
+    model such as "small", not a ".en" one). The Chinese initial prompt
+    nudges Whisper toward Simplified characters and punctuation."""
 
     def __init__(self, model_name: str = "base.en", device: str = "cpu",
-                 compute_type: str = "int8", model=None):
+                 compute_type: str = "int8", model=None, language: str = "en"):
+        self.language = "zh" if str(language).lower().startswith("zh") else "en"
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
@@ -36,10 +42,12 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray) -> str:
         if audio is None or len(audio) == 0:
             return ""
+        options = {"initial_prompt": ZH_PROMPT} if self.language == "zh" else {}
         segments, _ = self.model.transcribe(audio.astype(np.float32),
-                                            language="en", beam_size=1,
-                                            vad_filter=False)
-        return " ".join(s.text.strip() for s in segments).strip()
+                                            language=self.language, beam_size=1,
+                                            vad_filter=False, **options)
+        joiner = "" if self.language == "zh" else " "  # no spaces in Chinese
+        return joiner.join(s.text.strip() for s in segments).strip()
 
 
 def record_push_to_talk(input_fn=input, device=None) -> np.ndarray | None:

@@ -55,7 +55,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from starlette.requests import HTTPConnection
 
-from assistant import audio
+from assistant import audio, i18n
 from assistant.tools import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -752,12 +752,11 @@ class WebAssistant:
                 log.debug("Web heard: %r", text)
             text = (text or "").strip()
             if not text:
-                s.events.put({"type": "error",
-                              "message": "I didn't catch that. Try again?"})
+                s.events.put({"type": "error", "message": i18n.t("not_caught")})
                 return
             if is_exit(text):
                 s.chat.end_conversation()
-                self._reply(s, "Goodbye!", ended=True)
+                self._reply(s, i18n.t("goodbye"), ended=True)
                 return
             reply = get_reply(  # it logs errors itself
                 s.chat, text, output_fn=lambda m: None,
@@ -767,7 +766,7 @@ class WebAssistant:
             self._reply(s, reply)
         except Exception:
             log.exception("Web turn failed")
-            s.events.put({"type": "error", "message": "Sorry, something went wrong."})
+            s.events.put({"type": "error", "message": i18n.t("error")})
         finally:
             s.pending = None
             s.last_active = self.clock()
@@ -789,7 +788,7 @@ class WebAssistant:
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            s.emit({"type": "status", "text": "No answer, so I didn't do it."})
+            s.emit({"type": "status", "text": i18n.t("no_answer")})
         return answered and pending.answer
 
     def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
@@ -1067,12 +1066,15 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_text_chars: int = 4000, trusted_proxy=0,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
-               voice: dict | None = None, failover=None, features=None):
+               voice: dict | None = None, failover=None, features=None,
+               language: str = "en", google=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
     `features`: a webfeatures.Features (lecture recorder, tutor), whose
-    routes are added before any wrapping, so they get the same auth."""
+    routes are added before any wrapping, so they get the same auth.
+    `language` "zh" serves the page as lang="zh-CN" (i18n.js translates it);
+    `google`: a google_web.GoogleConnect for the "connect Google" button."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1230,13 +1232,25 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return error("not signed in", 401)
 
     # --- public: the page, PWA files, health check ---
+    # lang="zh-CN": i18n.js translates the page; data-google: it shows the
+    # "connect Google" button (google_web.py)
+    zh_page = str(language or "en").lower().startswith("zh")
+    page_tag = ("" if not (zh_page or google is not None) else
+                f'<html lang="{"zh-CN" if zh_page else "en"}"'
+                f'{" data-google" if google is not None else ""}>')
+
     @app.get("/")
     def index():
-        return FileResponse(STATIC / "index.html", media_type="text/html")
+        if not page_tag:
+            return FileResponse(STATIC / "index.html", media_type="text/html")
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        return Response(html.replace('<html lang="en">', page_tag, 1),
+                        media_type="text/html; charset=utf-8")
 
     for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
                         ("app.css", "text/css"), ("sw.js", "text/javascript"),
                         ("update-watch.js", "text/javascript"),
+                        ("i18n.js", "text/javascript"),
                         ("backend-router.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -1448,6 +1462,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    if google is not None:
+        from assistant import google_web
+
+        google_web.register(app, google, session_of, error)
     if features is not None:
         from assistant import webfeatures
 
@@ -1578,12 +1596,13 @@ def build_assistant(config: dict, tts_name: str | None = None,
         return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
-                          recorder=recorder)
+                          recorder=recorder, language=a["language"])
 
     stt = config["stt"]
     tts_cfg = config["tts"]
     return WebAssistant(chat_factory,
-                        Transcriber(stt["model"], stt["device"], stt["compute_type"]),
+                        Transcriber(stt["model"], stt["device"], stt["compute_type"],
+                                    language=a["language"]),
                         make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
@@ -1597,6 +1616,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     import uvicorn
 
     web = config["webapp"]
+    language = i18n.set_language(config["assistant"]["language"])
     host = host or web["host"]
     port = int(port or web["port"])
     trusted_proxy = parse_trusted_proxy(web["trusted_proxy"])
@@ -1621,13 +1641,18 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import webfeatures  # lecture recorder + homework tutor
 
     features = webfeatures.Features(config, assistant)
+    google = None
+    if web["google_connect"]:
+        from assistant.google_web import GoogleConnect
+
+        google = GoogleConnect(config, assistant.tools)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
                      trusted_proxy=trusted_proxy,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
-                     features=features)
+                     features=features, language=language, google=google)
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")

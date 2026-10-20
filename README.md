@@ -446,6 +446,61 @@ Replies use the voice from [Voices](#voices) (Kokoro once downloaded),
 rendered sentence by sentence so the first one plays while the rest are
 made; the model is warmed up when the server starts.
 
+## A Chinese instance for someone else (`config.mom.toml`)
+
+A second, separate copy of the phone app in Mandarin Chinese, for a family
+member to try. It runs on the same PC next to yours, on its own port, and
+uses **none of your connections**: no Notion, no Pinecone memory or notes,
+no dev team, its own history (`data/mom/`), sign-ins and log
+(`logs/mom.log`). She connects her own Google Calendar and Gmail (read and
+drafts only; nothing is ever sent) from her phone with a menu button.
+
+`[assistant] language = "zh"` makes Claude answer in Simplified Chinese,
+Whisper listen for Mandarin (the multilingual `small` model; `.en` models
+can't hear Chinese), yes/no work in Chinese (好的 / 是的 / 没问题 confirm;
+不 / 不要 / 算了 / 取消 or a question such as 可以吗？ do not), and the page
+show in Chinese. History screens stay in English.
+
+One-time setup on the PC (PowerShell, in the project folder):
+
+1. **A Google OAuth client for the web** (your `credentials.json` is a
+   Desktop client, which only allows localhost): console.cloud.google.com ->
+   your project -> APIs & Services -> Credentials -> Create credentials ->
+   OAuth client ID -> **Web application**. Authorized redirect URI:
+   `https://<pc-name>.<tailnet>.ts.net:8443/google/callback`. Download the
+   JSON as `data/mom/google_client.json`. On the OAuth consent screen ->
+   Audience, add her Gmail address as a test user.
+2. **Secrets**: create `.env.mom` with `ANTHROPIC_API_KEY=...` (your key is
+   fine; `.env.mom` is gitignored). Her `WEB_TOKEN` is added to it on the
+   first start.
+3. **Voice**: `python -m assistant --download-voice zh_CN-huayan-medium`
+   (Piper, into `voices/`). Without it the phone's own Chinese voice reads
+   the replies. The Whisper `small` model downloads on the first request.
+4. **Address**: create `config.mom.local.toml` (gitignored):
+   ```toml
+   [webapp]
+   public_origin = "https://<pc-name>.<tailnet>.ts.net:8443"
+   ```
+5. **Run it** and publish it on your tailnet:
+   ```powershell
+   python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
+   tailscale serve --bg --https=8443 http://127.0.0.1:8766
+   ```
+   Share the PC with her (Tailscale admin console -> Machines -> the PC ->
+   Share), so her phone's Tailscale can open that address and nothing else.
+6. **On her phone**: open the address, enter the token once, Share -> Add to
+   Home Screen. Then ⚙ -> **连接 Google 账户**, sign in, allow Calendar and
+   Gmail. Google shows "Google hasn't verified this app" while the consent
+   screen is in Testing: tap Advanced -> continue. She lands back in the app
+   and can ask "我明天有什么安排？".
+
+While the consent screen is in Testing, Google expires the sign-in after 7
+days; she taps the button again (it then reads 重新连接 Google 账户). To
+disconnect her account, delete `data/mom/google_token.json`, restart, and
+remove the app at myaccount.google.com -> Security -> Third-party access.
+`[webapp] google_connect` and `public_origin` are off and empty in your own
+`config.toml`, so your instance is unchanged.
+
 ## Run it in the cloud (Render)
 
 The phone web app can also run 24/7 on a small paid server at

@@ -99,3 +99,32 @@ def test_first_piece_ends_at_a_clause_for_faster_first_audio():
 ])
 def test_unspeakable_bits_are_stripped(text, expected):
     assert split_sentences(text) == expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("好的。明天下午三点半有个会！要我提醒你吗？",
+     ["好的。", "明天下午三点半有个会！", "要我提醒你吗？"]),
+    ("他说「好的。」然后走了；我们也走吧", ["他说「好的。」", "然后走了；", "我们也走吧"]),
+    ("真的？！太好了", ["真的？！", "太好了"]),
+    ("好!明天见", ["好!", "明天见"]),
+])
+def test_split_chinese(text, expected):
+    assert split_sentences(text) == expected
+
+
+def test_chinese_waits_for_a_closing_quote_and_cuts_long_runs():
+    splitter = SentenceSplitter()
+    assert splitter.feed("他说「好。") == []  # 」 may still come
+    assert splitter.feed("」好") == ["他说「好。」"]
+    long = "，".join(["今天的天气非常好"] * 40)  # no sentence end at all
+    pieces = SentenceSplitter(max_chars=60, first_clause_words=0).feed(long)
+    assert pieces and all(p.endswith("，") and len(p) <= 60 for p in pieces)
+
+
+def test_chinese_first_clause_comes_early():
+    splitter = SentenceSplitter()
+    out = []
+    for ch in "好的，我帮你查一下明天的日历，稍等。":
+        out += splitter.feed(ch)
+    assert out == ["好的，我帮你查一下明天的日历，"]  # "好的，" alone is too short
+    assert splitter.flush() == ["稍等。"]

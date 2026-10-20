@@ -24,7 +24,11 @@ END_IF_CAPITAL = {
     "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
     "mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun",
 }
-_CLOSERS = "\"')]}”’"
+_CLOSERS = "\"')]}”’」』）"
+# Chinese full-width ends: a sentence ends there without a following space.
+_ZH_ENDS = "。！？；"
+_CJK = re.compile(r"[\u3400-\u9fff]")
+_ZH_CLAUSE = re.compile(r"[，、；]")
 # ", " or "; " or a spaced dash, followed by a word (not "3,000" or "1, 2")
 _CLAUSE_BREAK = re.compile(r"(?<!\d)[,;](?= +[A-Za-z])|(?<= ) ?[-–—](?= +[A-Za-z])")
 _TOKEN_BEFORE = re.compile(r"([A-Za-z][A-Za-z.]*)$")
@@ -77,6 +81,15 @@ class SentenceSplitter:
             ch = text[i]
             if ch == "\n":
                 return i + 1
+            if ch in _ZH_ENDS:
+                end = i + 1
+                while end < len(text) and text[end] in _ZH_ENDS + "!?…":
+                    end += 1  # "？！"
+                while end < len(text) and text[end] in _CLOSERS:
+                    end += 1
+                if end >= len(text):
+                    return None  # a closing quote may still come
+                return end
             if ch in ".!?…":
                 j = i
                 while j + 1 < len(text) and text[j + 1] in ".!?…":
@@ -87,6 +100,8 @@ class SentenceSplitter:
                 if end >= len(text):
                     return None  # need the next character to decide
                 if not text[end].isspace():
+                    if text[j] in "!?" and _CJK.match(text[end]):
+                        return end  # "好!明天见" (half-width in Chinese)
                     i = end  # "3.5", "example.com", "U.S."
                     continue
                 k = end
@@ -125,6 +140,9 @@ class SentenceSplitter:
         for m in _CLAUSE_BREAK.finditer(self.buffer):
             if len(self.buffer[:m.start()].split()) >= self.first_clause_words:
                 return m.end()
+        for m in _ZH_CLAUSE.finditer(self.buffer):  # Chinese: ~2 characters a word
+            if len(_CJK.findall(self.buffer[:m.start()])) >= 2 * self.first_clause_words:
+                return m.end()
         return None
 
     def _find_forced_cut(self) -> int | None:
@@ -133,7 +151,7 @@ class SentenceSplitter:
             return None
         window = text[: self.max_chars]
         floor = self.max_chars // 3
-        for sep in (", ", "; ", " - ", " — ", ": "):
+        for sep in (", ", "; ", " - ", " — ", ": ", "，", "；", "、"):
             pos = window.rfind(sep)
             if pos >= floor:
                 return pos + len(sep)

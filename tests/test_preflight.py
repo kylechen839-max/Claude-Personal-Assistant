@@ -599,8 +599,9 @@ def test_audio_turn_needs_a_transcript():
 def test_error_replies_match_the_cli():
     """The canned failure sentences the checks look for are the ones the
     assistant actually says."""
-    source = (ROOT / "assistant" / "cli.py").read_text() + \
-        (ROOT / "assistant" / "chat.py").read_text()
+    # the English sentences live in i18n.py (beside their Chinese)
+    source = "".join((ROOT / "assistant" / name).read_text(encoding="utf-8")
+                     for name in ("cli.py", "chat.py", "i18n.py"))
     for reply in smoke.ERROR_REPLIES:
         assert reply in source, reply
 

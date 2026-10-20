@@ -47,6 +47,15 @@ def clear_settings_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def english_by_default(monkeypatch):
+    """i18n.LANG is process-wide (cli.main and webapp.serve set it): every
+    test starts in English and none leaks Chinese into the next."""
+    from assistant import i18n
+
+    monkeypatch.setattr(i18n, "LANG", "en")
+
+
 @pytest.fixture
 def fake_client():
     """A mocked anthropic.Anthropic() whose messages.create returns queued replies."""

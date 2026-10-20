@@ -1489,3 +1489,63 @@ screens are staged by setting the same attributes the JS sets (no mic).
   stdin, CLI error paths, reply status handling and de-duplication across
   restarts, inbox creation, registration, prompt. Not run against the real
   CLI or Notion from this sandbox.
+
+## Chinese MVP for a second user (`config.mom.toml`)
+
+- **A separate instance**: `python -m assistant --mode web --config
+  config.mom.toml --env-file .env.mom`. New `--env-file` flag (secrets and
+  the generated `WEB_TOKEN` go to that file); `config.mom.toml` turns off
+  Notion, memory, notes, lecture, tutor, dev team, failover, updates and the
+  PC browser tool, and keeps its own history, sessions, Google files
+  (`data/mom/`), port 8766 and `logs/mom.log`. `*.local.toml` and `.env.*`
+  are gitignored.
+- **Language** (`[assistant] language = "zh"`, new `assistant/i18n.py`):
+  a Chinese system prompt in the same voice style (`chat.SYSTEM_PROMPT_ZH`;
+  the English tool prompts say "the user" instead of Kyle, plus "always
+  reply in Simplified Chinese"); Whisper with `language="zh"` and a Mandarin
+  initial prompt (the multilingual `small` model); the assistant's own
+  sentences (goodbye, errors, "please say yes or no", decline, no answer,
+  Calendar and Gmail draft questions with Chinese dates) in Chinese; strict
+  Chinese yes/no (`cli.is_yes`, `voice_session.is_explicit_yes`: a yes word,
+  no 不/别/取消/算了/没, no question 吗/呢/？; 没问题 counts as yes; spoken
+  answers at most six characters) and 再见/拜拜 to end; sentence splitting on
+  。！？； without a following space, 」』） closers, Chinese commas for long
+  runs and the first clause.
+- **Phone page**: the server sends `<html lang="zh-CN">`; new
+  `web/i18n.js` translates the fixed English strings (text, placeholder,
+  aria-label, title, `confirm()`) at load and as app.js / voice.js change
+  them (MutationObserver), exact matches only. History screens stay
+  English. `sw.js` cache `hey-claude-shell-v5`, `/i18n.js` in the shell.
+- **Google from the phone** (`[webapp] google_connect`, `public_origin`,
+  new `assistant/google_web.py`): a menu button runs the OAuth web flow
+  (PKCE, offline access) in the phone's browser; the callback is
+  authenticated by a single-use, in-memory state (max 4, 10 min) because
+  the session cookie is SameSite=Strict; the token is written with
+  `write_private` and Calendar + Gmail (drafts only) are added to the
+  running app in one dict update. With `google_connect` on, Google tools
+  stay off until that token exists (no browser sign-in on the PC).
+  `cli.register_google` now holds the Calendar + Gmail registration.
+- Tests: new `tests/test_google_web.py` (7: 401 without a session, 403
+  cross-origin, consent URL with PKCE and the redirect URI, unknown state /
+  `error=` / replay give 400 and no file, good callback saves the token and
+  adds the tools to an existing session, bounded and expiring states, INFO
+  logs without code/state/token), `tests/test_i18n.py` (Chinese yes/no and
+  exit words, sentences, Calendar/Gmail questions, a Chinese voice
+  confirmation end to end, the no-answer status), and additions to
+  test_config_cli (config.mom.toml with Kyle's keys set: no Notion, no
+  memory, no Calendar before sign-in; `--env-file`; language reaches the web
+  app), test_sentences, test_stt, test_chat, test_webapp, test_docs and
+  `tests/js/i18n.test.mjs` (7, node:vm). Each regression test was checked
+  to fail with its source change reverted. The page and the button were
+  also checked once in headless Chromium against a local server (Chinese
+  labels under the CSP, the button opening Google's consent URL with a
+  code challenge); not on a real phone, and no real Google sign-in.
+- Counts: pytest 1498 -> 1573 passed, 46 skipped (unchanged; the same
+  model-download and live-service tests). JS: i18n 7 new (dashboard 111,
+  router 33 unchanged).
+- Known gaps: the push-to-talk page's spoken confirmation suffix in phone-
+  voice mode stays English ("Please say yes or no", app.js); conversation
+  titles and summaries may come out in English (the title prompt is English); Chinese
+  speech recognition and the huayan voice are untested on real audio here
+  (huggingface.co is blocked in the sandbox).
+
