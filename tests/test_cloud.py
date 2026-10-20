@@ -806,3 +806,82 @@ def test_wrong_invites_lock_out_that_address(family_cloud, slept):
     assert accept(client, "x", ip="198.51.100.7").status_code == 401  # others: as usual
     # the owner's WEB_TOKEN still signs in from the locked-out address
     assert login(client).status_code == 200
+
+
+# --- family members' own Google and speech (family invites, piece B) -----------------
+
+def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_path,
+                                                            monkeypatch):
+    """Google's redirect back carries no session cookie (SameSite=Strict):
+    the guard lets it reach google_web.py, which refuses an unknown state
+    (400, nothing written) instead of the guard's 401; and build_app wires
+    family members' Google in on the server profile."""
+    from assistant.family import Family
+
+    cfg = load_config(None, None, profile="server")
+    cfg["webapp"].update(sessions_file="", public_origin="https://hey-claude.example.com")
+    cfg["family"]["dir"] = str(tmp_path / "users")
+    monkeypatch.setenv("GOOGLE_WEB_CLIENT_JSON", json.dumps({"web": {
+        "client_id": "c", "client_secret": "s", "auth_uri": "https://a",
+        "token_uri": "https://t"}}))
+    fam = Family(cfg, client=fake_client)
+    assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
+                                                           model="m", tools=reg),
+                                    FakeTranscriber(), PrintTTS(), family=fam)
+    guard = cloud.build_app(cfg, assistant, TOKEN)
+    client = TestClient(at(PROXY, guard), base_url="https://testserver")
+    r = client.get("/google/callback", params={"state": "made-up", "code": "c"},
+                   headers=via_proxy(PUBLIC), follow_redirects=False)
+    assert r.status_code == 400 and "Google" in r.text
+    assert not (tmp_path / "users").exists() or not any((tmp_path / "users").iterdir())
+    # the rest still needs signing in
+    assert client.get("/api/google/status", headers=via_proxy(PUBLIC)).status_code == 401
+    _, invite = fam.invite("Mom", "zh")
+    assert accept(client, invite).status_code == 200
+    status = client.get("/api/google/status", headers=via_proxy(PUBLIC)).json()
+    assert status == {"enabled": True, "connected": False, "disconnect": True}
+    fam.close()
+
+
+def _render_yaml() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent / "render.yaml").read_text(encoding="utf-8")
+
+
+def _dockerfile() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_render_and_docker_are_ready_for_family():
+    import re
+    from pathlib import PurePosixPath
+
+    from assistant.config import ENV_OVERRIDES, SERVER_PROFILE
+    from assistant.tools.google_auth import WEB_CLIENT_ENV
+
+    render, docker = _render_yaml(), _dockerfile()
+    # family accounts live on the persistent disk
+    mount = re.search(r"mountPath:\s*(\S+)", render).group(1)
+    assert PurePosixPath(SERVER_PROFILE["family"]["dir"]).is_relative_to(mount)
+    assert SERVER_PROFILE["family"]["enabled"] is True
+    # the settings family Google and Chinese speech need are offered
+    keys = set(re.findall(r"-\s*key:\s*(\w+)", render))
+    assert {"PUBLIC_ORIGIN", WEB_CLIENT_ENV, "ZH_WHISPER_MODEL"} <= keys
+    assert ENV_OVERRIDES["PUBLIC_ORIGIN"] == ("webapp", "public_origin")
+    assert ENV_OVERRIDES["ZH_WHISPER_MODEL"] == ("family", "zh_stt_model")
+    assert re.search(rf"key: {WEB_CLIENT_ENV}\s*(#.*)?\n\s*sync: false", render)  # a secret
+    zh_model = re.search(r"key: ZH_WHISPER_MODEL.*\n\s*value: (\S+)", render).group(1)
+    # the image bakes in the Chinese Whisper model and voice the config names
+    # (HF_HUB_OFFLINE=1: nothing can be fetched at run time)
+    assert "HF_HUB_OFFLINE=1" in docker
+    assert re.search(rf"ARG ZH_WHISPER_MODEL={zh_model}\n", docker)
+    assert zh_model == DEFAULTS["family"]["zh_stt_model"]
+    voice = PurePosixPath(DEFAULTS["family"]["zh_piper_voice"])
+    assert re.search(rf"ARG ZH_PIPER_VOICE={voice.stem}\n", docker)
+    assert f"/app/{voice.parent}" in docker  # WORKDIR /app + voices/
+    assert re.search(r"ARG FAMILY_ZH=1\n", docker)
+    assert '"$ZH_PIPER_VOICE_URL" "$ZH_PIPER_VOICE"' in docker
+    assert "$ZH_WHISPER_MODEL" in docker

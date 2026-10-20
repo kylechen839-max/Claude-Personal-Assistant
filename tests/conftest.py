@@ -38,7 +38,11 @@ def make_response(*blocks, stop_reason="end_turn"):
 def _env_vars() -> tuple[str, ...]:
     from assistant.config import ENV_OVERRIDES
 
-    return (*ENV_OVERRIDES, "WEB_TOKEN")
+    from assistant.tools.google_auth import CLIENT_ENV, TOKEN_ENV, WEB_CLIENT_ENV
+
+    # and Kyle's Google sign-in (the server's), which family tests must not see
+    return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID", TOKEN_ENV, CLIENT_ENV,
+            WEB_CLIENT_ENV)
 
 
 @pytest.fixture(autouse=True)
@@ -149,3 +153,21 @@ def restore_root_logging():
     for h in handlers:
         root.addHandler(h)
     root.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def _logs_in_tmp(tmp_path, monkeypatch):
+    """setup_logging() (e.g. through cli.main) writes into tmp_path, never
+    the real logs/assistant.log: on Kyle's PC a test run once left fake
+    ERROR lines ("boom ...") in the running app's log."""
+    from assistant import config as config_mod
+
+    real = config_mod.setup_logging
+
+    def setup_logging(config):
+        log = config.get("logging", {})
+        if log.get("file"):
+            config = {**config, "logging": {**log, "file": str(
+                tmp_path / "logs" / Path(log["file"]).name)}}
+        return real(config)
+    monkeypatch.setattr(config_mod, "setup_logging", setup_logging)

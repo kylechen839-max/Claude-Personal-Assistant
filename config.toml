@@ -27,6 +27,13 @@ voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" 
 # ElevenLabs: only with engine = "elevenlabs" and ELEVENLABS_API_KEY in .env.
 elevenlabs_voice = ""         # a voice ID from your ElevenLabs library; "" = Rachel
 elevenlabs_model = "eleven_flash_v2_5"
+# Phone app voice picker (menu > Reply voice): each person (you, and each
+# family member) picks the voice their replies are read in, from the voices
+# this server has. The default above is used until they pick one.
+picker = true
+voices_dir = "voices"         # Piper voices found here are offered
+voice_file = "data/voice_choice.json"  # your pick; a family member's is in their own folder
+family_paid_voices = false    # true = family members may pick ElevenLabs voices (your bill)
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
@@ -43,6 +50,11 @@ max_seconds = 15
 no_speech_timeout = 5
 follow_up_seconds = 5         # after a reply, keep listening this long without the wake word; 0 = off
 follow_up_chime = true        # soft blip when that window opens (only if chime = true)
+barge_in = "wake_word"        # stop a reply by talking over it: "wake_word" (say "Hey Claude";
+                              # works with speakers), "voice" (just talk; best with headphones
+                              # or an echo-cancelling speakerphone) or "off" (or false)
+barge_in_ms = 400             # "voice": talk this long over a reply to stop it
+barge_in_echo_ratio = 2.5     # "voice": how much louder than the reply's own echo you must be
 mic_device = ""               # "" = default mic
 
 [calendar]
@@ -81,12 +93,16 @@ search_namespaces = "*"       # "*" = read all namespaces, or a list like ["proj
 top_k = 4
 min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
+weekly_review = false         # true: once a week, the first conversation offers to review this week's notes
+review_state_file = "data/memory_review.json"  # when the last weekly review offer was made
 
 [webapp]                      # python -m assistant --mode web (phone page)
 host = "127.0.0.1"            # keep this: reach it through `tailscale serve`
 port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
+max_attachment_mb = 10        # per PDF/text file attached with "+" (photos: [tutor] max_image_mb;
+                              # the whole message must fit in max_upload_mb, 4 on the cloud server)
 max_audio_seconds = 60        # longest recording accepted
 sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
@@ -95,13 +111,16 @@ google_connect = false        # true: a "connect Google" button in the phone app
                               # Calendar and Gmail (needs a Web application OAuth client)
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
+                              # and family members' Google (PUBLIC_ORIGIN overrides it)
 
 [voice]                       # hands-free voice conversation in the phone web app
 vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)
 silence_ms = 700              # this long a pause ends your turn
 min_utterance_ms = 300        # shorter sounds are ignored
 max_utterance_s = 30
+barge_in = "voice"            # talk over a reply to stop it; "off" if it cuts itself off (car speakers)
 barge_in_ms = 250             # talk this long over a reply to interrupt it
+follow_up_seconds = 5         # after a reply: soft cue + "Still listening…" this long; 0 = off
 vad_threshold = 0.5           # raise (e.g. 0.7) if it hears itself on speaker
 idle_timeout = 120            # seconds of quiet before the conversation ends
 max_session_minutes = 30
@@ -164,13 +183,34 @@ hub_sessions = []             # coordinator session ids for the hub's windows (a
 poll_seconds = 4              # the hub reads the Notion inbox at most this often
 hub_state_file = "data/devhub.json"  # the hub's transcript and pending replies
 
+[home_assistant]              # smart home by voice (README "Smart home"); owner only, never family
+enabled = false               # needs a Home Assistant install: HA_URL and HA_TOKEN in .env
+url = ""                      # HA_URL in .env overrides it, e.g. "http://homeassistant.local:8123"
+domains = ["light", "switch", "fan", "climate", "cover", "media_player", "sensor", "lock"]  # the only kinds it may touch
+scripts = []                  # script./scene./automation. entity ids it may run, e.g. ["scene.movie_time"]
+secure_entities = []          # more entity ids that always need a spoken yes (e.g. a garage relay)
+cache_seconds = 30            # how long the device list is kept
+timeout = 10                  # seconds per request
+
+[spotify]                     # "play my study playlist", "pause", "skip" (Spotify Premium; README "Spotify")
+enabled = false               # needs SPOTIFY_CLIENT_ID in .env and a one-time sign-in:
+                              # python -m assistant.tools.spotify (or "Connect Spotify" in the phone app)
+token = "data/spotify_token.json"  # the sign-in (private file); delete it to disconnect
+redirect_uri = "http://127.0.0.1:8888/callback"  # for the sign-in command; list it in your Spotify app
+pause_while_listening = true  # pause Spotify on this computer at the wake word, resume afterwards
+local_device = ""             # this computer's name in Spotify's device list; "" = its hostname
+volume_step = 15              # "turn it up" / "turn it down" by this many percent
+timeout = 10                  # seconds per Spotify request
+
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on
 dir = "data/users"            # users.json + one history folder per person (Render: /data/users)
 max_users = 10                # people you can invite
 invite_days = 30              # an invite link works this many days, and only once
-zh_stt_model = "small"        # Whisper model for Chinese-speaking family members
-zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice
+google = true                 # they may connect their own Google from their phone (Calendar, Gmail drafts)
+google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
+zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
+zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
 
 [logging]
 file = "logs/assistant.log"

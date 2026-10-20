@@ -209,7 +209,7 @@ def test_config_local_toml_is_gitignored():
     assert "config.local.toml" in (root / ".gitignore").read_text().splitlines()
 
 
-def test_mom_config_turns_every_connection_off(monkeypatch):
+def test_mom_config_turns_every_connection_off(monkeypatch, tmp_path):
     """config.mom.toml: a separate Chinese instance with none of Kyle's
     connections, even when his keys are in the environment."""
     monkeypatch.setenv("NOTION_TOKEN", "secret")
@@ -224,6 +224,9 @@ def test_mom_config_turns_every_connection_off(monkeypatch):
                  cfg["history"]["path"], cfg["webapp"]["sessions_file"]):
         assert path.startswith("data/mom/"), path
     assert cfg["logging"]["file"] == "logs/mom.log"
+    # On a PC where she already connected Google, data/mom/google_token.json
+    # exists; point at a token that doesn't, for the "not signed in yet" case.
+    cfg["calendar"]["token"] = str(tmp_path / "google_token.json")
     assert cli.build_memory(cfg, lambda *_: None) is None
     names = {s["name"] for s in cli.build_tools(cfg, lambda *_: None).schemas()}
     assert not names & {"list_assignments", "update_assignment_status",
@@ -345,3 +348,14 @@ def test_separate_instance_starts_with_its_own_env_file(tmp_path, monkeypatch):
     assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.mom"]) == 0
     monkeypatch.setenv("NOTION_TOKEN", "kyles")  # Kyle's own instance: unchanged
     assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+
+
+def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):
+    """conftest's _logs_in_tmp: setup_logging as cli.main reaches it (the
+    module attribute, default config, run from the repo) writes under
+    tmp_path, so a test run can't put fake ERROR lines in the running
+    app's logs/assistant.log."""
+    from assistant import config as config_mod
+
+    path = config_mod.setup_logging(load_config(None, None))
+    assert path is not None and tmp_path in path.parents

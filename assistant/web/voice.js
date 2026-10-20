@@ -19,6 +19,7 @@
 
   const LABELS = { connecting: "Connecting…", listening: "Listening", thinking: "Thinking…",
     speaking: "Speaking", paused: "Paused", ended: "Ended" };
+  const FOLLOW_UP_LABEL = "Still listening…"; // the follow-up window after a reply
   const reducedMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)");
 
   let ctx = null; // one AudioContext for capture and playback (unlocked by the tap)
@@ -169,6 +170,16 @@
     if (state === "thinking" || state === "listening") ui.resume.hidden = true;
   }
 
+  // After a reply: a soft cue (the same low note as the PC's follow-up
+  // blip) and "Still listening…" with the mic meter lit, for
+  // settings.follow_up_ms; silence just puts the plain label back.
+  function followUp(open) {
+    ui.view.classList.toggle("follow-up", open);
+    const state = ui.view.dataset.state;
+    if (state === "listening") ui.state.textContent = open ? FOLLOW_UP_LABEL : LABELS.listening;
+    if (open) earcons.play("thinking");
+  }
+
   function caption(who, text, append) {
     if (who === "user") {
       ui.user.textContent = text;
@@ -282,6 +293,12 @@
 
   function onFrame(frame) {
     if (!controller || !controller.live) return;
+    if (settings.barge_in === false && controller.state === "speaking") {
+      // barge-in off: the mic only hears the reply now; start afresh after it
+      endpointer.reset();
+      endpointer.prePad = [];
+      return;
+    }
     // The device can't keep up with the model: judge this frame by loudness
     // instead of dropping it, so pauses are still timed in real time.
     const quick = backlog > 8;
@@ -449,9 +466,9 @@
         setState, caption, sendUtterance,
         send: (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); },
         stopPlayback: () => playback.stop(),
-        mark,
+        mark, followUp,
         ended: (reason) => finish(reason === "idle" ? "Ended after a quiet stretch." : ""),
-      });
+      }, { bargeIn: settings.barge_in !== false, followUpMs: settings.follow_up_ms || 0 });
       endpointer = new VC.Endpointer({ threshold: settings.vad_threshold, silenceMs: settings.silence_ms,
         minUtteranceMs: settings.min_utterance_ms, maxUtteranceMs: settings.max_utterance_ms,
         confirmMs: settings.barge_in_ms });
@@ -511,6 +528,7 @@
     if (ctx) ctx.onstatechange = null;
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
     controller = null;
+    ui.view.classList.remove("follow-up");
     document.body.classList.remove("voice-open");
     ui.view.hidden = true;
     ui.resume.hidden = true;

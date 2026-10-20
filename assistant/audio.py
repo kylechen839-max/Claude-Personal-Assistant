@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import wave
 from pathlib import Path
 
@@ -101,8 +102,43 @@ def mic_that_opens(value, sd=None) -> dict:
     return dict(sd.query_devices(device, "input"))
 
 
+# Barge-in (wakeword.BargeInSpeaker): another thread can cut playback short.
+_stop = threading.Event()
+
+
+def stop_playback() -> None:
+    """Stop what play() is playing now, and play nothing more until
+    allow_playback() (the rest of an interrupted reply stays silent)."""
+    _stop.set()
+
+
+def allow_playback() -> None:
+    _stop.clear()
+
+
+def playback_stopped() -> bool:
+    return _stop.is_set()
+
+
+def output_latency() -> float | None:
+    """Output latency (s) of the stream play() used last, None if unknown."""
+    try:
+        import sounddevice as sd
+
+        latency = sd.get_stream().latency
+        return float(latency[1] if isinstance(latency, (tuple, list)) else latency)
+    except Exception:  # nothing played yet, or no sounddevice
+        return None
+
+
 def play(samples: np.ndarray, sr: int = SAMPLE_RATE) -> None:
+    """Play and wait until done, or until stop_playback() is called."""
     import sounddevice as sd
 
+    if _stop.is_set():
+        return
     sd.play(samples, sr)
-    sd.wait()
+    if _stop.wait(len(samples) / sr):  # talked over: stop at once
+        sd.stop()
+        return
+    sd.wait()  # the output latency's last few ms

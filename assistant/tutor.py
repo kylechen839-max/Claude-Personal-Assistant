@@ -43,26 +43,29 @@ class ImageRejected(ValueError):
 
 
 def prepare_image(data: bytes, declared_type: str | None = None,
-                  max_bytes: int = 8_000_000, max_side: int = MAX_SIDE
-                  ) -> tuple[bytes, str]:
+                  max_bytes: int = 8_000_000, max_side: int = MAX_SIDE,
+                  allowed: dict[str, str] | None = None) -> tuple[bytes, str]:
     """Validate an uploaded photo and return (clean bytes, media type).
 
     The image is decoded, turned upright from its EXIF orientation, shrunk
-    to `max_side`, and re-encoded without any metadata."""
+    to `max_side`, and re-encoded without any metadata. `allowed` (media
+    type -> Pillow format) defaults to ALLOWED_TYPES; a GIF, if allowed
+    (chat attachments), becomes a PNG of its first frame."""
     from PIL import Image, ImageOps
 
+    allowed = ALLOWED_TYPES if allowed is None else allowed
     if not data:
         raise ImageRejected("The image is empty")
     if len(data) > max_bytes:
         raise ImageRejected(f"The image is over {max_bytes // 1_000_000} MB")
     declared = (declared_type or "").split(";")[0].strip().lower()
-    if declared and declared not in ALLOWED_TYPES:
+    if declared and declared not in allowed:
         raise ImageRejected("Only JPEG, PNG or WebP photos are accepted")
     try:
         with Image.open(io.BytesIO(data)) as probe:
             fmt = probe.format
             width, height = probe.size
-        if fmt not in ALLOWED_TYPES.values():
+        if fmt not in allowed.values():
             raise ImageRejected("Only JPEG, PNG or WebP photos are accepted")
         if width * height > MAX_PIXELS:
             raise ImageRejected("The image has too many pixels")
@@ -73,7 +76,7 @@ def prepare_image(data: bytes, declared_type: str | None = None,
                 img.thumbnail((max_side, max_side), Image.LANCZOS)
             img.info.clear()  # no comment, ICC profile, text or EXIF carried over
             out = io.BytesIO()
-            if fmt == "PNG":  # screenshots stay sharp; no text chunks kept
+            if fmt in ("PNG", "GIF"):  # screenshots stay sharp; no text chunks kept
                 img.save(out, "PNG", optimize=True)
                 return out.getvalue(), "image/png"
             if img.mode not in ("RGB", "L"):

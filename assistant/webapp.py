@@ -21,9 +21,12 @@ per-address and global login lockouts, upload size/length limits, generic
 errors, strict headers, and an unauthenticated /healthz that says nothing.
 
 Reusable pieces (for other routes, e.g. a WebSocket voice mode):
-  WebAssistant.transcribe_upload(bytes) -> text
+  WebAssistant.transcribe_upload(bytes, language=None) -> text
   WebAssistant.chat_stream(session, text, cancel) -> iterator of text deltas
-  WebAssistant.synthesize(text) -> WAV bytes
+  WebAssistant.synthesize(text, session=None, language=None) -> WAV bytes
+  (in that person's picked voice, voice_picker.py, else their
+  language's voice, e.g. a Chinese-speaking family member's; None =
+  the server's)
   app.state.web.session_for(connection) -> Session | None (HTTP or WebSocket)
   app.state.web.cross_origin(connection) -> bool
   require_session (FastAPI dependency; 401, or close 1008 on a WebSocket)
@@ -39,6 +42,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import struct
 import tempfile
@@ -56,9 +60,19 @@ import numpy as np
 from starlette.requests import HTTPConnection
 
 from assistant import audio, i18n
+from assistant.attachments import MAX_ATTACHMENTS
+from assistant.chat import is_user_turn
 from assistant.tools import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+# A turn's form: the recording plus attachments; one extra so "too many"
+# gets its own message (attachments.prepare_all)
+MAX_FORM_FILES = 1 + MAX_ATTACHMENTS + 1
+# Claude's 400 reasons that mean a file is too long ("A maximum of 100 PDF
+# pages may be provided", "prompt is too long: 250000 tokens > 200000
+# maximum"); any other 400 on a turn with files: the file couldn't be read
+FILE_TOO_LONG = re.compile(r"\bpages?\b|too long|\btokens?\b", re.IGNORECASE)
 
 STATIC = Path(__file__).resolve().parent / "web"
 COOKIE = "hc_session"
@@ -631,6 +645,55 @@ class SessionTools(ToolRegistry):
         return super().dispatch(name, tool_input, untrusted=untrusted)
 
 
+class SpeechByLanguage:
+    """Whisper and the voice for sessions in another language than the
+    server's (a Chinese-speaking family member on an English server).
+    `models`: language -> (Whisper model, Piper voice). Each is made on
+    first use and cached per model and voice, not per session: everyone
+    speaking that language shares one."""
+
+    def __init__(self, server_language: str, models: dict,
+                 make_transcriber: Callable[[str, str], object],
+                 make_tts: Callable[[str], object]):
+        self.language = i18n.normalize(server_language)
+        self.models = {i18n.normalize(k): v for k, v in models.items()}
+        self.make_transcriber = make_transcriber  # (model, language)
+        self.make_tts = make_tts                  # (voice)
+        self._transcribers: dict[tuple, object] = {}
+        self._voices: dict[str, object] = {}
+        self.lock = threading.Lock()
+
+    def _spec(self, language: str | None):
+        lang = i18n.normalize(language) if language else self.language
+        return None if lang == self.language else self.models.get(lang)
+
+    def transcriber(self, language: str | None):
+        """The Transcriber for `language`; None = the server's own."""
+        spec = self._spec(language)
+        if spec is None:
+            return None
+        key = (spec[0], i18n.normalize(language))
+        with self.lock:
+            found = self._transcribers.get(key)
+            if found is None:
+                log.info("Speech: Whisper %s for %s sessions", *key)
+                found = self._transcribers[key] = self.make_transcriber(*key)
+        return found
+
+    def tts(self, language: str | None):
+        """The voice for `language`; None = the server's own."""
+        spec = self._spec(language)
+        if spec is None:
+            return None
+        with self.lock:
+            found = self._voices.get(spec[1])
+            if found is None:
+                log.info("Speech: voice %s for %s sessions", spec[1],
+                         i18n.normalize(language))
+                found = self._voices[spec[1]] = self.make_tts(spec[1])
+        return found
+
+
 class WebAssistant:
     """Everything the HTTP layer needs, without any HTTP (easy to test)."""
 
@@ -638,16 +701,25 @@ class WebAssistant:
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
                  max_sessions: int = 20, clock=time.monotonic,
-                 history=None, memory=None, family=None):
+                 history=None, memory=None, family=None, memory_review=None,
+                 speech: SpeechByLanguage | None = None):
         self.chat_factory = chat_factory
         self.history = history  # a HistoryStore (conversation history) or None
         self.memory = memory    # PineconeMemory, for semantic search and deletes
+        # memory_review.MemoryReview (the Memory screen); made from `memory`
+        # on first use when not given
+        self.memory_review = memory_review
         self.family = family    # family.Family (invited people), or None
         # sid -> family user id or None (owner); create_app sets it to the
         # session store's user()
         self.user_of: Callable[[str], str | None] = lambda sid: None
         self.transcriber = transcriber
         self.tts = tts
+        # other languages' Whisper and voice (family members), or None
+        self.speech = speech
+        # voice_picker.VoicePicker (each person's own reply voice), or None:
+        # everyone hears `tts`
+        self.voices = None
         self.tools = tools or ToolRegistry()
         self.conversation_timeout = conversation_timeout
         self.confirm_timeout = confirm_timeout
@@ -813,8 +885,10 @@ class WebAssistant:
 
     # turns
     def start_turn(self, s: Session, text: str | None = None,
-                   recording: np.ndarray | None = None) -> bool:
+                   recording: np.ndarray | None = None,
+                   attachments: list[dict] | None = None) -> bool:
         """Start a turn in the background. False if one is already running.
+        `attachments`: content blocks of files sent with it (attachments.py).
 
         Waits briefly for the lock: a turn puts "done" just before releasing
         it, so a page that starts the next turn right away isn't refused."""
@@ -829,34 +903,42 @@ class WebAssistant:
             if not s.busy.acquire(blocking=False):
                 return False
         s.last_active = self.clock()
-        s.thread = threading.Thread(target=self._run_turn, args=(s, text, recording),
+        s.thread = threading.Thread(target=self._run_turn,
+                                    args=(s, text, recording, attachments),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
         s.thread.start()
         return True
 
-    def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit, loggable_reply
-
+    def _run_turn(self, s: Session, text, recording, attachments=None) -> None:
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
+        with i18n.using(s.language):  # its sentences and tool questions
+            self._turn_body(s, text, recording, attachments)
+
+    def _turn_body(self, s: Session, text, recording, attachments=None) -> None:
+        from assistant.cli import get_reply, is_exit, loggable_reply
+
         try:
             if recording is not None:
-                text = self.transcribe(recording)
+                text = self.transcribe(recording, s.language)
                 s.events.put({"type": "transcript", "text": text})
                 log.info("Web heard %d chars", len(text))
                 log.debug("Web heard: %r", text)
             text = (text or "").strip()
-            if not text:
+            if not text and not attachments:
                 s.events.put({"type": "error", "message": i18n.t("not_caught")})
                 return
-            if is_exit(text):
+            if is_exit(text) and not attachments:
                 s.chat.end_conversation()
                 self._reply(s, i18n.t("goodbye"), ended=True)
                 return
-            reply = get_reply(  # it logs errors itself
-                s.chat, text, output_fn=lambda m: None,
-                on_text=lambda d: s.events.put({"type": "delta", "text": d}))
+            on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
+            if attachments:
+                reply = self._ask_with_files(s, text, attachments, on_text)
+            else:
+                reply = get_reply(  # it logs errors itself
+                    s.chat, text, output_fn=lambda m: None, on_text=on_text)
             log.info("Web replied %d chars", len(reply))
             log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
@@ -868,6 +950,29 @@ class WebAssistant:
             s.last_active = self.clock()
             s.events.put({"type": "done"})  # before release: see start_turn
             s.busy.release()
+
+    @staticmethod
+    def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text) -> str:
+        """get_reply for a turn with files: Claude refusing the request gets
+        a sentence about the file instead of the generic API error, "too
+        long" when its reason is about length (a PDF over 100 pages, a file
+        over the context window), else "couldn't read" (a protected or
+        broken PDF). ask() has already rolled the turn back, so Kyle can
+        retry without the file."""
+        import anthropic
+
+        from assistant.cli import friendly_error
+
+        try:
+            return s.chat.ask(text, on_text=on_text, attachments=attachments)
+        except anthropic.BadRequestError as e:
+            log.warning("Claude refused a turn with %d attachment(s) (HTTP %s)",
+                        len(attachments), e.status_code)
+            log.debug("Claude's reason: %s", e)
+            too_long = FILE_TOO_LONG.search(str(getattr(e, "message", "") or e))
+            return i18n.t("file_too_long" if too_long else "file_unreadable")
+        except Exception as e:  # noqa: BLE001 - as get_reply
+            return friendly_error(e, text, lambda m: None)
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
@@ -884,7 +989,7 @@ class WebAssistant:
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            s.emit({"type": "status", "text": i18n.t("no_answer")})
+            s.emit({"type": "status", "text": i18n.t("no_answer", s.language)})
         return answered and pending.answer
 
     def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
@@ -944,8 +1049,9 @@ class WebAssistant:
 
         def run():
             try:
-                reply = get_reply(s.chat, text, output_fn=lambda m: None,
-                                  on_text=on_text, cancel=cancel)
+                with i18n.using(s.language):  # error sentences, tool questions
+                    reply = get_reply(s.chat, text, output_fn=lambda m: None,
+                                      on_text=on_text, cancel=cancel)
                 if not streamed and reply:  # an error sentence
                     deltas.put(reply)
             finally:
@@ -966,17 +1072,59 @@ class WebAssistant:
                 yield item
 
     # speech
-    def transcribe(self, recording: np.ndarray) -> str:
-        with self._stt_lock:
-            return self.transcriber.transcribe(recording)
+    def transcribe(self, recording: np.ndarray, language: str | None = None) -> str:
+        """Whisper for `language` (a session's; None = the server's)."""
+        found = self.speech.transcriber(language) if self.speech and language else None
+        with self._stt_lock:  # one at a time, whichever model (CPU, memory)
+            return (found or self.transcriber).transcribe(recording)
 
-    def transcribe_upload(self, data: bytes, max_seconds: float | None = 60) -> str:
+    def transcribe_upload(self, data: bytes, max_seconds: float | None = 60,
+                          language: str | None = None) -> str:
         """A browser recording (any format) to text."""
-        return self.transcribe(decode_upload(data, max_seconds))
+        return self.transcribe(decode_upload(data, max_seconds), language)
 
-    def synthesize(self, text: str) -> bytes:
-        """`text` spoken by the configured TTS engine, as WAV bytes."""
-        return self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
+    def _language_tts(self, language: str | None):
+        """The voice for `language` (a family member's, e.g. Mandarin), else
+        the configured TTS engine."""
+        found = self.speech.tts(language) if self.speech and language else None
+        return found or self.tts
+
+    def tts_for(self, session: Session | None, language: str | None = None):
+        """The engine for this person's replies: the voice they picked if
+        this server has it, else their language's, else the configured one."""
+        if language is None and session is not None:
+            language = session.language
+        default = self._language_tts(language)
+        if self.voices is None or session is None:
+            return default
+        try:
+            engine = self.voices.engine_for(session.user, session.language)
+        except Exception:
+            log.exception("Choosing a voice failed; using the default")
+            return default
+        return default if engine is self.tts else engine
+
+    def render(self, engine, text: str) -> bytes:
+        """`text` spoken by `engine`, as WAV bytes (in the TTS thread)."""
+        return self._tts_pool.submit(render_wav, engine, text).result(timeout=120)
+
+    def synthesize(self, text: str, session: Session | None = None,
+                   language: str | None = None) -> bytes:
+        """`text` spoken in `session`'s voice (see tts_for), as WAV bytes.
+        Every voice renders on the one TTS thread. A picked voice that
+        fails falls back to the language's (or the configured) one."""
+        engine = self.tts_for(session, language)
+        default = self._language_tts(language if language is not None
+                                     else getattr(session, "language", None))
+        if engine is default:
+            return self.render(engine, text)
+        try:
+            return self.render(engine, text)
+        except Exception as e:
+            # dropped and skipped for a while (one log line), not retried
+            # on every sentence
+            self.voices.failed(engine, e)
+            return self.render(default, text)
 
     def remember(self, text: str, session: Session | None = None) -> str:
         """An id for /api/audio/<id>, which only `session` may fetch."""
@@ -999,8 +1147,8 @@ class WebAssistant:
                 return None
             if rid in self.audio_cache:
                 return self.audio_cache[rid]
-            text = entry[1]
-        data = self.synthesize(text)
+            text, language = entry[1], entry[2]
+        data = self.synthesize(text, session, language)
         with self.lock:
             self.audio_cache[rid] = data
             while len(self.audio_cache) > 10:
@@ -1200,10 +1348,12 @@ def page_tag(language: str = "en", google: bool = False) -> str:
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
                max_text_chars: int = 4000, trusted_proxy=0,
+               max_attachment_bytes: int = 10_000_000,
+               max_image_bytes: int = 8_000_000,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
-               language: str = "en", google=None, hub=None):
+               language: str = "en", google=None, hub=None, spotify=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
@@ -1211,7 +1361,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     routes are added before any wrapping, so they get the same auth.
     `language` "zh" serves the page as lang="zh-CN" (i18n.js translates it);
     `google`: a google_web.GoogleConnect for the "connect Google" button.
-    `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only)."""
+    `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only).
+    `max_attachment_bytes` / `max_image_bytes`: per file attached to a
+    turn (PDF or text / photo); the whole request stays under
+    `max_upload_bytes`.
+    `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner)."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1326,8 +1480,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return StreamingResponse(lines(), media_type="application/x-ndjson",
                                  headers={"X-Accel-Buffering": "no"})
 
-    async def read_upload(request: Request):
-        """(fields, audio bytes, error response) from JSON or a multipart form."""
+    async def read_upload(request: Request, files: list | None = None):
+        """(fields, audio bytes, error response) from JSON or a multipart form.
+        With a `files` list, the form's "attachment" files are added to it
+        as (name, bytes), up to one more than attachments.MAX_ATTACHMENTS."""
         ctype = request.headers.get("content-type", "")
         if ctype.startswith("application/json"):
             try:
@@ -1338,15 +1494,25 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             data = None
         elif ctype.startswith("multipart/form-data"):
             try:
-                form = await request.form(max_files=1, max_fields=5)
-            except Exception:
-                return None, None, error("bad request", 400)
+                form = await request.form(max_files=MAX_FORM_FILES, max_fields=5)
+            except Exception as e:  # noqa: BLE001 - any malformed body
+                # Starlette raises HTTPException(400, "Too many files. Maximum
+                # number of files is 6.") (MultiPartException outside an app)
+                reason = str(getattr(e, "detail", "") or e)
+                return None, None, error(
+                    f"bad request (attach at most {MAX_ATTACHMENTS} files)"
+                    if reason.startswith("Too many files") else "bad request", 400)
             upload = form.get("audio")
             data = None
             if upload is not None and hasattr(upload, "read"):
                 data = await upload.read(max_upload_bytes + 1)
                 if len(data) > max_upload_bytes:
                     return None, None, error("too large", 413)
+            attached = [f for f in form.getlist("attachment") if hasattr(f, "read")]
+            if attached and files is None:
+                return None, None, error("attachments go with a message", 400)
+            for f in attached[:MAX_ATTACHMENTS + 1]:
+                files.append((f.filename, await f.read(max_upload_bytes + 1)))
             fields = {k: v for k, v in form.items() if isinstance(v, str)}
         else:
             return None, None, error("send JSON or a form", 415)
@@ -1354,6 +1520,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if isinstance(value, str) and len(value) > max_text_chars:
                 return None, None, error("too large", 413)
         return fields, data, None
+
+    async def read_attachments(files: list):
+        """(content blocks, error response) for a turn's attached files."""
+        from assistant.attachments import (AttachmentRejected, describe,
+                                           prepare_all)
+        if not files:
+            return None, None
+        try:
+            prepared = await run_in_threadpool(
+                prepare_all, files, max_image_bytes=max_image_bytes,
+                max_file_bytes=max_attachment_bytes)
+        except AttachmentRejected as e:
+            log.info("Web turn: attachments refused (%d file(s))", len(files))
+            return None, error(str(e), 400)
+        # kinds and sizes only: names and contents stay out of the log
+        log.info("Web turn with %d attachment(s): %s", len(prepared),
+                 describe(prepared))
+        return [a.block() for a in prepared], None
 
     async def decode(data: bytes):
         try:
@@ -1372,7 +1556,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return error("not signed in", 401)
 
     def owner_of(request) -> Session | None:
-        """session_of for owner-only routes: 404 for a family member."""
+        """session_of for owner-only routes: 404 for a family member. Not
+        used in this file any more (the Google routes answer each person
+        about their own account), but owner-only routes added here use it
+        (never session_of: that would hand a family member Kyle's data)."""
         from fastapi import HTTPException
 
         s = session_of(request)
@@ -1380,15 +1567,18 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             raise HTTPException(404, "not found")
         return s
 
+    app.state.owner_of = owner_of  # for owner-only routes added by others (and tests)
+
     # --- public: the page, PWA files, health check ---
     @app.get("/")
     def index(request: Request):
         # in the language of whoever is signed in: a family member's own,
-        # else [assistant] language; only the owner gets "connect Google"
+        # else [assistant] language; "connect Google" for their own account
         sid = web.sid(request) if family is not None else None
         user = family.get(web.user_of(sid)) if sid else None
-        tag = (page_tag(user["language"]) if user is not None
-               else page_tag(language, google is not None))
+        tag = (page_tag(user["language"], google is not None
+                        and google.enabled(user["id"])) if user is not None
+               else page_tag(language, google is not None and bool(google.owner)))
         if not tag:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -1401,7 +1591,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("update-watch.js", "text/javascript"),
                         ("i18n.js", "text/javascript"),
                         ("backend-router.js", "text/javascript"),
-                        ("family.js", "text/javascript")):
+                        ("family.js", "text/javascript"),
+                        ("attachments.js", "text/javascript"),
+                        ("memory.js", "text/javascript"),
+                        ("spotify.js", "text/javascript"),
+                        ("voice-picker.js", "text/javascript"),
+                        ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1547,17 +1742,22 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 "history": assistant.history_of(s)[0] is not None,
                 "owner": s.user is None,
                 "family": s.user is None and family is not None,
+                "memory": s.user is None and getattr(assistant, "memory", None) is not None,
                 "language": s.language,
+                "voice_picker": getattr(assistant, "voices", None) is not None,
                 "conversation": s.chat.conversation_id,
-                "turns": sum(1 for m in s.chat.history
-                             if m["role"] == "user" and isinstance(m["content"], str))}
+                "turns": sum(1 for m in s.chat.history if is_user_turn(m))}
 
     @app.post("/api/turn")
     async def turn(request: Request):
         s = session_of(request)
         if s is None:
             return unauthorized()
-        fields, data, err = await read_upload(request)
+        files: list = []
+        fields, data, err = await read_upload(request, files)
+        if err:
+            return err
+        blocks, err = await read_attachments(files)
         if err:
             return err
         recording = None
@@ -1566,11 +1766,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if err:
                 return err
         text = fields.get("text")
-        if recording is None and not (isinstance(text, str) and text.strip()):
+        if recording is None and not blocks and not (
+                isinstance(text, str) and text.strip()):
             return error("send text or audio", 400)
         if not await run_in_threadpool(
                 assistant.start_turn, s,
-                text if recording is None else None, recording):
+                text if recording is None else None, recording, blocks):
             return error("still working on the last request", 409)
         return stream(s)
 
@@ -1593,7 +1794,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             recording, err = await decode(data)
             if err:
                 return err
-            answer = await run_in_threadpool(assistant.transcribe, recording)
+            answer = await run_in_threadpool(assistant.transcribe, recording,
+                                             s.language)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
@@ -1632,10 +1834,23 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import history_web
 
     history_web.register(app, assistant, session_of, error)
+    from assistant import memory_web
+
+    memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+
+    if getattr(assistant, "voices", None) is not None:
+        from assistant import voice_picker
+
+        voice_picker.register(app, assistant, error)  # everyone's own reply voice
     if google is not None:
         from assistant import google_web
 
-        google_web.register(app, google, owner_of, error)  # Kyle's Google only
+        # each person's own account: the owner's, or a family member's
+        google_web.register(app, google, session_of, error, web)
+    if spotify is not None:
+        from assistant import spotify_web
+
+        spotify_web.register(app, spotify, owner_of, error)  # Kyle's only
     if features is not None:
         from assistant import webfeatures
 
@@ -1747,7 +1962,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from assistant.chat import ClaudeChat
     from assistant.cli import (add_history_tools, add_memory_tools, build_memory,
-                               build_tools, register_notes)
+                               build_memory_review, build_tools,
+                               register_memory_review, register_notes)
     from assistant.history import Recorder, open_store
     import anthropic
 
@@ -1761,6 +1977,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
     memory = build_memory(config, output_fn)
     add_memory_tools(tools, memory)
     register_notes(tools, memory, config)
+    review = build_memory_review(config, memory)
+    register_memory_review(tools, review)
     store = open_store(config)  # conversation history (None if off)
     add_history_tools(tools, config, store, memory)
     client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1770,10 +1988,13 @@ def build_assistant(config: dict, tts_name: str | None = None,
         recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
                             client_fn=lambda: client,
                             title_model=config["history"]["title_model"])
-        return ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
+        chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                           max_history=a["max_history"], tools=registry,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
                           recorder=recorder, language=a["language"])
+        if review is not None:  # [memory] weekly_review (off by default)
+            chat.review_nudge = review.nudge
+        return chat
 
     family = None
     if config["family"]["enabled"]:
@@ -1782,14 +2003,42 @@ def build_assistant(config: dict, tts_name: str | None = None,
         family = Family(config, client=client)  # invited people (family.py)
     stt = config["stt"]
     tts_cfg = config["tts"]
-    return WebAssistant(chat_factory,
-                        Transcriber(stt["model"], stt["device"], stt["compute_type"],
-                                    language=a["language"]),
-                        make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
-                        tools=tools,
-                        conversation_timeout=a["conversation_timeout"],
-                        confirm_timeout=config["webapp"]["confirm_timeout"],
-                        history=store, memory=memory, family=family)
+    assistant = WebAssistant(chat_factory,
+                             Transcriber(stt["model"], stt["device"], stt["compute_type"],
+                                         language=a["language"]),
+                             make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
+                             tools=tools,
+                             conversation_timeout=a["conversation_timeout"],
+                             confirm_timeout=config["webapp"]["confirm_timeout"],
+                             history=store, memory=memory, family=family,
+                             memory_review=review,
+                             speech=family_speech(config) if family is not None else None)
+    if tts_cfg["picker"]:
+        from assistant.voice_picker import VoicePicker
+
+        assistant.voices = VoicePicker(config, assistant.tts, family)
+    return assistant
+
+
+def family_speech(config: dict) -> SpeechByLanguage:
+    """Chinese Whisper and voice for Chinese-speaking family members
+    ([family] zh_stt_model, zh_piper_voice); an English server's own
+    models stay for everyone else. No neural voice: "print", so the phone
+    reads the reply with its own Chinese voice rather than eSpeak's."""
+    from assistant.stt import Transcriber
+    from assistant.tts import make_tts
+
+    stt, f = config["stt"], config["family"]
+
+    def transcriber(model: str, language: str):
+        return Transcriber(model, stt["device"], stt["compute_type"], language=language)
+
+    def voice(path: str):
+        return make_tts("piper", piper_voice=path, fallback="print")
+
+    return SpeechByLanguage(config["assistant"]["language"],
+                            {"zh": (f["zh_stt_model"], f["zh_piper_voice"])},
+                            transcriber, voice)
 
 
 HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "
@@ -1820,6 +2069,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.attachments import limits as attachment_limits
     from assistant.failover.peers import settings_from_config
 
     failover = settings_from_config(config)
@@ -1830,11 +2080,14 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import devhub  # the PC hub: only on a loopback bind
 
     hub = devhub.Hub(config) if devhub.enabled(config, host) else None
-    google = None
-    if web["google_connect"]:
-        from assistant.google_web import GoogleConnect
+    from assistant import google_web  # the owner's and family members' Google
 
-        google = GoogleConnect(config, assistant.tools)
+    google = google_web.from_config(config, assistant)
+    spotify = None
+    if config["spotify"]["enabled"]:
+        from assistant.spotify_web import SpotifyConnect
+
+        spotify = SpotifyConnect(config, assistant.tools)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
@@ -1842,7 +2095,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub)
+                     hub=hub, spotify=spotify, **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")

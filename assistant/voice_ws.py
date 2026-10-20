@@ -128,7 +128,9 @@ def client_settings(v: dict) -> dict:
     return {"vad": v["vad"], "silence_ms": v["silence_ms"],
             "min_utterance_ms": v["min_utterance_ms"],
             "max_utterance_ms": int(v["max_utterance_s"] * 1000),
+            "barge_in": v["barge_in"] not in ("off", False),  # "voice" or "off"
             "barge_in_ms": v["barge_in_ms"], "vad_threshold": v["vad_threshold"],
+            "follow_up_ms": int(float(v["follow_up_seconds"]) * 1000),
             "idle_timeout": v["idle_timeout"], "debug_panel": v["debug_panel"]}
 
 
@@ -204,10 +206,16 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         def send(event: dict, data: bytes | None = None) -> None:
             loop.call_soon_threadsafe(out.put_nowait, (event, data))
 
+        language = getattr(session, "language", None)  # e.g. a family member's
+
+        def transcribe(samples):
+            return assistant.transcribe(samples, language)
+
         conv = VoiceConversation(
-            WebBackend(assistant, session), assistant.transcribe, assistant.synthesize,
+            WebBackend(assistant, session), transcribe,
+            lambda text: assistant.synthesize(text, session, language),  # their own voice
             send, clock=clock, idle_timeout=v["idle_timeout"],
-            max_session=v["max_session_minutes"] * 60)
+            max_session=v["max_session_minutes"] * 60, language=language)
         live[sid] = (conv, ws)
         if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")

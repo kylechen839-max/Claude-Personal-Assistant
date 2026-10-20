@@ -49,6 +49,30 @@ def test_registry_confirmation_gate():
     assert "cancelled" in reg2.dispatch("delete", {"id": "y"})[0]
 
 
+def test_a_confirm_prompt_may_need_no_question_and_sees_the_taint():
+    """confirm_prompt returning None runs the tool without asking (a light,
+    not a lock); the prompt can read UNTRUSTED_CONTEXT like the handler."""
+    from assistant.tools import UNTRUSTED_CONTEXT
+
+    seen = []
+
+    def prompt(inp):
+        seen.append(UNTRUSTED_CONTEXT.get())
+        return f"Unlock {inp['id']}?" if inp["id"] == "lock" else None
+
+    ran = []
+    asked = []
+    reg = ToolRegistry(confirm=lambda q: asked.append(q) or False)
+    reg.register(Tool("act", "a", {"type": "object"}, lambda id: ran.append(id) or "ok",
+                      confirm_prompt=prompt))
+    assert reg.dispatch("act", {"id": "light"}) == ("ok", False)
+    assert "cancelled" in reg.dispatch("act", {"id": "lock"})[0]
+    reg.dispatch("act", {"id": "light"}, untrusted=True)
+    assert ran == ["light", "light"] and asked == ["Unlock lock?"]
+    assert seen == [False, False, True]
+    assert UNTRUSTED_CONTEXT.get() is False  # reset afterwards
+
+
 def test_is_yes():
     for t in ["Yes.", "yeah go ahead", "Okay", "Go ahead", "yes please"]:
         assert is_yes(t), t

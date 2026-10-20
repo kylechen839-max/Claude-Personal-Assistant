@@ -3,6 +3,36 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Optional: a Chinese voice in the cloud image (decision).** The
+      reply-voice picker shows a Chinese-speaking family member only Chinese
+      voices, and the Render image bakes in just `en_US-lessac-medium`, so
+      on the cloud their list is "Default" alone until a `zh_CN` Piper voice
+      is added to the image (~60 MB more; Dockerfile `PIPER_VOICE_URL`
+      step). Nothing breaks without it.
+- [ ] **Family members' own Google on the cloud (~10 min, README "Invite
+      family" -> "Their own Google").** Only you can: (1) in
+      console.cloud.google.com, project `hey-claude-511904`, create an OAuth
+      client of type **Web application** with redirect URI
+      `https://hey-claude.onrender.com/google/callback` (your real Render
+      address); (2) in Render -> hey-claude -> Environment set
+      `PUBLIC_ORIGIN` to that address and paste the client's JSON into
+      `GOOGLE_WEB_CLIENT_JSON`; (3) make sure the consent screen is
+      **published** (Testing mode allows only listed test users, for 7
+      days). Until then invites work and the Connect button stays hidden.
+      Redeploy after merging so the image has the Chinese Whisper model and
+      voice (the build takes a few minutes longer).
+      `PUBLIC_ORIGIN` must be exactly the https address family members
+      open (scheme, host and port, no trailing path): the sign-in cookie
+      is set there and Google returns there, so a LAN `http://` address or
+      a second hostname (e.g. a custom domain next to `*.onrender.com`)
+      makes their sign-in fail.
+- [ ] **Measure Render memory with a Chinese-speaking family member.** The
+      +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
+      estimate, not measured (Hugging Face is blocked in the build
+      sandbox). After the first Chinese voice turn, check Render ->
+      hey-claude -> Metrics (memory peak) and note it in PROGRESS.md
+      ("Family invites, piece B"); if it nears 2 GB, set `FAMILY_ZH=0` or
+      a larger plan.
 - [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
       someone else").** Only you can: (1) create a **Web application** OAuth
       client in console.cloud.google.com with redirect URI
@@ -47,12 +77,19 @@ Only what is still open for Kyle. None of it blocks the code.
       check whether a project `strange-bird-511904-u7` exists (the
       auto-suggested ID before the project was named "Hey Claude"). If it
       exists and is empty, delete it. The real one is `hey-claude-511904`.
+- [ ] **Smart home (only if you have Home Assistant).** The tools are
+      built and stay off until you: (1) have a Home Assistant install on
+      your network; (2) create a long-lived access token (HA profile ->
+      Security); (3) put `HA_URL` and `HA_TOKEN` in `.env`; (4) set
+      `[home_assistant] enabled = true` in `config.local.toml`. Then
+      MANUAL_TEST.md "Smart home". No Home Assistant: nothing to do.
 - [ ] **Real-voice wake-word tuning.** The "Hey Claude" model was trained on
       synthetic voices only. Run MANUAL_TEST.md step 3 and set `[wake]
       sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what
       works for your voice and room.
 - [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
-      spoken delete, Notion, memory, web, Piper, network down, latency).
+      barge-in (step 4b: whether `barge_in = "voice"` works on your
+      speakers or needs headphones), spoken delete, Notion, memory, web, Piper, network down, latency).
       Note anything that fails here.
 - [ ] **Raspberry Pi move:** follow PI_MIGRATION.md (go/no-go in its last
       section). Before it, consider **publishing the Google OAuth app**
@@ -72,6 +109,15 @@ Only what is still open for Kyle. None of it blocks the code.
       CI to sign: create the Environment `stable-signing` (deployments from
       `master` only, you as required reviewer) and store
       `STABLE_SIGNING_KEY` there, **never as a repository secret**.
+- [ ] **Spotify app (only if you want Spotify by voice, ~5 min; needs
+      Premium).** Only you can: at developer.spotify.com create an app
+      (Web API) with redirect URIs `http://127.0.0.1:8888/callback` and
+      `https://<your-pc>.<tailnet>.ts.net/spotify/callback` (the phone
+      button; your `[webapp] public_origin` + `/spotify/callback`), add
+      your account under User Management, put its Client ID in `.env` as
+      `SPOTIFY_CLIENT_ID`, set `[spotify] enabled = true` in
+      `config.local.toml`, and run `python -m assistant.tools.spotify` once
+      (README "Spotify by voice"). Until then the Spotify tools stay off.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`
