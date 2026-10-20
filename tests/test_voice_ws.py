@@ -21,7 +21,7 @@ from starlette.websockets import WebSocketDisconnect  # noqa: E402
 from assistant import voice_ws, webapp  # noqa: E402
 from assistant.chat import ClaudeChat  # noqa: E402
 from assistant.tts import PrintTTS  # noqa: E402
-from tests.conftest import make_response, text_block  # noqa: E402
+from tests.conftest import first_text, make_response, text_block  # noqa: E402
 from tests.voice_fakes import stream_client, streamed  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -189,7 +189,7 @@ def test_streamed_turn_over_the_socket(make_voice):
     assert types.index("audio") < types.index("turn_done")
     assert msgs[-1]["interrupted"] is False
     assert ended["reason"] == "user"
-    assert client.stream_calls[0]["messages"][0]["content"] == \
+    assert first_text(client.stream_calls[0]["messages"][0]["content"]) == \
         "what's on my calendar tomorrow"
 
 
@@ -406,7 +406,7 @@ def test_barge_in_over_the_socket(make_voice):
         receive(ws, "turn_done")
     second = client.stream_calls[1]["messages"]
     assert second[1]["content"][0]["text"].startswith("First one here. [interrupted")
-    assert second[-1]["content"] == "what's the weather"
+    assert first_text(second[-1]["content"]) == "what's the weather"
 
 
 @pytest.mark.parametrize("answer, deleted, barge_in", [
@@ -469,7 +469,7 @@ def test_voice_continues_the_push_to_talk_conversation(make_voice):
         ws.send_bytes(utterance(1))
         receive(ws, "turn_done")
     second = client.stream_calls[-1]["messages"]
-    assert [m["content"] for m in second if m["role"] == "user"] == \
+    assert [first_text(m["content"]) for m in second if m["role"] == "user"] == \
         ["hello", "what did I just say"]
 
 

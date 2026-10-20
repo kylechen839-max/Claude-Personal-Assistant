@@ -1118,6 +1118,9 @@ def ask_title(client, messages: list[dict],
         response = api.messages.create(
             model=model, max_tokens=200, system=TITLE_PROMPT,
             messages=[{"role": "user", "content": text}])
+        from assistant import usage
+
+        usage.record(model, getattr(response, "usage", None))
         raw = "".join(b.text for b in response.content if b.type == "text")
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         data = json.loads(match.group(0)) if match else {}

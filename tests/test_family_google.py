@@ -646,8 +646,12 @@ def test_a_calendar_question_by_voice_is_asked_in_her_language(g):
 
     mom, mom_id = g.member("Mom", "zh")
     connected(g, mom, mom_id, "mom")
-    g.client.queue.append(make_response(
-        tool_use_block("delete_calendar_event", {"event_id": "e1"}), stop_reason="tool_use"))
+    # "你好" goes to the fast model; its delete call is dropped (router.py)
+    # and the main model's own delete call asks the question
+    for _ in range(2):
+        g.client.queue.append(make_response(
+            tool_use_block("delete_calendar_event", {"event_id": "e1"}),
+            stop_reason="tool_use"))
     g.client.queue.append(make_response(text_block("好的，不删了。")))
     with patch("googleapiclient.discovery.build", side_effect=RuntimeError("offline")):
         with ws_connect(mom) as ws:

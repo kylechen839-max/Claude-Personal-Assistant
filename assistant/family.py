@@ -458,7 +458,8 @@ class Family:
                               max_tool_rounds=a["max_tool_rounds"], memory=None,
                               recorder=recorder, language=user["language"],
                               user_name=user["name"],
-                              timezone=user.get("timezone") or None)
+                              timezone=user.get("timezone") or None,
+                              fast_model=a["fast_model"], router=a["router"])
 
         return UserContext(user, registry, store, chat_factory)
 

@@ -317,6 +317,8 @@ def summarize(client, model: str, transcript: str, course: str = "",
         tool_choice={"type": "tool", "name": "save_lecture_notes"},
         messages=[{"role": "user", "content":
                    f"{header}\n\n<transcript>\n{text}\n</transcript>"}])
+    from assistant import usage  # API token counts (usage.py)
+    usage.record(model, getattr(response, "usage", None))
     call = next((b for b in response.content if b.type == "tool_use"), None)
     if call is None:
         raise RuntimeError("Claude didn't return lecture notes")

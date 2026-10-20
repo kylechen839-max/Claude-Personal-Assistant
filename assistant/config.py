@@ -33,6 +33,10 @@ DEFAULTS: dict = {
         "api_timeout": 30,
         "timezone": "",  # IANA name, e.g. "America/New_York"; "" = system
         "language": "en",  # "en", or "zh" (Mandarin: prompt, speech, phone page)
+        # simple turns go to fast_model (router.py); "off" = always `model`
+        "fast_model": "claude-haiku-5-5",
+        "router": "auto",
+        "usage_file": "data/usage.json",  # monthly token totals ("" = not kept)
     },
     "tts": {
         "engine": "auto",  # auto = Kokoro, else Piper, else `fallback`
@@ -264,6 +268,7 @@ SERVER_PROFILE: dict = {
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
+    "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -271,6 +276,8 @@ PROFILES = {"server": SERVER_PROFILE}
 # Environment variables that override config values.
 ENV_OVERRIDES = {
     "CLAUDE_MODEL": ("assistant", "model"),
+    "CLAUDE_FAST_MODEL": ("assistant", "fast_model"),
+    "CLAUDE_ROUTER": ("assistant", "router"),  # "off" = always the main model
     "WAKEWORD_MODEL_PATH": ("wake", "keyword_path"),
     "NOTION_ASSIGNMENTS_DB": ("notion", "database_id"),
     "GOOGLE_CREDENTIALS": ("calendar", "credentials"),

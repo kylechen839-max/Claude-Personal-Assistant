@@ -259,7 +259,31 @@ you are most likely to tune:
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
+| `[assistant] fast_model` | "claude-haiku-5-5" | Cheaper model for short, simple questions; `CLAUDE_FAST_MODEL` overrides it |
+| `[assistant] router` | "auto" | "auto": simple turns go to `fast_model`, changes, lookups, reasoning, attachments and untrusted content stay on `model`; "off" (or `CLAUDE_ROUTER=off`): always `model` |
+| `[assistant] usage_file` | "data/usage.json" | Monthly API token totals and a rough cost estimate (the owner's phone app gets `month_usd`); "" = not kept |
 | `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
+
+**Cost: model routing and prompt caching.** Each turn picks its model
+before the request, with no extra API call (`assistant/router.py`): a short,
+simple question ("what time is it") goes to `fast_model` (Claude Haiku).
+Words that usually mean a change (add, move, book, set, turn off, lock,
+pause, forget, save, ...), a web lookup or reasoning, a long request, an
+attachment, or untrusted text (web, email, invites) earlier in the
+conversation send it to `model`. Words can miss a phrasing, so there is a
+second check: if Haiku answers with any tool call that isn't read-only
+(the list is `READ_ONLY_TOOLS` in `router.py`: calendar, assignment, email,
+notes and home *reads*), that answer is dropped before anything runs and
+`model` answers instead. Every change is therefore made by `model` (words
+Haiku said before its tool call may already have been spoken). Once a
+conversation needed `model` it stays there until it ends. Confirmations are
+the same on either model. The tools and system prompt are the same bytes on
+every request and are cached by the API (5 minutes); the date and recalled
+notes travel with each of your messages instead, and the weekly review
+offer with the first one only. Each Claude API call's token counts (chat,
+summaries, history titles, tutor, lecture notes: input, output, cache
+read/write, web searches) are logged at INFO in `logs/assistant.log`,
+without any text.
 
 ### Voices
 
@@ -1455,6 +1479,8 @@ assistant/
   config.py     config.toml + .env loading, logging
   doctor.py     setup check                       (python -m assistant --check)
   chat.py       Claude conversation, tool loop, memory hooks
+  router.py     per-turn model choice: Haiku for simple turns, else the main model
+  usage.py      API token counts per call, monthly totals and cost estimate
   tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
   tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
   tts_elevenlabs.py  optional ElevenLabs cloud voice
@@ -1510,5 +1536,6 @@ tests/          pytest suite (offline; live tests skip without keys);
 ```
 
 See `PROGRESS.md` for what each stage does and how it was tested,
-`BLOCKERS.md` for what is still open for you, and `MANUAL_TEST.md` for the final
-hands-on checklist.
+`BLOCKERS.md` for what is still open for you, `MANUAL_TEST.md` for the final
+hands-on checklist, and [BACKLOG.md](BACKLOG.md) for planned work (such as
+the hybrid model, before a public release).

@@ -2683,3 +2683,144 @@ chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
 - Final counts (Linux sandbox, Python 3.13): 2114 passed, 48 skipped
   (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
   252).
+
+## Cost: prompt caching, Haiku routing and usage tracking (2026-10-20)
+
+Kyle: "build Haiku routing and caching right now."
+- **Caching.** The tools and the system prompt are now the same bytes on
+  every request of a chat (`ClaudeChat.stable_system()`), sent as one
+  system text block with `cache_control` (it caches the tools too: they
+  render first). What changed per turn moved out: the date and time,
+  recalled notes and the weekly review offer are `turn_context()`, kept on
+  the user message under `message["context"]` (not in its content) and
+  sent by `request_messages()` as a text block after Kyle's words, the
+  same bytes on every later request, so the conversation is append-only on
+  the wire. A second, rolling breakpoint goes on a copy of the last block
+  that can take one (walking back past server-tool blocks); `chat.history`
+  never gets a marker. Two breakpoints of the four allowed. No `thinking`
+  parameter is sent, as before. `build_system()` stays as
+  system + context for the callers and tests that read it. Messages-cache
+  misses, each once when it happens (accepted): trimming past
+  `max_history` (round 2: trimmed to about half, so once per
+  `max_history / 2` messages instead of every turn), a barge-in's
+  `mark_interrupted`, an old attachment turned into a marker, a model
+  switch (caches are per model), and (round 2) the request after a weekly
+  review offer and after a `delete_note`.
+- **Routing** (`assistant/router.py`): one model per user turn, picked in
+  `ask()` before the request and kept for its whole tool loop. The main
+  model when the router is off, there's no separate fast model, the turn
+  or the history has an attachment, the conversation is tainted, it was
+  already escalated (sticky until `reset()`), the words are long (over 15
+  words or 100 characters; Chinese over 30 characters) or hit a keyword
+  (changes, current information, reasoning, in English and Chinese).
+  Otherwise `fast_model` (Claude Haiku 5.5). The route is logged at INFO as
+  the model and a reason code only. `ToolRegistry.schemas(model)` gives a
+  Haiku turn the web search/fetch versions Haiku supports
+  (`web_search_20250305` / `web_fetch_20250910`). Conversation summaries
+  use the fast model. Confirmations don't change: the same tools and
+  questions on either model.
+- **Usage** (`assistant/usage.py`): every Messages API call of the chat
+  (and its summaries) logs its model and token counts (input, output,
+  cache read, cache write, web searches) at INFO, no text. Monthly totals
+  per model, with a rough $ estimate from the list prices (Sonnet 5.5
+  $2/$10, Haiku 5.5 $0.10/$0.50 up to 100K-token prompts and 5x above;
+  cache reads 0.1x, 5-minute writes 1.25x; web search fees counted, not
+  priced), go to `[assistant] usage_file` (default `data/usage.json`, the
+  server profile `/data/usage.json`, "" = in memory only), last 12 months,
+  through `google_auth.write_private`. `/api/state` has `month_usd` for the
+  owner only.
+- **Settings:** `[assistant] fast_model = "claude-haiku-5-5"`,
+  `router = "auto"`, `usage_file`; `CLAUDE_FAST_MODEL`, `CLAUDE_ROUTER`
+  (`off` is the kill switch). Wired in `cli.build_chat`, the web app's and
+  family's chat factories; `cli.main` configures the usage file.
+- **BACKLOG.md** (new): "Before public release: Hybrid model"; this
+  routing is its first step. Linked from README.
+- Tests: `tests/test_routing_caching.py` (28): byte-identical system with a
+  cache marker across two turns a minute apart (fails on master: the time
+  was in it), append-only wire across a tool round and a second turn with
+  exactly one rolling marker and none in history, copy-only marking that
+  walks back past server blocks, notes in the turn and never in system,
+  `transcript()` or the recorder, no "Kyle" in a zh/family context, 11
+  router word cases (EN and ZH, keyword and length), attachments / taint /
+  off / no fast model, stickiness until `reset()`, one model per tool loop,
+  Haiku web tool versions, a route log with no words (caplog), summaries
+  on the fast model, a usage log with numbers and no text (caplog), list
+  prices and the long-prompt tier, the usage file round trip with the
+  12-month cap, `usage_file = ""`, every call counted with its model, the
+  config and env wiring. `tests/test_family.py` +1: only the owner's
+  `/api/state` has `month_usd`, and family chats get the router settings.
+  `conftest.py`: `make_response(usage=)`, `make_usage`, `system_text`,
+  `request_text`, `first_text`, `own_blocks`, `without_context`, and an
+  autouse fixture that gives each test its own meter and keeps a
+  configured usage file in `tmp_path`. 30 existing tests changed shape
+  only (system is a block list; a sent user turn is [words, context]; the
+  history's user turns carry `context`); no assertion was dropped.
+  `test_docs.py` knows `month_usd` and `cache_read` (a state field and a
+  log field, not settings).
+- Revert check: 27 single-change reverts (each source change undone alone,
+  `__pycache__` cleared, its tests run, restored) all make their tests
+  fail.
+- Counts (Linux sandbox, Python 3.13): 2153 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped). Not measured against the real API
+  (offline): the cache hit rate and Haiku's answers are MANUAL_TEST
+  "Model routing and prompt caching".
+
+### Round 2 (judge findings)
+
+1. **Changes reached Haiku.** Two layers now. (a) More words send a turn
+   to the main model: put, book, push, clear, set, lock/unlock, open,
+   pause, resume, stop, skip, next, volume, dim, forget, remember, save,
+   message, tell (not "tell me"), send, finish, done, change, update,
+   "turn/switch ... on/off" with words between; Chinese 提醒 记住 打开 关
+   播放 推 加 设置 删. (b) The safety net: a Haiku response that calls any
+   tool not in `router.READ_ONLY_TOOLS` (calendar, assignment, email,
+   notes, memory, history, dev-team, home and Spotify *reads*; unknown
+   tools count as changes) is dropped before dispatch, never enters
+   history, and the main model answers the turn (`escalated` set; INFO
+   `Route: <model> (escalated_tool)`). Haiku words streamed before its
+   tool call may already have been shown or spoken (README says so).
+   Tests: the probe's 29 phrases (EN and ZH, plus 删掉明天的会) go to the
+   main model, 5 simple questions still go to Haiku, a Haiku
+   `create_calendar_event` never runs and the main model's does, the
+   read-only list. `test_family_google` voice test: queue shape only (the
+   dropped Haiku call, then the main model's).
+2. **Two processes overwrote each other's usage.** Each save takes an
+   O_EXCL lock file (as `updater.Updater.acquire`; stale after 10 s),
+   re-reads the file and adds only this process's calls since its last
+   save; a lock held past 2 s defers the save to the next call. Tests:
+   two meters on one file add up to 4.0 then 6.0 (the probe got 2.0), a
+   held lock defers without losing, a stale one is taken over.
+3. **Mom's instance shared Kyle's usage file.** `config.mom.toml` now puts
+   every data file under `data/mom/` (usage, memory review state,
+   lectures, dev team state, Spotify token, family users). Test: every
+   setting whose default is under `data/` points under
+   `data/<name>/` in each `config.<name>.toml` and differs from Kyle's.
+4. **The review offer was replayed** (and a test had been weakened). It is
+   kept as `message["nudge"]`, rendered only while its turn is the latest
+   (its tool loop included): one messages-cache miss on the next request,
+   once a week. The memory-review tests check the full sent messages
+   again (`conftest.sent_text`).
+5. **A deleted note kept going to the API.** `PineconeMemory.retrieve` keeps
+   `last_matches` (vector id, text); the chat remembers recalled notes per
+   conversation (bounded, cleared by `reset()`), and a successful
+   `delete_note` replaces that note's line in every turn's context with
+   "(a note that was deleted)" (one cache miss). A declined delete keeps
+   it. Notes otherwise stay in their own turn (append-only), checked by a
+   test. Not covered (SECURITY.md): a delete from the phone's Memory
+   screen during a live conversation, and note text inside a
+   `recall_notes` tool result.
+6. **Trimming rewrote the cache every turn.** Past `max_history` the
+   history is cut to about half (falling back to the old cut if one tool
+   loop fills the half), so the prefix holds for `max_history / 2`
+   messages. The round-1 "one-time miss" wording and the
+   `request_messages` docstring (the 5.5 models do keep earlier thinking;
+   it is stripped for the signature 400s) are corrected; the stripping
+   itself is unchanged.
+7. **Docs and metering.** History titles, the tutor and lecture notes now
+   call `usage.record` (lecture.py: only that line and its import);
+   usage.py and README name what is metered. SECURITY.md no longer says
+   notes come back "in later system prompts".
+- Revert check: 20 round-2 reverts (each fix undone alone, `__pycache__`
+  cleared) and the 27 round-1 reverts, re-run on this tree, all fail.
+- Counts (Linux sandbox, Python 3.13): 2199 passed, 48 skipped (round 1:
+  2153; master f1eb136: 2124 passed, 48 skipped).

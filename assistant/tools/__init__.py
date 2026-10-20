@@ -78,8 +78,19 @@ class ToolRegistry:
         tool = self.tools.get(name)
         return bool(tool and tool.private)
 
-    def schemas(self) -> list[dict]:
-        return [t.schema() for t in self.tools.values()] + self.server_tools
+    def schemas(self, model: str | None = None) -> list[dict]:
+        """Tool definitions to send. With `model` (the router may pick a
+        model other than the one the registry was built for), web search and
+        fetch get the versions that model supports (web.tool_versions)."""
+        server = self.server_tools
+        if model:
+            from assistant.tools.web import tool_versions
+
+            search, fetch = tool_versions(model)
+            versions = {"web_search": search, "web_fetch": fetch}
+            server = [{**t, "type": versions[t["name"]]}
+                      if t.get("name") in versions else t for t in server]
+        return [t.schema() for t in self.tools.values()] + server
 
     def dispatch(self, name: str, tool_input: dict,
                  untrusted: bool = False) -> tuple[str, bool]:

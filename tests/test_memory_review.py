@@ -20,7 +20,8 @@ from assistant.memory import PineconeMemory
 from assistant.memory_review import MemoryReview
 from assistant.tools import ToolRegistry
 from assistant.tools.notes import QuickNotes
-from tests.conftest import make_response, text_block, tool_use_block
+from tests.conftest import (make_response, request_text, sent_text, text_block,
+                            tool_use_block)
 from tests.test_notes import FakeIndex
 
 NS = "voice-assistant"
@@ -302,13 +303,15 @@ def test_first_turn_of_a_conversation_carries_the_nudge(fake_client, memory, tmp
                           make_response(text_block("Sure."))]
     chat.ask("What's the weather?")
     chat.ask("Thanks")
-    first, second = (c["system"] for c in fake_client.calls)
+    first = request_text(fake_client.calls[0])
+    # the offer is for the first reply only: not replayed in later requests
+    second = sent_text(fake_client.calls[1])
     assert "I saved 2 notes this week, want to review them?" in first
     assert "Weekly memory review" not in second
     chat.reset()  # a new conversation the same week: no second nudge
     fake_client.queue.append(make_response(text_block("Hi.")))
     chat.ask("Hi")
-    assert "Weekly memory review" not in fake_client.calls[-1]["system"]
+    assert "Weekly memory review" not in sent_text(fake_client.calls[-1])
 
 
 def test_build_chat_wires_the_nudge(monkeypatch, memory):
@@ -478,8 +481,8 @@ def test_nudge_is_asked_for_only_at_the_start_of_a_conversation(fake_client):
     chat.ask("one")
     chat.ask("two")
     assert len(calls) == 1
-    assert "OFFER A REVIEW" in fake_client.calls[0]["system"]
-    assert "OFFER A REVIEW" not in fake_client.calls[1]["system"]
+    assert "OFFER A REVIEW" in request_text(fake_client.calls[0])
+    assert "OFFER A REVIEW" not in sent_text(fake_client.calls[1])
     chat.review_nudge = MagicMock(side_effect=RuntimeError("down"))
     chat.reset()
     fake_client.queue.append(make_response(text_block("c")))

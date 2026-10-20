@@ -11,7 +11,7 @@ import time
 
 import anthropic
 
-from assistant import audio, i18n
+from assistant import audio, i18n, usage
 from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
@@ -840,7 +840,8 @@ def build_chat(config: dict, tools=None, memory=None,
     chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
-                      recorder=recorder, language=a["language"])
+                      recorder=recorder, language=a["language"],
+                      fast_model=a["fast_model"], router=a["router"])
     if review is not None:  # [memory] weekly_review (off by default)
         chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
@@ -915,6 +916,7 @@ def main(argv=None) -> int:
     if args.role:
         config["failover"]["role"] = args.role
     log_file = setup_logging(config)
+    usage.configure(config["assistant"]["usage_file"])  # API token totals
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"

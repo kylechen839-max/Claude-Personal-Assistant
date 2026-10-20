@@ -16,6 +16,7 @@
 [assistant]
 language = "zh"               # Mandarin: Chinese prompt, speech and phone page
 # timezone = "Asia/Shanghai"  # her time zone, if it isn't this computer's
+usage_file = "data/mom/usage.json"  # her API usage, never added to (or shown as) Kyle's
 
 [stt]
 model = "small"               # multilingual Whisper (".en" models can't hear Chinese)
@@ -35,6 +36,7 @@ enabled = false
 
 [memory]
 enabled = false
+review_state_file = "data/mom/memory_review.json"
 
 [notes]
 enabled = false
@@ -63,12 +65,23 @@ enabled = false
 
 [lecture]
 enabled = false
+upload_dir = "data/mom/lectures"
 
 [tutor]
 enabled = false
 
 [devteam]
 enabled = false
+state_file = "data/mom/devteam.json"
+hub_state_file = "data/mom/devhub.json"
 
 [logging]
 file = "logs/mom.log"
+
+# Every other file under data/mom/ too, so nothing is shared with Kyle's
+# instance even if one of these is switched on later.
+[spotify]
+token = "data/mom/spotify_token.json"
+
+[family]
+dir = "data/mom/users"

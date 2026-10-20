@@ -234,6 +234,36 @@ def test_mom_config_turns_every_connection_off(monkeypatch, tmp_path):
     assert "list_calendar_events" not in names  # no Google sign-in yet
 
 
+def _other_instances():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    return sorted(p.name for p in root.glob("config.*.toml")
+                  if p.name != "config.toml" and ".local." not in p.name)
+
+
+@pytest.mark.parametrize("name", _other_instances())
+def test_other_instances_keep_every_data_file_in_their_own_folder(name):
+    """config.mom.toml (and any config.<name>.toml): every setting whose
+    default is a file under data/ points under data/<name>/ instead, so the
+    instance never shares Kyle's files. usage_file shared his API spend and
+    showed it to her (/api/state month_usd)."""
+    owner = load_config(None, None, profile="")
+    other = load_config(name, None, profile="")
+    folder = f"data/{name.split('.')[1]}/"
+    checked = []
+    for section, values in DEFAULTS.items():
+        if not isinstance(values, dict):
+            continue
+        for key, default in values.items():
+            if isinstance(default, str) and default.startswith("data/"):
+                value = other[section][key]
+                assert value == "" or value.startswith(folder), (section, key, value)
+                assert value != owner[section][key], (section, key)
+                checked.append(f"{section}.{key}")
+    assert "assistant.usage_file" in checked and "history.path" in checked
+
+
 def test_google_connect_without_a_token_never_signs_in_here(tmp_path, monkeypatch):
     """With google_connect, a client file but no token means no Google tools
     (Calendar would otherwise open a browser sign-in on this computer)."""
