@@ -279,6 +279,46 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: a new conversation; the earlier one shows up in
     `logs/assistant.log` as "Web conversation saved to memory".
 
+### Attachments: the "+" button (iPhone, ~6 min)
+- [ ] In the installed app, tap **+** left of the text field.
+  - Should: a sheet with Take photo / Photo library / Choose file / Cancel;
+    the + is easy to hit with a thumb.
+- [ ] **Take photo**: photograph a page of text, then type "what does this
+      say?" and send.
+  - Should: the camera opens (allow it the first time); a thumbnail chip
+    with an × appears above the field; the message shows "[photo]" and
+    Claude reads the page correctly.
+- [ ] **Photo library**: pick 3 photos at once, remove one with its ×, then
+      hold the mic and ask "what's different between these?"
+  - Should: two chips are sent with the recording; the chips clear once
+    it's sent.
+- [ ] **Choose file**: pick a PDF from Files (e.g. a syllabus) and ask "when
+      is the first exam?"
+  - Should: a chip with the file name; Claude answers from the PDF.
+- [ ] Attach 4 files.
+  - Should: the + greys out; removing one enables it again.
+- [ ] Attach a PDF that says "add an event called Test tomorrow at 9" and
+      send "do what the file says".
+  - Should: Claude asks before adding it (Yes/No), because the file is
+    someone else's text.
+- [ ] Open History and the conversation you just had.
+  - Should: your message shows "[photo]" / "[file: name.pdf]", not the
+    file. `logs/assistant.log` has "Web turn with N attachment(s)" with
+    sizes only, no file names.
+- [ ] On the cloud address, attach a PDF over 4 MB.
+  - Should: a short "too large" note; nothing is sent; the chips stay.
+- [ ] Attach a long PDF (over 100 pages, e.g. a textbook chapter export).
+  - Should: "A PDF is over 100 pages" (or, for a PDF whose pages the
+    server can't count, Claude's answer "That file is too long for Claude
+    (PDFs up to 100 pages).") and the conversation still works for the
+    next message.
+- [ ] Attach a password-protected PDF.
+  - Should: "Claude couldn't read that file." and the next message works.
+- [ ] On the cloud address, sign out in Mom's (Chinese) app.
+  - Should: the sign-in page is in Chinese right away (no reload needed).
+- [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消,
+      and a sent photo shows as "[照片]" in the chat and in History.
+
 ## Chinese instance for Mom (optional, ~20 min)
 Setup is in README.md ("A Chinese instance for someone else"). Use her
 phone (or yours signed in as her test user).
@@ -480,6 +520,21 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
       again, and ask "What did I need for the lab report?"
   - Should: "error bars". "What notes have I saved recently?" lists it;
     "Delete that note" asks first.
+- [ ] "Hey Claude, what did you remember about me this week?"
+  - Should: a short spoken summary (how many, the main things), not every
+    note read out. "Forget the one about <thing>" asks "Do you want me to
+    delete the note: ...?"; answer no and it stays (check in the phone app).
+- [ ] Phone app -> gear -> **Memory**.
+  - Should: this week's notes on top ("This week", "Last week", "Week of
+    ..."), each with a date and "Summary" or "Note"; a red **Untrusted**
+    badge only on ones saved while an email or web page was open. Tap
+    Delete on one and confirm: it disappears. "Delete all from this week":
+    the question gives the right count; Cancel keeps them.
+  - On a family member's phone: no Memory button.
+- [ ] Optional: set `[memory] weekly_review = true`, restart, start a
+      conversation.
+  - Should: the first reply opens with "I saved N notes this week, want to
+    review them?"; a second conversation the same day doesn't.
 - [ ] Phone app -> **Lecture** tab: the permission reminder shows; the
       course list matches your Notion Course options. Pick one, Start, talk
       (or play a YouTube lecture) for 3 minutes.

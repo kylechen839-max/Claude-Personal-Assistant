@@ -237,6 +237,10 @@ as the work. Never put secrets, tokens or personal data in this file.
   - `webapp.py`: WebAuth, strict self-only CSP.
   - `web/` is the PWA. Bump the `sw.js` cache version when assets change,
     and keep element ids and data attributes.
+  - A new page script needs three entries: `webapp.py`'s static route
+    list, `sw.js` SHELL, and `cloud.py` `PUBLIC_GET` (the login page loads
+    every script before sign-in; on the cloud a 401 leaves it missing until
+    a reload).
   - Hands-free voice is in `voice_ws.py` and `voice_session.py`.
 - **History and failover:**
   - `history.py` projects the event log. Other modules use

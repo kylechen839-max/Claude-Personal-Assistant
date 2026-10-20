@@ -20,6 +20,8 @@
 <link rel="stylesheet" href="/static/features.css">
 <script src="/i18n.js" defer></script>
 <script src="/family.js" defer></script>
+<script src="/attachments.js" defer></script>
+<script src="/memory.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -78,6 +80,7 @@
           <button id="backends-save" type="button">Save and check</button>
           <ul id="backend-status" class="backend-status"></ul>
         </fieldset>
+        <button id="memory-open" type="button" hidden>Memory</button>
         <button id="google-connect" type="button" hidden>Connect Google account</button>
         <button id="google-disconnect" type="button" hidden>Disconnect Google account</button>
         <p id="google-status" class="hint" hidden></p>
@@ -122,7 +125,11 @@
   </section>
 
   <footer>
+    <div id="attach-chips" class="attach-chips" hidden aria-label="Attachments"></div>
     <form id="text-form" autocomplete="off">
+      <button id="attach" class="attach-btn" type="button" aria-label="Add photos or files" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
       <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
       <button type="submit" aria-label="Send">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -134,8 +141,22 @@
     <div id="mic-meter" class="mic-meter" hidden aria-hidden="true"><span></span></div>
     <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
     <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
+    <input id="attach-camera" type="file" accept="image/*" capture="environment" hidden>
+    <input id="attach-library" type="file" accept="image/*" multiple hidden>
+    <input id="attach-file" type="file" multiple hidden
+           accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown,.pdf,.txt,.md">
   </footer>
 </main>
+
+<dialog id="attach-sheet" class="sheet" aria-labelledby="attach-title">
+  <form method="dialog">
+    <h2 id="attach-title">Add to your message</h2>
+    <button type="button" data-pick="camera">Take photo</button>
+    <button type="button" data-pick="library">Photo library</button>
+    <button type="button" data-pick="file">Choose file</button>
+    <button type="button" class="cancel">Cancel</button>
+  </form>
+</dialog>
 
 <section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
   <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>
@@ -200,6 +221,18 @@
     <button id="continue" class="primary" type="button">Continue this conversation</button>
     <p id="continue-hint" class="hint"></p>
   </footer>
+</main>
+
+<main id="memory-view" class="history memory" hidden aria-labelledby="memory-title">
+  <header class="bar">
+    <button id="memory-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="memory-title" tabindex="-1">Memory</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
+  <p id="memory-status" class="status center" role="status"></p>
 </main>
 
 <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  PDFs up to 100 pages. New setting `[webapp] max_attachment_mb` (10).
+  A file Claude can't open (password-protected or broken PDF) says so;
+  long PDFs are counted by their page tree, so annotated PDFs aren't refused.
+- Cloud: the sign-in page now loads its translations before sign-in, so a
+  Chinese family member's login page is in Chinese right away.
+- Memory review: a Memory screen in the phone app (settings menu, owner
+  only) lists conversation summaries and notes saved in Pinecone, newest
+  first, grouped by week, with date, kind and an "untrusted" badge, plus
+  Delete and "Delete all from this week" (both confirm). By voice, "what
+  did you remember about me this week?" and "forget that..." (spoken yes
+  first). Optional weekly nudge (`[memory] weekly_review`, off).
+- Fix: "list my recent notes" was always empty with pinecone 7+
+  (`Index.list` pages are `ListResponse` objects).
 - Family members are self-service on the cloud server: each can connect
   their own Google Calendar and Gmail (drafts only; deletes ask first) from
   their own phone, kept separate from Kyle's and deleted on Disconnect or

@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
+ID_PREFIX = "voice-"  # every vector store() writes (memory_review.py lists them)
+
 SUMMARY_PROMPT = (
     "Below is a conversation between Kyle and his voice assistant. Write a "
     "short note (1-3 sentences) of anything worth remembering long-term: "
@@ -116,7 +118,7 @@ class PineconeMemory:
 
     def store(self, summary: str, extra: dict | None = None) -> str:
         now = datetime.now(timezone.utc)
-        vector_id = f"voice-{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
+        vector_id = f"{ID_PREFIX}{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
         metadata = {"text": summary, "source": "voice-assistant",
                     "kind": "conversation_summary",
                     "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), **(extra or {})}
@@ -163,6 +165,30 @@ class PineconeMemory:
         if vector_ids:
             self.index.delete(ids=list(vector_ids), namespace=self.namespace)
             log.info("Memory: deleted %d vectors", len(vector_ids))
+
+
+def page_ids(page) -> list[str]:
+    """The vector ids in one page from `index.list()`: a list of id strings
+    (older SDKs), or a ListResponse (pinecone 7+) whose `.vectors` items
+    have `.id` (or are dicts with "id")."""
+    if isinstance(page, str):
+        return [page]
+    if isinstance(page, (list, tuple)):
+        return [i for i in page if isinstance(i, str)]
+    vectors = (page.get("vectors") if isinstance(page, dict)
+               else getattr(page, "vectors", None)) or []
+    ids = []
+    for v in vectors:
+        vid = v.get("id") if isinstance(v, dict) else getattr(v, "id", None)
+        if isinstance(vid, str):
+            ids.append(vid)
+    return ids
+
+
+def list_ids(index, prefix: str, namespace: str):
+    """Every id starting with `prefix` in `namespace`, page by page."""
+    for page in index.list(prefix=prefix, namespace=namespace):
+        yield from page_ids(page)
 
 
 def transcript(history: list[dict], user_only: bool = False) -> str:
