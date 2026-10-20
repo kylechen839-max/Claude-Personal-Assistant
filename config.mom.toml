@@ -38,6 +38,9 @@ enabled = false
 [notes]
 enabled = false
 
+[home_assistant]
+enabled = false               # Kyle's home stays Kyle's
+
 [web]
 browser = false               # never open pages on this computer
 

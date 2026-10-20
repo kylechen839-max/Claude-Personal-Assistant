@@ -20,6 +20,14 @@
   first). Optional weekly nudge (`[memory] weekly_review`, off).
 - Fix: "list my recent notes" was always empty with pinecone 7+
   (`Index.list` pages are `ListResponse` objects).
+- Smart home control through Home Assistant (off by default): "turn off
+  the bedroom lights", "set the thermostat to 70", "is the front door
+  locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home
+  Assistant REST API with a long-lived token (`HA_URL`/`HA_TOKEN` in `.env`,
+  `[home_assistant] enabled = true`). Only allowlisted device kinds and a
+  fixed set of actions; scripts only if allowlisted. Locks, garage doors
+  and alarms always ask first, and unlocking or opening is refused while
+  web or email content is in the conversation. Owner only.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply
