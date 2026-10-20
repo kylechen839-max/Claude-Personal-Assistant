@@ -91,8 +91,9 @@ def test_every_setting_name_in_docs_exists(doc):
     assert names - keys - OTHER_IDENTIFIERS == set()
 
 
-def test_config_toml_keys_have_defaults():
-    with open(ROOT / "config.toml", "rb") as f:
+@pytest.mark.parametrize("name", ["config.toml", "config.mom.toml"])
+def test_config_toml_keys_have_defaults(name):
+    with open(ROOT / name, "rb") as f:
         shipped = tomllib.load(f)
     for section, values in shipped.items():
         assert set(values) <= set(DEFAULTS[section]), section

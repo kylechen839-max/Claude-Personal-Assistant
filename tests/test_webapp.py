@@ -680,7 +680,7 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
 
 PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/silence.wav", "/healthz", "/backend-router.js",
+          "/silence.wav", "/healthz", "/backend-router.js", "/i18n.js",
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
@@ -1316,3 +1316,30 @@ def test_signed_in_check():
     assert web.signed_in(sid) and web.signed_in(web.bearer_sid)
     store.revoke(sid)
     assert not web.signed_in(sid) and not web.signed_in("made-up")
+
+
+def test_chinese_page(fake_client):
+    """language="zh": the page says lang="zh-CN" (i18n.js translates it),
+    and i18n.js loads before app.js and is in the offline shell."""
+    from unittest.mock import MagicMock
+
+    def make(**kw):
+        assistant = webapp.WebAssistant(
+            lambda r: ClaudeChat(client=fake_client, tools=r), FakeTranscriber(),
+            PrintTTS(), clock=Clock())
+        return TestClient(webapp.create_app(assistant, TOKEN, reap_interval=3600, **kw),
+                          base_url=BASE)
+
+    page = make(language="zh").get("/")
+    assert page.status_code == 200 and '<html lang="zh-CN">' in page.text
+    assert page.headers["content-type"].startswith("text/html")
+    assert "Content-Security-Policy" in page.headers
+    english = make().get("/")
+    assert '<html lang="en">' in english.text and "data-google" not in english.text
+    google = make(language="zh", google=MagicMock()).get("/")
+    assert '<html lang="zh-CN" data-google>' in google.text
+    assert english.text.index("/i18n.js") < english.text.index("/app.js")
+    js = make().get("/i18n.js")
+    assert js.status_code == 200 and "连接 Google 账户" in js.text
+    sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
+    assert '"/i18n.js"' in sw and "hey-claude-shell-v5" in sw

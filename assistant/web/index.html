@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="/voice.css">
 <link rel="stylesheet" href="/static/katex/katex.min.css">
 <link rel="stylesheet" href="/static/features.css">
+<script src="/i18n.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
 <script src="/voice.js" defer></script>
@@ -75,6 +76,8 @@
           <button id="backends-save" type="button">Save and check</button>
           <ul id="backend-status" class="backend-status"></ul>
         </fieldset>
+        <button id="google-connect" type="button" hidden>Connect Google account</button>
+        <p id="google-status" class="hint" hidden></p>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>
@@ -103,6 +106,7 @@
     <button id="mic" class="mic" type="button" aria-label="Hold to talk, or tap to start and stop">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
     </button>
+    <div id="mic-meter" class="mic-meter" hidden aria-hidden="true"><span></span></div>
     <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
     <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
   </footer>
@@ -110,6 +114,7 @@
 
 <section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
   <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>
+  <div id="voice-meter" class="mic-meter voice-meter" aria-hidden="true"><span></span></div>
   <div class="voice-orb-wrap">
     <button id="voice-orb" class="voice-orb" type="button" aria-label="Voice orb (tap to resume when paused)"></button>
   </div>

@@ -20,6 +20,17 @@
 - Dev team dashboard: the coordinator chat always shows whether the
   coordinator is in a task or idle, and a message sent mid-task shows as
   queued until the coordinator reads it.
+- Chinese (Mandarin) mode (`[assistant] language = "zh"`) and a `config.mom.toml`
+  template for a separate family-member instance (new `--env-file` flag):
+  Chinese replies, Mandarin speech recognition (Whisper `small`), a Mandarin
+  Piper voice, a Chinese phone page and Chinese yes/no. A Chinese yes must be
+  the whole answer from a short list (是的, 好的, 没问题, 删吧...); sentences
+  that merely contain 是 or 好, and questions back like 确定？, are a no.
+- "Connect Google account" in the phone app (`[webapp] google_connect`,
+  `public_origin`): signs in to Calendar and Gmail (drafts only) from the
+  phone. A separate instance refuses to start if the owner's Google, history,
+  web-token, Notion or Pinecone variables are inherited from the shell.
+- Phone app cache v5.
 - Dev team dashboard: the coordinator chat looks like the Claude Code app
   (full-width replies, your messages in bubbles, collapsible activity
   rows, an animated working line) and shows each message's delivery:

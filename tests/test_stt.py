@@ -62,3 +62,20 @@ def test_transcribe_kokoro_speech(tmp_path, kokoro_files, whisper):
     render_kokoro(kokoro_files, wav, PHRASE)
     text = whisper.transcribe(audio.load_audio(wav))
     assert rough_match(PHRASE, text), text
+
+
+def test_transcriber_language():
+    calls = []
+
+    class FakeModel:
+        def transcribe(self, audio, **kw):
+            calls.append(kw)
+            return iter([SimpleNamespace(text="明天"), SimpleNamespace(text="有什么安排？")]), None
+
+    assert Transcriber(model=FakeModel()).language == "en"
+    Transcriber(model=FakeModel()).transcribe(np.zeros(1600))
+    assert calls[-1]["language"] == "en" and "initial_prompt" not in calls[-1]
+    zh = Transcriber(model=FakeModel(), language="zh")
+    assert zh.transcribe(np.zeros(1600)) == "明天有什么安排？"  # no spaces in Chinese
+    assert calls[-1]["language"] == "zh"
+    assert calls[-1]["initial_prompt"] == "以下是普通话的句子。"

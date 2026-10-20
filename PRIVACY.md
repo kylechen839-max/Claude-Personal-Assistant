@@ -60,6 +60,18 @@ All paths are relative to the project folder unless noted. On Render the
 - **Wipe everything local:** delete `data/`, `logs/`, `token.json`, and the
   Pinecone namespace `voice-assistant`.
 
+## A second instance for someone else
+
+If you run a separate instance for a family member (`config.mom.toml`), it
+keeps its own conversation history (`data/mom/history.sqlite`), sign-ins
+(`data/mom/web_sessions.json`) and log (`logs/mom.log`). It does not use your
+Notion, Pinecone memory or Google account, and it refuses to start if those
+settings are inherited from the shell. Her Google sign-in token is stored only
+on the PC (`data/mom/google_token.json`, written privately) and gives read
+access to her Gmail and Calendar plus creating drafts; nothing is ever sent.
+Her requests go to Anthropic under your API key. To remove her Google access,
+delete that file and revoke the app in her Google account settings.
+
 ## Who can reach it
 
 - The PC and Pi web apps listen on `127.0.0.1` only; your phone reaches them

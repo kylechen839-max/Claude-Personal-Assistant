@@ -6,6 +6,7 @@ model = "claude-sonnet-5-5"   # CLAUDE_MODEL in the environment overrides this
 max_tokens = 1500            # a ceiling, not a target: room for thinking and web search
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
+language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)
 
 [tts]
 # "auto" (default): Kokoro if its files are downloaded, else Piper, else pyttsx3.
@@ -90,6 +91,10 @@ max_audio_seconds = 60        # longest recording accepted
 sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
+google_connect = false        # true: a "connect Google" button in the phone app signs in to
+                              # Calendar and Gmail (needs a Web application OAuth client)
+public_origin = ""            # the https:// address the phone opens (Google returns to
+                              # <public_origin>/google/callback); needed for google_connect
 
 [voice]                       # hands-free voice conversation in the phone web app
 vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)

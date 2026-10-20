@@ -1,7 +1,10 @@
 # Secrets
 .env
-# This machine's own settings (on top of config.toml)
+.env.*
+!.env.example
+# This machine's own settings (on top of config.toml, config.mom.toml, ...)
 config.local.toml
+*.local.toml
 credentials.json
 token.json
 .oauth_state.json

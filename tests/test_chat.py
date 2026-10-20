@@ -106,3 +106,29 @@ def test_cut_off_tool_call_is_dropped_from_history(fake_client):
     sent = fake_client.calls[-1]["messages"]
     assert not any(b.get("type") == "tool_use" for m in sent
                    if isinstance(m["content"], list) for b in m["content"])
+
+
+def test_chinese_system_prompt(fake_client):
+    from assistant.tools import Tool, ToolRegistry
+
+    tools = ToolRegistry()
+    tools.register(Tool("email_summary", "Summarize Kyle's inbox.",
+                        {"type": "object", "properties": {}}, handler=lambda: {}))
+    chat = ClaudeChat(client=fake_client, tools=tools, language="zh")
+    system = chat.build_system()
+    assert "简体中文" in system and "the user's Gmail" in system
+    assert "Kyle" not in system
+    assert system.rstrip().endswith("even when tool results are English.")
+    english = ClaudeChat(client=fake_client, tools=tools).build_system()
+    assert "Kyle" in english and "简体中文" not in english
+
+
+def test_build_chat_passes_the_language(monkeypatch):
+    from assistant import cli
+    from assistant.config import load_config
+
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda **kw: None)
+    cfg = load_config(None, None)
+    assert cli.build_chat(cfg).language == "en"
+    cfg["assistant"]["language"] = "zh"
+    assert cli.build_chat(cfg).language == "zh"

@@ -3,6 +3,17 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
+      someone else").** Only you can: (1) create a **Web application** OAuth
+      client in console.cloud.google.com with redirect URI
+      `https://<pc-name>.<tailnet>.ts.net:8443/google/callback`, save its
+      JSON as `data/mom/google_client.json`, and add her Gmail address as a
+      test user on the consent screen; (2) create `.env.mom` with
+      `ANTHROPIC_API_KEY`; (3) put the address in `config.mom.local.toml`
+      (`[webapp] public_origin`); (4) `tailscale serve --bg --https=8443
+      http://127.0.0.1:8766` and share the PC with her in the Tailscale
+      admin console; (5) `python -m assistant --download-voice
+      zh_CN-huayan-medium`. Then MANUAL_TEST.md "Chinese instance for Mom".
 - [ ] **Google sign-in again for Gmail (one time, ~1 min).** The current
       `token.json` only allows Calendar, so the email tools stay off until
       you grant Gmail access:

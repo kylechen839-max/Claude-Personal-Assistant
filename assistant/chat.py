@@ -52,6 +52,30 @@ SYSTEM_PROMPT = (
     "(The examples show the style only; their events are made up.)"
 )
 
+# The same voice style for a Mandarin-speaking user (`[assistant] language =
+# "zh"`): written in Chinese, about "the user" rather than Kyle.
+SYSTEM_PROMPT_ZH = (
+    "你是用户的私人语音助手，通过扬声器跟用户说话。你写的每个字都会被读出来，"
+    "所以要像一个聪明、亲切的人说话那样写，而不是像写文章。\n\n"
+    "说话方式：默认只说一两句简短的话。只有用户要求详细时才说多一点，"
+    "而且要分成短句，并问一下要不要继续（“还要听下去吗？”）。"
+    "直接说答案，不要客套开场，比如“好问题”或“当然可以帮你”。"
+    "要像真人一样自然，可以偶尔有一点自然的反应（“哦，不错”“嗯，这个有点难”），"
+    "每次最多一个。语气温暖、耐心、友好。真正有帮助时才简短地追问，"
+    "不要每次都以问题结尾。如果好像听错了，就像人一样简短地确认"
+    "（“不好意思，是十五还是五十？”），不要提到转录或音频。\n\n"
+    "不要写读不出来的东西：不要用 markdown、列表符号、标题、粗体、表格、"
+    "表情符号或代码。不要念网址或文件路径，用描述代替。超过三项的列表不要"
+    "全念，概括一下（“你今天有四件事，最重要的是……”）。数字和时间用口语说，"
+    "比如“下午三点半”“大概二十块钱”，不需要精确时就取整数。\n\n"
+    "用工具时：慢的查询之前先说一句（“稍等，我看一下你的日历”）。"
+    "用口语概括结果，绝不念原始数据、编号或 JSON。出错时简单说明，并给出下一步建议。\n\n"
+    "一定要用简体中文（普通话）回答。"
+)
+
+ZH_REPLY_RULE = ("Always reply in Simplified Chinese (Mandarin, 简体中文), even "
+                 "when tool results are English.")
+
 TOOLS_PROMPT = (
     "Use your tools instead of guessing whenever a question is about Kyle's "
     "schedule, his assignments, or anything that needs current information. "
@@ -116,8 +140,12 @@ class ClaudeChat:
     def __init__(self, client=None, model: str | None = None,
                  max_tokens: int = 500, system_prompt: str = SYSTEM_PROMPT,
                  max_history: int = 40, tools=None, max_tool_rounds: int = 6,
-                 memory=None, recorder=None):
+                 memory=None, recorder=None, language: str = "en"):
         self._client = client
+        # "zh": Chinese prompt and replies (see build_system)
+        self.language = "zh" if str(language).lower().startswith("zh") else "en"
+        if self.language == "zh" and system_prompt is SYSTEM_PROMPT:
+            system_prompt = SYSTEM_PROMPT_ZH
         self.memory = memory  # a PineconeMemory, or None
         # A history.Recorder (conversation history), or None. Every turn is
         # written as it happens; incognito recorders write nothing.
@@ -196,6 +224,11 @@ class ClaudeChat:
                          + "\n".join(f"- {n}" for n in notes))
         parts.append(f"Current local date and time: "
                      f"{now:%A, %B %d, %Y, %I:%M %p} ({now:%Z}, UTC{now:%z}).")
+        if self.language == "zh":
+            # The English tool/memory prompts are about Kyle; this user isn't.
+            parts = [parts[0]] + [p.replace("Kyle's", "the user's")
+                                   .replace("Kyle", "the user") for p in parts[1:]]
+            parts.append(ZH_REPLY_RULE)
         return "\n\n".join(parts)
 
     def ask(self, user_text: str, on_text=None, cancel=None) -> str:

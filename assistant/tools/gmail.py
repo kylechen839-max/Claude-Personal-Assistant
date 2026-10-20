@@ -20,6 +20,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 
+from assistant import i18n
 from assistant.tools import Tool
 from assistant.tools.google_auth import GMAIL_SCOPES, get_credentials
 from assistant.tools.timeutil import local_zone, spoken_date, spoken_time
@@ -288,15 +289,14 @@ class GmailInbox:
             others = [a for _, a in pairs if a.lower() != from_addr]
             if others and from_addr:
                 sender_too = len(others) < len(pairs)
-                warning = (f" Careful: replies also go to {', '.join(others)}."
+                warning = (i18n.t("draft_also", others=", ".join(others))
                            if sender_too else
-                           f" Careful: replies go to {', '.join(others)}, not "
-                           f"to the sender {from_addr}.")
+                           i18n.t("draft_instead", others=", ".join(others),
+                                  sender=from_addr))
         except Exception:
             pass
         text, _ = _trim(_squash(tool_input.get("body", "")), 200)
-        return (f"Do you want me to save a draft reply to {to}, saying: {text}? "
-                f"It won't be sent.{warning}")
+        return i18n.t("draft", to=to, text=text, warning=warning)
 
     def tools(self) -> list[Tool]:
         return [
