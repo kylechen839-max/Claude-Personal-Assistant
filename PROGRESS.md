@@ -1718,3 +1718,12 @@ screens are staged by setting the same attributes the JS sets (no mic).
   connected). "Got it" hides it for the visit. In Chinese on her page.
 - Tests: `tests/js/i18n.test.mjs` +3 (steps shown, only what's left, never
   on Kyle's page or before sign-in). Phone cache v6.
+
+## Chinese page: every screen translated
+
+- `assistant/web/i18n.js`: the Chat / Lecture / Tutor tabs, the settings
+  menu (backends, captions), the History screen (filters, groups, actions,
+  counts) and the lecture and tutor screens now have Chinese strings, plus
+  patterns for the dynamic ones ("12 messages", "Actions for …",
+  "Transcribing 40%"). Only the "Hey Claude" name stays in English.
+- Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
