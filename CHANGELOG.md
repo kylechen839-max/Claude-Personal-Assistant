@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fixed: asking about "tomorrow" just before midnight could list the day
+  after tomorrow. The date is now read once per question, so the system
+  prompt and the calendar and Notion tools agree.
+- Fixed: Whisper occasionally produced "!!!!" instead of words. Lecture
+  transcription and voice commands now detect it, decode that piece again
+  (greedily, in float32) and drop it if it is still garbage, so it never
+  reaches notes or Claude.
+- Tests: the Windows voice-latency test excludes only the OS test voice,
+  and the end-to-end calendar test pins the clock.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply

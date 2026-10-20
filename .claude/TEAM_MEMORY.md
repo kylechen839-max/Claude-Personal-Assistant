@@ -116,6 +116,10 @@ as the work. Never put secrets, tokens or personal data in this file.
 - JS tests: `node --test tests/js/*.test.mjs`. Give explicit files; the
   directory form fails on Node 22.
 - Report counts as "N passed, M skipped" against the baseline.
+- Dates: a chat turn reads "now" once (`timeutil.TURN_NOW`, set in
+  `ClaudeChat.ask`). Tests about "today"/"tomorrow" pin that clock
+  (`chat._now`) instead of reading the clock beside the product; one that
+  did failed whenever CI crossed midnight in New York.
 
 ## Environment (Linux cloud sandbox)
 - Setup:
