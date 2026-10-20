@@ -689,6 +689,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
           "/silence.wav", "/healthz", "/backend-router.js", "/i18n.js",
           "/family.js",  # accepts an #invite= link before sign-in
+          "/ui.js",  # menu closes on an outside tap; swipe down hides the keyboard
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
@@ -1352,4 +1353,4 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v8" in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v9" in sw and '"/ui.js"' in sw

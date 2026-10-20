@@ -1869,3 +1869,12 @@ Render/Docker changes) comes separately.
   patterns for the dynamic ones ("12 messages", "Actions for …",
   "Transcribing 40%"). Only the "Hey Claude" name stays in English.
 - Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
+
+## Phone page: menu closes on an outside tap; swipe down hides the keyboard
+
+- New `assistant/web/ui.js` (all pages): the settings menu closes on a tap
+  anywhere outside it, or Escape, like other apps; a downward swipe of
+  40 px or more while typing blurs the field so iOS closes the keyboard.
+  Served at `/ui.js` (public on the cloud, like the other page files),
+  cached by the service worker (v9).
+- Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
