@@ -164,6 +164,15 @@ hub_sessions = []             # coordinator session ids for the hub's windows (a
 poll_seconds = 4              # the hub reads the Notion inbox at most this often
 hub_state_file = "data/devhub.json"  # the hub's transcript and pending replies
 
+[home_assistant]              # smart home by voice (README "Smart home"); owner only, never family
+enabled = false               # needs a Home Assistant install: HA_URL and HA_TOKEN in .env
+url = ""                      # HA_URL in .env overrides it, e.g. "http://homeassistant.local:8123"
+domains = ["light", "switch", "fan", "climate", "cover", "media_player", "sensor", "lock"]  # the only kinds it may touch
+scripts = []                  # script./scene./automation. entity ids it may run, e.g. ["scene.movie_time"]
+secure_entities = []          # more entity ids that always need a spoken yes (e.g. a garage relay)
+cache_seconds = 30            # how long the device list is kept
+timeout = 10                  # seconds per request
+
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on
 dir = "data/users"            # users.json + one history folder per person (Render: /data/users)

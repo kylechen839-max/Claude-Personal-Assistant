@@ -745,6 +745,66 @@ phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
 
+## Smart home (Home Assistant)
+
+"Turn off the bedroom lights", "set the living room light to 50%", "is the
+front door locked?", "set the thermostat to 70", "turn on the fan". Off
+by default; it needs a running [Home Assistant](https://www.home-assistant.io/)
+on your network:
+
+1. In Home Assistant, create a dedicated user for the assistant
+   (Settings -> People -> Add person, allow login, **not** an
+   administrator), sign in as that user, then profile -> Security ->
+   Long-lived access tokens -> Create token. Copy it once. A non-admin
+   token can still switch devices but can't change Home Assistant's
+   settings; it can't read rooms, so the assistant then matches rooms by
+   device name ("Bedroom Lamp").
+2. In `.env`: `HA_URL=http://homeassistant.local:8123` (your address) and
+   `HA_TOKEN=<the token>`. The token is masked in the log.
+3. In `config.local.toml`:
+
+```toml
+[home_assistant]
+enabled = true
+```
+
+Restart; the startup line says so if the URL or token is missing.
+Claude gets three tools: `ha_list` (devices with their state, by room or
+kind, cached for `[home_assistant] cache_seconds`), `ha_state` (one
+device) and `ha_control`. Spoken names are matched to Home Assistant's
+friendly names and areas, loosely ("kitchen lite" still finds the
+kitchen light); if two devices fit ("the lamp"), it asks which one.
+
+Safety, in code rather than in the prompt:
+- Only the kinds of device in `[home_assistant] domains` (lights,
+  switches, fans, climate, covers, media players, sensors and locks by
+  default) are listed or touched, and only a fixed set of actions is
+  called (on, off, brightness, colour temperature, thermostat, fan speed,
+  open/close, play/pause/volume, lock/unlock). There is no way to call
+  any other service: no restart, no arbitrary scripts. A script, scene or
+  automation runs only if you list its entity id in `[home_assistant]
+  scripts`.
+- Locks, alarm panels, garage doors and gates (by Home Assistant's device
+  class, or a switch or cover with garage, gate, door or lock in its name,
+  even run together as in "Garagedoor", but not indoor, outdoor, doorbell
+  or clock; deadbolt; in Chinese 车库, 锁, 门禁, 大门, 闸门 or 门 ending
+  the name or a word), plus anything in `[home_assistant]
+  secure_entities` (put a relay there if its name says none of these: a
+  room called "Garage" doesn't count, nor non-English words like "Tor"), always ask for a spoken yes first, are never switched
+  for a whole room at once, and are only found by their exact name or all
+  of its words (never by a similar spelling).
+- Unlocking or opening one of those is refused outright while a web page
+  or email is in the conversation (start a new one). Other changes ask
+  first in that case, as everywhere else.
+- Home Assistant is Kyle's alone: family members never get these tools.
+  The Render cloud host can't reach a home network anyway.
+
+**Plain http.** Home Assistant usually serves http on the LAN, so the
+token travels unencrypted. That is fine inside your home network or over
+Tailscale; anywhere else use https (Nabu Casa or your own certificate).
+The assistant warns at startup when `HA_URL` is a plain http address
+outside the home network.
+
 ## Raspberry Pi (Pi 4/5, 64-bit Raspberry Pi OS Bookworm)
 
 The code is the same as on Windows; two scripts do the Pi-specific setup.
