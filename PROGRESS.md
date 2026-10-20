@@ -2690,3 +2690,34 @@ How it was tested (offline, Linux sandbox, Python 3.13):
   `tests/test_watch.py` has 62 tests. ruff: no findings in the new files,
   and none added to the files this work touched (the repo-wide count, 527,
   is the same as master's).
+
+### Round 3 (judge findings on round 2)
+
+- N1: new code that exits before answering on a free side port is a
+  failure again (tried twice, then refused), not inconclusive; only a busy
+  side port (and outside causes) stay inconclusive. Inconclusive results are
+  counted per commit (`Updater.note_inconclusive`, cleared by `mark_gated`):
+  the host backs off 1, 5, 15, then 60 minutes (`host.GATE_BACKOFF`), and the
+  watchdog alerts once after 3 tries or 30 minutes ("The go-live check of X
+  can't run (...)"). Tests: `test_a_commit_that_crashes_on_start_is_refused`,
+  `test_repeated_inconclusive_gate_alerts_once`,
+  `test_inconclusive_alert_after_half_an_hour_too`,
+  `test_host_backs_off_an_inconclusive_gate`.
+- N2: `pkill -f -- <pattern>` (the pattern starts with dashes). Test:
+  `test_pkill_pattern_comes_after_double_dash`. An autouse fixture in
+  `tests/test_watch.py` now fails any test that would run a real command
+  (pkill, PowerShell, a restart) through `watch._run`.
+- N3: a rollback whose reset fails still clears `applied`, and
+  `Host.restart_on` refuses a commit the gate refused. Tests:
+  `test_failed_reset_clears_applied`, `test_host_never_restarts_on_a_refused_commit`.
+- N4: while the update lock is held a down app is still never healed, but
+  it is reported after `start_grace_seconds` + 15 minutes
+  (`watch.LOCKED_MARGIN`). Test: `test_hung_update_doesnt_hide_a_down_app_forever`.
+- N5: `updater.clear_stale` renames a stale lock aside atomically and puts
+  it back (os.link, never over a newer one) if it turned out to be a fresh
+  lock another process took meanwhile. Test:
+  `test_a_fresh_lock_survives_a_late_stale_clear`.
+- The judge's round-3 probes are folded in with the corrected expectations
+  (the tests above). Each fix was reverted alone, with `__pycache__`
+  cleared, and its test failed (10 reverts); the round-2 reverts were rerun
+  against the new code and all 21 still fail.

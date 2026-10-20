@@ -75,6 +75,13 @@ LOCK_STALE_SECONDS = 3 * 3600
 # Checks that never trigger a restart or a rollback: an older version still
 # running is switched, and the phone address (Tailscale) is outside the app.
 NOT_HEALED = ("version", "phone address")
+# While an update holds the lock, an app that doesn't answer is reported
+# after start_grace_seconds plus this (it's never healed meanwhile).
+LOCKED_MARGIN = 15 * 60
+# A go-live check that keeps being inconclusive is reported after this many
+# tries, or this long (Watch.record).
+INCONCLUSIVE_ALERT_COUNT = 3
+INCONCLUSIVE_ALERT_SECONDS = 30 * 60
 HTTP_TIMEOUT = 15
 SWITCH_WAIT = 240  # for a restarted instance to answer on the new version
 _ASSET = re.compile(r"<(?:script|link)\b[^>]*\b(?:src|href)=\"([^\"]+)\"", re.IGNORECASE)
@@ -373,7 +380,9 @@ def kill_stale_candidate(root: Path, inst: Instance, run=None) -> None:
                   "-Force -ErrorAction SilentlyContinue }")
         cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
     else:
-        cmd = ["pkill", "-f", marker.replace(".", r"\.")]  # ERE: only dots matter
+        # "--": the pattern starts with dashes, which pkill would take for
+        # options; ERE, so only the dots need escaping
+        cmd = ["pkill", "-f", "--", marker.replace(".", r"\.")]
     log.warning("Side port of %s busy: stopping a leftover check copy", inst.name)
     run(cmd, root, 60)
 
@@ -383,8 +392,9 @@ def candidate_check(root: Path, inst: Instance, sha: str, http=None, popen=None,
                     wait: float | None = None, run=None) -> list[Check]:
     """Start `inst` on the checked-out code at its side port, run the test
     conversation against it, stop it. Empty list = passed. A busy side port
-    (after stopping a leftover copy) or a copy that exits before answering
-    is inconclusive (Check.outside), not a verdict on `sha`."""
+    (after stopping a leftover copy) is inconclusive (Check.outside), not a
+    verdict on `sha`; a copy that exits before answering on a free port is
+    a failure (the new code doesn't start; gate_check tries it twice)."""
     http = http or _session()
     popen = popen or subprocess.Popen
     port = inst.port + int(inst.settings["watch"]["side_port_offset"])
@@ -409,8 +419,7 @@ def candidate_check(root: Path, inst: Instance, sha: str, http=None, popen=None,
         while True:
             code = child.poll()
             if code is not None:
-                return [Check("go-live", False, f"did not start (exit {code})",
-                              outside=True)]
+                return [Check("go-live", False, f"did not start (exit {code})")]
             health, _ = get_health(http, f"http://127.0.0.1:{port}")
             if health is not None:
                 if str(health.get("version")) != sha[:7]:
@@ -755,6 +764,7 @@ class Watch:
             try:
                 ok, why = self.gate(head)
                 if ok is None:
+                    self.up.note_inconclusive(head, why)
                     log.warning("Go-live check of %s couldn't tell (%s); trying "
                                 "again next run", head[:7], why)
                     return
@@ -851,7 +861,9 @@ class Watch:
         grace = float(self.cfg["start_grace_seconds"])
         since = float(st.setdefault("down_since", now)) if health is None else now
         if self.up.locked():
-            if health is None:  # stopped on purpose, most likely: no alert yet
+            # stopped on purpose, most likely: no alert yet; but a hung update
+            # mustn't hide an app that stays down
+            if health is None and now - since < grace + LOCKED_MARGIN:
                 st["starting"] = True
             log.info("%s failing, but an update or deploy is running; not healing "
                      "it now", inst.name)
@@ -918,6 +930,14 @@ class Watch:
         known = self.status.setdefault("instances", {})
         for gone in set(known) - {i.name for i in instances}:
             known.pop(gone)
+        stuck = self.up.inconclusive(head)
+        if stuck and not stuck.get("alerted") and (
+                int(stuck.get("count") or 0) >= INCONCLUSIVE_ALERT_COUNT
+                or now - float(stuck.get("first") or now) >= INCONCLUSIVE_ALERT_SECONDS):
+            self.up.mark_inconclusive_alerted(head)
+            self.event("inconclusive", f"The go-live check of {head[:7]} can't run "
+                       f"({stuck.get('why') or 'no reason'}), so it isn't live yet; "
+                       "the running version stays.")
         for inst in instances:
             checks, health = results[inst.name]
             st = self._state(inst)

@@ -56,6 +56,9 @@ HEAD_POLL = 30          # seconds between "did HEAD move?" checks
 IDLE_WAIT = 120         # at most this long for the web app to go quiet
 HEALTH_WAIT = 180       # default for the new web app to answer /healthz
 WAKE_SETTLE = 20        # the new wake loop must still run after this
+# A go-live check that couldn't tell (busy side port, Claude down) is tried
+# again after 1, 5, 15, then every 60 minutes (the watchdog alerts if it lasts).
+GATE_BACKOFF = (60, 300, 900, 3600)
 
 
 def log_path(mode: str, root: Path = ROOT) -> Path:
@@ -211,9 +214,11 @@ class Host:
                 self.say(f"go-live check of {new[:7]} on a side port")
                 ok, why = up.gate(new)
                 if ok is None:
+                    count = int(up.note_inconclusive(new, why)["count"])
+                    wait = GATE_BACKOFF[min(count, len(GATE_BACKOFF)) - 1]
                     self.say(f"go-live check of {new[:7]} couldn't run ({why}); "
-                             "trying again in a minute")
-                    self.gate_retry = self.clock() + 60
+                             f"trying again in {wait // 60 or 1} min")
+                    self.gate_retry = self.clock() + wait
                     return False
                 up.mark_gated(new, ok)
                 verdict = ok
@@ -265,7 +270,16 @@ class Host:
             self.trigger_watch()
 
     def restart_on(self, new: str) -> None:
-        """HEAD moved to `new`: restart on it; roll back if it won't run."""
+        """HEAD moved to `new`: restart on it; roll back if it won't run.
+        Never on a commit the go-live check refused (a rollback whose reset
+        failed leaves it checked out)."""
+        gated = getattr(self.updater, "gated", None)
+        if gated is not None and gated(new) is False:
+            if self.refused != new:
+                self.refused = new
+                self.say(f"!!! {new[:7]} failed its go-live check; not restarting "
+                         f"on it (staying on {(self.child_sha or '?')[:7]})")
+            return
         old = self.child_sha
         self.say(f"code changed {(old or '?')[:7]} -> {new[:7]}; restarting "
                  + ("when idle" if self.mode == "web" else "now"))

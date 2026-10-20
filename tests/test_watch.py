@@ -21,6 +21,15 @@ SECRET_REPLY = "Your dentist appointment with Dr. Who is at 4 PM"
 
 # ----- fakes -------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def no_real_commands(monkeypatch):
+    """No test here may run a real pkill, PowerShell or restart: every
+    command goes through an injected fake `run`."""
+    def refuse(cmd, cwd=None, timeout=0):
+        raise AssertionError(f"a real command would have run: {cmd[:2]}")
+    monkeypatch.setattr(watch, "_run", refuse)
+
+
 class FakeGit:
     """git for Updater: HEAD, ancestry, what's on GitHub, reset --keep;
     other commands are recorded and succeed."""
@@ -1016,12 +1025,16 @@ def test_a_busy_side_port_is_inconclusive_not_a_rejection(tmp_path):
     assert killed and "--candidate" in killed[0][-1].replace("\\", "")
 
 
-def test_a_copy_that_does_not_start_is_inconclusive(tmp_path):
+def test_a_commit_that_crashes_on_start_is_refused(tmp_path):
+    """The side port was free and the new code exited before answering (an
+    ImportError): that's the code's fault. Tried twice, then refused (not
+    inconclusive, which would block every pull forever)."""
     (tmp_path / ".env").write_text(f"WEB_TOKEN={TOKEN}\n")
+    started = []
 
-    class Dead:
+    class Crash:
         def __init__(self, cmd, **kw):
-            pass
+            started.append(cmd)
 
         def poll(self):
             return 1
@@ -1030,9 +1043,11 @@ def test_a_copy_that_does_not_start_is_inconclusive(tmp_path):
         def get(self, url, timeout=0):
             raise ConnectionError("nothing")
 
-    failed = watch.candidate_check(tmp_path, make_instance(), NEW, http=Nothing(),
-                                   popen=Dead, sleep=lambda s: None)
-    assert failed[0].outside and watch.external(failed)
+    def check(root, i, sha):
+        return watch.candidate_check(root, i, sha, http=Nothing(), popen=Crash,
+                                     sleep=lambda s: None)
+    ok, why = watch.gate_check(NEW, tmp_path, [make_instance()], check=check)
+    assert ok is False and "did not start (exit 1)" in why and len(started) == 2
 
 
 def test_gate_retries_once_before_rejecting():
@@ -1188,3 +1203,119 @@ def test_state_writes_wait_for_another_process(tmp_path):
     up.set_last_good(GOOD)
     waited = _time.monotonic() - start
     assert waited >= 0.5 and up.last_good() == GOOD and not lock.exists()
+
+
+# ----- round 3 ------------------------------------------------------------------------
+
+def test_repeated_inconclusive_gate_alerts_once(world):
+    """A go-live check that keeps failing to run (a busy side port) never
+    goes live, so after a few tries the watchdog says so, once."""
+    world.apps.add(8765, version=OLD)
+    w = world.make(gate=lambda sha: (None, "Your app: go-live: side port 8865 is in use"))
+    for _ in range(5):
+        w.run()
+        world.clock.t += 300
+    stuck = [t for t in world.sent if "can't run" in t]
+    assert len(stuck) == 1 and "side port 8865 is in use" in stuck[0]
+    assert NEW[:7] in stuck[0] and w.up.rejected() == []
+    w.up.mark_gated(NEW, True)  # it got through: the count starts over
+    assert w.up.inconclusive(NEW) is None
+
+
+def test_inconclusive_alert_after_half_an_hour_too(world):
+    world.apps.add(8765, version=OLD)
+    w = world.make(gate=lambda sha: (None, "Claude unreachable"))
+    w.run()
+    assert not [t for t in world.sent if "can't run" in t]
+    world.clock.t += watch.INCONCLUSIVE_ALERT_SECONDS
+    w.up.note_inconclusive(NEW, "Claude unreachable")  # (the host tried meanwhile)
+    world.git.calls.clear()
+    w.cfg["gate"] = False  # this run only records
+    w.run()
+    assert len([t for t in world.sent if "can't run" in t]) == 1
+
+
+def test_host_backs_off_an_inconclusive_gate():
+    """1, 5, 15, then 60 minutes between tries, not every minute forever."""
+    h = host.Host("web", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
+                  clock=lambda: 0.0)
+    up = HostUpdater(lambda sha: (None, "side port in use"))
+    counts = []
+    up.note_inconclusive = lambda sha, why: counts.append(1) or {"count": len(counts)}
+    h.updater = up
+    waits = []
+    for _ in range(5):
+        h.gate_retry = 0.0
+        assert h.gate_allows(NEW) is False
+        waits.append(h.gate_retry)
+    assert waits == [60, 300, 900, 3600, 3600]
+
+
+def test_pkill_pattern_comes_after_double_dash(tmp_path, monkeypatch):
+    monkeypatch.setattr(watch.sys, "platform", "linux")
+    seen = []
+    watch.kill_stale_candidate(tmp_path, make_instance(),
+                               run=lambda cmd, cwd, t: seen.append(cmd) or (0, ""))
+    cmd = seen[0]
+    assert cmd[:3] == ["pkill", "-f", "--"] and cmd[3].startswith("--config config")
+
+
+def test_failed_reset_clears_applied(tmp_path):
+    """A refused commit whose reset failed stays checked out, but is no
+    longer the updater's "applied" one, so no host restarts on it as such."""
+    def run(cmd, cwd, timeout=0):
+        if cmd[1:2] == ["reset"]:
+            return 1, "error: Entry 'x' not uptodate. Cannot merge."
+        return FakeGit()(cmd, cwd, timeout)
+    up = Updater(root=tmp_path, run=run, gate=lambda sha: (False, "x"))
+    up._save_state(applied=NEW)
+    up.mark_gated(NEW, False)
+    assert up.rollback(OLD, NEW, "go-live check failed").status == "failed"
+    assert up.applied() is None
+
+
+def test_host_never_restarts_on_a_refused_commit():
+    started = []
+    h = host.Host("web", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
+                  popen=lambda cmd: started.append(cmd) or SimpleNamespace(
+                      poll=lambda: None, terminate=lambda: None, wait=lambda timeout: 0),
+                  health=lambda port: {"ok": True, "busy": False, "version": NEW[:7]},
+                  sleep=lambda s: None)
+    h.updater = HostUpdater(lambda sha: (False, "x"), verdict=False)
+    h.updater.head = lambda: OLD
+    h.start()
+    h.restart_on(NEW)
+    assert len(started) == 1  # still the old one
+
+
+def test_hung_update_doesnt_hide_a_down_app_forever(world):
+    """The update lock held (an update hung): never healed, but reported
+    once start_grace_seconds plus a margin have passed."""
+    world.apps.add(8765, up=False)
+    w = world.make()
+    assert w.up.acquire()
+    w.run()
+    later(world)
+    w.run()
+    assert world.sent == []  # within grace + margin: maybe stopped on purpose
+    later(world, watch.LOCKED_MARGIN)
+    w.run()
+    assert len(world.sent) == 1 and "Your app is failing" in world.sent[0]
+    assert world.git.restarts == []  # still never healed while locked
+    w.up.release()
+
+
+def test_a_fresh_lock_survives_a_late_stale_clear(tmp_path):
+    """Two processes found the same dead lock stale; the first already took
+    the lock. The second's clear must not remove the first's fresh lock."""
+    from assistant.updater import clear_stale, take_lock
+
+    lock = tmp_path / "update.lock"
+    dead = str(subprocess_dead_pid())
+    lock.write_text(dead)
+    assert take_lock(lock, 3600)  # the first process clears it and takes it
+    mine = lock.read_text()
+    clear_stale(lock, dead)  # the second, acting on what it saw before
+    assert lock.exists() and lock.read_text() == mine
+    assert not take_lock(lock, 3600)  # still held
+    assert not list(tmp_path.glob("*.stale"))

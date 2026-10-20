@@ -1412,9 +1412,12 @@ but never restarted for or rolled back.
 **New code goes live only after the go-live check** (`[watch] gate`, on by
 default): each instance is started a second time on a side port (its port
 + `side_port_offset`, 100: 8765 -> 8865, on 127.0.0.1) and must pass the same
-test conversation first (a failure is tried once more before the commit is
-refused; a busy side port, after stopping a leftover check copy, or a copy
-that doesn't start says nothing about the code and is tried again later). The automatic updater does this before the running
+test conversation first (a failure, including new code that exits before
+it answers, is tried once more before the commit is refused; a busy side
+port, after stopping a leftover check copy, or Claude being unreachable says
+nothing about the code and is tried again later: after 1, 5, 15, then every
+60 minutes, and you are told once if it keeps happening for 3 tries or
+half an hour). The automatic updater does this before the running
 apps see the new commit; for a pull by hand the host supervisor or the
 watchdog does it before restarting anything. A commit that fails is undone
 and the old version keeps running. **Update with one command** instead of

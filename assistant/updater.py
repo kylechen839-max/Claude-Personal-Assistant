@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -155,15 +156,44 @@ def lock_stale(path: Path, max_age: float, clock=time.time) -> bool:
     return text.isdigit() and not pid_alive(int(text))
 
 
-def take_lock(path: Path, max_age: float, clock=time.time) -> bool:
-    """Create `path` exclusively with this process's PID, after removing a
-    stale one (lock_stale)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if lock_stale(path, max_age, clock):
+def _lock_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def clear_stale(path: Path, seen: str | None) -> None:
+    """Remove the stale lock `path` that held `seen`, without ever removing
+    a fresh one: two processes may both have judged it stale, and the first
+    may already have taken the lock. The file is renamed aside atomically
+    (only one rename of it can succeed); if what was moved isn't the stale
+    lock that was seen, it is put back (os.link: never over a newer one)."""
+    aside = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(4)}.stale")
+    try:
+        os.replace(path, aside)
+    except OSError:
+        return  # already gone: someone else cleared it
+    try:
+        if _lock_text(aside) != seen:  # a fresh lock: give it back
+            try:
+                os.link(aside, path)
+            except OSError:
+                pass
+    finally:
         try:
-            path.unlink()
+            aside.unlink()
         except OSError:
             pass
+
+
+def take_lock(path: Path, max_age: float, clock=time.time) -> bool:
+    """Create `path` exclusively with this process's PID, after clearing a
+    stale one (lock_stale, clear_stale)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = _lock_text(path)
+    if lock_stale(path, max_age, clock):
+        clear_stale(path, seen)
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
@@ -359,9 +389,32 @@ class Updater:
 
     def mark_gated(self, sha: str, ok: bool) -> None:
         with self._state_lock():
-            self._save_state(gated={"sha": sha, "ok": bool(ok), "at": self.clock()})
+            self._save_state(gated={"sha": sha, "ok": bool(ok), "at": self.clock()},
+                             inconclusive=None)
             if not ok:
                 self.reject(sha)
+
+    def note_inconclusive(self, sha: str, why: str) -> dict:
+        """The go-live check of `sha` couldn't tell (a busy side port, Claude
+        down): count it, so the hosts back off and the watchdog alerts once
+        it keeps happening (watch.Watch.record). Returns the record."""
+        with self._state_lock():
+            rec = self._state().get("inconclusive") or {}
+            if rec.get("sha") != sha:
+                rec = {"sha": sha, "count": 0, "first": self.clock(), "alerted": False}
+            rec.update(count=int(rec["count"]) + 1, last=self.clock(), why=why[:300])
+            self._save_state(inconclusive=rec)
+            return rec
+
+    def inconclusive(self, sha: str | None) -> dict | None:
+        rec = self._state().get("inconclusive") or None
+        return rec if rec and sha and rec.get("sha") == sha else None
+
+    def mark_inconclusive_alerted(self, sha: str) -> None:
+        with self._state_lock():
+            rec = self.inconclusive(sha)
+            if rec:
+                self._save_state(inconclusive={**rec, "alerted": True})
 
     def last_good(self) -> str | None:
         """The last commit whose test conversation passed on this machine."""
@@ -494,6 +547,7 @@ class Updater:
         if self.gate is not None:  # nothing restarts on it while we hold the lock
             ok, why = self.gate(new)
             if ok is None:  # Claude or the internet down: no verdict on `new`
+                self.note_inconclusive(new, why)
                 return self.rollback(old, new, f"go-live check couldn't run ({why}); "
                                      "trying again next time", requirements,
                                      reject=False)
@@ -513,6 +567,9 @@ class Updater:
             requirements = "requirements.txt" in self.changed_files(old, bad)
         code, out = self.git("reset", "--keep", old)
         if code != 0:  # still on `bad`: not rejected, it may come back by hand
+            # but no longer "applied": the hosts must not restart on it as an
+            # update of theirs (restart_on); a hand restart is gated
+            self._save_state(applied=None)
             return UpdateResult(FAILED, f"{why}; ROLLBACK FAILED ({out.strip()[-200:]}): "
                                 f"run `git reset --keep {short(old)}` by hand", old, bad)
         if reject:
