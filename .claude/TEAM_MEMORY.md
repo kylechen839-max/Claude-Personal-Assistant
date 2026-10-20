@@ -192,6 +192,9 @@ as the work. Never put secrets, tokens or personal data in this file.
     paths and resolves it to Kyle's own user id, so the master can write
     his private per-viewer subtree; the page reads the same path with the
     id from `user.id()`.
+  - Lesson (2026-10-20): a master wrote estimated dashboard times that
+    ran ahead of the clock. Take every `at`/`updated_at` from
+    `date -u +%Y-%m-%dT%H:%M:%SZ` at write time; never estimate.
   - `test_page_never_writes` rejects any `.set(`/`.update(`/`.delete(`/
     `.add(` in the page, Map and Set included; keep page state in arrays
     or plain objects.
