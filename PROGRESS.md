@@ -6,7 +6,7 @@ All seven stages are done. Run the tests with `pytest` from the project root
 **Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
 shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 110
+change, and the launcher shellcheck test skipped), plus 123
 JavaScript tests (node:test: `voice-core.test.js` and
 `agent-dashboard.test.mjs`, both also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
@@ -59,7 +59,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
-| `tests/js/agent-dashboard.test.mjs` | 98 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
+| `tests/js/agent-dashboard.test.mjs` | 111 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1234,6 +1234,47 @@ still the default.
   markdown list bullets, table font size, the coordinator body fitting a
   2×2 window, and the phone layout (a flex column). Not checked in the
   real claude.ai shell; see MANUAL_TEST.md.
+
+- **Follow-up: working indicator.** The master writes
+  `status: {state, text, at}` on the chat index document
+  (`data/users/me/chat-<sessionTail>`). The page subscribes to that
+  document through `liveQuery` (`docsOf` now takes a document snapshot;
+  same cap of 8, paused on Runs). It shows "Coordinator · working" with
+  three pulsing dots, the step text (at most 80 characters, plain text)
+  and the elapsed time while the status is fresh (under 15 min). After a
+  send it shows "Sent · waiting for the coordinator" until a coordinator
+  message or a newer status arrives, or 10 min pass. Bubbles show the
+  date when a message is not from today. The skill sets the status at
+  each step and takes every `at` from `date -u`.
+- **Follow-up: delivery stages.** Under Kyle's latest message a line
+  shows Sending… (animated), Delivered (sendToClaude resolved), Seen by
+  coordinator with the time (`status.seen_ref` = its nonce, or its
+  mirrored copy), then "Coordinator · working: <step>" (animated, with
+  the elapsed time). The reply clears it. Delivered with no pickup for 2
+  minutes turns amber with Open session; a failed send shows "Not sent:
+  <reason>" in red. This replaced the separate "waiting" row. The skill
+  writes `seen_ref` as its first action on a chat message and checks the
+  comment threads for missed messages at the end of every turn. Tests:
+  98 → 106 JS; all 8 new ones fail on the previous page.
+- **Round 2.**
+  - Judge findings:
+    1. "working" now needs Seen, which is latched from `seen_ref` or
+       Kyle's mirrored copy.
+    2. `docsOf` accepts `exists()` as a method.
+    3. The line clears on a coordinator message that is new since the
+       send and comes after Seen or the copy, so Kyle's clock no longer
+       matters.
+
+    Each has a test that fails without its fix.
+  - Kyle's restyle: the chat now looks like the Claude Code app (its own
+    light and dark palette, the system UI font at 15 px, full-width
+    coordinator text, grey bubbles for Kyle, app-style markdown with code
+    panels and language labels, a ✻ working line, a rounded composer
+    with an arrow Send button), and there are new `kind: "activity"`
+    rows that collapse into "N steps".
+  - The working timer shows minutes ("3m"), refreshed on the existing
+    one-minute interval.
+  - JS tests: 106 → 111.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was

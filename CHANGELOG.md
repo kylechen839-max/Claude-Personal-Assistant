@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Dev team dashboard: the coordinator chat looks like the Claude Code app
+  (full-width replies, your messages in bubbles, collapsible activity
+  rows, an animated working line) and shows each message's delivery:
+  Sending, Delivered, Seen by coordinator, Working, or an amber warning
+  when the coordinator hasn't picked it up after 2 minutes.
 - Dev team dashboard: the Grid is now a full-screen window workspace.
   Windows auto-tile, with a dark monospace body, run colours, maximize
   (Esc or Restore), an Active only / All recent filter, and a slim

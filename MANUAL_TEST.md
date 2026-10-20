@@ -524,7 +524,16 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
   - Should: the first time, claude.ai asks you to allow commenting;
     allow it. The message shows as "sending", then "sent". Within a
     minute or two the master's reply appears in the window (formatted:
-    bold, lists, code), and your message stays once.
+    bold, lists, code), and your message stays once. Right after the
+    send, the line under your message goes Sending…, Delivered, Seen by
+    coordinator (with a time), then "Coordinator · working" with its
+    current step and a timer, and clears when the reply arrives. If the
+    coordinator is busy for 2 minutes the line turns amber with Open
+    session. The chat reads like the Claude Code app: coordinator text
+    full width in a sans-serif font, your messages in grey bubbles on the
+    right, steps as small ✓ lines that collapse into "N steps ▸", and a
+    turning ✻ while it works, readable in light and dark. Each message's time matches
+    when it was really sent.
 - [ ] When the master asks you something during a run you chatted in.
   - Should: its message is amber and the window shows a "question"
     chip, until you reply in the box.

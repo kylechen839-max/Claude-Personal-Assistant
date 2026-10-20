@@ -177,37 +177,77 @@ main[data-view="grid"]{height:100%;gap:10px}
 .hint{font-size:.76rem;color:var(--muted);margin:0}
 .hint[data-level="bad"]{color:var(--silent)}
 /* The coordinator chat: transcript, then the box. */
-.chat{flex:1 1 150px;display:flex;flex-direction:column;gap:6px;min-height:150px;border-top:1px solid var(--line);padding-top:6px}
+/* The coordinator chat: the Claude Code app's look, its own palette in both themes. */
+.chat{flex:1 1 150px;display:flex;flex-direction:column;gap:8px;min-height:150px;margin:4px -11px -12px;padding:10px 14px 12px;
+  font-family:-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;font-size:15px;line-height:1.55;
+  background:#faf9f7;color:#1f1e1d;color-scheme:light;
+  --fg:#1f1e1d;--muted:#6b6660;--line:#e3dfd9;--card:#ffffff;--accent:#2a5bc4;--chip:#efece7;--bubble:#efece7;
+  --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;--silent:#a8261d;--silent-bg:#fbe4e1}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .chat{background:#1f1e1d;color:#e8e6e3;color-scheme:dark;
+  --fg:#e8e6e3;--muted:#a7a29b;--line:#3a3836;--card:#2a2927;--accent:#8db0f6;--chip:#2f2d2b;--bubble:#33312e;
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916}}
+:root[data-theme="dark"] .chat{background:#1f1e1d;color:#e8e6e3;color-scheme:dark;
+  --fg:#e8e6e3;--muted:#a7a29b;--line:#3a3836;--card:#2a2927;--accent:#8db0f6;--chip:#2f2d2b;--bubble:#33312e;
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916}
+.chat .hint{font-size:.8rem}
+.tile[data-max] .chat{margin-top:-8px}
 .logwrap{position:relative;flex:1;min-height:70px;display:flex}
-.log{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:7px;padding:2px 2px 4px;overscroll-behavior:contain}
+.log{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:2px 2px 6px;overscroll-behavior:contain}
 .log>.empty{color:var(--muted);margin:auto 0 0}
-.msg{align-self:flex-start;max-width:94%;min-width:0;padding:5px 9px 6px;border-radius:8px;background:#1a2027;border:1px solid var(--line);
-  overflow-wrap:anywhere}
-.msg[data-from="kyle"]{align-self:flex-end;background:#1c2a40;border-color:#2c4670}
-.msg[data-kind="question"]{background:var(--needs-bg);border-color:var(--needs-edge)}
-.msg .meta{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
-.msg[data-kind="question"] .who{color:var(--needs);font-weight:700}
+.msg{min-width:0;overflow-wrap:anywhere}
+.msg[data-from="coordinator"]{align-self:stretch}
+.msg[data-from="kyle"]{align-self:flex-end;max-width:75%;padding:8px 13px;border-radius:18px;background:var(--bubble)}
+.msg[data-kind="question"]{border-left:3px solid var(--needs-edge);padding-left:10px}
+.msg .meta{display:flex;flex-wrap:wrap;gap:0 6px;font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.msg[data-from="coordinator"] .meta .at::before{content:"· "}
+.msg[data-from="kyle"] .meta{display:none}
+.msg[data-kind="question"] .who{color:var(--needs);font-weight:600}
 .msg .plain{white-space:pre-wrap}
-.md>*{margin:3px 0 0}.md>:first-child{margin-top:2px}
-.md h3,.md h4,.md h5,.md h6{font-size:inherit;font-weight:700}
-.md h3{font-size:1.08em}
-.md ul,.md ol{display:block;padding-left:1.5em}.md ul{list-style:disc}.md ol{list-style:decimal}.md li{display:list-item}
-.md pre{overflow:auto;background:#0b0e12;padding:5px 7px;border-radius:6px;white-space:pre}
-.md code{font-family:var(--mono);background:#0b0e12;border-radius:4px;padding:0 3px}
-.md pre code{padding:0;background:none}
-.md blockquote{margin-left:0;padding-left:8px;border-left:3px solid var(--line);color:var(--muted)}
+.act{display:flex;gap:7px;align-items:baseline;font-size:.82rem;color:var(--muted);min-width:0}
+.act .icon{flex:none;width:1em;text-align:center}
+.act .atext{overflow-wrap:anywhere}
+.acts{display:flex;flex-direction:column;gap:3px}
+.acts-toggle{align-self:flex-start;padding:0;font-size:.82rem;font-weight:500;color:var(--muted);background:none}
+.acts-list{display:flex;flex-direction:column;gap:3px;padding-left:2px}
+.md>*{margin:.55em 0 0}.md>:first-child{margin-top:.15em}
+.md h3,.md h4,.md h5,.md h6{font-weight:600;line-height:1.35}
+.md h3{font-size:1.15em}.md h4{font-size:1.08em}.md h5,.md h6{font-size:1.02em}
+.md strong{font-weight:600}
+.md ul,.md ol{display:block;padding-left:1.6em}.md ul{list-style:disc}.md ol{list-style:decimal}.md li{display:list-item;margin:.15em 0}
+.md a{color:var(--accent);text-decoration:none}.md a:hover{text-decoration:underline}
+.md code{font-family:var(--mono);font-size:.86em;background:var(--chip);border-radius:5px;padding:.1em .35em}
+.md pre{position:relative;overflow-x:auto;font-family:var(--mono);font-size:.84em;line-height:1.5;background:var(--chip);
+  border:1px solid var(--line);border-radius:9px;padding:10px 12px;white-space:pre}
+.md pre[data-lang]{padding-top:24px}
+.md pre[data-lang]::before{content:attr(data-lang);position:absolute;top:5px;left:12px;font-size:.78em;color:var(--muted);font-family:var(--body)}
+.md pre code{padding:0;background:none;font-size:inherit}
+.md blockquote{margin-left:0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
 .md .tablewrap{overflow-x:auto}
-.md table{border-collapse:collapse;font-size:inherit;color:inherit}
-.md th,.md td{border:1px solid var(--line);padding:2px 6px;text-align:left;vertical-align:top}
+.md table{border-collapse:collapse;font-size:.92em;color:inherit}
+.md th,.md td{border:1px solid var(--line);padding:4px 9px;text-align:left;vertical-align:top}
+.md th{font-weight:600}
 .md hr{border:0;border-top:1px solid var(--line)}
 .md-rest{white-space:pre-wrap}
 .newpill{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);padding:3px 12px;font-size:.74rem;color:#0b0e12;
   background:var(--accent);border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,.4)}
-.composer{flex:none;display:flex;gap:6px;align-items:flex-end}
-.composer textarea{flex:1;min-width:0;min-height:2.6em;max-height:9em;resize:vertical;font:inherit;color:var(--fg);background:#0b0e12;
-  border:1px solid var(--line);border-radius:7px;padding:5px 8px}
+.dline{align-self:flex-end;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;max-width:75%;margin-top:-8px;
+  font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.dline[data-stage="late"]{color:var(--needs)}
+.dline[data-stage="failed"]{color:var(--silent)}
+.work{flex:none;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 7px;font-size:.85rem;color:var(--muted);min-width:0}
+.work .wtext{overflow-wrap:anywhere;min-width:0}
+.work .wtime::before{content:"· "}
+.work .wtime{font-variant-numeric:tabular-nums}
+.spin{display:inline-block;color:#d97757;font-size:1.05em;line-height:1;animation:spin 2.4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+.composer{flex:none;position:relative;display:flex}
+.composer textarea{flex:1;min-width:0;min-height:2.9em;max-height:10em;resize:none;font:inherit;line-height:1.45;color:var(--fg);
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:9px 48px 9px 14px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.composer button{color:#0b0e12;background:var(--accent);padding:5px 14px}
+.composer button{position:absolute;right:7px;bottom:7px;width:32px;height:32px;padding:0;border-radius:50%;font-size:1rem;
+  font-weight:700;color:#fff;background:#c96442}
+.composer button:disabled{opacity:.45}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 /* Phone (narrow or coarse pointer, set by the script as data-compact): one
    slim row (view switch, filter, count) over the workspace; a maximized
@@ -377,6 +417,14 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   function clock(t) {
     try { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); } catch (_) { return "?"; }
   }
+  // clock(), with the date in front when t isn't today.
+  function stamp(t) {
+    try {
+      const d = new Date(t);
+      if (d.toDateString() === new Date(Date.now()).toDateString()) return clock(t);
+      return d.toLocaleDateString([], {month: "short", day: "numeric"}) + " " + clock(t);
+    } catch (_) { return "?"; }
+  }
 
   // ---- rendering (textContent only) ----
   function el(tag, cls, content) {
@@ -484,9 +532,13 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
 
   // ---- live queries: runs and agents share one helper and one error table ----
   // Each subscribes once and re-subscribes only from its own error path.
+  // A query snapshot (docs) or one document's snapshot (exists).
   function docsOf(snap) {
     const out = [];
-    for (const d of snap.docs || []) {
+    let one = false;
+    try { one = typeof snap.exists === "function" ? snap.exists() === true : snap.exists === true; } catch (_) { one = false; }
+    const list = Array.isArray(snap.docs) ? snap.docs : one ? [snap] : [];
+    for (const d of list) {
       let body;
       try { body = d.data(); } catch (_) { body = undefined; }
       const r = body && typeof body === "object" && !Array.isArray(body) ? {...body} : {};
@@ -637,7 +689,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   const CHAT_SUBS = 8;      // conversations subscribed at once
   const PENDING_MAX = 20;   // Kyle's own unconfirmed messages kept per session
   const SEND_MAX = 4000;    // UTF-8 bytes per comment (the shell allows 4 KiB)
-  const CHAT_KINDS = ["update", "reply", "question", "report"];
+  const CHAT_KINDS = ["update", "reply", "question", "report", "activity"];
+  const ACTIVITY_MAX = 200;
+  const CHECK_WORD = /^(?:✓|ran|passed|done|finished|completed|merged|pushed|approved|fixed|opened|created|green)\b/i;
   const USER_SEG = /^[A-Za-z0-9_.~:@+-]{1,200}$/;
   const MD_BUDGET = 2000;   // elements per rendered message; the rest is plain text
   const MD_DEPTH = 6;       // list nesting
@@ -654,6 +708,10 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     claude_unavailable: "Not sent: the coordinator can't receive it right now.",
     upstream_error: "May have been sent; check before resending.",
   };
+  const WORK_STALE_MS = 15 * 60e3; // a "working" status older than this shows nothing
+  const PICKUP_MS = 2 * 60e3;       // delivered but not seen this long: say so
+  const NOT_PICKED = "Coordinator hasn't picked this up yet. It may be busy; it checks for missed messages after each reply.";
+  const WORK_TEXT_MAX = 80;
   const SEND_STOP = ["not_granted", "capability_disabled", "capability_removed", "forbidden"];
 
   const $main = document.getElementById("main");
@@ -1078,17 +1136,40 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       t.input = el("textarea");
       t.input.rows = 2;
       t.input.maxLength = SEND_MAX;
-      t.input.placeholder = "Message the coordinator (Enter sends, Shift+Enter: new line)";
+      t.input.placeholder = "Reply to the coordinator…";
       t.input.setAttribute("aria-label", "Message the coordinator");
-      t.send = el("button", "send", "Send");
+      t.send = el("button", "send", "↑");
+      t.send.setAttribute("aria-label", "Send");
+      t.send.title = "Send (Enter; Shift+Enter for a new line)";
       t.send.type = "button";
       t.form.append(t.input, t.send);
       t.form.hidden = true;
       t.sendHint = el("p", "hint");
       t.sendHint.setAttribute("aria-live", "polite");
-      t.chat.append(t.chatNote, t.logWrap, t.form, t.sendHint);
+      t.dline = el("div", "dline");
+      t.dline.setAttribute("role", "status");
+      const dspin = el("span", "spin");
+      dspin.setAttribute("aria-hidden", "true");
+      dspin.textContent = "✻";
+      t.dspin = dspin;
+      t.dtext = el("span", "dtext");
+      t.dtime = el("span", "dtime");
+      t.dopen = link("Open session", SESSION_PREFIX);
+      t.dline.append(dspin, t.dtext, t.dtime, t.dopen);
+      t.work = el("div", "work");
+      t.work.setAttribute("role", "status");
+      t.work.hidden = true;
+      const spin = el("span", "spin");
+      spin.setAttribute("aria-hidden", "true");
+      spin.textContent = "✻";
+      t.workLabel = el("span", "wlabel");
+      t.workText = el("span", "wtext");
+      t.workTime = el("span", "wtime");
+      t.work.append(spin, t.workLabel, t.workText, t.workTime);
+      t.chat.append(t.chatNote, t.logWrap, t.work, t.form, t.sendHint);
       t.body.append(t.runLine, t.dyn, t.chat);
       t.bubbles = Object.create(null);
+      t.openActs = Object.create(null);
       t.hintText = "";
       t.hintBad = false;
       t.logSeen = false;
@@ -1621,11 +1702,13 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     for (const key of Object.keys(chats)) {
       if (keep[key]) continue;
       chats[key].live.pause();
+      chats[key].statusLive.pause();
       delete chats[key];
     }
     for (const p of want) {
       if (!chats[p.session]) chats[p.session] = makeChat(p.session);
       chats[p.session].live.start(db);
+      chats[p.session].statusLive.start(db);
     }
   }
 
@@ -1638,6 +1721,18 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       conn(msg, bad) { chat.conn = bad ? msg : ""; renderGrid(); },
       stop(summary, conn) { chat.docs = null; chat.conn = [summary, conn].filter(Boolean).join(" · "); renderGrid(); },
     });
+    // The conversation's index document: the master's {last_at, status}.
+    chat.status = null;
+    chat.statusLive = liveQuery((d) => d.doc(`data/users/${uid}/chat-${tail}`), {
+      what: "status", list: "status", noDb: "",
+      rows(list) {
+        const st = list.length ? list[0].status : null;
+        chat.status = st && typeof st === "object" && !Array.isArray(st) ? st : null;
+        renderGrid();
+      },
+      conn() { /* the transcript's own line reports the connection */ },
+      stop() { chat.status = null; renderGrid(); },
+    });
     return chat;
   }
 
@@ -1647,7 +1742,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       key: "d " + String(d._id),
       from: d.from === "kyle" ? "kyle" : "coordinator",
       kind: CHAT_KINDS.includes(d.kind) ? d.kind : "update",
-      text: text(d.text, CHAT_MAX, true),
+      text: d.kind === "activity" ? text(d.text, ACTIVITY_MAX) : text(d.text, CHAT_MAX, true),
       at: time(d.at),
       ref: text(d.ref, 20),
       state: "",
@@ -1696,6 +1791,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     let open = null;
     for (let i = items.length - 1; i >= 0; i -= 1) {
       if (items[i].from === "kyle") break;
+      if (items[i].kind === "activity") continue;
       if (items[i].kind === "question") { open = items[i]; break; }
     }
     if (open && mine.some((m) => m.state !== "not sent" && (open.at === null || m.at >= open.at))) open = null;
@@ -1706,7 +1802,22 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.qchip.hidden = !open;
     const next = Object.create(null);
     const list = [];
-    for (const m of items) {
+    for (let i = 0; i < items.length; i += 1) {
+      const m = items[i];
+      if (m.kind === "activity" && m.from === "coordinator") {
+        // Consecutive activity rows collapse into one "N steps" row.
+        let j = i;
+        while (j + 1 < items.length && items[j + 1].kind === "activity" && items[j + 1].from === "coordinator") j += 1;
+        const run = items.slice(i, j + 1);
+        const gkey = "g " + m.key;
+        const sig = run.map((x) => x.key + "\u0002" + x.text).join("\u0001");
+        let b = t.bubbles[gkey];
+        if (!b || b.sig !== sig) b = {sig, el: activityGroup(t, gkey, run)};
+        next[gkey] = b;
+        list.push(b.el);
+        i = j;
+        continue;
+      }
       const kind = m.kind === "question" ? (m === open ? "question" : "asked") : m.kind;
       const sig = [m.from, kind, m.at, m.state, m.text].join("\u0001");
       let b = t.bubbles[m.key];
@@ -1715,6 +1826,16 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       list.push(b.el);
     }
     t.bubbles = next;
+    // Under Kyle's latest message from this page: how far it got.
+    const last = (pendingBy[key] || []).at(-1);
+    const line = last ? deliveryLine(last, chat, items, p.session) : null;
+    if (line) {
+      const target = next["l " + last.nonce]
+        || next[(items.find((m) => m.from === "kyle" && m.ref === last.nonce && m.key[0] === "d") || {}).key];
+      if (target) list.splice(list.indexOf(target.el) + 1, 0, t.dline);
+      showLine(t, line, p.session);
+    }
+    t.lineShown = !!line;
     if (!list.length) list.push(t.logEmpty);
     if (!sameChildren(t.log, list)) {
       const stick = t.stick || !t.logSeen || nearBottom(t.log);
@@ -1728,6 +1849,99 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     }
     t.logSeen = t.logSeen || !!(chat && chat.docs);
     t.stick = false;
+    fillWork(t, key, chat);
+  }
+
+  // The master's index document status, when it says "working" and is
+  // fresh (under WORK_STALE_MS, not from the future).
+  function workingStatus(chat, now) {
+    const st = chat ? chat.status : null;
+    const at = st ? time(st.at) : null;
+    if (!st || st.state !== "working" || at === null || now - at > WORK_STALE_MS || at > now + FUTURE_SLACK_MS) return null;
+    return {at, text: text(st.text, WORK_TEXT_MAX)};
+  }
+
+  // The "working" row above the box, when no delivery line is showing.
+  function fillWork(t, key, chat) {
+    const now = Date.now();
+    const w = t.lineShown ? null : workingStatus(chat, now);
+    t.work.hidden = !w;
+    if (!w) return;
+    setText(t.workLabel, "Working…");
+    setText(t.workText, w.text);
+    t.workText.hidden = !w.text;
+    setText(t.workTime, since(now - w.at));
+  }
+
+  // Kyle's message's stage: sending, not sent, delivered, not picked up,
+  // seen, working; null once the coordinator has replied after it.
+  function deliveryLine(m, chat, items, session) {
+    const now = Date.now();
+    if (m.state === "sending") return {stage: "sending", text: "Sending…", spin: true};
+    if (m.state !== "sent") return {stage: "failed", text: m.reason || "Not sent."};
+    const sent = m.sentAt || m.at;
+    // Seen: the master's pickup write names this nonce (later step writes
+    // drop seen_ref, so it is latched), or Kyle's mirrored copy arrived.
+    // Both carry the master's clock, so nothing compares it with this one.
+    const st = chat ? chat.status : null;
+    if (m.seenAt === undefined && st && typeof st.seen_ref === "string" && st.seen_ref === m.nonce) m.seenAt = time(st.at) ?? now;
+    const copyAt = items.findIndex((x) => x.from === "kyle" && x.ref === m.nonce && x.key[0] === "d");
+    if (m.seenAt === undefined && copyAt >= 0) m.seenAt = items[copyAt].at ?? now;
+    const seen = m.seenAt === undefined ? null : m.seenAt;
+    // Replied: a coordinator message (not an activity row) new since the
+    // send, after the copy or no older than Seen.
+    if (seen !== null && items.some((x, i) => x.from === "coordinator" && x.kind !== "activity" && !(m.known && m.known[x.key])
+        && ((copyAt >= 0 && i > copyAt) || (x.at !== null && x.at >= seen)))) return null;
+    const w = workingStatus(chat, now);
+    if (w && seen !== null) {
+      return {stage: "working", text: "Coordinator · working" + (w.text ? `: ${w.text}` : ""), spin: true, time: since(now - w.at)};
+    }
+    if (seen !== null) return {stage: "seen", text: "Seen by coordinator", time: stamp(seen)};
+    if (now - sent > PICKUP_MS) return {stage: "late", text: NOT_PICKED, open: !!session};
+    return {stage: "delivered", text: "Delivered"};
+  }
+
+  // "just now", "3m", "1h 20m": the working timer, refreshed each minute.
+  function since(ms) {
+    const m = Math.max(0, Math.floor(ms / 60e3));
+    if (m < 1) return "just now";
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  }
+
+  function showLine(t, line, session) {
+    t.dline.dataset.stage = line.stage;
+    t.dspin.hidden = !line.spin;
+    setText(t.dtext, line.text);
+    setText(t.dtime, line.time || "");
+    t.dtime.hidden = !line.time;
+    t.dopen.hidden = !line.open;
+    if (line.open && t.dopen.href !== session) t.dopen.href = session;
+  }
+
+  // Activity rows: one compact muted line each, text only; a run of 2 or
+  // more collapses into an expandable "N steps" row.
+  function activityRow(m) {
+    const row = el("div", "act");
+    row.append(el("span", "icon", CHECK_WORD.test(m.text) ? "✓" : "•"), el("span", "atext", m.text));
+    return row;
+  }
+  function activityGroup(t, gkey, run) {
+    if (run.length === 1) return activityRow(run[0]);
+    const box = el("div", "acts");
+    const toggle = el("button", "acts-toggle");
+    toggle.type = "button";
+    const body = el("div", "acts-list");
+    body.append(...run.map(activityRow));
+    const show = (open) => {
+      t.openActs[gkey] = open;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = `${run.length} steps ${open ? "▾" : "▸"}`;
+      body.hidden = !open;
+    };
+    toggle.addEventListener("click", () => show(!t.openActs[gkey]));
+    show(!!t.openActs[gkey]);
+    box.append(toggle, body);
+    return box;
   }
 
   function bubble(m, kind) {
@@ -1736,7 +1950,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     b.dataset.kind = kind;
     const meta = el("div", "meta");
     const who = m.from === "kyle" ? "You" : "Coordinator" + (m.kind === "update" ? "" : ` · ${m.kind}`);
-    meta.append(el("span", "who", who), el("span", "at", m.at === null ? "?" : clock(m.at)));
+    meta.append(el("span", "who", who), el("span", "at", m.at === null ? "?" : stamp(m.at)));
     if (m.state) meta.append(el("span", "state", m.state));
     b.append(meta, m.from === "kyle" ? el("div", "plain", m.text) : renderMarkdown(m.text));
     return b;
@@ -1817,7 +2031,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       try { anchorP = comments.anchorFor(t.h2); } catch (e) { anchorP = Promise.reject(e); }
     }
     const mine = pendingBy[key] || (pendingBy[key] = []);
-    const msg = {nonce, text: textOut.slice(full.length - body.length), at: Date.now(), state: "sending"};
+    const known = Object.create(null);  // mirror docs already here: none of them answers this message
+    for (const d of (chats[key] && chats[key].docs) || []) known["d " + String(d._id)] = true;
+    const msg = {nonce, text: textOut.slice(full.length - body.length), at: Date.now(), state: "sending", known};
     mine.push(msg);
     if (mine.length > PENDING_MAX) mine.splice(0, mine.length - PENDING_MAX);
     t.hintText = "";
@@ -1831,6 +2047,7 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       const res = await comments.sendToClaude(target);
       if (res && typeof res.threadId === "string" && res.threadId) threads[key] = res.threadId;
       msg.state = "sent";
+      msg.sentAt = Date.now();
       unavailableSeen = 0;
       if (t.input.value === draft) t.input.value = "";
       if (textOut.length < full.length) hint = "Sent, cut to fit 4 KB.";
@@ -1847,6 +2064,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
         hint = SEND_COPY[code]; bad = true;
       } else { msg.state = "may have been sent"; hint = SEND_COPY.upstream_error; bad = true; }
       if (code === "claude_unavailable") { sending = false; checkSend(true); }
+      const why = hint || SEND_OFF;
+      msg.reason = /^(Not sent|May have)/.test(why) ? why : "Not sent: " + why;
     }
     sending = false;
     t.hintText = hint;
@@ -1920,6 +2139,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
         let j = i + 1;
         while (j < lines.length && !lines[j].trimStart().startsWith(m[1])) j += 1;
         const pre = mk(st, "pre");
+        const lang = line.slice(m[0].length).trim().split(/\s/)[0];
+        if (/^[A-Za-z0-9_+#.-]{1,20}$/.test(lang)) pre.dataset.lang = lang;  // shown by CSS attr(), as text
         pre.append(mk(st, "code", "", lines.slice(i + 1, j).join("\n")));
         out.append(pre);
         i = j + 1;
