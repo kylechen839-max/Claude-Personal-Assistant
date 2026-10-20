@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="/static/features.css">
 <script src="/i18n.js" defer></script>
 <script src="/family.js" defer></script>
+<script src="/attachments.js" defer></script>
 <script src="/spotify.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
@@ -124,7 +125,11 @@
   </section>
 
   <footer>
+    <div id="attach-chips" class="attach-chips" hidden aria-label="Attachments"></div>
     <form id="text-form" autocomplete="off">
+      <button id="attach" class="attach-btn" type="button" aria-label="Add photos or files" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
       <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
       <button type="submit" aria-label="Send">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -136,8 +141,22 @@
     <div id="mic-meter" class="mic-meter" hidden aria-hidden="true"><span></span></div>
     <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
     <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
+    <input id="attach-camera" type="file" accept="image/*" capture="environment" hidden>
+    <input id="attach-library" type="file" accept="image/*" multiple hidden>
+    <input id="attach-file" type="file" multiple hidden
+           accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown,.pdf,.txt,.md">
   </footer>
 </main>
+
+<dialog id="attach-sheet" class="sheet" aria-labelledby="attach-title">
+  <form method="dialog">
+    <h2 id="attach-title">Add to your message</h2>
+    <button type="button" data-pick="camera">Take photo</button>
+    <button type="button" data-pick="library">Photo library</button>
+    <button type="button" data-pick="file">Choose file</button>
+    <button type="button" class="cancel">Cancel</button>
+  </form>
+</dialog>
 
 <section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
   <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>

@@ -1,8 +1,8 @@
 // Makes the page installable and opens it quickly. Only the app shell is
 // cached (network first, so updates show up); API calls, reply audio and
 // anything else are never cached.
-const CACHE = "hey-claude-shell-v11";
-const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/spotify.js", "/ui.js", "/app.css", "/manifest.webmanifest", "/icon.svg",
+const CACHE = "hey-claude-shell-v13";
+const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/spotify.js",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];
 
 self.addEventListener("install", (e) => {

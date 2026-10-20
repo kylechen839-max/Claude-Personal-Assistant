@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  PDFs up to 100 pages. New setting `[webapp] max_attachment_mb` (10).
+  A file Claude can't open (password-protected or broken PDF) says so;
+  long PDFs are counted by their page tree, so annotated PDFs aren't refused.
+- Cloud: the sign-in page now loads its translations before sign-in, so a
+  Chinese family member's login page is in Chinese right away.
 - Spotify by voice (off by default, Premium required): "play my study
   playlist", "pause", "skip", "what's playing?", "turn it up", "play it
   on my phone". Your own playlists are searched first. Sign in once with
