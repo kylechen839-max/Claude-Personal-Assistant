@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import html
 import logging
+import os
 import re
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -149,10 +150,16 @@ class NoSendGmail:
 class GmailInbox:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", timezone: str | None = None,
-                 max_summary: int = MAX_SUMMARY):
+                 max_summary: int = MAX_SUMMARY, save_token: bool = True,
+                 environ=None, in_app: bool = False):
         self._service = NoSendGmail(service) if service is not None else None
         self.credentials_path = credentials_path
         self.token_path = token_path
+        # as GoogleCalendar: a family member's token never comes from the
+        # environment, and is never re-signed-in interactively
+        self.save_token = save_token
+        self.environ = os.environ if environ is None else environ
+        self.in_app = in_app
         self.tz = local_zone(timezone)
         self.max_summary = max_summary
 
@@ -163,7 +170,8 @@ class GmailInbox:
 
             # Raises MissingScopes (with the sign-in command) for an old token.
             creds = get_credentials(self.credentials_path, self.token_path,
-                                    scopes=GMAIL_SCOPES)
+                                    scopes=GMAIL_SCOPES, save_token=self.save_token,
+                                    environ=self.environ, in_app=self.in_app)
             self._service = NoSendGmail(build("gmail", "v1", credentials=creds,
                                               cache_discovery=False))
         return self._service
@@ -274,8 +282,8 @@ class GmailInbox:
             userId="me", body={"message": message}).execute()
         return {"status": "draft_saved", "draft_id": draft.get("id"),
                 "to": _sender(info["to"]), "subject": info["subject"],
-                "message": "Saved as a draft in Gmail. It was not sent; Kyle "
-                           "can review and send it himself."}
+                "message": "Saved as a draft in Gmail. It was not sent; the "
+                           "account's owner can review and send it from Gmail."}
 
     def describe_for_draft(self, tool_input: dict) -> str:
         """Names the real address (a display name can say anything) and

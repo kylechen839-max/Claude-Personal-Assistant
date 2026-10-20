@@ -424,9 +424,35 @@ for all of this except the Google sign-in.
     shows only its own conversation. Your list shows them as "Active".
 - [ ] Open the same link again in another private tab.
   - Should: "expired or already used", and the login page.
+- [ ] On their phone (after BLOCKERS "Family members' own Google"): the
+      welcome card's step says to connect *their own* Google account. ⚙ ->
+      连接 Google 账户, sign in with *their* Google account (Advanced -> Go
+      to ... on the unverified-app warning), allow everything.
+  - **Release-gating:** do this from the iPhone *home-screen* app, not
+    only Safari. The sign-in relies on a cookie set in the app and sent
+    back on Google's redirect; if the home-screen app's cookie jar doesn't
+    carry it, sign-in fails with "Google 登录没有完成", and that blocks the
+    release.
+  - Should: back in the app, the menu says Google 账户已连接 within a few seconds; "我明天有
+    什么安排？" reads *their* calendar, never yours; "帮我回复那封邮件"
+    asks first and only saves a draft in *their* Gmail.
+- [ ] On their phone tap Connect, and when Google's page opens copy its
+      address (Share -> Copy); open it in a different browser or phone and
+      sign in there.
+  - Should: "Google 登录没有完成" and nothing connected on either account.
+- [ ] On their phone, hold the mic and say something in Mandarin, then
+      try hands-free voice.
+  - Should: the transcript is Chinese characters, replies are spoken with
+    the Mandarin voice (the first one may take ~10 s while the model loads),
+    and "请说“是”或者“不”" ends a delete question. Your own English voice
+    and recognition are unchanged.
+- [ ] Their ⚙ -> 断开 Google 账户 -> confirm.
+  - Should: "Google 账户已断开。"; asking about their calendar now says it
+    isn't connected.
 - [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
-    history are unchanged.
+    history are unchanged. (Their Google token is deleted with their
+    folder; check Render -> Shell `ls /data/users` if you like.)
 
 ---
 

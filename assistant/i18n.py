@@ -4,11 +4,22 @@
 (Simplified Chinese, Mandarin). `set_language()` is called once at startup
 (cli.main, webapp.serve); `t(key, **values)` gives the sentence. Claude's
 own replies follow the system prompt (chat.SYSTEM_PROMPT_ZH), not this table.
+
+On a shared server (family members, family.py) each person has their own
+language: `t(key, lang)` takes it explicitly, and `using(lang)` sets it for
+everything a turn's thread calls (a tool's confirmation question, an error
+sentence), so one person's turn never speaks another's language. Threads
+don't inherit it: set it at the start of each turn's thread.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 LANG = "en"
+# this thread's (turn's) language, over LANG; None = LANG
+_SESSION: ContextVar[str | None] = ContextVar("i18n_language", default=None)
 
 EN = {
     "goodbye": "Goodbye!",
@@ -33,6 +44,9 @@ EN = {
     "draft_also": " Careful: replies also go to {others}.",
     "draft_instead": " Careful: replies go to {others}, not to the sender {sender}.",
     "google_failed": "Google sign-in didn't finish. Go back to the app and try again.",
+    "still_working": "I'm still working on your last request.",
+    "google_reconnect": "Reconnect Google from the app's settings: tap the gear, "
+                        "then \"Connect Google account\".",
 }
 
 ZH = {
@@ -57,22 +71,46 @@ ZH = {
     "draft_also": "注意：回复也会发给 {others}。",
     "draft_instead": "注意：回复会发给 {others}，而不是发件人 {sender}。",
     "google_failed": "Google 登录没有完成。请回到应用里再试一次。",
+    "still_working": "我还在处理你上一个请求。",
+    "google_reconnect": "请在应用的设置里重新连接 Google：点齿轮，再点“连接 Google 账户”。",
 }
 
 
+def normalize(language: str | None) -> str:
+    """"zh..." -> "zh", anything else -> "en"."""
+    return "zh" if str(language or "").lower().startswith("zh") else "en"
+
+
 def set_language(language: str | None) -> str:
-    """"zh..." -> Chinese, anything else -> English. Returns the code used."""
+    """The server-wide language. Returns the code used."""
     global LANG
-    LANG = "zh" if str(language or "").lower().startswith("zh") else "en"
+    LANG = normalize(language)
     return LANG
 
 
-def is_zh() -> bool:
-    return LANG == "zh"
+def current() -> str:
+    """This turn's language (`using`), else the server's."""
+    return _SESSION.get() or LANG
 
 
-def t(key: str, **values) -> str:
-    table = ZH if LANG == "zh" else EN
+@contextmanager
+def using(language: str | None):
+    """Speak `language` in this thread (and what it calls) until the block
+    ends; None keeps the server's."""
+    token = _SESSION.set(normalize(language) if language else None)
+    try:
+        yield
+    finally:
+        _SESSION.reset(token)
+
+
+def is_zh(lang: str | None = None) -> bool:
+    return (normalize(lang) if lang else current()) == "zh"
+
+
+def t(key: str, lang: str | None = None, **values) -> str:
+    """The sentence `key` in `lang` (default: `current()`)."""
+    table = ZH if is_zh(lang) else EN
     text = table.get(key, EN[key])
     return text.format(**values) if values else text
 

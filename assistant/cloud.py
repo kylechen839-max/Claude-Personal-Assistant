@@ -29,6 +29,10 @@ for the public internet with no Tailscale in front:
   handshake: rate limit, cookie or Bearer token (wrong ones count toward the
   lockout) and an Origin naming this site. X-Forwarded-Host, which the web
   app's own same-site checks read, is removed unless the proxy sent it.
+- Google's redirect back to /google/callback is public: the session
+  cookie isn't sent on it, and google_web.py accepts only a pending,
+  one-time state from the browser that started it (family members connect
+  their own Google from their phones).
 - Errors never reach the client as stack traces.
 - With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
   the derived `hc1.` bearer tokens (checked here, never counted as wrong
@@ -74,7 +78,11 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # family invites: the page code that accepts an #invite= link
               "/family.js",
               # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
-              "/ui.js"}
+              "/ui.js",
+              # Google's redirect back after a family member's sign-in: the
+              # Strict session cookie isn't sent on it, so google_web.py
+              # checks the one-time state and its browser-binding cookie
+              "/google/callback"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it
@@ -676,6 +684,7 @@ def build_app(config: dict, web_assistant, token: str):
     from assistant.failover.peers import settings_from_config
     from assistant.failover.tokens import TokenAuthority
 
+    from assistant import google_web  # the owner's and family members' Google
     from assistant import webfeatures  # lecture recorder + homework tutor
 
     failover = settings_from_config(config)
@@ -687,7 +696,9 @@ def build_app(config: dict, web_assistant, token: str):
                             trusted_proxy=trust, limiter=limiter,
                             sessions_file=web["sessions_file"] or None,
                             voice=config.get("voice"), failover=failover,
-                            features=features)
+                            features=features,
+                            language=config["assistant"]["language"],
+                            google=google_web.from_config(config, web_assistant))
     features.resume_jobs()  # lecture jobs cut off by a redeploy
     return CloudGuard(
         app, token, trusted_proxies=cloud["trusted_proxies"],

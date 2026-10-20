@@ -1901,3 +1901,127 @@ Render/Docker changes) comes separately.
   Served at `/ui.js` (public on the cloud, like the other page files),
   cached by the service worker (v10).
 - Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
+
+## Family invites, piece B: their own Google and speech language (2026-10-20)
+
+A family member is now self-service: they connect their own Google from
+their own phone, and a Chinese speaker's voice turns use Chinese speech
+recognition and the Mandarin voice, with the assistant's own sentences in
+their language, on the same shared cloud server as Kyle.
+
+- **Their own Google** (`google_web.py`, `family.py`): one sign-in flow for
+  the owner ([webapp] google_connect, as before) and family members.
+  `GoogleConnect(family=..., owner=...)` answers `/api/google/status` and
+  `/connect` about the caller's own account; `POST /api/google/disconnect`
+  (family only) deletes their token and tools. A member's token goes to
+  `<dir>/<id>/google_token.json` (`Family.save_google`, `write_private`,
+  under the family lock, refused once removed) and their Calendar and
+  Gmail tools (`Family._google_tools`, through the piece-A hook
+  `_register_tools`) read only that file: `environ={}` (never
+  `GOOGLE_TOKEN_JSON`), `save_token=False` (never a sign-in on the server),
+  their `primary` calendar, their time zone, descriptions about them. Gmail
+  stays drafts-only (`NoSendGmail`), deletes and drafts ask first. Tools
+  join their open conversations in place (`_refresh_tools`: add, then
+  remove). The OAuth state is bound to who started it and their session,
+  and to the browser by `hc_google` (Lax, path `/google/callback`, 10 min,
+  nonce hashed with the state); the callback also needs the session still
+  signed in as that person. Per-person cap 4 pending, 32 in all. Family
+  sign-in uses a separate *Web application* client
+  (`GOOGLE_WEB_CLIENT_JSON` or `[family] google_client`) and the server's
+  own address (`PUBLIC_ORIGIN`, new env override). On the cloud the owner
+  gets 404 on these routes (his Google is `GOOGLE_TOKEN_JSON`).
+- **Speech per session** (`webapp.SpeechByLanguage`): language ->
+  (Whisper model, Piper voice) for sessions whose language isn't the
+  server's; made on first use and cached per model/voice, not per session.
+  `WebAssistant.transcribe/transcribe_upload/synthesize(..., language)`;
+  push-to-talk, `/api/confirm`, reply audio (the language stored with each
+  reply id in piece A) and the voice socket (`voice_ws`) pass the
+  session's. Still one STT lock and one TTS thread. `family_speech(config)`
+  uses `[family] zh_stt_model` (`small`, `ZH_WHISPER_MODEL`) and
+  `zh_piper_voice`, fallback "print" (the phone's own voice, never English
+  eSpeak reading Chinese).
+- **i18n per session** (`i18n.py`): `t(key, lang)`, `is_zh(lang)`,
+  `current()`, `using(lang)` (a ContextVar). Each push-to-talk turn,
+  `chat_stream` run and voice-conversation worker runs in its session's
+  language, so error sentences and tool confirmation questions (calendar,
+  Gmail) are in the language of the person answering; `VoiceConversation
+  (language=...)`; the busy-turn sentence and the failed-callback page are
+  translated too. Fixes the piece-A limitation that `i18n.t` was
+  server-wide.
+- **Page**: a family member's page gets `data-google` when their Google is
+  set up; the first-run guide's step now says to connect *their own*
+  account; a **Disconnect Google account** button (family, connected).
+  Service worker cache v11.
+- **Cloud/Render/Docker**: CloudGuard lets `/google/callback` through
+  without the session cookie; `cloud.build_app` passes Google and the
+  language. Dockerfile `FAMILY_ZH=1` bakes in Whisper `small` (about
+  480 MB) and `zh_CN-huayan-medium` (about 60 MB; published sizes, not
+  measured here: Hugging Face is blocked in the sandbox); `render.yaml`
+  adds `PUBLIC_ORIGIN`, `GOOGLE_WEB_CLIENT_JSON` (secrets) and
+  `ZH_WHISPER_MODEL`; `/data/users` is on the disk (server profile). Memory
+  with a Chinese speaker active is estimated at 0.5-0.7 GB on top of the
+  measured 564 MB, not measured; Standard (2 GB) stays the plan.
+- Config: `[family] google` (true), `google_client` (""), comments for
+  `zh_stt_model` / `zh_piper_voice`; `PUBLIC_ORIGIN`, `ZH_WHISPER_MODEL`
+  env overrides. `client_config("")` no longer reads the current folder.
+- Tests: `tests/test_family_google.py` (23): A's token separate from B's
+  and Kyle's, and their tools build credentials from their own refresh
+  token with `GOOGLE_TOKEN_JSON` set; the owner has no connect on the
+  cloud; another session's state, a browser without the binding cookie, a
+  signed-out session and a removed person are refused (nothing written,
+  token endpoint never called); failed page in her language; tools only
+  after connecting (and in her open session at once), no owner tool or
+  "Kyle" in what Claude is sent; Gmail drafts-only, deletes ask; disconnect;
+  removal deletes the token, not others'; no secrets, state, code or names
+  at INFO (caplog); off without a web client or with a Desktop one; zh
+  push-to-talk and reply audio use the zh model and voice, en uses the
+  server's, two zh speakers share one; zh voice socket; lazy and cached
+  models; `i18n.t` follows the session language (threads isolated); push-
+  to-talk and calendar-question sentences per person; voice sentences;
+  build_assistant wiring; busy sentence; `client_config("")`. A test-only
+  guard fails any Google token refresh (a first draft without `expiry` in
+  the fake token made one real refresh request with a fake client id; no
+  account was involved). `test_cloud.py` +2 (the callback passes the guard
+  and family status works there; Dockerfile/render.yaml match the config).
+  `tests/js/i18n.test.mjs` +3 (Disconnect, its failure and "no", the guide
+  wording). Updated: `test_family.py` (the owner-only Google test now
+  checks a family member never gets Kyle's connected Google),
+  `test_google_web.py` (status has `disconnect`), `test_voice_ws.py` and
+  `test_family.py` fakes take the language, `test_webapp.py` cache v11,
+  `test_docs.py` allows `--build-arg`, `conftest.py` also clears
+  `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` / `GOOGLE_WEB_CLIENT_JSON`.
+  Each source change was undone alone and its tests failed: `environ={}`,
+  the nonce check, the session check, registering and refreshing the
+  tools, the turn's `i18n.using`, transcribe and synthesize per language,
+  `voice_ws` language, the CloudGuard path, the disconnect delete, the
+  callback language, `question_suffix` language, the description rewrite,
+  the Dockerfile and render.yaml entries, `family_speech` wiring, the page
+  tag, the busy sentence, the `client_config` guard, and the JS button and
+  guide text.
+- Counts (Linux sandbox, Python 3.13): pytest 1712 -> 1737 passed, 48
+  skipped (unchanged). JS: i18n 14, family 9, backend-router 33, ui 4,
+  devhub 12, voice-core 14, agent-dashboard 126, all passing.
+- Round 2 (judge, no security defect):
+  - `owner_of` is back in `create_app` (other branches' owner-only routes
+    use it; `session_of` there would hand family Kyle's data), also as
+    `app.state.owner_of`.
+  - A family member's expired, revoked, scope-short or missing token now
+    says "Reconnect Google from the app's settings" (EN/ZH,
+    `i18n` `google_reconnect`, in the turn's language) instead of Kyle's PC
+    sign-in, token.json or `GOOGLE_TOKEN_JSON` advice, and logs a warning
+    without that advice: `get_credentials(..., in_app=True)`,
+    `MissingScopes(in_app=)`, `GoogleCalendar`/`GmailInbox(in_app=)`, set
+    by `Family._google_tools`. Kyle's messages are unchanged.
+  - New tests (each fails with only its change undone): `owner_of` (owner
+    200, family 404, nobody 401); the in-app refresh message and log (EN and
+    ZH), scope and missing-token messages; `save_google`'s re-check (the
+    person removed while Google answers: 400, no file); the binding
+    cookie's HttpOnly, Secure, SameSite=lax, Path, Max-Age=600; the voice
+    socket twin of the Chinese calendar question (`chat_stream`'s
+    `using`); `VoiceConversation._work`'s `using` (kept: a backend that
+    answers in the worker thread, ChatBackend, needs it).
+  - Docs: BLOCKERS says `PUBLIC_ORIGIN` must be the exact https address
+    family members open and that the zh memory figure is to be measured;
+    MANUAL_TEST marks the home-screen-app sign-in as release-gating.
+  - Counts (Linux sandbox, Python 3.13): pytest 1737 -> 1744 passed, 48
+    skipped. JS unchanged (i18n 14, family 9, all files passing).

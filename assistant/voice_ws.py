@@ -204,10 +204,18 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         def send(event: dict, data: bytes | None = None) -> None:
             loop.call_soon_threadsafe(out.put_nowait, (event, data))
 
+        language = getattr(session, "language", None)  # e.g. a family member's
+
+        def transcribe(samples):
+            return assistant.transcribe(samples, language)
+
+        def synthesize(text):
+            return assistant.synthesize(text, language)
+
         conv = VoiceConversation(
-            WebBackend(assistant, session), assistant.transcribe, assistant.synthesize,
+            WebBackend(assistant, session), transcribe, synthesize,
             send, clock=clock, idle_timeout=v["idle_timeout"],
-            max_session=v["max_session_minutes"] * 60)
+            max_session=v["max_session_minutes"] * 60, language=language)
         live[sid] = (conv, ws)
         if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")

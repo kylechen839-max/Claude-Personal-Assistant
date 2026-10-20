@@ -95,6 +95,7 @@ google_connect = false        # true: a "connect Google" button in the phone app
                               # Calendar and Gmail (needs a Web application OAuth client)
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
+                              # and family members' Google (PUBLIC_ORIGIN overrides it)
 
 [voice]                       # hands-free voice conversation in the phone web app
 vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)
@@ -169,8 +170,10 @@ enabled = false               # the server profile (Render) turns it on
 dir = "data/users"            # users.json + one history folder per person (Render: /data/users)
 max_users = 10                # people you can invite
 invite_days = 30              # an invite link works this many days, and only once
-zh_stt_model = "small"        # Whisper model for Chinese-speaking family members
-zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice
+google = true                 # they may connect their own Google from their phone (Calendar, Gmail drafts)
+google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
+zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
+zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
 
 [logging]
 file = "logs/assistant.log"

@@ -37,8 +37,9 @@ class El {
 }
 
 function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true,
-                      standalone = false, local = {} } = {}) {
+                      standalone = false, local = {}, disconnectOk = true, answer = true } = {}) {
   const google = new El('button', { id: 'google-connect', hidden: '' }, ['Connect Google account']);
+  const unlink = new El('button', { id: 'google-disconnect', hidden: '' }, ['Disconnect Google account']);
   const hint = new El('p', { id: 'google-status', hidden: '' });
   const menu = new El('details', { class: 'menu' }, [google, hint]);
   const input = new El('input', { id: 'text', placeholder: 'Type a message' });
@@ -52,7 +53,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   const guideDone = new El('button', { id: 'guide-done' }, ['Got it']);
   const loginP = new El('p', { id: 'login-text' }, ['Enter your access token']);
   const body = new El('body', {}, [loginText, menu, input, mic, status, reply]);
-  const byId = { 'google-connect': google, 'google-status': hint, text: input, status,
+  const byId = { 'google-connect': google, 'google-disconnect': unlink, 'google-status': hint, text: input, status,
                  guide, 'guide-text': guideText, 'guide-done': guideDone, 'login-text': loginP };
   const stored = {};
   const observers = [];
@@ -71,7 +72,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
       constructor(fn) { this.fn = fn; observers.push(this); }
       observe(target, options) { this.target = target; this.options = options; }
     },
-    confirm: (message) => { asked.push(message); return true; },
+    confirm: (message) => { asked.push(message); return answer; },
     location: { href: '/' },
     navigator: { standalone },
     sessionStorage: { getItem: (k) => stored[k] ?? null, setItem: (k, v) => { stored[k] = v; } },
@@ -79,6 +80,10 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
       if (url === '/api/google/status') return { ok: gstatus !== null, json: async () => gstatus };
+      if (url === '/api/google/disconnect') {
+        if (disconnectOk) gstatus = { ...gstatus, connected: false };
+        return { ok: disconnectOk, json: async () => ({}) };
+      }
       if (url === '/api/google/connect') {
         return connect ? { ok: true, json: async () => connect } : { ok: false, json: async () => ({}) };
       }
@@ -90,7 +95,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   vm.runInContext(SCRIPT, win);
   const flush = () => new Promise((r) => setImmediate(r));
   const mutate = (records) => observers[0].fn(records);
-  return { win, guide, guideText, guideDone, loginP, google, hint, menu, input, mic, status, reply, loginText, observers,
+  return { win, guide, guideText, guideDone, loginP, google, unlink, hint, menu, input, mic, status, reply, loginText, observers,
            fetches, asked, flush, mutate };
 }
 
@@ -253,4 +258,50 @@ test('Chinese page: tabs, settings, history and tutor labels are all translated'
   assert.equal(t('Actions for Dentist'), 'Dentist 的操作');
   assert.equal(t('Transcribing 40%'), '正在转写 40%');
   assert.equal(t('Hey Claude'), 'Hey Claude');  // the app name stays
+});
+
+test('Disconnect: shown only to a family member who is connected; asks, then posts', async () => {
+  const owner = page('en', { gstatus: { enabled: true, connected: true, disconnect: false } });
+  await owner.flush();
+  assert.equal(owner.unlink.hidden, true);  // the owner's token is managed on the PC
+  const notYet = page('zh-CN', { gstatus: { enabled: true, connected: false, disconnect: true } });
+  await notYet.flush();
+  assert.equal(notYet.unlink.hidden, true);
+
+  const p = page('zh-CN', { gstatus: { enabled: true, connected: true, disconnect: true } });
+  await p.flush();
+  assert.equal(p.unlink.hidden, false);
+  assert.equal(p.unlink.textContent, 'Disconnect Google account');  // translated by start() in a real page
+  for (const fn of p.unlink.listeners.click) await fn();
+  assert.deepEqual(p.asked, ['要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。']);
+  const post = p.fetches.find((f) => f.url === '/api/google/disconnect');
+  assert.equal(post.opts.method, 'POST');
+  assert.equal(post.opts.credentials, 'same-origin');
+  await p.flush();
+  assert.equal(p.unlink.hidden, true);  // refreshed: not connected any more
+  assert.equal(p.hint.textContent, 'Google 账户已断开。');
+  assert.equal(p.google.textContent, '连接 Google 账户');
+});
+
+test('Disconnect: a "no" sends nothing; a failure says so', async () => {
+  const no = page('en', { gstatus: { enabled: true, connected: true, disconnect: true }, answer: false });
+  await no.flush();
+  for (const fn of no.unlink.listeners.click) await fn();
+  assert.equal(no.fetches.filter((f) => f.url === '/api/google/disconnect').length, 0);
+  const bad = page('en', { gstatus: { enabled: true, connected: true, disconnect: true },
+                           disconnectOk: false });
+  await bad.flush();
+  for (const fn of bad.unlink.listeners.click) await fn();
+  assert.equal(bad.hint.textContent, "Couldn't disconnect. Try again.");
+  assert.equal(bad.unlink.disabled, false);
+});
+
+test('first-run guide: the Google step is about their own account', async () => {
+  const en = page('en');
+  await en.flush();
+  assert.match(en.guideText.textContent, /Connect your own Google account/);
+  assert.match(en.guideText.textContent, /sign in with your own Google account/);
+  const zh = page('zh-CN');
+  await zh.flush();
+  assert.match(zh.guideText.textContent, /用你自己的 Google 账户登录/);
 });

@@ -21,9 +21,11 @@ per-address and global login lockouts, upload size/length limits, generic
 errors, strict headers, and an unauthenticated /healthz that says nothing.
 
 Reusable pieces (for other routes, e.g. a WebSocket voice mode):
-  WebAssistant.transcribe_upload(bytes) -> text
+  WebAssistant.transcribe_upload(bytes, language=None) -> text
   WebAssistant.chat_stream(session, text, cancel) -> iterator of text deltas
-  WebAssistant.synthesize(text) -> WAV bytes
+  WebAssistant.synthesize(text, language=None) -> WAV bytes
+  (language: the session's, e.g. a Chinese-speaking family member's;
+  None = the server's models)
   app.state.web.session_for(connection) -> Session | None (HTTP or WebSocket)
   app.state.web.cross_origin(connection) -> bool
   require_session (FastAPI dependency; 401, or close 1008 on a WebSocket)
@@ -631,6 +633,55 @@ class SessionTools(ToolRegistry):
         return super().dispatch(name, tool_input, untrusted=untrusted)
 
 
+class SpeechByLanguage:
+    """Whisper and the voice for sessions in another language than the
+    server's (a Chinese-speaking family member on an English server).
+    `models`: language -> (Whisper model, Piper voice). Each is made on
+    first use and cached per model and voice, not per session: everyone
+    speaking that language shares one."""
+
+    def __init__(self, server_language: str, models: dict,
+                 make_transcriber: Callable[[str, str], object],
+                 make_tts: Callable[[str], object]):
+        self.language = i18n.normalize(server_language)
+        self.models = {i18n.normalize(k): v for k, v in models.items()}
+        self.make_transcriber = make_transcriber  # (model, language)
+        self.make_tts = make_tts                  # (voice)
+        self._transcribers: dict[tuple, object] = {}
+        self._voices: dict[str, object] = {}
+        self.lock = threading.Lock()
+
+    def _spec(self, language: str | None):
+        lang = i18n.normalize(language) if language else self.language
+        return None if lang == self.language else self.models.get(lang)
+
+    def transcriber(self, language: str | None):
+        """The Transcriber for `language`; None = the server's own."""
+        spec = self._spec(language)
+        if spec is None:
+            return None
+        key = (spec[0], i18n.normalize(language))
+        with self.lock:
+            found = self._transcribers.get(key)
+            if found is None:
+                log.info("Speech: Whisper %s for %s sessions", *key)
+                found = self._transcribers[key] = self.make_transcriber(*key)
+        return found
+
+    def tts(self, language: str | None):
+        """The voice for `language`; None = the server's own."""
+        spec = self._spec(language)
+        if spec is None:
+            return None
+        with self.lock:
+            found = self._voices.get(spec[1])
+            if found is None:
+                log.info("Speech: voice %s for %s sessions", spec[1],
+                         i18n.normalize(language))
+                found = self._voices[spec[1]] = self.make_tts(spec[1])
+        return found
+
+
 class WebAssistant:
     """Everything the HTTP layer needs, without any HTTP (easy to test)."""
 
@@ -638,7 +689,8 @@ class WebAssistant:
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
                  max_sessions: int = 20, clock=time.monotonic,
-                 history=None, memory=None, family=None):
+                 history=None, memory=None, family=None,
+                 speech: SpeechByLanguage | None = None):
         self.chat_factory = chat_factory
         self.history = history  # a HistoryStore (conversation history) or None
         self.memory = memory    # PineconeMemory, for semantic search and deletes
@@ -648,6 +700,8 @@ class WebAssistant:
         self.user_of: Callable[[str], str | None] = lambda sid: None
         self.transcriber = transcriber
         self.tts = tts
+        # other languages' Whisper and voice (family members), or None
+        self.speech = speech
         self.tools = tools or ToolRegistry()
         self.conversation_timeout = conversation_timeout
         self.confirm_timeout = confirm_timeout
@@ -835,14 +889,18 @@ class WebAssistant:
         return True
 
     def _run_turn(self, s: Session, text, recording) -> None:
-        from assistant.cli import get_reply, is_exit, loggable_reply
-
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
+        with i18n.using(s.language):  # its sentences and tool questions
+            self._turn_body(s, text, recording)
+
+    def _turn_body(self, s: Session, text, recording) -> None:
+        from assistant.cli import get_reply, is_exit, loggable_reply
+
         try:
             if recording is not None:
-                text = self.transcribe(recording)
+                text = self.transcribe(recording, s.language)
                 s.events.put({"type": "transcript", "text": text})
                 log.info("Web heard %d chars", len(text))
                 log.debug("Web heard: %r", text)
@@ -884,7 +942,7 @@ class WebAssistant:
         s.pending = None
         if not answered:
             log.info("No answer to a confirmation; treating it as no")
-            s.emit({"type": "status", "text": i18n.t("no_answer")})
+            s.emit({"type": "status", "text": i18n.t("no_answer", s.language)})
         return answered and pending.answer
 
     def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
@@ -944,8 +1002,9 @@ class WebAssistant:
 
         def run():
             try:
-                reply = get_reply(s.chat, text, output_fn=lambda m: None,
-                                  on_text=on_text, cancel=cancel)
+                with i18n.using(s.language):  # error sentences, tool questions
+                    reply = get_reply(s.chat, text, output_fn=lambda m: None,
+                                      on_text=on_text, cancel=cancel)
                 if not streamed and reply:  # an error sentence
                     deltas.put(reply)
             finally:
@@ -966,17 +1025,23 @@ class WebAssistant:
                 yield item
 
     # speech
-    def transcribe(self, recording: np.ndarray) -> str:
-        with self._stt_lock:
-            return self.transcriber.transcribe(recording)
+    def transcribe(self, recording: np.ndarray, language: str | None = None) -> str:
+        """Whisper for `language` (a session's; None = the server's)."""
+        found = self.speech.transcriber(language) if self.speech and language else None
+        with self._stt_lock:  # one at a time, whichever model (CPU, memory)
+            return (found or self.transcriber).transcribe(recording)
 
-    def transcribe_upload(self, data: bytes, max_seconds: float | None = 60) -> str:
+    def transcribe_upload(self, data: bytes, max_seconds: float | None = 60,
+                          language: str | None = None) -> str:
         """A browser recording (any format) to text."""
-        return self.transcribe(decode_upload(data, max_seconds))
+        return self.transcribe(decode_upload(data, max_seconds), language)
 
-    def synthesize(self, text: str) -> bytes:
-        """`text` spoken by the configured TTS engine, as WAV bytes."""
-        return self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
+    def synthesize(self, text: str, language: str | None = None) -> bytes:
+        """`text` spoken in `language`'s voice (None: the configured TTS
+        engine), as WAV bytes. Every voice renders on the one TTS thread."""
+        found = self.speech.tts(language) if self.speech and language else None
+        return self._tts_pool.submit(render_wav, found or self.tts,
+                                     text).result(timeout=120)
 
     def remember(self, text: str, session: Session | None = None) -> str:
         """An id for /api/audio/<id>, which only `session` may fetch."""
@@ -999,8 +1064,8 @@ class WebAssistant:
                 return None
             if rid in self.audio_cache:
                 return self.audio_cache[rid]
-            text = entry[1]
-        data = self.synthesize(text)
+            text, language = entry[1], entry[2]
+        data = self.synthesize(text, language)
         with self.lock:
             self.audio_cache[rid] = data
             while len(self.audio_cache) > 10:
@@ -1372,7 +1437,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return error("not signed in", 401)
 
     def owner_of(request) -> Session | None:
-        """session_of for owner-only routes: 404 for a family member."""
+        """session_of for owner-only routes: 404 for a family member. Not
+        used in this file any more (the Google routes answer each person
+        about their own account), but owner-only routes added here use it
+        (never session_of: that would hand a family member Kyle's data)."""
         from fastapi import HTTPException
 
         s = session_of(request)
@@ -1380,15 +1448,18 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             raise HTTPException(404, "not found")
         return s
 
+    app.state.owner_of = owner_of  # for owner-only routes added by others (and tests)
+
     # --- public: the page, PWA files, health check ---
     @app.get("/")
     def index(request: Request):
         # in the language of whoever is signed in: a family member's own,
-        # else [assistant] language; only the owner gets "connect Google"
+        # else [assistant] language; "connect Google" for their own account
         sid = web.sid(request) if family is not None else None
         user = family.get(web.user_of(sid)) if sid else None
-        tag = (page_tag(user["language"]) if user is not None
-               else page_tag(language, google is not None))
+        tag = (page_tag(user["language"], google is not None
+                        and google.enabled(user["id"])) if user is not None
+               else page_tag(language, google is not None and bool(google.owner)))
         if not tag:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -1594,7 +1665,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             recording, err = await decode(data)
             if err:
                 return err
-            answer = await run_in_threadpool(assistant.transcribe, recording)
+            answer = await run_in_threadpool(assistant.transcribe, recording,
+                                             s.language)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
@@ -1636,7 +1708,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     if google is not None:
         from assistant import google_web
 
-        google_web.register(app, google, owner_of, error)  # Kyle's Google only
+        # each person's own account: the owner's, or a family member's
+        google_web.register(app, google, session_of, error, web)
     if features is not None:
         from assistant import webfeatures
 
@@ -1790,7 +1863,29 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
                         confirm_timeout=config["webapp"]["confirm_timeout"],
-                        history=store, memory=memory, family=family)
+                        history=store, memory=memory, family=family,
+                        speech=family_speech(config) if family is not None else None)
+
+
+def family_speech(config: dict) -> SpeechByLanguage:
+    """Chinese Whisper and voice for Chinese-speaking family members
+    ([family] zh_stt_model, zh_piper_voice); an English server's own
+    models stay for everyone else. No neural voice: "print", so the phone
+    reads the reply with its own Chinese voice rather than eSpeak's."""
+    from assistant.stt import Transcriber
+    from assistant.tts import make_tts
+
+    stt, f = config["stt"], config["family"]
+
+    def transcriber(model: str, language: str):
+        return Transcriber(model, stt["device"], stt["compute_type"], language=language)
+
+    def voice(path: str):
+        return make_tts("piper", piper_voice=path, fallback="print")
+
+    return SpeechByLanguage(config["assistant"]["language"],
+                            {"zh": (f["zh_stt_model"], f["zh_piper_voice"])},
+                            transcriber, voice)
 
 
 HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "
@@ -1831,11 +1926,9 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import devhub  # the PC hub: only on a loopback bind
 
     hub = devhub.Hub(config) if devhub.enabled(config, host) else None
-    google = None
-    if web["google_connect"]:
-        from assistant.google_web import GoogleConnect
+    from assistant import google_web  # the owner's and family members' Google
 
-        google = GoogleConnect(config, assistant.tools)
+    google = google_web.from_config(config, assistant)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),

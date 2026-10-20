@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Family members are self-service on the cloud server: each can connect
+  their own Google Calendar and Gmail (drafts only; deletes ask first) from
+  their own phone, kept separate from Kyle's and deleted on Disconnect or
+  removal; the sign-in is bound to the person's session and browser.
+  Chinese-speaking members get Chinese speech recognition (Whisper small)
+  and the Mandarin voice, loaded on first use, and the assistant's own
+  sentences follow each person's language on a shared server. The cloud
+  image bundles the Chinese models (`FAMILY_ZH=0` leaves them out);
+  render.yaml adds `PUBLIC_ORIGIN` and `GOOGLE_WEB_CLIENT_JSON`.
+  A family member whose Google sign-in expires is told, in their language,
+  to reconnect Google from the app's settings.
 - Family invites on the cloud server (`[family]`, on in the server
   profile): the owner invites someone from the phone menu with a one-time
   link (`#invite=`, 30 days). They get their own account, history and reply
