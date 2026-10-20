@@ -698,3 +698,28 @@ def test_owner_of_stays_for_owner_only_routes(g):
     assert kyle.get("/api/owner-thing").json() == {"ok": True}
     mom, _ = g.member()
     assert mom.get("/api/owner-thing").status_code == 404
+
+
+def test_a_picked_voice_wins_over_the_language_voice():
+    """voice_picker (each person's pick) and SpeechByLanguage (a Chinese
+    member's Mandarin voice) together: a pick wins; without one, her
+    language's voice; the owner keeps the server's."""
+    from types import SimpleNamespace
+
+    from assistant.webapp import WebAssistant
+
+    default, mandarin, picked = object(), object(), object()
+    wa = object.__new__(WebAssistant)
+    wa.tts = default
+    wa.speech = SimpleNamespace(tts=lambda lang: mandarin if lang == "zh" else None)
+    choices = {}
+    wa.voices = SimpleNamespace(
+        engine_for=lambda user, lang: choices.get(user, default))
+    mom = SimpleNamespace(user="mom", language="zh")
+    kyle = SimpleNamespace(user=None, language="en")
+    assert wa.tts_for(mom) is mandarin
+    assert wa.tts_for(kyle) is default
+    choices["mom"] = picked
+    assert wa.tts_for(mom) is picked
+    wa.voices = None
+    assert wa.tts_for(mom) is mandarin
