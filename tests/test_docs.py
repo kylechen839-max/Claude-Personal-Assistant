@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import cli, preflight, smoke, tts, tts_kokoro
+from assistant import cli, deploy, preflight, smoke, tts, tts_kokoro, watch
 from assistant.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
@@ -60,6 +60,8 @@ def code_flags(monkeypatch):
             | _parser_flags(monkeypatch, lambda: tts.main([]))
             | _parser_flags(monkeypatch, lambda: preflight.parse_args([]))
             | _parser_flags(monkeypatch, lambda: smoke.main([]))
+            | _parser_flags(monkeypatch, lambda: watch.main([]))
+            | _parser_flags(monkeypatch, lambda: deploy.main([]))
             | _parser_flags(monkeypatch, lambda: runpy.run_module(
                 "assistant.tools.calendar", run_name="__main__")))
 

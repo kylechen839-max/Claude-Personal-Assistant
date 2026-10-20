@@ -1,6 +1,7 @@
 """Dev team coordinator link: sending through the Claude Code CLI (mocked)
 and reading replies from the Notion inbox (mocked)."""
 
+import inspect
 import json
 import subprocess
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from assistant import devteam
 from assistant.config import DEFAULTS
 from assistant.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
                                session_id)
@@ -177,6 +179,17 @@ def test_voice_message_header_prefix_and_cap(tmp_path):
     message = run.calls[0][1]["input"]
     assert message.startswith(f"[Hey Claude voice | reply id {sent['reply_id']}]")
     assert "x" * 4000 + "\n" in message and "x" * 4001 not in message
+
+
+def test_watchdog_alerts_have_their_own_header_and_no_hub_source(tmp_path):
+    """watch.py sends with source="watch"; the hub's source is gone."""
+    run = ok_run()
+    sent = link(tmp_path, run=run).send("Mom's app is failing", source="watch")
+    assert sent["reply_id"].startswith("hc-")
+    message = run.calls[0][1]["input"]
+    assert message.startswith(f"[Hey Claude watchdog | reply id {sent['reply_id']}]")
+    assert set(devteam.SOURCES) == {"voice", "watch"}
+    assert "session" not in inspect.signature(devteam.CoordinatorLink.send).parameters
 
 
 def test_replies_are_capped_for_speech(tmp_path):

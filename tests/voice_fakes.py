@@ -20,10 +20,13 @@ class StreamClosed(Exception):
 class FakeStream:
     """One streamed response: yields text deltas, then the final message.
     `hold_after`: block after that many deltas until `release` is set or the
-    stream is closed (to simulate a barge-in mid-reply)."""
+    stream is closed (to simulate a barge-in mid-reply). `quiet_close`: a
+    closed stream just ends, as a closed TLS socket can read as end of
+    stream (then the final message is whatever had arrived)."""
 
-    def __init__(self, parts, final, hold_after=None, delay=0.0):
+    def __init__(self, parts, final, hold_after=None, delay=0.0, quiet_close=False):
         self.parts = parts
+        self.quiet_close = quiet_close
         self.final = final
         self.hold_after = hold_after
         self.delay = delay
@@ -45,6 +48,8 @@ class FakeStream:
                 while not (self.release.is_set() or self.closed.is_set()):
                     time.sleep(0.005)
             if self.closed.is_set():
+                if self.quiet_close:
+                    return
                 raise StreamClosed("stream closed")
             if self.delay:
                 time.sleep(self.delay)

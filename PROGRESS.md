@@ -1950,6 +1950,17 @@ Render/Docker changes) comes separately.
   `devteam.py` and `devhub.py` restored. Full suite: 9 failed, 1611 passed,
   44 skipped, 16 errors (the 25 are the sandbox's eSpeak/PortAudio/wake
   model tests, as in the baseline); JS 53/53 (`tests/js/*.test.mjs`).
+- Merged master (health watchdog, safe updates, Spotify): `devteam.py`
+  keeps `SOURCES` for "voice" and the watchdog's "watch" (header
+  `[Hey Claude watchdog | …]`, `hc-` ids), `send(text, source="voice")`
+  without the hub's `session=`; `create_app` keeps `health=` and
+  `serve` the candidate guard on `resume_jobs()`, without `hub=`;
+  `watch.candidate_config` no longer sets the removed `[devteam] hub`.
+  New `test_watchdog_alerts_have_their_own_header_and_no_hub_source`
+  (fails on both sides' old `devteam.py`). Full suite: 9 failed,
+  2096 passed, 56 skipped, 26 errors (all 35 the sandbox's
+  eSpeak/PortAudio/wake model set); JS 94/94.
+
 ## Three flaky CI tests, root-caused (2026-10-20)
 
 - **Midnight in New York** (`test_end_to_end.py::test_definition_of_done_phrase`):
@@ -2641,3 +2652,344 @@ their language, on the same shared cloud server as Kyle.
   measurement sees more of the reply's loud parts. Full run: 1755 passed,
   48 skipped; JS files all pass.
 
+
+## Health and function checks, and safe go-live (2026-10-20)
+
+Kyle: "The app should not have undiscovered bugs that are discovered by the
+users when the app restarts", and "it should never get to the point where
+the app does not work when I try to use it". Three things went wrong that
+day and are now caught automatically: Mom's and Kai's apps died with a
+Claude session and returned 502 for hours; a real multi-turn conversation
+failed with an API 400 (thinking-block signatures) that no mocked test
+saw; hands-free barge-in misfired (fixed on its own branch; voice-core.js
+is untouched here).
+
+- **Watchdog** (`assistant/watch.py`, `python -m assistant.watch`; the
+  `\HeyClaude\Watch` task every 5 minutes via
+  `scripts/install_watch_task.ps1` or `install_family_tasks.ps1 -Watch`,
+  `deploy/hey-claude-watch.{service,timer}` via `scripts/install_watch.sh`
+  on the Pi). Finds every instance with install_family_tasks.ps1's rule.
+  Quick check: `/healthz`, the page and every script/stylesheet it loads,
+  served version vs HEAD, the phone address (`[webapp] public_origin` or
+  the `tailscale serve status --json` entry for the port). Test
+  conversation (smoke.py `--conversation`, `run_conversation`) after a
+  restart (new `/healthz` `started`, loopback only) or a new version, every
+  `functional_hours` (6), retried after `retry_minutes` (30): text with a
+  read-only tool, a follow-up that must recall a number from the first
+  turn, an audio turn (the existing fixture), a hands-free turn over
+  `/api/voice`, and a last text turn sent while the voice socket is still
+  open (the path that broke). Self-heal: restart once per failure
+  (`scripts/restart_instance.ps1`, or `[watch] restart_command`); still
+  failing on code newer than the last known good (the last commit whose
+  test conversation passed here, `logs/update-state.json` `last_good`):
+  `git reset --keep` to it (only an ancestor, never over local-only
+  commits; config/.env/data untouched), restart, reject the commit.
+  Outside causes (no internet, Claude down, rate limit, bad key) never roll
+  back. State in `data/watch_status.json` (private, atomic), every result
+  in `logs/watch.log`. Alerts only on a change of state and for one-off
+  events: the owner's banner (`/api/state` `health`, Kyle's own instance
+  and owner sessions only; `ui.js renderHealth`) and the dev team
+  coordinator (`CoordinatorLink.send(source="watch")`). Alert text is
+  labels, check names and fixed reasons (`smoke.Outcome.reason`), never
+  reply text or keys.
+- **Check session** (`POST /api/check-session`, `WebAssistant.start_check`):
+  a fresh session becomes one for good: no recorder (no history),
+  `ClaudeChat.check_mode` (no memory summary or review offer),
+  `SessionTools.check_mode` (only `tools.READ_ONLY_TOOLS` offered and run).
+  The smoke client uses it whenever the server has it and signs out at the
+  end; the conversation mode refuses to run without it.
+- **Go-live gate** (`watch.gate_check`, `candidate_check`): each instance is
+  started again on port + `side_port_offset` (100) as `--candidate` (no
+  history database, no saved sign-ins, no hub, no resumed lecture jobs,
+  its own log, keys stripped from its environment) and must pass the test
+  conversation before anything restarts on the commit. Used by the updater
+  (inside its lock, after the import/`--check` smoke), by the host
+  supervisor for a pull by hand (the web host checks; the wake host waits
+  for its verdict), by the watchdog when an app runs an older version than
+  HEAD, and by `scripts/deploy.ps1` / `deploy.sh` (`assistant/deploy.py`:
+  pull, gate, switch or refuse, then a live check). A failing commit is
+  undone and rejected; one that fails only for outside reasons is neither.
+  `install_family_tasks.ps1 -Restart` now goes through it. After the host
+  restarts on new code it starts the watchdog's test conversation at once.
+- **Claude down**: 5xx/overloaded after the retries now says "Claude is
+  unreachable right now. I retried a few times; please try again in a
+  minute." (`cli.CLAUDE_DOWN`, `i18n claude_down`), and the smoke check
+  counts it as an error reply.
+- **CI**: new `api-contract` job runs `tests/test_contract.py` with the
+  `ANTHROPIC_API_KEY` secret (skips cleanly without it) on pushes and PRs,
+  against the cheapest model (`CONTRACT_MODEL`, default claude-haiku-5-5)
+  and the default model; name it in master's required checks.
+
+How it was tested (offline, Linux sandbox, Python 3.13):
+- `tests/contract_fakes.py`: a contract-shaped Messages API fake (validates
+  role order, tool_use/tool_result pairing, thinking signatures bound to the
+  client, thinking first before tool results; answers with the SDK's own
+  `Message`/`ThinkingBlock` types, streamed or not).
+- `tests/test_contract.py` (2 offline + 4 live, skipped here): two
+  ClaudeChat instances sharing one history then a follow-up (fails with
+  the thinking fix reverted: 400 "Invalid `signature`"); the whole web
+  app conversation through smoke, voice socket included, checking that the
+  last text turn ran with the voice conversation open, nothing reached
+  history or memory and the write tool was never offered or run.
+- `tests/test_watch.py` (40): discovery, Tailscale mapping, `[watch]`
+  mirrored in config.toml, each quick-check failure, alerts only on a
+  change, restart once per failure, a restart that fixes it raises no
+  alert, test conversation after a restart and when due (and sets the last
+  known good), rollback to the last good, no rollback for outside causes or
+  over local commits, gate before switching, refusal when the gate fails,
+  a gate that can't tell, side-port candidate (port, flags, stripped
+  environment), the updater's gate (reject vs retry), host gating of a hand
+  pull and the wake host waiting, host starting the watchdog after a
+  restart, deploy refuse and switch paths, banner contents and staleness,
+  banner only on Kyle's instance and for the owner, no token or reply text
+  in alerts/logs/status (caplog), the coordinator channel, fixed reasons,
+  the check session server side, the smoke conversation (passes, keeps the
+  socket open, fails without the tool call or the recall, never runs
+  without a check session), the "Claude unreachable" sentence.
+- Revert proof: each of 25 source changes (plus the banner in ui.js) was reverted alone and its test
+  failed (list in the round's report); then restored.
+- `tests/js/ui.test.mjs` +1 (banner lines and element); `tests/ps/
+  restart_instance.tests.ps1` (7 checks, runs on Windows CI);
+  `deploy.sh`/`install_watch.sh` added to the bash parse check.
+- Full run (Linux sandbox, Python 3.13): 2157 passed, 58 skipped (master
+  b1e40b9: 2112 passed, 48 skipped). The 10 new skips: the 4 live contract
+  tests (no key here), and PowerShell/shellcheck checks of the new scripts
+  (not installed here; they run in CI). JS: 253 pass (was 252). The test
+  that changed: `test_get_reply_error_messages`' "other" case is now a 400
+  (still "went wrong") and a 500 case expects the new "unreachable" sentence.
+- Not measured: the test conversation's real cost and duration (no API key
+  in the sandbox; estimated ~30k input tokens per instance per check), the
+  side-port copy's startup time and memory on the PC (Whisper + Kokoro
+  loaded twice for a minute or two), and the Task Scheduler / systemd
+  installs (no Windows or systemd here). MANUAL_TEST "Health checks and
+  safe updates" covers them.
+
+### Round 2 (judge findings)
+
+1. Healing an app that is only starting: the host starts the watchdog only
+   after the hand-pulled app answers on the new version (`healthy`); no
+   heal while the update lock is held; an app that doesn't answer gets
+   `[watch] start_grace_seconds` (300, new setting) before a restart and
+   again after it; `restarted` is recorded only for a restart that ran, and
+   a rollback needs one. Tests: `test_host_starts_the_watchdog_only_once_the_hand_pulled_app_answers`,
+   `test_no_restart_or_rollback_while_an_update_holds_the_lock`,
+   `test_no_rollback_without_a_restart_that_ran`,
+   `test_down_app_gets_the_start_grace_and_a_long_wait_before_any_rollback`,
+   `test_a_slow_start_after_the_restart_is_waited_for`,
+   `test_family_copy_down_without_restart_rolls_back_nobody`.
+2. Phone-address (Tailscale) failures are reported but never heal or roll
+   back; no restart while a turn runs (`busy`). Tests:
+   `test_phone_address_failure_never_restarts_or_rolls_back`,
+   `test_never_restarts_in_the_middle_of_a_turn`.
+3. `rollback_checkout` re-reads HEAD and the branch under the lock and needs
+   HEAD on the bad commit. Tests: `test_rollback_rereads_head_and_leaves_a_new_local_commit`,
+   `test_rollback_checkout_needs_head_on_the_bad_commit_and_the_branch`.
+4. A busy side port (after stopping a leftover `--candidate`) and a copy
+   that doesn't start are inconclusive (`Check.outside`, gate None); a
+   failure is retried once before a commit is refused. Tests:
+   `test_a_busy_side_port_is_inconclusive_not_a_rejection`,
+   `test_a_copy_that_does_not_start_is_inconclusive`,
+   `test_gate_retries_once_before_rejecting`.
+5. `updater.take_lock`/`lock_stale`/`pid_alive`: a lock whose PID is dead is
+   stale at once (watch.lock and update.lock; `locked()` too); the watch
+   task's limit is 2 h (systemd 2h), the watch lock's age limit 3 h. Tests:
+   `test_a_killed_runs_lock_is_stale_at_once`, `test_the_watch_task_outlives_the_worst_gate`.
+6. `rolled_back` is set only after the lock was taken. Tests:
+   `test_rollback_lock_taken_after_the_restart_sets_nothing`,
+   `test_rollback_happens_once_the_lock_is_free`.
+7. `Updater.rollback` rejects only after the reset worked. Test:
+   `test_reject_only_when_the_reset_worked`.
+8. `Updater._state_lock`: state writes take a file lock (PID, stale when its
+   process is gone) plus a thread lock. Tests: `test_state_writes_wait_for_another_process`,
+   `test_state_writes_dont_lose_each_other`.
+9. `install_family_tasks.ps1 -Restart` runs deploy inside `Push-Location
+   $repoDir`. Test: `test_family_restart_runs_deploy_from_the_project_folder`.
+10. Check sessions skip the Pinecone search (`ClaudeChat.recall`). Tests:
+    `test_check_session_never_queries_memory`, and the contract web test
+    now asserts `memory.retrieve` was never called.
+11. `test_functional_check_after_a_restart_and_when_due` asserts the test
+    conversation is not due at 5 h and is at 6 h.
+- The judge's probes are folded into `tests/test_watch.py` with the
+  corrected expectations (the tests above). Each fix was reverted alone and
+  its test failed (22 reverts, bytecode caches cleared between them; the
+  functional_hours check by setting the default to 4). Two older tests now
+  pass the start grace between runs (`later()`), and the fake clock starts
+  at the real time so lock ages are measured right.
+- Full run after round 2 (Linux sandbox, Python 3.13): 2179 passed, 58
+  skipped (round 1: 2157 / 58; master b1e40b9: 2112 / 48); JS 253 pass.
+  `tests/test_watch.py` has 62 tests. ruff: no findings in the new files,
+  and none added to the files this work touched (the repo-wide count, 527,
+  is the same as master's).
+
+### Round 3 (judge findings on round 2)
+
+- N1: new code that exits before answering on a free side port is a
+  failure again (tried twice, then refused), not inconclusive; only a busy
+  side port (and outside causes) stay inconclusive. Inconclusive results are
+  counted per commit (`Updater.note_inconclusive`, cleared by `mark_gated`):
+  the host backs off 1, 5, 15, then 60 minutes (`host.GATE_BACKOFF`), and the
+  watchdog alerts once after 3 tries or 30 minutes ("The go-live check of X
+  can't run (...)"). Tests: `test_a_commit_that_crashes_on_start_is_refused`,
+  `test_repeated_inconclusive_gate_alerts_once`,
+  `test_inconclusive_alert_after_half_an_hour_too`,
+  `test_host_backs_off_an_inconclusive_gate`.
+- N2: `pkill -f -- <pattern>` (the pattern starts with dashes). Test:
+  `test_pkill_pattern_comes_after_double_dash`. An autouse fixture in
+  `tests/test_watch.py` now fails any test that would run a real command
+  (pkill, PowerShell, a restart) through `watch._run`.
+- N3: a rollback whose reset fails still clears `applied`, and
+  `Host.restart_on` refuses a commit the gate refused. Tests:
+  `test_failed_reset_clears_applied`, `test_host_never_restarts_on_a_refused_commit`.
+- N4: while the update lock is held a down app is still never healed, but
+  it is reported after `start_grace_seconds` + 15 minutes
+  (`watch.LOCKED_MARGIN`). Test: `test_hung_update_doesnt_hide_a_down_app_forever`.
+- N5: `updater.clear_stale` renames a stale lock aside atomically and puts
+  it back (os.link, never over a newer one) if it turned out to be a fresh
+  lock another process took meanwhile. Test:
+  `test_a_fresh_lock_survives_a_late_stale_clear`.
+- The judge's round-3 probes are folded in with the corrected expectations
+  (the tests above). Each fix was reverted alone, with `__pycache__`
+  cleared, and its test failed (10 reverts); the round-2 reverts were rerun
+  against the new code and all 21 still fail.
+
+### Follow-up (judge round 3 LOWs)
+
+- The watchdog now honours the hosts' backoff: `Watch.switch` skips the
+  go-live check until the last inconclusive try plus `gate_backoff(count)`
+  (`Updater.gate_wait`). The table moved from `host.GATE_BACKOFF` to
+  `updater.GATE_BACKOFF` / `updater.gate_backoff`, used by both. An hour of
+  5-minute watchdog runs now gates 4 times (0, 5, 10, 25 min), not 12.
+  Tests: `test_watchdog_backs_off_an_inconclusive_gate_like_the_hosts`,
+  `test_gate_backoff_is_one_table_for_hosts_and_watchdog`.
+- The automatic-update path alerts too: `Watch.alert_inconclusive` reads the
+  stored record whatever its commit (`Updater.last_inconclusive`). Off HEAD
+  it counts only while the commit is neither refused nor checked since
+  (`gated(sha) is None`), and only by tries (3), never the half-hour rule, so
+  a hand pull undone after one try doesn't alert. Tests:
+  `test_inconclusive_checks_on_the_update_path_alert_once`,
+  `test_an_off_head_record_alerts_only_while_its_commit_is_pending`.
+- A check copy killed by a signal (negative exit code, e.g. the Pi's OOM
+  killer) is inconclusive ("killed by signal 9"), not "did not start", so it
+  isn't refused after two tries. Test:
+  `test_a_copy_killed_by_a_signal_is_inconclusive`.
+- Windows CI fix (PR #28, windows-latest / 3.12: 2 failed): two tests used an
+  empty `restart_command` to model "no way to restart", but on Windows
+  `restart_command()` falls back to `restart_instance.ps1`, so a restart ran
+  and the rollback followed. `watch.WINDOWS` now holds the platform; those
+  tests pin it to False, and
+  `test_windows_falls_back_to_the_task_scheduler_restart` covers the
+  fallback. Reproduced on Linux by forcing the Windows branch: the same two
+  tests failed with the same reset to ccccccc; with the fix they pass.
+- README and SECURITY now say: 1, 5, 15, then 60 minutes after the last try
+  for a pull by hand (hosts and watchdog), the next `[update]` check for an
+  automatic update.
+- Each fix was reverted alone with `__pycache__` cleared and its test failed
+  (6 reverts). Full run (Linux sandbox, Python 3.13): 2205 passed, 58
+  skipped (HEAD e49c3a5: 2199 / 58, i.e. minus the 6 new tests); `tests/test_watch.py` has 76 tests. ruff:
+  no new findings in the touched files.
+
+## Fix: phone barge-in cancelled replies before any audio (2026-10-20)
+
+Kyle's phone log (12:47 and 12:52 UTC): "Voice barge-in on turn N after 0
+chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
+- **Root cause (page):** `voice-core.js` `TurnController` treated any
+  confirmed speech in the **thinking** state as a barge-in
+  (`onVad` "speechConfirmed" and `_utterance`, there since the MVP). So
+  Kyle's trailing words, room noise or the echo of the app's own "thinking"
+  note / follow-up cue cancelled the turn before its first audio chunk.
+  `[voice] barge_in = "off"` didn't help: it only ignored the mic in the
+  **speaking** state.
+- **Root cause (server):** the cancel closes the Claude stream from another
+  thread. A closed socket can read as a plain end of stream rather than an
+  error (reproduced against a local SSE server: the SDK's `text_stream`
+  ends quietly and `get_final_message()` returns `stop_reason=None` with
+  only the thinking block received so far, signature ""). `ClaudeChat`
+  stored that fragment as the reply, so the next request carried an
+  unsigned thinking block (the 400s that PR #26 works around).
+- **Fix, page:** barge-in needs the reply's audio to have started and
+  speech that began after that, with the same `barge_in_ms` rule as before.
+  Speech while it is still thinking (or with barge-in off, between
+  chunks) is **held and sent as the next turn** once the reply has played
+  (one slot, newest wins; a real barge-in, pause or End drops it; never
+  sent while a yes/no question is open). Chosen over "ignore" so "...and
+  on Friday" isn't lost, and over "append to the turn" because that needs
+  the running turn cancelled. Audio that arrives while Kyle is still
+  talking plays on and the state catches up when he stops. The
+  `Endpointer` gets `holdOff(ms)`: `voice.js` calls it for every earcon and
+  the follow-up cue (sound length + 250 ms), so they can't start an
+  utterance. Pausing (app in the background) still stops a thinking turn.
+  Phone cache v20.
+- **Fix, server:** `ClaudeChat._create` checks the final message: no
+  `stop_reason` means the stream ended early; when cancelled that is the
+  normal `_Cancelled` path (history gets "[interrupted: Kyle started talking
+  before I said anything]", no thinking block), otherwise `StreamEndedEarly`
+  drops the turn from history like any failed request. The barge-in log
+  line also says how many chunks had been sent ("(0 sent)").
+- Tests (round 1): `tests/js/voice-core.test.js` 28 (was 21): "talking while it
+  thinks cancels that turn" is replaced by its opposite (held, sent after
+  the reply, no interrupt), plus barge-in only by speech begun after the
+  audio started, speech running past the end of the reply (no stuck
+  "thinking"), speech after a yes, barge-in off while thinking, pause/End
+  drop a held utterance, `Endpointer.holdOff`, and the earcon wiring in
+  `voice.js`. `tests/test_voice.py` +2: a 0-chunk cancel whose stream ends
+  quietly with a thinking-only fragment (`FakeStream(quiet_close=True)`)
+  leaves valid history and a clean next request, with the INFO line
+  checked by caplog; a stream that ends early without a cancel is not
+  kept. Each fails with its source change reverted. (Final counts are
+  under round 3.) Not checked on a real phone: how often trailing words or room noise now get
+  held as a next turn (MANUAL_TEST "Talk while it is still thinking").
+
+### Round 2 (judge findings)
+
+1. Muting while Kyle was talking over a reply that then finished left the
+   state "thinking", and his next words sent an interrupt for a reply he
+   had heard in full: `setMuted(true)` now runs the same catch-up as the
+   end of speech. Speech only counts as talking over the reply while its
+   audio is audible (`replyAudible`: playing, or "speaking"); speech in a
+   gap between chunks is held like speech while it thinks.
+2. Words held before a yes/no question could be sent as a new turn after
+   it (an early "yes" agreeing to whatever came next): a `confirm` drops
+   the held words, and while a question is open (asked, or just answered)
+   speech that isn't the answer is dropped, not held. Speech right after
+   the answer no longer barges in either (that is covered by 1 and the
+   drop; a separate `audioStarted` reset on the answer turned out to be
+   redundant, so it isn't in).
+3. The stricter VAD threshold now applies whenever reply audio plays
+   (`controller.replyAudible`, read per frame in `voice.js`), also while
+   the state shows "thinking" because he was talking when it started.
+- Merged origin/master (b1e40b9, #25 and #26) by fast-forward; CHANGELOG
+  keeps both Fix entries.
+- Tests: `voice-core.test.js` 34 (+6), each failing with its fix reverted
+  (the after-the-answer test fails with fixes 1 and 2 reverted together).
+
+### Round 3 (judge findings)
+
+1. A yes/no question that played under Kyle's speech (he started just
+   before its audio) left the page on "Thinking…": the question's end and
+   his speech's end both did nothing, so his real "yes" was dropped until
+   the 60 s timeout. New `_settle()` rule, run when speech ends, on mute
+   and when playback goes idle: in "thinking" with nothing playing and him
+   not talking, a heard question with no answer sent yet goes to
+   "listening", and a finished turn ends the reply. The page now knows the
+   question's audio was played (`questionAudio`) and that an answer is on
+   its way (`answerSent`, so it stays "thinking" until `confirm_answer`).
+   Sweep: a turn that ends with its question unanswered (the server gave
+   up) now clears `awaitingAnswer`, so the next words are a new turn
+   instead of an answer to nothing.
+2. The reply's own echo in a pause between sentences could be queued as
+   the next turn. Each time playback goes idle the page calls `echoTail`
+   (`voice.js`: `endpointer.holdOff(CUE_TAIL_MS)`, as for the earcons), and
+   speech that began in such a pause is dropped when reply audio played
+   under more than half of it (timed with `performance.now()`).
+3. PROGRESS: the stale round-1 counts are gone; README says a pause between
+   sentences doesn't count as barge-in either.
+- Tests: `voice-core.test.js` 40 (+6): the question-under-speech sequence
+  (speechEnd and misfire), an unanswered question closing with its turn,
+  echo in a pause dropped, real speech in a pause still asked, and the
+  `echoTail` wiring. Each fails with its fix reverted, except the
+  `_settle()` call in `onPlaybackIdle`, which is defensive: no reachable
+  sequence leaves "thinking" with playback ending and him silent, so no
+  test fails without it.
+- Final counts (Linux sandbox, Python 3.13): 2114 passed, 48 skipped
+  (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
+  252).

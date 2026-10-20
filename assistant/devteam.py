@@ -34,6 +34,11 @@ REPLY_ID, REPLY, STATUS, RUN = "Reply ID", "Reply", "Status", "Run"
 STATUSES = ("answered", "working", "blocked")
 MAX_MESSAGE_CHARS = 4000
 MAX_REPLY_CHARS = 1200
+# Where a message comes from: the header the coordinator sees, the reply id
+# prefix and the longest message (docs/COORDINATOR_LINK.md).
+SOURCES = {"voice": ("Hey Claude voice", "hc-", MAX_MESSAGE_CHARS),
+           # the watchdog's alerts (watch.py): an app failing or recovering
+           "watch": ("Hey Claude watchdog", "hc-", MAX_MESSAGE_CHARS)}
 PENDING_DAYS = 7  # a message nobody answered stops counting as pending
 
 # session_..., cse_..., or a claude.ai/code/<id> URL (scheme and query optional)
@@ -137,9 +142,11 @@ class CoordinatorLink:
         return sorted(keep)
 
     # ----- sending -----
-    def send(self, text: str) -> dict:
-        """Queue `text` into the coordinator's session."""
-        text = (text or "").strip()[:MAX_MESSAGE_CHARS]
+    def send(self, text: str, source: str = "voice") -> dict:
+        """Queue `text` into the coordinator's session. `source` is "voice"
+        or "watch" (the watchdog's alerts)."""
+        header, prefix, cap = SOURCES[source]
+        text = (text or "").strip()[:cap]
         if not text:
             raise DevTeamError("There's no message to send.")
         if not self.session:
@@ -149,9 +156,9 @@ class CoordinatorLink:
         if not exe:
             raise DevTeamError("Claude Code isn't installed on this computer, "
                                "so I can't reach the dev team from here.")
-        reply_id = (f"hc-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
+        reply_id = (f"{prefix}{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
                     f"{secrets.token_hex(2)}")
-        message = (f"[Hey Claude voice | reply id {reply_id}]\n{text}\n\n"
+        message = (f"[{header} | reply id {reply_id}]\n{text}\n\n"
                    f"Answer per docs/COORDINATOR_LINK.md: one row in the Notion "
                    f"database \"{INBOX_TITLE}\" with {REPLY_ID} = {reply_id}.")
         try:

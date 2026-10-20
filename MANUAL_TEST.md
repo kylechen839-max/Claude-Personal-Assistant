@@ -426,6 +426,16 @@ with the stopwatch button.
       and after its first sentence say "Stop, what time is it?"
   - Should: it goes quiet at once and answers the time. Then ask "What were
     you saying before?": it knows it was cut off and only what you heard.
+- [ ] Talk while it is still thinking: ask "What's on my calendar
+      tomorrow?", stop, and while the orb pulses (before any answer is
+      heard) add "and on Friday". Then, on the loudspeaker, ask a few short
+      questions in a row and stay quiet while it thinks.
+  - Should: the first answer is never cut off before you heard it; it
+    answers tomorrow, then Friday. The quiet thinking note and the "Still
+    listening" note never stop or start a turn by themselves. On the PC,
+    `logs/assistant.log` has no "Voice barge-in ... (0 sent)" lines for
+    these turns. (Afterwards remove the `[voice] barge_in = "off"` override
+    from `config.local.toml` if you still have it.)
 - [ ] Speaker vs. AirPods: ask a long question on the loudspeaker with the
       phone on a table, and stay silent while it answers. Repeat with
       AirPods.
@@ -834,6 +844,37 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
   - Should: "not found", and no "PC hub on ..." line (the PC hub was
     removed). If `data/devhub.json` is still there (the old hub's saved
     chat), delete it; nothing reads it any more.
+
+## Health checks and safe updates (~15 min)
+Needs the PC's apps installed as tasks (yours and the family copies).
+- [ ] `.\scripts\install_watch_task.ps1`, then wait a minute and run
+      `.\.venv\Scripts\python.exe -m assistant.watch --status`.
+  - Should: one OK line per app (yours, Mom's, Kai's), with the version.
+    Task Scheduler shows `\HeyClaude\Watch` with "every 5 minutes", and
+    no window ever flashes up.
+- [ ] Stop Mom's app (Task Scheduler -> HeyClaude -> Family-mom -> End)
+      and wait up to 15 minutes (5 minutes' grace in case it is starting,
+      then the next run restarts it).
+  - Should: it is running again (the watchdog restarted it), with no
+    banner in your phone app (a restart that fixes it isn't an alert).
+- [ ] Disable Mom's task (right-click -> Disable), End it, wait 5-10
+      minutes, then open your phone app.
+  - Should: a banner "Mom's app is down since HH:MM (healthz: ...)" in
+    your app only (Mom's app, if you sign in to it, shows none). With the
+    coordinator set up, it got one message. Enable the task again: within
+    10 minutes the banner goes and one "recovered" message follows.
+- [ ] On your phone, in the app, check History and the Memory screen after
+      a test conversation ran (`--functional`).
+  - Should: no "remember the number" conversation anywhere, nothing new
+    in memory, no calendar change.
+- [ ] `.\scripts\deploy.ps1` when there is something to pull.
+  - Should: "Go-live check of <sha> ... a few minutes", then the apps
+    restart and "is live and passed". Your phone keeps working throughout
+    except for a few seconds during the restart.
+- [ ] Unplug the network for a functional check (`python -m assistant.watch
+      --functional`), then type a question in the phone app.
+  - Should: the reply says "Claude is unreachable right now..." or "can't
+    reach the internet", and the watchdog reports it without rolling back.
 
 ## Spotify (optional, ~10 min)
 Needs Spotify Premium, BLOCKERS.md "Spotify app" done, and Spotify open on

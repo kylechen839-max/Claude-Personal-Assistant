@@ -230,6 +230,9 @@ class ClaudeChat:
         # returns a system prompt line offering a review, or None
         # (memory_review.MemoryReview.nudge)
         self.review_nudge = None
+        # A health check's conversation (webapp.WebAssistant.start_check):
+        # nothing is saved (no history, no memory summary, no review offer).
+        self.check_mode = False
 
     @property
     def client(self):
@@ -258,7 +261,7 @@ class ClaudeChat:
 
     @property
     def incognito(self) -> bool:
-        return bool(self.recorder and self.recorder.incognito)
+        return self.check_mode or bool(self.recorder and self.recorder.incognito)
 
     @property
     def conversation_id(self) -> str | None:
@@ -506,7 +509,7 @@ class ClaudeChat:
         return True
 
     def recall(self, user_text: str) -> list[str]:
-        if not self.memory:
+        if not self.memory or self.check_mode:  # a health check: no Pinecone query
             return []
         try:
             notes = self.memory.retrieve(user_text)
@@ -520,7 +523,7 @@ class ClaudeChat:
 
     def _nudge(self) -> str | None:
         """The weekly memory review offer, if one is due (never blocks)."""
-        if self.review_nudge is None:
+        if self.review_nudge is None or self.check_mode:
             return None
         try:
             return self.review_nudge()
@@ -593,7 +596,16 @@ class ClaudeChat:
                     partial.append(delta)
                     if on_text:
                         on_text(delta)
-                return stream.get_final_message()
+                final = stream.get_final_message()
+                if final.stop_reason is None:
+                    # Ended before message_stop: a fragment (e.g. an unsigned
+                    # thinking block) that would break every later request.
+                    # abort() does this: a closed socket can read as a plain
+                    # end of stream, not an error.
+                    if cancel is not None and cancel.is_set():
+                        raise _Cancelled("".join(partial))
+                    raise StreamEndedEarly("the reply stream ended early")
+                return final
             except _Cancelled:
                 raise
             except Exception:
@@ -774,6 +786,12 @@ class _Cancelled(Exception):
     def __init__(self, partial: str):
         super().__init__("cancelled")
         self.partial = partial
+
+
+class StreamEndedEarly(Exception):
+    """A streamed response stopped before its end without being cancelled
+    (the connection dropped). The turn is dropped from history, as for any
+    failed request, so it can be retried."""
 
 
 def has_web_content(history: list[dict]) -> bool:
