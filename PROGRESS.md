@@ -1556,3 +1556,19 @@ screens are staged by setting the same attributes the JS sets (no mic).
   router 33, voice-core 12. Headless Chromium at 1400×900: hub and
   dashboard render with no console errors once signed in. Not run against
   the real CLI, Notion or claude.ai downloads from this sandbox.
+- **Review round 2 (four low findings):** a session dropped from
+  `hub_sessions` now leaves `data/devhub.json` at startup, with its
+  pending and seen reply ids; `CoordinatorLink` uses an RLock that
+  `pending()`, `_save()` and `_inbox()` take, so a hub poll can't lose an
+  id a send is adding or dump the dict mid-change; `serve` prints and logs
+  "the PC hub is disabled while TRUSTED_PROXY is set" instead of the hub
+  link; and the CLI runs through `devteam.run_cli` (Popen, a new process
+  group on Windows), which on a timeout runs `taskkill /T /F` on Windows
+  (`kill()` elsewhere) so npm `claude.cmd`'s node.exe can't keep the
+  window's send lock held. `send()`'s results and the voice tools are
+  unchanged. Tests: 3 new in `tests/test_devhub.py` (removed window on
+  disk, window freed after a Windows timeout, proxy warning), 3 new in
+  `tests/test_devteam.py` (taskkill /T and the process-group flag, kill
+  elsewhere, pending/_save wait for the lock); each fails on the previous
+  code (the Windows timeout one hits the fake's "blocked forever on
+  node.exe's pipes" under the old `subprocess.run`).

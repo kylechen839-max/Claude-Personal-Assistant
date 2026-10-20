@@ -64,12 +64,42 @@ class DevTeamError(Exception):
     """Something Kyle can act on, said in one plain sentence."""
 
 
+_WINDOWS = os.name == "nt"
+# Windows only (subprocess has the name only there); 0 is a no-op elsewhere.
+_NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+
+
+def run_cli(args, *, input=None, timeout=None, cwd=None, **_):
+    """subprocess.run(capture_output=True, text=True) for the Claude Code
+    CLI, except that a timeout kills the whole process tree. On Windows the
+    npm `claude.cmd` is cmd.exe running node.exe: killing cmd.exe alone
+    leaves node.exe holding the pipes, and the read after it would block
+    until the CLI quits by itself (holding the hub window's lock)."""
+    proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, cwd=cwd,
+                            creationflags=_NEW_GROUP if _WINDOWS else 0)
+    try:
+        out, err = proc.communicate(input, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if _WINDOWS:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                               capture_output=True, timeout=10)
+            else:
+                proc.kill()
+            proc.communicate(timeout=5)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass  # give up quietly: the caller says "didn't answer in time"
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
 class CoordinatorLink:
     def __init__(self, coordinator: str, *, claude_command: str = "claude",
                  repo_dir: str = "", timeout: float = 60,
                  state_file: str | Path = "data/devteam.json",
                  assignments=None, notion_client=None, inbox_id: str = "",
-                 run=subprocess.run, which=shutil.which):
+                 run=None, which=shutil.which):
         self.session = session_id(coordinator)
         self.claude_command = claude_command
         self.repo_dir = repo_dir or None
@@ -78,8 +108,9 @@ class CoordinatorLink:
         self.assignments = assignments  # NotionAssignments: the parent page
         self._client = notion_client
         self.inbox_id = inbox_id        # data source id, found or created lazily
-        self._run, self._which = run, which
-        self._lock = threading.Lock()
+        self._run, self._which = run or run_cli, which
+        # Reentrant: the hub and replies() hold it around pending()/_save().
+        self._lock = threading.RLock()
         self._state = self._load()
 
     # ----- state: messages waiting for a reply -----
@@ -98,22 +129,24 @@ class CoordinatorLink:
             return
         from assistant.tools.google_auth import write_private
 
-        self._state["inbox_id"] = self.inbox_id
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        # Private and atomic: the hub keeps Kyle's typed messages here.
-        write_private(self.state_file, json.dumps(self._state))
+        with self._lock:
+            self._state["inbox_id"] = self.inbox_id
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            # Private and atomic: the hub keeps Kyle's typed messages here.
+            write_private(self.state_file, json.dumps(self._state))
 
     def pending(self) -> list[str]:
         now = datetime.now(timezone.utc)
         keep = {}
-        for rid, sent in self._state["pending"].items():
-            try:
-                age = now - datetime.fromisoformat(sent)
-            except ValueError:
-                continue
-            if age.days < PENDING_DAYS:
-                keep[rid] = sent
-        self._state["pending"] = keep
+        with self._lock:  # a send may be adding an id from another thread
+            for rid, sent in self._state["pending"].items():
+                try:
+                    age = now - datetime.fromisoformat(sent)
+                except ValueError:
+                    continue
+                if age.days < PENDING_DAYS:
+                    keep[rid] = sent
+            self._state["pending"] = keep
         return sorted(keep)
 
     # ----- sending -----
@@ -174,8 +207,9 @@ class CoordinatorLink:
         if self.inbox_id:
             return self.inbox_id
         found = self._find_inbox() or self._create_inbox()
-        self.inbox_id = found
-        self._save()
+        with self._lock:
+            self.inbox_id = found
+            self._save()
         return found
 
     def _find_inbox(self) -> str:

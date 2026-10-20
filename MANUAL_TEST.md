@@ -607,3 +607,9 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
   - Should: "not found".
 - [ ] Press Clear in a window and confirm.
   - Should: the conversation disappears and stays gone after a reload.
+- [ ] Unplug the network (or turn off Wi-Fi), send from a hub window and
+      wait for `[devteam] timeout` (60 s by default).
+  - Should: the message shows "Not sent: … didn't answer in time", no
+    `node.exe` for Claude Code is left in Task Manager, and the same
+    window takes another message straight away (no "one message at a
+    time").

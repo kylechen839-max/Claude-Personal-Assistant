@@ -975,6 +975,14 @@ server. Each window has a – button to hide it (the toolbar's Hidden menu
 brings it back; the choice stays in this browser) and Clear, which deletes
 that window's transcript from `data/devhub.json`.
 
+The hub is off while `TRUSTED_PROXY` (`[webapp] trusted_proxy`) is set:
+every hub request answers 404, because a trusted proxy could vouch for a
+request from elsewhere, and the web app prints "the PC hub is disabled
+while TRUSTED_PROXY is set" at startup instead of the hub link. Open it on
+this PC from a web app started without the proxy setting. Dropping a
+session from `hub_sessions` deletes that window's transcript from the
+file at the next start.
+
 ## Preflight: check everything in one pass
 
 ```powershell

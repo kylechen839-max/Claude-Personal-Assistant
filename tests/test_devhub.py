@@ -33,8 +33,9 @@ class Clock:
 
 def config(tmp_path, **team):
     cfg = json.loads(json.dumps(DEFAULTS))
-    cfg["devteam"].update(hub=True, hub_sessions=[SID, SID2],
-                          hub_state_file=str(tmp_path / "devhub.json"), **team)
+    team = {"hub_sessions": [SID, SID2], **team}
+    cfg["devteam"].update(hub=True, hub_state_file=str(tmp_path / "devhub.json"),
+                          **team)
     return cfg
 
 
@@ -330,3 +331,64 @@ def test_serve_builds_the_hub_only_on_loopback(monkeypatch, tmp_path):
                  output_fn=lambda m: None)
     assert isinstance(built[0], devhub.Hub) and built[1] is None
     assert built[0].sessions == [SID, SID2]
+
+
+def test_removed_window_is_deleted_on_disk(tmp_path):
+    """A session dropped from hub_sessions: its transcript leaves the file
+    and its reply ids stop being pending, so a late answer never lands."""
+    notion = FakeNotion()
+    hub = make_hub(tmp_path, notion=notion)
+    rid = hub.send(SID2, SECRET)["reply_id"]
+    hub.link._state.setdefault("seen", {})[rid] = ["working", "on it"]
+    hub.link._save()
+    hub.send(SID, "keep me")
+    again = make_hub(tmp_path, notion=notion, hub_sessions=[SID])
+    raw = (tmp_path / "devhub.json").read_text()
+    assert SECRET not in raw and rid not in raw and "keep me" in raw
+    assert rid not in again.link.pending()
+
+
+def test_hub_window_frees_after_a_windows_cli_timeout(tmp_path, monkeypatch):
+    """npm claude.cmd that hangs: after the timeout the window answers
+    "not sent" and takes the next message (no 409 until the CLI quits)."""
+    import subprocess
+
+    from assistant import devteam
+    from tests.devteam_fakes import TreePopen
+
+    TreePopen.made, TreePopen.tree_killed = [], set()
+    monkeypatch.setattr(subprocess, "Popen", TreePopen)
+    monkeypatch.setattr(devteam, "_WINDOWS", True)
+    cfg = config(tmp_path)
+    link = CoordinatorLink(SID, which=lambda c: f"/usr/bin/{c}", timeout=0.01,
+                           state_file=cfg["devteam"]["hub_state_file"],
+                           notion_client=FakeNotion())
+    hub = devhub.Hub(cfg, link, clock=Clock())
+    assert hub.send(SID, "first")["stage"] == "not sent"
+    assert not hub._send_locks[SID].locked()
+    assert hub.send(SID, "second")["stage"] == "not sent"  # not BlockingIOError
+    assert any(p.args[:2] == ["taskkill", "/T"] for p in TreePopen.made)
+
+
+def test_serve_warns_that_a_trusted_proxy_turns_the_hub_off(monkeypatch, tmp_path, caplog):
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    monkeypatch.setattr(webapp, "build_assistant", lambda *a, **k: object())
+    monkeypatch.setattr(webapp, "create_app", lambda *a, **kw: None)
+    monkeypatch.setenv(webapp.TOKEN_ENV, "x" * 40)
+    monkeypatch.setattr("assistant.webfeatures.Features.resume_jobs", lambda self: None)
+    cfg = config(tmp_path)
+    out = []
+    webapp.serve(cfg, host="127.0.0.1", port=8765, env_file=tmp_path / ".env",
+                 output_fn=out.append)
+    assert any("PC hub on" in m for m in out)
+    assert not any("TRUSTED_PROXY" in m for m in out)
+    out.clear()
+    cfg["webapp"]["trusted_proxy"] = "127.0.0.1"
+    caplog.set_level(logging.WARNING)
+    webapp.serve(cfg, host="127.0.0.1", port=8765, env_file=tmp_path / ".env",
+                 output_fn=out.append)
+    assert any("PC hub is disabled while TRUSTED_PROXY is set" in m for m in out)
+    assert not any("PC hub on" in m for m in out)
+    assert "PC hub is disabled" in caplog.text

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- PC hub: chat with your dev team coordinator(s) at
+  http://127.0.0.1:8765/devteam on the PC (`[devteam] hub = true`).
+  Messages go through Claude Code on your plan; markdown replies, step
+  updates and an In task / Idle pill come back through the Notion inbox.
+  Desktop- and loopback-only (off while TRUSTED_PROXY is set, with a
+  startup warning); launchers in `tools/agent-dashboard/desktop/open-hub.*`.
+- Agent dashboard: desktop-only (the phone layout is gone). Windows can be
+  hidden and restored from "Hidden (N)" or Show all, the Runs view and
+  window chrome got a calmer unified look, and "Get desktop app" saves the
+  Windows or Mac launcher (as a small zip) for the dashboard or the hub.
+- Dev team link: a timed-out Claude Code CLI on Windows is stopped with its
+  whole process tree.
 - Dev team dashboard: the coordinator chat always shows whether the
   coordinator is in a task or idle, and a message sent mid-task shows as
   queued until the coordinator reads it.

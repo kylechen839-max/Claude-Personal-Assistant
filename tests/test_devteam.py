@@ -3,6 +3,7 @@ and reading replies from the Notion inbox (mocked)."""
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -236,3 +237,74 @@ def test_state_is_written_privately_and_atomically(tmp_path, monkeypatch):
     import sys
     if sys.platform != "win32":
         assert os.stat(tmp_path / "devteam.json").st_mode & 0o777 == 0o600
+
+
+@pytest.fixture
+def tree_popen(monkeypatch):
+    from tests.devteam_fakes import TreePopen
+
+    TreePopen.made, TreePopen.tree_killed = [], set()
+    monkeypatch.setattr(subprocess, "Popen", TreePopen)
+    return TreePopen
+
+
+def test_windows_timeout_kills_the_whole_cli_tree(tmp_path, monkeypatch, tree_popen):
+    """npm claude.cmd: a timeout must taskkill /T the tree, or the read
+    after it blocks on node.exe and the send never returns."""
+    from assistant import devteam
+
+    monkeypatch.setattr(devteam, "_WINDOWS", True)
+    team = CoordinatorLink(SID, which=lambda c: f"/usr/bin/{c}", timeout=0.01,
+                           state_file=tmp_path / "devteam.json",
+                           notion_client=FakeNotion())
+    with pytest.raises(DevTeamError, match="in time"):
+        team.send("hello")
+    cli, kill = tree_popen.made[0], tree_popen.made[1]
+    assert kill.args == ["taskkill", "/T", "/F", "/PID", str(cli.pid)]
+    assert cli.kw["creationflags"] == devteam._NEW_GROUP
+    assert team.pending() == []
+
+
+def test_timeout_elsewhere_kills_the_process(tmp_path, monkeypatch):
+    from assistant import devteam
+
+    class Hung:
+        killed = False
+        pid, returncode = 7, None
+
+        def __init__(self, args, **kw):
+            self.kw = kw
+
+        def communicate(self, input=None, timeout=None):
+            if not Hung.killed:
+                raise subprocess.TimeoutExpired("claude", timeout)
+            return "", ""
+
+        def kill(self):
+            Hung.killed = True
+
+    monkeypatch.setattr(devteam, "_WINDOWS", False)
+    monkeypatch.setattr(subprocess, "Popen", Hung)
+    with pytest.raises(subprocess.TimeoutExpired):
+        devteam.run_cli(["claude"], input="x", timeout=0.01)
+    assert Hung.killed
+
+
+def test_pending_and_save_wait_for_the_state_lock(tmp_path):
+    """A send inserts its id under the lock; pending() (which rebuilds the
+    dict) and _save() (which dumps it) must wait for it, or the new id is
+    lost or the dump sees the dict change size mid-iteration."""
+    import threading
+
+    team = link(tmp_path)
+    for call in (team.pending, team._save):
+        done = threading.Event()
+        with team._lock:  # a send halfway through inserting its id
+            t = threading.Thread(target=lambda: (call(), done.set()))
+            t.start()
+            assert not done.wait(0.2), f"{call.__name__} ran without the lock"
+            team._state["pending"]["hc-new"] = datetime.now(timezone.utc).isoformat()
+        t.join(5)
+        assert done.is_set()
+    assert team.pending() == ["hc-new"]
+    assert "hc-new" in (tmp_path / "devteam.json").read_text()

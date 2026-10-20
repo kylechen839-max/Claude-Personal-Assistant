@@ -58,3 +58,52 @@ class FakeNotion:
     def _create(self, **kw):
         self.created.append(kw)
         return {"id": "db-new", "data_sources": [{"id": "ds-new"}]}
+
+
+class TreePopen:
+    """subprocess.Popen for npm `claude.cmd` on Windows that never answers:
+    cmd.exe runs node.exe, and node.exe holds the pipes. Killing only the
+    top process (proc.kill()) leaves them held, so the read after it would
+    block forever (raised here instead of hanging the test); `taskkill /T`
+    frees them. Patch it over subprocess.Popen: subprocess.run's own
+    taskkill call comes here too."""
+    made = []
+    tree_killed = set()
+
+    def __init__(self, args, **kw):
+        self.args, self.kw = args, kw
+        self.pid = 4000 + len(TreePopen.made)
+        self.returncode = None
+        TreePopen.made.append(self)
+        if args[0] == "taskkill":
+            TreePopen.tree_killed.add(int(args[args.index("/PID") + 1]))
+            self.returncode = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def _blocked(self, timeout):
+        if self.args[0] == "taskkill" or self.pid in TreePopen.tree_killed:
+            self.returncode = 1
+            return "", ""
+        if timeout is not None:
+            import subprocess
+
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        raise RuntimeError("blocked forever on node.exe's pipes")
+
+    def communicate(self, input=None, timeout=None):
+        return self._blocked(timeout)
+
+    def wait(self, timeout=None):
+        self._blocked(timeout)
+        return self.returncode
+
+    def kill(self):
+        pass  # only cmd.exe: node.exe keeps the pipes
+
+    def poll(self):
+        return self.returncode

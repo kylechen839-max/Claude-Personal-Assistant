@@ -354,11 +354,17 @@ it is kept to the PC itself:
   (`script-src 'self'`).
 - One message in flight per window; at most 8 windows, 200 messages a
   window, 12000 characters a message or reply. No message or reply text
-  is logged at INFO.
+  is logged at INFO. A CLI that hangs past `[devteam] timeout` has its
+  whole process tree killed (`taskkill /T` on Windows), so the window is
+  freed.
+- With `trusted_proxy` set the hub fails closed (every request 404) and
+  `serve` warns at startup that it is disabled.
 - **At rest:** the transcript and pending reply ids are in
   `hub_state_file` (`data/devhub.json`), written privately (0600 on
   Linux/macOS; Windows uses the folder's permissions) and atomically.
-  Clear rewrites the file without that window's messages; older copies of
+  Clear rewrites the file without that window's messages, and a session
+  dropped from `hub_sessions` is removed from the file at the next start
+  (with its pending reply ids); older copies of
   the text may remain in free disk blocks until overwritten, as with any
   file delete.
 

@@ -109,11 +109,16 @@ class Hub:
         self._notion_error = ""
         with self.link._lock:
             windows = self.link._state.setdefault("windows", {})
-            for sid in list(windows):
-                if sid not in self.sessions:
-                    del windows[sid]  # a window no longer configured: gone
+            gone = [sid for sid in windows if sid not in self.sessions]
+            for sid in gone:  # a window no longer configured: gone, on disk too
+                for rid in {m.get("reply_id") for m in windows.pop(sid)} - {None}:
+                    self.link._state["pending"].pop(rid, None)
+                    self.link._state.get("seen", {}).pop(rid, None)
             for sid in self.sessions:
                 windows.setdefault(sid, [])
+            if gone:
+                self.link._save()
+                log.info("Hub: removed %d window(s) no longer configured", len(gone))
 
     # ----- transcript -----
     def _messages(self, sid: str) -> list:

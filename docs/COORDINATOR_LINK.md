@@ -126,7 +126,13 @@ connector:
    hub has its own state file, `hub_state_file` (`data/devhub.json`), and
    `hub-` reply ids, so the voice tools never pick up a hub reply. It is
    off on any non-loopback bind, and every hub route answers 404 to a
-   request that came through a proxy (`tailscale serve` included).
+   request that came through a proxy (`tailscale serve` included). With
+   `TRUSTED_PROXY` set every hub request answers 404 too, and the web app
+   says at startup that the PC hub is disabled; open it on this PC from a
+   web app started without the proxy setting. If Claude Code doesn't
+   answer within `[devteam] timeout`, the whole CLI process tree is
+   stopped (`taskkill /T` on Windows) and the window takes the next
+   message.
 4. **Notion.** Nothing to do: the app creates the inbox next to the
    Assignments database with its existing integration, and the coordinator
    reaches it through Kyle's Notion connector.

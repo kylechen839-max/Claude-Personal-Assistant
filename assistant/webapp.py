@@ -1597,6 +1597,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         history=store, memory=memory)
 
 
+HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "
+                     "set; open it on this PC without the proxy.")
+
+
 def serve(config: dict, host: str | None = None, port: int | None = None,
           tts_name: str | None = None, show_token: bool = False,
           env_file: str | Path = ".env", output_fn=print) -> int:
@@ -1642,7 +1646,12 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                  ", ".join(b.role for b in failover.backends) or "none")
         start_history_sync(config, assistant, token, failover)
     features.resume_jobs()  # lecture jobs cut off by a restart
-    if hub is not None:
+    if hub is not None and trusted_proxy:
+        # Every hub route answers 404 to a request a trusted proxy vouches
+        # for (devhub.from_this_machine), so say so instead of a dead link.
+        output_fn(HUB_PROXY_WARNING)
+        log.warning(HUB_PROXY_WARNING)
+    elif hub is not None:
         output_fn(f"PC hub on http://{host}:{port}/devteam "
                   f"({len(hub.sessions)} coordinator window(s)).")
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
