@@ -725,6 +725,30 @@ for your recent notes or to delete one (it asks first). With conversation
 history on, a saved note also shows up in that conversation. Notes need
 `[memory]` (Pinecone); `[notes] enabled` turns them off.
 
+### Review what it remembers
+"What did you remember about me this week?" gives a short spoken summary of
+this week's conversation summaries and notes ("...last week?" works too).
+"Forget the one about cilantro" deletes it after a spoken yes (the same
+`delete_note` as for notes, which now also takes conversation summaries).
+
+In the phone app, **Memory** in the settings menu lists everything the
+assistant saved in Pinecone, newest first and grouped by week, with the
+date, whether it is a conversation summary or a note, and an **Untrusted**
+badge on ones saved while a web page or email was in the conversation.
+Delete removes one; "Delete all from this week" removes that week's notes
+(both ask first). Only what the assistant wrote itself (ids starting with
+`voice-` or `note-` in `[memory] namespace`) is listed or deleted; your
+other Pinecone notes are never touched. Old vectors without a date show
+under "Date unknown". It is the owner's only: family members have no memory
+and don't see it.
+
+Optional weekly nudge: with `[memory] weekly_review = true`, once a week
+the first conversation that has notes from this week starts with "I saved N
+notes this week, want to review them?". Off by default; the time of the
+last offer is kept in `[memory] review_state_file`
+(`data/memory_review.json`). With failover, each backend keeps its own, so
+you may hear it once per backend.
+
 ### Record a lecture (phone app)
 In the phone app, open the **Lecture** tab, pick the course (the options
 come from the Course property of your Notion Assignments database), and

@@ -81,6 +81,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # the login page's language (Chinese for a family member) and
               # the history panel's code: page code only, no personal data
               "/i18n.js", "/history.js",
+              # the Memory screen's code (its /api/memory data needs the owner)
+              "/memory.js",
               # the owner's "Connect Spotify" button (its routes need sign-in)
               "/spotify.js"}
 PUBLIC_POST = {"/api/login"}

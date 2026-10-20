@@ -2037,6 +2037,68 @@ Render/Docker changes) comes separately.
     48 skipped. JS: attachments 6, i18n 13, ui 4, app-send 2, all
     passing.
 
+## Memory review: see and delete what it remembers
+
+- `assistant/memory_review.py` (`MemoryReview`): lists the assistant's own
+  vectors in its Pinecone namespace by id prefix (`index.list` with
+  `voice-` and `note-`, then `index.fetch` in batches of 100, at most
+  1000), sorts newest first by `created_at` (both writers already store
+  it; vectors without one show as "date unknown", last), groups them by
+  week (Monday, in `[assistant] timezone`) with kind (summary / note) and
+  the `untrusted` flag. Deletes one (must exist and be ours) or a week
+  (exactly the ids the page showed that are still in that week).
+- Phone app: `memory.js` + **Memory** in the settings menu (owner with
+  memory on; `/api/state` has `memory`), `memory_web.py` routes
+  (`GET /api/memory`, `POST /api/memory/{id}/delete`,
+  `POST /api/memory/delete-week`), owner-only (family 404). Chinese strings
+  in `i18n.js`. `/memory.js` is public on the cloud like the other page
+  files and in the service worker shell (cache v12).
+- Voice: read-only `review_memory` tool ("what did you remember about me
+  this week?"; `week: "last"` too). "Forget that..." reuses `delete_note`,
+  which now also takes `voice-` ids (summaries) and asks first; its
+  question is in `i18n.py` (Chinese too).
+- Weekly nudge: `[memory] weekly_review = false` by default. When on,
+  `ClaudeChat` asks `MemoryReview.nudge` at the start of each conversation;
+  at most once in 7 days, and only with notes this week, a system prompt
+  line asks Claude to open with "I saved N notes this week, want to review
+  them?". Last offer time in `[memory] review_state_file` (atomic private
+  write; `/data/...` on the cloud). With no notes it looks again after an
+  hour at most; a Pinecone error never blocks the reply.
+- Tests: `tests/test_memory_review.py` (27: listing, local-week grouping
+  and sorting, batching and the cap, delete one, delete week by exact ids,
+  the voice tool and its untrusted mark, "forget that" asking through
+  `delete_note`, nudge off/on/once a week/restart/no notes/errors, first
+  turn only, wiring, caplog for the module and routes, routes 401/403/404,
+  family 404 with no Pinecone call, 502 without details),
+  `tests/test_notes.py` +2 (summary delete asks first; Chinese question;
+  the foreign-id refusal now uses a non-assistant id),
+  `tests/js/memory.test.mjs` (8, node:vm: menu visibility, rendering and
+  badges, delete and delete-week confirmations and exact POST bodies,
+  every string has Chinese). Each failed with its source change reverted
+  (owner_of -> session_of, whole-week delete, no chat hook, nudge every
+  turn, old note prefix, no untrusted flag, default on, family flag, no
+  confirm in the page).
+- Review round 2: **listing works with the pinned SDK.** `pinecone>=7`
+  (10.0.0 here) yields `ListResponse` pages from `Index.list()` (ids in
+  `page.vectors[i].id`), not lists of ids, so the Memory screen,
+  `review_memory`, the nudge and delete-week saw nothing, and on master
+  `list_recent_notes` was always empty too. New shared
+  `memory.list_ids`/`page_ids` read both shapes (and dicts) and are used by
+  `memory_review.py` and `QuickNotes._ids`. `FakeIndex.list` now yields
+  ListResponse-shaped pages. The 1000 cap now sorts on the save time after
+  the prefix (ids without one last), so a quick note newer than some
+  summaries is kept. Tests: `test_notes.py` +2 (a real `pinecone` Index
+  with a mocked `_http`: recent notes listed; `page_ids` shapes),
+  `test_memory_review.py` +1 (the same real Index: 5 listed, this week's
+  2) and the cap test now asserts which ids survive. With the old list
+  code `test_notes.py` fails 2 and `test_memory_review.py` 15; with the old
+  sort the cap test fails. Service worker cache v11.
+- Counts (Linux sandbox, Python 3.13): pytest 1743 passed, 48 skipped, plus
+  `test_end_to_end.py::test_hey_claude_whats_on_my_calendar_tomorrow`, which
+  failed once in the full run (eSpeak-generated audio, shorter than 1 s) and
+  passed 4 of 4 reruns; it doesn't touch memory code (master about 1712
+  passed, 48 skipped); node 203 .mjs + 14 voice-core, all passing.
+
 ## Spotify by voice (2026-10-20)
 
 - "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",

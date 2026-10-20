@@ -35,6 +35,8 @@ EN = {
     "draft_also": " Careful: replies also go to {others}.",
     "draft_instead": " Careful: replies go to {others}, not to the sender {sender}.",
     "google_failed": "Google sign-in didn't finish. Go back to the app and try again.",
+    "note_delete": "Do you want me to delete the note: {text}?",
+    "note_delete_any": "Do you want me to delete that note?",
     "spotify_failed": "Spotify sign-in didn't finish. Go back to the app and try again.",
     "spotify_premium": "Spotify only lets apps control playback with a Premium account.",
     "spotify_no_device": "Spotify isn't open anywhere. Open Spotify on your PC or "
@@ -74,6 +76,8 @@ ZH = {
     "draft_also": "注意：回复也会发给 {others}。",
     "draft_instead": "注意：回复会发给 {others}，而不是发件人 {sender}。",
     "google_failed": "Google 登录没有完成。请回到应用里再试一次。",
+    "note_delete": "要我删除这条记忆吗：{text}？",
+    "note_delete_any": "要我删除这条记忆吗？",
     "spotify_failed": "Spotify 登录没有完成。请回到应用里再试一次。",
     "spotify_premium": "Spotify 只允许高级会员（Premium）账户用应用控制播放。",
     "spotify_no_device": "哪里都没有打开 Spotify。请先在电脑或手机上打开 Spotify，再说一次。",

@@ -84,7 +84,10 @@ DEFAULTS: dict = {
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
-               "text_fields": ["text", "chunk_text", "content", "summary"]},
+               "text_fields": ["text", "chunk_text", "content", "summary"],
+               # once a week, offer to review this week's notes (memory_review.py)
+               "weekly_review": False,
+               "review_state_file": "data/memory_review.json"},
     "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
         "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
         "app_origin": "",           # where the phone app is installed from
@@ -229,6 +232,7 @@ SERVER_PROFILE: dict = {
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
+    "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}

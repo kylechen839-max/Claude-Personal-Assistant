@@ -106,6 +106,22 @@
       "这个邀请链接已过期或已经用过了，请再要一个新的。",
     "this invite link has expired or was already used": "这个邀请链接已过期或已经用过了。",
     "Couldn't reach the server. Open the link again.": "连不上服务器，请再打开一次链接。",
+    // the Memory screen (memory.js)
+    "Memory": "记忆",
+    "Summary": "对话摘要",
+    "Note": "笔记",
+    "Untrusted": "来源不可信",
+    "Saved while a web page or email was in the conversation": "保存时对话里有网页或邮件内容",
+    "Date unknown": "日期未知",
+    "Last week": "上周",
+    "Delete all from this week": "删除本周的全部记忆",
+    "Delete all from that week": "删除那一周的全部记忆",
+    "Delete all with no date": "删除所有日期未知的记忆",
+    "Delete this memory? This can't be undone.": "要删除这条记忆吗？删除后无法恢复。",
+    "Nothing saved yet.": "还没有保存任何记忆。",
+    "Showing the newest 1000 only.": "只显示最新的 1000 条。",
+    "couldn't reach long-term memory; try again": "连不上长期记忆，请再试一次。",
+    "not found": "找不到。",
     // tabs, settings, history, lecture and tutor screens
     "Backends": "服务器",
     "Use": "使用",
@@ -261,6 +277,12 @@
     [/^(.+) \(in use\)$/, "$1（正在使用）"],
     [/^A photo is over ([\d.]+) MB$/, "有一张照片超过 $1 MB。"],
     [/^A file is over ([\d.]+) MB$/, "有一个文件超过 $1 MB。"],
+    [/^Week of (.+)$/, "$1 那一周"],
+    [/^Deleted (\d+)\.$/, "已删除 $1 条。"],
+    [/^Delete all (\d+) notes? from this week\? This can't be undone\.$/, "要删除本周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? from last week\? This can't be undone\.$/, "要删除上周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? from the week of (.+)\? This can't be undone\.$/, "要删除 $2 那一周的全部 $1 条记忆吗？删除后无法恢复。"],
+    [/^Delete all (\d+) notes? with no date\? This can't be undone\.$/, "要删除日期未知的全部 $1 条记忆吗？删除后无法恢复。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
   // The line a message with attachments ends with, "[photo] [file: a.pdf]"

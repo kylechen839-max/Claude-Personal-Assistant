@@ -21,6 +21,7 @@
 <script src="/i18n.js" defer></script>
 <script src="/family.js" defer></script>
 <script src="/attachments.js" defer></script>
+<script src="/memory.js" defer></script>
 <script src="/spotify.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
@@ -80,6 +81,7 @@
           <button id="backends-save" type="button">Save and check</button>
           <ul id="backend-status" class="backend-status"></ul>
         </fieldset>
+        <button id="memory-open" type="button" hidden>Memory</button>
         <button id="google-connect" type="button" hidden>Connect Google account</button>
         <p id="google-status" class="hint" hidden></p>
         <button id="spotify-connect" type="button" hidden>Connect Spotify</button>
@@ -221,6 +223,18 @@
     <button id="continue" class="primary" type="button">Continue this conversation</button>
     <p id="continue-hint" class="hint"></p>
   </footer>
+</main>
+
+<main id="memory-view" class="history memory" hidden aria-labelledby="memory-title">
+  <header class="bar">
+    <button id="memory-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="memory-title" tabindex="-1">Memory</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
+  <p id="memory-status" class="status center" role="status"></p>
 </main>
 
 <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
