@@ -225,3 +225,18 @@ test('first-run guide: not signed in yet shows nothing; no data-google never sho
   assert.equal(owner.guide.hidden, true);
   assert.equal(owner.loginP.textContent, 'Enter your access token');
 });
+
+test('Chinese page: tabs, settings, history and tutor labels are all translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  for (const [en, zh] of [['Chat', '聊天'], ['Lecture', '讲座'], ['Tutor', '作业辅导'],
+    ['Backends', '服务器'], ['Save and check', '保存并检查'], ['Pinned', '已置顶'],
+    ['Rename', '重命名'], ['Today', '今天'], ['Take photo', '拍照'], ['CC', '字幕'],
+    [' Show the full solution', ' 显示完整解答'], ['Auto: Pi, then PC, then cloud', '自动：先树莓派，再电脑，再云端']]) {
+    assert.equal(t(en), zh, en);
+  }
+  assert.equal(t('12 messages'), '12 条消息');
+  assert.equal(t('Actions for Dentist'), 'Dentist 的操作');
+  assert.equal(t('Transcribing 40%'), '正在转写 40%');
+  assert.equal(t('Hey Claude'), 'Hey Claude');  // the app name stays
+});
