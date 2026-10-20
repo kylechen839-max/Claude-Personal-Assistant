@@ -137,6 +137,23 @@ enabled = false               # set true in config.local.toml, after signing is 
 channel = "stable"
 check_minutes = 15
 
+[watch]                       # health checks: python -m assistant.watch (README "Health checks")
+enabled = true                # false = don't check this instance (also per config.<name>.toml)
+label = ""                    # its name in alerts and the banner; "" = "Your app" / "Mom's app"
+public_url = "auto"           # the phone's address: "auto" = public_origin or `tailscale serve`; "" = none
+functional_hours = 6          # the full test conversation this often (and after every restart or update)
+retry_minutes = 30            # a failed test conversation is tried again after this long
+gate = true                   # new code must pass the test conversation on a side port before going live
+side_port_offset = 100        # side port = the instance's port + this (8765 -> 8865)
+candidate_seconds = 300       # for the side-port copy to come up
+start_grace_seconds = 300     # an app not answering gets this long (restart, reboot) before it's healed
+rollback = true               # still failing after one restart: back to the last version that passed
+restart_command = []          # self-heal; [] = its Task Scheduler task (Windows), none elsewhere
+banner = true                 # your phone app shows a banner while an app is down
+coordinator = true            # tell the dev team coordinator ([devteam]) when something breaks or recovers
+status_file = "data/watch_status.json"
+stale_minutes = 30            # the banner says the checks stopped after this long without one
+
 [history]
 # Every conversation (wake word, text, phone) is saved here and can be
 # searched and continued: python -m assistant --history list

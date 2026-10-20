@@ -143,6 +143,10 @@ def parse_args(argv=None):
     parser.add_argument("--update", action="store_true",
                         help="update now from the tested `stable` branch "
                              "(fast-forward only; rolled back if checks fail)")
+    parser.add_argument("--candidate", action="store_true",
+                        help="web mode: a side-port copy for the go-live check "
+                             "(assistant/watch.py): no history, no saved "
+                             "sign-ins, no background jobs, its own log")
     hist = parser.add_argument_group("conversation history")
     hist.add_argument("--history", nargs="+", metavar="ACTION",
                       help="list | search WORDS | show ID | export ID | delete ID")
@@ -176,6 +180,13 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print,
         return friendly_error(e, user_text, output_fn)
 
 
+# The API itself is down or overloaded (500, 503, 529), not this computer's
+# network: the client has already retried ([assistant] api_max_retries).
+CLAUDE_DOWN = tuple(c for c in (getattr(anthropic, n, None) for n in (
+    "InternalServerError", "ServiceUnavailableError", "OverloadedError"))
+    if isinstance(c, type))
+
+
 def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
     """Log a failed request and return a short sentence to speak instead."""
     if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
@@ -190,6 +201,11 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
         log.warning("Rate limited: %s", e)
         output_fn(f"API error: {e}")
         return i18n.t("rate_limited")
+    if isinstance(e, CLAUDE_DOWN):  # 5xx / overloaded, after the retries
+        log.warning("Claude unavailable (HTTP %s): %s",
+                    getattr(e, "status_code", "?"), type(e).__name__)
+        output_fn(f"API error: {e}")
+        return i18n.t("claude_down")
     if isinstance(e, anthropic.APIError):
         log.error("API error: %s", e)
         output_fn(f"API error: {e}")
@@ -936,6 +952,10 @@ def main(argv=None) -> int:
     i18n.set_language(config["assistant"]["language"])
     if args.role:
         config["failover"]["role"] = args.role
+    if args.candidate:
+        from assistant.watch import candidate_config
+
+        candidate_config(config, args.config)
     log_file = setup_logging(config)
     if args.download_voice:
         return download_voice_command(args.download_voice)

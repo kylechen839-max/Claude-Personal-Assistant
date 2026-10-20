@@ -74,6 +74,7 @@ which), so you can start with only the Anthropic key in text mode.
 | `--host`, `--port` | Web mode: where to listen (default 127.0.0.1:8765) |
 | `--show-token` | Web mode: print the access token to the console once |
 | `--role pi` | Which backend this is in the phone app's Pi -> PC -> cloud failover (`pi`, `pc` or `cloud`; see FAILOVER.md) |
+| `--candidate` | Web mode: the go-live check's side-port copy (no history, no saved sign-ins, no background jobs, its own log); started by the watchdog, not by hand (see "Health checks and safe updates") |
 
 **Follow-up mode:** after a reply, the assistant plays a soft, low blip
 and keeps listening for 5 seconds without the wake word, so you can just
@@ -1151,6 +1152,10 @@ systemctl --user restart hey-claude     # after changing .env or config.toml
 ./scripts/install_service.sh --uninstall
 ```
 
+If the Pi also serves the phone web app, `./scripts/install_watch.sh` adds
+the watchdog (see "Health checks and safe updates"); if it runs only the
+wake word, set `[watch] enabled = false` in `config.local.toml` there.
+
 **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
 (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
 `.venv/bin/python -m assistant --download-voice en_US-lessac-medium` on
@@ -1303,9 +1308,12 @@ applied automatically** (pip would install new, unpinned dependency ranges
 into the venv the assistant is running from): stop the assistant, then run
 `python -m assistant --update`. Everything is logged to
 `logs/host-<mode>.log` (failures start with `!!!`), with the exact range
-(`old -> new`); `logs/update-state.json` has the last result. Moving HEAD
-yourself (`git checkout`, `git pull`) only restarts the assistant, never
-rolls back. The supervisor itself keeps running its starting version until
+(`old -> new`); `logs/update-state.json` has the last result. With
+`[watch] gate` on (the default) an update also has to pass the go-live
+check before anything restarts on it (see "Health checks and safe
+updates"). Moving HEAD yourself (`git checkout`, `git pull`) restarts the
+assistant once the go-live check passed, without the `/healthz` rollback;
+use `.\scripts\deploy.ps1` instead of `git pull`. The supervisor itself keeps running its starting version until
 the task or service restarts (next sign-in or reboot, or `systemctl --user
 restart hey-claude` on the Pi).
 
@@ -1403,6 +1411,103 @@ The phone keeps working throughout, apart from a few seconds while the web
 app restarts on the same `127.0.0.1:8765` (`tailscale serve` is untouched).
 To undo: `.\scripts\install_windows_service.ps1 -Uninstall`, then
 re-create the old task by hand.
+
+## Health checks and safe updates
+
+So a broken app is found and fixed before you notice it, a watchdog checks
+every web app on the machine (yours and each family copy) and new code only
+goes live after it has passed a real conversation.
+
+**Install (once).** On the PC, in PowerShell in the project folder:
+
+```powershell
+.\scripts\install_watch_task.ps1             # \HeyClaude\Watch: every 5 minutes, hidden
+.\scripts\install_family_tasks.ps1 -Watch    # or together with the family copies' tasks
+```
+
+On the Pi: `./scripts/install_watch.sh` (a systemd user timer,
+`hey-claude-watch.timer`). `python -m assistant.watch --status` prints the
+last results; `python -m assistant.watch --functional` runs everything now.
+
+**What it checks.** Every 5 minutes, for each instance (`config.toml` with
+`.env`, and every `config.<name>.toml` with its `.env.<name>`, the same rule
+as `install_family_tasks.ps1`): `/healthz` on its port, the page and every
+script and stylesheet it loads, that it runs the checked-out version, and
+the address the phone opens (`[webapp] public_origin`, else the `tailscale
+serve` entry for its port; set `[watch] public_url` to override, `""` to
+skip). After every restart or new version, every `functional_hours` (6) and,
+once failed, every `retry_minutes` (30), it also has a **test conversation**
+with it, the way people use it, in one session: a text turn that makes it
+use a read-only tool (the calendar, else the assignments list, else web
+search), a follow-up that depends on the first turn, a spoken turn
+(`tests/fixtures/hey_claude_calendar_tomorrow.wav`), a hands-free voice turn
+over `/api/voice`, and a last text turn typed while the voice view is still
+open. Every turn must answer, and the follow-ups must still remember a
+number from the first. The conversation runs in a **check session**: no
+history, no memory summary, and only read-only tools are offered or run, so
+a check never writes to your calendar, Notion, Gmail, memory or history.
+Each one costs a few short Claude requests; `functional_hours` sets how
+often (estimated, not measured: roughly 30,000 input tokens per instance
+per check).
+
+**What it does about a problem.** An app that doesn't answer first gets
+`start_grace_seconds` (300) in case it is starting (a restart, a reboot,
+loading its models); nothing is done while an update or deploy holds the
+update lock, or while someone's turn is running. Then it is restarted once
+(its Task Scheduler task; on Linux `[watch] restart_command`, e.g.
+`["systemctl", "--user", "restart", "hey-claude-web"]`) and given the grace
+period again. If that restart ran and it still fails on code newer than the
+**last known good** version (the last one whose test conversation passed
+here), the checkout goes back to that version (`git reset --keep`, as the
+updater does: config, `.env` and `data/` untouched; not when the newer
+commits exist only on this machine, nor when HEAD or the branch moved
+meanwhile), the apps restart, and that commit is never taken again. Without
+a restart that ran (no restart command), it is only reported. Failures that
+aren't the code's (no internet, Claude unreachable, rate limits, a rejected
+API key) and a phone address (Tailscale) that doesn't answer are reported
+but never restarted for or rolled back.
+
+**New code goes live only after the go-live check** (`[watch] gate`, on by
+default): each instance is started a second time on a side port (its port
++ `side_port_offset`, 100: 8765 -> 8865, on 127.0.0.1) and must pass the same
+test conversation first (a failure, including new code that exits before
+it answers, is tried once more before the commit is refused; a busy side
+port, after stopping a leftover check copy, a check copy killed by the
+system (out of memory on the Pi) or Claude being unreachable says nothing
+about the code and is tried again later: for a pull by hand, 1, 5, 15, then
+every 60 minutes after the last try (the host supervisor and the watchdog
+share that schedule); for an automatic update, at the next `[update]`
+check. You are told once if it keeps happening for 3 tries, or for half an
+hour on a pull by hand). The automatic updater does this before the running
+apps see the new commit; for a pull by hand the host supervisor or the
+watchdog does it before restarting anything. A commit that fails is undone
+and the old version keeps running. **Update with one command** instead of
+`git pull` and restarting:
+
+```powershell
+.\scripts\deploy.ps1            # pull, go-live check, switch over (or refuse)
+.\scripts\deploy.ps1 -NoPull    # the code checked out now (after a pull by hand)
+```
+
+(`./scripts/deploy.sh` on the Pi; `--no-pull`, `--restart`, `--requirements`.)
+`install_family_tasks.ps1 -Restart` goes through the same check.
+
+**Where you hear about it.** Only when something changes (an app starts
+failing, or recovers) and for one-off events (a version refused or rolled
+back), never repeatedly:
+- your phone app shows a banner ("Mom's app is down since 06:13 (healthz:
+  HTTP 502)", or that the checks stopped running) on your own instance only;
+  family members never see it;
+- the dev team coordinator gets a message through the PC hub's link
+  (`[devteam]`, when set up; `[watch] coordinator = false` turns it off), so
+  it can find the cause and open a PR;
+- `logs/watch.log` has every result, and `data/watch_status.json` the
+  current state.
+
+An alert names the app, the check and a fixed reason (an error class or an
+HTTP status), never conversation text or a key. When the Claude API itself
+is down, the app says "Claude is unreachable right now. I retried a few
+times; please try again in a minute." instead of a vague error.
 
 ## PC hub: chat with the dev team coordinator (desktop only)
 
@@ -1532,6 +1637,8 @@ assistant/
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
   host.py       home host supervisor: restarts, updates (python -m assistant.host)
   updater.py    safe update from the stable branch  (--update)
+  watch.py      health checks, test conversation, go-live gate (python -m assistant.watch)
+  deploy.py     pull, go-live check, switch or refuse (scripts/deploy.ps1 / .sh)
   version.py    git short SHA for /healthz
   webfeatures.py lecture recorder + tutor routes for the phone app
   lecture.py    chunked uploads, transcription job, Notion lecture notes
@@ -1547,11 +1654,15 @@ scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)
                 measure_memory.py, container_smoke.sh, ws_smoke.py (cloud image)
+                install_watch_task.ps1, install_watch.sh, restart_instance.ps1,
+                deploy.ps1/.sh                            (health checks, safe updates)
 Dockerfile      the cloud image; render.yaml deploys it on Render
 deploy/         hey-claude.service                 (systemd user unit)
+                hey-claude-watch.service/.timer    (the watchdog every 5 minutes)
 tests/          pytest suite (offline; live tests skip without keys)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
-                              the Docker image, the Pinecone MCP connector
+                              the Docker image, the Pinecone MCP connector,
+                              api-contract (real-API conversation, with the secret)
 
 tools/agent-dashboard/  dev-team run dashboard + coordinator grid (claude.ai page), watchdog,
                         desktop launchers

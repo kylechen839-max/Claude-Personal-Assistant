@@ -21,11 +21,14 @@ What has to be true before any new code runs here:
 Anything else: skip and log. Nothing local is ever reset or discarded.
 
 One update: `git merge --ff-only origin/stable`, smoke (import, then `python
--m assistant --check` with no required FAIL), and on any failure `git reset
---keep <old>` and the commit is remembered as rejected. An update that
-changes requirements.txt is never applied automatically (pip would run new,
-unpinned dependency ranges into the venv the running assistant uses): it
-needs `python -m assistant --update` by hand while the assistant is stopped.
+-m assistant --check` with no required FAIL), the go-live check with
+`[watch] gate` on (assistant/watch.py: every instance's test conversation on
+a side port, while the lock keeps the running apps on the old code), and on
+any failure `git reset --keep <old>` and the commit is remembered as
+rejected. An update that changes requirements.txt is never applied
+automatically (pip would run new, unpinned dependency ranges into the venv
+the running assistant uses): it needs `python -m assistant --update` by hand
+while the assistant is stopped.
 
 The supervisor restarts the assistant when it sees HEAD move (after the
 current voice turn); for a commit this updater applied it then checks
@@ -38,9 +41,12 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -50,11 +56,23 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL_FILES = {"config.toml"}  # may differ per machine (as in the preflight)
 LOCK_STALE_SECONDS = 3 * 3600  # longer than any fetch + merge + pip + smoke
+_STATE_THREADS = threading.Lock()  # one state write at a time in this process
+_STATE_HELD = threading.local()    # ... reentrant within a thread
 HOST_ALIVE_SECONDS = 15        # a host touches logs/host-<mode>.alive every second
 TAG_PATTERN = "stable-*"
 SSH_SIG = "-----BEGIN SSH SIGNATURE-----"
 OTHER_SIGS = ("-----BEGIN PGP SIGNATURE-----", "-----BEGIN SIGNED MESSAGE-----",
               "-----BEGIN PGP MESSAGE-----")
+# A go-live check that couldn't tell (busy side port, Claude down) is tried
+# again 1, 5, 15, then every 60 minutes after the last try, by the hosts and
+# the watchdog alike (the watchdog alerts if it lasts).
+GATE_BACKOFF = (60, 300, 900, 3600)
+
+
+def gate_backoff(count: int) -> int:
+    """Seconds to wait after the `count`th inconclusive go-live check in a row."""
+    return GATE_BACKOFF[min(max(int(count), 1), len(GATE_BACKOFF)) - 1]
+
 
 # statuses
 UP_TO_DATE, UPDATED, SKIPPED, FAILED, ROLLED_BACK, LOCKED = (
@@ -102,6 +120,99 @@ def normalize_remote(url: str) -> str:
     return url.lower()
 
 
+def pid_alive(pid: int) -> bool:
+    """Is process `pid` still running? (A lock file's owner: a lock whose
+    process was killed is stale at once, not after hours.) True when it
+    can't tell. Windows: never os.kill, which would terminate it."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return kernel32.GetLastError() == 5  # access denied: it exists
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def lock_stale(path: Path, max_age: float, clock=time.time) -> bool:
+    """A lock file older than `max_age`, or whose process (the PID in it)
+    is gone. A file without a readable PID counts by age only."""
+    try:
+        age = clock() - path.stat().st_mtime
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if age > max_age:
+        return True
+    return text.isdigit() and not pid_alive(int(text))
+
+
+def _lock_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def clear_stale(path: Path, seen: str | None) -> None:
+    """Remove the stale lock `path` that held `seen`, without ever removing
+    a fresh one: two processes may both have judged it stale, and the first
+    may already have taken the lock. The file is renamed aside atomically
+    (only one rename of it can succeed); if what was moved isn't the stale
+    lock that was seen, it is put back (os.link: never over a newer one)."""
+    aside = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(4)}.stale")
+    try:
+        os.replace(path, aside)
+    except OSError:
+        return  # already gone: someone else cleared it
+    try:
+        if _lock_text(aside) != seen:  # a fresh lock: give it back
+            try:
+                os.link(aside, path)
+            except OSError:
+                pass
+    finally:
+        try:
+            aside.unlink()
+        except OSError:
+            pass
+
+
+def take_lock(path: Path, max_age: float, clock=time.time) -> bool:
+    """Create `path` exclusively with this process's PID, after clearing a
+    stale one (lock_stale, clear_stale)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = _lock_text(path)
+    if lock_stale(path, max_age, clock):
+        clear_stale(path, seen)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
 def _run(cmd: list[str], cwd: Path, timeout: float = 900) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
@@ -120,7 +231,8 @@ class Updater:
                  run: Callable = _run, say: Callable[[str], None] | None = None,
                  clock: Callable[[], float] = time.time,
                  local_branch: str = "master", repo: str | None = None,
-                 trust_unsigned: bool = False, allowed_signers: str | Path | None = None):
+                 trust_unsigned: bool = False, allowed_signers: str | Path | None = None,
+                 gate: Callable[[str], tuple[bool | None, str]] | None = None):
         self.root = Path(root)
         self.remote = remote
         self.branch = branch
@@ -134,6 +246,9 @@ class Updater:
         self.allowed_signers = Path(allowed_signers) if allowed_signers else default_signers_path()
         self.state_file = self.root / "logs" / "update-state.json"
         self.lock_file = self.root / "logs" / "update.lock"
+        # The go-live check (watch.gate_check): the new commit must pass the
+        # test conversation on a side port before anything restarts on it.
+        self.gate = gate
 
     @classmethod
     def from_config(cls, cfg: dict, **kw) -> "Updater":
@@ -217,36 +332,126 @@ class Updater:
         except (OSError, ValueError):
             return {}
 
+    @contextmanager
+    def _state_lock(self):
+        """Read-modify-write of the state file, one at a time: the two hosts,
+        the watchdog and --update all write it (a lost write could forget a
+        rejected commit or the last known good). Reentrant in a thread; a
+        file lock across processes (whose owner may have been killed)."""
+        depth = getattr(_STATE_HELD, "depth", 0)
+        if depth:
+            _STATE_HELD.depth = depth + 1
+            try:
+                yield
+            finally:
+                _STATE_HELD.depth -= 1
+            return
+        lock = self.state_file.with_name(self.state_file.name + ".lock")
+        with _STATE_THREADS:
+            deadline = time.monotonic() + 10
+            held = take_lock(lock, 60)
+            while not held and time.monotonic() < deadline:
+                time.sleep(0.02)
+                held = take_lock(lock, 60)
+            if not held:
+                log.warning("Update state is locked by another process; writing anyway")
+            _STATE_HELD.depth = 1
+            try:
+                yield
+            finally:
+                _STATE_HELD.depth = 0
+                if held:
+                    try:
+                        lock.unlink()
+                    except OSError:
+                        pass
+
     def _save_state(self, **changes) -> None:
-        state = {**self._state(), **changes}
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        self.state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        from assistant.tools.google_auth import write_private
+
+        with self._state_lock():
+            state = {**self._state(), **changes}
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            # atomic: the hosts, the watchdog and --update all read it
+            write_private(self.state_file, json.dumps(state, indent=2))
 
     def rejected(self) -> list[str]:
         return list(self._state().get("rejected", []))
 
     def reject(self, sha: str) -> None:
-        self._save_state(rejected=(self.rejected() + [sha])[-20:])
+        with self._state_lock():
+            if sha not in self.rejected():
+                self._save_state(rejected=(self.rejected() + [sha])[-20:])
 
     def applied(self) -> str | None:
         """The commit this updater last moved HEAD to (None after rollback)."""
         return self._state().get("applied")
 
+    def gated(self, sha: str | None) -> bool | None:
+        """Did `sha` pass the go-live check (True), fail it (False), or
+        hasn't it been checked (None)?"""
+        if not sha:
+            return None
+        if sha in self.rejected():
+            return False
+        g = self._state().get("gated") or {}
+        return bool(g.get("ok")) if g.get("sha") == sha else None
+
+    def mark_gated(self, sha: str, ok: bool) -> None:
+        with self._state_lock():
+            self._save_state(gated={"sha": sha, "ok": bool(ok), "at": self.clock()},
+                             inconclusive=None)
+            if not ok:
+                self.reject(sha)
+
+    def note_inconclusive(self, sha: str, why: str) -> dict:
+        """The go-live check of `sha` couldn't tell (a busy side port, Claude
+        down): count it, so the hosts back off and the watchdog alerts once
+        it keeps happening (watch.Watch.record). Returns the record."""
+        with self._state_lock():
+            rec = self._state().get("inconclusive") or {}
+            if rec.get("sha") != sha:
+                rec = {"sha": sha, "count": 0, "first": self.clock(), "alerted": False}
+            rec.update(count=int(rec["count"]) + 1, last=self.clock(), why=why[:300])
+            self._save_state(inconclusive=rec)
+            return rec
+
+    def inconclusive(self, sha: str | None) -> dict | None:
+        rec = self.last_inconclusive()
+        return rec if rec and sha and rec.get("sha") == sha else None
+
+    def last_inconclusive(self) -> dict | None:
+        """The stored record, whatever its commit (the updater notes one on
+        the commit it then rolls back from)."""
+        return self._state().get("inconclusive") or None
+
+    def gate_wait(self, sha: str | None) -> float:
+        """Seconds until the go-live check of `sha` is due again after an
+        inconclusive one (gate_backoff); 0 = now."""
+        rec = self.inconclusive(sha)
+        if not rec:
+            return 0.0
+        due = float(rec.get("last") or 0) + gate_backoff(rec.get("count") or 1)
+        return max(0.0, due - self.clock())
+
+    def mark_inconclusive_alerted(self, sha: str) -> None:
+        with self._state_lock():
+            rec = self.inconclusive(sha)
+            if rec:
+                self._save_state(inconclusive={**rec, "alerted": True})
+
+    def last_good(self) -> str | None:
+        """The last commit whose test conversation passed on this machine."""
+        return self._state().get("last_good")
+
+    def set_last_good(self, sha: str) -> None:
+        with self._state_lock():
+            if sha and sha != self.last_good():
+                self._save_state(last_good=sha)
+
     # --- lock (two supervisors and --update share one checkout) ---
     def acquire(self) -> bool:
-        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            if self.clock() - self.lock_file.stat().st_mtime > LOCK_STALE_SECONDS:
-                self.lock_file.unlink()
-        except OSError:
-            pass
-        try:
-            fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            return False
-        with os.fdopen(fd, "w") as f:
-            f.write(str(os.getpid()))
-        return True
+        return take_lock(self.lock_file, LOCK_STALE_SECONDS, self.clock)
 
     def release(self) -> None:
         try:
@@ -255,7 +460,8 @@ class Updater:
             pass
 
     def locked(self) -> bool:
-        return self.lock_file.exists()
+        return self.lock_file.exists() and not lock_stale(
+            self.lock_file, LOCK_STALE_SECONDS, self.clock)
 
     def hosts_running(self) -> list[str]:
         """Modes whose host supervisor touched its heartbeat file just now."""
@@ -362,21 +568,37 @@ class Updater:
             ok, why = self.smoke()
             if not ok:
                 return self.rollback(old, new, why, requirements)
+        if self.gate is not None:  # nothing restarts on it while we hold the lock
+            ok, why = self.gate(new)
+            if ok is None:  # Claude or the internet down: no verdict on `new`
+                self.note_inconclusive(new, why)
+                return self.rollback(old, new, f"go-live check couldn't run ({why}); "
+                                     "trying again next time", requirements,
+                                     reject=False)
+            self.mark_gated(new, ok)
+            if not ok:
+                return self.rollback(old, new, f"go-live check failed: {why}",
+                                     requirements)
         return UpdateResult(UPDATED, f"{len(files)} file(s) changed"
                             + (", requirements installed" if requirements else ""),
                             old, new)
 
     def rollback(self, old: str, bad: str, why: str,
-                 requirements: bool | None = None) -> UpdateResult:
-        """Back to `old` (keeping config.toml edits) and never retry `bad`."""
+                 requirements: bool | None = None, reject: bool = True) -> UpdateResult:
+        """Back to `old` (keeping config.toml edits) and never retry `bad`
+        (with `reject`; else it is tried again at the next check)."""
         if requirements is None:
             requirements = "requirements.txt" in self.changed_files(old, bad)
         code, out = self.git("reset", "--keep", old)
-        self.reject(bad)
-        self._save_state(applied=None)
-        if code != 0:
+        if code != 0:  # still on `bad`: not rejected, it may come back by hand
+            # but no longer "applied": the hosts must not restart on it as an
+            # update of theirs (restart_on); a hand restart is gated
+            self._save_state(applied=None)
             return UpdateResult(FAILED, f"{why}; ROLLBACK FAILED ({out.strip()[-200:]}): "
                                 f"run `git reset --keep {short(old)}` by hand", old, bad)
+        if reject:
+            self.reject(bad)
+        self._save_state(applied=None)
         if requirements:
             code, out = self.pip_install()
             if code != 0:
@@ -405,8 +627,9 @@ class Updater:
 def main(argv=None, output_fn=print) -> int:
     """python -m assistant --update: one update now (requirements included)."""
     from assistant.config import load_config
+    from assistant.watch import updater_gate
 
-    up = Updater.from_config(load_config()["update"], say=output_fn)
+    up = Updater.from_config(load_config()["update"], say=output_fn, gate=updater_gate())
     result = up.update(allow_requirements=True)
     if result.changed:
         output_fn("A running assistant (HeyClaude task or hey-claude service) "

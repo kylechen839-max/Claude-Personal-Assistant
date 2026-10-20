@@ -183,6 +183,35 @@ DEFAULTS: dict = {
         "trust_unsigned": False,
         "health_seconds": 180,  # for the restarted web app to answer /healthz
     },
+    # python -m assistant.watch: health and function checks of every web app
+    # instance on this machine (assistant/watch.py, README "Health checks").
+    # From config.toml for the whole machine; enabled, label, public_url and
+    # restart_command also from each instance's own config.<name>.toml.
+    "watch": {
+        "enabled": True,            # false = this instance isn't checked
+        "label": "",                # its name in alerts; "" = "Mom's app" from config.mom.toml
+        # the address the phone opens: "auto" = [webapp] public_origin, else
+        # the `tailscale serve` entry for its port; "" = don't check one
+        "public_url": "auto",
+        "functional_hours": 6,      # the full test conversation this often (and
+                                    # after every restart or new version)
+        "retry_minutes": 30,        # a failed one is tried again after this long
+        "gate": True,               # new code must pass that conversation on a
+                                    # side port before it replaces the running one
+        "side_port_offset": 100,    # side port = the instance's port + this
+        "candidate_seconds": 300,   # for the side-port copy to come up
+        "start_grace_seconds": 300,  # an app not answering gets this long (a
+                                    # restart, a reboot) before it's healed
+        "rollback": True,           # still failing after a restart: back to the
+                                    # last version that passed (git reset --keep)
+        "restart_command": [],      # self-heal; [] = its Task Scheduler task on
+                                    # Windows, none elsewhere (e.g. ["systemctl",
+                                    # "--user", "restart", "hey-claude-web"])
+        "banner": True,             # the owner's phone app shows apps that are down
+        "coordinator": True,        # tell the dev team coordinator ([devteam])
+        "status_file": "data/watch_status.json",
+        "stale_minutes": 30,        # banner: "checks stopped" after this long
+    },
     "lecture": {
         "enabled": True,
         "model": "base.en",          # faster-whisper model: "tiny.en" is faster
