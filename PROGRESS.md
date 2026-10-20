@@ -1870,6 +1870,38 @@ Render/Docker changes) comes separately.
   "Transcribing 40%"). Only the "Hey Claude" name stays in English.
 - Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
 
+## Mom's app tells her what it can do
+
+- The first-run card (`assistant/web/i18n.js`) now also lists example
+  questions in Chinese (weather, a recipe, translating, a birthday message;
+  plus calendar and email ones once Google is connected), shown without
+  her asking until she taps 知道了 once.
+- Her assistant answers "你能帮我做什么？" with examples of what this
+  instance can do right now (`chat.zh_help_prompt`, from the registered
+  tools), and tells her how to connect Google if it isn't yet.
+- Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
+  Phone cache v9.
+
+## Family copies start by themselves
+
+- `scripts/install_family_tasks.ps1`: one Task Scheduler task per family
+  instance (`config.<name>.toml` + `.env.<name>`; `config.toml` and
+  `*.local.toml` never count), `\HeyClaude\Family-<name>`, run hidden at
+  sign-in with a minute's restart after a crash; `-Restart` after an update,
+  `-Uninstall`. Stops a hand-started copy first. Kyle's own tasks untouched.
+- Tests: `tests/ps/install_family_tasks.tests.ps1` (instance discovery and
+  command, run by `test_preflight.py` where PowerShell exists, i.e. the
+  Windows CI job) and a text check; the existing parse check covers it too.
+
+## Phone page: menu closes on an outside tap; swipe down hides the keyboard
+
+- New `assistant/web/ui.js` (all pages): the settings menu closes on a tap
+  anywhere outside it, or Escape, like other apps; a downward swipe of
+  40 px or more while typing blurs the field so iOS closes the keyboard.
+  Served at `/ui.js` (public on the cloud, like the other page files),
+  cached by the service worker (v10).
+- Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
+
 ## Chat attachments: the "+" button (2026-10-20)
 
 - **What:** a **+** left of the phone app's text field opens a sheet (Take
@@ -1903,7 +1935,7 @@ Render/Docker changes) comes separately.
   and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
   now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
   is unchanged). Chinese strings for every new label and the server's
-  messages in `i18n.js`. Phone cache v9 with `/attachments.js` in the
+  messages in `i18n.js`. Phone cache v11 with `/attachments.js` in the
   shell.
 - **Cloud:** `/api/turn` was already an upload path capped at
   `max_upload_mb` (4 MB there); the form parser now allows 6 files (the

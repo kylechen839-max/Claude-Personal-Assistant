@@ -542,6 +542,20 @@ remove the app at myaccount.google.com -> Security -> Third-party access.
 `[webapp] google_connect` and `public_origin` are off and empty in your own
 `config.toml`, so your instance is unchanged.
 
+
+**Start them automatically.** Each family copy (any `config.<name>.toml`
+with its `.env.<name>`, e.g. Mom's and Kai's) can start by itself when you
+sign in to Windows and restart after a crash:
+
+```powershell
+.\scripts\install_family_tasks.ps1            # once: installs \HeyClaude\Family-<name> tasks
+.\scripts\install_family_tasks.ps1 -Restart   # after updating the code
+.\scripts\install_family_tasks.ps1 -Uninstall
+```
+
+A copy already running in a window is stopped first (you can then close the
+window). Your own app is `install_windows_service.ps1`'s job and isn't touched.
+
 ## Invite family (cloud)
 
 On the Render server you can give someone their own account on your

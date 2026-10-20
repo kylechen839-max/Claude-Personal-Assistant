@@ -75,7 +75,9 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # family invites: the page code that accepts an #invite= link
               "/family.js",
               # the chat's "+" (and the tutor's photo shrinking)
-              "/attachments.js"}
+              "/attachments.js",
+              # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
+              "/ui.js"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it
