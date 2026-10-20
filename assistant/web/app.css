@@ -405,3 +405,9 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
   background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .guide[hidden] { display: none; }
 .guide-text { margin: 0 0 .7rem; white-space: pre-line; line-height: 1.5; }
+
+/* The owner's health banner: an app down, checks stopped (ui.js renderHealth) */
+.health-banner { margin: .5rem 1rem 0; padding: .6rem .85rem; border-radius: 12px;
+  background: var(--warn); color: var(--warn-ink); border: 1px solid var(--warn-line);
+  white-space: pre-line; line-height: 1.45; font-size: .92rem; }
+.health-banner[hidden] { display: none; }

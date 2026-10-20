@@ -17,6 +17,13 @@ UNTRUSTED_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "untrusted_context", default=False)
 UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
 
+# Tools that only read, and read nothing private enough to keep out of a
+# health check: the only ones a check session may run (webapp.SessionTools).
+# An allowlist, so a new tool is never runnable there by default. Anthropic's
+# server tools (web search and fetch) are read-only too.
+READ_ONLY_TOOLS = ("list_calendar_events", "list_assignments", "ha_list", "ha_state",
+                   "spotify_now_playing", "spotify_devices")
+
 
 def mark_untrusted(result: dict, untrusted: bool) -> dict:
     if untrusted:
