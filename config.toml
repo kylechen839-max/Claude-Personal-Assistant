@@ -27,6 +27,13 @@ voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" 
 # ElevenLabs: only with engine = "elevenlabs" and ELEVENLABS_API_KEY in .env.
 elevenlabs_voice = ""         # a voice ID from your ElevenLabs library; "" = Rachel
 elevenlabs_model = "eleven_flash_v2_5"
+# Phone app voice picker (menu > Reply voice): each person (you, and each
+# family member) picks the voice their replies are read in, from the voices
+# this server has. The default above is used until they pick one.
+picker = true
+voices_dir = "voices"         # Piper voices found here are offered
+voice_file = "data/voice_choice.json"  # your pick; a family member's is in their own folder
+family_paid_voices = false    # true = family members may pick ElevenLabs voices (your bill)
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
@@ -168,6 +175,25 @@ hub = false                   # the PC hub at http://127.0.0.1:8765/devteam (loo
 hub_sessions = []             # coordinator session ids for the hub's windows (at most 8; [] = coordinator_session)
 poll_seconds = 4              # the hub reads the Notion inbox at most this often
 hub_state_file = "data/devhub.json"  # the hub's transcript and pending replies
+
+[home_assistant]              # smart home by voice (README "Smart home"); owner only, never family
+enabled = false               # needs a Home Assistant install: HA_URL and HA_TOKEN in .env
+url = ""                      # HA_URL in .env overrides it, e.g. "http://homeassistant.local:8123"
+domains = ["light", "switch", "fan", "climate", "cover", "media_player", "sensor", "lock"]  # the only kinds it may touch
+scripts = []                  # script./scene./automation. entity ids it may run, e.g. ["scene.movie_time"]
+secure_entities = []          # more entity ids that always need a spoken yes (e.g. a garage relay)
+cache_seconds = 30            # how long the device list is kept
+timeout = 10                  # seconds per request
+
+[spotify]                     # "play my study playlist", "pause", "skip" (Spotify Premium; README "Spotify")
+enabled = false               # needs SPOTIFY_CLIENT_ID in .env and a one-time sign-in:
+                              # python -m assistant.tools.spotify (or "Connect Spotify" in the phone app)
+token = "data/spotify_token.json"  # the sign-in (private file); delete it to disconnect
+redirect_uri = "http://127.0.0.1:8888/callback"  # for the sign-in command; list it in your Spotify app
+pause_while_listening = true  # pause Spotify on this computer at the wake word, resume afterwards
+local_device = ""             # this computer's name in Spotify's device list; "" = its hostname
+volume_step = 15              # "turn it up" / "turn it down" by this many percent
+timeout = 10                  # seconds per Spotify request
 
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on

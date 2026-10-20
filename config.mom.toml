@@ -24,6 +24,7 @@ model = "small"               # multilingual Whisper (".en" models can't hear Ch
 engine = "piper"              # python -m assistant --download-voice zh_CN-huayan-medium
 piper_voice = "voices/zh_CN-huayan-medium.onnx"
 fallback = "print"            # no voice yet: the phone's own (Chinese) voice reads replies
+voice_file = "data/mom/voice_choice.json"  # her pick in the menu's voice picker
 
 [calendar]                    # her Google account, signed in from the phone
 credentials = "data/mom/google_client.json"  # a *Web application* OAuth client
@@ -37,6 +38,9 @@ enabled = false
 
 [notes]
 enabled = false
+
+[home_assistant]
+enabled = false               # Kyle's home stays Kyle's
 
 [web]
 browser = false               # never open pages on this computer

@@ -30,7 +30,7 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "resume_conversation",  # tool names, not settings
                      "email_summary", "read_email", "draft_reply",
                      "remember_note", "recall_notes", "list_recent_notes",
-                     "delete_note",
+                     "delete_note", "ha_list", "ha_state", "ha_control",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

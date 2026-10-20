@@ -20,6 +20,27 @@
   first). Optional weekly nudge (`[memory] weekly_review`, off).
 - Fix: "list my recent notes" was always empty with pinecone 7+
   (`Index.list` pages are `ListResponse` objects).
+- Smart home control through Home Assistant (off by default): "turn off
+  the bedroom lights", "set the thermostat to 70", "is the front door
+  locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home
+  Assistant REST API with a long-lived token (`HA_URL`/`HA_TOKEN` in `.env`,
+  `[home_assistant] enabled = true`). Only allowlisted device kinds and a
+  fixed set of actions; scripts only if allowlisted. Locks, garage doors
+  and alarms always ask first, and unlocking or opening is refused while
+  web or email content is in the conversation. Owner only.
+- Spotify by voice (off by default, Premium required): "play my study
+  playlist", "pause", "skip", "what's playing?", "turn it up", "play it
+  on my phone". Your own playlists are searched first. Sign in once with
+  `python -m assistant.tools.spotify` or the owner-only Connect Spotify
+  (PKCE, read-and-control scopes only; nothing changes playlists or the
+  library). In wake-word mode, music on this PC pauses at "Hey Claude"
+  and resumes after. Family members don't get Spotify yet.
+- Reply voice in the phone app's settings: each person (you, each family
+  member, separate instances like Mom's) picks their voice from what that
+  server has in their language (Piper, Kokoro, the system voice, and your
+  ElevenLabs voices tagged paid if `ELEVENLABS_API_KEY` is set; family
+  only with `[tts] family_paid_voices`). Preview plays a sample. New
+  `[tts]` settings `picker`, `voices_dir`, `voice_file`, `family_paid_voices`.
 - Family members are self-service on the cloud server: each can connect
   their own Google Calendar and Gmail (drafts only; deletes ask first) from
   their own phone, kept separate from Kyle's and deleted on Disconnect or

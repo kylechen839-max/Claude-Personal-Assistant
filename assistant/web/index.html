@@ -22,6 +22,8 @@
 <script src="/family.js" defer></script>
 <script src="/attachments.js" defer></script>
 <script src="/memory.js" defer></script>
+<script src="/spotify.js" defer></script>
+<script src="/voice-picker.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -59,6 +61,21 @@
       <div class="menu-body">
         <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
         <label><input id="mute" type="checkbox"> Don't speak replies</label>
+        <section id="voice-picker" class="voice-picker" hidden>
+          <label>Reply voice
+            <select id="voice-select"></select>
+          </label>
+          <div class="voice-picker-row">
+            <span id="voice-paid" class="tag" hidden>paid</span>
+            <button id="voice-preview" type="button">Preview</button>
+          </div>
+          <div id="voice-custom-row" class="voice-picker-row" hidden>
+            <input id="voice-custom" type="text" maxlength="64" autocapitalize="off"
+                   spellcheck="false" placeholder="ElevenLabs voice ID" aria-label="ElevenLabs voice ID">
+            <button id="voice-custom-use" type="button">Use this voice</button>
+          </div>
+          <p id="voice-status" class="hint" role="status"></p>
+        </section>
         <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
         <fieldset id="backends" class="backends" hidden>
           <legend>Backends</legend>
@@ -84,6 +101,8 @@
         <button id="google-connect" type="button" hidden>Connect Google account</button>
         <button id="google-disconnect" type="button" hidden>Disconnect Google account</button>
         <p id="google-status" class="hint" hidden></p>
+        <button id="spotify-connect" type="button" hidden>Connect Spotify</button>
+        <p id="spotify-status" class="hint" hidden></p>
         <section id="family" class="family" hidden>
           <button id="invite-open" type="button">Invite someone</button>
           <form id="invite-form" class="invite-form" autocomplete="off" hidden>

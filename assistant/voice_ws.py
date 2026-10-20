@@ -209,11 +209,9 @@ def add_voice_routes(app, assistant, allowed_origins=(),
         def transcribe(samples):
             return assistant.transcribe(samples, language)
 
-        def synthesize(text):
-            return assistant.synthesize(text, language)
-
         conv = VoiceConversation(
-            WebBackend(assistant, session), transcribe, synthesize,
+            WebBackend(assistant, session), transcribe,
+            lambda text: assistant.synthesize(text, session, language),  # their own voice
             send, clock=clock, idle_timeout=v["idle_timeout"],
             max_session=v["max_session_minutes"] * 60, language=language)
         live[sid] = (conv, ws)

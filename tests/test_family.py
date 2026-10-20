@@ -30,7 +30,8 @@ DAY = 86400
 # what the owner's registry has and a family member must never get
 OWNER_TOOLS = ("list_assignments", "update_assignment_status", "search_memory",
                "remember_note", "recall_notes", "search_conversations",
-               "resume_conversation", "message_dev_team", "list_events")
+               "resume_conversation", "message_dev_team", "list_events",
+               "ha_list", "ha_state", "ha_control")
 
 
 def owner_registry():
@@ -345,7 +346,7 @@ def test_reply_audio_is_only_for_its_own_session(env, owner):
     other_owner_browser = env.client()
     login(other_owner_browser)
     assert other_owner_browser.get(reply["audio"]).status_code == 404
-    env.assistant.synthesize = lambda text, language=None: b"RIFF....WAVE"
+    env.assistant.synthesize = lambda text, session=None, language=None: b"RIFF....WAVE"
     assert owner.get(reply["audio"]).status_code == 200
 
 

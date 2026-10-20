@@ -45,6 +45,11 @@ DEFAULTS: dict = {
         "kokoro_voices": "models/kokoro/voices-v1.0.bin",
         "elevenlabs_voice": "",  # voice ID; "" = a calm premade voice
         "elevenlabs_model": "eleven_flash_v2_5",
+        # phone app: each person picks their own reply voice (voice_picker.py)
+        "picker": True,
+        "voices_dir": "voices",          # the Piper voices offered
+        "voice_file": "data/voice_choice.json",  # the owner's pick ("" = not kept)
+        "family_paid_voices": False,     # family members may pick ElevenLabs
     },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {
@@ -193,6 +198,28 @@ DEFAULTS: dict = {
                 "hub_sessions": [],         # coordinator session ids; [] = coordinator_session
                 "poll_seconds": 4,          # how often the hub reads Notion, at most
                 "hub_state_file": "data/devhub.json"},
+    "home_assistant": {             # smart home (README "Smart home"); owner only
+        "enabled": False,           # needs HA_URL and HA_TOKEN in .env
+        "url": "",                  # HA_URL overrides, e.g. http://homeassistant.local:8123
+        # the only kinds of device listed or controlled
+        "domains": ["light", "switch", "fan", "climate", "cover", "media_player",
+                    "sensor", "lock"],
+        "scripts": [],              # script./scene./automation. ids it may run
+        "secure_entities": [],      # more entity ids that always ask first
+        "cache_seconds": 30,        # device list kept this long
+        "timeout": 10,              # seconds per request
+    },
+    "spotify": {                    # play, pause, skip by voice (Premium; README "Spotify")
+        "enabled": False,           # needs SPOTIFY_CLIENT_ID and a one-time sign-in
+        "token": "data/spotify_token.json",  # written privately; delete to disconnect
+        # where the browser lands after `python -m assistant.tools.spotify`
+        # (add it to your Spotify app's redirect URIs, exactly)
+        "redirect_uri": "http://127.0.0.1:8888/callback",
+        "pause_while_listening": True,  # wake word: pause music on this computer, resume after
+        "local_device": "",         # this computer's Spotify device name; "" = its hostname
+        "volume_step": 15,          # "turn it up" / "down" by this much (percent)
+        "timeout": 10,              # seconds per Spotify request
+    },
     "family": {                     # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
@@ -218,7 +245,7 @@ DEFAULTS: dict = {
 # stdout for the host's log viewer); no PC-only tools.
 SERVER_PROFILE: dict = {
     "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
-            "fallback": "espeak"},
+            "fallback": "espeak", "voice_file": "/data/voice_choice.json"},
     "wake": {"chime": False, "follow_up_seconds": 0},
     "calendar": {"save_token": False},
     "web": {"browser": False},
@@ -252,6 +279,7 @@ ENV_OVERRIDES = {
     "CLOUD_CLIENT_IP_HEADER": ("cloud", "client_ip_header"),
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
+    "HA_URL": ("home_assistant", "url"),
 }
 
 
@@ -263,7 +291,7 @@ ENV_OVERRIDES = {
 ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
-                     "PINECONE_INDEX")
+                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN")
 
 
 def inherited_env_conflicts(inherited, env_file: str | Path | None) -> list[str]:
@@ -330,7 +358,7 @@ def load_config(path: str | Path | None = "config.toml",
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
-                   "GOOGLE_CLIENT_JSON")
+                   "GOOGLE_CLIENT_JSON", "HA_TOKEN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens

@@ -80,6 +80,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/family.js",
               # the chat's "+" (and the tutor's photo shrinking)
               "/attachments.js",
+              # the settings menu's reply-voice picker (its API needs sign-in)
+              "/voice-picker.js",
               # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
               "/ui.js",
               # the login page's language (Chinese for a family member) and
@@ -87,6 +89,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/i18n.js", "/history.js",
               # the Memory screen's code (its /api/memory data needs the owner)
               "/memory.js",
+              # the owner's "Connect Spotify" button (its routes need sign-in)
+              "/spotify.js",
               # Google's redirect back after a family member's sign-in: the
               # Strict session cookie isn't sent on it, so google_web.py
               # checks the one-time state and its browser-binding cookie

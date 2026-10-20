@@ -230,6 +230,9 @@ as the work. Never put secrets, tokens or personal data in this file.
   - `chat.py`: `ClaudeChat`, `tainted()`.
   - `tools/__init__.py`: `Tool` flags `confirm_prompt`,
     `confirm_if_untrusted`, `untrusted_output`, `private`.
+    A `confirm_prompt` may return None ("no question for this input",
+    e.g. a light but not a lock) and can read `UNTRUSTED_CONTEXT`; a
+    result can taint per call with `mark_untrusted` (home_assistant.py).
   - The tools themselves are in `tools/*.py`. They are registered in
     `cli.py` `build_tools` and the `add_*`/`register_*` helpers, which
     `webapp.py` reuses.
