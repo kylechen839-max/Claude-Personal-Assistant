@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Attach photos (camera or library), PDFs and text files to a chat message
+  with the new + button left of the text field. Up to 4 per message, shown
+  as removable chips, sent with the next typed or push-to-talk message.
+  Files are checked by content, photos lose EXIF, history keeps only a
+  marker, and after an attachment Claude asks before changing anything.
+  PDFs up to 100 pages. New setting `[webapp] max_attachment_mb` (10).
+  A file Claude can't open (password-protected or broken PDF) says so;
+  long PDFs are counted by their page tree, so annotated PDFs aren't refused.
+- Cloud: the sign-in page now loads its translations before sign-in, so a
+  Chinese family member's login page is in Chinese right away.
 - Smart home control through Home Assistant (off by default): "turn off
   the bedroom lights", "set the thermostat to 70", "is the front door
   locked?". New `ha_list`, `ha_state`, `ha_control` tools use the Home

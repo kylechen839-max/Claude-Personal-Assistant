@@ -254,3 +254,29 @@ test('Chinese page: tabs, settings, history and tutor labels are all translated'
   assert.equal(t('Transcribing 40%'), '正在转写 40%');
   assert.equal(t('Hey Claude'), 'Hey Claude');  // the app name stays
 });
+
+test('Chinese page: attachment markers are shown in Chinese, other text is not', () => {
+  const p = page('zh-CN');
+  const t = (s) => p.win.HeyClaudeI18n.translate(s);
+  // the "me" bubble: typed text, then the marker line (attachments.js summary())
+  assert.equal(t('what is this?\n[photo] [file: plan.pdf]'), 'what is this?\n[照片] [文件：plan.pdf]');
+  assert.equal(t('[photo]'), '[照片]');
+  assert.equal(t('[file: notes.txt] [photo] '), '[文件：notes.txt] [照片] ');
+  // a marker that isn't the whole last line is someone's words: left alone
+  assert.equal(t('I typed [photo] myself'), 'I typed [photo] myself');
+  assert.equal(t('[photo]\nand some text'), '[photo]\nand some text');
+  // as app.js adds it
+  const div = { nodeType: 1, tagName: 'DIV', getAttribute: () => null, setAttribute() {},
+                childNodes: [{ nodeType: 3, nodeValue: '看看\n[photo]' }] };
+  p.mutate([{ type: 'childList', addedNodes: [div] }]);
+  assert.equal(div.childNodes[0].nodeValue, '看看\n[照片]');
+});
+
+test('Chinese page: the new attachment errors are translated', () => {
+  const t = (s) => page('zh-CN').win.HeyClaudeI18n.translate(s);
+  assert.equal(t('bad request'), '请求有误。');
+  assert.equal(t('A PDF is over 100 pages'), '有一个 PDF 超过 100 页。');
+  assert.equal(t('That file is too long for Claude (PDFs up to 100 pages).'),
+               '这个文件太长了，Claude 处理不了（PDF 最多 100 页）。');
+  assert.equal(t("Claude couldn't read that file."), 'Claude 读不了这个文件。');
+});
