@@ -534,6 +534,13 @@ The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
     right, steps as small ✓ lines that collapse into "N steps ▸", and a
     turning ✻ while it works, readable in light and dark. Each message's time matches
     when it was really sent.
+- [ ] Glance at the coordinator window between and during tasks, then
+      send a message while it is mid-task.
+  - Should: the pill above the box says "In task: <step> · Nm" (green,
+    pulsing) while it works and "Idle · last active …" once its turn
+    ends. A message sent mid-task shows "Queued · coordinator is
+    mid-task…" until it is seen, never the amber "hasn't picked this up"
+    line.
 - [ ] When the master asks you something during a run you chatted in.
   - Should: its message is amber and the window shows a "question"
     chip, until you reply in the box.

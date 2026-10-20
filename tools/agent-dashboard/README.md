@@ -333,7 +333,20 @@ batch as each message: `{last_at, status}`. `status` is
 request (`seen_ref` = the nonce of the message it just picked up) (`text` at most 80 characters, one short step such as "Checking
 CI on PR #4") and `{state: "idle", at}` when its turn ends. The page
 subscribes to this one document per loaded conversation (the same cap
-of 8, paused on Runs). While `state` is `working` and `at` is under 15
+of 8, paused on Runs).
+
+**Presence pill** (always shown above the box, from the same status):
+"● In task: <step> · 4m" (green, a pulsing dot that is still under
+reduced motion) while `working` and `at` is at most 30 minutes old;
+"● In task (no update for 45m)" (amber) from 30 to 120 minutes; "○ Idle
+· last active 12m ago" when `idle` or working for more than 120 minutes;
+"○ Status unknown" with no status or no user id. Times refresh every
+minute. Under Kyle's message, while it is Delivered but not Seen and the
+coordinator is in a task, the line reads "Queued · coordinator is
+mid-task; it reads new messages when this step ends" (calmly animated)
+instead of the 2-minute amber line, which shows only when the
+coordinator is not in a task. The working row above the box no longer
+repeats the step; the pill shows it. While `state` is `working` and `at` is under 15
 minutes old, it shows a "Coordinator · working" row above the box: three
 pulsing dots (still under reduced motion), the step text and the time
 since `at`, refreshed every minute. Idle, missing or stale shows

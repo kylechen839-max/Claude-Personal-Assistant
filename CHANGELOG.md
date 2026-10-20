@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Dev team dashboard: the coordinator chat always shows whether the
+  coordinator is in a task or idle, and a message sent mid-task shows as
+  queued until the coordinator reads it.
 - Dev team dashboard: the coordinator chat looks like the Claude Code app
   (full-width replies, your messages in bubbles, collapsible activity
   rows, an animated working line) and shows each message's delivery:

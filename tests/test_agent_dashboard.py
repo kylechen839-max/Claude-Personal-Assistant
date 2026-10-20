@@ -379,10 +379,16 @@ def test_skill_mirrors_the_chat():
             "at each step, and idle when your turn ends.") in flat
     assert ('On pickup: your FIRST action on any chat message (a wake, or one found at turn end) is to write '
             '`status: {state: "working", text: "Reading your message", seen_ref: <nonce>, at}`.') in flat
-    assert ("At the end of EVERY turn, read the dashboard comment threads (ArtifactComments read); answer any "
-            "comment sent to you that is still awaiting a reply. Comment wakes that arrive mid-turn can be lost.") in flat
+    assert ("At the end of EVERY turn, read the dashboard comment threads (ArtifactComments read), answer any "
+            "comment sent to you that is still awaiting a reply, then set `status` idle. "
+            "Comment wakes that arrive mid-turn can be lost.") in flat
+    assert "that start-of-turn write is the pickup write above: one write that carries `seen_ref`" in flat
+    assert flat.count("At the end of EVERY turn") == 1
     assert ('Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, '
             'merges; not every tool call.') in flat
+    assert ("At the start of EVERY turn, set `status` working with a step text, and check "
+            "`ArtifactComments action:\"watch\"` lists the dashboard; re-arm it if it's missing. "
+            "Watches can silently disappear.") in flat
     assert "Take every `at` from `date -u +%Y-%m-%dT%H:%M:%SZ` at write time; never estimate." in flat
     assert "older than 30 days" in flat
     # The db can't list collections: the prune finds chats through an index doc.

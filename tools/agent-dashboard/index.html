@@ -182,13 +182,13 @@ main[data-view="grid"]{height:100%;gap:10px}
   font-family:-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;font-size:15px;line-height:1.55;
   background:#faf9f7;color:#1f1e1d;color-scheme:light;
   --fg:#1f1e1d;--muted:#6b6660;--line:#e3dfd9;--card:#ffffff;--accent:#2a5bc4;--chip:#efece7;--bubble:#efece7;
-  --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;--silent:#a8261d;--silent-bg:#fbe4e1}
+  --needs:#8f5200;--needs-bg:#fdf0d8;--needs-edge:#d48a12;--silent:#a8261d;--silent-bg:#fbe4e1;--run:#14655a}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .chat{background:#1f1e1d;color:#e8e6e3;color-scheme:dark;
   --fg:#e8e6e3;--muted:#a7a29b;--line:#3a3836;--card:#2a2927;--accent:#8db0f6;--chip:#2f2d2b;--bubble:#33312e;
-  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916}}
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916;--run:#68d0bd}}
 :root[data-theme="dark"] .chat{background:#1f1e1d;color:#e8e6e3;color-scheme:dark;
   --fg:#e8e6e3;--muted:#a7a29b;--line:#3a3836;--card:#2a2927;--accent:#8db0f6;--chip:#2f2d2b;--bubble:#33312e;
-  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916}
+  --needs:#f2b65c;--needs-bg:#36270f;--needs-edge:#d9952c;--silent:#ff8a7d;--silent-bg:#3a1916;--run:#68d0bd}
 .chat .hint{font-size:.8rem}
 .tile[data-max] .chat{margin-top:-8px}
 .logwrap{position:relative;flex:1;min-height:70px;display:flex}
@@ -234,6 +234,16 @@ main[data-view="grid"]{height:100%;gap:10px}
   font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
 .dline[data-stage="late"]{color:var(--needs)}
 .dline[data-stage="failed"]{color:var(--silent)}
+.presence{flex:none;align-self:flex-start;display:flex;align-items:baseline;gap:6px;max-width:100%;padding:2px 10px;border-radius:999px;
+  font-size:.8rem;color:var(--muted);background:var(--chip);overflow-wrap:anywhere}
+.pdot{flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;align-self:center}
+.presence[data-state="task"]{color:var(--run)}
+.presence[data-state="task"] .pdot{background:currentColor;animation:pulse 1.6s ease-in-out infinite}
+.presence[data-state="maybe"]{color:var(--needs)}
+.presence[data-state="maybe"] .pdot{background:currentColor}
+@media (prefers-reduced-motion: reduce){.presence .pdot{animation:none}}
+.dline[data-stage="queued"] .spin{animation:pulse 2.4s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.dline[data-stage="queued"] .spin{animation:none}}
 .work{flex:none;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 7px;font-size:.85rem;color:var(--muted);min-width:0}
 .work .wtext{overflow-wrap:anywhere;min-width:0}
 .work .wtime::before{content:"· "}
@@ -710,6 +720,9 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
   };
   const WORK_STALE_MS = 15 * 60e3; // a "working" status older than this shows nothing
   const PICKUP_MS = 2 * 60e3;       // delivered but not seen this long: say so
+  const IN_TASK_MS = 30 * 60e3;     // presence: "working" this fresh is "In task"
+  const MAYBE_MS = 120 * 60e3;      // ... this fresh "In task (no update for ...)"; older counts as idle
+  const QUEUED = "Queued · coordinator is mid-task; it reads new messages when this step ends";
   const NOT_PICKED = "Coordinator hasn't picked this up yet. It may be busy; it checks for missed messages after each reply.";
   const WORK_TEXT_MAX = 80;
   const SEND_STOP = ["not_granted", "capability_disabled", "capability_removed", "forbidden"];
@@ -1166,7 +1179,13 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       t.workText = el("span", "wtext");
       t.workTime = el("span", "wtime");
       t.work.append(spin, t.workLabel, t.workText, t.workTime);
-      t.chat.append(t.chatNote, t.logWrap, t.work, t.form, t.sendHint);
+      t.pres = el("div", "presence");
+      t.pres.setAttribute("role", "status");
+      const pdot = el("span", "pdot");
+      pdot.setAttribute("aria-hidden", "true");
+      t.presText = el("span", "ptext");
+      t.pres.append(pdot, t.presText);
+      t.chat.append(t.chatNote, t.logWrap, t.work, t.pres, t.form, t.sendHint);
       t.body.append(t.runLine, t.dyn, t.chat);
       t.bubbles = Object.create(null);
       t.openActs = Object.create(null);
@@ -1850,6 +1869,31 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.logSeen = t.logSeen || !!(chat && chat.docs);
     t.stick = false;
     fillWork(t, key, chat);
+    fillPresence(t, chat);
+  }
+
+  // Is the coordinator in a task? From the index document's status:
+  // working within IN_TASK_MS, working with no update for up to MAYBE_MS,
+  // idle (or older), or unknown (no status, or no transcript here).
+  function presence(chat, now) {
+    const st = chat && uid !== null ? chat.status : null;
+    const at = st ? time(st.at) : null;
+    if (!st || (st.state !== "working" && st.state !== "idle")) return {state: "unknown", text: "Status unknown"};
+    const age = at === null ? null : now - at;
+    if (st.state === "working" && age !== null && age <= IN_TASK_MS && at <= now + FUTURE_SLACK_MS) {
+      const what = text(st.text, WORK_TEXT_MAX);
+      return {state: "task", text: `In task${what ? `: ${what}` : ""} · ${since(age)}`};
+    }
+    if (st.state === "working" && age !== null && age <= MAYBE_MS && age > IN_TASK_MS) {
+      return {state: "maybe", text: `In task (no update for ${since(age)})`};
+    }
+    return {state: "idle", text: age === null || age < 0 ? "Idle" : `Idle · last active ${since(age) === "just now" ? "just now" : since(age) + " ago"}`};
+  }
+
+  function fillPresence(t, chat) {
+    const pr = presence(chat, Date.now());
+    t.pres.dataset.state = pr.state;
+    setText(t.presText, pr.text);
   }
 
   // The master's index document status, when it says "working" and is
@@ -1868,8 +1912,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
     t.work.hidden = !w;
     if (!w) return;
     setText(t.workLabel, "Working…");
-    setText(t.workText, w.text);
-    t.workText.hidden = !w.text;
+    setText(t.workText, "");  // the presence pill shows the step
+    t.workText.hidden = true;
     setText(t.workTime, since(now - w.at));
   }
 
@@ -1897,6 +1941,8 @@ main[data-compact] .grip,main[data-compact] .resize,main[data-compact] #grid-res
       return {stage: "working", text: "Coordinator · working" + (w.text ? `: ${w.text}` : ""), spin: true, time: since(now - w.at)};
     }
     if (seen !== null) return {stage: "seen", text: "Seen by coordinator", time: stamp(seen)};
+    // Not seen while the coordinator is in a task: queued, not lost.
+    if (presence(chat, now).state === "task") return {stage: "queued", text: QUEUED, spin: true};
     if (now - sent > PICKUP_MS) return {stage: "late", text: NOT_PICKED, open: !!session};
     return {stage: "delivered", text: "Delivered"};
   }

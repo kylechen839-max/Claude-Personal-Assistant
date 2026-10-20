@@ -2126,6 +2126,10 @@ const STATUS = `data/users/u_test/chat-${TAIL}`;
 const statusSnap = (page, body) => page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: body !== null,
   data: () => (body === null ? undefined : body), metadata: { fromCache: false } });
 const work = (page) => byClass(chatOf(page).panel, 'work')[0];
+const pill = (page) => {
+  const pr = byClass(chatOf(page).panel, 'presence')[0];
+  return [pr.dataset.state, byClass(pr, 'ptext')[0].textContent, pr.hidden];
+};
 
 test('working: the status row shows the step text and elapsed time, refreshed on the interval', async () => {
   const page = await chatPage();
@@ -2135,7 +2139,8 @@ test('working: the status row shows the step text and elapsed time, refreshed on
   const w = work(page);
   assert.equal(w.hidden, false);
   assert.equal(byClass(w, 'wlabel')[0].textContent, 'Working…');
-  assert.equal(byClass(w, 'wtext')[0].textContent, 'Checking CI on PR #4');
+  assert.equal(byClass(w, 'wtext')[0].hidden, true, 'the step shows once, in the presence pill');
+  assert.equal(pill(page)[1], 'In task: Checking CI on PR #4 · 3m');
   assert.equal(byClass(w, 'wtime')[0].textContent, '3m');
   assert.equal(byClass(w, 'spin')[0].textContent, '✻');
   assert.equal(byClass(w, 'spin')[0].getAttribute('aria-hidden'), 'true');
@@ -2158,10 +2163,9 @@ test('working: hostile status text stays text, clamped to 80', async () => {
   const page = await chatPage();
   const evil = '<img src=x onerror=alert(1)>' + 'y'.repeat(200) + '\n**bold**';
   statusSnap(page, { status: { state: 'working', text: evil, at: iso(NOW) } });
-  const t = byClass(work(page), 'wtext')[0];
+  const t = byClass(byClass(chatOf(page).panel, 'presence')[0], 'ptext')[0];
   assert.equal(t.children.length, 0);
-  assert.equal(t.textContent.length, 80);
-  assert.ok(t.textContent.startsWith('<img src=x onerror=alert(1)>'));
+  assert.equal(t.textContent, `In task: ${('<img src=x onerror=alert(1)>' + 'y'.repeat(200)).slice(0, 79)}… · just now`);
   assert.equal(chatOf(page).panel.find((e) => ['IMG', 'STRONG'].includes(e.tagName)).length, 0);
 });
 
@@ -2281,17 +2285,19 @@ test('bubbles show the date too when a message is not from today', async () => {
 
 // ---- round 2: judge findings ----
 
-test('delivery: a working status for another task (no seen_ref) never shows as working, and still goes amber', async () => {
+test('delivery: a working status for another task (no seen_ref) never shows as working: queued while in task, amber only when idle', async () => {
   const page = await chatPage();
   const c = chatOf(page);
   type(c, 'hi');
   c.send.click();
   await settle();
   statusSnap(page, { status: { state: 'working', text: 'Old task: judge round 2', at: iso(NOW + 30e3) } });
-  assert.equal(stage(page)[0], 'delivered');
+  assert.deepEqual(stage(page), ['queued', 'Queued · coordinator is mid-task; it reads new messages when this step ends', 'spin']);
   page.setNow(NOW + 125e3);
   statusSnap(page, { status: { state: 'working', text: 'Old task: pushing', at: iso(NOW + 120e3) } });
-  assert.equal(stage(page)[0], 'late');
+  assert.equal(stage(page)[0], 'queued', 'still queued past 2 minutes while in task: no amber');
+  statusSnap(page, { status: { state: 'idle', at: iso(NOW + 121e3) } });
+  assert.equal(stage(page)[0], 'late', 'amber once idle without a pickup');
   // Seen is latched: a later step write without seen_ref keeps it working.
   const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
   statusSnap(page, { status: { state: 'working', text: 'Reading your message', seen_ref: nonce, at: iso(NOW + 124e3) } });
@@ -2306,7 +2312,7 @@ test('docsOf: a document snapshot with exists() as a method is read', async () =
   const page = await chatPage();
   page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: () => true, metadata: { fromCache: false },
     data: () => ({ status: { state: 'working', text: 'Method form', at: iso(NOW) } }) });
-  assert.equal(byClass(work(page), 'wtext')[0].textContent, 'Method form');
+  assert.equal(pill(page)[1], 'In task: Method form · just now');
   page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: () => false, data: () => undefined, metadata: {} });
   assert.equal(work(page).hidden, true);
 });
@@ -2379,4 +2385,39 @@ test('chat: the composer has an arrow Send button and the reply placeholder; fen
   const [a, b] = md.children;
   assert.deepEqual([a.dataset.lang, a.textContent], ['python', 'x = 1']);
   assert.equal(b.dataset.lang, undefined, 'an odd info string gets no label');
+});
+
+// ---- presence: in task or idle, at any time ----
+
+test('presence: the pill shows in task, maybe, idle or unknown, with no message sent', async () => {
+  const page = await chatPage();
+  assert.equal(page.comments.calls.send.length, 0);
+  assert.deepEqual(pill(page), ['unknown', 'Status unknown', false]);
+  const at = (m) => iso(NOW - m * MIN);
+  const cases = [
+    [{ state: 'working', text: 'Judging round 2', at: at(4) }, ['task', 'In task: Judging round 2 · 4m']],
+    [{ state: 'working', text: 'x', at: at(30) }, ['task', 'In task: x · 30m']],
+    [{ state: 'working', text: 'x', at: at(31) }, ['maybe', 'In task (no update for 31m)']],
+    [{ state: 'working', text: 'x', at: at(45) }, ['maybe', 'In task (no update for 45m)']],
+    [{ state: 'working', text: 'x', at: at(120) }, ['maybe', 'In task (no update for 2h 0m)']],
+    [{ state: 'working', text: 'x', at: at(121) }, ['idle', 'Idle · last active 2h 1m ago']],
+    [{ state: 'idle', at: at(12) }, ['idle', 'Idle · last active 12m ago']],
+    [{ state: 'idle', at: iso(NOW) }, ['idle', 'Idle · last active just now']],
+    [{ state: 'working' }, ['idle', 'Idle']],
+    [{ state: 'pondering', at: at(1) }, ['unknown', 'Status unknown']],
+  ];
+  for (const [status, want] of cases) {
+    statusSnap(page, { status });
+    assert.deepEqual(pill(page).slice(0, 2), want, JSON.stringify(status));
+  }
+  statusSnap(page, null);
+  assert.deepEqual(pill(page).slice(0, 2), ['unknown', 'Status unknown']);
+  // Elapsed times refresh on the interval.
+  statusSnap(page, { status: { state: 'working', text: 'Tests', at: at(4) } });
+  page.setNow(NOW + 27 * MIN);
+  page.intervals[0].fn();
+  assert.deepEqual(pill(page).slice(0, 2), ['maybe', 'In task (no update for 31m)']);
+  // No user id: unknown.
+  const none = await chatPage({ user: null });
+  assert.deepEqual(pill(none).slice(0, 2), ['unknown', 'Status unknown']);
 });

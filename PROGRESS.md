@@ -6,7 +6,7 @@ All seven stages are done. Run the tests with `pytest` from the project root
 **Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
 Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
 shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 123
+change, and the launcher shellcheck test skipped), plus 124
 JavaScript tests (node:test: `voice-core.test.js` and
 `agent-dashboard.test.mjs`, both also run by pytest).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
@@ -59,7 +59,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
-| `tests/js/agent-dashboard.test.mjs` | 111 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
+| `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1275,6 +1275,25 @@ still the default.
   - The working timer shows minutes ("3m"), refreshed on the existing
     one-minute interval.
   - JS tests: 106 → 111.
+
+### Dashboard chat presence and queued state (2026-10-20)
+- A presence pill above the box is always shown, from the index
+  document's `status`:
+  - In task with the step and minutes (green, pulsing, ≤30 min);
+  - In task with no update (amber, 30–120 min);
+  - Idle with last active (`idle`, or working older than 120 min);
+  - Status unknown (no status or no user id).
+- The working row no longer repeats the step.
+- A message that is Delivered but not Seen while the coordinator is in
+  a task shows "Queued · coordinator is mid-task…". The 2-minute amber
+  line now shows only when the coordinator isn't in a task.
+- The skill sets the status working at the start of every turn, idle at
+  the end, and re-arms a vanished comment watch. TEAM_MEMORY records
+  that watches can disappear.
+- Tests: JS 111 → 112 (one new pill test with the 30/120-minute edges,
+  plus four tests updated for the moved step text and the queued
+  state). All five fail on the previous page. `test_agent_dashboard.py`
+  pins the two new SKILL phrases.
 
 ## Known issues
 - **Wake word on real voices is untested.** The "Hey Claude" model was
