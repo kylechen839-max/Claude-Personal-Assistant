@@ -1,6 +1,8 @@
 // Small touch behaviours the phone page should have, like other apps:
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
 // - swiping down while the keyboard is open closes the keyboard.
+// And the owner's health banner (state.health from /api/state, written by
+// the watchdog, assistant/watch.py): "Mom's app is down since 06:13".
 "use strict";
 
 (function (root) {
@@ -41,7 +43,46 @@
     return { onStart, onMove };
   }
 
-  const api = { closeMenuOutside, swipeDownHidesKeyboard, SWIPE_PX };
+  function clock(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // The banner's lines for state.health (null: nothing to show). Only
+  // names, times and fixed reasons come from the server; never chat text.
+  function healthLines(health, fmt) {
+    fmt = fmt || clock;
+    if (!health) return [];
+    const lines = [];
+    for (const i of health.issues || []) {
+      const down = /^healthz\b/.test(i.what || "");
+      const since = fmt(i.since);
+      lines.push(`${i.label} ${down ? "is down" : "isn't working right"}`
+        + (since ? ` since ${since}` : "") + (i.what ? ` (${i.what})` : ""));
+    }
+    if (health.stale) {
+      const at = fmt(health.checked);
+      lines.push("Health checks haven't run" + (at ? ` since ${at}` : " yet") + ".");
+    }
+    for (const e of health.events || []) {
+      const at = fmt(e.at);
+      lines.push((at ? `${at}: ` : "") + e.text);
+    }
+    return lines;
+  }
+
+  function renderHealth(doc, health, fmt) {
+    const el = doc.getElementById("health");
+    if (!el) return [];
+    const lines = healthLines(health, fmt);
+    el.textContent = lines.join("\n");
+    el.hidden = !lines.length;
+    return lines;
+  }
+
+  const api = { closeMenuOutside, swipeDownHidesKeyboard, SWIPE_PX, healthLines,
+    renderHealth };
   root.HeyClaudeUI = api;
   if (typeof root.document !== "undefined" && root.document.addEventListener) {
     api.menu = closeMenuOutside(root.document);

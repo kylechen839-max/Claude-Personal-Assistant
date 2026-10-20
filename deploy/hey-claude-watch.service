@@ -1,0 +1,17 @@
+# systemd *user* unit: one run of the Hey Claude watchdog (assistant/watch.py).
+# Started every 5 minutes by hey-claude-watch.timer; installed with
+# scripts/install_watch.sh, which fills in @REPO_DIR@.
+
+[Unit]
+Description=Hey Claude watchdog (health and test conversation checks)
+Documentation=file://@REPO_DIR@/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_DIR@
+ExecStart=@REPO_DIR@/.venv/bin/python -m assistant.watch
+# a go-live check (each instance's side-port copy and test conversation,
+# twice if it fails once) can take most of an hour; the run lock outlives it
+TimeoutStartSec=2h
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=hey-claude-watch

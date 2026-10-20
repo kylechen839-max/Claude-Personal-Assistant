@@ -162,7 +162,8 @@ def test_wake_loop_gives_up_after_repeated_mic_failures():
 
 
 @pytest.mark.parametrize("exc,expected", [
-    ("auth", "API key"), ("rate", "too many requests"), ("other", "went wrong")])
+    ("auth", "API key"), ("rate", "too many requests"), ("other", "went wrong"),
+    ("down", "Claude is unreachable right now")])  # 5xx: the API itself is down
 def test_get_reply_error_messages(fake_client, exc, expected):
     import anthropic
     import httpx
@@ -170,9 +171,9 @@ def test_get_reply_error_messages(fake_client, exc, expected):
     from assistant.chat import ClaudeChat
 
     req = httpx.Request("POST", "https://api.anthropic.com")
-    status = {"auth": 401, "rate": 429, "other": 500}[exc]
+    status = {"auth": 401, "rate": 429, "other": 400, "down": 500}[exc]
     cls = {"auth": anthropic.AuthenticationError, "rate": anthropic.RateLimitError,
-           "other": anthropic.InternalServerError}[exc]
+           "other": anthropic.BadRequestError, "down": anthropic.InternalServerError}[exc]
     fake_client.messages.create.side_effect = cls(
         "err", response=httpx.Response(status, request=req), body=None)
     reply = cli.get_reply(ClaudeChat(client=fake_client), "hi", lambda *_: None)

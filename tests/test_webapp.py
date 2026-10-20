@@ -157,6 +157,7 @@ def test_login_sets_a_strict_cookie(make_app):
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
         "history": False, "conversation": None, "owner": True, "family": False,
         "memory": False, "language": "en", "voice_picker": False,
+        "health": None,
         "month_usd": 0}  # the owner's API cost estimate (usage.py)
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
@@ -1365,6 +1366,6 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v20" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v21" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw

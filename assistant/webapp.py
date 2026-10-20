@@ -62,7 +62,7 @@ from starlette.requests import HTTPConnection
 from assistant import audio, i18n, usage
 from assistant.attachments import MAX_ATTACHMENTS
 from assistant.chat import is_user_turn
-from assistant.tools import ToolRegistry
+from assistant.tools import READ_ONLY_TOOLS, ToolRegistry
 
 log = logging.getLogger(__name__)
 
@@ -639,9 +639,25 @@ class SessionTools(ToolRegistry):
         self.tools = shared.tools
         self.server_tools = shared.server_tools
         self._emit = emit
+        # A health check's session (WebAssistant.start_check): only
+        # READ_ONLY_TOOLS are offered or run, so a check never writes.
+        self.check_mode = False
+
+    def read_only(self) -> list[str]:
+        """The read-only tools this session has (READ_ONLY_TOOLS order)."""
+        return [n for n in READ_ONLY_TOOLS if n in self.tools]
+
+    def schemas(self, model: str | None = None) -> list[dict]:
+        if not self.check_mode:
+            return super().schemas(model)
+        return ([self.tools[n].schema() for n in self.read_only()]
+                + self.server_schemas(model))
 
     def dispatch(self, name, tool_input, untrusted=False):
         self._emit({"type": "tool", "name": name})
+        if self.check_mode and name not in READ_ONLY_TOOLS:
+            log.warning("Check session: refused %s (not read-only)", name)
+            return "Not available in a health check: it could change something.", True
         return super().dispatch(name, tool_input, untrusted=untrusted)
 
 
@@ -868,6 +884,28 @@ class WebAssistant:
         finally:
             s.busy.release()
         return True
+
+    def start_check(self, s: Session) -> list[str] | None:
+        """Make this session a health check's (assistant/watch.py, smoke.py),
+        for good: no history (its recorder is dropped), no memory summary or
+        review offer (ClaudeChat.check_mode), and only read-only tools
+        (SessionTools.check_mode). Only a fresh session can be one, so
+        nothing said before is affected. Returns the read-only tools it
+        has, or None (a turn running, or it already has a conversation)."""
+        if not s.busy.acquire(timeout=2):
+            return None
+        try:
+            if not getattr(s.chat, "check_mode", False):
+                if s.chat.history or s.chat.conversation_id:
+                    return None
+                s.chat.recorder = None
+                s.chat.review_nudge = None
+                s.chat.check_mode = True
+                s.registry.check_mode = True
+            log.info("Web: session %s is a health check", s.sid[:6])
+            return s.registry.read_only()
+        finally:
+            s.busy.release()
 
     def shutdown(self) -> None:
         with self.lock:
@@ -1353,7 +1391,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
-               language: str = "en", google=None, hub=None, spotify=None):
+               language: str = "en", google=None, hub=None, spotify=None,
+               health=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
@@ -1365,7 +1404,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     `max_attachment_bytes` / `max_image_bytes`: per file attached to a
     turn (PDF or text / photo); the whole request stays under
     `max_upload_bytes`.
-    `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner)."""
+    `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner).
+    `health`: a function returning the watchdog's issues for the owner's
+    banner (watch.banner), or None: /api/state has no "health" then."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1644,6 +1685,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         client = request.client.host if request.client else ""
         if is_loopback(client) and "x-forwarded-for" not in request.headers:
             body["busy"] = assistant_busy(assistant, app)
+            # when this process started: the watchdog's "it restarted" cue
+            body["started"] = STARTED
         return body
 
     # --- sign-in ---
@@ -1746,10 +1789,36 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
-               "turns": sum(1 for m in s.chat.history if is_user_turn(m))}
+               "turns": sum(1 for m in s.chat.history if is_user_turn(m)),
+               # the watchdog's issues (watch.py): the owner's only, never
+               # a family member's
+               "health": owner_health(s)}
         if s.user is None:  # the API bill is the owner's business only
             out["month_usd"] = usage.month_usd()
         return out
+
+    def owner_health(s: Session):
+        if health is None or s.user is not None:
+            return None
+        try:
+            return health()
+        except Exception:  # a broken status file must not break the page
+            log.exception("Reading the health status failed")
+            return None
+
+    @app.post("/api/check-session")
+    def check_session(request: Request):
+        """Make this (fresh) session a health check's: nothing saved, only
+        read-only tools (WebAssistant.start_check). One way: it ends with
+        sign-out. Used by assistant/smoke.py."""
+        s = session_of(request)
+        if s is None:
+            return unauthorized()
+        tools = assistant.start_check(s)
+        if tools is None:
+            return error("only a new, idle session can be a check session", 409)
+        return {"ok": True, "read_only_tools": tools,
+                "server_tools": [t["name"] for t in s.registry.server_tools]}
 
     @app.post("/api/turn")
     async def turn(request: Request):
@@ -1938,6 +2007,7 @@ def assistant_busy(assistant: "WebAssistant", app) -> bool:
 
 
 ICON_SIZES = (180, 192, 512)
+STARTED = time.time()  # this process's start, in /healthz for this machine only
 
 
 def _static_route(name: str, media_type: str):
@@ -2092,6 +2162,9 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         from assistant.spotify_web import SpotifyConnect
 
         spotify = SpotifyConnect(config, assistant.tools)
+    from assistant import watch  # the owner's banner when an app is down
+
+    health = watch.banner_source(config, env_file)
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
@@ -2099,12 +2172,14 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub, spotify=spotify, **attachment_limits(config))
+                     hub=hub, spotify=spotify, health=health,
+                     **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
         start_history_sync(config, assistant, token, failover)
-    features.resume_jobs()  # lecture jobs cut off by a restart
+    if not config.get("candidate"):  # a side-port check copy (cli --candidate)
+        features.resume_jobs()  # lecture jobs cut off by a restart
     if hub is not None and trusted_proxy:
         # Every hub route answers 404 to a request a trusted proxy vouches
         # for (devhub.from_this_machine), so say so instead of a dead link.

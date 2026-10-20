@@ -399,21 +399,29 @@ def test_unknown_skip_name(capsys):
 # ---------- smoke check (HTTP) ----------
 
 class FakeResponse:
-    def __init__(self, status=200, lines=(), cookies=None, headers=None):
+    def __init__(self, status=200, lines=(), cookies=None, headers=None, body=None):
         self.status_code = status
         self._lines = lines
         self.cookies = cookies or {}
         self.headers = headers or {}
+        self.body = body
 
     def iter_lines(self, decode_unicode=True):
         return iter(self._lines)
 
+    def json(self):
+        if self.body is None:
+            raise ValueError("not JSON")
+        return self.body
+
 
 class FakeHTTP:
-    """A web app: /healthz, a protected /api/state, login and turns."""
+    """A web app: /healthz, a protected /api/state, login, check sessions
+    (`check`: its HTTP status; 404 = an older server) and turns."""
 
-    def __init__(self, token, health=200, protected=401):
+    def __init__(self, token, health=200, protected=401, check=200):
         self.token, self.health, self.protected = token, health, protected
+        self.check = check
         self.requests = []
 
     def get(self, url, headers=None, timeout=0, **kw):
@@ -430,6 +438,11 @@ class FakeHTTP:
                                 headers={"set-cookie": "hc_session=abc.def; Path=/; Secure"})
         if not headers.get("Cookie"):
             return FakeResponse(401)
+        if url.endswith("/api/check-session"):
+            return FakeResponse(self.check, body={"ok": True, "read_only_tools": [
+                "list_calendar_events"], "server_tools": []} if self.check == 200 else None)
+        if url.endswith("/api/logout"):
+            return FakeResponse(200, body={"ok": True})
         events = ([b'{"type": "transcript", "text": "hey claude what\'s on my calendar"}']
                   if files else [])
         events += [b'{"type": "reply", "text": "Physics lab at 2 PM.", "audio": "/a/1"}',
@@ -448,7 +461,9 @@ def smoke_with(http, token="t" * 32, voice_ws=None, url="http://127.0.0.1:8765/"
 def test_smoke_all_pass():
     http = FakeHTTP("t" * 32)
     got = smoke_with(http)
-    assert [o.status for o in got.values()] == [PASS] * 5, got
+    assert [o.status for o in got.values()] == [PASS] * 6, got
+    assert list(got) == ["healthz", "auth required", "login", "check session",
+                         "text turn", "audio turn"]
     assert "heard" in got["audio turn"].detail
     # the session cookie went back by hand (it's Secure; plain http here)
     turn_headers = [h for m, u, h in http.requests if u.endswith("/api/turn")]
@@ -609,7 +624,8 @@ def test_error_replies_match_the_cli():
 # ---------- the wrapper scripts ----------
 
 SCRIPTS = ["scripts/preflight.sh", "scripts/cloud_smoke.sh", "scripts/install_pi.sh",
-           "scripts/install_service.sh", "scripts/ci/pi_simulation.sh"]
+           "scripts/install_service.sh", "scripts/ci/pi_simulation.sh",
+           "scripts/deploy.sh", "scripts/install_watch.sh"]
 
 
 @pytest.mark.parametrize("script", SCRIPTS)
@@ -836,3 +852,20 @@ def test_family_tasks_leave_the_owners_app_alone():
     assert "$prefix = 'Family-'" in text and "Family-*" not in text.replace('"$prefix*"', "")
     assert "Unregister-HostTask" not in text and "'Web'" not in text
     assert "*.local.toml" in text and "--env-file" in text
+
+
+def test_restart_instance_matches_only_that_apps_processes():
+    """restart_instance.ps1 (the watchdog's self-heal) stops only the copy
+    of the app it restarts: never another instance, never a side-port
+    candidate."""
+    import shutil
+
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell not available")
+    p = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                        "-File", str(ROOT / "tests" / "ps" / "restart_instance.tests.ps1"),
+                        "-Script", str(ROOT / "scripts" / "restart_instance.ps1")],
+                       capture_output=True, text=True, timeout=180, check=False)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stdout.count("PASS ") == 7, p.stdout

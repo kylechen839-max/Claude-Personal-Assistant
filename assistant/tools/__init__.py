@@ -17,6 +17,13 @@ UNTRUSTED_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "untrusted_context", default=False)
 UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
 
+# Tools that only read, and read nothing private enough to keep out of a
+# health check: the only ones a check session may run (webapp.SessionTools).
+# An allowlist, so a new tool is never runnable there by default. Anthropic's
+# server tools (web search and fetch) are read-only too.
+READ_ONLY_TOOLS = ("list_calendar_events", "list_assignments", "ha_list", "ha_state",
+                   "spotify_now_playing", "spotify_devices")
+
 
 def mark_untrusted(result: dict, untrusted: bool) -> dict:
     if untrusted:
@@ -82,15 +89,18 @@ class ToolRegistry:
         """Tool definitions to send. With `model` (the router may pick a
         model other than the one the registry was built for), web search and
         fetch get the versions that model supports (web.tool_versions)."""
-        server = self.server_tools
-        if model:
-            from assistant.tools.web import tool_versions
+        return [t.schema() for t in self.tools.values()] + self.server_schemas(model)
 
-            search, fetch = tool_versions(model)
-            versions = {"web_search": search, "web_fetch": fetch}
-            server = [{**t, "type": versions[t["name"]]}
-                      if t.get("name") in versions else t for t in server]
-        return [t.schema() for t in self.tools.values()] + server
+    def server_schemas(self, model: str | None = None) -> list[dict]:
+        """The server tools, typed for `model` (see schemas)."""
+        if not model:
+            return self.server_tools
+        from assistant.tools.web import tool_versions
+
+        search, fetch = tool_versions(model)
+        versions = {"web_search": search, "web_fetch": fetch}
+        return [{**t, "type": versions[t["name"]]}
+                if t.get("name") in versions else t for t in self.server_tools]
 
     def dispatch(self, name: str, tool_input: dict,
                  untrusted: bool = False) -> tuple[str, bool]:

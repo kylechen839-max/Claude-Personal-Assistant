@@ -548,3 +548,21 @@ def test_titles_tutor_and_lecture_calls_are_metered(fake_client):
     month = usage.METER.months[datetime.now().strftime("%Y-%m")]
     assert (month[FAST]["calls"], month[FAST]["input"]) == (1, 100)
     assert (month[MAIN]["calls"], month[MAIN]["input"]) == (2, 500)
+
+
+def test_a_web_session_types_its_server_tools_for_the_routed_model():
+    """The web app's per-session registry (SessionTools) takes the model too,
+    in a health check's session as well, so a Haiku turn never gets Sonnet's
+    web tool versions."""
+    from assistant.tools import ToolRegistry
+    from assistant.tools.web import tool_versions
+    from assistant.webapp import SessionTools
+
+    shared = ToolRegistry()
+    shared.server_tools = [{"type": "web_search_20260209", "name": "web_search"}]
+    tools = SessionTools(shared, confirm=lambda q: False, emit=lambda e: None)
+    haiku = tool_versions(FAST)[0]
+    for check in (False, True):
+        tools.check_mode = check
+        assert tools.schemas(FAST)[-1]["type"] == haiku
+        assert tools.schemas()[-1]["type"] == "web_search_20260209"

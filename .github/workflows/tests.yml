@@ -2,7 +2,8 @@ name: tests
 
 # Runs the offline test suite on every push and pull request, and once a
 # week so breakage from new library releases shows up even without pushes.
-# Live-service tests skip themselves (no secrets are given to CI).
+# Live-service tests skip themselves (no secrets are given to the pytest
+# jobs; only api-contract gets ANTHROPIC_API_KEY, for tests/test_contract.py).
 on:
   push:
   pull_request:
@@ -100,6 +101,37 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -rs
+
+  # Real-API contract tests (tests/test_contract.py): the realistic
+  # multi-turn conversation (tool use, thinking, two requests sharing one
+  # history, the web app's voice socket) against the real Anthropic API with
+  # the cheapest model and the default one. Runs on every push and pull
+  # request when the ANTHROPIC_API_KEY repository secret is set; without it
+  # (forks, or before Kyle adds it) the live tests skip and only the
+  # contract-shaped fake runs. Make "api-contract" a required check on
+  # master so a pull request that breaks a real conversation can't merge.
+  api-contract:
+    name: api-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 ffmpeg
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Contract tests (real API when the secret is set)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m pytest -rs tests/test_contract.py
 
   # The phone app's backend router (Pi -> PC -> cloud failover, FAILOVER.md):
   # node:test, no packages needed.
