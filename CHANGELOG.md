@@ -15,6 +15,15 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Fixed: asking about "tomorrow" just before midnight could list the day
+  after tomorrow. The date is now read once per question, so the system
+  prompt and the calendar and Notion tools agree.
+- Fixed: Whisper occasionally produced "!!!!" instead of words. Lecture
+  transcription and voice commands now detect it, decode that piece again
+  (greedily, in float32) and drop it if it is still garbage, so it never
+  reaches notes or Claude.
+- Tests: the Windows voice-latency test excludes only the OS test voice,
+  and the end-to-end calendar test pins the clock.
 - Fix: a conversation could break for good ("Sorry, something went wrong
   talking to Claude" on every turn) after hands-free voice shared it: a
   thinking block signed for another request was sent back. Earlier turns'

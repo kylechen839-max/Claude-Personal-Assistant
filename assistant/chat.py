@@ -7,6 +7,8 @@ import os
 from contextvars import ContextVar
 from datetime import datetime
 
+from assistant.tools.timeutil import TURN_NOW
+
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
@@ -264,7 +266,9 @@ class ClaudeChat:
 
     def build_system(self, notes: list[str] | None = None,
                      nudge: str | None = None) -> str:
-        now = _now(self.timezone)
+        now = TURN_NOW.get()  # the turn's own moment (set in ask)
+        if now is None:
+            now = _now(self.timezone)
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
@@ -309,6 +313,9 @@ class ClaudeChat:
         "+", attachments.py) sent before the text; saved history gets only
         a marker such as "[photo]" (attachment_marker)."""
         token = _CURRENT_CHAT.set(self)
+        # "Now" is read once per turn: the prompt's date and the tools'
+        # "today"/"tomorrow" must agree even if midnight passes mid-turn.
+        clock = TURN_NOW.set(_now(self.timezone))
         try:
             notes = self.recall(user_text)
             nudge = self._nudge() if not self.history else None
@@ -366,6 +373,7 @@ class ClaudeChat:
             return reply
         finally:
             self._pending_resume = None
+            TURN_NOW.reset(clock)
             _CURRENT_CHAT.reset(token)
 
     # ---------- conversation history ----------
