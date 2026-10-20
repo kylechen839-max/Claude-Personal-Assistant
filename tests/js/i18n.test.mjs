@@ -37,7 +37,7 @@ class El {
 }
 
 function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true,
-                      standalone = false } = {}) {
+                      standalone = false, local = {} } = {}) {
   const google = new El('button', { id: 'google-connect', hidden: '' }, ['Connect Google account']);
   const hint = new El('p', { id: 'google-status', hidden: '' });
   const menu = new El('details', { class: 'menu' }, [google, hint]);
@@ -75,6 +75,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
     location: { href: '/' },
     navigator: { standalone },
     sessionStorage: { getItem: (k) => stored[k] ?? null, setItem: (k, v) => { stored[k] = v; } },
+    localStorage: { getItem: (k) => local[k] ?? null, setItem: (k, v) => { local[k] = v; } },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
       if (url === '/api/google/status') return { ok: gstatus !== null, json: async () => gstatus };
@@ -201,6 +202,8 @@ test('first-run guide: home screen and Google steps in Chinese, then gone', asyn
   assert.match(p.guideText.textContent, /1\. 把这个应用加到主屏幕/);
   assert.match(p.guideText.textContent, /2\. 连接你的 Google 账户/);
   assert.match(p.guideText.textContent, /点“高级”/);
+  assert.match(p.guideText.textContent, /你可以这样问我/);
+  assert.doesNotMatch(p.guideText.textContent, /我明天有什么安排/);  // no calendar before Google
   p.guideDone.listeners.click[0]();
   assert.equal(p.guide.hidden, true);
   await p.win.document.getElementById('google-connect');  // refresh again: stays dismissed
@@ -211,9 +214,20 @@ test('first-run guide: only the steps still to do; none when all done', async ()
   await home.flush();
   assert.doesNotMatch(home.guideText.textContent, /主屏幕/);
   assert.match(home.guideText.textContent, /1\. 连接你的 Google 账户/);
-  const done = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true } });
+  // setup done: the card shows only what she can ask, including calendar and email
+  const local = {};
+  const done = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true }, local });
   await done.flush();
-  assert.equal(done.guide.hidden, true);
+  assert.equal(done.guide.hidden, false);
+  assert.doesNotMatch(done.guideText.textContent, /步骤/);
+  assert.match(done.guideText.textContent, /^你可以这样问我/);
+  assert.match(done.guideText.textContent, /“明天天气怎么样？”/);
+  assert.match(done.guideText.textContent, /“我明天有什么安排？”/);
+  done.guideDone.listeners.click[0]();
+  assert.equal(local.examplesSeen, '1');
+  const later = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true }, local });
+  await later.flush();
+  assert.equal(later.guide.hidden, true);  // seen once: gone for good
 });
 
 test('first-run guide: not signed in yet shows nothing; no data-google never shows it', async () => {

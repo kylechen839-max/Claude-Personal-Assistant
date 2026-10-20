@@ -1727,3 +1727,15 @@ screens are staged by setting the same attributes the JS sets (no mic).
   patterns for the dynamic ones ("12 messages", "Actions for …",
   "Transcribing 40%"). Only the "Hey Claude" name stays in English.
 - Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
+
+## Mom's app tells her what it can do
+
+- The first-run card (`assistant/web/i18n.js`) now also lists example
+  questions in Chinese (weather, a recipe, translating, a birthday message;
+  plus calendar and email ones once Google is connected), shown without
+  her asking until she taps 知道了 once.
+- Her assistant answers "你能帮我做什么？" with examples of what this
+  instance can do right now (`chat.zh_help_prompt`, from the registered
+  tools), and tells her how to connect Google if it isn't yet.
+- Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
+  Phone cache v8.

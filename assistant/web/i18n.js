@@ -173,6 +173,15 @@
     "Incognito off: conversations are saved again.": "已关闭无痕模式：对话会再次保存。",
     "Can't reach the Pi, the PC or the cloud right now.": "现在连不上树莓派、电脑或云端。",
     "No sound is coming from this microphone. If you're on CarPlay or Bluetooth, try push-to-talk.": "这个麦克风没有声音。如果在用 CarPlay 或蓝牙，请改用按住说话。",
+    "Things you can ask me (hold the mic and talk, or type):": "你可以这样问我（按住麦克风说话，或者打字）：",
+    "\"What's the weather tomorrow?\"": "“明天天气怎么样？”",
+    "\"How do I make braised pork belly?\"": "“红烧肉怎么做？”",
+    "\"How do you say 'thank you for dinner' in English?\"": "“‘谢谢你请我吃饭’用英文怎么说？”",
+    "\"Help me write a birthday message to my friend.\"": "“帮我给朋友写一段生日祝福。”",
+    "\"What's on my calendar tomorrow?\"": "“我明天有什么安排？”",
+    "\"Add a doctor's appointment Friday at 10am.\"": "“星期五上午十点加一个看医生的预约。”",
+    "\"Any new email today?\"": "“今天有新邮件吗？”",
+    "\"Help me reply to that email.\" (I only write a draft; you send it.)": "“帮我回复那封邮件。”（我只写草稿，你自己发送。）",
     // first-run guide (data-google instances: a family member's own app)
     "Enter the sign-in code you were sent. You only need to do this once on this phone.":
       "请输入发给你的登录码。这部手机只需要输入一次。",
@@ -281,6 +290,16 @@
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
 
+  // Shown (with the steps, or alone once they're done) until she taps Got it.
+  const EXAMPLES_ALWAYS = ["\"What's the weather tomorrow?\"",
+    "\"How do I make braised pork belly?\"",
+    "\"How do you say 'thank you for dinner' in English?\"",
+    "\"Help me write a birthday message to my friend.\""];
+  const EXAMPLES_GOOGLE = ["\"What's on my calendar tomorrow?\"",
+    "\"Add a doctor's appointment Friday at 10am.\"",
+    "\"Any new email today?\"",
+    "\"Help me reply to that email.\" (I only write a draft; you send it.)"];
+
   function standalone(win) {
     try {
       return win.navigator?.standalone === true ||
@@ -297,9 +316,22 @@
     const steps = [];
     if (!standalone(win)) steps.push(STEP_HOME);
     if (st.enabled && !st.connected) steps.push(STEP_GOOGLE);
-    if (!steps.length || dismissed) { box.hidden = true; return; }
-    text.textContent = [say("Welcome! A few one-time steps:"),
-      ...steps.map((step, i) => `${i + 1}. ${say(step)}`)].join("\n");
+    let seen = false;
+    try { seen = win.localStorage?.getItem("examplesSeen") === "1"; } catch (e) { /* private */ }
+    const examples = seen ? [] : [...EXAMPLES_ALWAYS, ...(st.connected ? EXAMPLES_GOOGLE : [])];
+    if ((!steps.length && !examples.length) || dismissed) { box.hidden = true; return; }
+    const lines = [];
+    if (steps.length) {
+      lines.push(say("Welcome! A few one-time steps:"),
+                 ...steps.map((step, i) => `${i + 1}. ${say(step)}`));
+    }
+    if (examples.length) {
+      if (lines.length) lines.push("");
+      lines.push(say("Things you can ask me (hold the mic and talk, or type):"),
+                 ...examples.map((e) => `• ${say(e)}`));
+    }
+    text.textContent = lines.join("\n");
+    box.setAttribute("data-examples", examples.length ? "1" : "");
     box.hidden = false;
   }
 
@@ -316,8 +348,11 @@
     const done = doc.getElementById("guide-done");
     if (done) {
       done.addEventListener("click", () => {
-        try { win.sessionStorage?.setItem("guideDismissed", "1"); } catch (e) { /* private */ }
         const box = doc.getElementById("guide");
+        try {
+          win.sessionStorage?.setItem("guideDismissed", "1");
+          if (box && box.getAttribute("data-examples") === "1") win.localStorage?.setItem("examplesSeen", "1");
+        } catch (e) { /* private */ }
         if (box) box.hidden = true;
       });
     }
