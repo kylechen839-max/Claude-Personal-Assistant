@@ -278,6 +278,17 @@ Each coordinator window with a session link has a transcript and a box.
   | `claude_unavailable` | nothing was posted; re-checks `canSendToClaude` |
   | `upstream_error`, unknown | "May have been sent; check before resending." |
 
+- **The look** follows the Claude Code app's session view, in its own
+  light (#faf9f7) and dark (#1f1e1d) palette with the system UI font at
+  15 px. Coordinator messages are full width with no bubble, under a
+  small "Coordinator · 7:55 PM" line (the date too when not today).
+  Kyle's messages are right-aligned grey bubbles (at most 75 % wide)
+  with the delivery line under them. Activity rows are compact muted
+  lines (✓ when the text starts with a word like Ran, Passed, Done,
+  Merged or Pushed, else •), and consecutive ones collapse into one
+  "N steps ▸" row that expands. The working line is an animated ✻
+  (still under reduced motion), "Working…", the step and the minutes.
+  The box is a rounded field with an arrow Send button inside it.
 - **The transcript** is the coordinator's mirror (below), newest 200,
   oldest first, each message with its time; coordinator messages are
   rendered as markdown (headings, bold, em, code, fences, quotes, lists,
@@ -309,11 +320,35 @@ owner included, can read it. The page reads it with
 | Field | Type | Meaning |
 |---|---|---|
 | `from` | string | `kyle` or `coordinator` (anything else shows as coordinator). |
-| `kind` | string | `update`, `reply`, `question` or `report` (else `update`). |
+| `kind` | string | `update`, `reply`, `question`, `report` or `activity` (else `update`). `activity` is one short step ("Ran tests · 151 passed", "Started the judge"), at most 200 characters, shown as plain text. |
 | `text` | string | The message, markdown, at most 12000 characters shown. |
 | `at` | string | UTC ISO 8601. |
 | `run_id` | string | The run it is about. |
 | `ref` | string | Optional: on Kyle's mirrored message, the nonce from his `[run … #nonce]` prefix. |
+
+**Index and status document** `data/users/<id>/chat-<sessionTail>` (in
+the collection `data/users/<id>`), written by the master in the same
+batch as each message: `{last_at, status}`. `status` is
+`{state: "working", text, at, seen_ref?}` while the coordinator works on Kyle's
+request (`seen_ref` = the nonce of the message it just picked up) (`text` at most 80 characters, one short step such as "Checking
+CI on PR #4") and `{state: "idle", at}` when its turn ends. The page
+subscribes to this one document per loaded conversation (the same cap
+of 8, paused on Runs). While `state` is `working` and `at` is under 15
+minutes old, it shows a "Coordinator · working" row above the box: three
+pulsing dots (still under reduced motion), the step text and the time
+since `at`, refreshed every minute. Idle, missing or stale shows
+nothing. Under Kyle's latest message from the page, a delivery line
+shows each stage: "Sending…" (animated) while `sendToClaude` is in
+flight, "Delivered" once claude.ai accepted it, "Seen by coordinator"
+and the time once `status.seen_ref` names its nonce (or its mirrored
+copy arrives), then "Coordinator · working: <step>" (animated, with the
+elapsed time) while the status is fresh. The coordinator's reply clears
+it. Delivered with no pickup for 2 minutes turns amber: "Coordinator
+hasn't picked this up yet. It may be busy; it checks for missed messages
+after each reply." with Open session. A failed send shows "Not sent:
+<reason>" in red. While that line shows, the working row above the box
+is hidden. Every `at` comes from the clock at
+write time; a message not from today shows its date too.
 
 ## Desktop window
 

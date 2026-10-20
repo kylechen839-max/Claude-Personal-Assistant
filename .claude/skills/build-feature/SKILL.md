@@ -93,13 +93,24 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
   `data/users/me/chat-<sessionTail>/msgs` (`me` resolves to Kyle;
   `<sessionTail>` is your session id after `session_`): `set` one new
   document per message with `from` (`"coordinator"` or `"kyle"`),
-  `kind` (`"update"`, `"reply"`, `"question"` or `"report"`), `text`
+  `kind` (`"update"`, `"reply"`, `"question"`, `"report"` or `"activity"`), `text`
   (markdown, at most 12000 characters), `at` (UTC ISO 8601), `run_id`,
   and for Kyle's messages `ref`.
 - In the same `batch`, `set` the index document `chat-<sessionTail>` in
   the collection `data/users/me` with `{last_at}` = that message's `at`.
   The db cannot list collections, so this index is how the prune below
-  finds old chats; the page ignores it.
+  finds old chats. It also holds `status`, which the page shows as a
+  "working" row: keep both fields on every write (`update` once the
+  document exists).
+- While working on Kyle's chat request, set `status` working with a short step text at each step, and idle when your turn ends.
+  Working is `status: {state: "working", text: "<at most 80 characters,
+  e.g. Checking CI on PR #4>", at}`; idle is `{state: "idle", at}`.
+- On pickup: your FIRST action on any chat message (a wake, or one found at turn end) is to write `status: {state: "working", text: "Reading your message", seen_ref: <nonce>, at}`.
+  The page shows Kyle "Seen by coordinator" from `seen_ref`.
+- At the end of EVERY turn, read the dashboard comment threads (ArtifactComments read); answer any comment sent to you that is still awaiting a reply. Comment wakes that arrive mid-turn can be lost.
+- Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, merges; not every tool call.
+  One short line, at most 200 characters, plain text.
+- Take every `at` from `date -u +%Y-%m-%dT%H:%M:%SZ` at write time; never estimate.
 - When Kyle used the box this run, ask him as kind `"question"` instead of AskUserQuestion, and wait for his answer in the thread.
 - On a Send-to-Claude wake from the box: read the thread, reply in it,
   and mirror both messages (Kyle's with `from: "kyle"` and `ref` = the

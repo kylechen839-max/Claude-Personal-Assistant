@@ -102,6 +102,7 @@ function fakeDb() {
     },
   });
   const db = {
+    doc: (name) => { calls.queries[name] = [name, 'doc']; return makeQuery(name); },
     collection: (name) => ({
       orderBy: (field, dir) => ({
         limit: (n) => {
@@ -1541,7 +1542,7 @@ const chatOf = (page, i = 0) => {
   return {
     panel,
     input: panel.find((e) => e.tagName === 'TEXTAREA')[0],
-    send: button(panel, 'Send'),
+    send: panel.find((e) => e.tagName === 'BUTTON' && e.getAttribute('aria-label') === 'Send')[0],
     form: byClass(panel, 'composer')[0],
     hint: byClass(panel, 'chat')[0].children.at(-1),
     note: byClass(panel, 'chat')[0].children[0],
@@ -1982,7 +1983,7 @@ test('chat: subscriptions only for coordinator windows on Grid, newest 8 (a maxi
   runs.push(runRow({ _docId: 'no-session', session_url: undefined }));
   runSnap(page, runs);
   await settle();
-  const chatQueries = () => Object.keys(page.db.calls.queries).filter((q) => q.startsWith('data/users/'));
+  const chatQueries = () => Object.keys(page.db.calls.queries).filter((q) => q.startsWith('data/users/') && q.endsWith('/msgs'));
   const live = () => chatQueries().filter((q) => (page.db.calls.subsBy[q] ?? 0) > (page.db.calls.unsubsBy[q] ?? 0));
   assert.deepEqual(live().sort(), [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `data/users/u_test/chat-s${i}/msgs`).sort());
   const ninth = panels(page).find((p) => p.id === 'coord-run-9');
@@ -2117,4 +2118,265 @@ test('markdown: about 2000 elements per message; the rest is plain text', async 
     const count = r.find(() => true).length;
     assert.ok(count <= 2010, `${JSON.stringify(s.slice(0, 8))}: ${count} elements`);
   }
+});
+
+// ---- the working indicator (the master's status on the chat index doc) ----
+
+const STATUS = `data/users/u_test/chat-${TAIL}`;
+const statusSnap = (page, body) => page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: body !== null,
+  data: () => (body === null ? undefined : body), metadata: { fromCache: false } });
+const work = (page) => byClass(chatOf(page).panel, 'work')[0];
+
+test('working: the status row shows the step text and elapsed time, refreshed on the interval', async () => {
+  const page = await chatPage();
+  assert.deepEqual(page.db.calls.queries[STATUS], [STATUS, 'doc']);
+  assert.equal(work(page).hidden, true, 'no status yet');
+  statusSnap(page, { last_at: iso(NOW), status: { state: 'working', text: 'Checking CI on PR #4', at: iso(NOW - 3 * MIN) } });
+  const w = work(page);
+  assert.equal(w.hidden, false);
+  assert.equal(byClass(w, 'wlabel')[0].textContent, 'Working…');
+  assert.equal(byClass(w, 'wtext')[0].textContent, 'Checking CI on PR #4');
+  assert.equal(byClass(w, 'wtime')[0].textContent, '3m');
+  assert.equal(byClass(w, 'spin')[0].textContent, '✻');
+  assert.equal(byClass(w, 'spin')[0].getAttribute('aria-hidden'), 'true');
+  page.setNow(NOW + 2 * MIN);
+  page.intervals[0].fn();
+  assert.equal(byClass(w, 'wtime')[0].textContent, '5m');
+  // Stale (over 15 min), idle, missing or junk: nothing.
+  page.setNow(NOW + 13 * MIN);
+  page.intervals[0].fn();
+  assert.equal(w.hidden, true, 'stale');
+  page.setNow(NOW);
+  for (const body of [{ status: { state: 'idle', at: iso(NOW) } }, {}, null, { status: 'working' },
+    { status: { state: 'working', text: 'x' } }, { status: { state: 'working', at: iso(NOW + 60 * MIN) } }]) {
+    statusSnap(page, body);
+    assert.equal(w.hidden, true, JSON.stringify(body));
+  }
+});
+
+test('working: hostile status text stays text, clamped to 80', async () => {
+  const page = await chatPage();
+  const evil = '<img src=x onerror=alert(1)>' + 'y'.repeat(200) + '\n**bold**';
+  statusSnap(page, { status: { state: 'working', text: evil, at: iso(NOW) } });
+  const t = byClass(work(page), 'wtext')[0];
+  assert.equal(t.children.length, 0);
+  assert.equal(t.textContent.length, 80);
+  assert.ok(t.textContent.startsWith('<img src=x onerror=alert(1)>'));
+  assert.equal(chatOf(page).panel.find((e) => ['IMG', 'STRONG'].includes(e.tagName)).length, 0);
+});
+
+const dline = (page) => byClass(chatOf(page).log, 'dline')[0];
+const stage = (page) => {
+  const d = dline(page);
+  if (!d) return null;
+  return [d.dataset.stage, byClass(d, 'dtext')[0].textContent, byClass(d, 'spin')[0].hidden ? '' : 'spin'];
+};
+
+test('delivery: Sending…, Delivered, Seen, working, then cleared by the reply; the line sits under Kyle\'s bubble', async () => {
+  const page = await chatPage();
+  let finish;
+  page.comments.replies.push(() => new Promise((resolve) => { finish = resolve; }));
+  const c = chatOf(page);
+  type(c, 'status?');
+  c.send.click();
+  await settle();
+  assert.deepEqual(stage(page), ['sending', 'Sending…', 'spin']);
+  const kids = c.log.children;
+  assert.equal(kids[kids.indexOf(dline(page)) - 1].dataset.from, 'kyle', 'right under Kyle\'s bubble');
+  finish({ threadId: 't1', commentId: 'c1' });
+  await settle();
+  assert.deepEqual(stage(page), ['delivered', 'Delivered', '']);
+  assert.equal(work(page).hidden, true, 'no separate waiting row');
+  const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
+  // Seen: the master's pickup write names this message.
+  statusSnap(page, { status: { state: 'idle', seen_ref: nonce, at: iso(NOW + 1000) } });
+  assert.deepEqual(stage(page), ['seen', 'Seen by coordinator', '']);
+  assert.match(byClass(dline(page), 'dtime')[0].textContent, /\d/);
+  // Working, with the step and the elapsed time.
+  statusSnap(page, { status: { state: 'working', text: 'Reading your message', seen_ref: nonce, at: iso(NOW + 1000) } });
+  assert.deepEqual(stage(page), ['working', 'Coordinator · working: Reading your message', 'spin']);
+  page.setNow(NOW + 4 * MIN);
+  page.intervals[0].fn();
+  assert.equal(byClass(dline(page), 'dtime')[0].textContent, '3m');
+  assert.equal(work(page).hidden, true, 'the line carries it; no duplicate row');
+  // The mirrored copy of Kyle's message keeps the line under it; the reply clears it.
+  chatSnap(page, [mirror('k1', { from: 'kyle', text: 'status?', ref: nonce, at: iso(NOW) })]);
+  assert.equal(stage(page)[0], 'working');
+  chatSnap(page, [mirror('r1', { text: 'All green.', at: iso(NOW + 2 * MIN) }),
+    mirror('k1', { from: 'kyle', text: 'status?', ref: nonce, at: iso(NOW) })]);
+  assert.equal(stage(page), null);
+});
+
+test('delivery: a mirrored copy alone counts as seen; 2 minutes with no pickup turns amber with Open session', async () => {
+  const page = await chatPage();
+  const c = chatOf(page);
+  type(c, 'hello?');
+  c.send.click();
+  await settle();
+  page.setNow(NOW + 119e3);
+  page.intervals[0].fn();
+  assert.equal(stage(page)[0], 'delivered');
+  page.setNow(NOW + 121e3);
+  page.intervals[0].fn();
+  assert.deepEqual(stage(page), ['late',
+    "Coordinator hasn't picked this up yet. It may be busy; it checks for missed messages after each reply.", '']);
+  const open = dline(page).find((e) => e.tagName === 'A')[0];
+  assert.deepEqual([open.hidden, open.textContent, open.href], [false, 'Open session', SESSION]);
+  // A status for something else (no seen_ref) doesn't count as seen.
+  statusSnap(page, { status: { state: 'idle', at: iso(NOW + 121e3) } });
+  assert.equal(stage(page)[0], 'late');
+  const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
+  chatSnap(page, [mirror('k1', { from: 'kyle', text: 'hello?', ref: nonce, at: iso(NOW + 130e3) })]);
+  assert.equal(stage(page)[0], 'seen');
+  assert.equal(dline(page).find((e) => e.tagName === 'A')[0].hidden, true);
+});
+
+test('delivery: a failed send shows "Not sent: <reason>" in red under the bubble', async () => {
+  for (const [code, want] of [['rate_limited', 'Not sent: too many messages. Wait a minute, then press Send.'],
+    ['forbidden', 'Not sent: Sending from this page is off here. Use Open session.'],
+    ['upstream_error', 'May have been sent; check before resending.']]) {
+    const page = await chatPage();
+    page.comments.replies.push(() => Promise.reject({ code, message: 'SECRET' }));
+    type(chatOf(page), 'x');
+    chatOf(page).send.click();
+    await settle();
+    assert.deepEqual(stage(page), ['failed', want, ''], code);
+    assert.ok(!page.ids.coords.textContent.includes('SECRET'));
+  }
+});
+
+test('delivery: hostile status text in the line stays text', async () => {
+  const page = await chatPage();
+  const c = chatOf(page);
+  type(c, 'go');
+  c.send.click();
+  await settle();
+  const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
+  statusSnap(page, { status: { state: 'working', seen_ref: nonce, text: '<script>alert(1)</script>' + 'z'.repeat(200), at: iso(NOW + 1000) } });
+  const t = byClass(dline(page), 'dtext')[0];
+  assert.equal(t.children.length, 0);
+  assert.ok(t.textContent.startsWith('Coordinator · working: <script>alert(1)</script>'));
+  assert.equal(t.textContent.length, 'Coordinator · working: '.length + 80);
+  assert.equal(page.ids.coords.find((e) => e.tagName === 'SCRIPT').length, 0);
+});
+
+test('working: the status subscription is paused on Runs and resumes on Grid', async () => {
+  const page = await chatPage();
+  assert.equal(page.db.calls.subsBy[STATUS], 1);
+  page.ids['view-runs'].click();
+  assert.equal(page.db.calls.unsubsBy[STATUS], 1);
+  page.ids['view-grid'].click();
+  await settle();
+  assert.equal(page.db.calls.subsBy[STATUS], 2);
+});
+
+test('bubbles show the date too when a message is not from today', async () => {
+  const page = await chatPage();
+  chatSnap(page, [mirror('today', { at: iso(NOW - MIN) }), mirror('old', { at: iso(NOW - 3 * DAY) })]);
+  const [old, today] = bubbles(page).map((b) => byClass(b, 'at')[0].textContent);
+  assert.ok(old.length > today.length, `${old} | ${today}`);
+  assert.doesNotMatch(today, /[A-Za-z]{3} \d/);
+  assert.match(old, /[A-Za-z]{3} \d/, 'a month and day in front');
+});
+
+// ---- round 2: judge findings ----
+
+test('delivery: a working status for another task (no seen_ref) never shows as working, and still goes amber', async () => {
+  const page = await chatPage();
+  const c = chatOf(page);
+  type(c, 'hi');
+  c.send.click();
+  await settle();
+  statusSnap(page, { status: { state: 'working', text: 'Old task: judge round 2', at: iso(NOW + 30e3) } });
+  assert.equal(stage(page)[0], 'delivered');
+  page.setNow(NOW + 125e3);
+  statusSnap(page, { status: { state: 'working', text: 'Old task: pushing', at: iso(NOW + 120e3) } });
+  assert.equal(stage(page)[0], 'late');
+  // Seen is latched: a later step write without seen_ref keeps it working.
+  const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
+  statusSnap(page, { status: { state: 'working', text: 'Reading your message', seen_ref: nonce, at: iso(NOW + 124e3) } });
+  assert.equal(stage(page)[0], 'working');
+  statusSnap(page, { status: { state: 'working', text: 'Running tests', at: iso(NOW + 125e3) } });
+  assert.deepEqual(stage(page).slice(0, 2), ['working', 'Coordinator · working: Running tests']);
+  statusSnap(page, { status: { state: 'idle', at: iso(NOW + 126e3) } });
+  assert.equal(stage(page)[0], 'seen');
+});
+
+test('docsOf: a document snapshot with exists() as a method is read', async () => {
+  const page = await chatPage();
+  page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: () => true, metadata: { fromCache: false },
+    data: () => ({ status: { state: 'working', text: 'Method form', at: iso(NOW) } }) });
+  assert.equal(byClass(work(page), 'wtext')[0].textContent, 'Method form');
+  page.db.handlers(STATUS).next({ id: `chat-${TAIL}`, exists: () => false, data: () => undefined, metadata: {} });
+  assert.equal(work(page).hidden, true);
+});
+
+test('delivery: the reply clears the line even when Kyle\'s clock runs ahead of the master\'s', async () => {
+  const page = await chatPage();
+  chatSnap(page, [mirror('before', { text: 'earlier', at: iso(NOW - 20 * MIN) })]);
+  page.setNow(NOW + 10 * MIN);  // Kyle's clock is 10 minutes fast
+  const c = chatOf(page);
+  type(c, 'go');
+  c.send.click();
+  await settle();
+  const nonce = /#([a-z0-9]{6})\]/.exec(sentText(page))[1];
+  const earlier = mirror('before', { text: 'earlier', at: iso(NOW - 20 * MIN) });
+  // An older coordinator message, or one before Seen, doesn't clear it.
+  statusSnap(page, { status: { state: 'working', seen_ref: nonce, text: 'Reading', at: iso(NOW) } });
+  chatSnap(page, [mirror('k1', { from: 'kyle', text: 'go', ref: nonce, at: iso(NOW) }), earlier]);
+  assert.equal(stage(page)[0], 'working');
+  chatSnap(page, [mirror('r1', { text: 'Done.', at: iso(NOW + MIN) }), mirror('k1', { from: 'kyle', text: 'go', ref: nonce, at: iso(NOW) }), earlier]);
+  assert.equal(stage(page), null, 'cleared by the master-clock reply after the copy');
+  // An activity row is not a reply.
+  const again = await chatPage();
+  type(chatOf(again), 'x');
+  chatOf(again).send.click();
+  await settle();
+  const n2 = /#([a-z0-9]{6})\]/.exec(sentText(again))[1];
+  chatSnap(again, [mirror('a1', { kind: 'activity', text: 'Ran tests', at: iso(NOW + MIN) }),
+    mirror('k1', { from: 'kyle', text: 'x', ref: n2, at: iso(NOW) })]);
+  assert.equal(stage(again)[0], 'seen');
+});
+
+// ---- activity rows ----
+
+test('activity: one compact text-only row each; consecutive ones collapse into an expandable "N steps" row', async () => {
+  const page = await chatPage();
+  chatSnap(page, [
+    mirror('a4', { kind: 'activity', text: 'Started the judge', at: iso(NOW - MIN) }),
+    mirror('u1', { text: 'Building **round 2**', at: iso(NOW - 2 * MIN) }),
+    mirror('a3', { kind: 'activity', text: 'Pushed claude/x', at: iso(NOW - 3 * MIN) }),
+    mirror('a2', { kind: 'activity', text: '<img src=x onerror=alert(1)> **not bold** ' + 'w'.repeat(300), at: iso(NOW - 4 * MIN) }),
+    mirror('a1', { kind: 'activity', text: 'Ran tests · 151 passed', at: iso(NOW - 5 * MIN) }),
+  ]);
+  const kids = chatOf(page).log.children;
+  assert.deepEqual(kids.map((e) => e.className), ['acts', 'msg', 'act']);
+  const [group, , single] = kids;
+  const toggle = byClass(group, 'acts-toggle')[0];
+  const list = byClass(group, 'acts-list')[0];
+  assert.deepEqual([toggle.textContent, toggle.getAttribute('aria-expanded'), list.hidden], ['3 steps ▸', 'false', true]);
+  toggle.click();
+  assert.deepEqual([toggle.textContent, toggle.getAttribute('aria-expanded'), list.hidden], ['3 steps ▾', 'true', false]);
+  const rows = byClass(list, 'act');
+  assert.deepEqual(rows.map((r) => byClass(r, 'icon')[0].textContent), ['✓', '•', '✓']);
+  const hostile = byClass(rows[1], 'atext')[0];
+  assert.equal(hostile.children.length, 0, 'text only, no markdown');
+  assert.equal(hostile.textContent.length, 200);
+  assert.ok(hostile.textContent.includes('**not bold**'));
+  assert.equal(page.ids.coords.find((e) => e.tagName === 'IMG').length, 0);
+  assert.deepEqual([byClass(single, 'icon')[0].textContent, byClass(single, 'atext')[0].textContent], ['•', 'Started the judge']);
+  // Expanded stays expanded across a re-render.
+  runSnap(page, [runRow({ phase: 'judging' })]);
+  assert.equal(byClass(chatOf(page).log.children[0], 'acts-list')[0].hidden, false);
+});
+
+test('chat: the composer has an arrow Send button and the reply placeholder; fences get a text language label', async () => {
+  const page = await chatPage();
+  const c = chatOf(page);
+  assert.deepEqual([c.send.textContent, c.send.getAttribute('aria-label')], ['↑', 'Send']);
+  assert.equal(c.input.placeholder, 'Reply to the coordinator…');
+  const md = page.api.renderMarkdown('```python\nx = 1\n```\n```"><script>\ny\n```');
+  const [a, b] = md.children;
+  assert.deepEqual([a.dataset.lang, a.textContent], ['python', 'x = 1']);
+  assert.equal(b.dataset.lang, undefined, 'an odd info string gets no label');
 });
