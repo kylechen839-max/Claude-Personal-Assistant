@@ -129,6 +129,53 @@ Run `python -m assistant` for steps 3-8 and leave it running.
   - If your answer isn't heard: same mic/VAD settings as step 3 (it records
     the answer like a command).
 
+### 5b. Calendar colors, repeats, guests and invites (8 min)
+First run `pip install -r requirements.txt` and the Google sign-in once more
+(`python -m assistant.tools.google_auth`), and allow the two new read-only
+calendar permissions. Use test events only; delete them afterwards.
+- [ ] "Hey Claude, add Color Test tomorrow at 3 and make it Tomato."
+  - Should: the event shows red in Google Calendar (web and phone).
+- [ ] Make an event label in Google Calendar (an event's color menu, add a
+      label, e.g. "School"). Restart the assistant, then "Hey Claude, label
+      Color Test School."
+  - Should: the event shows the School label and its color.
+- [ ] "Hey Claude, make Color Test Basil." (from a label back to a color)
+  - Should: the label is gone and the event is green. Report if it keeps
+    the label or loses both.
+- [ ] "Hey Claude, add Repeat Test every Wednesday at 8 AM for 4 weeks."
+      Then "move just next week's Repeat Test to 9", then "move all of the
+      Repeat Tests to 10".
+  - Should: four Wednesdays; the first move changes one, the second moves
+    every one to 10:00 (the one you moved alone stays where you put it).
+    Then "move all of the Repeat Tests to Thursday": every one moves to
+    Thursday at 10.
+- [ ] "Hey Claude, delete every Repeat Test."
+  - Should: it asks "delete every Repeat Test, the whole series?"; say yes
+    and all four are gone.
+- [ ] "Hey Claude, remind me about Color Test 10 minutes before and at the
+      start."
+  - Should: Google Calendar shows two notifications, 10 minutes and 0
+    minutes ("at time of event").
+- [ ] "Hey Claude, add a Meet link to Color Test."
+  - Should: the event has a "Join with Google Meet" button.
+- [ ] Invite a second email address of yours: "Hey Claude, invite
+      <your other address> to Color Test."
+  - Should: it asks "send an invite for Color Test to <address>?" and
+    names the address; say yes, and the invite arrives at that address.
+- [ ] From the second address, invite your main account to an event. Then
+      "Hey Claude, what's on my calendar <that day>?" and "decline it".
+  - Should: it asks "decline <title> from <second address>?"; say yes. The
+    second account sees your "No". The guest list is otherwise unchanged.
+    Add a note ("decline it and tell them I'm away"): the question reads
+    the note out, and the second account sees it.
+- [ ] Move Color Test (with the second address still invited) to another
+      hour.
+  - Should: it moves, and the second address gets no update email (report
+    it if one arrives).
+- [ ] "Hey Claude, when am I free for an hour tomorrow?"
+  - Should: the gaps match your calendar (events marked "Free" don't
+    count).
+
 ## 6. Notion status (1 min)
 - [ ] "Hey Claude, what assignments are due this week?"
   - Should: matches the Upcoming view in Notion.

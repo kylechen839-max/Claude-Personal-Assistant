@@ -9,9 +9,9 @@ except to the services listed below, using your own keys.
 
 | Service | What is sent | When |
 |---|---|---|
-| **Anthropic** (Claude API) | What you say (as text, after local speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events, assignments, email you asked about, web pages) | Every turn |
+| **Anthropic** (Claude API) | What you say (as text, after local speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events with their colors, labels, guest counts and the first 300 characters of their notes, your calendars' names, guest addresses you ask to invite; assignments, email you asked about, web pages) | Every turn |
 | **Pinecone** (your index) | Short conversation summaries and notes you ask it to remember; search queries built from what you say | Before each reply (search) and after each conversation (summary) |
-| **Google Calendar** | Event reads and the changes you ask for | When you ask about or change your calendar |
+| **Google Calendar** | Event reads and the changes you ask for. After your spoken yes, Google emails the guests you invite or remove, and the organizer (with your note, if any) when you answer an invite; for other changes, moves and deletes the assistant asks Google not to email anyone (Google says it may still send some notices) | When you ask about or change your calendar |
 | **Gmail** (only if `[gmail]` is enabled) | Searches and reads you ask for; **drafts** you approve. Nothing is ever sent: the code blocks every send call | When you ask about email |
 | **Notion** | Assignment reads and status changes; lecture notes pages and assignments you add from them, if the lecture recorder is on | When you ask |
 | **Slack / Discord / GitHub** (only if `[teamchat]` is on) | Reads and searches you ask for, with your token; the message, issue or file text goes to Anthropic so Claude can sum it up, as with email. Nothing is ever posted. Slack direct messages are never passed to Claude or logged. A digest you approve is saved in your Notion. Logs hold only counts and service names. A family member's instance never uses team chat | When you ask about team chat |
@@ -97,8 +97,10 @@ keeps its own conversation history (`data/mom/history.sqlite`), sign-ins
 (`data/mom/web_sessions.json`) and log (`logs/mom.log`). It does not use your
 Notion, Pinecone memory or Google account, and it refuses to start if those
 settings are inherited from the shell. Her Google sign-in token is stored only
-on the PC (`data/mom/google_token.json`, written privately) and gives read
-access to her Gmail and Calendar plus creating drafts; nothing is ever sent.
+on the PC (`data/mom/google_token.json`, written privately) and lets the
+assistant read and change her Calendar, read her Gmail and create drafts. No email is ever
+sent by the assistant; Google itself emails the guests when she invites
+someone or answers an invite, after her spoken yes.
 Her requests go to Anthropic under your API key. To remove her Google access,
 delete that file and revoke the app in her Google account settings.
 

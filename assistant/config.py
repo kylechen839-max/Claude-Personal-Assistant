@@ -78,7 +78,10 @@ DEFAULTS: dict = {
     "calendar": {"enabled": True, "credentials": "credentials.json",
                  "token": "token.json", "calendar_id": "primary",
                  # write refreshed tokens back to token.json (never on a server)
-                 "save_token": True},
+                 "save_token": True,
+                 # your own names for event colors: name -> a Google color
+                 # (e.g. Basil) or one of your event labels
+                 "color_labels": {}},
     "gmail": {"enabled": True,  # uses the [calendar] credentials and token
               "max_summary": 15},   # most emails in one summary
     "notion": {"enabled": True,

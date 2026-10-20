@@ -116,6 +116,28 @@ def test_calendar_questions_in_chinese(zh):
     assert cal.describe_for_delete({"event_id": "x"}) == "要我删除这个日程吗？"
 
 
+def test_new_calendar_questions_in_chinese(zh):
+    from assistant.tools.calendar import GoogleCalendar
+    from tests.test_calendar_features import BY_ID, INVITE, OCCURRENCE
+    from tests.test_tools import make_service
+
+    service, _ = make_service(by_id={**BY_ID, "inv1": {**INVITE, "summary": "项目会议"}})
+    cal = GoogleCalendar(service=service, timezone="America/New_York")
+    assert cal.ask_for_create({"title": "学习小组", "start": "2026-10-20T14:30:00",
+                               "attendees": ["ana@uni.edu", "ben@uni.edu"]}) == \
+        "要我把“学习小组”的邀请发给ana@uni.edu、ben@uni.edu吗？"
+    assert cal.describe_for_rsvp({"event_id": "inv1", "response": "accepted"}) == \
+        "要我接受Prof. Smith发来的“项目会议”吗？"
+    assert cal.describe_for_delete({"event_id": OCCURRENCE["id"], "scope": "all"}) == \
+        "要我删除所有的“Lab meeting”，整个系列吗？"
+    assert cal.describe_for_update({"event_id": "inv1"}) == "要我修改“项目会议”吗？"
+    assert cal.ask_for_update({"event_id": "inv1",
+                               "remove_attendees": ["ana@uni.edu"]}) == \
+        "要我把ana@uni.edu从“项目会议”的邀请里移除吗？"
+    assert cal.describe_for_rsvp({"event_id": "nope", "response": "accepted"}) == \
+        "要我回复这个邀请吗？"
+
+
 def test_gmail_draft_question_in_chinese(zh):
     from tests.test_gmail import inbox
 

@@ -37,6 +37,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_cloud.py` | 78 | cloud server: auth wall, lockouts, proxy headers, limits |
 | `test_server_profile.py` | 22 | server profile, Google secrets from env, server `--check` |
 | `test_end_to_end.py` | 3 | "Hey Claude, what's on my calendar tomorrow?" |
+| `test_calendar_features.py` | 39 | calendar colors, labels, repeats, guests, RSVP, free time, other calendars |
 | `test_docs.py` | 25 | docs match the code |
 | `test_sentences.py` | 17 | voice mode: sentence splitter |
 | `test_voice.py` | 33 | voice mode: turn pipeline, barge-in |
@@ -2920,6 +2921,154 @@ chunk(s) + 0%" on almost every turn, each turn then "replied 0 chars".
   (master b1e40b9: 2112 passed, 48 skipped); JS files 271 pass (master:
   252).
 
+## Google Calendar: colors, labels, repeats, guests, invites, free time (2026-10-20)
+
+Kyle asked for "all the features that Google Calendar offers", starting
+with event colors and the color labels. `tools/calendar.py` now has 8
+tools (the 4 existing names are kept; `preflight.py` and the family tests
+use them):
+- `list_calendar_events`: also search words (`query`, up to 100
+  characters) and `calendar` (a name, an id, or "all": up to 10 calendars,
+  50 events each, merged by time; one unreadable calendar is skipped and
+  counted). Each event now says its color or label name, whether it
+  repeats, Kyle's own RSVP, the number of other guests, the Meet link,
+  "free" when it doesn't block time, and the first 300 characters of its
+  notes.
+- `create_calendar_event` and the new `update_calendar_event`: color
+  (Google's 11 classic colors by name, plain words like "red", or a bare
+  colorId), Google's named **event labels** (`eventLabelId` with
+  `eventLabelVersion=1`, sent only when setting a label, since that
+  parameter without a label removes it; switching from a label to a
+  classic color clears the label first, then sets `colorId`), repeat rules
+  (RRULE/EXDATE/RDATE, 5 lines of 200 characters; timed repeats need a
+  named time zone, else a clear error), reminders (popup minutes 0-40320,
+  at most 5; `[0]` is a reminder at the start, `[]` none, omitted the
+  calendar default), guests (20 per call), a Meet link (fresh `requestId`
+  per call, `conferenceDataVersion=1`), busy/free, visibility, and on
+  updates title/place/notes, removing guests and "guests can modify".
+- `move_calendar_event`, `update_calendar_event`, `delete_calendar_event`:
+  `scope` "this" (the occurrence id that the listing returns) or "all"
+  (the series, through `recurringEventId`). A series move shifts the
+  first occurrence by the same wall-clock amount, so 10 AM stays 10 AM
+  across DST; moving a "BYDAY" series to another weekday is refused with
+  a hint to change the repeat instead.
+- New `respond_to_calendar_invite` (accepted/declined/tentative, optional
+  note): the full guest list goes back with only Kyle's entry changed.
+- New `find_free_time` (up to 14 days, a minimum length, from/to hours):
+  built from events.list (no new scope). Events shown as free and declined
+  invites don't count, all-day busy events block their day, and the math
+  is in UTC so DST days come out right.
+- New `list_calendars` (names, ids, main, access role, and the color
+  choices: classic, Kyle's labels, `[calendar] color_labels`). Only
+  registered when the token has the two new read-only scopes.
+
+Color names resolve in this order: `[calendar] color_labels` aliases (new
+setting, e.g. `{ School = "Basil" }`), the calendar's label names,
+Google's classic names, everyday words, a colorId. An unknown color is an
+error listing the choices. Labels and the calendar list are cached for 5
+minutes (20 entries).
+
+Scopes: `CALENDAR_EXTRA_SCOPES` (`calendar.calendarlist.readonly`,
+`calendar.calendars.readonly`) are added to the sign-in, but
+`CALENDAR_SCOPES` (what `get_credentials` requires) is still only
+`calendar.events`, so existing tokens keep working. `cli.register_google`
+passes `extras` and Kyle's `color_labels`; without the scopes it prints a
+re-sign-in hint, `--check` shows "Calendar labels access", and label
+names, calendars by name and `list_calendars` wait. `family.py` gives a
+member the extras only if her own token has them, and never Kyle's
+`color_labels`. `requirements.txt`: `google-api-python-client>=2.199`
+(the first release with `eventLabelVersion`).
+
+Safety: adding or removing guests and answering invites always ask, naming
+the addresses (or the organizer); Google is told to email guests
+(`sendUpdates="all"`) only on those calls, otherwise `"none"`. Deleting a
+series asks "delete every ..., the whole series?". Other changes ask when
+untrusted text is in the conversation. Event notes, other people's
+invites, RSVP results and calendars Kyle doesn't own (`accessRole` not
+"owner", or an id not in his list) mark results untrusted. INFO logs have
+counts and field names only. SECURITY.md has the details.
+
+Not covered (the README says so): focus time, out of office and working
+location (work or school accounts only), attachments and quickAdd, and
+creating or renaming labels and calendars.
+
+Tests: `tests/test_calendar_features.py` (26, new) covers every option
+above on a `MagicMock` client with real shapes (invites without
+`organizer.self`, occurrences with `recurringEventId` and
+`originalStartTime`, `labelProperties.eventLabels`, `calendarList` items
+with `accessRole`), the DST cases (a series move across the November
+change; free time on Nov 1, when midnight to 6 AM is seven hours), a
+caplog test that the new tools log no titles, notes or addresses at INFO,
+and a real-shape guard: the calls the tools make are replayed on
+`googleapiclient.discovery.build("calendar", "v3", static_discovery=True)`
+and constructed, never executed (an unknown parameter raises TypeError).
+`test_security.py` +6 (update in INJECTED_CALLS, invites ask without web
+content, RSVP asks, series delete says "every", a series update after a
+fetched page asks), `test_i18n.py` +1 (the Chinese questions),
+`test_family_google.py` +1 (flags, the extra-scope gate, no
+`color_labels` leak, no "Kyle" in the schemas), `test_gmail.py` +1
+(`test_old_token_keeps_calendar_core_tools`; the two sign-in scope pins
+now include the read-only extras), `test_doctor.py` +1. `make_service`
+in `test_tools.py` gained `by_id`, labels, the calendar list and
+instances. With the source change reverted, all 38 new or changed tests
+fail; separate mutations (no non-owner taint, reminder 0 rejected, RSVP
+dropping other guests, free time in wall-clock time, no
+`eventLabelVersion`, no invite question) are each caught.
+- Counts (Linux sandbox, Python 3.13): 2160 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped). JS unchanged. Not checked against
+  the real Google API (mocks only); MANUAL_TEST 5b covers that.
+
+### Round 2 (judge findings)
+
+1. A series move from an occurrence that had been moved on its own
+   shifted by the wrong amount (Tuesdays at 10, Nov 10 moved alone to
+   2 PM, "move all to 11" set the series to 7 AM). The shift and the
+   day check now measure from `originalStartTime` (falling back to
+   `start`).
+2. The invite and remove questions said "and 1 more" past three
+   addresses, so an injected 4th guest could hide. They now name every
+   address (at most 20 per call), in English and Chinese. When the event
+   can't be read, they still name them ("an invite for that event to ...").
+3. The RSVP question didn't read out the note that Google emails to the
+   organizer. New `cal_rsvp_note` / `cal_rsvp_note_any` (EN, ZH): "...and
+   send the note: {comment}?".
+4. A weekly series couldn't move to another weekday, and the refusal
+   pointed at a tool that can't do it. `follow_new_day`: a one-weekday
+   BYDAY is rewritten to the new weekday in the same patch. Several
+   weekdays, an nth weekday (`2TU`), BYMONTHDAY/BYYEARDAY/BYMONTH/BYWEEKNO/
+   BYSETPOS with a day change, and EXDATE/RDATE with any shift (their
+   dates would stop matching) are refused plainly: "Say the new days and
+   time and I'll make a new series, then delete the old one." A rule
+   with no BY part follows the start by itself.
+5. `find_free_time` offered hours already past. It now starts at the
+   turn's "now" (`timeutil.now`, so TURN_NOW pins it), rounded up to the
+   next 5 minutes, and skips days that are over.
+6. Bad input reached the log through the ERROR traceback (`Not an email
+   address: 'Ana Lopez'`, the reminder value, the unknown color). The
+   messages no longer repeat the value ("Guest 2 is not an email
+   address").
+7. PRIVACY.md: the Calendar row says Google emails invited or removed
+   guests and organizers (with the note) after a spoken yes, and the
+   Anthropic row lists colors, labels, guest counts, 300 characters of
+   notes, calendar names and guest addresses. The family paragraph no
+   longer says "nothing is ever sent".
+- Also: move and update results are marked untrusted on a calendar Kyle
+  doesn't own; if the second step of a label-to-color change fails, the
+  error says "the label was removed but the color wasn't set"; README,
+  SECURITY and MANUAL_TEST say moves and deletes don't ask Google to email
+  guests (Google's docs say some notices may still go out).
+- Tests: `test_calendar_features.py` 39 (+13): the judge's probes as
+  tests with the correct expectations (an already-moved occurrence; a
+  weekday move rewriting BYDAY, replacing round 1's "refused"
+  expectation), each refused rule kind (5 cases), EXDATE refused and a
+  daily rule following, every address named (6 guests, EN and ZH), the
+  RSVP note, free time with a pinned clock, a caplog test over the
+  formatted ERROR tracebacks, taint on another person's calendar, and the
+  label message. A file-wide fixture pins TURN_NOW so free time never
+  reads the real clock. Each change undone alone fails its test
+  (and only its own); all of round 2 undone fails all 14.
+- Counts (Linux sandbox, Python 3.13): 2173 passed, 48 skipped (master
+  f1eb136: 2124 passed, 48 skipped).
 ## Team chat connectors: Slack, Discord, GitHub (off by default)
 
 Kyle asked for connectors where Claude "can look through something like a

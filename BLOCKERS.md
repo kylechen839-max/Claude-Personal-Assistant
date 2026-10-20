@@ -81,6 +81,26 @@ Only what is still open for Kyle. None of it blocks the code.
       4. Copy the new `token.json` to the Pi, or paste its contents into
          `GOOGLE_TOKEN_JSON` on the cloud host.
       `python -m assistant --check` shows "Gmail access: granted" afterwards.
+- [ ] **Google sign-in again for calendar labels and other calendars (one
+      time, ~2 min).** The fuller calendar tools (colors, repeats, guests,
+      invites, free time) work with the current `token.json`; Google's
+      named event labels, other calendars by name and "which calendars do I
+      have?" need two more read-only permissions:
+      1. On the PC and the Pi: `pip install -r requirements.txt` (needs
+         `google-api-python-client` 2.199+ for labels; the automatic
+         updater skips updates that change requirements).
+      2. On the PC: `python -m assistant.tools.google_auth` and accept the
+         new "See the list of Google calendars you're subscribed to" and
+         "See the title, description, default time zone ... of your
+         calendars" boxes (read-only). (OAuth consent screen -> Data access:
+         adding `calendar.calendarlist.readonly` and
+         `calendar.calendars.readonly` is optional while the app is in
+         Testing.)
+      3. Copy the new `token.json` to the Pi, or paste its contents into
+         `GOOGLE_TOKEN_JSON` on the cloud host.
+      `python -m assistant --check` shows "Calendar labels access: granted"
+      afterwards. Family members get the new boxes the next time they
+      press "Connect Google account".
 - [ ] **Lecture Notes database (only if the first lecture job fails with
       "Notion refused to create the Lecture Notes database").** The
       assistant creates it automatically inside "Fall 2026 Assignments". If

@@ -141,6 +141,9 @@ console too.
 Things to try: "What's on my calendar tomorrow?", "What did we talk about yesterday?", "Move my dentist
 appointment to Friday at 10", "What assignments are due this week?",
 "Mark Homework 6 as done", "Delete the study group tomorrow",
+"Make my dentist appointment red", "Add gym every Tuesday and Thursday at
+7 AM", "When am I free for an hour tomorrow?", "Accept the project sync
+invite",
 "What's the weather this afternoon?", "Who won the Braves game last night?",
 "What does this page say: emory.edu/...", "Open YouTube",
 "Pull up the Canvas page for Classical Mechanics".
@@ -825,6 +828,55 @@ nothing). After the first Render deploy, the log's first five "Proxy check"
 lines show what Render's proxy sends; see BLOCKERS.md.
 
 ## Email, notes, lectures and homework help
+
+### Google Calendar by voice
+Beyond "what's on my calendar", the calendar tools cover most of what the
+Google Calendar app does:
+
+- **Colors and labels.** "Make it red", "Color the lab meeting Basil",
+  "Label it School". Google's 11 event colors work by name (Lavender, Sage,
+  Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil,
+  Tomato) or plain words like red or light blue. The named **event labels**
+  you made in Google Calendar work by their names too. Labels are read
+  from Google; create and rename them in the Google Calendar app.
+  `[calendar] color_labels` in `config.toml` adds your own words, e.g.
+  `color_labels = { Homework = "School", Gym = "Tangerine" }`.
+- **Repeating events.** "Add gym every Tuesday and Thursday at 7 AM for
+  ten weeks". To move, change or delete a repeating event, say whether you
+  mean just this one or all of them; deleting a whole series asks "delete
+  every ...?" first. Moving a weekly series to another weekday works; a
+  series on several weekdays or fixed dates of the month can only change
+  its time (otherwise it offers to make a new series).
+- **Reminders, busy/free and privacy.** "Remind me 10 minutes before and
+  at the start", "no reminders", "show me as free", "make it private".
+- **Guests and Meet.** "Invite ana@uni.edu", "Add a Meet link". Google
+  emails an invite, so adding or removing guests always asks first and
+  names every address. Moving or deleting an event doesn't ask Google to
+  email its guests; tell them yourself, or do it in Google Calendar.
+- **Invites.** "Accept the project sync invite", "Tell them maybe". This
+  always asks first, and reads out any note it would send.
+- **Free time and search.** "When am I free for an hour tomorrow
+  afternoon?", "When is my next dentist appointment?"
+- **Other calendars.** "What's on my Classes calendar?", "What's on all my
+  calendars this week?" (up to 10 calendars), "Which calendars do I have?"
+
+Labels and other calendars need two read-only permissions that a
+`token.json` from before this feature doesn't have. Everything else keeps
+working without them; to add them, sign in once more (the startup line and
+`--check` remind you):
+
+```powershell
+python -m assistant.tools.google_auth            # or add --headless without a browser
+```
+
+This needs `google-api-python-client` 2.199 or newer (event labels); the
+automatic updater doesn't install new requirements, so run
+`pip install -r requirements.txt` on the PC and the Pi after updating.
+
+Not covered: focus time, out of office and working location (Google only
+allows them on work or school accounts), file attachments, and Google's
+"quick add" text box. Creating, renaming or deleting labels and calendars
+is left to the Google Calendar app.
 
 ### Email triage by voice (Gmail)
 "Anything important in my email?", "Read the one from Professor Smith",

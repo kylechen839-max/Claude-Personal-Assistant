@@ -382,12 +382,62 @@ def test_google_auth_cli_flags(monkeypatch, tmp_path):
     assert called[-1] == (("credentials.json", "token.json"), google_auth.SCOPES)
     (tmp_path / "config.toml").write_text("[gmail]\nenabled = false\n")
     google_auth.main()
-    assert called[-1][1] == google_auth.CALENDAR_SCOPES  # no mail access asked
+    # no mail access asked
+    assert called[-1][1] == (google_auth.CALENDAR_SCOPES
+                             + google_auth.CALENDAR_EXTRA_SCOPES)
+    assert not any("gmail" in s for s in called[-1][1])
 
 
 def test_sign_in_scopes_follow_the_gmail_setting():
-    assert google_auth.sign_in_scopes(False) == [google_auth.CALENDAR_SCOPE]
+    assert google_auth.sign_in_scopes(False) == [
+        google_auth.CALENDAR_SCOPE,
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.calendars.readonly"]
     assert google_auth.sign_in_scopes(True) == google_auth.SCOPES
+    # the extras are read-only; what every token must have is unchanged
+    assert all(s.endswith(".readonly") for s in google_auth.CALENDAR_EXTRA_SCOPES)
+    assert google_auth.CALENDAR_SCOPES == [google_auth.CALENDAR_SCOPE]
+
+
+def test_old_token_keeps_calendar_core_tools(tmp_path, monkeypatch):
+    """A token from before the calendar list/labels scopes: the core
+    Calendar tools still load (no MissingScopes), list_calendars is left
+    off with a hint, and doctor says how to grant it."""
+    from google.oauth2.credentials import Credentials
+
+    monkeypatch.delenv(google_auth.TOKEN_ENV, raising=False)
+    token = tmp_path / "token.json"
+    old = {**OLD_TOKEN, "scopes": [google_auth.CALENDAR_SCOPE]
+           + google_auth.GMAIL_SCOPES}
+    token.write_text(json.dumps(old))
+    cfg = load_config(None, None)
+    cfg["calendar"]["token"] = str(token)
+    cfg["calendar"]["credentials"] = str(tmp_path / "none.json")
+    cfg["web"]["enabled"] = cfg["notion"]["enabled"] = False
+    said = []
+    reg = cli.build_tools(cfg, output_fn=said.append)
+    for name in ("list_calendar_events", "create_calendar_event",
+                 "move_calendar_event", "update_calendar_event",
+                 "delete_calendar_event", "respond_to_calendar_invite",
+                 "find_free_time", "email_summary"):
+        assert reg.has(name), name
+    assert not reg.has("list_calendars")
+    assert any("Calendar labels" in s and google_auth.SIGN_IN_COMMAND in s
+               for s in said)
+    check = doctor.check_calendar_scopes(cfg)[0]
+    assert not check.ok and google_auth.SIGN_IN_COMMAND in check.detail
+    # the core tools' credentials still load from the old token
+    monkeypatch.setattr(Credentials, "valid", property(lambda self: True))
+    creds = google_auth.get_credentials("c.json", token, environ={})
+    assert google_auth.CALENDAR_SCOPE in creds.scopes
+
+    token.write_text(json.dumps({**OLD_TOKEN, "scopes": google_auth.SCOPES}))
+    said.clear()
+    reg = cli.build_tools(cfg, output_fn=said.append)
+    assert reg.has("list_calendars") and not any("Calendar labels" in s for s in said)
+    assert doctor.check_calendar_scopes(cfg)[0].ok
+    cal = reg.tools["list_calendars"].handler.__self__
+    assert cal.extras and cal.color_labels == {}
 
 
 def test_headless_sign_in_keeps_the_requested_scopes(tmp_path):
