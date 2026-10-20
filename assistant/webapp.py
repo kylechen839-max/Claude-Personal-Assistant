@@ -137,6 +137,11 @@ def read_cookie(token: str, value: str | None, epoch: str = "") -> str | None:
     return None
 
 
+# SessionStore.user() of a session that isn't listed (signed out, removed or
+# expired a moment ago): never the owner, and no family member either
+GONE = "!gone"
+
+
 class SessionStore:
     """Signed-in browsers, kept on the server so a cookie can be revoked.
 
@@ -145,7 +150,10 @@ class SessionStore:
     epoch that every cookie signature includes. Sessions unused for
     `max_age` seconds expire. With `path` the list survives restarts (a small
     JSON file, rewritten on sign-in/out and at most daily on use); without it
-    a restart signs everyone out."""
+    a restart signs everyone out.
+
+    A session made with `create(user_id)` belongs to that family member
+    (family.py); all others are the owner's."""
 
     def __init__(self, path: str | Path | None = None,
                  max_age: float = COOKIE_MAX_AGE, max_sessions: int = 100,
@@ -157,6 +165,7 @@ class SessionStore:
         self.lock = threading.Lock()
         self.epoch = secrets.token_hex(8)
         self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
+        self.users: dict[str, str] = {}  # sid -> family user id (absent = owner)
         self._saved_at: dict[str, float] = {}
         self._unsaved = False  # a save failed; retry before trusting the file
         # failover access tokens signed in at or before this unix time are
@@ -172,6 +181,8 @@ class SessionStore:
             self.epoch = str(data["epoch"])
             self.sessions = {str(k): float(v) for k, v in data["sessions"].items()}
             self._saved_at = dict(self.sessions)
+            self.users = {str(k): str(v) for k, v in data.get("users", {}).items()
+                          if str(k) in self.sessions}
             self.tokens_not_before = int(data.get("tokens_not_before", 0))
         except Exception as e:  # unreadable: start over (everyone signs in again)
             log.warning("Ignoring unreadable web session file %s: %s", self.path, e)
@@ -182,18 +193,15 @@ class SessionStore:
     def _save(self) -> None:
         if not self.path:
             return
+        from assistant.tools.google_auth import write_private
+
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            tmp.write_text(json.dumps({"epoch": self.epoch,
-                                       "sessions": self.sessions,
-                                       "tokens_not_before": self.tokens_not_before}),
-                           encoding="utf-8")
-            try:
-                os.chmod(tmp, 0o600)
-            except OSError:
-                pass
-            tmp.replace(self.path)
+            # private and atomic (a unique temp file, retried on Windows)
+            write_private(self.path, json.dumps({
+                "epoch": self.epoch, "sessions": self.sessions,
+                "users": self.users,
+                "tokens_not_before": self.tokens_not_before}))
             self._saved_at = dict(self.sessions)
             if self._unsaved:
                 log.warning("Web sessions saved to %s again", self.path)
@@ -205,15 +213,42 @@ class SessionStore:
                       "be undone by a restart until this works", self.path, e)
             self._unsaved = True
 
-    def create(self) -> str:
+    def create(self, user_id: str | None = None) -> str:
+        """A new signed-in session: the owner's, or `user_id`'s (family)."""
         sid = secrets.token_urlsafe(16)
         with self.lock:
             self.sessions[sid] = self.clock()
+            if user_id is not None:
+                self.users[sid] = user_id
             while len(self.sessions) > self.max_sessions:
                 oldest = min(self.sessions, key=self.sessions.get)
-                del self.sessions[oldest]
+                self._drop(oldest)
             self._save()
         return sid
+
+    def _drop(self, sid: str) -> bool:
+        self.users.pop(sid, None)
+        return self.sessions.pop(sid, None) is not None
+
+    def user(self, sid: str | None) -> str | None:
+        """The family member this session belongs to; None = the owner's;
+        GONE for one that isn't listed (e.g. removed between the cookie
+        check and this call), so it fails closed instead of counting as
+        the owner's. Bearer and access-token sessions: WebAuth.user_of."""
+        with self.lock:
+            if sid and sid in self.users:
+                return self.users[sid]
+            return None if sid and sid in self.sessions else GONE
+
+    def revoke_user(self, user_id: str) -> list[str]:
+        """Sign out every session of one family member; returns their ids."""
+        with self.lock:
+            sids = [sid for sid, uid in self.users.items() if uid == user_id]
+            for sid in sids:
+                self._drop(sid)
+            if sids:
+                self._save()
+        return sids
 
     def valid(self, sid: str | None) -> bool:
         """Is this session signed in? Counts as use (pushes back expiry)."""
@@ -227,7 +262,7 @@ class SessionStore:
             if last is None:
                 return False
             if now - last > self.max_age:
-                del self.sessions[sid]
+                self._drop(sid)
                 self._save()
                 return False
             self.sessions[sid] = now
@@ -243,7 +278,7 @@ class SessionStore:
 
     def revoke(self, sid: str) -> None:
         with self.lock:
-            if self.sessions.pop(sid, None) is not None:
+            if self._drop(sid):
                 self._save()
 
     def revoke_tokens(self, not_before: int) -> None:
@@ -253,11 +288,16 @@ class SessionStore:
             self._save()
 
     def revoke_all(self) -> list[str]:
-        """Sign out every browser; returns the ids that were signed in."""
+        """Sign out every one of the owner's browsers; returns their ids.
+        Family members stay signed in (they have no token to sign in again
+        with; remove them to cut them off). The cookie epoch is rotated
+        when nobody else is left signed in."""
         with self.lock:
-            sids = list(self.sessions)
-            self.sessions.clear()
-            self.epoch = secrets.token_hex(8)
+            sids = [sid for sid in self.sessions if sid not in self.users]
+            for sid in sids:
+                self._drop(sid)
+            if not self.sessions:
+                self.epoch = secrets.token_hex(8)
             self._save()
         return sids
 
@@ -553,10 +593,16 @@ class PendingConfirm:
 class Session:
     """One browser's conversation and the turn that is running in it."""
 
-    def __init__(self, sid: str, chat, registry: ToolRegistry, now: float):
+    def __init__(self, sid: str, chat, registry: ToolRegistry, now: float,
+                 user: str | None = None, history=None):
         self.sid = sid
         self.chat = chat
         self.registry = registry
+        # None: the owner (WEB_TOKEN). Else a family member's id (family.py),
+        # whose conversations use their own tools and `history` store only.
+        self.user = user
+        self.history = history
+        self.language = getattr(chat, "language", "en")  # "en" or "zh"
         self.last_active = now
         self.events: queue.Queue = queue.Queue()
         self.busy = threading.Lock()
@@ -592,10 +638,14 @@ class WebAssistant:
                  transcriber, tts, tools: ToolRegistry | None = None,
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
                  max_sessions: int = 20, clock=time.monotonic,
-                 history=None, memory=None):
+                 history=None, memory=None, family=None):
         self.chat_factory = chat_factory
         self.history = history  # a HistoryStore (conversation history) or None
         self.memory = memory    # PineconeMemory, for semantic search and deletes
+        self.family = family    # family.Family (invited people), or None
+        # sid -> family user id or None (owner); create_app sets it to the
+        # session store's user()
+        self.user_of: Callable[[str], str | None] = lambda sid: None
         self.transcriber = transcriber
         self.tts = tts
         self.tools = tools or ToolRegistry()
@@ -605,7 +655,9 @@ class WebAssistant:
         self.clock = clock
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
-        self.replies: OrderedDict[str, str] = OrderedDict()  # id -> text to speak
+        # id -> (session id, text to speak, language): only that session
+        # may fetch it
+        self.replies: OrderedDict[str, tuple] = OrderedDict()
         self.audio_cache: OrderedDict[str, bytes] = OrderedDict()
         self._ids = itertools.count(1)
         self._stt_lock = threading.Lock()
@@ -618,8 +670,16 @@ class WebAssistant:
             self._tts_pool.submit(_warm_up, tts)
 
     # sessions
-    def session(self, sid: str) -> Session:
+    def session(self, sid: str) -> Session | None:
+        """This browser's conversation (made on first use). None for a family
+        member who is no longer listed."""
         ended = []
+        user = self.user_of(sid)  # webapp.GONE (signed out): no session
+        ctx = None
+        if user is not None:
+            ctx = self.family.context(user) if self.family is not None else None
+            if ctx is None:
+                return None
         with self.lock:
             s = self.sessions.get(sid)
             if s is None:
@@ -629,20 +689,54 @@ class WebAssistant:
                                  key=lambda x: x.last_active, default=None)
                     if oldest is not None:
                         ended.append(self.sessions.pop(oldest.sid))
-                s = self._new_session(sid)
+                s = self._new_session(sid, user, ctx)
                 self.sessions[sid] = s
         for old in ended:
             self._end(old)
+        if user is not None and self.family.get(user) is None:
+            # removed while this was being made (after drop_user ran)
+            with self.lock:
+                if self.sessions.get(sid) is s:
+                    del self.sessions[sid]
+            return None
         return s
 
-    def _new_session(self, sid: str) -> Session:
+    def _new_session(self, sid: str, user: str | None = None, ctx=None) -> Session:
         holder: dict = {}
-        registry = SessionTools(self.tools,
+        # a family member's own tools (web only), never the owner's
+        registry = SessionTools(ctx.registry if ctx is not None else self.tools,
                                 confirm=lambda q: self._confirm(holder["s"], q),
                                 emit=lambda e: holder["s"].emit(e))
-        s = Session(sid, self.chat_factory(registry), registry, self.clock())
+        if ctx is not None:
+            s = Session(sid, ctx.chat_factory(registry), registry, self.clock(),
+                        user=user, history=ctx.history)
+        else:
+            s = Session(sid, self.chat_factory(registry), registry, self.clock(),
+                        history=self.history)
         holder["s"] = s
         return s
+
+    def history_of(self, s: Session):
+        """(history store, memory) a session may see: its own family store
+        and no memory, or the owner's."""
+        if s.user is not None:
+            return s.history, None
+        return self.history, self.memory
+
+    def drop_user(self, user: str) -> list[Session]:
+        """Forget a removed family member's conversations without saving or
+        summarizing them (their history is being deleted)."""
+        with self.lock:
+            gone = [x for x in self.sessions.values() if x.user == user]
+            for x in gone:
+                self.sessions.pop(x.sid, None)
+        for x in gone:
+            if x.pending:
+                x.pending.answered.set()  # a waiting yes/no is a no
+            abort = getattr(x.chat, "abort", None)
+            if callable(abort):  # stop a reply being streamed
+                abort()
+        return gone
 
     def reap(self) -> int:
         """End conversations idle longer than the timeout. Returns how many."""
@@ -713,6 +807,8 @@ class WebAssistant:
             if s.thread:
                 s.thread.join(timeout=10)
             self._end(s)
+        if self.family is not None:
+            self.family.close()  # family members' history files
         self._tts_pool.shutdown(wait=False)
 
     # turns
@@ -775,7 +871,7 @@ class WebAssistant:
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
-                      "audio": f"/api/audio/{self.remember(text)}",
+                      "audio": f"/api/audio/{self.remember(text, s)}",
                       "ended": ended})
 
     def _confirm(self, s: Session, question: str) -> bool:
@@ -783,7 +879,7 @@ class WebAssistant:
         pending = PendingConfirm(question, stream=s.listener is not None)
         s.pending = pending
         s.emit({"type": "confirm", "question": question, "id": pending.id,
-                "audio": f"/api/audio/{self.remember(question)}"})
+                "audio": f"/api/audio/{self.remember(question, s)}"})
         answered = pending.answered.wait(self.confirm_timeout)
         s.pending = None
         if not answered:
@@ -882,21 +978,28 @@ class WebAssistant:
         """`text` spoken by the configured TTS engine, as WAV bytes."""
         return self._tts_pool.submit(render_wav, self.tts, text).result(timeout=120)
 
-    def remember(self, text: str) -> str:
+    def remember(self, text: str, session: Session | None = None) -> str:
+        """An id for /api/audio/<id>, which only `session` may fetch."""
         rid = f"{next(self._ids)}-{secrets.token_urlsafe(6)}"
+        sid = session.sid if session is not None else None
+        lang = session.language if session is not None else None
         with self.lock:
-            self.replies[rid] = text
+            self.replies[rid] = (sid, text, lang)
             while len(self.replies) > 50:
-                self.replies.popitem(last=False)
+                rid_old, _ = self.replies.popitem(last=False)
+                self.audio_cache.pop(rid_old, None)
         return rid
 
-    def audio_for(self, rid: str) -> bytes | None:
+    def audio_for(self, rid: str, session: Session | None = None) -> bytes | None:
+        """The reply's WAV; None if unknown or another session's."""
         with self.lock:
+            entry = self.replies.get(rid)
+            if entry is None or (entry[0] is not None and (
+                    session is None or entry[0] != session.sid)):
+                return None
             if rid in self.audio_cache:
                 return self.audio_cache[rid]
-            text = self.replies.get(rid)
-        if text is None:
-            return None
+            text = entry[1]
         data = self.synthesize(text)
         with self.lock:
             self.audio_cache[rid] = data
@@ -1034,6 +1137,14 @@ class WebAuth:
 
             log_.append([revoke_event(now, role)])
 
+    def user_of(self, sid: str | None) -> str | None:
+        """Whose session this is: None = the owner (WEB_TOKEN as bearer, a
+        failover access token, or an owner's cookie session); else a family
+        member's id, or GONE (not signed in any more, never the owner)."""
+        if sid and (sid == self.bearer_sid or sid in self.token_sessions):
+            return None
+        return self.store.user(sid)
+
     def session_for(self, conn) -> Session | None:
         sid = self.sid(conn)
         return self.assistant.session(sid) if sid else None
@@ -1059,6 +1170,31 @@ def require_session(conn: HTTPConnection):
             raise WebSocketException(code=1008)
         raise HTTPException(401, "not signed in")
     return session
+
+
+def require_owner(conn: HTTPConnection):
+    """FastAPI dependency: like require_session, but only for the owner
+    (WEB_TOKEN). A family member's session gets 404, as if the route
+    didn't exist (Kyle's Notion, lecture notes, tutor, invites)."""
+    from fastapi import HTTPException, WebSocketException
+
+    session = require_session(conn)
+    if session.user is not None:
+        if conn.scope["type"] == "websocket":
+            raise WebSocketException(code=1008)
+        raise HTTPException(404, "not found")
+    return session
+
+
+def page_tag(language: str = "en", google: bool = False) -> str:
+    """The page's <html> tag: lang="zh-CN" makes i18n.js translate it,
+    data-google shows the "connect Google" button (google_web.py). "" = the
+    file as it is."""
+    zh = str(language or "en").lower().startswith("zh")
+    if not (zh or google):
+        return ""
+    return (f'<html lang="{"zh-CN" if zh else "en"}"'
+            f'{" data-google" if google else ""}>')
 
 
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
@@ -1099,6 +1235,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         security_headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     store = SessionStore(sessions_file)
     web = WebAuth(assistant, token, allowed_origins, trusted_proxy, limiter, store)
+    family = getattr(assistant, "family", None)  # family.Family, or None
+    if hasattr(assistant, "user_of"):
+        assistant.user_of = web.user_of  # which family member a session is
 
     @asynccontextmanager
     async def lifespan(app):
@@ -1232,27 +1371,37 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     def unauthorized():
         return error("not signed in", 401)
 
-    # --- public: the page, PWA files, health check ---
-    # lang="zh-CN": i18n.js translates the page; data-google: it shows the
-    # "connect Google" button (google_web.py)
-    zh_page = str(language or "en").lower().startswith("zh")
-    page_tag = ("" if not (zh_page or google is not None) else
-                f'<html lang="{"zh-CN" if zh_page else "en"}"'
-                f'{" data-google" if google is not None else ""}>')
+    def owner_of(request) -> Session | None:
+        """session_of for owner-only routes: 404 for a family member."""
+        from fastapi import HTTPException
 
+        s = session_of(request)
+        if s is not None and s.user is not None:
+            raise HTTPException(404, "not found")
+        return s
+
+    # --- public: the page, PWA files, health check ---
     @app.get("/")
-    def index():
-        if not page_tag:
+    def index(request: Request):
+        # in the language of whoever is signed in: a family member's own,
+        # else [assistant] language; only the owner gets "connect Google"
+        sid = web.sid(request) if family is not None else None
+        user = family.get(web.user_of(sid)) if sid else None
+        tag = (page_tag(user["language"]) if user is not None
+               else page_tag(language, google is not None))
+        if not tag:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        return Response(html.replace('<html lang="en">', page_tag, 1),
-                        media_type="text/html; charset=utf-8")
+        return Response(html.replace('<html lang="en">', tag, 1),
+                        media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"})
 
     for name, media in (("app.js", "text/javascript"), ("history.js", "text/javascript"),
                         ("app.css", "text/css"), ("sw.js", "text/javascript"),
                         ("update-watch.js", "text/javascript"),
                         ("i18n.js", "text/javascript"),
-                        ("backend-router.js", "text/javascript")):
+                        ("backend-router.js", "text/javascript"),
+                        ("family.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -1320,7 +1469,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 await _wait(delay)
             return error("sign-in failed", 401)
         sid = web.sid(request)
-        if sid is None or sid == web.bearer_sid:
+        if sid is None or sid == web.bearer_sid or web.user_of(sid) is not None:
+            # (a browser holding a family member's cookie gets a new owner
+            # session, never that member's turned into the owner's)
             sid = store.create()
         response = JSONResponse({"ok": True})
         set_session_cookie(response, token, sid, store.epoch)
@@ -1357,13 +1508,27 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         """Sign out every browser (e.g. a lost phone), and with failover every
         phone's access token on every synced backend. Clients sending
         WEB_TOKEN itself as bearer: change WEB_TOKEN to cut those off."""
-        if web.sid(request) is None:
+        sid = web.sid(request)
+        if sid is None:
             return unauthorized()
+        user = web.user_of(sid)
+        if user == GONE:  # signed out (or removed) a moment ago
+            return unauthorized()
+        if user is not None:  # a family member: only their own browsers
+            revoked = store.revoke_user(user)
+            await end_voice(revoked)
+            for sid in revoked:
+                await run_in_threadpool(assistant.end_session, sid)
+            log.info("Web: family member %s signed out everywhere", user)
+            return signed_out()
+        # every live voice call but a family member's (they stay signed in)
+        live = [s for s in list(getattr(app.state, "voice_conversations", {}))
+                if web.user_of(s) in (None, GONE)]
         revoked = store.revoke_all()
         # failover access tokens (phones) too, on every synced backend
         revoked += list(web.token_sessions)
         web.revoke_tokens(web.failover_role)
-        await end_voice([*revoked, *getattr(app.state, "voice_conversations", {})])
+        await end_voice(dict.fromkeys([*revoked, *live]))  # each once
         for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)
         log.warning("Web: signed out everywhere")
@@ -1379,7 +1544,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 "confirm": (s.pending.question if s.pending
                             and not s.pending.stream else None),
                 "incognito": s.chat.incognito,
-                "history": assistant.history is not None,
+                "history": assistant.history_of(s)[0] is not None,
+                "owner": s.user is None,
+                "family": s.user is None and family is not None,
+                "language": s.language,
                 "conversation": s.chat.conversation_id,
                 "turns": sum(1 for m in s.chat.history
                              if m["role"] == "user" and isinstance(m["content"], str))}
@@ -1444,10 +1612,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     @app.get("/api/audio/{rid}")
     async def reply_audio(rid: str, request: Request):
-        if session_of(request) is None:
+        s = session_of(request)
+        if s is None:
             return unauthorized()
         try:
-            data = await run_in_threadpool(assistant.audio_for, rid)
+            data = await run_in_threadpool(assistant.audio_for, rid, s)
         except Exception:
             log.exception("Rendering reply audio failed")
             return error("could not make audio", 500)
@@ -1466,11 +1635,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     if google is not None:
         from assistant import google_web
 
-        google_web.register(app, google, session_of, error)
+        google_web.register(app, google, owner_of, error)  # Kyle's Google only
     if features is not None:
         from assistant import webfeatures
 
         webfeatures.install(app, features)
+    from assistant import family as family_mod
+
+    family_mod.register(app, family, web, assistant, error)
     if hub is not None:
         from assistant import devhub
 
@@ -1603,6 +1775,11 @@ def build_assistant(config: dict, tts_name: str | None = None,
                           max_tool_rounds=a["max_tool_rounds"], memory=memory,
                           recorder=recorder, language=a["language"])
 
+    family = None
+    if config["family"]["enabled"]:
+        from assistant.family import Family
+
+        family = Family(config, client=client)  # invited people (family.py)
     stt = config["stt"]
     tts_cfg = config["tts"]
     return WebAssistant(chat_factory,
@@ -1612,7 +1789,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
                         tools=tools,
                         conversation_timeout=a["conversation_timeout"],
                         confirm_timeout=config["webapp"]["confirm_timeout"],
-                        history=store, memory=memory)
+                        history=store, memory=memory, family=family)
 
 
 HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "

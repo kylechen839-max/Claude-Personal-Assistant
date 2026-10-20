@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/static/katex/katex.min.css">
 <link rel="stylesheet" href="/static/features.css">
 <script src="/i18n.js" defer></script>
+<script src="/family.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
 <script src="/voice.js" defer></script>
@@ -78,6 +79,24 @@
         </fieldset>
         <button id="google-connect" type="button" hidden>Connect Google account</button>
         <p id="google-status" class="hint" hidden></p>
+        <section id="family" class="family" hidden>
+          <button id="invite-open" type="button">Invite someone</button>
+          <form id="invite-form" class="invite-form" autocomplete="off" hidden>
+            <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
+            <label>Language
+              <select id="invite-language">
+                <option value="en">English</option>
+                <option value="zh">中文 (Chinese)</option>
+              </select>
+            </label>
+            <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
+                   spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
+            <button type="submit">Create invite link</button>
+          </form>
+          <p id="invite-status" class="hint" role="status"></p>
+          <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
+          <ul id="family-list" class="family-list"></ul>
+        </section>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>

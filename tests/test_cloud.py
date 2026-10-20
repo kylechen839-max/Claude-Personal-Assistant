@@ -755,3 +755,54 @@ def test_build_app_refuses_a_web_app_without_its_auth(monkeypatch, fake_client):
                                     FakeTranscriber(), PrintTTS())
     with pytest.raises(RuntimeError, match="WebAuth"):
         cloud.build_app(cfg, assistant, TOKEN)
+
+
+# --- family invites (assistant/family.py) ------------------------------------------
+
+@pytest.fixture
+def family_cloud(make_cloud, fake_client, tmp_path):
+    """CloudGuard around a web app with [family] on; returns (guard, client,
+    family)."""
+    from assistant.family import Family
+
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    fam = Family(config, client=fake_client)
+    clock = Clock()
+    limiter = cloud.BoundedLoginLimiter(clock=clock)
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber(), PrintTTS(), clock=clock, family=fam)
+    trust = cloud.ProxyNetworks(hops=1, networks=tuple(cloud.parse_networks(TRUSTED)))
+    app = webapp.create_app(assistant, TOKEN, limiter=limiter, trusted_proxy=trust,
+                            reap_interval=3600)
+    guard, client = make_cloud(clock=clock, app=app, guard_kwargs={"lockout": limiter})
+    yield guard, client, fam
+    fam.close()
+
+
+def accept(client, invite, ip=PUBLIC):
+    return client.post("/api/invite/accept", json={"invite": invite},
+                       headers=via_proxy(ip))
+
+
+def test_invite_accept_passes_the_guard_and_signs_in(family_cloud):
+    _, client, fam = family_cloud
+    assert client.get("/family.js", headers=via_proxy(PUBLIC)).status_code == 200
+    _, token = fam.invite("Mom", "zh")
+    r = accept(client, token)
+    assert r.status_code == 200, r.text
+    state = client.get("/api/state", headers=via_proxy(PUBLIC))
+    assert state.status_code == 200 and state.json()["owner"] is False
+    # owner-only routes stay hidden from a family member behind the guard too
+    assert client.get("/api/users", headers=via_proxy(PUBLIC)).status_code == 404
+
+
+def test_wrong_invites_lock_out_that_address(family_cloud, slept):
+    _, client, fam = family_cloud
+    for _ in range(5):
+        assert accept(client, "hcinv.guess").status_code == 401
+    assert accept(client, "hcinv.guess").status_code == 429
+    assert accept(client, "x", ip="198.51.100.7").status_code == 401  # others: as usual
+    # the owner's WEB_TOKEN still signs in from the locked-out address
+    assert login(client).status_code == 200

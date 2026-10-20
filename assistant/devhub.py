@@ -251,7 +251,7 @@ def install(app, hub: Hub) -> None:
     from fastapi.responses import FileResponse, JSONResponse
     from starlette.concurrency import run_in_threadpool
 
-    from assistant.webapp import require_session
+    from assistant.webapp import require_owner
 
     def local_only(request: Request) -> None:
         """404 for anything not from this machine itself."""
@@ -289,12 +289,12 @@ def install(app, hub: Hub) -> None:
         return FileResponse(WEB / "devteam.css", media_type="text/css")
 
     @app.get("/api/devteam/state", dependencies=local)
-    async def state(session=Depends(require_session)):
+    async def state(session=Depends(require_owner)):
         await run_in_threadpool(hub.poll)
         return hub.state()
 
     @app.post("/api/devteam/send", dependencies=local)
-    async def send(request: Request, session=Depends(require_session)):
+    async def send(request: Request, session=Depends(require_owner)):
         body = await body_of(request)
         sid = window(body)
         text = body.get("text")
@@ -311,7 +311,7 @@ def install(app, hub: Hub) -> None:
         return {"message": msg}
 
     @app.post("/api/devteam/clear", dependencies=local)
-    async def clear(request: Request, session=Depends(require_session)):
+    async def clear(request: Request, session=Depends(require_owner)):
         sid = window(await body_of(request))
         if not sid:
             return error("no such window", 404)

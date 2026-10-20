@@ -60,6 +60,20 @@ All paths are relative to the project folder unless noted. On Render the
 - **Wipe everything local:** delete `data/`, `logs/`, `token.json`, and the
   Pinecone namespace `voice-assistant`.
 
+## Family accounts (cloud)
+
+When you invite someone, the cloud server stores their name, language, time
+zone, invite status and only a SHA-256 hash of their one-time invite link in
+`/data/users/users.json`, and their conversations in
+`/data/users/<id>/history.sqlite`, on your Render disk (which you, as the
+server's admin, can read). Their messages go to Anthropic under your API
+key, and their web searches send only their time zone as location. Their
+data is never synced to your Pi or PC, never put in Pinecone or Notion, and
+not visible to your account in the app. Removing someone signs them out and
+deletes their folder and entry; if a file can't be deleted right away, the
+server retries at the next start, the next removal, or when you open the
+family list.
+
 ## A second instance for someone else
 
 If you run a separate instance for a family member (`config.mom.toml`), it
