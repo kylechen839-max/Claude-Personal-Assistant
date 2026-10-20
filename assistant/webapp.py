@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import struct
 import tempfile
@@ -56,9 +57,19 @@ import numpy as np
 from starlette.requests import HTTPConnection
 
 from assistant import audio, i18n
+from assistant.attachments import MAX_ATTACHMENTS
+from assistant.chat import is_user_turn
 from assistant.tools import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+# A turn's form: the recording plus attachments; one extra so "too many"
+# gets its own message (attachments.prepare_all)
+MAX_FORM_FILES = 1 + MAX_ATTACHMENTS + 1
+# Claude's 400 reasons that mean a file is too long ("A maximum of 100 PDF
+# pages may be provided", "prompt is too long: 250000 tokens > 200000
+# maximum"); any other 400 on a turn with files: the file couldn't be read
+FILE_TOO_LONG = re.compile(r"\bpages?\b|too long|\btokens?\b", re.IGNORECASE)
 
 STATIC = Path(__file__).resolve().parent / "web"
 COOKIE = "hc_session"
@@ -813,8 +824,10 @@ class WebAssistant:
 
     # turns
     def start_turn(self, s: Session, text: str | None = None,
-                   recording: np.ndarray | None = None) -> bool:
+                   recording: np.ndarray | None = None,
+                   attachments: list[dict] | None = None) -> bool:
         """Start a turn in the background. False if one is already running.
+        `attachments`: content blocks of files sent with it (attachments.py).
 
         Waits briefly for the lock: a turn puts "done" just before releasing
         it, so a page that starts the next turn right away isn't refused."""
@@ -829,12 +842,13 @@ class WebAssistant:
             if not s.busy.acquire(blocking=False):
                 return False
         s.last_active = self.clock()
-        s.thread = threading.Thread(target=self._run_turn, args=(s, text, recording),
+        s.thread = threading.Thread(target=self._run_turn,
+                                    args=(s, text, recording, attachments),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
         s.thread.start()
         return True
 
-    def _run_turn(self, s: Session, text, recording) -> None:
+    def _run_turn(self, s: Session, text, recording, attachments=None) -> None:
         from assistant.cli import get_reply, is_exit, loggable_reply
 
         rec = s.chat.recorder
@@ -847,16 +861,19 @@ class WebAssistant:
                 log.info("Web heard %d chars", len(text))
                 log.debug("Web heard: %r", text)
             text = (text or "").strip()
-            if not text:
+            if not text and not attachments:
                 s.events.put({"type": "error", "message": i18n.t("not_caught")})
                 return
-            if is_exit(text):
+            if is_exit(text) and not attachments:
                 s.chat.end_conversation()
                 self._reply(s, i18n.t("goodbye"), ended=True)
                 return
-            reply = get_reply(  # it logs errors itself
-                s.chat, text, output_fn=lambda m: None,
-                on_text=lambda d: s.events.put({"type": "delta", "text": d}))
+            on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
+            if attachments:
+                reply = self._ask_with_files(s, text, attachments, on_text)
+            else:
+                reply = get_reply(  # it logs errors itself
+                    s.chat, text, output_fn=lambda m: None, on_text=on_text)
             log.info("Web replied %d chars", len(reply))
             log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
@@ -868,6 +885,29 @@ class WebAssistant:
             s.last_active = self.clock()
             s.events.put({"type": "done"})  # before release: see start_turn
             s.busy.release()
+
+    @staticmethod
+    def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text) -> str:
+        """get_reply for a turn with files: Claude refusing the request gets
+        a sentence about the file instead of the generic API error, "too
+        long" when its reason is about length (a PDF over 100 pages, a file
+        over the context window), else "couldn't read" (a protected or
+        broken PDF). ask() has already rolled the turn back, so Kyle can
+        retry without the file."""
+        import anthropic
+
+        from assistant.cli import friendly_error
+
+        try:
+            return s.chat.ask(text, on_text=on_text, attachments=attachments)
+        except anthropic.BadRequestError as e:
+            log.warning("Claude refused a turn with %d attachment(s) (HTTP %s)",
+                        len(attachments), e.status_code)
+            log.debug("Claude's reason: %s", e)
+            too_long = FILE_TOO_LONG.search(str(getattr(e, "message", "") or e))
+            return i18n.t("file_too_long" if too_long else "file_unreadable")
+        except Exception as e:  # noqa: BLE001 - as get_reply
+            return friendly_error(e, text, lambda m: None)
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
@@ -1200,6 +1240,8 @@ def page_tag(language: str = "en", google: bool = False) -> str:
 def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                max_upload_bytes: int = 10_000_000, max_audio_seconds: float = 60,
                max_text_chars: int = 4000, trusted_proxy=0,
+               max_attachment_bytes: int = 10_000_000,
+               max_image_bytes: int = 8_000_000,
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
@@ -1211,7 +1253,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     routes are added before any wrapping, so they get the same auth.
     `language` "zh" serves the page as lang="zh-CN" (i18n.js translates it);
     `google`: a google_web.GoogleConnect for the "connect Google" button.
-    `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only)."""
+    `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only).
+    `max_attachment_bytes` / `max_image_bytes`: per file attached to a
+    turn (PDF or text / photo); the whole request stays under
+    `max_upload_bytes`."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1326,8 +1371,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return StreamingResponse(lines(), media_type="application/x-ndjson",
                                  headers={"X-Accel-Buffering": "no"})
 
-    async def read_upload(request: Request):
-        """(fields, audio bytes, error response) from JSON or a multipart form."""
+    async def read_upload(request: Request, files: list | None = None):
+        """(fields, audio bytes, error response) from JSON or a multipart form.
+        With a `files` list, the form's "attachment" files are added to it
+        as (name, bytes), up to one more than attachments.MAX_ATTACHMENTS."""
         ctype = request.headers.get("content-type", "")
         if ctype.startswith("application/json"):
             try:
@@ -1338,15 +1385,25 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             data = None
         elif ctype.startswith("multipart/form-data"):
             try:
-                form = await request.form(max_files=1, max_fields=5)
-            except Exception:
-                return None, None, error("bad request", 400)
+                form = await request.form(max_files=MAX_FORM_FILES, max_fields=5)
+            except Exception as e:  # noqa: BLE001 - any malformed body
+                # Starlette raises HTTPException(400, "Too many files. Maximum
+                # number of files is 6.") (MultiPartException outside an app)
+                reason = str(getattr(e, "detail", "") or e)
+                return None, None, error(
+                    f"bad request (attach at most {MAX_ATTACHMENTS} files)"
+                    if reason.startswith("Too many files") else "bad request", 400)
             upload = form.get("audio")
             data = None
             if upload is not None and hasattr(upload, "read"):
                 data = await upload.read(max_upload_bytes + 1)
                 if len(data) > max_upload_bytes:
                     return None, None, error("too large", 413)
+            attached = [f for f in form.getlist("attachment") if hasattr(f, "read")]
+            if attached and files is None:
+                return None, None, error("attachments go with a message", 400)
+            for f in attached[:MAX_ATTACHMENTS + 1]:
+                files.append((f.filename, await f.read(max_upload_bytes + 1)))
             fields = {k: v for k, v in form.items() if isinstance(v, str)}
         else:
             return None, None, error("send JSON or a form", 415)
@@ -1354,6 +1411,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if isinstance(value, str) and len(value) > max_text_chars:
                 return None, None, error("too large", 413)
         return fields, data, None
+
+    async def read_attachments(files: list):
+        """(content blocks, error response) for a turn's attached files."""
+        from assistant.attachments import (AttachmentRejected, describe,
+                                           prepare_all)
+        if not files:
+            return None, None
+        try:
+            prepared = await run_in_threadpool(
+                prepare_all, files, max_image_bytes=max_image_bytes,
+                max_file_bytes=max_attachment_bytes)
+        except AttachmentRejected as e:
+            log.info("Web turn: attachments refused (%d file(s))", len(files))
+            return None, error(str(e), 400)
+        # kinds and sizes only: names and contents stay out of the log
+        log.info("Web turn with %d attachment(s): %s", len(prepared),
+                 describe(prepared))
+        return [a.block() for a in prepared], None
 
     async def decode(data: bytes):
         try:
@@ -1402,6 +1477,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("i18n.js", "text/javascript"),
                         ("backend-router.js", "text/javascript"),
                         ("family.js", "text/javascript"),
+                        ("attachments.js", "text/javascript"),
                         ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
@@ -1550,15 +1626,18 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 "family": s.user is None and family is not None,
                 "language": s.language,
                 "conversation": s.chat.conversation_id,
-                "turns": sum(1 for m in s.chat.history
-                             if m["role"] == "user" and isinstance(m["content"], str))}
+                "turns": sum(1 for m in s.chat.history if is_user_turn(m))}
 
     @app.post("/api/turn")
     async def turn(request: Request):
         s = session_of(request)
         if s is None:
             return unauthorized()
-        fields, data, err = await read_upload(request)
+        files: list = []
+        fields, data, err = await read_upload(request, files)
+        if err:
+            return err
+        blocks, err = await read_attachments(files)
         if err:
             return err
         recording = None
@@ -1567,11 +1646,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if err:
                 return err
         text = fields.get("text")
-        if recording is None and not (isinstance(text, str) and text.strip()):
+        if recording is None and not blocks and not (
+                isinstance(text, str) and text.strip()):
             return error("send text or audio", 400)
         if not await run_in_threadpool(
                 assistant.start_turn, s,
-                text if recording is None else None, recording):
+                text if recording is None else None, recording, blocks):
             return error("still working on the last request", 409)
         return stream(s)
 
@@ -1821,6 +1901,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         output_fn(f"WARNING: listening on {host} without a TLS proxy in front "
                   "(trusted_proxy). The safe local setup is the default "
                   "127.0.0.1 behind `tailscale serve` (README).")
+    from assistant.attachments import limits as attachment_limits
     from assistant.failover.peers import settings_from_config
 
     failover = settings_from_config(config)
@@ -1843,7 +1924,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub)
+                     hub=hub, **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,
                  ", ".join(b.role for b in failover.backends) or "none")
