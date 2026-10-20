@@ -384,6 +384,50 @@ Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
 
+## Reply-voice picker (`voice_picker.py`)
+
+Everyone signed in (the owner, or a family member) can pick the voice the
+server reads their replies with (`[tts] picker`, on by default).
+
+- **Routes.** `GET /api/voices`, `POST /api/voices` and
+  `POST /api/voices/preview` need a session (`require_session`: cookie or
+  Bearer, same-site; on the cloud CloudGuard's sign-in wall and its 16 KB
+  body cap for non-upload routes). Not `/api/voice`: that is the voice
+  WebSocket. A removed family member's session is gone (401).
+- **Only voices the server has.** A choice is accepted only if it is in
+  this person's list: a Piper name must match
+  `lang_REGION-name-quality` (no `/` or `..`, so no other file can be
+  named) and have its `.onnx.json`; Kokoro only if set up (never with the
+  server profile); ElevenLabs IDs must be 8-64 letters and digits. A hand-
+  edited or stale choice falls back to the default with one INFO line (the
+  voice id and the person's id; nothing they said).
+- **Per person.** The owner's choice is in `[tts] voice_file` (on the
+  cloud `/data/`), a family member's in `<family dir>/<id>/voice.json`,
+  both written with `google_auth.write_private` (temp file in the same
+  folder, rename retried on Windows). A family member's file is written
+  under the family lock and only while they are listed, so it can't be
+  written back after `remove()` deleted their folder. Choosing the default
+  deletes the file. Nobody can see or change anyone else's choice.
+- **Money.** ElevenLabs voices are listed only with `ELEVENLABS_API_KEY`
+  set, and offered to family members only with `[tts]
+  family_paid_voices = true` (off by default: they would spend the owner's
+  plan). The voice list is fetched at most hourly (failures: every 5
+  minutes); the key goes only in the `xi-api-key` header and is never
+  logged. Preview clips are cached (the last 8), so tapping Preview again
+  costs nothing. Callers asking for the same clip at once share one render,
+  and each session may have one preview rendering at a time and 10 a
+  minute (429). A typed-in voice ID that isn't in the list is checked once
+  with `GET /v1/voices/{id}` before it is saved (unknown: 400; ElevenLabs
+  unreachable: 503, nothing saved).
+- **Failures.** A chosen voice whose engine fails is dropped and skipped
+  for 5 minutes (one warning with the voice id and error type), so a broken
+  voice isn't retried, and its timeout paid, on every sentence.
+- **Bounded.** At most 4 extra engines are kept loaded (least recently
+  used out; Kokoro voices share one model), 8 preview clips, 64 cached
+  choices, 50 Piper files and 100 ElevenLabs voices looked at.
+- Voice names from ElevenLabs are cut to one printable line of 60
+  characters and shown with `textContent` only.
+
 ## PC hub (`/devteam`): loopback only
 
 The hub (assistant/devhub.py) lets a signed-in browser on the PC queue

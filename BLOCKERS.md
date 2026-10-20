@@ -3,6 +3,12 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Optional: a Chinese voice in the cloud image (decision).** The
+      reply-voice picker shows a Chinese-speaking family member only Chinese
+      voices, and the Render image bakes in just `en_US-lessac-medium`, so
+      on the cloud their list is "Default" alone until a `zh_CN` Piper voice
+      is added to the image (~60 MB more; Dockerfile `PIPER_VOICE_URL`
+      step). Nothing breaks without it.
 - [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
       someone else").** Only you can: (1) create a **Web application** OAuth
       client in console.cloud.google.com with redirect URI

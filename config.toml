@@ -27,6 +27,13 @@ voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" 
 # ElevenLabs: only with engine = "elevenlabs" and ELEVENLABS_API_KEY in .env.
 elevenlabs_voice = ""         # a voice ID from your ElevenLabs library; "" = Rachel
 elevenlabs_model = "eleven_flash_v2_5"
+# Phone app voice picker (menu > Reply voice): each person (you, and each
+# family member) picks the voice their replies are read in, from the voices
+# this server has. The default above is used until they pick one.
+picker = true
+voices_dir = "voices"         # Piper voices found here are offered
+voice_file = "data/voice_choice.json"  # your pick; a family member's is in their own folder
+family_paid_voices = false    # true = family members may pick ElevenLabs voices (your bill)
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi

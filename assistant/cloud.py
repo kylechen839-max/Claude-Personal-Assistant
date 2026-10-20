@@ -73,6 +73,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/static/katex/katex.min.js", "/static/katex/katex.min.css",
               # family invites: the page code that accepts an #invite= link
               "/family.js",
+              # the settings menu's reply-voice picker (its API needs sign-in)
+              "/voice-picker.js",
               # small touch behaviours (menu closes on an outside tap, swipe hides keyboard)
               "/ui.js"}
 PUBLIC_POST = {"/api/login"}

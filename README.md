@@ -215,6 +215,7 @@ you are most likely to tune:
 | `[tts] engine` | "auto" | "auto", "kokoro", "piper", "pyttsx3", "espeak", "elevenlabs" or "print"; `[tts] fallback` is the last resort (pyttsx3, or espeak on a server) |
 | `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
 | `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
+| `[tts] picker` | true | Phone app: everyone picks their own reply voice (see "Voices") |
 | `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
@@ -283,6 +284,26 @@ is streamed with a timeout; if the request fails (network, quota, a bad
 key) that sentence is spoken by the local voice above, and the cloud is
 skipped for a minute. Without the key the local voice is used. The key is
 never logged.
+
+**Pick your voice in the phone app.** The settings menu (gear) has **Reply
+voice**: a list of the voices this server really has, in your language,
+with **Preview** to hear a short sample. It offers the Piper voices in
+`[tts] voices_dir` (`voices/`), the Kokoro voices if Kokoro is set up (not
+on the cloud server, which has too little memory for it), the system voice
+(pyttsx3, or espeak-ng on a server) and, only with `ELEVENLABS_API_KEY`
+set, your ElevenLabs voices (listed from your account, refreshed hourly,
+tagged **paid**; you can also type a voice ID). Chinese speakers see the
+Chinese voices (e.g. `zh_CN-huayan-medium`: `python -m assistant
+--download-voice zh_CN-huayan-medium`). The choice is per person: yours is
+saved on that server in `[tts] voice_file` (`data/voice_choice.json`;
+`/data/` on the cloud, `data/mom/` for `config.mom.toml`), each family
+member's in their own folder (deleted when you remove them), and it is used
+from the next reply on, in push-to-talk and voice conversations alike.
+Family members can't pick ElevenLabs voices (your bill) unless you set
+`[tts] family_paid_voices = true`. A voice that has gone away (file deleted,
+key removed) falls back to the default with one log line. "Use the phone's
+voice" in the same menu still wins over all of these. `[tts] picker =
+false` turns the picker off.
 
 **Sounds.** Voice mode on the phone plays three soft cues: a gentle two-note
 rise when it starts listening, a very quiet low note when your turn has
@@ -1172,6 +1193,7 @@ assistant/
   tts.py        TTS interface, engine choice (auto), pyttsx3, Piper, espeak-ng, print
   tts_kokoro.py Kokoro voice + checksummed download (--download-voice kokoro)
   tts_elevenlabs.py  optional ElevenLabs cloud voice
+  voice_picker.py  each person's reply voice in the phone app (/api/voices)
   earcons.py    soft listening / thinking / ended sounds
   stt.py        push-to-talk recording, faster-whisper
   wakeword.py   openWakeWord, energy VAD, mic/file sources

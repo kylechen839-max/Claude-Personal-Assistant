@@ -2,7 +2,7 @@
 // cached (network first, so updates show up); API calls, reply audio and
 // anything else are never cached.
 const CACHE = "hey-claude-shell-v10";
-const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/app.css", "/manifest.webmanifest", "/icon.svg",
+const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/voice-picker.js", "/ui.js", "/app.css", "/manifest.webmanifest", "/icon.svg",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];
 
 self.addEventListener("install", (e) => {

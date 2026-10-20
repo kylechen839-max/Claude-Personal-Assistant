@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="/static/features.css">
 <script src="/i18n.js" defer></script>
 <script src="/family.js" defer></script>
+<script src="/voice-picker.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -57,6 +58,21 @@
       <div class="menu-body">
         <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
         <label><input id="mute" type="checkbox"> Don't speak replies</label>
+        <section id="voice-picker" class="voice-picker" hidden>
+          <label>Reply voice
+            <select id="voice-select"></select>
+          </label>
+          <div class="voice-picker-row">
+            <span id="voice-paid" class="tag" hidden>paid</span>
+            <button id="voice-preview" type="button">Preview</button>
+          </div>
+          <div id="voice-custom-row" class="voice-picker-row" hidden>
+            <input id="voice-custom" type="text" maxlength="64" autocapitalize="off"
+                   spellcheck="false" placeholder="ElevenLabs voice ID" aria-label="ElevenLabs voice ID">
+            <button id="voice-custom-use" type="button">Use this voice</button>
+          </div>
+          <p id="voice-status" class="hint" role="status"></p>
+        </section>
         <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
         <fieldset id="backends" class="backends" hidden>
           <legend>Backends</legend>

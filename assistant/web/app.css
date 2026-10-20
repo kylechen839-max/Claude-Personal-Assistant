@@ -125,6 +125,16 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .family-list button { min-height: 36px; padding: 0 .7rem; font-weight: 400; }
 .family-list .danger { color: var(--bad-ink); }
 #app[data-account="family"] .tabs { display: none; }
+/* reply-voice picker (voice-picker.js) */
+.voice-picker { border-top: 1px solid var(--line); padding: .35rem 1rem .5rem; display: grid; gap: .45rem; }
+.voice-picker > label { display: grid; gap: .3rem; font-size: 1rem; }
+.voice-picker select { min-height: 40px; max-width: 100%; }
+.voice-picker-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.voice-picker-row input { flex: 1; min-width: 8rem; }
+.voice-picker button { min-height: 36px; padding: 0 .8rem; font-weight: 400; }
+.voice-picker .hint { margin: 0; }
+.tag { font-size: .75rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--muted); }
 @keyframes pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
 
 .log { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;

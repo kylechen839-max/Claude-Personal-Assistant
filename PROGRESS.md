@@ -1901,3 +1901,62 @@ Render/Docker changes) comes separately.
   Served at `/ui.js` (public on the cloud, like the other page files),
   cached by the service worker (v10).
 - Tests: `tests/js/ui.test.mjs` (4), public-path lists updated.
+
+## Phone app: each person picks their reply voice
+
+- New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the
+  settings menu has **Reply voice**, with the voices this server really has
+  in the person's language (Piper files in `[tts] voices_dir` with their
+  language from the file name, Kokoro if set up and never with the server
+  profile, the system voice from `[tts] fallback`, and ElevenLabs only with
+  `ELEVENLABS_API_KEY`: listed from `GET /v1/voices`, cached an hour,
+  tagged "paid", a voice ID can be typed in). **Preview** plays a short
+  sample sentence (English or Chinese), cached.
+- Saved per person: the owner's in `[tts] voice_file`
+  (`data/voice_choice.json`; `/data/` on the cloud, `data/mom/` for the
+  Chinese instance), a family member's in `<family dir>/<id>/voice.json`
+  (written only while they are listed; deleted with their folder). Family
+  members get ElevenLabs only with `[tts] family_paid_voices = true`.
+- The session's voice is used from the next reply on: `WebAssistant.synthesize(text,
+  session)` (reply audio and the voice WebSocket) asks
+  `VoicePicker.engine_for(user, language)`. Engines are built once per voice
+  and kept (4 at most, least recently used out); Kokoro voices share one
+  loaded model (`KokoroTTS(shared=...)`). A voice that is gone falls back
+  to the default with one INFO line; a chosen engine that fails mid-reply
+  falls back to the default for that sentence.
+- Endpoints: `GET /api/voices`, `POST /api/voices`, `POST
+  /api/voices/preview` (session-bound, same-site, CloudGuard sign-in wall;
+  `/api/voice` is already the voice WebSocket, hence the plural).
+  `/api/state` has `voice_picker`. New settings `[tts] picker`,
+  `voices_dir`, `voice_file`, `family_paid_voices`. Phone cache stays v10
+  (`/voice-picker.js` added to the shell and to CloudGuard's public page
+  files).
+- Tests: `tests/test_voice_picker.py` (27: listing with a fake voices dir,
+  Kokoro and a mocked ElevenLabs API, per-person saving where member A
+  doesn't change B or the owner, preview audio and its cache, fallback on
+  an unknown or removed voice with one log line, engine cache and shared
+  Kokoro model, removal, routes behind CloudGuard), `tests/test_voice_ws.py`
+  +1 (voice mode renders in the person's voice), `tests/js/voice-picker.test.mjs`
+  (8). Each fails with its source change reverted. Full suite: 1740 passed,
+  48 skipped (was 1712 / 48); JS: 217 node tests pass (sandbox, not real
+  hardware).
+- Review round 2:
+  - Picking the default Piper voice reuses the default engine (no second
+    model load).
+  - Previews: callers asking for the same clip at once share one render;
+    each session may have one preview rendering at a time and 10 a minute
+    (429 past that).
+  - A chosen voice whose engine fails is dropped and skipped for 5 minutes
+    (one warning), rather than retried on every sentence; picking it again
+    retries it.
+  - A typed-in ElevenLabs ID that isn't in the cached list is checked once
+    with `GET /v1/voices/{id}`: unknown -> 400, ElevenLabs unreachable ->
+    503, nothing saved.
+  - The new tests read and write text as UTF-8 (Windows), with a test that
+    checks it.
+  - Tests: `tests/test_voice_picker.py` +9 (36). Each fails with its fix
+    reverted. Full suite: 1749 passed, 48 skipped; JS 217 pass.
+- Round 3: a preview of a typed-in ElevenLabs ID is checked with ElevenLabs
+  first (unknown: 404 like any unknown preview voice, unreachable: 503;
+  nothing rendered or cached), and a test covers a second caller waiting on
+  a failing render. Tests +2 (38); full suite 1751 passed, 48 skipped.
