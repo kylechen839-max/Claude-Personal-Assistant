@@ -593,7 +593,16 @@ class ClaudeChat:
                     partial.append(delta)
                     if on_text:
                         on_text(delta)
-                return stream.get_final_message()
+                final = stream.get_final_message()
+                if final.stop_reason is None:
+                    # Ended before message_stop: a fragment (e.g. an unsigned
+                    # thinking block) that would break every later request.
+                    # abort() does this: a closed socket can read as a plain
+                    # end of stream, not an error.
+                    if cancel is not None and cancel.is_set():
+                        raise _Cancelled("".join(partial))
+                    raise StreamEndedEarly("the reply stream ended early")
+                return final
             except _Cancelled:
                 raise
             except Exception:
@@ -774,6 +783,12 @@ class _Cancelled(Exception):
     def __init__(self, partial: str):
         super().__init__("cancelled")
         self.partial = partial
+
+
+class StreamEndedEarly(Exception):
+    """A streamed response stopped before its end without being cancelled
+    (the connection dropped). The turn is dropped from history, as for any
+    failed request, so it can be retried."""
 
 
 def has_web_content(history: list[dict]) -> bool:

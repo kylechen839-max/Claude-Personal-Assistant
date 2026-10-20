@@ -20,6 +20,7 @@
   const LABELS = { connecting: "Connecting…", listening: "Listening", thinking: "Thinking…",
     speaking: "Speaking", paused: "Paused", ended: "Ended" };
   const FOLLOW_UP_LABEL = "Still listening…"; // the follow-up window after a reply
+  const CUE_TAIL_MS = 250; // after an earcon, the mic still hears it (latency, room)
   const reducedMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)");
 
   let ctx = null; // one AudioContext for capture and playback (unlocked by the tap)
@@ -117,6 +118,9 @@
       node.buffer = buffer;
       node.connect(ctx.destination); // not outGain: the orb shows only the voice
       node.start();
+      // its echo must not count as speech (a turn, or later a barge-in);
+      // the tail covers output latency and the room
+      if (endpointer) endpointer.holdOff(buffer.duration * 1000 + CUE_TAIL_MS);
     },
     // listening when the mic first opens (or after a pause), thinking once
     // your turn is sent; the ended cue is played by finish().
@@ -166,7 +170,6 @@
     ui.view.dataset.state = state;
     if (prev !== state) earcons.onState(prev, state);
     ui.state.textContent = LABELS[state] || state;
-    if (endpointer) endpointer.strict = state === "speaking";
     if (state === "thinking" || state === "listening") ui.resume.hidden = true;
   }
 
@@ -307,7 +310,9 @@
       let prob = 0;
       try { prob = quick ? quickVad.process(frame) : await vad.process(frame); } catch (e) { prob = 0; }
       backlog--;
-      for (const ev of endpointer.process(frame, prob, endpointer.strict)) controller.onVad(ev);
+      if (!controller) return; // ended meanwhile
+      // stricter while reply audio plays, whatever the state shows
+      for (const ev of endpointer.process(frame, prob, controller.replyAudible)) controller.onVad(ev);
     });
   }
 
@@ -467,6 +472,9 @@
         send: (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); },
         stopPlayback: () => playback.stop(),
         mark, followUp,
+        // the end of a sentence still echoes: it mustn't start an utterance
+        echoTail: () => { if (endpointer) endpointer.holdOff(CUE_TAIL_MS); },
+        now: () => performance.now(),
         ended: (reason) => finish(reason === "idle" ? "Ended after a quiet stretch." : ""),
       }, { bargeIn: settings.barge_in !== false, followUpMs: settings.follow_up_ms || 0 });
       endpointer = new VC.Endpointer({ threshold: settings.vad_threshold, silenceMs: settings.silence_ms,
