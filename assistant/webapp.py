@@ -145,7 +145,10 @@ class SessionStore:
     epoch that every cookie signature includes. Sessions unused for
     `max_age` seconds expire. With `path` the list survives restarts (a small
     JSON file, rewritten on sign-in/out and at most daily on use); without it
-    a restart signs everyone out."""
+    a restart signs everyone out.
+
+    A session made with `create(user_id)` belongs to that family member
+    (family.py); all others are the owner's."""
 
     def __init__(self, path: str | Path | None = None,
                  max_age: float = COOKIE_MAX_AGE, max_sessions: int = 100,
@@ -157,6 +160,7 @@ class SessionStore:
         self.lock = threading.Lock()
         self.epoch = secrets.token_hex(8)
         self.sessions: dict[str, float] = {}  # sid -> last used (wall clock)
+        self.users: dict[str, str] = {}  # sid -> family user id (absent = owner)
         self._saved_at: dict[str, float] = {}
         self._unsaved = False  # a save failed; retry before trusting the file
         # failover access tokens signed in at or before this unix time are
@@ -172,6 +176,8 @@ class SessionStore:
             self.epoch = str(data["epoch"])
             self.sessions = {str(k): float(v) for k, v in data["sessions"].items()}
             self._saved_at = dict(self.sessions)
+            self.users = {str(k): str(v) for k, v in data.get("users", {}).items()
+                          if str(k) in self.sessions}
             self.tokens_not_before = int(data.get("tokens_not_before", 0))
         except Exception as e:  # unreadable: start over (everyone signs in again)
             log.warning("Ignoring unreadable web session file %s: %s", self.path, e)
@@ -182,18 +188,15 @@ class SessionStore:
     def _save(self) -> None:
         if not self.path:
             return
+        from assistant.tools.google_auth import write_private
+
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            tmp.write_text(json.dumps({"epoch": self.epoch,
-                                       "sessions": self.sessions,
-                                       "tokens_not_before": self.tokens_not_before}),
-                           encoding="utf-8")
-            try:
-                os.chmod(tmp, 0o600)
-            except OSError:
-                pass
-            tmp.replace(self.path)
+            # private and atomic (a unique temp file, retried on Windows)
+            write_private(self.path, json.dumps({
+                "epoch": self.epoch, "sessions": self.sessions,
+                "users": self.users,
+                "tokens_not_before": self.tokens_not_before}))
             self._saved_at = dict(self.sessions)
             if self._unsaved:
                 log.warning("Web sessions saved to %s again", self.path)
@@ -205,15 +208,37 @@ class SessionStore:
                       "be undone by a restart until this works", self.path, e)
             self._unsaved = True
 
-    def create(self) -> str:
+    def create(self, user_id: str | None = None) -> str:
+        """A new signed-in session: the owner's, or `user_id`'s (family)."""
         sid = secrets.token_urlsafe(16)
         with self.lock:
             self.sessions[sid] = self.clock()
+            if user_id is not None:
+                self.users[sid] = user_id
             while len(self.sessions) > self.max_sessions:
                 oldest = min(self.sessions, key=self.sessions.get)
-                del self.sessions[oldest]
+                self._drop(oldest)
             self._save()
         return sid
+
+    def _drop(self, sid: str) -> bool:
+        self.users.pop(sid, None)
+        return self.sessions.pop(sid, None) is not None
+
+    def user(self, sid: str | None) -> str | None:
+        """The family member this session belongs to; None = the owner."""
+        with self.lock:
+            return self.users.get(sid) if sid else None
+
+    def revoke_user(self, user_id: str) -> list[str]:
+        """Sign out every session of one family member; returns their ids."""
+        with self.lock:
+            sids = [sid for sid, uid in self.users.items() if uid == user_id]
+            for sid in sids:
+                self._drop(sid)
+            if sids:
+                self._save()
+        return sids
 
     def valid(self, sid: str | None) -> bool:
         """Is this session signed in? Counts as use (pushes back expiry)."""
@@ -227,7 +252,7 @@ class SessionStore:
             if last is None:
                 return False
             if now - last > self.max_age:
-                del self.sessions[sid]
+                self._drop(sid)
                 self._save()
                 return False
             self.sessions[sid] = now
@@ -243,7 +268,7 @@ class SessionStore:
 
     def revoke(self, sid: str) -> None:
         with self.lock:
-            if self.sessions.pop(sid, None) is not None:
+            if self._drop(sid):
                 self._save()
 
     def revoke_tokens(self, not_before: int) -> None:
@@ -253,11 +278,16 @@ class SessionStore:
             self._save()
 
     def revoke_all(self) -> list[str]:
-        """Sign out every browser; returns the ids that were signed in."""
+        """Sign out every one of the owner's browsers; returns their ids.
+        Family members stay signed in (they have no token to sign in again
+        with; remove them to cut them off). The cookie epoch is rotated
+        when nobody else is left signed in."""
         with self.lock:
-            sids = list(self.sessions)
-            self.sessions.clear()
-            self.epoch = secrets.token_hex(8)
+            sids = [sid for sid in self.sessions if sid not in self.users]
+            for sid in sids:
+                self._drop(sid)
+            if not self.sessions:
+                self.epoch = secrets.token_hex(8)
             self._save()
         return sids
 

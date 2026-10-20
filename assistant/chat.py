@@ -130,6 +130,18 @@ def current_chat() -> "ClaudeChat | None":
     return _CURRENT_CHAT.get()
 
 
+def _now(timezone: str | None = None) -> datetime:
+    """Local time here, or in `timezone` (a family member's, family.py)."""
+    if timezone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return datetime.now(ZoneInfo(timezone))
+        except Exception:
+            log.warning("Unknown time zone; using this machine's")
+    return datetime.now().astimezone()
+
+
 def default_model() -> str:
     return os.environ.get("CLAUDE_MODEL") or DEFAULT_MODEL
 
@@ -140,8 +152,12 @@ class ClaudeChat:
     def __init__(self, client=None, model: str | None = None,
                  max_tokens: int = 500, system_prompt: str = SYSTEM_PROMPT,
                  max_history: int = 40, tools=None, max_tool_rounds: int = 6,
-                 memory=None, recorder=None, language: str = "en"):
+                 memory=None, recorder=None, language: str = "en",
+                 user_name: str | None = None, timezone: str | None = None):
         self._client = client
+        # A family member's name (family.py): the prompts say it, not "Kyle"
+        self.user_name = user_name or None
+        self.timezone = timezone or None  # IANA name; None = this machine's
         # "zh": Chinese prompt and replies (see build_system)
         self.language = "zh" if str(language).lower().startswith("zh") else "en"
         if self.language == "zh" and system_prompt is SYSTEM_PROMPT:
@@ -204,7 +220,7 @@ class ClaudeChat:
         return self.recorder.conversation_id if self.recorder else None
 
     def build_system(self, notes: list[str] | None = None) -> str:
-        now = datetime.now().astimezone()
+        now = _now(self.timezone)
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
@@ -229,6 +245,10 @@ class ClaudeChat:
             parts = [parts[0]] + [p.replace("Kyle's", "the user's")
                                    .replace("Kyle", "the user") for p in parts[1:]]
             parts.append(ZH_REPLY_RULE)
+        elif self.user_name:
+            # an English-speaking family member: every prompt is about them
+            parts = [p.replace("Kyle's", f"{self.user_name}'s")
+                     .replace("Kyle", self.user_name) for p in parts]
         return "\n\n".join(parts)
 
     def ask(self, user_text: str, on_text=None, cancel=None) -> str:
