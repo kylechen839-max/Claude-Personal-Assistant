@@ -1584,3 +1584,27 @@ screens are staged by setting the same attributes the JS sets (no mic).
   - Counts: pytest 1573 -> 1618 passed, 46 skipped (unchanged); round 3 (a question like 确定？ is never a yes) 1622 passed, 46 skipped. JS: i18n 7
     passed.
 
+
+## Voice fixes from Kyle's testing (2026-10-19)
+
+- **Slow end of turn.** The endpointer only counted clearly silent frames
+  toward the pause; frames the VAD was unsure about (road noise, music)
+  held the turn open, up to the 30 s cap. They now count at half weight.
+  Frames the phone couldn't run the model on were dropped and didn't count
+  either; they are now judged by loudness instead (`voice.js` onFrame).
+- **CarPlay / Bluetooth: voice mode heard nothing, push-to-talk worked.**
+  Likely cause: the audio context opened at one sample rate and the car's
+  mic ran at another, and Safari hands such a context silence (push-to-talk
+  records with MediaRecorder, which isn't affected). The audio session type
+  is now set before the context opens, and the context is reopened at the
+  mic's rate (kept as is if the browser won't start it). If the mic still
+  gives pure digital silence for 5 s, voice mode says so and suggests
+  push-to-talk. Not verified in a car from this sandbox: MANUAL_TEST item.
+- **Subtitles sometimes empty.** The spoken text of each audio chunk now
+  fills the subtitles when no reply text showed it, and reply text replaces
+  a tool status line ("list events…") instead of being appended to it.
+- **New: mic level meter** under the push-to-talk button while recording
+  and under the voice state, turning the accent colour while it hears
+  speech. Service worker cache bumped to v4 so phones pick it up.
+- Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
+  text reaches captions), full suite 1494 passed, 46 skipped.

@@ -72,6 +72,7 @@
       this.frames = [];
       this.speechFrames = 0;
       this.silentFrames = 0;
+      this.silentMs = 0;
       this.confirmed = false;
     }
     // Feed one frame and its speech probability; returns events.
@@ -89,6 +90,7 @@
           this.prePad = [];
           this.speechFrames = 1;
           this.silentFrames = 0;
+          this.silentMs = 0;
           events.push({ type: "speechStart" });
           this._maybeConfirm(events);
         }
@@ -98,12 +100,17 @@
       if (positive) {
         this.speechFrames++;
         this.silentFrames = 0;
+        this.silentMs = 0;
         this._maybeConfirm(events);
-      } else if (negative) {
+      } else {
+        // Unsure frames (road noise, music: neither speech nor clearly
+        // silence) count at half weight, so they can't hold a turn open
+        // until the length limit.
         this.silentFrames++;
+        this.silentMs += negative ? this.frameMs : this.frameMs / 2;
       }
       const lengthMs = this.frames.length * this.frameMs;
-      if (this.silentFrames * this.frameMs >= this.silenceMs || lengthMs >= this.maxUtteranceMs) {
+      if (this.silentMs >= this.silenceMs || lengthMs >= this.maxUtteranceMs) {
         events.push(this._finish(lengthMs >= this.maxUtteranceMs));
       }
       return events;
@@ -253,6 +260,8 @@
           if (t !== this.activeTurn) return false;
           this.playing = true;
           if (!this.userSpeaking) this._set("speaking");
+          // the spoken text, for subtitles when no text delta showed it
+          if (ev.text) this._do("caption", "audio", ev.text, true);
           return true; // play it
         case "error":
           this._do("caption", "status", ev.message, false);
