@@ -3,6 +3,24 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
+      project folder: `.\scripts\install_watch_task.ps1` (or
+      `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden
+      `\HeyClaude\Watch` task (every 5 minutes) that checks your app and
+      Mom's and Kai's, heals them, and shows a banner in your phone app when
+      one is down (README "Health checks and safe updates"). The PC
+      session's permission check has blocked scheduled-task installs
+      before, so run it yourself. From now on update with
+      `.\scripts\deploy.ps1` instead of `git pull` + restarting.
+- [ ] **Add the `ANTHROPIC_API_KEY` repository secret and make
+      `api-contract` a required check (~3 min).** GitHub -> the repo ->
+      Settings -> Secrets and variables -> Actions -> New repository
+      secret `ANTHROPIC_API_KEY` (a key with a low spend limit is enough:
+      a few short requests per run). Then Settings -> Branches -> master's
+      rule -> Require status checks -> add `api-contract`. Until the
+      secret is there the job passes with the live tests skipped (only the
+      contract-shaped fake runs). The key is only given to that job and
+      never printed.
 - [ ] **Optional: a Chinese voice in the cloud image (decision).** The
       reply-voice picker shows a Chinese-speaking family member only Chinese
       voices, and the Render image bakes in just `en_US-lessac-medium`, so

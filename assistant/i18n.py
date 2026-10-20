@@ -28,6 +28,8 @@ EN = {
     "bad_key": "Sorry, my Anthropic API key isn't working. Please check it.",
     "rate_limited": "I'm getting too many requests right now. Try again in a minute.",
     "api_error": "Sorry, something went wrong talking to Claude.",
+    "claude_down": "Claude is unreachable right now. I retried a few times; "
+                   "please try again in a minute.",
     "file_too_long": "That file is too long for Claude (PDFs up to 100 pages).",
     "file_unreadable": "Claude couldn't read that file.",
     "say_yes_no": " Please say yes or no.",
@@ -105,6 +107,7 @@ ZH = {
     "bad_key": "抱歉，Anthropic 密钥不能用了，请检查一下。",
     "rate_limited": "现在请求太多了，请过一分钟再试。",
     "api_error": "抱歉，连接 Claude 时出了点问题。",
+    "claude_down": "现在连不上 Claude，已经重试了几次，请过一分钟再试。",
     "file_too_long": "这个文件太长了，Claude 处理不了（PDF 最多 100 页）。",
     "file_unreadable": "Claude 读不了这个文件。",
     "say_yes_no": "请说“是”或者“不”。",

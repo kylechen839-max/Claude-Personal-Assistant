@@ -20,7 +20,17 @@
 
         .\scripts\install_family_tasks.ps1              # install and start
         .\scripts\install_family_tasks.ps1 -Restart     # restart them (after an update)
+        .\scripts\install_family_tasks.ps1 -Watch       # also install the watchdog task
         .\scripts\install_family_tasks.ps1 -Uninstall   # stop and remove the tasks
+
+    -Restart goes through the go-live check (python -m assistant.deploy
+    --no-pull --restart): the code checked out now must first pass each
+    app's test conversation on a side port; if it fails, nothing restarts
+    and the old version keeps running. After the restart each app is
+    checked again live. Better still, update with .\scripts\deploy.ps1.
+
+    -Watch also installs \HeyClaude\Watch (scripts\install_watch_task.ps1),
+    which checks every app every 5 minutes and heals or reports problems.
 
     A task starts in your normal Windows environment. If you have set
     GOOGLE_TOKEN_JSON, WEB_TOKEN or similar as user environment variables,
@@ -35,6 +45,7 @@
 [CmdletBinding()]
 param(
     [switch]$Restart,
+    [switch]$Watch,
     [switch]$Uninstall
 )
 $ErrorActionPreference = 'Stop'
@@ -43,6 +54,7 @@ $repoDir = Split-Path -Parent $PSScriptRoot
 $taskPath = '\HeyClaude\'
 $prefix = 'Family-'
 $pythonw = Join-Path $repoDir '.venv\Scripts\pythonw.exe'
+$python = Join-Path $repoDir '.venv\Scripts\python.exe'
 $user = "$env:USERDOMAIN\$env:USERNAME"
 
 function Get-FamilyInstance {
@@ -126,17 +138,21 @@ if ($instances.Count -eq 0) {
 if ($Restart) {
     foreach ($i in $instances) {
         $name = "$prefix$($i.Name)"
-        if (Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue) {
-            Stop-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue
-            [void](Stop-InstanceProcess $i)
-            Start-ScheduledTask -TaskPath $taskPath -TaskName $name
-            Write-Host "Restarted $taskPath$name"
-        }
-        else {
+        if (-not (Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue)) {
             Write-Warning "$taskPath$name isn't installed; run this script without -Restart first."
         }
     }
-    exit 0
+    # The go-live check first, then the restart and a live check (assistant/deploy.py),
+    # from the project folder (the module and its config are found from there).
+    Push-Location $repoDir
+    try {
+        & $python -m assistant.deploy --no-pull --restart
+        $code = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    exit $code
 }
 
 if (-not (Test-Path -LiteralPath $pythonw)) {
@@ -149,6 +165,9 @@ foreach ($i in $instances) {
         Write-Host "Stopped the copy of $($i.Name)'s app started by hand; you can close its window."
     }
     Register-FamilyTask $i
+}
+if ($Watch) {
+    & (Join-Path $PSScriptRoot 'install_watch_task.ps1')
 }
 Write-Host ''
 Write-Host 'They start each time you sign in to Windows (about 30 s after) and restart'

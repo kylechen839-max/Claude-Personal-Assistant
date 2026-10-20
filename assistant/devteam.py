@@ -38,7 +38,9 @@ MAX_REPLY_CHARS = 1200
 # prefix and the longest message. Hub replies are markdown, up to 12000
 # characters; voice replies stay short and spoken (docs/COORDINATOR_LINK.md).
 SOURCES = {"voice": ("Hey Claude voice", "hc-", MAX_MESSAGE_CHARS),
-           "hub": ("Hey Claude hub", "hub-", 12000)}
+           "hub": ("Hey Claude hub", "hub-", 12000),
+           # the watchdog's alerts (watch.py): an app failing or recovering
+           "watch": ("Hey Claude watchdog", "hc-", MAX_MESSAGE_CHARS)}
 HUB_REPLY_CHARS = 12000
 PRESENCE_TEXT_CHARS = 80
 PENDING_DAYS = 7  # a message nobody answered stops counting as pending
@@ -152,7 +154,7 @@ class CoordinatorLink:
     # ----- sending -----
     def send(self, text: str, source: str = "voice", session: str = "") -> dict:
         """Queue `text` into the coordinator's session (or `session`, one of
-        the hub's windows). `source` is "voice" or "hub"."""
+        the hub's windows). `source` is "voice", "hub" or "watch"."""
         header, prefix, cap = SOURCES[source]
         text = (text or "").strip()[:cap]
         session = session_id(session) or self.session

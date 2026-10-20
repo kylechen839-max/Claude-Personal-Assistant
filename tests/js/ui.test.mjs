@@ -2,7 +2,8 @@
 // assistant/web/ui.js in node:vm with a minimal fake document: the settings
 // menu closes on a tap outside it (not inside) and on Escape; a downward
 // swipe while typing blurs the field (hides the keyboard), a short one or a
-// swipe when not typing does nothing.
+// swipe when not typing does nothing. The owner's health banner: its
+// lines (an app down, one failing, stale checks, events) and the element.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,4 +67,35 @@ test('keyboard: swiping up, or when nothing is focused, does nothing', () => {
   t.fire('touchstart', touch(100));
   t.fire('touchmove', touch(400));
   assert.equal(t.input.blurred, 0);
+});
+
+// The owner's health banner (state.health from /api/state, assistant/watch.py).
+const at = (iso) => (iso ? iso.slice(11, 16) : '');
+
+test('health banner: lines and the element', () => {
+  const banner = { textContent: '', hidden: true };
+  const win = { document: { getElementById: (id) => (id === 'health' ? banner : null),
+    querySelector: () => null, addEventListener() {} } };
+  win.window = win;
+  vm.createContext(win);
+  vm.runInContext(SCRIPT, win);
+  const ui = win.HeyClaudeUI;
+  const health = {
+    issues: [{ label: "Mom's app", since: '2026-10-20T06:13:00+00:00', what: 'healthz: HTTP 502' },
+             { label: 'Your app', since: '2026-10-20T07:00:00+00:00', what: 'follow-up turn: HTTP 500' }],
+    stale: true, checked: '2026-10-20T05:00:00+00:00',
+    events: [{ at: '2026-10-20T04:00:00+00:00', text: 'New version abc1234 failed its go-live check.' }],
+  };
+  assert.deepEqual([...ui.healthLines(health, at)], [
+    "Mom's app is down since 06:13 (healthz: HTTP 502)",
+    "Your app isn't working right since 07:00 (follow-up turn: HTTP 500)",
+    "Health checks haven't run since 05:00.",
+    '04:00: New version abc1234 failed its go-live check.',
+  ]);
+  ui.renderHealth(win.document, health, at);
+  assert.equal(banner.hidden, false);
+  assert.match(banner.textContent, /^Mom's app is down since 06:13/);
+  ui.renderHealth(win.document, null, at);  // all well, or not the owner
+  assert.equal(banner.hidden, true);
+  assert.equal(banner.textContent, '');
 });

@@ -120,6 +120,12 @@ as the work. Never put secrets, tokens or personal data in this file.
 - JS tests: `node --test tests/js/*.test.mjs`. Give explicit files; the
   directory form fails on Node 22.
 - Report counts as "N passed, M skipped" against the baseline.
+- Lesson (2026-10-20): mocked clients passed every test while a real
+  multi-turn conversation failed (thinking-block signatures). Conversation
+  changes get a test against `tests/contract_fakes.py` (it validates
+  requests like the API and answers with the SDK's own types) in
+  `tests/test_contract.py`; CI's `api-contract` job runs the same tests
+  against the real API when the secret is set.
 - Dates: a chat turn reads "now" once (`timeutil.TURN_NOW`, set in
   `ClaudeChat.ask`). Tests about "today"/"tomorrow" pin that clock
   (`chat._now`) instead of reading the clock beside the product; one that
@@ -256,6 +262,12 @@ as the work. Never put secrets, tokens or personal data in this file.
     server profile must not load Kokoro (memory); use Piper or eSpeak.
 - **Features:** `lecture.py`, `tutor.py` and `webfeatures.py`. The lecture
   job is the pattern for background work.
+- **Health and go-live:** `watch.py` (the 5-minute watchdog, the test
+  conversation in a check session, restart once, roll back to the last
+  known good, alerts on a change only) and `deploy.py`; new code goes live
+  only after `watch.gate_check` passed on a side port. On the PC, update
+  with `scripts/deploy.ps1`, never `git pull` + restart. A new read-only
+  tool the check may use goes in `tools.READ_ONLY_TOOLS`.
 - **Ownership:** PRIVACY.md, CHANGELOG.md and version bumps belong to the
   master at release time; builders send wording instead.
 

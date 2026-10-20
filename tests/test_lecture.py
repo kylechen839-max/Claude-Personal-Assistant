@@ -18,7 +18,7 @@ from assistant.lecture import (AUDIO_FILE, ChunkedUploads, LectureNotesDB,
                                assignment_candidates, notes_blocks, rich_text,
                                summarize)
 from assistant.tools.notion import NotionAssignments
-from tests.conftest import make_response, tool_use_block
+from tests.conftest import make_response, text_block, tool_use_block
 
 TRANSCRIPT_WORDS = ["Today", "we", "cover", "kinetic", "energy", "SECRET-LECTURE"]
 
@@ -129,15 +129,100 @@ NOTES = {
 }
 
 
-def test_summarize_forces_the_notes_tool(fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+def notes_reply(notes, stop_reason="end_turn"):
+    """The API's reply to an output_config.format request: thinking (when
+    the model thought), then one text block holding the JSON."""
+    return make_response(SimpleNamespace(type="thinking", thinking="", signature="s"),
+                         text_block(json.dumps(notes)), stop_reason=stop_reason)
+
+
+def test_summarize_asks_for_structured_notes(fake_client):
+    fake_client.queue = [notes_reply(NOTES)]
     out = summarize(fake_client, "m", "the transcript", "PHYS 141", "2026-10-16")
     call = fake_client.calls[0]
-    assert call["tool_choice"] == {"type": "tool", "name": "save_lecture_notes"}
+    fmt = call["output_config"]["format"]
+    assert fmt["type"] == "json_schema" and "action_items" in fmt["schema"]["required"]
+    assert "tool_choice" not in call and "tools" not in call
     assert "<transcript>\nthe transcript\n</transcript>" in call["messages"][0]["content"]
     assert "Course: PHYS 141" in call["messages"][0]["content"]
-    assert out["title"] == "Work and kinetic energy"
+    assert out == NOTES
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-5-5", "claude-opus-5-5",
+                                   "claude-fable-5-1"])
+def test_summarize_works_on_models_that_reject_forced_tool_choice(fake_client, model):
+    """Regression: the forced save_lecture_notes call got a 400 on the
+    default model (claude-sonnet-5-5), so no lecture was ever summarized."""
+    fake_client.queue = [notes_reply(NOTES)]
+    assert summarize(fake_client, model, "the transcript")["title"] == NOTES["title"]
+
+
+def test_default_lecture_model_summarizes(tmp_path, fake_client):
+    """The whole pipeline on the default model, as the web app builds it."""
+    from assistant.config import DEFAULTS
+
+    fake_client.queue = [notes_reply(NOTES)]
+    p, _, uid, _, _, _ = pipeline(tmp_path, fake_client)
+    p.model = DEFAULTS["assistant"]["model"]
+    p.submit(uid)
+    p.wait(10)
+    job = p.job(uid)
+    assert job.status == "done", job.error
+    assert fake_client.calls[0]["model"] == DEFAULTS["assistant"]["model"]
+
+
+@pytest.mark.parametrize("reply", [
+    make_response(text_block("Sorry, here are some notes.")),          # not JSON
+    make_response(text_block("[1, 2]")),                               # not an object
+    make_response(),                                                   # no text
+    make_response(tool_use_block("x", {})),                            # no text
+    notes_reply(NOTES, stop_reason="max_tokens"),                      # cut off
+    make_response(text_block(""), stop_reason="refusal"),              # refused
+])
+def test_bad_summary_replies_fail_without_echoing_the_reply(fake_client, reply):
+    fake_client.queue = [reply]
+    with pytest.raises(RuntimeError) as err:
+        summarize(fake_client, "claude-sonnet-5-5", "SECRET-LECTURE transcript")
+    assert "SECRET" not in str(err.value) and "Sorry" not in str(err.value)
+
+
+def test_unparsable_summary_fails_the_job_and_a_retry_resumes(tmp_path, fake_client):
+    fake_client.queue = [make_response(text_block("not json")), notes_reply(NOTES)]
+    p, up, uid, _, whisper, _ = pipeline(tmp_path, fake_client)
+    p.submit(uid)
+    p.wait(10)
+    job = p.job(uid)
+    assert job.status == "failed" and "didn't return lecture notes" in job.error
+    assert (up.directory(uid) / "transcript.txt").exists()  # kept for the retry
+    transcribed = len(whisper.calls)
+    p.submit(uid)
+    p.wait(10)
+    assert p.job(uid).status == "done"
+    assert len(whisper.calls) == transcribed and len(fake_client.calls) == 2
+
+
+def test_notes_schema_is_accepted_by_structured_outputs():
+    """Every object in the schema sets additionalProperties: false."""
+    from assistant.lecture import NOTES_SCHEMA
+    from tests.conftest import _strict_schema_problem
+
+    assert _strict_schema_problem(NOTES_SCHEMA) is None
+    assert _strict_schema_problem({"type": "object", "properties": {}})
+
+
+def test_fake_client_rejects_forced_tool_choice_like_the_api(fake_client):
+    """The conftest fake mirrors the API, so a forced call can't sneak back."""
+    import anthropic
+
+    for choice in ({"type": "tool", "name": "t"}, {"type": "any"}):
+        with pytest.raises(anthropic.BadRequestError, match="not supported"):
+            fake_client.messages.create(model="claude-sonnet-5-5", tool_choice=choice,
+                                        max_tokens=1, messages=[])
+    fake_client.queue = [make_response(text_block("ok"))] * 2
+    fake_client.messages.create(model="claude-sonnet-5", max_tokens=1, messages=[],
+                                tool_choice={"type": "any"})
+    fake_client.messages.create(model="claude-sonnet-5-5", max_tokens=1, messages=[],
+                                tool_choice={"type": "auto"})
 
 
 def test_only_assignment_like_items_are_offered():
@@ -329,8 +414,7 @@ def pipeline(tmp_path, fake_client, keep_audio=False, whisper=None):
 
 
 def test_pipeline_end_to_end_with_mocks(tmp_path, fake_client, caplog):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, notion, whisper, _ = pipeline(tmp_path, fake_client)
     p.submit(uid)
     with caplog.at_level(logging.DEBUG):
@@ -360,8 +444,7 @@ def test_pipeline_end_to_end_with_mocks(tmp_path, fake_client, caplog):
 
 
 def test_keep_audio_setting(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, _, _, _ = pipeline(tmp_path, fake_client, keep_audio=True)
     p.submit(uid)
     p.wait(10)
@@ -390,8 +473,7 @@ def test_progress_is_reported(tmp_path, fake_client):
 
 
 def test_notion_failure_keeps_transcript_and_retry_resumes(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, notion, whisper, _ = pipeline(tmp_path, fake_client)
     notion.pages.create.side_effect = RuntimeError("Notion is down")
     p.submit(uid)
@@ -425,8 +507,7 @@ def test_unfinished_upload_cant_be_submitted(tmp_path, fake_client):
 
 
 def test_resume_pending_after_restart(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, _, _, assignments = pipeline(tmp_path, fake_client)
     from assistant.lecture import LectureJob
     p._save(LectureJob(id=uid, course="PHYS 141",
@@ -438,8 +519,7 @@ def test_resume_pending_after_restart(tmp_path, fake_client):
 
 
 def test_adding_an_offered_assignment_only_on_request(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, notion, _, assignments = pipeline(tmp_path, fake_client)
     p.submit(uid)
     p.wait(10)
@@ -607,9 +687,8 @@ def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client, caplog):
 
 # ---------- retries never file a second page ----------
 def test_retry_after_a_failed_append_resumes_the_same_page(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block(
-        "save_lecture_notes", {**NOTES, "key_concepts": [f"c{i}" for i in range(250)]}),
-        stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(
+        {**NOTES, "key_concepts": [f"c{i}" for i in range(250)]})]
     p, up, uid, notion, _, _ = pipeline(tmp_path, fake_client)
     notion.data_sources.retrieve.return_value = {"properties": {"Lecture ID": {}}}
     notion.blocks.children.append.side_effect = [None, RuntimeError("Notion 502")]
@@ -628,8 +707,7 @@ def test_retry_after_a_failed_append_resumes_the_same_page(tmp_path, fake_client
 
 
 def test_page_created_before_a_crash_is_found_by_its_key(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, notion, _, _ = pipeline(tmp_path, fake_client)
     notion.data_sources.retrieve.return_value = {"properties": {"Lecture ID": {}}}
     notion.data_sources.query.return_value = {"results": [
@@ -700,8 +778,7 @@ def test_stale_uploads_and_old_failed_jobs_are_purged(tmp_path, fake_client):
 
 
 def test_add_taps_during_saving_are_kept_and_never_doubled(tmp_path, fake_client):
-    fake_client.queue = [make_response(tool_use_block("save_lecture_notes", NOTES),
-                                       stop_reason="tool_use")]
+    fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, notion, _, assignments = pipeline(tmp_path, fake_client)
     p.submit(uid)
     p.wait(10)
