@@ -22,7 +22,8 @@ scipy>=1.10
 scikit-learn>=1.3
 tqdm>=4.0
 requests>=2.0
-google-api-python-client>=2.100
+# 2.199 adds Calendar event labels (eventLabelVersion, labelProperties)
+google-api-python-client>=2.199
 google-auth-oauthlib>=1.2
 google-auth-httplib2>=0.2
 notion-client>=3.0

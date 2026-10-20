@@ -3,7 +3,8 @@
 The one-time sign-in asks for every scope the assistant uses. A token saved
 before Gmail support only has the Calendar scope: Calendar keeps working
 with it, and the Gmail tools say exactly what to re-run
-(`python -m assistant.tools.google_auth`).
+(`python -m assistant.tools.google_auth`). The same goes for the read-only
+calendar list and labels scopes (CALENDAR_EXTRA_SCOPES).
 
 In cloud mode there is no token file: the token JSON comes from the
 GOOGLE_TOKEN_JSON environment variable (refreshed tokens stay in memory).
@@ -26,15 +27,25 @@ GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 # also permits sending, so sending is blocked in code instead (gmail.py
 # wraps the service so send calls raise; a test checks there are none).
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+# What every Calendar tool needs (and all get_credentials requires: older
+# tokens have only this, and must keep working).
 CALENDAR_SCOPES = [CALENDAR_SCOPE]
+# Read-only extras: the calendar list (other calendars, list_calendars) and
+# calendar settings (Google's named event labels). Optional: without them
+# the core tools still work, and these say to sign in again.
+CALENDAR_EXTRA_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.calendars.readonly"]
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE]
-SCOPES = CALENDAR_SCOPES + GMAIL_SCOPES  # everything, when Gmail is enabled
+# everything, when Gmail is enabled
+SCOPES = CALENDAR_SCOPES + CALENDAR_EXTRA_SCOPES + GMAIL_SCOPES
 
 
 def sign_in_scopes(gmail_enabled: bool = False) -> list[str]:
     """What sign-in asks for: Gmail access only if [gmail] is enabled, so a
     Calendar-only setup never grants mail access."""
-    return CALENDAR_SCOPES + (GMAIL_SCOPES if gmail_enabled else [])
+    return (CALENDAR_SCOPES + CALENDAR_EXTRA_SCOPES
+            + (GMAIL_SCOPES if gmail_enabled else []))
 # On a server the OAuth files come from the environment instead (no files
 # to upload, nothing written back): the contents of token.json and of
 # credentials.json, pasted into the host's secret settings.
@@ -399,7 +410,8 @@ def main(prog: str = "python -m assistant.tools.google_auth") -> None:
         headless_finish(input("\nPaste that address here: "), creds, token)
     else:
         sign_in(creds, token, scopes=scopes)
-    print(("Google Calendar and Gmail (read, drafts) authorized"
+    print(("Google Calendar (events, plus read-only calendar list and labels) "
+           "and Gmail (read, drafts) authorized"
            if gmail else "Google Calendar authorized ([gmail] is disabled, so "
            "no mail access was requested)") + "; token saved to", token)
     print(f"For cloud hosting, put the contents of {token} in {TOKEN_ENV}.")

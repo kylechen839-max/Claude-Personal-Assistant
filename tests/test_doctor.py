@@ -134,6 +134,27 @@ def test_configured_mic_index(tmp_path):
     assert not bad[-1].ok and "not usable" in bad[-1].detail
 
 
+def test_calendar_labels_scope_check(tmp_path, monkeypatch):
+    """An older token (events scope only) warns, with the sign-in command;
+    one with the read-only list/labels scopes passes. Never required."""
+    import json
+
+    from assistant.tools import google_auth
+
+    monkeypatch.delenv(google_auth.TOKEN_ENV, raising=False)
+    cfg = config(tmp_path)
+    token = tmp_path / "token.json"
+    cfg["calendar"]["token"] = str(token)
+    token.write_text(json.dumps({"token": "a", "scopes": [google_auth.CALENDAR_SCOPE]}))
+    (check,) = doctor.check_calendar_scopes(cfg)
+    assert not check.ok and not check.required
+    assert google_auth.SIGN_IN_COMMAND in check.detail
+    assert check in doctor.check_google_files(cfg)
+    token.write_text(json.dumps({"token": "a", "scopes": google_auth.SCOPES}))
+    (check,) = doctor.check_calendar_scopes(cfg)
+    assert check.ok and "read-only" in check.detail
+
+
 def test_calendar_disabled(tmp_path):
     cfg = config(tmp_path)
     cfg["calendar"]["enabled"] = False
