@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/static/katex/katex.min.css">
 <link rel="stylesheet" href="/static/features.css">
 <script src="/i18n.js" defer></script>
+<script src="/family.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
 <script src="/voice.js" defer></script>
@@ -31,7 +32,7 @@
 <main id="login" class="login" hidden>
   <img class="login-icon" src="/icon.svg" alt="">
   <h1>Hey Claude</h1>
-  <p>Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
+  <p id="login-text">Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
      You only need to do this once on this phone.</p>
   <form id="login-form" autocomplete="off">
     <input id="token" type="password" placeholder="Access token" autocomplete="current-password"
@@ -78,11 +79,33 @@
         </fieldset>
         <button id="google-connect" type="button" hidden>Connect Google account</button>
         <p id="google-status" class="hint" hidden></p>
+        <section id="family" class="family" hidden>
+          <button id="invite-open" type="button">Invite someone</button>
+          <form id="invite-form" class="invite-form" autocomplete="off" hidden>
+            <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
+            <label>Language
+              <select id="invite-language">
+                <option value="en">English</option>
+                <option value="zh">中文 (Chinese)</option>
+              </select>
+            </label>
+            <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
+                   spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
+            <button type="submit">Create invite link</button>
+          </form>
+          <p id="invite-status" class="hint" role="status"></p>
+          <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
+          <ul id="family-list" class="family-list"></ul>
+        </section>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>
     </details>
   </header>
+  <section id="guide" class="guide" hidden>
+    <p id="guide-text" class="guide-text"></p>
+    <button id="guide-done" type="button">Got it</button>
+  </section>
 
   <section id="log" class="log" aria-live="polite"></section>
   <p id="status" class="status" aria-live="polite"></p>

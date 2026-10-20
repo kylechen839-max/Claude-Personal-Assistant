@@ -149,6 +149,28 @@ def test_preflight_from_app_origin(setup):
     assert r.header("vary") == "Origin"
 
 
+def test_preflight_allows_family_remove_from_app_origin(setup):
+    """family.js removes someone with POST .../remove: a cross-origin DELETE
+    would be refused at the preflight (ALLOWED_METHODS is GET and POST)."""
+    import re
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parent.parent / "assistant" / "web" / "family.js").read_text(
+        encoding="utf-8")
+    handler = js[js.index("remove.addEventListener"):js.index("li.append")]
+    call = re.search(r"(post|call)\(`(/api/users/[^`]*)`", handler)
+    assert call, handler
+    found = re.search(r'method:\s*"([A-Z]+)"', handler)
+    method = found.group(1) if found else "POST" if call.group(1) == "post" else "GET"
+    path = call.group(2).replace("${encodeURIComponent(user.id)}", "u1")
+    app, *_ = setup
+    r = request(app, "OPTIONS", f"https://pi{path}",
+                {"origin": APP, "access-control-request-method": method,
+                 "access-control-request-headers": "authorization, content-type"})
+    assert r.status == 204
+    assert r.header("access-control-allow-origin") == APP
+
+
 @pytest.mark.parametrize("method,hdrs", [("DELETE", ""), ("PUT", ""),
                                          ("POST", "x-custom"), ("POST", "cookie")])
 def test_preflight_refuses_unneeded_methods_and_headers(setup, method, hdrs):

@@ -7,6 +7,15 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Family invites on the cloud server (`[family]`, on in the server
+  profile): the owner invites someone from the phone menu with a one-time
+  link (`#invite=`, 30 days). They get their own account, history and reply
+  language (English or Chinese), with web search only and none of the
+  owner's Notion, memory, Google, history, lecture/tutor, dev team or PC hub.
+  Removing someone signs them out and deletes their data (retried later if a
+  file is locked). Invites and removals are managed at the cloud server's own
+  address. "Sign out everywhere" is now per person. A session the server
+  doesn't list is never treated as the owner.
 - Agent dashboard Grid: a Coordinator picker shows only the chosen
   coordinator session's windows (default All); the choice is kept per
   viewer, and Forget clears a pick whose session has no recent runs.

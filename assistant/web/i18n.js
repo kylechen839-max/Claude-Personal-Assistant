@@ -84,12 +84,154 @@
     "Google account connected.": "Google 账户已连接。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
+    "Invite someone": "邀请家人",
+    "Name": "名字",
+    "Language": "语言",
+    "Time zone": "时区",
+    "Create invite link": "生成邀请链接",
+    "Invite link": "邀请链接",
+    "Invite link ready.": "邀请链接已准备好。",
+    "Invite link copied.": "邀请链接已复制。",
+    "Copy the invite link below.": "请复制下面的邀请链接。",
+    "Active": "已加入",
+    "Invited": "已邀请",
+    "New link": "新链接",
+    "Remove": "移除",
+    "This invite link has expired or was already used. Ask for a new one.":
+      "这个邀请链接已过期或已经用过了，请再要一个新的。",
+    "this invite link has expired or was already used": "这个邀请链接已过期或已经用过了。",
+    "Couldn't reach the server. Open the link again.": "连不上服务器，请再打开一次链接。",
+    // tabs, settings, history, lecture and tutor screens
+    "Backends": "服务器",
+    "Use": "使用",
+    "Auto": "Pi, then PC, then cloud\": \"自动：先树莓派，再电脑，再云端",
+    "Pi only": "只用树莓派",
+    "PC only": "只用电脑",
+    "Cloud only": "只用云端",
+    "Pi (tailnet)": "树莓派（tailnet）",
+    "PC (tailnet)": "电脑（tailnet）",
+    "Cloud": "云端",
+    "Empty = the address the server suggests.": "留空 = 使用服务器建议的地址。",
+    "Save and check": "保存并检查",
+    "CC": "字幕",
+    "All": "全部",
+    "Pinned": "已置顶",
+    "Phone": "手机",
+    "Voice": "语音",
+    "PC": "电脑",
+    "Typed": "打字",
+    "Archived": "已归档",
+    "Open": "打开",
+    "Pin": "置顶",
+    "Unpin": "取消置顶",
+    "Rename": "重命名",
+    "Archive": "归档",
+    "Unarchive": "取消归档",
+    "Export as Markdown": "导出为 Markdown",
+    "Delete…": "删除…",
+    "Delete conversation?": "删除这个对话？",
+    "this app's address": "这个应用的地址",
+    "Filter": "筛选",
+    "Back to history": "返回历史记录",
+    "More actions": "更多操作",
+    "Chat / Lecture / Tutor": "聊天 / 讲座 / 作业辅导",
+    "Chat": "聊天",
+    "Lecture": "讲座",
+    "Tutor": "作业辅导",
+    "Course": "课程",
+    "Course (optional)": "课程（可选）",
+    "Start recording": "开始录音",
+    "Stop recording": "停止录音",
+    "Recent lectures": "最近的讲座",
+    "Uploaded. Transcribing on the server...": "已上传，正在服务器上转写…",
+    "Microphone not allowed.": "没有麦克风权限。",
+    "Waiting": "等待中",
+    "Summarizing": "正在总结",
+    "Saving to Notion": "正在保存到 Notion",
+    "Done": "完成",
+    "Failed": "失败",
+    "Open the notes in Notion": "在 Notion 里打开笔记",
+    "Something went wrong.": "出了点问题。",
+    "Try again": "再试一次",
+    "These look like assignments. Add any to Notion?": "这些看起来像作业，要加到 Notion 吗？",
+    "Added": "已添加",
+    "No lectures yet.": "还没有讲座。",
+    "The problem": "题目",
+    "What are you stuck on? (optional)": "哪里不会？（可选）",
+    "Take photo": "拍照",
+    "Choose photo": "选择照片",
+    "Show the full solution": "显示完整解答",
+    "Read explanations aloud": "朗读讲解",
+    "Preparing the photo...": "正在准备照片…",
+    "Photo ready. Ask a question, or just tap Ask.": "照片好了。可以提问，或直接点“提问”。",
+    "That photo couldn\"t be opened. Try a JPEG or PNG.": "这张照片打不开，请换一张 JPEG 或 PNG。",
+    "Take or choose a photo first.": "请先拍照或选择照片。",
+    "Next step?": "下一步？",
+    "Thinking...": "正在思考…",
+    "Ask": "提问",
+    "Spoken to the PC": "对电脑说的",
+    "Phone voice mode": "手机语音对话",
+    "Incognito": "nothing from now on is saved.\": \"无痕模式：从现在起不保存。",
+    "Incognito off": "conversations are saved again.\": \"已关闭无痕模式：对话会再次保存。",
+    "Today": "今天",
+    "Yesterday": "昨天",
+    "This week": "本周",
+    "Older": "更早",
+    "Results": "搜索结果",
+    "Nothing here.": "这里还没有内容。",
+    "No saved conversations yet.": "还没有保存的对话。",
+    "Turn incognito off to continue it.": "关闭无痕模式才能继续这个对话。",
+    "Deleted.": "已删除。",
+    "Can\"t reach the Pi, the PC or the cloud right now.": "现在连不上树莓派、电脑或云端。",
+    "No sound is coming from this microphone. If you\"re on CarPlay or Bluetooth, try push-to-talk.": "这个麦克风没有声音。如果在用 CarPlay 或蓝牙，请改用按住说话。",
+    "Auto: Pi, then PC, then cloud": "自动：先树莓派，再电脑，再云端",
+    "That photo couldn't be opened. Try a JPEG or PNG.": "这张照片打不开，请换一张 JPEG 或 PNG。",
+    "Incognito: nothing from now on is saved.": "无痕模式：从现在起不保存。",
+    "Incognito off: conversations are saved again.": "已关闭无痕模式：对话会再次保存。",
+    "Can't reach the Pi, the PC or the cloud right now.": "现在连不上树莓派、电脑或云端。",
+    "No sound is coming from this microphone. If you're on CarPlay or Bluetooth, try push-to-talk.": "这个麦克风没有声音。如果在用 CarPlay 或蓝牙，请改用按住说话。",
+    "Things you can ask me (hold the mic and talk, or type):": "你可以这样问我（按住麦克风说话，或者打字）：",
+    "\"What's the weather tomorrow?\"": "“明天天气怎么样？”",
+    "\"How do I make braised pork belly?\"": "“红烧肉怎么做？”",
+    "\"How do you say 'thank you for dinner' in English?\"": "“‘谢谢你请我吃饭’用英文怎么说？”",
+    "\"Help me write a birthday message to my friend.\"": "“帮我给朋友写一段生日祝福。”",
+    "\"What's on my calendar tomorrow?\"": "“我明天有什么安排？”",
+    "\"Add a doctor's appointment Friday at 10am.\"": "“星期五上午十点加一个看医生的预约。”",
+    "\"Any new email today?\"": "“今天有新邮件吗？”",
+    "\"Help me reply to that email.\" (I only write a draft; you send it.)": "“帮我回复那封邮件。”（我只写草稿，你自己发送。）",
+    // first-run guide (data-google instances: a family member's own app)
+    "Enter the sign-in code you were sent. You only need to do this once on this phone.":
+      "请输入发给你的登录码。这部手机只需要输入一次。",
+    "Welcome! A few one-time steps:": "欢迎！只需要做一次的几个步骤：",
+    "Got it": "知道了",
+    ["Add this app to your home screen: in Safari, tap the Share button (the square " +
+      "with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there."]:
+      "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
+      "再点“添加到主屏幕”，以后从主屏幕打开。",
+    ["Connect your Google account so I can see your calendar and email: tap the gear at " +
+      "the top right, then \"Connect Google account\". If Google says it hasn't verified " +
+      "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
+      "app was made by your family, not a company."]:
+      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”。" +
+      "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
+      "这个应用是你的家人做的，不是公司做的。",
   };
   const PATTERNS = [
     [/^Working: (.+)…$/, "正在处理：$1…"],
     [/^Error (\d+)$/, "错误 $1"],
     [/^Microphone unavailable: (.*)$/, "麦克风不可用：$1"],
+    [/^Remove (.+)\? This deletes their conversations\.$/, "要移除$1吗？这会删除他们的对话记录。"],
     [/^Voice mode couldn't start: (.*)$/, "语音模式无法启动：$1"],
+    [/^Actions for (.+)$/, "$1 的操作"],
+    [/^No conversations match “(.+)”\.$/, "没有和“$1”相符的对话。"],
+    [/^(\d+) messages$/, "$1 条消息"],
+    [/^Continuing “(.+)”\. Go ahead\.$/, "继续“$1”，请说。"],
+    [/^Asked: (.*)$/s, "问：$1"],
+    [/^Answered: (.*)$/s, "答：$1"],
+    [/^Transcribing (\d+)%$/, "正在转写 $1%"],
+    [/^Uploaded (.+)$/, "已上传 $1"],
+    [/^offline, retrying in (\d+) s$/, "离线，$1 秒后重试"],
+    [/^(.+) \(in use\)$/, "$1（正在使用）"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
 
@@ -158,19 +300,90 @@
     }
   }
 
+  // --- first-run guide: the steps only she can do on her phone ---
+  const STEP_HOME = "Add this app to your home screen: in Safari, tap the Share button (the " +
+    "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
+  const STEP_GOOGLE = "Connect your Google account so I can see your calendar and email: tap " +
+    "the gear at the top right, then \"Connect Google account\". If Google says it hasn't " +
+    "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
+    "app was made by your family, not a company.";
+
+  // Shown (with the steps, or alone once they're done) until she taps Got it.
+  const EXAMPLES_ALWAYS = ["\"What's the weather tomorrow?\"",
+    "\"How do I make braised pork belly?\"",
+    "\"How do you say 'thank you for dinner' in English?\"",
+    "\"Help me write a birthday message to my friend.\""];
+  const EXAMPLES_GOOGLE = ["\"What's on my calendar tomorrow?\"",
+    "\"Add a doctor's appointment Friday at 10am.\"",
+    "\"Any new email today?\"",
+    "\"Help me reply to that email.\" (I only write a draft; you send it.)"];
+
+  function standalone(win) {
+    try {
+      return win.navigator?.standalone === true ||
+        !!(win.matchMedia && win.matchMedia("(display-mode: standalone)").matches);
+    } catch (e) { return false; }
+  }
+
+  function renderGuide(win, doc, st, say) {
+    const box = doc.getElementById("guide");
+    const text = doc.getElementById("guide-text");
+    if (!box || !text) return;
+    let dismissed = false;
+    try { dismissed = win.sessionStorage?.getItem("guideDismissed") === "1"; } catch (e) { /* private */ }
+    const steps = [];
+    if (!standalone(win)) steps.push(STEP_HOME);
+    if (st.enabled && !st.connected) steps.push(STEP_GOOGLE);
+    let seen = false;
+    try { seen = win.localStorage?.getItem("examplesSeen") === "1"; } catch (e) { /* private */ }
+    const examples = seen ? [] : [...EXAMPLES_ALWAYS, ...(st.connected ? EXAMPLES_GOOGLE : [])];
+    if ((!steps.length && !examples.length) || dismissed) { box.hidden = true; return; }
+    const lines = [];
+    if (steps.length) {
+      lines.push(say("Welcome! A few one-time steps:"),
+                 ...steps.map((step, i) => `${i + 1}. ${say(step)}`));
+    }
+    if (examples.length) {
+      if (lines.length) lines.push("");
+      lines.push(say("Things you can ask me (hold the mic and talk, or type):"),
+                 ...examples.map((e) => `• ${say(e)}`));
+    }
+    text.textContent = lines.join("\n");
+    box.setAttribute("data-examples", examples.length ? "1" : "");
+    box.hidden = false;
+  }
+
   // --- "Connect Google account" (google_web.py) ---
   function setupGoogle(win, doc) {
     const btn = doc.getElementById("google-connect");
     const hint = doc.getElementById("google-status");
     if (!btn) return null;
     const say = (text) => (isActive(doc) ? translate(text) : text);
+    const login = doc.getElementById("login-text");
+    if (login) {
+      login.textContent = say("Enter the sign-in code you were sent. You only need to do this once on this phone.");
+    }
+    const done = doc.getElementById("guide-done");
+    if (done) {
+      done.addEventListener("click", () => {
+        const box = doc.getElementById("guide");
+        try {
+          win.sessionStorage?.setItem("guideDismissed", "1");
+          if (box && box.getAttribute("data-examples") === "1") win.localStorage?.setItem("examplesSeen", "1");
+        } catch (e) { /* private */ }
+        if (box) box.hidden = true;
+      });
+    }
 
+    let signedIn = false;
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
                                     { credentials: "same-origin", cache: "no-store" });
         if (!res.ok) return;  // not signed in yet, or the button is off
         const st = await res.json();
+        signedIn = true;
+        renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (hint) {
@@ -200,6 +413,12 @@
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
     refresh();
+    // After signing in the page doesn't reload: look again until it works.
+    let tries = 0;
+    const timer = typeof win.setInterval === "function" ? win.setInterval(() => {
+      if (signedIn || ++tries > 200) { win.clearInterval(timer); return; }
+      refresh();
+    }, 3000) : null;
     return { refresh };
   }
 

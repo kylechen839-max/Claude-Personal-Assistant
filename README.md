@@ -464,6 +464,14 @@ A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对�
 other answer is a no, including sentences that merely contain 是 or 好
 (还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
 
+Her app guides her itself: the sign-in screen asks for "the sign-in code you
+were sent", and after signing in a card lists only the steps still left for
+her (add the app to the home screen; connect Google, including what to tap
+on Google's "unverified app" screen). Each step disappears once done, and
+"知道了" (Got it) hides the card until she next opens the app. Steps before
+she can reach the app (installing Tailscale, accepting your share, opening
+the link) are yours to send her.
+
 One-time setup on the PC (PowerShell, in the project folder):
 
 1. **A Google OAuth client for the web** (your `credentials.json` is a
@@ -511,6 +519,45 @@ disconnect her account, delete `data/mom/google_token.json`, restart, and
 remove the app at myaccount.google.com -> Security -> Third-party access.
 `[webapp] google_connect` and `public_origin` are off and empty in your own
 `config.toml`, so your instance is unchanged.
+
+## Invite family (cloud)
+
+On the Render server you can give someone their own account on your
+assistant, with their own conversation history and language (English or
+Chinese), without sharing `WEB_TOKEN`. The server profile turns this on
+(`[family] enabled`); on a PC it is off unless you set it.
+
+Invites are managed from the cloud server's own address: open
+`https://<cloud>/` (e.g. `https://hey-claude.onrender.com/`) directly. With
+failover the app talks to whichever backend is active, normally your Pi or
+PC, where `[family]` is off, so the **Invite someone** menu only shows
+while the cloud is the active backend.
+
+1. Signed in with your token at the cloud's address, open ⚙ -> **Invite
+   someone**, enter their
+   name and language (and their time zone, e.g. `Asia/Shanghai`), then
+   **Create invite link**. The phone's share sheet opens (or the link is
+   copied). Send it to them however you like. The link points at the
+   server itself (`[webapp] public_origin`, else with failover the cloud's
+   address, `APP_ORIGIN`).
+2. They open the link on their phone: it signs that phone in as them and
+   reloads the page in their language. Share -> Add to Home Screen.
+3. The link works once and for `invite_days` (30 days). If it expired, or
+   they get a new phone, tap **New link** next to their name (the old link
+   stops working).
+4. **Remove** (also at the cloud's address) signs them out everywhere and
+   deletes their conversations (if a file can't be deleted right away, it
+   is retried later).
+
+What they get: chat and voice with Claude, web search, and their own
+history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
+synced to your Pi or PC). What they never get: your Notion, Pinecone memory
+and notes, Google Calendar and Gmail, the dev team, the lecture recorder and
+tutor, your history, failover, or the invite menu. Their **Sign out
+everywhere** signs out only their own phones; yours signs out only yours.
+Settings: `[family]` in `config.toml` (`dir`, `max_users`, `invite_days`).
+Their own Google account and Chinese speech recognition and voice come
+later (`zh_stt_model`, `zh_piper_voice` are reserved for that).
 
 ## Run it in the cloud (Render)
 

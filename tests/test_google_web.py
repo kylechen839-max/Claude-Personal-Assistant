@@ -110,7 +110,8 @@ def test_callback_saves_the_token_and_adds_the_tools(setup, caplog):
     connect, assistant, client, token = setup
     login(client)
     # a browser's session already exists: it must see the new tools too
-    session = assistant.session(next(iter(assistant.sessions), "sid-x"))
+    session = assistant.session(
+        next(iter(assistant.sessions), None) or client.app.state.web.store.create())
     assert not session.registry.has("list_calendar_events")
     q = start(client)
     state = q["state"][0]

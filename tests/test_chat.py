@@ -132,3 +132,18 @@ def test_build_chat_passes_the_language(monkeypatch):
     assert cli.build_chat(cfg).language == "en"
     cfg["assistant"]["language"] = "zh"
     assert cli.build_chat(cfg).language == "zh"
+
+
+def test_chinese_prompt_says_what_it_can_do(fake_client):
+    """"你能帮我做什么？" gets an answer that matches what this instance has."""
+    from assistant.chat import ZH_HELP_CONNECT, ZH_HELP_EMAIL
+    from assistant.tools import Tool, ToolRegistry
+
+    bare = ClaudeChat(client=fake_client, tools=ToolRegistry(), language="zh").build_system()
+    assert "你能帮我做什么" in bare and ZH_HELP_CONNECT in bare and ZH_HELP_EMAIL not in bare
+    tools = ToolRegistry()
+    for name in ("list_calendar_events", "email_summary"):
+        tools.register(Tool(name, "x", {"type": "object", "properties": {}}, handler=lambda: {}))
+    full = ClaudeChat(client=fake_client, tools=tools, language="zh").build_system()
+    assert ZH_HELP_EMAIL in full and ZH_HELP_CONNECT not in full
+    assert "你能帮我做什么" not in ClaudeChat(client=fake_client, tools=tools).build_system()

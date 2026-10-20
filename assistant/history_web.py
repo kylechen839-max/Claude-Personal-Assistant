@@ -12,7 +12,8 @@
 Every route needs the signed-in session (401 otherwise) and goes through
 the store, which only sees its owner's conversations; an unknown id and
 someone else's id both give the same 404. Ids are random, so they can't be
-enumerated.
+enumerated. A family member (family.py) gets their own store and no memory
+search, so Kyle's conversations are unknown ids to them.
 """
 
 # No `from __future__ import annotations` here: FastAPI must see the real
@@ -78,13 +79,17 @@ def register(app, assistant, session_of, error) -> None:
     from starlette.concurrency import run_in_threadpool
 
     def guard(request):
-        """(session, store, error response)."""
+        """(session, store, error response): the session's own store."""
         s = session_of(request)
         if s is None:
             return None, None, error("not signed in", 401)
-        if assistant.history is None:
+        store, _ = assistant.history_of(s)
+        if store is None:
             return s, None, error("history is off", 404)
-        return s, assistant.history, None
+        return s, store, None
+
+    def memory_of(s):
+        return assistant.history_of(s)[1]  # None for a family member
 
     @app.get("/api/conversations")
     def list_conversations(request: Request):
@@ -107,7 +112,7 @@ def register(app, assistant, session_of, error) -> None:
             return error("bad request", 400)
         query = (p.get("q") or "").strip()[:200]
         hits = history.search_conversations(
-            store, query, assistant.memory, limit=limit + 1, offset=offset,
+            store, query, memory_of(s), limit=limit + 1, offset=offset,
             **filters)
         more = len(hits) > limit
         return {"conversations": [item(c) for c in hits[:limit]],
@@ -176,7 +181,7 @@ def register(app, assistant, session_of, error) -> None:
             return err
         try:
             await run_in_threadpool(history.delete_conversation, store, cid,
-                                    assistant.memory)
+                                    memory_of(s))
         except KeyError:
             return error("not found", 404)
         except Exception:

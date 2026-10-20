@@ -73,6 +73,39 @@ SYSTEM_PROMPT_ZH = (
     "一定要用简体中文（普通话）回答。"
 )
 
+# What a Chinese-speaking user (a family member's instance) can ask for, so
+# "你能帮我做什么？" gets a real answer. Only what this instance has right now.
+ZH_HELP_ALWAYS = ("everyday questions and explanations, translating between "
+                  "Chinese and English, helping write a message or letter, "
+                  "recipes and cooking tips, simple math and unit conversions")
+ZH_HELP_WEB = "weather, news, opening hours and other things that need a web search"
+ZH_HELP_CALENDAR = ("her calendar: what's on today or tomorrow, adding an "
+                    "appointment or reminder, moving one (deleting always asks first)")
+ZH_HELP_EMAIL = ("her Gmail: what new email came in, reading one out, and "
+                 "drafting a reply she then sends herself (you never send email)")
+ZH_HELP_CONNECT = ("Not connected yet: her calendar and Gmail. Tell her she can "
+                   "connect them with the gear menu, then 连接 Google 账户.")
+
+
+def zh_help_prompt(tools) -> str:
+    can = [ZH_HELP_ALWAYS]
+    if tools and (tools.has("web_search") or tools.has("web_fetch")):
+        can.append(ZH_HELP_WEB)
+    has_calendar = bool(tools and tools.has("list_calendar_events"))
+    if has_calendar:
+        can.append(ZH_HELP_CALENDAR)
+    if tools and tools.has("email_summary"):
+        can.append(ZH_HELP_EMAIL)
+    text = ("If the user asks what you can do or how to use you (你能做什么, "
+            "你能帮我做什么, 怎么用), answer warmly in two or three spoken "
+            "sentences with a few concrete examples she could say, in Chinese, "
+            "picked from what you can do now: " + "; ".join(can) + ". She can "
+            "hold the microphone button and talk, or type.")
+    if not has_calendar:
+        text += " " + ZH_HELP_CONNECT
+    return text
+
+
 ZH_REPLY_RULE = ("Always reply in Simplified Chinese (Mandarin, 简体中文), even "
                  "when tool results are English.")
 
@@ -130,6 +163,18 @@ def current_chat() -> "ClaudeChat | None":
     return _CURRENT_CHAT.get()
 
 
+def _now(timezone: str | None = None) -> datetime:
+    """Local time here, or in `timezone` (a family member's, family.py)."""
+    if timezone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return datetime.now(ZoneInfo(timezone))
+        except Exception:
+            log.warning("Unknown time zone; using this machine's")
+    return datetime.now().astimezone()
+
+
 def default_model() -> str:
     return os.environ.get("CLAUDE_MODEL") or DEFAULT_MODEL
 
@@ -140,8 +185,12 @@ class ClaudeChat:
     def __init__(self, client=None, model: str | None = None,
                  max_tokens: int = 500, system_prompt: str = SYSTEM_PROMPT,
                  max_history: int = 40, tools=None, max_tool_rounds: int = 6,
-                 memory=None, recorder=None, language: str = "en"):
+                 memory=None, recorder=None, language: str = "en",
+                 user_name: str | None = None, timezone: str | None = None):
         self._client = client
+        # A family member's name (family.py): the prompts say it, not "Kyle"
+        self.user_name = user_name or None
+        self.timezone = timezone or None  # IANA name; None = this machine's
         # "zh": Chinese prompt and replies (see build_system)
         self.language = "zh" if str(language).lower().startswith("zh") else "en"
         if self.language == "zh" and system_prompt is SYSTEM_PROMPT:
@@ -204,7 +253,7 @@ class ClaudeChat:
         return self.recorder.conversation_id if self.recorder else None
 
     def build_system(self, notes: list[str] | None = None) -> str:
-        now = datetime.now().astimezone()
+        now = _now(self.timezone)
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
@@ -228,7 +277,12 @@ class ClaudeChat:
             # The English tool/memory prompts are about Kyle; this user isn't.
             parts = [parts[0]] + [p.replace("Kyle's", "the user's")
                                    .replace("Kyle", "the user") for p in parts[1:]]
+            parts.append(zh_help_prompt(self.tools))
             parts.append(ZH_REPLY_RULE)
+        elif self.user_name:
+            # an English-speaking family member: every prompt is about them
+            parts = [p.replace("Kyle's", f"{self.user_name}'s")
+                     .replace("Kyle", self.user_name) for p in parts]
         return "\n\n".join(parts)
 
     def ask(self, user_text: str, on_text=None, cancel=None) -> str:

@@ -15,6 +15,9 @@ for the public internet with no Tailscale in front:
   lock their address's wrong tokens out for 15 minutes; past 20 from
   everyone, each wrong token waits a second. Login bodies are checked here,
   keyed by the real client address, so the web app never sees wrong ones.
+  Accepting a family invite (POST /api/invite/accept) is public too, with
+  the login call's limits; the web app checks the invite and counts wrong,
+  expired or used ones toward the same lockout.
   Cookies are checked against the web app's session store (revocable).
 - Each address gets a request budget per minute.
 - X-Forwarded-For / -Proto count only when the connection comes from the
@@ -67,8 +70,14 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/static/vad/silero_vad_v5.onnx",
               # lecture recorder / tutor page code and the vendored KaTeX
               "/static/features.js", "/static/features.css",
-              "/static/katex/katex.min.js", "/static/katex/katex.min.css"}
+              "/static/katex/katex.min.js", "/static/katex/katex.min.css",
+              # family invites: the page code that accepts an #invite= link
+              "/family.js"}
 PUBLIC_POST = {"/api/login"}
+# Accepting a family invite (family.py): public and limited like the login
+# call, but its body is an invite, not WEB_TOKEN, so the web app checks it
+# (wrong ones count toward the same shared lockout there).
+INVITE_POST = {"/api/invite/accept"}
 # with failover on: the router module (loaded before sign-in) and the token
 # trade, whose body (WEB_TOKEN) is checked here like /api/login's
 FAILOVER_PUBLIC_GET = {"/backend-router.js"}
@@ -436,10 +445,13 @@ class CloudGuard:
                                {"Retry-After": "60", **extra})
         public_get = PUBLIC_GET | (FAILOVER_PUBLIC_GET if self.failover_role else set())
         public_post = PUBLIC_POST | (FAILOVER_PUBLIC_POST if self.failover_role else set())
+        invite = method == "POST" and path in INVITE_POST
         public = ((method in ("GET", "HEAD") and path in public_get)
-                  or (method == "POST" and path in public_post))
+                  or (method == "POST" and path in public_post) or invite)
         bearer = _bearer(scope)
         login = method == "POST" and path in public_post and bearer is None
+        invite = invite and bearer is None
+        signing_in = login or invite  # one try at a time when locked out
         if bearer is not None and self.derived(bearer):
             # checked here; the failover layer checks scope (app / sync)
             need = "sync" if path.startswith("/api/sync/") else "app"
@@ -459,15 +471,16 @@ class CloudGuard:
         if not has_body:
             body = None  # nothing read: the app gets the server's receive
         else:
-            pool = self.login_slots if login else self.slots
+            pool = self.login_slots if signing_in else self.slots
             # a locked-out address may still sign in (right token), one try at a time
-            if not pool.take(ip, limit=1 if login and self.lockout.blocked(ip) else None):
+            if not pool.take(ip, limit=1 if signing_in and self.lockout.blocked(ip)
+                             else None):
                 return await _json(send, 429, {"error": "too many requests at once"},
                                    {"Retry-After": "5", **extra})
             try:
                 limit = (self.max_upload_bytes if is_upload(path)
                          else self.max_body_bytes)
-                timeout = (self.login_timeout if login else
+                timeout = (self.login_timeout if signing_in else
                            self.body_timeout + limit / self.min_upload_rate)
                 body, error = await _read_body(scope, receive, limit, timeout)
                 if error:

@@ -330,6 +330,60 @@ Render fills `X-Forwarded-For` (if it ever arrives without the real client,
 the per-address limit acts like the global one; the global cap still holds).
 Someone who steals the unlocked phone has the assistant, as with any app.
 
+## Family accounts (`family.py`, cloud)
+
+The owner (WEB_TOKEN) can invite people to their own accounts on the cloud
+server (`[family] enabled`, on in the server profile).
+
+- **Invite links.** `POST /api/invites` (owner only) makes
+  `hcinv.` + 256 random bits. Only its SHA-256 is stored (`users.json`,
+  written privately and atomically with `google_auth.write_private`); the
+  token is shown once, in the link's `#invite=` fragment, which browsers
+  never send to a server (the page has `Referrer-Policy: no-referrer`).
+  `family.js` clears it from the address bar before POSTing it to
+  `/api/invite/accept`. A link works once and for `invite_days`; a new link
+  replaces the old one. Tokens and `#invite=` links are masked in logs;
+  INFO lines name only user ids and counts, never names.
+- **Accepting.** `/api/invite/accept` is public (CloudGuard `INVITE_POST`:
+  the login call's slots and timeout, but no WEB_TOKEN body check). Wrong,
+  expired or used invites go through the same `LoginLimiter` as wrong
+  tokens (per-address lockout, global slowdown); a valid one always works,
+  and so does the owner's WEB_TOKEN. Redeeming and creating the session
+  happen under the family lock, so a DELETE can't race in between.
+- **Isolation.** A family session (`SessionStore.users`) gets its own
+  `ToolRegistry` with only Anthropic's web search and fetch (no browser,
+  Notion, memory, notes, history tools, Google or dev team), its own
+  `HistoryStore` at `<dir>/<id>/history.sqlite` with no sync event log,
+  and no Pinecone memory. Owner-only routes (`require_owner`: invites and
+  users, lecture, tutor, Google connect) answer 404 to it, as if absent.
+  History routes use the session's own store, so the owner's conversation
+  ids are unknown ids. Reply audio (`/api/audio/<id>`) is bound to the
+  session that made it. Failover tokens and Bearer WEB_TOKEN are always the
+  owner, and they are the only sessions outside the session list that are:
+  a cookie session that isn't listed (removed, signed out or expired after
+  its cookie was checked) is `webapp.GONE`, which gets no conversation
+  (401), so a removal racing a request never hands that browser the
+  owner's session (`WebAuth.user_of`). A family conversation made while
+  its person is being removed is dropped again. Signing in with WEB_TOKEN in a browser holding a family cookie
+  makes a new owner session (never upgrades theirs).
+- **Removing** someone signs out their sessions and live voice sockets,
+  drops their conversations without summarizing, closes their database and
+  deletes their folder (retried on Windows). `users.json` is written from
+  a copy before anything changes in memory, so a failed save leaves them
+  listed and the owner can try again. A folder that still can't be deleted
+  is kept in `users.json` (`deleting`) and retried at the next start, the
+  next removal and whenever the owner opens the list.
+- **Sign out everywhere** is per person: the owner's signs out the owner's
+  browsers, access tokens and voice calls; family members stay signed in,
+  live voice calls included (they have no
+  token to sign in again; remove them to cut them off). The cookie epoch is
+  rotated only when nobody else is left signed in, since rotating it would
+  sign everyone out. A family member's signs out only their own browsers.
+
+Left as is: a family member's session lasts 90 days from its last use, like
+the owner's; a family member who is also on the owner's phone shares that
+phone's cookie jar (one account per browser at a time).
+
 ## PC hub (`/devteam`): loopback only
 
 The hub (assistant/devhub.py) lets a signed-in browser on the PC queue
@@ -344,8 +398,8 @@ it is kept to the PC itself:
   `Tailscale-User-Login` header, and no configured trusted proxy vouches
   for the request. `tailscale serve` adds those headers, so the phone and
   the tailnet never reach it.
-- The `/api/devteam/*` routes need the web app's sign-in
-  (`require_session`, the same cookie, `WebAuth`, `LoginLimiter`, CSP and
+- The `/api/devteam/*` routes need the owner's sign-in
+  (`require_owner`: a family member's session gets 404; the same cookie, `WebAuth`, `LoginLimiter`, CSP and
   cross-origin guard; a cross-origin POST gets 403). The sign-in form on
   the page posts to the existing `/api/login`.
 - Messages go to the CLI on stdin, never on its command line. Coordinator

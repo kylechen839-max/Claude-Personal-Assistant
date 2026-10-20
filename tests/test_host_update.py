@@ -588,7 +588,7 @@ def test_healthz_version_and_local_busy(make_app):
     local = TestClient(app, base_url=BASE, client=("127.0.0.1", 50000))
     assert local.get("/healthz").json()["busy"] is False
     # a turn in progress
-    s = assistant.session("sid1")
+    s = assistant.session(app.state.web.store.create())
     s.busy.acquire()
     assert local.get("/healthz").json()["busy"] is True
     s.busy.release()

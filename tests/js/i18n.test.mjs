@@ -36,7 +36,8 @@ class El {
   set textContent(v) { this.childNodes = [new Text(v)]; }
 }
 
-function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true } = {}) {
+function page(lang, { gstatus = { enabled: true, connected: false }, connect, google: on = true,
+                      standalone = false, local = {} } = {}) {
   const google = new El('button', { id: 'google-connect', hidden: '' }, ['Connect Google account']);
   const hint = new El('p', { id: 'google-status', hidden: '' });
   const menu = new El('details', { class: 'menu' }, [google, hint]);
@@ -46,8 +47,14 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   const reply = new El('div', { class: 'msg claude' }, ['Mute']);  // looks like a label
   const loginText = new El('p', {}, ['Enter your access token (', new El('code', {}, ['WEB_TOKEN']),
     ' in the PC\'s ', new El('code', {}, ['.env']), ').\n     You only need to do this once on this phone.']);
+  const guide = new El('section', { id: 'guide', hidden: '' });
+  const guideText = new El('p', { id: 'guide-text' });
+  const guideDone = new El('button', { id: 'guide-done' }, ['Got it']);
+  const loginP = new El('p', { id: 'login-text' }, ['Enter your access token']);
   const body = new El('body', {}, [loginText, menu, input, mic, status, reply]);
-  const byId = { 'google-connect': google, 'google-status': hint, text: input, status };
+  const byId = { 'google-connect': google, 'google-status': hint, text: input, status,
+                 guide, 'guide-text': guideText, 'guide-done': guideDone, 'login-text': loginP };
+  const stored = {};
   const observers = [];
   const fetches = [];
   const asked = [];
@@ -66,6 +73,9 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
     },
     confirm: (message) => { asked.push(message); return true; },
     location: { href: '/' },
+    navigator: { standalone },
+    sessionStorage: { getItem: (k) => stored[k] ?? null, setItem: (k, v) => { stored[k] = v; } },
+    localStorage: { getItem: (k) => local[k] ?? null, setItem: (k, v) => { local[k] = v; } },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
       if (url === '/api/google/status') return { ok: gstatus !== null, json: async () => gstatus };
@@ -80,7 +90,7 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   vm.runInContext(SCRIPT, win);
   const flush = () => new Promise((r) => setImmediate(r));
   const mutate = (records) => observers[0].fn(records);
-  return { win, google, hint, menu, input, mic, status, reply, loginText, observers,
+  return { win, guide, guideText, guideDone, loginP, google, hint, menu, input, mic, status, reply, loginText, observers,
            fetches, asked, flush, mutate };
 }
 
@@ -181,4 +191,66 @@ test('Google button: a failed or non-https answer never navigates', async () => 
     assert.equal(p.google.disabled, false);
     assert.equal(p.hint.textContent, '无法开始 Google 登录。');
   }
+});
+
+test('first-run guide: home screen and Google steps in Chinese, then gone', async () => {
+  const p = page('zh-CN');
+  await p.flush();
+  assert.equal(p.loginP.textContent, '请输入发给你的登录码。这部手机只需要输入一次。');
+  assert.equal(p.guide.hidden, false);
+  assert.match(p.guideText.textContent, /^欢迎！/);
+  assert.match(p.guideText.textContent, /1\. 把这个应用加到主屏幕/);
+  assert.match(p.guideText.textContent, /2\. 连接你的 Google 账户/);
+  assert.match(p.guideText.textContent, /点“高级”/);
+  assert.match(p.guideText.textContent, /你可以这样问我/);
+  assert.doesNotMatch(p.guideText.textContent, /我明天有什么安排/);  // no calendar before Google
+  p.guideDone.listeners.click[0]();
+  assert.equal(p.guide.hidden, true);
+  await p.win.document.getElementById('google-connect');  // refresh again: stays dismissed
+});
+
+test('first-run guide: only the steps still to do; none when all done', async () => {
+  const home = page('zh-CN', { standalone: true });
+  await home.flush();
+  assert.doesNotMatch(home.guideText.textContent, /主屏幕/);
+  assert.match(home.guideText.textContent, /1\. 连接你的 Google 账户/);
+  // setup done: the card shows only what she can ask, including calendar and email
+  const local = {};
+  const done = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true }, local });
+  await done.flush();
+  assert.equal(done.guide.hidden, false);
+  assert.doesNotMatch(done.guideText.textContent, /步骤/);
+  assert.match(done.guideText.textContent, /^你可以这样问我/);
+  assert.match(done.guideText.textContent, /“明天天气怎么样？”/);
+  assert.match(done.guideText.textContent, /“我明天有什么安排？”/);
+  done.guideDone.listeners.click[0]();
+  assert.equal(local.examplesSeen, '1');
+  const later = page('zh-CN', { standalone: true, gstatus: { enabled: true, connected: true }, local });
+  await later.flush();
+  assert.equal(later.guide.hidden, true);  // seen once: gone for good
+});
+
+test('first-run guide: not signed in yet shows nothing; no data-google never shows it', async () => {
+  const out = page('zh-CN', { gstatus: null });
+  await out.flush();
+  assert.equal(out.guide.hidden, true);
+  const owner = page('en', { google: false });
+  await owner.flush();
+  assert.equal(owner.guide.hidden, true);
+  assert.equal(owner.loginP.textContent, 'Enter your access token');
+});
+
+test('Chinese page: tabs, settings, history and tutor labels are all translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  for (const [en, zh] of [['Chat', '聊天'], ['Lecture', '讲座'], ['Tutor', '作业辅导'],
+    ['Backends', '服务器'], ['Save and check', '保存并检查'], ['Pinned', '已置顶'],
+    ['Rename', '重命名'], ['Today', '今天'], ['Take photo', '拍照'], ['CC', '字幕'],
+    [' Show the full solution', ' 显示完整解答'], ['Auto: Pi, then PC, then cloud', '自动：先树莓派，再电脑，再云端']]) {
+    assert.equal(t(en), zh, en);
+  }
+  assert.equal(t('12 messages'), '12 条消息');
+  assert.equal(t('Actions for Dentist'), 'Dentist 的操作');
+  assert.equal(t('Transcribing 40%'), '正在转写 40%');
+  assert.equal(t('Hey Claude'), 'Hey Claude');  // the app name stays
 });
