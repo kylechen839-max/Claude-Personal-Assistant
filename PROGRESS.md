@@ -1861,3 +1861,11 @@ Render/Docker changes) comes separately.
   +1 (Remove sends POST `.../remove`, never DELETE); all three failed
   before the fix. Counts (Linux sandbox, Python 3.13): pytest 1710 passed,
   46 skipped. JS: family 9, backend-router 33, all 204 node tests passing (190 .mjs + 14 voice-core.test.js).
+## Chinese page: every screen translated
+
+- `assistant/web/i18n.js`: the Chat / Lecture / Tutor tabs, the settings
+  menu (backends, captions), the History screen (filters, groups, actions,
+  counts) and the lecture and tutor screens now have Chinese strings, plus
+  patterns for the dynamic ones ("12 messages", "Actions for …",
+  "Transcribing 40%"). Only the "Hey Claude" name stays in English.
+- Tests: `tests/js/i18n.test.mjs` +1. Phone cache v7.
