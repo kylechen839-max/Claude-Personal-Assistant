@@ -1886,6 +1886,61 @@ Render/Docker changes) comes separately.
 - Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
   Phone cache v9.
 
+## Three flaky CI tests, root-caused (2026-10-20)
+
+- **Midnight in New York** (`test_end_to_end.py::test_definition_of_done_phrase`):
+  the test worked out "tomorrow" from the clock, and the assistant read the
+  clock again seconds later (after the wake-word scan and Whisper). The
+  assistant had the same race inside one turn: the system prompt's date
+  (`ClaudeChat.build_system`) and the calendar tool's "tomorrow"
+  (`timeutil.resolve_day`) were two readings, so a question at 23:59:59
+  could get the day after tomorrow. Now "now" is read once per turn:
+  `ClaudeChat.ask` sets `timeutil.TURN_NOW`, and the prompt, `resolve_day`
+  and Notion's "today" (`list_assignments`) all use it; outside a turn they
+  read the clock as before. The end-to-end test pins the clock to 23:59:59
+  New York time. Tests: `test_tools.py` +2 (a turn at 23:59:59 whose clock
+  ticks past midnight before the tool runs: "tomorrow" stays Tuesday, not
+  Wednesday; Notion's "today" inside a turn); both, and the pinned
+  end-to-end test, fail on the old code.
+- **Voice latency on Windows** (`test_first_audio_latency_with_real_whisper`):
+  the 2 s budget is for our pipeline (Whisper, streaming, sentence split,
+  framing); Windows SAPI, a test-only voice, took up to 3.3 s per sentence
+  on the runner. c5c428a subtracted the first sentence's SAPI time; now the
+  OS voice is timed where the product calls it (`webapp.render_wav` on the
+  web app's TTS thread, with its COM set-up), and every render before the
+  first audio is subtracted, including a first sentence whose render
+  failed and was skipped. Kokoro's ~0.4 s first audio isn't what this test
+  measures. Test: `test_voice_ws.py` +3 (fake slow voice and slow Whisper:
+  OS-voice time is excluded, a slow Whisper still counts; the failed-first-
+  render case fails with c5c428a's formula).
+- **Whisper "!!!!" on Windows** (`test_lecture.py::test_pipeline_transcribes_a_real_webm`):
+  "!" is token 0, so "!!!!" is a degenerate decode: NaN logits (int8
+  kernels misbehave on some CPUs) or a bad sampled temperature fallback.
+  Every Whisper path uses faster-whisper's default fallback, voice
+  `Transcriber.transcribe` included; what sets this test apart is
+  `vad_filter=True` and the WebM/Opus re-encode, which weakens the
+  sampling theory. The cause wasn't reproduced (no Whisper model in the
+  sandbox, CI logs can't be fetched), so the fix is a product guard that
+  holds whatever the cause: `stt.is_degenerate` (3+ characters, all "!";
+  "..." and "♪♪♪" are normal non-speech output and aren't retried) and `stt.redecode`, which decodes again greedily (temperature
+  0, no conditioning on the bad text) on a float32 copy of our own model,
+  loaded only then, and drops segments still degenerate. The lecture job
+  applies it per window, voice `Transcriber.transcribe` per utterance; INFO
+  logs give seconds and counts, never text. The webm test now uses the
+  pipeline's own model (so the float32 retry is in play), has no fixed
+  seed (it should still catch a product failure), and on a miss prints the
+  fallback steps faster-whisper logged. The decode path was checked: a
+  SAPI fixture through WebM/Opus and `audio_windows` comes back at 16 kHz,
+  same length, lag 0, correlation 0.986, no NaN (3 dB quieter: the test's
+  encoder opens a stereo stream). Tests: `test_lecture.py` +2 (a "!!!!"
+  window is decoded again and filed clean; one still garbage is dropped),
+  `test_stt.py` +3 (`is_degenerate`; retry on an injected model; retry in
+  float32 on our own, loaded once); all fail without the guard.
+- Counts (Linux sandbox, Python 3.13, no eSpeak or Whisper model, so not
+  the CI numbers): 9 failed, 1697 passed, 45 skipped, 16 errors, against
+  master's 9 failed, 1687 passed, 45 skipped, 16 errors; the same eSpeak
+  and wake-model audio set fails on both. The end-to-end test's mocked-stt
+  case passed here with two SAPI fixtures standing in for the eSpeak phrase.
 ## Family copies start by themselves
 
 - `scripts/install_family_tasks.ps1`: one Task Scheduler task per family
