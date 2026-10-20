@@ -28,6 +28,7 @@ from dataclasses import dataclass
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 200_000   # about 50k tokens; longer text files are refused
 MAX_NAME_CHARS = 80
+MAX_PDF_PAGES = 100        # Claude's limit for a PDF
 # What the phone may send, for its error message and the file picker
 ALLOWED = ("image/jpeg", "image/png", "image/webp", "image/gif",
            "application/pdf", "text/plain", "text/markdown")
@@ -35,6 +36,47 @@ IMAGE_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP",
                "image/gif": "GIF"}
 TYPES_MESSAGE = "Only photos (JPEG, PNG, WebP, GIF), PDFs and text files can be attached"
 
+
+# What pdf_pages() looks for: an object's start, and in it the page tree
+# root's "/Type /Pages", "/Parent" (only the root has none) and a direct
+# "/Count N" (not "/Count 5 0 R"; at most 9 digits, so int() stays cheap).
+# The object header's runs are bounded and can't start inside a run of
+# digits, so a file of digits or spaces stays linear (unbounded \d+\s+ was
+# quadratic: 80 KB of digits took a minute, holding the GIL).
+_PDF_TOKENS = re.compile(rb"(?<![0-9])[0-9]{1,10}[ \t\r\n\f\x00]{1,16}[0-9]{1,5}"
+                         rb"[ \t\r\n\f\x00]{1,16}obj(?![A-Za-z])"
+                         rb"|/Type\s*/Pages(?![A-Za-z])|/Parent(?![A-Za-z])"
+                         rb"|/Count\s+(\d{1,9})(?![\d.]|\s+\d+\s+R)")
+
+
+def pdf_pages(data: bytes) -> int | None:
+    """The page count of a PDF from its page tree root (the /Type /Pages
+    object without a /Parent): its /Count, the last definition winning. An
+    incremental save that adds or removes pages appends a new root; one that
+    only annotates pages rewrites those pages but not the root, so they are
+    not counted twice. None when the root can't be seen (inside a compressed
+    object stream, or an indirect /Count): Claude checks those. One pass,
+    match by match: no list of every match, whatever the file holds."""
+    pages = None
+    is_root = has_parent = False
+    count = None
+    for m in _PDF_TOKENS.finditer(data):
+        token = m.group(0)
+        if token.startswith(b"/Type"):
+            is_root = True
+        elif token.startswith(b"/Parent"):
+            has_parent = True
+        elif token.startswith(b"/Count"):
+            if count is None:
+                count = int(m.group(1))
+        else:  # the next object starts: was the last one the root?
+            if is_root and not has_parent and count is not None:
+                pages = count
+            is_root = has_parent = False
+            count = None
+    if is_root and not has_parent and count is not None:
+        pages = count
+    return pages
 
 # Bytes no text file has (tab, newlines and form feed are fine)
 _CONTROL = re.compile(rb"[\x00-\x08\x0b\x0e-\x1f\x7f]")
@@ -124,6 +166,8 @@ def prepare(data: bytes, name: str | None, *, max_image_bytes: int,
     if len(data) > max_file_bytes:
         raise AttachmentRejected(f"A file is over {max_file_bytes / 1_000_000:g} MB")
     if kind == "application/pdf":
+        if (pdf_pages(data) or 0) > MAX_PDF_PAGES:
+            raise AttachmentRejected(f"A PDF is over {MAX_PDF_PAGES} pages")
         return Attachment("pdf", kind, data, clean)
     if len(data.decode("utf-8-sig")) > MAX_TEXT_CHARS:
         raise AttachmentRejected("A text file is too long to send")

@@ -234,7 +234,23 @@ to that session's own conversation.
   max_image_mb`, PDFs and text up to `[webapp] max_attachment_mb`, neither
   above `[webapp] max_upload_mb`, which still caps the whole request (4 MB
   on the cloud server, where CloudGuard counts `/api/turn` as an upload
-  path). Text files are capped at 200,000 characters. The base64 of all
+  path). Text files are capped at 200,000 characters. PDFs whose page
+  tree root (the `/Type /Pages` object without a `/Parent`) has a direct
+  `/Count` over 100 are refused up front, the last definition of the root
+  winning, so an incremental save that only annotates pages isn't counted
+  twice and one that removes pages counts the new total. This is
+  deliberately not a full PDF parse: when the root is inside a compressed
+  object stream or its count is indirect, nothing is refused here and
+  Claude's own 400 is the backstop. A crafted file can also understate its
+  `/Count` (a decoy root appended last); that only costs one API call, which
+  Claude refuses with the same "too long" sentence. The scan is one linear
+  pass with bounded patterns that keeps no list of matches (4 MB of digits,
+  of spaces or of page-tree words: well under a second and under 1 MB extra
+  memory in the sandbox). A 400 on a turn with files says
+  "too long" only when Claude's reason is about pages, length or tokens,
+  else "Claude couldn't read that file." (a protected or broken PDF). Only
+  the HTTP status of that 400 is logged at INFO/WARNING; the reason text is
+  DEBUG. The base64 of all
   attachments kept in a conversation is capped at 20 MB (older ones become
   a marker), under the API's 32 MB request limit.
 - **Taint.** An attached file or photo is someone else's text, so the

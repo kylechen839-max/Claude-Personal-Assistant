@@ -308,6 +308,7 @@ class ClaudeChat:
             start = len(self.history)
             new_thread = not (self.recorder and self.recorder.conversation_id)
             saved = None
+            dropped: list = []  # attachments turned into markers this turn
             # saved history gets a marker for attachments, never their bytes
             recorded = "\n".join(t for t in (user_text, attachment_marker(
                 attachments)) if t) if attachments else user_text
@@ -315,7 +316,7 @@ class ClaudeChat:
                 saved = self.recorder.user(recorded)
             if attachments:
                 self.untrusted_attachments = True  # before any tool can run
-                self._drop_old_attachments(attachments)
+                dropped = self._drop_old_attachments(attachments)
                 content = list(attachments)
                 if user_text.strip():
                     content.append({"type": "text", "text": user_text})
@@ -336,6 +337,8 @@ class ClaudeChat:
                                          reply or "(interrupted)"})
             except Exception:
                 del self.history[start:]  # keep history valid so the user can retry
+                for m, i, block in dropped:  # the retry may still need them
+                    m["content"][i] = block
                 if self.recorder:  # the retry saves it again
                     self.recorder.retract(saved, new_thread)
                 raise
@@ -642,22 +645,26 @@ class ClaudeChat:
                 self._turn_events.append(tool_event(
                     b.name, dict(getattr(b, "input", None) or {}), "ok"))
 
-    def _drop_old_attachments(self, new: list[dict]) -> None:
+    def _drop_old_attachments(self, new: list[dict]) -> list[tuple]:
         """Keep the attachments sent with every request under
         MAX_ATTACHMENT_CHARS (the API caps a request at 32 MB): older ones
-        become a text marker, oldest first."""
+        become a text marker, oldest first. Returns (message, index, block)
+        of each one replaced, so a failed turn can put them back."""
         budget = MAX_ATTACHMENT_CHARS - sum(_block_size(b) for b in new)
         held = [(m, i) for m in self.history if is_user_turn(m)
                 and isinstance(m["content"], list)
                 for i, b in enumerate(m["content"]) if _is_attachment(b)]
         total = sum(_block_size(m["content"][i]) for m, i in held)
+        dropped = []
         for m, i in held:
             if total <= budget:
                 break
             total -= _block_size(m["content"][i])
+            dropped.append((m, i, m["content"][i]))
             m["content"][i] = {"type": "text", "text": "(earlier "
                                + attachment_marker([m["content"][i]]).strip("[]")
                                + ", no longer attached)"}
+        return dropped
 
     def _trim_history(self) -> None:
         if len(self.history) <= self.max_history:

@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import struct
 import tempfile
@@ -65,6 +66,10 @@ log = logging.getLogger(__name__)
 # A turn's form: the recording plus attachments; one extra so "too many"
 # gets its own message (attachments.prepare_all)
 MAX_FORM_FILES = 1 + MAX_ATTACHMENTS + 1
+# Claude's 400 reasons that mean a file is too long ("A maximum of 100 PDF
+# pages may be provided", "prompt is too long: 250000 tokens > 200000
+# maximum"); any other 400 on a turn with files: the file couldn't be read
+FILE_TOO_LONG = re.compile(r"\bpages?\b|too long|\btokens?\b", re.IGNORECASE)
 
 STATIC = Path(__file__).resolve().parent / "web"
 COOKIE = "hc_session"
@@ -863,10 +868,12 @@ class WebAssistant:
                 s.chat.end_conversation()
                 self._reply(s, i18n.t("goodbye"), ended=True)
                 return
-            extra = {"attachments": attachments} if attachments else {}
-            reply = get_reply(  # it logs errors itself
-                s.chat, text, output_fn=lambda m: None,
-                on_text=lambda d: s.events.put({"type": "delta", "text": d}), **extra)
+            on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
+            if attachments:
+                reply = self._ask_with_files(s, text, attachments, on_text)
+            else:
+                reply = get_reply(  # it logs errors itself
+                    s.chat, text, output_fn=lambda m: None, on_text=on_text)
             log.info("Web replied %d chars", len(reply))
             log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply)
@@ -878,6 +885,29 @@ class WebAssistant:
             s.last_active = self.clock()
             s.events.put({"type": "done"})  # before release: see start_turn
             s.busy.release()
+
+    @staticmethod
+    def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text) -> str:
+        """get_reply for a turn with files: Claude refusing the request gets
+        a sentence about the file instead of the generic API error, "too
+        long" when its reason is about length (a PDF over 100 pages, a file
+        over the context window), else "couldn't read" (a protected or
+        broken PDF). ask() has already rolled the turn back, so Kyle can
+        retry without the file."""
+        import anthropic
+
+        from assistant.cli import friendly_error
+
+        try:
+            return s.chat.ask(text, on_text=on_text, attachments=attachments)
+        except anthropic.BadRequestError as e:
+            log.warning("Claude refused a turn with %d attachment(s) (HTTP %s)",
+                        len(attachments), e.status_code)
+            log.debug("Claude's reason: %s", e)
+            too_long = FILE_TOO_LONG.search(str(getattr(e, "message", "") or e))
+            return i18n.t("file_too_long" if too_long else "file_unreadable")
+        except Exception as e:  # noqa: BLE001 - as get_reply
+            return friendly_error(e, text, lambda m: None)
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
@@ -1356,9 +1386,13 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         elif ctype.startswith("multipart/form-data"):
             try:
                 form = await request.form(max_files=MAX_FORM_FILES, max_fields=5)
-            except Exception:
-                return None, None, error(f"bad request (attach at most "
-                                         f"{MAX_ATTACHMENTS} files)", 400)
+            except Exception as e:  # noqa: BLE001 - any malformed body
+                # Starlette raises HTTPException(400, "Too many files. Maximum
+                # number of files is 6.") (MultiPartException outside an app)
+                reason = str(getattr(e, "detail", "") or e)
+                return None, None, error(
+                    f"bad request (attach at most {MAX_ATTACHMENTS} files)"
+                    if reason.startswith("Too many files") else "bad request", 400)
             upload = form.get("audio")
             data = None
             if upload is not None and hasattr(upload, "read"):

@@ -343,7 +343,10 @@ recording ("what does this say?"); a photo on its own can be sent too. Up to
 px first; the server checks every file by its first bytes (not its name):
 JPEG, PNG, WebP or GIF photos up to `[tutor] max_image_mb` (8), re-encoded
 without EXIF/location; PDFs and UTF-8 text files up to `[webapp]
-max_attachment_mb` (10). The whole message must also fit in `[webapp]
+max_attachment_mb` (10); a PDF may have at most 100 pages (Claude's limit),
+and a file Claude still finds too long gets "That file is too long for
+Claude" (a password-protected or broken PDF: "Claude couldn't read that
+file.") instead of a generic error. The whole message must also fit in `[webapp]
 max_upload_mb` (10; 4 on the cloud server, so send big PDFs through the PC).
 The files are sent to Anthropic with the message and kept only in memory for
 the conversation; saved history gets a marker such as `[photo]` or

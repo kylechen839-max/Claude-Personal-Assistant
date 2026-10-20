@@ -112,6 +112,106 @@ def test_limits():
         prepare(b"\xff\xd8\xff" + b"\x00" * 100, "broken.jpg", **LIMITS)
 
 
+def paged_pdf(pages, *, kids_per_node=None):
+    """An uncompressed PDF with `pages` page objects (3, 4, ...) under the
+    page tree root 2 (through intermediate /Pages nodes if kids_per_node)."""
+    body = [b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"]
+    page_ids = list(range(3, 3 + pages))
+    parent = {p: 2 for p in page_ids}
+    root_kids = page_ids
+    if kids_per_node:
+        node_ids, root_kids = [], []
+        for n, start in enumerate(range(0, pages, kids_per_node)):
+            nid = 10_000 + n
+            kids = page_ids[start:start + kids_per_node]
+            parent.update({p: nid for p in kids})
+            body.append(b"%d 0 obj << /Type /Pages /Parent 2 0 R /Kids [%s] /Count %d >> endobj\n"
+                        % (nid, b" ".join(b"%d 0 R" % k for k in kids), len(kids)))
+            node_ids.append(nid)
+        root_kids = node_ids
+    body.append(b"2 0 obj << /Count %d /Type /Pages /Kids [%s] >> endobj\n"
+                % (pages, b" ".join(b"%d 0 R" % k for k in root_kids)))
+    for p in page_ids:
+        body.append(b"%d 0 obj << /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] >> endobj\n"
+                    % (p, parent[p]))
+    return b"".join(body) + b"trailer << /Root 1 0 R >>\n%%EOF\n"
+
+
+def incremental(pdf, objects):
+    """An incremental save: the changed objects appended after %%EOF."""
+    return pdf + b"".join(objects) + b"trailer << /Root 1 0 R /Prev 0 >>\n%%EOF\n"
+
+
+def test_pdfs_over_100_pages_are_refused_up_front():
+    assert attachments.pdf_pages(paged_pdf(100)) == 100
+    assert prepare(paged_pdf(100), "ok.pdf", **LIMITS).kind == "pdf"
+    with pytest.raises(AttachmentRejected, match="A PDF is over 100 pages"):
+        prepare(paged_pdf(101), "long.pdf", **LIMITS)
+    # a two-level page tree: the root's count, not a node's
+    assert attachments.pdf_pages(paged_pdf(150, kids_per_node=50)) == 150
+    with pytest.raises(AttachmentRejected, match="over 100 pages"):
+        prepare(paged_pdf(150, kids_per_node=50).replace(b"/Type /Pages", b"/Type/Pages"),
+                "long.pdf", **LIMITS)
+    # no page tree root in sight (compressed object stream, or an indirect
+    # /Count): Claude decides, nothing refused here
+    assert attachments.pdf_pages(PDF.replace(b"/Count 0", b"")) is None
+    assert attachments.pdf_pages(paged_pdf(150).replace(b"/Count 150", b"/Count 9 0 R")) is None
+    assert prepare(paged_pdf(150).replace(b"/Count 150", b"/Count 9 0 R"), "x.pdf", **LIMITS)
+
+
+def test_an_annotated_pdf_is_not_counted_twice():
+    """An annotated 60-page PDF saved incrementally rewrites 45 page objects:
+    105 "/Type /Page" definitions, still 60 pages."""
+    annotated = incremental(paged_pdf(60), [
+        b"%d 0 obj << /Type /Page /Parent 2 0 R /Annots [900 0 R] >> endobj\n" % p
+        for p in range(3, 48)])
+    assert annotated.count(b"/Type /Page ") == 105
+    assert attachments.pdf_pages(annotated) == 60
+    assert prepare(annotated, "annotated.pdf", **LIMITS).kind == "pdf"
+    # pages removed in an incremental save: the new root counts
+    trimmed = incremental(paged_pdf(150), [
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 90 >> endobj\n"])
+    assert attachments.pdf_pages(trimmed) == 90
+    assert prepare(trimmed, "trimmed.pdf", **LIMITS).kind == "pdf"
+    # and pages added
+    grown = incremental(paged_pdf(90), [
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 120 >> endobj\n"])
+    with pytest.raises(AttachmentRejected, match="over 100 pages"):
+        prepare(grown, "grown.pdf", **LIMITS)
+
+
+def test_page_counting_streams_its_matches():
+    """A 10 MB PDF of nothing but page-tree words is counted match by match
+    (finditer): no list of every match, which would take about 60 MB."""
+    import tracemalloc
+
+    hostile = b"%PDF-1.4\n" + b"/Parent " * 1_250_000
+    tracemalloc.start()
+    try:
+        assert attachments.pdf_pages(hostile) is None
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000, peak
+    huge = paged_pdf(1).replace(b"/Count 1", b"/Count " + b"9" * 5000)
+    assert attachments.pdf_pages(huge) is None  # no 5000-digit int()
+
+
+def test_page_counting_stays_linear_on_runs_of_digits_and_spaces():
+    """A PDF of one long run of digits (or digits then spaces) made the old
+    unbounded object-header pattern quadratic: 80 KB took a minute, holding
+    the GIL. 200 KB of each must be quick."""
+    import time
+
+    for hostile in (b"%PDF-1.4\n" + b"1" * 200_000,
+                    b"%PDF-1.4\n" + b"1" * 100_000 + b" " * 100_000):
+        start = time.perf_counter()
+        assert attachments.pdf_pages(hostile) is None
+        assert time.perf_counter() - start < 2.0
+    # real object headers are still seen
+    assert attachments.pdf_pages(paged_pdf(3)) == 3
+
+
 def test_limits_from_config_stay_under_the_request_cap():
     from assistant.config import DEFAULTS, load_config
 
@@ -210,6 +310,84 @@ def test_too_many_files_in_the_form_is_refused(make_app, fake_client):
     r = client.post("/api/turn", data={"text": "look"}, files=files)
     assert r.status_code == 400 and "at most 4" in r.json()["error"]
     assert fake_client.calls == []
+
+
+def test_only_too_many_files_says_attach_at_most(make_app, fake_client):
+    _, client = make_app()
+    login(client)
+    # too many fields, and a broken body: no word about files
+    r = client.post("/api/turn", data={f"f{i}": "x" for i in range(8)},
+                    files=[("attachment", ("a.txt", b"hi", "text/plain"))])
+    assert r.status_code == 400 and r.json()["error"] == "bad request"
+    r = client.post("/api/turn", content=b"--xyz\r\nnot a part\r\n",
+                    headers={"content-type": "multipart/form-data; boundary=xyz"})
+    assert r.status_code == 400 and r.json()["error"] == "bad request"
+    assert fake_client.calls == []
+
+
+def bad_request(message="messages.0.content.0.pdf: A maximum of 100 PDF pages may be provided."):
+    """anthropic.BadRequestError as the SDK raises it for a 400."""
+    import anthropic
+    import httpx
+
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    return anthropic.BadRequestError(message, response=httpx.Response(400, request=req),
+                                     body=body)
+
+
+def refuse(**kwargs):
+    raise bad_request()
+
+
+@pytest.mark.parametrize("lang, sentence", [
+    ("en", "That file is too long for Claude (PDFs up to 100 pages)."),
+    ("zh", "这个文件太长了，Claude 处理不了（PDF 最多 100 页）。")])
+def test_a_file_claude_refuses_gets_its_own_sentence(make_app, fake_client, caplog,
+                                                     monkeypatch, lang, sentence):
+    from assistant import i18n
+
+    monkeypatch.setattr(i18n, "LANG", lang)
+    assistant, client = make_app()
+    login(client)
+    fake_client.messages.create.side_effect = refuse
+    with caplog.at_level(logging.DEBUG):
+        evs = events(client.post("/api/turn", data={"text": "summarize"},
+                                 files=[("attachment", ("thesis.pdf", PDF, "application/pdf"))]))
+    assert [e for e in evs if e["type"] == "reply"][-1]["text"] == sentence
+    s = next(iter(assistant.sessions.values()))
+    assert s.chat.history == []  # rolled back: Kyle can retry without the file
+    info = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.INFO)
+    assert "Claude refused a turn with 1 attachment(s) (HTTP 400)" in info
+    assert "thesis" not in info and "PDF pages" not in info  # the reason is DEBUG
+    # a 400 without a file is still the generic API error
+    evs = events(client.post("/api/turn", json={"text": "hello"}))
+    assert [e for e in evs if e["type"] == "reply"][-1]["text"] == i18n.t("api_error")
+
+
+@pytest.mark.parametrize("reason, key", [
+    ("messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid.",
+     "file_unreadable"),
+    ("messages.0.content.0.pdf.source: The PDF specified is password protected.",
+     "file_unreadable"),
+    ("prompt is too long: 250000 tokens > 200000 maximum", "file_too_long"),
+    ("messages.0.content.0.pdf: A maximum of 100 PDF pages may be provided.",
+     "file_too_long")])
+def test_only_a_length_400_says_too_long(make_app, fake_client, reason, key):
+    from assistant import i18n
+
+    _, client = make_app()
+    login(client)
+
+    def refuse_with(**kwargs):
+        raise bad_request(reason)
+
+    fake_client.messages.create.side_effect = refuse_with
+    evs = events(client.post("/api/turn", data={"text": "summarize"},
+                             files=[("attachment", ("scan.pdf", PDF, "application/pdf"))]))
+    assert [e for e in evs if e["type"] == "reply"][-1]["text"] == i18n.t(key)
+    assert i18n.EN["file_unreadable"] == "Claude couldn't read that file."
+    assert i18n.ZH["file_unreadable"] == "Claude 读不了这个文件。"
 
 
 def test_attachments_are_only_for_turns(make_app, fake_client):
@@ -387,6 +565,22 @@ def test_a_failed_attachment_turn_leaves_history_usable(fake_client):
     assert chat.history == []
 
 
+def test_a_failed_turn_keeps_the_older_attachments(fake_client, monkeypatch):
+    """The budget swaps turn 1's PDF for a marker before turn 2 is sent; if
+    turn 2 fails, the rollback puts the PDF back so a retry still has it."""
+    pdf = prepare(PDF, "one.pdf", **LIMITS).block()
+    monkeypatch.setattr(chat_mod, "MAX_ATTACHMENT_CHARS", len(pdf["source"]["data"]) + 1)
+    chat = ClaudeChat(client=fake_client, model="m")
+    fake_client.queue.append(make_response(text_block("ok")))
+    chat.ask("read", attachments=[pdf])
+    before = json.loads(json.dumps(chat.history))
+    fake_client.messages.create.side_effect = RuntimeError("API down")
+    with pytest.raises(RuntimeError):
+        chat.ask("and this", attachments=[{**pdf, "title": "two.pdf"}])
+    assert chat.history == before
+    assert chat.history[0]["content"][0]["title"] == "one.pdf"
+
+
 # --- family and cloud ---------------------------------------------------------------------
 
 def test_family_attachments_go_to_their_own_chat(env, owner):
@@ -428,6 +622,27 @@ def test_cloud_guard_caps_attachment_uploads(make_cloud, fake_client):
     anon = make_cloud()[1]
     assert anon.get("/attachments.js", headers=via_proxy(PUBLIC)).status_code == 200
     assert anon.get("/static/features.js", headers=via_proxy(PUBLIC)).status_code != 401
+
+
+def test_every_file_the_login_page_loads_is_public_on_the_cloud(make_cloud):
+    """Before sign-in the page loads all its scripts, styles and icons; a 401
+    leaves one missing (e.g. i18n.js: the login page stayed English for a
+    Chinese family member) until a reload after signing in."""
+    import re
+
+    from assistant import cloud
+
+    page = (webapp.STATIC / "index.html").read_text(encoding="utf-8")
+    paths = sorted(set(re.findall(r'(?:src|href)="(/[^"#?]*)"', page)))
+    assert {"/i18n.js", "/history.js", "/app.js", "/attachments.js"} <= set(paths)
+    anon = make_cloud()[1]
+    for path in paths:
+        assert path in cloud.PUBLIC_GET, path
+        # 404 for the lecture/tutor files when those features are off
+        assert anon.get(path, headers=via_proxy(PUBLIC)).status_code != 401, path
+    for path in ("/i18n.js", "/history.js"):
+        assert anon.get(path, headers=via_proxy(PUBLIC)).status_code == 200, path
+    assert anon.get("/api/state", headers=via_proxy(PUBLIC)).status_code == 401
 
 
 # --- the page -------------------------------------------------------------------------

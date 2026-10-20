@@ -307,7 +307,17 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
     sizes only, no file names.
 - [ ] On the cloud address, attach a PDF over 4 MB.
   - Should: a short "too large" note; nothing is sent; the chips stay.
-- [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消.
+- [ ] Attach a long PDF (over 100 pages, e.g. a textbook chapter export).
+  - Should: "A PDF is over 100 pages" (or, for a PDF whose pages the
+    server can't count, Claude's answer "That file is too long for Claude
+    (PDFs up to 100 pages).") and the conversation still works for the
+    next message.
+- [ ] Attach a password-protected PDF.
+  - Should: "Claude couldn't read that file." and the next message works.
+- [ ] On the cloud address, sign out in Mom's (Chinese) app.
+  - Should: the sign-in page is in Chinese right away (no reload needed).
+- [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消,
+      and a sent photo shows as "[照片]" in the chat and in History.
 
 ## Chinese instance for Mom (optional, ~20 min)
 Setup is in README.md ("A Chinese instance for someone else"). Use her

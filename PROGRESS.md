@@ -59,6 +59,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
 | `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
+| `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
+| `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
@@ -1960,3 +1963,76 @@ Render/Docker changes) comes separately.
   46 skipped. JS: attachments 6, agent-dashboard 126, backend-router 33,
   devhub 12, family 9, i18n 11, voice-core 14, all passing. Real iPhone
   camera/picker behaviour is not tested here (MANUAL_TEST "Attachments").
+- **Round 2 (judge's five low findings, all fixed):**
+  1. A failed turn no longer strips older attachments:
+     `_drop_old_attachments` returns what it replaced and `ask()`'s
+     rollback puts the blocks back (`test_a_failed_turn_keeps_the_older_
+     attachments`; fails with the chat.py change reverted).
+  2. Claude's 400 on an attachment turn (`anthropic.BadRequestError`) now
+     says "That file is too long for Claude (PDFs up to 100 pages)."
+     (`i18n.py` `file_too_long`, Chinese too) instead of the generic API
+     error; the turn is still rolled back and a 400 without files is still
+     the generic error. INFO/WARNING logs the count and HTTP status only.
+     PDFs with more than 100 `/Type /Page` objects are refused before
+     upload to Claude ("A PDF is over 100 pages"; a lower bound, see
+     SECURITY.md). Tests: `test_a_file_claude_refuses_gets_its_own_
+     sentence` (en, zh; fails with webapp.py or i18n.py reverted),
+     `test_pdfs_over_100_pages_are_refused_up_front` (fails with
+     attachments.py reverted).
+  3. A malformed form says plain "bad request"; "attach at most 4 files"
+     only when Starlette's error is "Too many files"
+     (`test_only_too_many_files_says_attach_at_most`; fails with that hunk
+     reverted).
+  4. The Chinese page shows the marker line of a message as `[照片]` /
+     `[文件：name]` (i18n.js `translateMarkers`, only when the markers are
+     the whole last line); history keeps the English marker. Two new
+     i18n tests (both fail with i18n.js reverted).
+  5. Rows for the attachment test files above, and
+     `tests/js/app-send.test.mjs`, which loads the real `app.js` in
+     node:vm: picked files go with a message, chips clear only on an ok
+     response (fails if `res.ok &&` is removed), and a typed or tapped
+     yes/no goes to `/api/confirm` as JSON without files (fails if
+     `!confirming &&` is removed from `pendingFiles`). app.js unchanged.
+  - Phone cache stays v11 (this branch's new version, not released yet).
+  - Counts (Linux sandbox, Python 3.13): pytest 1740 -> 1745 passed,
+    48 skipped. JS: attachments 6, i18n 11 -> 13, ui 4, app-send 2 (new),
+    all passing.
+- **Round 3 (judge's three low findings plus an older cloud bug, all
+  fixed):**
+  1. Page count from the page tree root, not by counting `/Type /Page`:
+     `attachments.pdf_pages()` takes the direct `/Count` of the last
+     `/Type /Pages` object without a `/Parent`. An annotated 60-page PDF
+     whose incremental save rewrites 45 pages (105 page definitions) is 60
+     pages and accepted; an incremental save that trims 150 to 90 pages is
+     accepted, one that grows 90 to 120 is refused; a root in a compressed
+     object stream or with an indirect count gives None (Claude decides).
+     SECURITY.md's "lower bound" sentence is replaced. Tests:
+     `test_an_annotated_pdf_is_not_counted_twice` and the reworked
+     `test_pdfs_over_100_pages_are_refused_up_front` (two-level tree,
+     `/Type/Pages`, indirect count); both fail with the round-2 `findall`
+     count.
+  2. One `finditer` pass, no list of matches: the root's count is only
+     known at the end (the last definition wins), so there is no early
+     stop, but memory stays constant. `test_page_counting_streams_its_
+     matches`: a 10 MB file of `/Parent ` words peaks under 1 MB in
+     tracemalloc (fails if the matches are collected into a list); a
+     5000-digit `/Count` is ignored, never parsed. Measured here: 0.5 s
+     for that file, 0.7 s for 10 MB of object headers (sandbox, not a Pi).
+  3. A 400 on a turn with files says "too long" only when Claude's reason
+     mentions pages, "too long" or tokens (`webapp.FILE_TOO_LONG`); any
+     other 400 (protected or broken PDF) says "Claude couldn't read that
+     file." (`i18n.py` `file_unreadable`, Chinese in i18n.py and i18n.js).
+     `test_only_a_length_400_says_too_long` (4 reasons; the two
+     unreadable ones fail with that line reverted), plus the i18n.js
+     string in the JS test (fails without it).
+  4. On the cloud, `/i18n.js` and `/history.js` got a 401 before sign-in
+     (the login page stayed English for a Chinese family member until a
+     reload); both are page code with no personal data and are now in
+     `cloud.PUBLIC_GET`. `/backend-router.js` is only imported by app.js
+     with failover on and was already in `FAILOVER_PUBLIC_GET`.
+     `test_every_file_the_login_page_loads_is_public_on_the_cloud` reads
+     every `src`/`href` in index.html and checks a fresh cloud app never
+     401s them (fails with the cloud.py change reverted).
+  - Counts (Linux sandbox, Python 3.13): pytest 1745 -> 1752 passed,
+    48 skipped. JS: attachments 6, i18n 13, ui 4, app-send 2, all
+    passing.

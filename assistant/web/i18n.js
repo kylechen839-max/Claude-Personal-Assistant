@@ -209,6 +209,11 @@
     "Only photos, PDFs and text files can be attached.": "只能附加照片、PDF 和文本文件。",
     "Attach at most 4 files to a message": "每条消息最多附加 4 个文件。",
     "bad request (attach at most 4 files)": "请求有误（最多附加 4 个文件）。",
+    "bad request": "请求有误。",
+    "A PDF is over 100 pages": "有一个 PDF 超过 100 页。",
+    "That file is too long for Claude (PDFs up to 100 pages).":
+      "这个文件太长了，Claude 处理不了（PDF 最多 100 页）。",
+    "Claude couldn't read that file.": "Claude 读不了这个文件。",
     "Only photos (JPEG, PNG, WebP, GIF), PDFs and text files can be attached":
       "只能附加照片（JPEG、PNG、WebP、GIF）、PDF 和文本文件。",
     "A photo couldn't be read": "有一张照片读不出来。",
@@ -253,6 +258,17 @@
     [/^A file is over ([\d.]+) MB$/, "有一个文件超过 $1 MB。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
+  // The line a message with attachments ends with, "[photo] [file: a.pdf]"
+  // (attachments.js summary(), and the marker saved in history): shown in
+  // Chinese, kept in English where it is stored.
+  const MARKER = /\[photo\]|\[file: [^\]\n]+\]/;
+  const MARKER_LINE = new RegExp(`(^|\\n)((?:${MARKER.source})(?: (?:${MARKER.source}))*)(\\s*)$`);
+
+  function translateMarkers(text) {
+    return text.replace(MARKER_LINE, (all, lead, line, trail) => lead + line
+      .replace(/\[photo\]/g, "[照片]")
+      .replace(/\[file: ([^\]\n]+)\]/g, "[文件：$1]") + trail);
+  }
 
   // The Chinese for a known English string (whitespace kept), else `text`.
   function translate(text) {
@@ -265,7 +281,7 @@
         if (re.test(key)) { out = key.replace(re, rep); break; }
       }
     }
-    if (out === undefined) return text;
+    if (out === undefined) return translateMarkers(text);
     // keep the spacing, except next to full-width punctuation ("，在电脑的")
     const lead = /^[，。、：；）]/.test(out) ? "" : text.match(/^\s*/)[0];
     const trail = /[（]$/.test(out) ? "" : text.match(/\s*$/)[0];
