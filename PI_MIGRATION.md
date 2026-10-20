@@ -96,7 +96,7 @@ under 1 GB, so 4 GB is enough; 8 GB only matters if the Pi does other work.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **USB conference speakerphone** (e.g. Anker PowerConf, Jabra Speak) | One plug; hardware echo cancellation, so it doesn't hear itself and follow-ups work well; good pickup across a room | 40-100 USD |
+| **USB conference speakerphone** (e.g. Anker PowerConf, Jabra Speak) | One plug; hardware echo cancellation, so it doesn't hear itself, follow-ups work well and `[wake] barge_in = "voice"` (talk over a reply to stop it) becomes usable; good pickup across a room | 40-100 USD |
 | **USB mic + powered USB/3.5 mm speaker** | Cheap, easy to replace either part | No echo cancellation (the follow-up window may hear the reply; keep the speaker away from the mic); 3.5 mm needs a Pi 4 (the Pi 5 has no audio jack) |
 | **ReSpeaker-style mic-array HAT** (2- or 4-mic) | Neat, mounts on the Pi, far-field mics | Needs a driver (an out-of-tree kernel module that often breaks with OS updates); check Pi 5 support before buying; you still need a speaker |
 

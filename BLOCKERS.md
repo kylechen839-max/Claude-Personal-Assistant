@@ -88,7 +88,8 @@ Only what is still open for Kyle. None of it blocks the code.
       sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what
       works for your voice and room.
 - [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
-      spoken delete, Notion, memory, web, Piper, network down, latency).
+      barge-in (step 4b: whether `barge_in = "voice"` works on your
+      speakers or needs headphones), spoken delete, Notion, memory, web, Piper, network down, latency).
       Note anything that fails here.
 - [ ] **Raspberry Pi move:** follow PI_MIGRATION.md (go/no-go in its last
       section). Before it, consider **publishing the Google OAuth app**

@@ -95,6 +95,25 @@ Run `python -m assistant` for steps 3-8 and leave it running.
     it. The window length is `follow_up_seconds` (`0` turns follow-ups off);
     `follow_up_chime = false` drops the blip only.
 
+## 4b. Interrupting a reply (barge-in) (3 min)
+- [ ] Ask something with a long answer ("Hey Claude, tell me about the
+      history of Rome"). While it talks, say "Hey Claude, what time is it?"
+  - Should: the reply stops within about a second, the wake chime plays, and
+    it answers the time. It never stops by itself on its own voice.
+- [ ] Same, but say "Hey Claude, stop" over the reply.
+  - Should: it just stops; nothing is said back, and the follow-up blip plays.
+- [ ] Set `[wake] barge_in = "voice"` (in `config.local.toml`), restart, ask
+      for a long answer and talk over it without the wake word, at a normal
+      voice, first on your usual speakers, then with headphones.
+  - Should: with headphones it stops after about half a second of talking.
+    On speakers, note whether it (a) never stops (then raise your voice,
+    lower `barge_in_echo_ratio`, e.g. 2.0, or go back to "wake_word") or
+    (b) cuts itself off with nobody talking (raise `barge_in_echo_ratio`,
+    e.g. 3.5, or go back to "wake_word"). Report which happened.
+- [ ] "Hey Claude, delete Manual Test tomorrow" (create it first, step 5),
+      and say "yes" over the question before it finishes.
+  - Should: the event is still there (talking over the question is a no).
+
 ## 5. Calendar create and spoken delete (3 min)
 - [ ] "Hey Claude, add a test event called Manual Test tomorrow at noon."
   - Should: it appears in Google Calendar tomorrow 12:00-13:00 (right time
@@ -421,6 +440,16 @@ with the stopwatch button.
     Repeat and say "no": the event stays. Repeat and talk over the question
     ("okay, and what about Friday?"): it says "OK, I won't delete it", the
     event stays, and it then answers about Friday.
+- [ ] Follow-up cue: after an answer finishes, wait.
+  - Should: a very quiet low note and **Still listening…** with the mic
+    meter lit; after about 5 s the label goes back to **Listening** without
+    a sound. Asking something inside those 5 s just works. No cue after a
+    yes/no question or after you interrupted it.
+- [ ] CarPlay or a car's Bluetooth: a few turns while it plays through the
+      car speakers, staying silent during answers.
+  - Should: it never cuts itself off. If it does, set `[voice] barge_in =
+    "off"` (answers then always play to the end and it listens right after)
+    and note it.
 - [ ] Lock screen / interruption: mid-answer, lock the phone (or take a call
       / say "Hey Siri"), then come back.
   - Should: it stops talking, shows "Tap to continue", and carries on with

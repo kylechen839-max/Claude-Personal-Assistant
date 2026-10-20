@@ -128,7 +128,9 @@ def client_settings(v: dict) -> dict:
     return {"vad": v["vad"], "silence_ms": v["silence_ms"],
             "min_utterance_ms": v["min_utterance_ms"],
             "max_utterance_ms": int(v["max_utterance_s"] * 1000),
+            "barge_in": v["barge_in"] not in ("off", False),  # "voice" or "off"
             "barge_in_ms": v["barge_in_ms"], "vad_threshold": v["vad_threshold"],
+            "follow_up_ms": int(float(v["follow_up_seconds"]) * 1000),
             "idle_timeout": v["idle_timeout"], "debug_panel": v["debug_panel"]}
 
 

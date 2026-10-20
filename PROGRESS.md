@@ -24,6 +24,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_stt.py` | 4 | stage 3 |
 | `test_wakeword.py` | 15 | stage 4 |
 | `test_follow_up.py` | 14 | follow-up mode |
+| `test_barge_in.py` | 43 | barge-in on the PC loop (talk over a reply), with follow-ups |
 | `test_tools.py` | 27 | stage 5 |
 | `test_web.py` | 17 | web search / browser |
 | `test_security.py` | 36 | tool safety, log redaction |
@@ -2417,3 +2418,107 @@ their language, on the same shared cloud server as Kyle.
     MANUAL_TEST marks the home-screen-app sign-in as release-gating.
   - Counts (Linux sandbox, Python 3.13): pytest 1737 -> 1744 passed, 48
     skipped. JS unchanged (i18n 14, family 9, all files passing).
+
+## Interrupt by talking (barge-in) and follow-ups, PC and phone (2026-10-20)
+
+- **PC wake-word loop** (`assistant/wakeword.py` `BargeInSpeaker`,
+  `EchoGate`): while a reply plays, a helper thread reads the mic. `[wake]
+  barge_in = "wake_word"` (default): "Hey Claude" over a reply stops it at
+  once, chimes and records the new request. `"voice"`: plain talking does
+  too, once there are `barge_in_ms` (400 ms) of speech mostly
+  `barge_in_echo_ratio` (2.5x) louder than the reply's own echo; the echo is
+  measured over the first 250 ms of each reply's sound and follows a reply
+  that gets gradually louder (levels smoothed over ~100 ms so syllable gaps
+  don't break "sustained"). `"off"`: as before (mic closed while speaking).
+  - Stopping: `audio.play` waits on a stop event instead of `sd.wait()`
+    (`audio.stop_playback()` from the mic thread stops the sound and keeps
+    the rest of the reply silent); Kokoro stops rendering the remaining
+    sentences; pyttsx3 is stopped from its own `started-word` callback (the
+    only safe place to call `engine.stop()`), hooked only when barge-in is on.
+  - The interrupting request is the next turn of the same conversation
+    (`cli.run_wake`), timed as "Turn timings from barge-in". History keeps
+    about the part of the reply that was heard (`ClaudeChat.mark_interrupted`,
+    estimated at 2.7 words/s of sound). "Hey Claude, stop" / "never mind" /
+    "别说了" just stops (Claude isn't asked). Talking over a yes/no question
+    is a no and the words aren't used as the answer. A reply that says
+    "Claude" itself can't wake the loop with its own voice. The follow-up
+    window works as before after the interrupting request's answer.
+  - `--audio-file` with barge-in on reads the file in real time
+    (`FileSource(pace=1.0)`), so the watcher hears the part of the file that
+    goes with each reply, as a mic would.
+- **Phone voice mode** (`voice-core.js` `TurnController`, `voice.js`):
+  barge-in was already there (it stops playback, tells the server, which
+  cancels the Claude stream and the remaining TTS, and history keeps the
+  heard part). New: `[voice] barge_in = "off"` for car speakers that defeat
+  echo cancellation (the mic is ignored while a reply plays; listening
+  resumes right after), and `[voice] follow_up_seconds` (5): after a reply
+  has played, a soft low note (the existing "thinking" earcon, the same note
+  as the PC's follow-up blip) and **Still listening…** (还在听…) with the
+  mic meter lit; silence quietly puts back **Listening**. No cue after a
+  barge-in, a yes/no question or a turn without audio. Phone cache v19
+  (`i18n.js` changed; master was already at v10).
+- Tests: new `tests/test_barge_in.py` (23): eSpeak-rendered speech through
+  the real FileSource (paced 8x), WakeListener, VAD and BargeInSpeaker, with
+  a fake sounddevice so "playing" takes time and is stopped through
+  `audio.play`: talking over a reply stops it (played < 2.4 of 3 s) and is
+  sent as the next turn without the wake word; an untouched reply plays in
+  full; the reply's own echo (mixed into the "mic" at 0.25x, above the
+  VAD's threshold) doesn't stop it while Kyle over the same echo does;
+  "wake_word" mode ignores plain talk and stops on the wake word (with the
+  chime); a reply saying "Hey Claude" can't wake itself; "stop" just stops;
+  a follow-up within the window after a barge-in turn is heard and one
+  after it is not; talking over a delete question deletes nothing; "off"
+  never opens the mic while speaking; the gate, `audio.play` stopping,
+  pyttsx3 and Kokoro stopping, config and wiring, INFO logs without text
+  (caplog). `tests/js/voice-core.test.js` +7 (follow-up window open/close
+  by silence or speech, not after barge-in/question/no audio, off, pause
+  and end, barge-in on/off). `tests/test_voice_ws.py` +1 and the `ready`
+  settings check. Existing follow-up tests (`test_follow_up.py`) unchanged
+  and passing. Full run (Linux sandbox, Python 3.13): 1736 passed, 48
+  skipped (before: 1712 passed, 48 skipped); `voice-core.test.js` 21 (was
+  14). `test_barge_in.py` takes ~20 s (the files are paced in real time
+  /8); it also passed under full 4-core CPU load. Not measured on real
+  hardware: how loud the echo is from Kyle's speakers, so whether "voice"
+  works without headphones is MANUAL_TEST step 4b.
+
+### Round 2 (judge findings)
+
+1. A request said over "Bye!" was kept and sent to Claude after the next
+   bare "Hey Claude": the goodbye now drops it, and every new wake clears
+   any leftover interruption (`cli.run_wake`, `handle_command`).
+2. "voice" echo measuring ignored audio latency: the gate now skips the
+   streams' output + input latency (`MicSource.latency`,
+   `audio.output_latency()`; 0.35 s when unknown) before measuring. The
+   pipeline echo test now has the echo arrive ~300 ms after the sound
+   starts (calibration margin ~8 frames on the late side, any amount early).
+3. pyttsx3 off Windows (eSpeak's blocking `aplay`): with barge-in on, replies
+   are rendered to a file and played through `audio.play`, so they stop;
+   if rendering fails it logs and plays the usual, unstoppable way. README
+   lists which engines can be stopped.
+4. Tests now check the stop flag is cleared after a cut reply and the next
+   wake chime really reaches the speaker.
+5. Chinese replies: the heard part is estimated at ~4 characters/s.
+6. The "no request" message says what interrupted (wake word or voice).
+7. `[wake] barge_in` is normalised (`false`/"" = "off", `true` =
+   "wake_word", any case, "wake-word") and anything else stops startup with
+   a clear message (`wakeword.barge_in_mode`).
+- CI margins: the pipeline tests now pace at 6x (was 8x) with 6 s replies;
+  "cut off" means under 4 s (cuts measured at 1.2-1.7 s), so there is about
+  0.4 s of real-time headroom instead of about 0.1 s.
+- Tests: `test_barge_in.py` 39 (was 23), each fix's test fails with that
+  fix reverted. Full run (Linux sandbox): 1752 passed, 48 skipped (round 1:
+  1736; master: 1712); JS files all pass (`voice-core.test.js` 21).
+  `test_barge_in.py` passes under full 4-core CPU load; there, eSpeak now
+  and then wrote no clip file at all, so the shared `tts_clip` test helper
+  also retries on a missing file (it already retried on an empty one).
+- Round 3: the echo is measured for 600 ms (was 250) after the reported
+  latency, so an echo up to ~0.5 s later than reported (Bluetooth, drivers)
+  isn't taken for talking (the judge's Kokoro simulation: all replies played
+  through); README says so next to the echo-ratio advice. pyttsx3's
+  "Audio saved to ..." is no longer printed on every reply. New tests: an
+  echo 250 ms later than reported, the quiet render, and the leftover
+  interruption cleared at a new wake (`test_barge_in.py` 42; 43 after the merge with Spotify, which adds `test_idle_hook_waits_for_the_barge_in_turn`: the back-to-idle hook (Spotify resume) fires only after a barge-in turn). The pipeline
+  echo is now 0.2x (still above the VAD threshold), since a longer
+  measurement sees more of the reply's loud parts. Full run: 1755 passed,
+  48 skipped; JS files all pass.
+
