@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The dev team dashboard moved to a new artifact URL (the old one stopped
+  waking the coordinator); re-download the desktop launcher from Get
+  desktop app.
 - Fixed: the go-live gate refused every update on a machine without a web
   app (a wake-only Pi, or a family copy that never started), and the wake
   host undid a hand pull there. Such machines now go live after the import

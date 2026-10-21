@@ -4,7 +4,7 @@
 # the default browser. See tools/agent-dashboard/README.md.
 set -euo pipefail
 
-URL="https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
+URL="https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn"
 
 # Checked silently: asking `open` to find the app (-Ra) shows it in Finder
 # on every launch.

@@ -40,7 +40,7 @@ session without the repo stalled on the ArtifactData permission prompt
 
 ```text
 You are the hourly watchdog for Kyle's agent run dashboard
-(https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G, collection "runs").
+(https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn, collection "runs").
 You only mark runs whose session is gone. Keep it short and cheap.
 
 1. Load these tools with ToolSearch: ArtifactData,

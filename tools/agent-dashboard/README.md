@@ -15,7 +15,7 @@ buttons at the top (the choice is remembered on that device):
   **chat box** that sends Kyle's message to the coordinator and shows
   everything the coordinator tells him (see [Chat box](#chat-box)).
 
-- **URL:** https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (a claude.ai
+- **URL:** https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn (a claude.ai
   artifact with the `db`, `user`, `comments` and `downloads` capabilities;
   open it signed in on a desktop browser; it can have its own window, see
   [Desktop window](#desktop-window)). The page is desktop only: it has no
@@ -400,7 +400,7 @@ browser.
   (Program Files, Program Files (x86), then your user folder), then Edge.
   To pin it: right-click the desktop → New → Shortcut, and enter the
   browser path plus the option, for example
-  `"C:\Program Files\Google\Chrome\Application\chrome.exe" --app=https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G`
+  `"C:\Program Files\Google\Chrome\Application\chrome.exe" --app=https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn`
   (Edge: `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`).
   Name it "Agent dashboard", then open it and right-click its taskbar
   icon → Pin to taskbar.

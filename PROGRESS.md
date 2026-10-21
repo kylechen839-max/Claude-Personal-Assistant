@@ -903,7 +903,7 @@ A read-only claude.ai page for checking on `/build-feature` runs at a
 glance, apart from the chat list (LLM Council verdict, 2026-10-19). It
 is not part of the assistant and loads nothing from it.
 - `tools/agent-dashboard/index.html`: the page behind
-  https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (the master publishes
+  https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn (the master publishes
   it). One subscription to the `runs` collection (newest 100). A summary
   line ("2 need you · 1 running · 1 silent"), then one card per run with a
   state pill and a coloured edge: needs you (PR ready or blocked), silent
@@ -3680,3 +3680,18 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
     schemas and is not a fix.
 - **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
+
+## Dev team dashboard: new artifact URL (2026-10-21)
+- The old dashboard artifact stopped delivering chat wakes to the
+  coordinator; a fresh copy of the same page wakes it reliably. Every
+  reference now points at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn:
+  the page's `LAUNCHER_KINDS`, both desktop launchers (CRLF and LF/exec bit
+  kept), the dashboard README and watchdog prompt, MANUAL_TEST, the
+  Dev team dashboard section above, TEAM_MEMORY (plus a dated lesson) and
+  the test that pins the URL. The page itself lives on in the
+  agent-dashboard repo, which also gets a static `moved.html` for the old
+  artifact.
+- **Tests.** `test_agent_dashboard.py` pins the new URL; with the old
+  launchers and page it fails 4 tests (launcher URL and the page/desktop
+  byte-for-byte checks). test_docs + test_agent_dashboard: 75 passed,
+  1 skipped (Linux sandbox, Python 3.13).

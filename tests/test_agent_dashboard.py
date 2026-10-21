@@ -224,7 +224,7 @@ def test_watchdog_prompt_is_one_fenced_block():
 
 # ---- Grid (workspace), the coordinator chat and desktop launchers ----
 
-DASHBOARD_URL = "https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G"
+DASHBOARD_URL = "https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn"
 DESKTOP = DASH / "desktop"
 MANIFEST = '{"db":{}, "user":{}, "comments":{}, "downloads":true}'
 
