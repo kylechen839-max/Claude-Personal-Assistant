@@ -911,8 +911,16 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   `WEB_TOKEN` (a wake-only Pi, a family copy that never started) is not
   checked or gated (`watch.discover`); with no instance left, a commit
   goes live only after the updater's import and `--check` smoke, run by
-  the gate itself (a pull by hand never ran it). Before, every commit was
-  refused there and the wake host undid Kyle's pull.
+  the gate itself (a pull by hand never ran it). Only a failed import
+  refuses it; a failed `--check` (no mic, no audio device, no API key are
+  this machine's, not the code's) is inconclusive, retried with the
+  backoff and alerted after 3 tries. Before, every commit was refused
+  there and the wake host undid Kyle's pull. An instance skipped for its
+  missing token that answers on its port anyway (its WEB_TOKEN set only in
+  the environment) is shown as "unchecked" in the status and the owner's
+  banner, with one alert, not left out silently. Deliberately unchanged:
+  the automatic updater's own smoke (`Updater._update`) still rolls back
+  and rejects on a `--check` failure, as before; it is a separate path.
 - **Requirements must be installed first.** The gate and deploy compare
   the installed versions (`importlib.metadata`) with every `>=` minimum in
   `requirements.txt` whose environment marker applies here

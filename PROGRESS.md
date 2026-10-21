@@ -3454,3 +3454,37 @@ reverted (`__pycache__` cleared). Master b96e6ed measured here first:
 - Counts (Linux sandbox, Python 3.13): 2455 passed, 59 skipped; master b96e6ed: 2435
   passed, 58 skipped. JS 232 pass. The extra skip is the live routed
   contract run (no key here).
+
+### Round 3 (judge findings on the B1 fix)
+
+- **N1: with no web app, a `--check` failure refused the commit for good.**
+  `--check` also fails for the machine's reasons (an unplugged mic, no
+  audio device, no API key). The no-web-app branch of `gate_check` now
+  refuses only when the import step fails (`updater.SMOKE_IMPORT_FAILED`,
+  the prefix `Updater.smoke()` already gives each step); a `--check`
+  failure is None: inconclusive, retried with the hosts' backoff, alerted
+  after 3 tries. The automatic updater's own smoke (`Updater._update`) is
+  a separate path and is unchanged: it still rolls back and rejects on a
+  `--check` failure, as on master. Tests:
+  `test_a_check_failure_without_a_web_app_is_inconclusive` (also through
+  the real `Updater.smoke()` words for both steps) and
+  `test_a_hand_pull_on_a_pi_with_no_mic_is_not_undone` (no reset, not
+  rejected, one inconclusive try noted).
+- **N2: an app with WEB_TOKEN only in the environment wasn't watched.**
+  `discover(untokened=...)` hands back the instances it skipped for a
+  missing token; the watchdog asks each one's `/healthz`, and one that
+  answers gets a WARNING line and a status entry "unchecked: running, but
+  WEB_TOKEN isn't in its env file, so it can't be checked" (in `--status`
+  and the owner's banner), alerted once when it starts, dropped when it no
+  longer answers. Test:
+  `test_an_app_with_its_token_only_in_the_environment_is_reported` (the
+  fake HTTP world: status, one alert over two runs, banner, `--status`
+  line, gone once down).
+- **N3 (docs):** README "Health checks and safe updates" says a `>=` line
+  without a marker that a machine can't install makes its gate "can't
+  tell yet" (the alert names the package), and to give such a line an
+  environment marker.
+- Revert check: N1 and N2 reverts fail their tests; the 13 round-2 reverts
+  re-run on this tree still fail theirs.
+- Counts (Linux sandbox, Python 3.13): 2458 passed, 59 skipped (round 2: 2455 passed, 59
+  skipped; master b96e6ed: 2435 passed, 58 skipped). JS 232 pass.

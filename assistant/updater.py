@@ -101,6 +101,9 @@ def short(sha: str | None) -> str:
 
 # "name>=1.2" (extras and spaces allowed); other pins are left to pip
 _MINIMUM = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*>=\s*(\d+(?:\.\d+)*)")
+# Updater.smoke()'s reasons start with one of these: an import failure is the
+# code's; a --check failure may be this machine's (no mic, no API key)
+SMOKE_IMPORT_FAILED, SMOKE_CHECK_FAILED = "import failed", "--check failed"
 INSTALL_HINT = ("stop the apps, then run `python -m assistant --update` or "
                 "`pip install -r requirements.txt`")
 
@@ -553,11 +556,12 @@ class Updater:
         code, out = self.run([self.python, "-c", "import assistant.cli, assistant.host, "
                               "assistant.updater"], self.root, 300)
         if code != 0:
-            return False, "import failed: " + out.strip()[-300:]
+            return False, f"{SMOKE_IMPORT_FAILED}: " + out.strip()[-300:]
         code, out = self.run([self.python, "-m", "assistant", "--check"], self.root, 600)
         fails = [line for line in out.splitlines() if line.startswith("[FAIL]")]
         if code != 0:
-            return False, "--check failed: " + ("; ".join(fails) or out.strip()[-300:])
+            return False, f"{SMOKE_CHECK_FAILED}: " + ("; ".join(fails)
+                                                       or out.strip()[-300:])
         return True, "import and --check ok"
 
     # --- the update ---

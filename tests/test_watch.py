@@ -1127,6 +1127,70 @@ def test_no_web_token_means_no_web_app_to_gate(tmp_path):
     assert ok is None and why == "no web app here; smoke crashed (OSError)"
 
 
+def test_a_check_failure_without_a_web_app_is_inconclusive(tmp_path):
+    """Judge N1: `--check` also fails for the machine's reasons (an
+    unplugged mic, no audio device, no API key), so with no web app it
+    must not refuse the commit for good; only an import failure does."""
+    wake_only(tmp_path)
+    ok, why = watch.gate_check(NEW, tmp_path, check=no_side_port, smoke=lambda root: (
+        False, "--check failed: [FAIL] Microphone: no input device"))
+    assert ok is None and why == "no web app here; --check failed"
+    # the real smoke's words, both steps
+    for out, verdict in (((1, "ImportError: x"), False), ((0, ""), None)):
+        steps = iter([out, (1, "[FAIL] Microphone: no input device\n")])
+        up = Updater(root=tmp_path, run=lambda cmd, cwd, timeout=0, s=steps: next(s))
+        ok, _ = watch.gate_check(NEW, tmp_path, check=no_side_port,
+                                 smoke=lambda root, u=up: u.smoke())
+        assert ok is verdict
+
+
+def test_a_hand_pull_on_a_pi_with_no_mic_is_not_undone(tmp_path):
+    """Judge N1 on the wake host: the pull stays, nothing is rejected for
+    good, and the check is tried again later (the hosts' backoff)."""
+    wake_only(tmp_path)
+    git = FakeGit(head=OLD)
+    up = Updater(root=tmp_path, run=git, gate=lambda sha: watch.gate_check(
+        sha, tmp_path, check=no_side_port,
+        smoke=lambda root: (False, "--check failed: [FAIL] Microphone")))
+    started = []
+    h = host.Host("wake", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
+                  popen=lambda cmd: started.append(cmd) or SimpleNamespace(
+                      poll=lambda: None, terminate=lambda: None, wait=lambda timeout: 0),
+                  sleep=lambda s: None)
+    h.updater = up
+    h.start()
+    git.head = NEW
+    h.restart_by_hand(NEW)
+    assert git.resets() == [] and up.gated(NEW) is None and up.rejected() == []
+    assert up.inconclusive(NEW)["count"] == 1 and len(started) == 1
+
+
+def test_an_app_with_its_token_only_in_the_environment_is_reported(world):
+    """Judge N2: ensure_web_token writes nothing to .env when WEB_TOKEN is
+    in the environment, so discover() skipped a running app silently. Now
+    it is a status entry, alerted once, shown while it lasts."""
+    (world.root / ".env").write_text("ANTHROPIC_API_KEY=x\n")  # no WEB_TOKEN
+    world.apps.add(8765)
+    w = watch.Watch(world.root, http=world.apps, run=world.git,
+                    updater=Updater(root=world.root, run=world.git, clock=world.clock),
+                    alerts=watch.Alerts(world.sent.append), smoke_fn=passing_smoke,
+                    clock=world.clock, sleep=world.clock.sleep,
+                    settings=load_config(None, None))
+    status = w.run()
+    main = status["instances"]["main"]
+    assert main["status"] == watch.UNCHECKED and main["what"] == watch.UNCHECKED_WHAT
+    assert len(world.sent) == 1 and "WEB_TOKEN" in world.sent[0]
+    assert watch.banner(status, now=world.clock())["issues"][0]["instance"] == "main"
+    out = []
+    watch.print_status(status, out.append)
+    assert out[0].startswith("UNCHECKED") and "can't be checked" in out[0]
+    world.clock.sleep(300)
+    w.run()
+    assert len(world.sent) == 1  # no alert storm
+    world.apps.state.clear()  # nothing answers any more: nothing to report
+    assert "main" not in w.run()["instances"]
+
+
 def test_a_hand_pull_on_a_wake_only_pi_is_not_undone(tmp_path):
     """Judge B1: the wake host ran the gate on Kyle's pull, it failed for
     the missing token, and refuse() did `git reset --keep` back."""

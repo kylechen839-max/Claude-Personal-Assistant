@@ -1548,7 +1548,10 @@ last results; `python -m assistant.watch --functional` runs everything now.
 `.env`, and every `config.<name>.toml` with its `.env.<name>`, the same rule
 as `install_family_tasks.ps1`; one whose env file has no `WEB_TOKEN` has no
 web app yet, e.g. a wake-only Pi or a family copy that never started, and
-is left out): `/healthz` on its port, the page and every
+is left out; if something answers on its port anyway, its token is set only
+in the environment, and `--status` and your banner show it as "running, but
+WEB_TOKEN isn't in its env file, so it can't be checked", with one alert:
+put `WEB_TOKEN` in its env file): `/healthz` on its port, the page and every
 script and stylesheet it loads, that it runs the checked-out version, and
 the address the phone opens (`[webapp] public_origin`, else the `tailscale
 serve` entry for its port; set `[watch] public_url` to override, `""` to
@@ -1612,11 +1615,20 @@ and the old version keeps running. **Update with one command** instead of
 anything switches, the installed packages must meet every `>=` minimum in
 `requirements.txt`; after a pull by hand that raised one, the gate and
 deploy refuse with what's missing until you stop the apps and run
-`pip install -r requirements.txt` (or `python -m assistant --update`). An
+`pip install -r requirements.txt` (or `python -m assistant --update`).
+A `>=` line with no environment marker that a machine can't or won't
+install (no wheel for it there, say) makes every go-live check on that
+machine "can't tell yet", and the alert after 3 tries names the package:
+give such a line a marker instead (as `openwakeword>=0.6; platform_system
+!= "Linux"` and the Kokoro lines already have), and the check skips it
+where the marker says it doesn't apply. An
 app in the middle of someone's turn is waited for (up to 2 minutes), then
 left running and named, instead of being restarted mid-answer. On a
 machine with no web app (a wake-only Pi), there is nothing to start on a
-side port: new code must pass the import and `--check` smoke only.
+side port: new code must pass the import and `--check` smoke only. A
+failed import refuses it; a failed `--check` (often this machine's: an
+unplugged mic, no audio device, no API key) is "can't tell yet", tried again
+later and reported after 3 tries, never a refusal for good.
 
 **Where you hear about it.** Only when something changes (an app starts
 failing, or recovers) and for one-off events (a version refused or rolled

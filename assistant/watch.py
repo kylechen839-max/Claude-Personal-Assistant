@@ -71,6 +71,9 @@ ROOT = Path(__file__).resolve().parent.parent
 MAIN = "main"  # Kyle's own instance: config.toml + .env
 _FAMILY = re.compile(r"^config\.([A-Za-z0-9_-]+)\.toml$")
 OK, FAILING = "ok", "failing"
+# answers on its port, but its env file has no WEB_TOKEN: can't be checked
+UNCHECKED = "unchecked"
+UNCHECKED_WHAT = "running, but WEB_TOKEN isn't in its env file, so it can't be checked"
 MAX_EVENTS = 20
 # A run that holds the lock longer was killed: longer than the scheduled
 # task's limit (2 h, install_watch_task.ps1 / hey-claude-watch.service),
@@ -125,13 +128,16 @@ def default_label(name: str) -> str:
     return "Your app" if name == MAIN else f"{name[:1].upper()}{name[1:]}'s app"
 
 
-def discover(root: Path = ROOT, tailscale=None) -> list[Instance]:
+def discover(root: Path = ROOT, tailscale=None,
+             untokened: list[Instance] | None = None) -> list[Instance]:
     """Kyle's instance and each config.<name>.toml with its .env.<name>
     (install_family_tasks.ps1's rule), minus any with [watch] enabled =
     false, and minus any whose env file has no WEB_TOKEN: it has no web app
     to check or gate (a wake-only Pi; a family copy whose app never ran,
-    since the app writes its token on first start). `tailscale`: port ->
-    https URL (tailscale_urls), or None to ask."""
+    since the app writes its token on first start; those go to
+    `untokened` when given: Watch looks whether one answers anyway, its
+    token set only in the environment). `tailscale`: port -> https URL
+    (tailscale_urls), or None to ask."""
     pairs = []
     if (root / "config.toml").exists():
         pairs.append((MAIN, "config.toml", ".env"))
@@ -153,15 +159,18 @@ def discover(root: Path = ROOT, tailscale=None) -> list[Instance]:
         watch = cfg["watch"]
         if not watch["enabled"]:
             continue
+        port = int(cfg["webapp"]["port"])
+        inst = Instance(name, config, env_file, port,
+                        watch["label"] or default_label(name),
+                        restart_command=list(watch["restart_command"] or []),
+                        settings=cfg)
         if not env_token(root, env_file):
             log.info("%s has no WEB_TOKEN (no web app here, or it never ran); "
                      "not checked or gated", env_file)
+            if untokened is not None:
+                untokened.append(inst)
             continue
-        port = int(cfg["webapp"]["port"])
-        found.append(Instance(name, config, env_file, port,
-                              watch["label"] or default_label(name),
-                              restart_command=list(watch["restart_command"] or []),
-                              settings=cfg))
+        found.append(inst)
     if any(i.settings["watch"]["public_url"] == "auto"
            and not i.settings["webapp"]["public_origin"] for i in found):
         tailscale = tailscale_urls() if tailscale is None else tailscale
@@ -488,7 +497,11 @@ def gate_check(sha: str, root: Path = ROOT, instances: list[Instance] | None = N
     a wake-only Pi): there is nothing to start on a side port, so `sha`
     passes on the import and --check smoke alone, run here (a pull by hand
     never ran it)."""
-    from assistant.updater import requirements_problem
+    from assistant.updater import (
+        SMOKE_CHECK_FAILED,
+        SMOKE_IMPORT_FAILED,
+        requirements_problem,
+    )
 
     problem = (requirements or requirements_problem)(root)
     if problem:
@@ -508,7 +521,11 @@ def gate_check(sha: str, root: Path = ROOT, instances: list[Instance] | None = N
         # the output tail goes to the log only; alerts get fixed words
         log.warning("Go-live check: no web app here; smoke FAILED on %s: %s",
                     sha[:7], why)
-        return False, f"no web app here; {why.split(':', 1)[0]}"
+        if str(why).startswith(SMOKE_IMPORT_FAILED):  # the code's fault
+            return False, f"no web app here; {SMOKE_IMPORT_FAILED}"
+        # --check also fails for this machine's reasons (no mic, no audio
+        # device, no API key): inconclusive, tried again with the backoff
+        return None, f"no web app here; {SMOKE_CHECK_FAILED}"
     problems, outside = [], True
     for inst in instances:
         failed = _checked(check, root, inst, sha)
@@ -614,7 +631,7 @@ def banner(status: dict, now: float | None = None, stale_minutes: float = 30) ->
     issues = [{"instance": name, "label": i.get("label", name),
                "since": i.get("since_iso", ""), "what": i.get("what", "")}
               for name, i in sorted((status.get("instances") or {}).items())
-              if i.get("status") == FAILING]
+              if i.get("status") in (FAILING, UNCHECKED)]
     checked = float(status.get("checked") or 0)
     stale = bool(status) and now - checked > stale_minutes * 60
     events = [e for e in (status.get("events") or [])
@@ -695,6 +712,7 @@ class Watch:
         self.settings = settings or instance_config(self.root, "config.toml")
         self.cfg = self.settings["watch"]
         self.instances = instances
+        self.untokened: list[Instance] = []  # found without a WEB_TOKEN (discover)
         self.http = http or _session()
         self.run_cmd = run or _run
         if updater is None:
@@ -880,8 +898,15 @@ class Watch:
             self.release()
 
     def _run(self, force: bool) -> dict:
-        instances = self.instances if self.instances is not None else discover(self.root)
-        self.instances = instances
+        if self.instances is None:
+            self.untokened = []
+            self.instances = discover(self.root, untokened=self.untokened)
+        instances = self.instances
+        unchecked = [i for i in self.untokened
+                     if get_health(self.http, i.local)[0] is not None]
+        for inst in unchecked:
+            log.warning("%s answers on port %d, but WEB_TOKEN isn't in %s, so it "
+                        "can't be checked", inst.name, inst.port, inst.env_file)
         head = self.head()
         results = {}
         for inst in instances:
@@ -897,7 +922,7 @@ class Watch:
         for inst in instances:
             results[inst.name] = self.heal(inst, head, *results[inst.name])
         head = self.head()
-        self.record(instances, results, head)
+        self.record(instances, results, head, unchecked)
         write_status(self.status_file, self.status)
         return self.status
 
@@ -1005,14 +1030,23 @@ class Watch:
                    f"({stuck.get('why') or 'no reason'}), so it isn't live yet; "
                    "the running version stays.")
 
-    def record(self, instances, results, head) -> None:
+    def record(self, instances, results, head, unchecked=()) -> None:
         now = self.clock()
         self.status.update(checked=now, checked_iso=iso(now),
                            head=(head or "")[:7],
                            last_good=(self.up.last_good() or "")[:7])
         known = self.status.setdefault("instances", {})
-        for gone in set(known) - {i.name for i in instances}:
+        for gone in set(known) - {i.name for i in [*instances, *unchecked]}:
             known.pop(gone)
+        for inst in unchecked:  # reported once, then shown while it lasts
+            st = self._state(inst)
+            if st.get("status") != UNCHECKED:
+                st.clear()
+                st.update(status=UNCHECKED, since=now, since_iso=iso(now))
+                self.alerts(f"{inst.label} is {UNCHECKED_WHAT} (add its "
+                            f"WEB_TOKEN to {inst.env_file}).")
+            st.update(label=inst.label, port=inst.port, what=UNCHECKED_WHAT,
+                      checks=[], version="")
         self.alert_inconclusive(head, now)
         for inst in instances:
             checks, health = results[inst.name]
