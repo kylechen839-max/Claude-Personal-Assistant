@@ -521,9 +521,13 @@ either. The app's own sounds can't start or stop a turn. The conversation keeps 
 turn after turn until you tap **End**, say "goodbye", or stay quiet for
 `idle_timeout` (2 minutes); then it is summarized to memory like the voice
 loop. Deletes still ask out loud. Let the question finish, then say
-"yes" (or "yeah, delete it", "go ahead"); anything else, or talking over the
-question, means no ("OK, I won't delete it"). The answer is never sent to
-Claude as a new request.
+"yes" (or "yeah", "yep", "ya", "sure", "okay", "do it", "go ahead",
+"please", "right", "好", "可以"...; case and punctuation don't matter). "No",
+"cancel", "stop" or talking over the question means no ("OK, I won't delete
+it"). Anything else (it misheard you, or you said something unrelated) gets
+one "Sorry, I didn't catch that. Please say yes or no."; a second unclear
+answer cancels ("I still didn't catch that, so I left it"). The answer is
+never sent to Claude as a new request.
 
 - Buttons: **End**, **Mute** (stops listening; the reply still plays),
   **CC** (captions of what it heard and what it is saying, remembered on
@@ -593,9 +597,11 @@ Whisper listen for Mandarin (the multilingual `small` model; `.en` models
 can't hear Chinese), yes/no work in Chinese, and the page show in Chinese.
 A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对的 /
 好 / 好的 / 好啊 / 好吧 / 行 / 可以 / 确定 / 确认 / 没问题 / 删吧 / 删除吧 /
-加吧, optionally after 嗯 / 哦 / 啊 / 呃, e.g. "嗯，好的" or "好，删吧"); any
-other answer is a no, including sentences that merely contain 是 or 好
-(还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
+加吧 / 没错, optionally after 嗯 / 哦 / 啊 / 呃 or said twice, e.g. "嗯，好的",
+"好，删吧" or "对对对"). A negation (不好, 不对, 别, 取消, 算了, 好，等一下) is
+a no. Anything else, including sentences that merely contain 是 or 好
+(还是明天吧, 是谁), a lone 嗯 and questions such as 可以吗？, is asked once
+more ("不好意思，我没听清。") and then cancelled; it is never a yes. History screens stay in English.
 
 Her app guides her itself: the sign-in screen asks for "the sign-in code you
 were sent", and after signing in a card lists only the steps still left for
@@ -1131,6 +1137,13 @@ Google Calendar app does:
   emails an invite, so adding or removing guests always asks first and
   names every address. Moving or deleting an event doesn't ask Google to
   email its guests; tell them yourself, or do it in Google Calendar.
+- **What asks first.** Adding, moving or changing an event just happens
+  when you ask (Claude is told not to ask "are you sure?" itself). Deleting,
+  inviting or removing guests and answering an invite always ask. After
+  something written by someone else came into the conversation (a web
+  page, an email, an invite from someone else, notes on an event, a shared
+  calendar, an attached file), every change asks too, until the
+  conversation ends.
 - **Invites.** "Accept the project sync invite", "Tell them maybe". This
   always asks first, and reads out any note it would send.
 - **Free time and search.** "When am I free for an hour tomorrow

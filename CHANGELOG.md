@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Confirmations: a misheard yes ("ya", "yep", "okay", "sure", "right",
+  没错, 好, 可以, 对对对) now counts; an unclear answer is asked once more
+  ("Sorry, I didn't catch that"), then cancelled, never a third time. Numbers
+  and questions back ("Yes, 11", "Right?") are asked again, not taken as a
+  yes. Claude no longer asks "are you sure?" itself before adding, moving or
+  changing a calendar event; deletes, guest changes, invite answers and
+  changes after untrusted content still ask.
+
 - Dev team: every coordinator mirrors all its replies (comment-thread replies
   too), its in-between updates and step lines to the dashboard chat, and
   keeps the live status on the current step, like the Claude app.
