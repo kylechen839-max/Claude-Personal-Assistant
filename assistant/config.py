@@ -139,6 +139,16 @@ DEFAULTS: dict = {
                                     # (needs a Web application OAuth client)
         "public_origin": "",        # https://... the phone opens; Google
                                     # returns to <public_origin>/google/callback
+        # The public pages (/welcome, /privacy, /terms, the waitlist;
+        # public_site.py). Off until the public beta launches: the pages
+        # describe beta tiers, BYOK and Notion sign-in.
+        "public_site": False,
+        "support_email": "",        # contact on the privacy and terms pages
+                                    # ("" = "contact the owner")
+        "legal_draft": True,        # a visible "Draft" note on privacy and terms
+        "waitlist_file": "",        # POST /api/waitlist entries, a private
+                                    # file ("" = waitlist closed; the server
+                                    # profile keeps it on the disk)
     },
     # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
     "cloud": {
@@ -280,6 +290,11 @@ DEFAULTS: dict = {
         # file) and the server's public address (public_origin)
         "google": True,
         "google_client": "",
+        # beta testers' (tier "beta", Calendar only) Web client, in its own
+        # Google Cloud project (GOOGLE_PUBLIC_CLIENT_JSON, or this file);
+        # unset: beta testers can't connect Google (never the family client)
+        "public_google_client": "",
+        "max_history_mb": 20,       # each person's history (not [history] max_mb)
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",
@@ -300,7 +315,9 @@ SERVER_PROFILE: dict = {
     "calendar": {"save_token": False},
     "web": {"browser": False},
     "webapp": {"host": "0.0.0.0", "max_upload_mb": 4,
-               "sessions_file": "/data/web_sessions.json"},  # on the disk
+               "sessions_file": "/data/web_sessions.json",  # on the disk
+               "public_site": False,  # turned on at the public beta's launch
+               "waitlist_file": "/data/waitlist.json"},  # on the disk
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
@@ -344,7 +361,10 @@ ENV_OVERRIDES = {
 ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
-                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN")
+                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "USER_DATA_KEY")
+# USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
+# so a separate instance sets its own (or none) and never borrows the
+# owner's from the shell.
 # (Not the team chat tokens: a separate instance never registers the chat
 # tools (cli.main), so an inherited GITHUB_TOKEN, common in a developer's
 # environment, must not stop a family member's app from starting.)
@@ -414,8 +434,11 @@ def load_config(path: str | Path | None = "config.toml",
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
-                   "GOOGLE_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
-                   "DISCORD_BOT_TOKEN", "GITHUB_TOKEN")
+                   "GOOGLE_CLIENT_JSON", "GOOGLE_WEB_CLIENT_JSON",
+                   "GOOGLE_PUBLIC_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
+                   "DISCORD_BOT_TOKEN", "GITHUB_TOKEN",
+                   # opens the people's own Anthropic keys (userkeys.py)
+                   "USER_DATA_KEY")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens

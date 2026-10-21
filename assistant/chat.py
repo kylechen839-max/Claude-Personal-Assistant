@@ -199,8 +199,12 @@ class ClaudeChat:
                  max_history: int = 40, tools=None, max_tool_rounds: int = 6,
                  memory=None, recorder=None, language: str = "en",
                  user_name: str | None = None, timezone: str | None = None,
-                 fast_model: str | None = None, router: str = "off"):
+                 fast_model: str | None = None, router: str = "off",
+                 meter=None):
         self._client = client
+        # Where this chat's API usage is counted: None = usage.METER (the
+        # owner's bill); a family member's own key counts on theirs (family.py)
+        self.meter = meter
         # A family member's name (family.py): the prompts say it, not "Kyle"
         self.user_name = user_name or None
         self.timezone = timezone or None  # IANA name; None = this machine's
@@ -255,6 +259,9 @@ class ClaudeChat:
         # A health check's conversation (webapp.WebAssistant.start_check):
         # nothing is saved (no history, no memory summary, no review offer).
         self.check_mode = False
+
+    def _count_usage(self, model: str, response) -> None:
+        (self.meter or usage).record(model, getattr(response, "usage", None))
 
     @property
     def client(self):
@@ -653,7 +660,7 @@ class ClaudeChat:
             response = self.client.messages.create(
                 model=model, max_tokens=200, system=SUMMARY_PROMPT,
                 messages=[{"role": "user", "content": text}])
-            usage.record(model, getattr(response, "usage", None))
+            self._count_usage(model, response)
             summary = "".join(b.text for b in response.content
                               if b.type == "text").strip()
             if not summary or summary.upper().startswith("NOTHING"):
@@ -726,16 +733,21 @@ class ClaudeChat:
             if self.tools:
                 kwargs["tools"] = self.tools.schemas(model)
             response = self._create(kwargs, on_text, cancel)
-            usage.record(model, getattr(response, "usage", None))
+            self._count_usage(model, response)
             if model != self.model and self.tools and needs_main_for(
                     b.name for b in response.content if b.type == "tool_use"):
                 # The fast model wants to change something. Its response is
-                # dropped before anything runs or enters history, and the
-                # main model answers this turn (and the rest of it).
-                model = self._turn_model = self.model
+                # dropped before anything runs, and so are its earlier rounds
+                # of this turn (their thinking is signed for the fast model
+                # and the main model's request would be refused): the main
+                # model answers the whole turn again from Kyle's message.
+                # Only read-only tools ran (every fast response is checked
+                # here first); the main model runs any it needs again.
+                self._turn_model = self.model
                 self.escalated = True
-                log.info("Route: %s (escalated_tool)", model)
-                continue
+                log.info("Route: %s (escalated_tool)", self.model)
+                self._rewind_turn()
+                return self._run(on_text, cancel)
             if response.stop_reason == "pause_turn":
                 # A long server-side search/fetch paused; send the partial
                 # turn back unchanged (no new user message) to resume it.
@@ -786,6 +798,25 @@ class ClaudeChat:
                 raise _Cancelled("".join(b.text for b in response.content
                                          if b.type == "text"))
         return "Sorry, that took too many steps. Could you ask a simpler way?"
+
+    def _rewind_turn(self) -> int:
+        """Back to the start of this turn: Kyle's message (with its context)
+        stays, everything after it goes, and the turn's tool events with it
+        (they run again). Untrusted text it read keeps the conversation
+        tainted: only reset() clears that. Returns how many messages went."""
+        start = next((i for i, m in enumerate(self.history)
+                      if m is self._turn_start), None)
+        if start is None:
+            return 0
+        dropped = self.history[start + 1:]
+        if dropped and self.tools and has_untrusted_content(
+                dropped, self.tools.untrusted_names()):
+            self.untrusted_context = True
+        del self.history[start + 1:]
+        self._turn_events = []
+        if dropped:
+            log.info("Rewound %d message(s) of the fast model's turn", len(dropped))
+        return len(dropped)
 
     def _note_server_tools(self, blocks) -> None:
         from assistant.history import tool_event

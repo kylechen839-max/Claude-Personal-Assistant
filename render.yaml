@@ -58,6 +58,16 @@ services:
         sync: false
       - key: GOOGLE_WEB_CLIENT_JSON # the whole contents of that client's JSON file
         sync: false
+      # Beta testers' (invite tier "beta") Calendar-only Web client, from a
+      # separate Google Cloud project. Left empty, beta testers can't
+      # connect Google (they never use the family client above).
+      - key: GOOGLE_PUBLIC_CLIENT_JSON
+        sync: false
+      # Encrypts each tester's own Anthropic API key on the disk (userkeys.py).
+      # Render makes a random one; keep it: if it changes, everyone has to
+      # enter their key again (nothing else breaks). Never share it.
+      - key: USER_DATA_KEY
+        generateValue: true
       - key: ZH_WHISPER_MODEL       # Chinese speech recognition (baked into the image)
         value: small
       # Pi -> PC -> cloud failover (FAILOVER.md). Leave ASSISTANT_ROLE empty

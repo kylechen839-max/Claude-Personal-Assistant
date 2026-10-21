@@ -15,6 +15,40 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Beta testers bring their own Anthropic API key: Settings -> Your Anthropic
+  API key (checked with Anthropic, stored encrypted with `USER_DATA_KEY`).
+  Without one a beta tester is told to add it; family members still use the
+  owner's key unless they add their own. Their usage no longer counts toward
+  the owner's monthly estimate.
+- Fixed: the go-live gate refused every update on a machine without a web
+  app (a wake-only Pi, or a family copy that never started), and the wake
+  host undid a hand pull there. Such machines now go live after the import
+  smoke; a failing `--check` (no mic, no audio device, no key) is retried
+  and reported instead of refusing for good, in the gate and the automatic
+  updater alike.
+- Fixed: when Haiku moved to a change mid-turn, Sonnet received Haiku's
+  signed thinking, which the API rejects; the whole turn now reruns on Sonnet
+  from your message.
+- The watchdog and go-live test conversation start with a quick question
+  Haiku answers, and the api-contract CI job also runs with routing on.
+- The gate and deploy refuse until the packages in requirements.txt are
+  installed; `install_family_tasks.ps1 -Restart` waits for a running turn
+  and restarts every app, your own included. A web app whose WEB_TOKEN is
+  only in the environment shows as "unchecked".
+- Public beta pages (off until launch, `[webapp] public_site`): /welcome
+  (landing page with a waitlist), /privacy and /terms (drafts, `[webapp]
+  legal_draft`), and an owner-only /waitlist list. The waitlist is
+  rate-limited per visitor, de-duplicated, capped at 2000 entries and never
+  logged; `waitlist_file` is empty (closed) except on the cloud server. New
+  settings: `[webapp] public_site`, `support_email`, `legal_draft`,
+  `waitlist_file`.
+- Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
+  Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
+  sign in through a separate Calendar-only Google client
+  (`GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client`); without it
+  they see "Google isn't set up for beta accounts yet." Each person's history
+  is now capped at `[family] max_history_mb` (20 MB). Existing people stay
+  Family.
 - Cheaper replies: short, simple questions are now answered by Claude Haiku
   5.5 (`[assistant] fast_model`, `router = "auto"`). Anything that changes
   your calendar, notes, email or home, needs a web lookup or real reasoning,

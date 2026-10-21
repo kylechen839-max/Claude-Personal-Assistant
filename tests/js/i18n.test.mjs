@@ -331,3 +331,77 @@ test('Chinese page: the new attachment errors are translated', () => {
                '这个文件太长了，Claude 处理不了（PDF 最多 100 页）。');
   assert.equal(t("Claude couldn't read that file."), 'Claude 读不了这个文件。');
 });
+
+test('a beta tester (gmail false) never sees mail wording', async () => {
+  const gs = { enabled: true, connected: false, disconnect: true, gmail: false, note: null };
+  for (const lang of ['en', 'zh-CN']) {
+    const p = page(lang, { gstatus: gs });
+    await p.flush();
+    assert.equal(p.guide.hidden, false);
+    assert.doesNotMatch(p.guideText.textContent, /email|邮件|family|家人/);
+    assert.match(p.guideText.textContent, lang === 'en' ? /see your calendar:/ : /我就能看你的日历：/);
+  }
+  const done = page('en', { gstatus: { ...gs, connected: true }, standalone: true });
+  await done.flush();
+  assert.match(done.guideText.textContent, /What's on my calendar tomorrow/);
+  assert.doesNotMatch(done.guideText.textContent, /email/);
+  for (const fn of done.unlink.listeners.click) await fn();
+  assert.deepEqual(done.asked, ["Disconnect your Google account? I won't see your calendar any more."]);
+  const zh = page('zh-CN', { gstatus: { ...gs, connected: true }, standalone: true });
+  await zh.flush();
+  for (const fn of zh.unlink.listeners.click) await fn();
+  assert.deepEqual(zh.asked, ['要断开你的 Google 账户吗？之后我就看不到你的日历了。']);
+  // a family member's status keeps today's wording
+  const fam = page('en', { gstatus: { ...gs, gmail: true, connected: true }, standalone: true });
+  await fam.flush();
+  assert.match(fam.guideText.textContent, /Any new email today/);
+});
+
+test('a beta tester without the public client sees why Google is off', async () => {
+  const note = "Google isn't set up for beta accounts yet.";
+  for (const [lang, said] of [['en', note], ['zh-CN', '测试版账户暂时还不能连接 Google。']]) {
+    const p = page(lang, { gstatus: { enabled: false, connected: false, disconnect: true,
+                                      gmail: false, note } });
+    await p.flush();
+    assert.equal(p.google.hidden, true);
+    assert.equal(p.hint.hidden, false);
+    assert.equal(p.hint.textContent, said);
+  }
+});
+
+test('the invite form\'s tier labels are translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  assert.equal(t('Account'), '账户类型');
+  assert.equal(t('Beta (Calendar only)'), '测试版（只有日历）');
+  assert.equal(t('Family (Calendar and Gmail)'), '家人（日历和 Gmail）');
+  assert.equal(t('Active · Beta'), '已加入 · 测试版');
+});
+
+test('every string of the "Your Anthropic API key" settings is translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  // the section's own text in index.html (text nodes and the aria-label)
+  const html = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+  const section = html.match(/<section id="api-key"[\s\S]*?<\/section>/)[0];
+  const texts = [...section.matchAll(/>([^<>]+)</g)].map((m) => m[1].replace(/\s+/g, ' ').trim())
+    .filter((x) => x && !x.startsWith('console.anthropic.com'));  // the address stays
+  texts.push(section.match(/aria-label="([^"]+)"/)[1]);
+  assert.ok(texts.length >= 5, texts.join('|'));
+  for (const en of texts) assert.notEqual(t(en), en, en);
+  // what family.js and the server (userkeys_web.py, userkeys.py) say there
+  const family = readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8');
+  const keyPart = family.slice(family.indexOf('function setupKey'), family.indexOf('let owner = null'));
+  const said = [...keyPart.matchAll(/"([A-Z][^"]* [^"]{4,})"/g)].map((m) => m[1]);  // sentences
+  said.push('Save key', 'Replace key');
+  assert.ok(said.length >= 8, said.join('|'));
+  for (const en of said) assert.notEqual(t(en), en, en);
+  for (const en of ["that doesn't look like an Anthropic API key (it starts with sk-ant-)",
+    "Anthropic didn't accept that key", "couldn't reach Anthropic to check the key; try again",
+    "couldn't check the key with Anthropic; try again", 'too many tries; wait a minute',
+    "this server can't store keys yet (its owner needs to set USER_DATA_KEY)"]) {
+    assert.notEqual(t(en), en, en);
+  }
+  assert.equal(t('Your key ending in wxyz is saved.'), '你的密钥（结尾 wxyz）已保存。');
+  assert.equal(t('About $1.25 this month on your key.'), '这个月用你的密钥大约花了 $1.25。');
+});

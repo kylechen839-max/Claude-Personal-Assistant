@@ -16,6 +16,7 @@
     "). You only need to do this once on this phone.": "里）。这部手机只需要输入一次。",
     "Access token": "访问令牌",
     "Sign in": "登录",
+    "What is Hey Claude?": "Hey Claude 是什么？",
     "Incognito": "无痕",
     "Backend in use": "正在使用的服务器",
     "Conversation history": "对话记录",
@@ -107,6 +108,42 @@
     "Copy the invite link below.": "请复制下面的邀请链接。",
     "Active": "已加入",
     "Invited": "已邀请",
+    "Active · Beta": "已加入 · 测试版",
+    "Invited · Beta": "已邀请 · 测试版",
+    "Account": "账户类型",
+    "Beta (Calendar only)": "测试版（只有日历）",
+    "Family (Calendar and Gmail)": "家人（日历和 Gmail）",
+    "Google isn't set up for beta accounts yet.": "测试版账户暂时还不能连接 Google。",
+    "Disconnect your Google account? I won't see your calendar any more.":
+      "要断开你的 Google 账户吗？之后我就看不到你的日历了。",
+    // a person's own Anthropic key (family.js setupKey, userkeys_web.py)
+    "Your Anthropic API key": "你的 Anthropic API 密钥",
+    "Anthropic API key": "Anthropic API 密钥",
+    "Save key": "保存密钥",
+    "Replace key": "更换密钥",
+    "Remove key": "删除密钥",
+    ["You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, " +
+      "open API Keys, tap Create Key, and paste it here."]:
+      "用多少由你自己向 Anthropic 付费。获取密钥：登录 console.anthropic.com，" +
+      "打开 API Keys，点 Create Key，然后粘贴到这里。",
+    "This server can't store keys yet.": "这个服务器暂时还不能保存密钥。",
+    "Your saved key can't be read any more. Please enter it again.":
+      "你保存的密钥已经读不出来了，请重新输入。",
+    "Add your key to start talking with Claude.": "添加你的密钥，就可以开始和 Claude 对话了。",
+    "Optional: without one, the family's key is used.": "可选：不添加的话，会用家里的密钥。",
+    "Checking the key with Anthropic…": "正在向 Anthropic 核对密钥…",
+    "Remove your Anthropic API key from this app?": "要从这个应用里删除你的 Anthropic API 密钥吗？",
+    "that doesn't look like an Anthropic API key (it starts with sk-ant-)":
+      "这看起来不像 Anthropic API 密钥（它以 sk-ant- 开头）",
+    "paste your Anthropic API key": "请粘贴你的 Anthropic API 密钥",
+    "Anthropic didn't accept that key": "Anthropic 没有接受这个密钥",
+    "couldn't reach Anthropic to check the key; try again": "连不上 Anthropic 核对密钥，请再试一次",
+    "couldn't check the key with Anthropic; try again": "暂时没法向 Anthropic 核对密钥，请再试一次",
+    "too many tries; wait a minute": "尝试次数太多了，请等一分钟",
+    "this server can't store keys yet (its owner needs to set USER_DATA_KEY)":
+      "这个服务器暂时还不能保存密钥（需要管理员设置 USER_DATA_KEY）",
+    "couldn't save the key; try again": "密钥没能保存，请再试一次",
+    "couldn't remove the key; try again": "密钥没能删除，请再试一次",
     "New link": "新链接",
     "Remove": "移除",
     "This invite link has expired or was already used. Ask for a new one.":
@@ -280,6 +317,13 @@
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
+    ["Connect your own Google account so I can see your calendar: tap the gear at " +
+      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "account. If Google says it hasn't verified " +
+      "this app, tap \"Advanced\", then \"Go to … (unsafe)\"."]:
+      "连接你的 Google 账户，我就能看你的日历：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "用你自己的 Google 账户登录。" +
+      "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
   const PATTERNS = [
     [/^Working: (.+)…$/, "正在处理：$1…"],
@@ -307,6 +351,8 @@
     [/^Delete all (\d+) notes? with no date\? This can't be undone\.$/, "要删除日期未知的全部 $1 条记忆吗？删除后无法恢复。"],
     [/^Default \((.+)\)$/, "默认（$1）"],
     [/^(.+) · paid$/, "$1 · 付费"],
+    [/^Your key ending in (\S{1,4}) is saved\.$/, "你的密钥（结尾 $1）已保存。"],
+    [/^About \$(\d+\.\d\d) this month on your key\.$/, "这个月用你的密钥大约花了 $$$1。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
   // The line a message with attachments ends with, "[photo] [file: a.pdf]"
@@ -395,14 +441,20 @@
     "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
+  // a beta tester's (status "gmail": false): Calendar only, no mail wording
+  const STEP_GOOGLE_CALENDAR = "Connect your own Google account so I can see your calendar: " +
+    "tap the gear at the top right, then \"Connect Google account\", and sign in with your " +
+    "own Google account. If Google says it hasn't verified this app, tap \"Advanced\", " +
+    "then \"Go to … (unsafe)\".";
 
   // Shown (with the steps, or alone once they're done) until she taps Got it.
   const EXAMPLES_ALWAYS = ["\"What's the weather tomorrow?\"",
     "\"How do I make braised pork belly?\"",
     "\"How do you say 'thank you for dinner' in English?\"",
     "\"Help me write a birthday message to my friend.\""];
-  const EXAMPLES_GOOGLE = ["\"What's on my calendar tomorrow?\"",
-    "\"Add a doctor's appointment Friday at 10am.\"",
+  const EXAMPLES_CALENDAR = ["\"What's on my calendar tomorrow?\"",
+    "\"Add a doctor's appointment Friday at 10am.\""];
+  const EXAMPLES_GOOGLE = [...EXAMPLES_CALENDAR,
     "\"Any new email today?\"",
     "\"Help me reply to that email.\" (I only write a draft; you send it.)"];
 
@@ -421,10 +473,12 @@
     try { dismissed = win.sessionStorage?.getItem("guideDismissed") === "1"; } catch (e) { /* private */ }
     const steps = [];
     if (!standalone(win)) steps.push(STEP_HOME);
-    if (st.enabled && !st.connected) steps.push(STEP_GOOGLE);
+    const mail = st.gmail !== false;  // false: a beta tester, Calendar only
+    if (st.enabled && !st.connected) steps.push(mail ? STEP_GOOGLE : STEP_GOOGLE_CALENDAR);
     let seen = false;
     try { seen = win.localStorage?.getItem("examplesSeen") === "1"; } catch (e) { /* private */ }
-    const examples = seen ? [] : [...EXAMPLES_ALWAYS, ...(st.connected ? EXAMPLES_GOOGLE : [])];
+    const examples = seen ? [] : [...EXAMPLES_ALWAYS,
+      ...(st.connected ? (mail ? EXAMPLES_GOOGLE : EXAMPLES_CALENDAR) : [])];
     if ((!steps.length && !examples.length) || dismissed) { box.hidden = true; return; }
     const lines = [];
     if (steps.length) {
@@ -465,6 +519,7 @@
     }
 
     let signedIn = false;
+    let mail = true;  // the last status's "gmail" (false: no mail wording)
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
@@ -472,11 +527,15 @@
         if (!res.ok) return;  // not signed in yet, or the button is off
         const st = await res.json();
         signedIn = true;
+        mail = st.gmail !== false;
         renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
-        if (hint) {
+        if (hint && !st.enabled && st.note) {  // e.g. not set up for beta accounts yet
+          hint.hidden = false;
+          hint.textContent = say(String(st.note));
+        } else if (hint) {
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = say("Google account connected.");
         }
@@ -502,7 +561,9 @@
     });
     if (unlink) {
       unlink.addEventListener("click", async () => {
-        const ask = say("Disconnect your Google account? I won't see your calendar or email any more.");
+        const ask = say(mail
+          ? "Disconnect your Google account? I won't see your calendar or email any more."
+          : "Disconnect your Google account? I won't see your calendar any more.");
         if (typeof win.confirm === "function" && !win.confirm(ask)) return;
         unlink.disabled = true;
         let ok = false;

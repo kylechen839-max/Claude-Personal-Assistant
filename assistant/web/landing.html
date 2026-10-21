@@ -1,0 +1,105 @@
+<!doctype html>
+<!-- Release check before `[webapp] public_site = true`: these claims depend on
+     other public-beta pieces being on master and deployed:
+     - "Bring your own Anthropic API key", "stored encrypted on the server and
+       used only for your requests": G2 (BYOK)
+     - "Calendar only, for now", "No Gmail access is asked for": G1 (beta tier)
+     - "Your Notion assignments" for beta users: G6 (Notion public OAuth) -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Hey Claude: a voice and text assistant for your calendar and Notion that asks before it deletes anything. Invite-only beta.">
+<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)">
+<title>Hey Claude: a voice assistant for your calendar</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/welcome"><img src="/icon.svg" alt="" width="32" height="32"> Hey Claude</a>
+  <a class="sign-in" href="/">Sign in</a>
+</header>
+
+<main>
+  <section class="hero" aria-labelledby="title">
+    <h1 id="title">Ask about your day. Out loud, or by typing.</h1>
+    <p class="lead">Hey Claude is a voice and text assistant built on Claude. It reads
+      your calendar and your Notion assignments, answers out loud, and asks you
+      before it deletes anything or invites anyone.</p>
+    <p class="badge">Invite-only beta</p>
+    <p><a class="button" href="#waitlist">Join the waitlist</a></p>
+  </section>
+
+  <section aria-labelledby="what">
+    <h2 id="what">What it does</h2>
+    <ul class="features">
+      <li><strong>Talk or type.</strong> Hold the mic, or use hands-free voice mode on
+        your phone, and ask "what's on my calendar tomorrow?"</li>
+      <li><strong>Your Google Calendar.</strong> Hear today's and tomorrow's events, add
+        new ones and move them.</li>
+      <li><strong>Your Notion assignments.</strong> List what's due and mark an
+        assignment in progress or done.</li>
+      <li><strong>Asks first.</strong> A delete, or an invite that emails other people,
+        always needs your yes. While a web page or someone else's invite is part of
+        the conversation, every change to your calendar or Notion asks first too.</li>
+      <li><strong>Looks things up.</strong> It can search the web when a question needs
+        it.</li>
+      <li><strong>On your phone.</strong> It runs in the browser and can be added to your
+        home screen like an app. No app store needed.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="beta">
+    <h2 id="beta">How the beta works</h2>
+    <dl class="facts">
+      <dt>Invite-only</dt>
+      <dd>Spots are limited. Join the waitlist and you'll get a personal invite link
+        by email when one opens up.</dd>
+      <dt>Bring your own Anthropic API key</dt>
+      <dd>Hey Claude uses your own key from the
+        <a href="https://console.anthropic.com/">Anthropic Console</a>, so you pay
+        Anthropic directly for what you use. Your key is stored encrypted on the
+        server and used only for your requests.</dd>
+      <dt>Calendar only, for now</dt>
+      <dd>Beta accounts connect Google Calendar. No Gmail access is asked for.</dd>
+      <dt>A beta</dt>
+      <dd>Things may break or change. See the <a href="/terms">terms</a> and the
+        <a href="/privacy">privacy notice</a>.</dd>
+    </dl>
+  </section>
+
+  <section id="waitlist" class="card" aria-labelledby="join">
+    <h2 id="join">Join the waitlist</h2>
+    {{WAITLIST_STATUS}}
+    <form method="post" action="/api/waitlist" class="waitlist">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required maxlength="254"
+             autocomplete="email" autocapitalize="off" spellcheck="false"
+             placeholder="you@example.com">
+      <label for="note">What would you use it for? <span class="optional">(optional)</span></label>
+      <textarea id="note" name="note" rows="3" maxlength="300"
+                placeholder="For example: keeping track of classes and deadlines"></textarea>
+      <div class="hp" aria-hidden="true">
+        <label for="website">Leave this empty</label>
+        <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+      <button type="submit" class="button">Join the waitlist</button>
+      <p class="fine">We use your email only to send you an invite, and delete it on
+        request. See the <a href="/privacy">privacy notice</a>.</p>
+    </form>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <nav aria-label="Site">
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="/">Sign in</a>
+  </nav>
+  <p>Hey Claude is an independent project built on the Claude API. It is not made
+    or endorsed by Anthropic.</p>
+</footer>
+</body>
+</html>

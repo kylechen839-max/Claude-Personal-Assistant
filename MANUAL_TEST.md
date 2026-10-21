@@ -555,7 +555,8 @@ for all of this except the Google sign-in.
 
 - [ ] **Invite family.** On your iPhone open the cloud server's own address
       directly (`https://hey-claude.onrender.com/`, signed in with your
-      token), ⚙ -> Invite someone -> a name, 中文, Create invite link.
+      token), ⚙ -> Invite someone -> a name, 中文, Account **Family
+      (Calendar and Gmail)** (Beta is preselected), Create invite link.
       (Invites and Remove are managed there: with failover the app usually
       talks to the Pi or PC, where family is off and the menu is hidden.)
   - Should: the share sheet opens with the link (or it says it was copied);
@@ -596,6 +597,59 @@ for all of this except the Google sign-in.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
     folder; check Render -> Shell `ls /data/users` if you like.)
+- [ ] **Beta tester (Calendar only).** Invite someone with the Account left
+      on **Beta (Calendar only)** and open the link on another phone,
+      before `GOOGLE_PUBLIC_CLIENT_JSON` is set (BLOCKERS "Beta testers'
+      Google").
+  - Should: your list shows them "Invited · Beta"; on their phone ⚙ has
+    no Connect button and says "Google isn't set up for beta accounts
+    yet."; nothing in the welcome card mentions email.
+- [ ] After setting `GOOGLE_PUBLIC_CLIENT_JSON` (and redeploying), their ⚙
+      -> Connect Google account.
+  - Should: Google's consent page names the **beta** project (not your
+    family one) and asks only for calendar access, with no Gmail line.
+    After signing in, "What's on my calendar tomorrow?" reads their
+    calendar; "Any new email?" says it can't read email.
+- [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
+      on Render"). On the beta tester's phone, before adding a key, type
+      "hello" and also try hands-free voice.
+  - Should: both answer "Add your Anthropic API key in Settings to start."
+    (in Chinese for a Chinese account); your Render usage shows no new call.
+- [ ] Their ⚙ -> **Your Anthropic API key**: paste a real key of theirs
+      (from console.anthropic.com -> API Keys), **Save key**.
+  - Should: "Checking the key with Anthropic…", then "Your key ending in
+    xxxx is saved." with the right last four; "hello" now gets a reply;
+    their Anthropic console's usage page shows the call, and your
+    owner page's monthly estimate doesn't move.
+- [ ] Paste a wrong key (change one character) and Save.
+  - Should: "Anthropic didn't accept that key", and the old key keeps working.
+- [ ] **Remove key**, confirm.
+  - Should: the next "hello" says to add a key again. On a **Family**
+    account the same steps work, and without a key they use yours as before.
+
+### Public site and waitlist (~10 min)
+Only at the beta's launch, after `public_site` is turned on for the server
+(README "Public beta"). Before that, `/welcome` answers "not found" and the
+sign-in page has no link to it.
+- [ ] On your iPhone, in a private Safari tab (signed out), open
+      `https://<cloud>/welcome`, then Privacy and Terms from its footer.
+  - Should: readable at phone width without zooming or sideways scrolling,
+    in light and in dark mode (Settings -> Display); the privacy and
+    terms pages show the yellow "Draft: Kyle to review" note.
+- [ ] Read both pages as the person responsible for them. Fix any wording
+      in `assistant/web/privacy.html` / `terms.html`, set `support_email`,
+      and `legal_draft = false` once you're happy.
+  - Should: after a redeploy the draft note is gone and the contact line
+    shows your support address as a link.
+- [ ] Join the waitlist with your own second address and a short note.
+  - Should: back on the page with "Thanks! You're on the list."
+- [ ] With VoiceOver on (Settings -> Accessibility), swipe through the form.
+  - Should: it reads Email, the optional question and the button, and
+    never a "Leave this empty" field.
+- [ ] Signed in at the cloud's address, open `https://<cloud>/waitlist`.
+  - Should: your entry with its note and date; Remove takes it off the list.
+- [ ] The signed-out sign-in page at `https://<cloud>/`.
+  - Should: a "What is Hey Claude?" link under the form opens `/welcome`.
 
 ---
 
@@ -942,6 +996,15 @@ Needs the PC's apps installed as tasks (yours and the family copies).
   - Should: "Go-live check of <sha> ... a few minutes", then the apps
     restart and "is live and passed". Your phone keeps working throughout
     except for a few seconds during the restart.
+- [ ] Start a long question in Mom's app (or yours), and while it is
+      answering run `.\scripts\install_family_tasks.ps1 -Restart`.
+  - Should: the answer finishes before that app restarts (or, if it takes
+    over 2 minutes, "... is in the middle of a turn; not restarted").
+- [ ] On a wake-only Pi (no web app, no `WEB_TOKEN` in `.env`): `git pull`
+      there when there is something new, then wait 2 minutes.
+  - Should: `logs/host-wake.log` says the go-live check passed and the
+    wake listener restarted on the new version; `git log -1` still shows
+    the pulled commit (it was not undone).
 - [ ] Unplug the network for a functional check (`python -m assistant.watch
       --functional`), then type a question in the phone app.
   - Should: the reply says "Claude is unreachable right now..." or "can't
@@ -991,6 +1054,12 @@ Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
   - Should: `Route: claude-sonnet-5-5 (keyword)`, then
     `Route: claude-sonnet-5-5 (sticky)`: once a conversation needed Sonnet
     it stays there.
+- [ ] In a new conversation ask "what's on my calendar tomorrow", then,
+      once it answered, "get rid of the first one".
+  - Should: it asks "Delete ...?" before anything is deleted (say no).
+    `logs/assistant.log` may show `Route: claude-sonnet-5-5
+    (escalated_tool)` and `Rewound N message(s) of the fast model's turn`;
+    either way there is no "Invalid `signature`" error.
 - [ ] Set `CLAUDE_ROUTER=off` and start again.
   - Should: every route line says `claude-sonnet-5-5 (off)`.
 - [ ] Phone app as the owner: open the page's state (`/api/state` after

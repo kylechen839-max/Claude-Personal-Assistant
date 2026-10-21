@@ -44,6 +44,30 @@ Only what is still open for Kyle. None of it blocks the code.
       is set there and Google returns there, so a LAN `http://` address or
       a second hostname (e.g. a custom domain next to `*.onrender.com`)
       makes their sign-in fail.
+- [ ] **Beta testers' Google: a Calendar-only OAuth client (~20 min plus
+      Google's review; README "Invite family" -> "Account types").** Only
+      you can: (1) create a *new* Google Cloud project (e.g. "Hey Claude
+      Beta"), enable the Calendar API, and set up its OAuth consent screen
+      with only the `calendar.events`, `calendar.calendarlist.readonly` and
+      `calendar.calendars.readonly` scopes, a support email and the privacy
+      policy link; publish it ("In production", unverified: up to 100
+      users see a warning screen); (2) create a **Web application** client
+      there with redirect URI `https://hey-claude.onrender.com/google/callback`;
+      (3) paste its JSON into `GOOGLE_PUBLIC_CLIENT_JSON` in Render ->
+      Environment; (4) submit the project for verification (demo video of
+      the consent and a calendar question). Never add Gmail scopes to that
+      project. Until (3), beta testers can't connect Google (the app says
+      so); family members are unaffected.
+- [ ] **`USER_DATA_KEY` on Render (~2 min; README "Invite family" -> "Their
+      own Anthropic key").** It encrypts the testers' own Anthropic keys.
+      `render.yaml` has Render generate it; if the service isn't synced from
+      the Blueprint, add it in Render -> hey-claude -> Environment yourself:
+      a random value of 32+ characters (e.g. the output of
+      `python -c "import secrets; print(secrets.token_urlsafe(48))"`), then
+      Save. Never change or lose it afterwards (every tester would have to
+      enter their key again). Until it is set, beta testers can't save a key
+      (the app says why) and so can't talk to Claude; family members keep
+      using your key.
 - [ ] **Measure Render memory with a Chinese-speaking family member.** The
       +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
       estimate, not measured (Hugging Face is blocked in the build

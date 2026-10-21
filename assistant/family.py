@@ -20,6 +20,24 @@ and Kyle's tools never read theirs. Nothing else: no Notion, Pinecone
 memory or notes, Kyle's Google, dev team, lecture recorder or tutor, and no
 way to see anyone else's history. Removing someone signs them out and
 deletes their folder, Google token included.
+
+Each person has a tier (`tier` in users.json, chosen at invite): "family"
+(the above; people listed before tiers existed load as this) or "beta" (an
+invite-only public beta tester): Calendar only, never Gmail tools or Gmail
+scopes, signed in through a separate OAuth client ([family]
+public_google_client / GOOGLE_PUBLIC_CLIENT_JSON) whose consent screen asks
+for nothing else. Without that client a beta tester can't connect Google;
+they never fall back to the family client (its consent screen lists Gmail).
+
+Whose Claude bill (bring your own key, userkeys.py): someone who saved
+their own Anthropic key in the app (PUT /api/me/anthropic-key,
+userkeys_web.py) talks to Claude on it, for their chats and their history
+titles alike, and that usage is counted in `<dir>/<id>/usage.json`, never
+the owner's month_usd. Without one, a "family" person uses the owner's key
+(as before); a "beta" tester never does: their turn stops with MissingKey
+("add your key in Settings") before any request is made. The client is
+looked up on every call (UserApi), so a new or removed key applies at once,
+also to a conversation already open.
 """
 
 # No `from __future__ import annotations`: FastAPI must see the real
@@ -43,6 +61,8 @@ TOKEN_PREFIX = "hcinv."
 LANGUAGES = ("en", "zh")
 MAX_NAME = 40
 STATUSES = ("invited", "active")
+TIERS = ("family", "beta")
+DEFAULT_TIER = "beta"      # a new invite; before tiers everyone was family
 GOOGLE_TOKEN = "google_token.json"  # in <dir>/<id>/
 _ID = re.compile(r"^u_[A-Za-z0-9_-]{8,40}$")
 
@@ -99,10 +119,26 @@ def clean_timezone(tz) -> str:
     return tz
 
 
+def clean_tier(tier) -> str:
+    tier = str(tier or DEFAULT_TIER).strip().lower()
+    if tier not in TIERS:
+        raise FamilyError("tier must be family or beta")
+    return tier
+
+
+def tier_of(user: dict | None) -> str:
+    """Their tier: "family" if users.json predates tiers; anything else
+    unexpected counts as the narrower "beta"."""
+    tier = (user or {}).get("tier", "family")
+    return tier if tier in TIERS else "beta"
+
+
 def public(user: dict) -> dict:
     """A user as the owner's page sees it (never the invite hash)."""
-    return {k: user.get(k) for k in ("id", "name", "language", "timezone",
-                                     "created", "status", "invite_expires")}
+    out = {k: user.get(k) for k in ("id", "name", "language", "timezone",
+                                    "created", "status", "invite_expires")}
+    out["tier"] = tier_of(user)
+    return out
 
 
 @dataclass
@@ -118,6 +154,10 @@ class UserContext:
     def language(self) -> str:
         return self.user.get("language", "en")
 
+    @property
+    def tier(self) -> str:
+        return tier_of(self.user)
+
     def close(self) -> None:
         if self.history is not None:
             try:
@@ -131,15 +171,26 @@ class Family:
     atomically). Thread-safe: one lock covers the file, the contexts and
     redeeming, so an invite can't be accepted while it is being removed."""
 
-    def __init__(self, config: dict, client=None, clock=time.time):
+    def __init__(self, config: dict, client=None, clock=time.time,
+                 user_client: Callable[[str], object] | None = None, environ=None):
+        from assistant.userkeys import KeyStore
+
         f = config["family"]
         self.config = config
         self.dir = Path(f["dir"])
         self.path = self.dir / "users.json"
         self.max_users = int(f["max_users"])
         self.invite_days = float(f["invite_days"])
+        self.max_history_mb = float(f["max_history_mb"])
         self.clock = clock
         self._client = client
+        # anthropic.Anthropic for a person's own key (a seam for tests)
+        self._user_client = user_client or self._new_user_client
+        self.keys = KeyStore(self.dir, environ)  # their Anthropic keys, encrypted
+        # uid -> their client, or None (no usable key of their own); filled
+        # on first use, dropped when they save or remove a key
+        self._user_clients: dict[str, object] = {}
+        self._meters: dict[str, object] = {}  # uid -> their usage.UsageMeter
         self.lock = threading.RLock()
         self.users: dict[str, dict] = {}
         # removed people whose folder isn't deleted yet (e.g. a file was
@@ -157,7 +208,8 @@ class Family:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             users = data.get("users", {}) if isinstance(data, dict) else {}
-            self.users = {uid: u for uid, u in users.items()
+            # silently migrated: no tier = listed before tiers = family
+            self.users = {uid: {**u, "tier": tier_of(u)} for uid, u in users.items()
                           if valid_id(uid) and isinstance(u, dict)
                           and u.get("status") in STATUSES}
             deleting = data.get("deleting", []) if isinstance(data, dict) else []
@@ -184,10 +236,11 @@ class Family:
         user["invite_expires"] = int(self.clock() + self.invite_days * 86400)
         return token
 
-    def invite(self, name, language="en", timezone="") -> tuple[dict, str]:
+    def invite(self, name, language="en", timezone="",
+               tier=DEFAULT_TIER) -> tuple[dict, str]:
         """A new person and their one-time token (shown once, never stored)."""
         user = {"name": clean_name(name), "language": clean_language(language),
-                "timezone": clean_timezone(timezone)}
+                "timezone": clean_timezone(timezone), "tier": clean_tier(tier)}
         with self.lock:
             if len(self.users) >= self.max_users:
                 raise FamilyError(f"at most {self.max_users} people", 409)
@@ -197,7 +250,8 @@ class Family:
             users = {**self.users, uid: user}
             self._save(users)
             self.users = users
-        log.info("Family: invited %s (%d people)", uid, len(self.users))
+        log.info("Family: invited %s (%s, %d people)", uid, user["tier"],
+                 len(self.users))
         return public(user), token
 
     def reinvite(self, uid: str) -> tuple[dict, str]:
@@ -262,6 +316,8 @@ class Family:
             self._save(users, deleting)  # OSError: nothing changed, try again
             self.users, self._deleting = users, deleting
             ctx = self._contexts.pop(uid, None)
+            self._user_clients.pop(uid, None)
+            self._meters.pop(uid, None)
             if before_delete is not None:
                 before_delete(uid)
         if ctx is not None:
@@ -326,24 +382,46 @@ class Family:
     def google_token(self, uid: str) -> Path:
         return self.dir / uid / GOOGLE_TOKEN
 
-    def google_client(self) -> dict | None:
-        """The Web application OAuth client they sign in with; None (their
-        Google is off) if it isn't set up."""
-        from assistant.tools.google_auth import web_client_config
+    def tier(self, uid: str | None) -> str:
+        """The owner (None) counts as family; a uid that isn't listed (e.g.
+        removed while signing in) gets the narrower beta, never family."""
+        if not uid:
+            return "family"
+        with self.lock:
+            user = self.users.get(uid)
+        return tier_of(user) if user is not None else "beta"
 
+    def google_client(self, uid: str | None = None) -> dict | None:
+        """The Web application OAuth client `uid` signs in with: family
+        members the family client, beta testers only the public one (never
+        the family client, whose consent screen lists Gmail). None (their
+        Google is off) if it isn't set up."""
+        from assistant.tools.google_auth import PUBLIC_CLIENT_ENV, web_client_config
+
+        f = self.config["family"]
+        beta = uid is not None and self.tier(uid) == "beta"
+        which = "public" if beta else "web"
         try:
-            client = web_client_config(self.config["family"]["google_client"])
+            client = (web_client_config(f["public_google_client"], env=PUBLIC_CLIENT_ENV)
+                      if beta else web_client_config(f["google_client"]))
         except (OSError, ValueError) as e:  # never the value
-            log.warning("Family: the Google web client is unreadable (%s)", e)
+            log.warning("Family: the Google %s client is unreadable (%s)", which, e)
             return None
         if client is not None and "web" not in client:
-            log.warning("Family: the Google client is not a Web application client")
+            log.warning("Family: the Google %s client is not a Web application client",
+                        which)
             return None
         return client
 
-    def google_enabled(self) -> bool:
+    def google_enabled(self, uid: str | None = None) -> bool:
         return bool(self.config["family"]["google"] and own_origin(self.config)
-                    and self.google_client())
+                    and self.google_client(uid))
+
+    def gmail_allowed(self, uid: str | None) -> bool:
+        """May `uid` have Gmail at all? Never a beta tester."""
+        return bool(self.config["gmail"]["enabled"]) and self.tier(uid) == "family"
+
+        return sign_in_scopes(self.gmail_allowed(uid))
 
     def google_connected(self, uid: str) -> bool:
         return valid_id(uid) and self._google_info(uid) is not None
@@ -379,7 +457,7 @@ class Family:
                                save_token=False, environ={}, in_app=True,
                                extras=set(CALENDAR_EXTRA_SCOPES) <= granted_scopes(info)
                                ).tools()
-        if self.config["gmail"]["enabled"] and \
+        if self.config["gmail"]["enabled"] and tier_of(user) == "family" and \
                 set(GMAIL_SCOPES) <= granted_scopes(info):
             from assistant.tools.gmail import GmailInbox
 
@@ -449,15 +527,20 @@ class Family:
             # Their own file, opened directly: history.open_store() would
             # replace the owner's store that record_event() writes to.
             # eventlog=False: nothing to sync to Kyle's Pi or PC.
+            # [family] max_history_mb, not the owner's [history] max_mb: many
+            # people share one small server disk.
             store = HistoryStore(self.dir / user["id"] / "history.sqlite",
                                  retention_days=h["retention_days"],
-                                 max_mb=h["max_mb"], origin=origin_of(self.config),
+                                 max_mb=self.max_history_mb,
+                                 origin=origin_of(self.config),
                                  eventlog=False)
 
         def chat_factory(session_registry):
-            recorder = Recorder(store, "web", client_fn=self.client,
-                                title_model=h["title_model"])
-            return ClaudeChat(client=self.client(), model=a["model"],
+            # their own key (or, for family, the owner's), looked up per call
+            chat_api, title_api = UserApi(self, user["id"]), UserApi(self, user["id"])
+            recorder = Recorder(store, "web", client_fn=title_api.client_or_none,
+                                title_model=h["title_model"], meter=title_api)
+            return ClaudeChat(client=chat_api, meter=chat_api, model=a["model"],
                               max_tokens=a["max_tokens"],
                               max_history=a["max_history"], tools=session_registry,
                               max_tool_rounds=a["max_tool_rounds"], memory=None,
@@ -468,7 +551,12 @@ class Family:
 
         return UserContext(user, registry, store, chat_factory)
 
-    def client(self):
+    def client(self, uid: str | None = None):
+        """The owner's client (uid None), else the one `uid`'s calls use:
+        their own key's, the owner's for a "family" person without one, or
+        MissingKey (a beta tester without a key, or someone no longer listed)."""
+        if uid is not None:
+            return self.api_for(uid)[0]
         if self._client is None:
             import anthropic
 
@@ -477,11 +565,131 @@ class Family:
                                                timeout=a["api_timeout"])
         return self._client
 
+    def _new_user_client(self, key: str):
+        from assistant.userkeys import user_client
+
+        a = self.config["assistant"]  # the same options as the owner's
+        # only their key: never ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+        # from the server's environment (Kyle's)
+        return user_client(key, max_retries=a["api_max_retries"],
+                           timeout=a["api_timeout"])
+
+    def api_for(self, uid: str) -> tuple[object, bool]:
+        """(client, True if it is on their own key) for `uid`'s next call."""
+        from assistant.userkeys import MissingKey
+
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or not valid_id(uid):  # removed: nobody's key
+                raise MissingKey("not a listed person")
+            if uid not in self._user_clients:
+                key = self.keys.load(uid)
+                self._user_clients[uid] = self._user_client(key) if key else None
+            own = self._user_clients[uid]
+        if own is not None:
+            return own, True
+        if tier_of(user) == "family":
+            return self.client(), False
+        raise MissingKey()
+
+    # ---------- their own Anthropic key (userkeys_web.py) ----------
+    def key_status(self, uid: str) -> dict:
+        """What their Settings shows: {set, last4, unreadable, required,
+        available, month_usd}. Never the key."""
+        with self.lock:
+            if uid not in self.users:
+                raise FamilyError("not found", 404)
+            key = self.keys.load(uid)
+            tier = tier_of(self.users[uid])
+        out = {"set": key is not None, "last4": key[-4:] if key else None,
+               # a saved key that no longer opens (USER_DATA_KEY changed)
+               "unreadable": key is None and self.keys.stored(uid),
+               "required": tier == "beta", "available": self.keys.problem() is None}
+        if key is not None:  # their own estimate (usage.py prices)
+            out["month_usd"] = self.meter(uid).month_usd()
+        return out
+
+    def set_key(self, uid: str, key: str) -> bool:
+        """Save their (already checked) key; their next call uses it. False
+        if they were removed meanwhile (nothing written)."""
+        with self.lock:
+            if self.users.get(uid, {}).get("status") != "active" or not valid_id(uid):
+                return False
+            self.keys.save(uid, key)  # KeyProblem 503: no USER_DATA_KEY
+            self._user_clients.pop(uid, None)
+        return True
+
+    def delete_key(self, uid: str) -> bool:
+        """Delete their key; their next call is on the owner's key (family)
+        or stops with MissingKey (beta). False if there was none."""
+        with self.lock:
+            if uid not in self.users or not valid_id(uid):
+                return False
+            had = self.keys.delete(uid)
+            self._user_clients.pop(uid, None)
+        return had
+
+    def meter(self, uid: str):
+        """Their own usage.UsageMeter (`<dir>/<id>/usage.json`)."""
+        from assistant.usage import UsageMeter
+
+        with self.lock:
+            if uid not in self._meters:
+                self._meters[uid] = UsageMeter(self.dir / uid / "usage.json")
+            return self._meters[uid]
+
+    def record_usage(self, uid: str, model: str, usage) -> None:
+        """Count a call made on `uid`'s own key on their meter, unless they
+        were removed meanwhile (their folder is going away)."""
+        with self.lock:
+            if uid in self.users:
+                self.meter(uid).record(model, usage)
+
     def close(self) -> None:
         with self.lock:
             contexts, self._contexts = list(self._contexts.values()), {}
         for ctx in contexts:
             ctx.close()
+
+
+class UserApi:
+    """The Anthropic client one person's conversation uses, looked up on
+    every use (Family.api_for), so a key they save or remove applies to the
+    very next call. ClaudeChat's `client` and `meter` (and the Recorder's):
+    usage on their own key goes on their meter, on the owner's key to the
+    owner's (usage.METER). Raises MissingKey on use when they have none."""
+
+    def __init__(self, family: "Family", uid: str):
+        self._family = family
+        self._uid = uid
+        self.own_key = False  # whose key the last call used (cli.friendly_error)
+
+    def resolve(self):
+        client, self.own_key = self._family.api_for(self._uid)
+        return client
+
+    def client_or_none(self):
+        """For history titles: None without a key (the Recorder then uses
+        the first words as the title)."""
+        from assistant.userkeys import MissingKey
+
+        try:
+            return self.resolve()
+        except MissingKey:
+            return None
+
+    def __getattr__(self, name):  # .messages, .with_options, ...
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self.resolve(), name)
+
+    def record(self, model: str, usage) -> None:
+        if self.own_key:
+            self._family.record_usage(self._uid, model, usage)
+        else:
+            from assistant import usage as owner_usage
+
+            owner_usage.record(model, usage)
 
 
 def _unlink(path: Path, attempts: int = 20) -> None:
@@ -538,7 +746,8 @@ def own_origin(config: dict) -> str:
 def register(app, family: "Family | None", web, assistant, error) -> None:
     """The owner's family routes and the public invite acceptance:
 
-      POST   /api/invites             {name, language, timezone?} -> {url, expires_at}
+      POST   /api/invites             {name, language, timezone?, tier?} -> {url, expires_at}
+                                      (tier "beta", the default, or "family")
       GET    /api/users               the invited people (owner only)
       POST   /api/users/{id}/remove   sign them out, delete their history
                                       (also DELETE /api/users/{id}; the page
@@ -583,7 +792,7 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         try:
             user, token = await run_in_threadpool(
                 family.invite, body.get("name"), body.get("language") or "en",
-                body.get("timezone") or "")
+                body.get("timezone") or "", body.get("tier") or DEFAULT_TIER)
         except FamilyError as e:
             return error(str(e), e.status)
         return link(request, user, token)

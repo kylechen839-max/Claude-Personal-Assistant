@@ -232,7 +232,8 @@ def test_invite_for_a_removed_person_fails(env, owner):
 def test_a_family_member_has_web_tools_only(env, owner):
     env.config["web"]["location"] = {"city": "Kyle's town", "region": "", "country": "",
                                      "timezone": ""}
-    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai")
+    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai",
+                          tier="family")  # the owner's key (no key of her own)
     uid = link["user"]["id"]
     ctx = env.family.context(uid)
     assert ctx.registry.tools == {}
@@ -261,7 +262,7 @@ def test_a_family_member_has_web_tools_only(env, owner):
 def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
     cid = seed_owner_conversation(env.owner_store)
     assert owner.get(f"/api/conversations/{cid}").status_code == 200
-    mom, _ = env.member(owner)
+    mom, _ = env.member(owner, tier="family")  # on the owner's key
     assert mom.get(f"/api/conversations/{cid}").status_code == 404
     assert mom.get(f"/api/conversations/{cid}/export").status_code == 404
     assert mom.post(f"/api/conversations/{cid}/continue").status_code == 404
@@ -316,12 +317,13 @@ def test_family_never_gets_the_owners_google(fake_client, tmp_path):
     login(owner)
     assert owner.get("/api/google/status").json()["connected"] is True
     assert 'data-google' in owner.get("/").text
-    _, token = fam.invite("Mom", "zh")
+    _, token = fam.invite("Mom", "zh", tier="family")
     mom = TC(app, base_url=BASE)
     assert mom.post("/api/invite/accept", json={"invite": token}).status_code == 200
     # no family web client set up: her own Google is off, and Kyle's isn't hers
     assert mom.get("/api/google/status").json() == {
-        "enabled": False, "connected": False, "disconnect": True}
+        "enabled": False, "connected": False, "disconnect": True, "gmail": True,
+        "note": None}
     assert mom.post("/api/google/connect", json={}).status_code == 503
     page = mom.get("/").text
     assert '<html lang="zh-CN">' in page and "data-google" not in page
@@ -336,7 +338,7 @@ def test_only_the_owner_sees_the_api_cost(env, owner):
     from assistant import usage
     from tests.conftest import make_usage
 
-    mom, _ = env.member(owner, language="en")
+    mom, _ = env.member(owner, language="en", tier="family")  # on the owner's key
     env.fake_client.queue.append(make_response(text_block("Hi."),
                                                usage=make_usage(1000, 100)))
     assert mom.post("/api/turn", json={"text": "hello"}).status_code == 200
@@ -660,3 +662,65 @@ def test_invite_links_point_at_this_server(env, owner, monkeypatch, failover, ex
     env.config["webapp"]["public_origin"] = "https://public.example.com"
     r = owner.post("/api/invites", json={"name": "Dad"})
     assert r.json()["url"].startswith("https://public.example.com/#invite=")
+
+
+# --- tiers (public beta piece G1) -----------------------------------------------
+
+def test_an_invite_defaults_to_beta_and_the_owner_can_pick_family(env, owner):
+    beta = env.invite(owner, name="Tester")
+    assert beta["user"]["tier"] == "beta"
+    fam = env.invite(owner, name="Dad", tier="family")
+    assert fam["user"]["tier"] == "family"
+    r = owner.post("/api/invites", json={"name": "Eve", "tier": "admin"})
+    assert r.status_code == 400 and "tier" in r.json()["error"]
+    listed = {u["name"]: u["tier"] for u in owner.get("/api/users").json()["users"]}
+    assert listed == {"Tester": "beta", "Dad": "family"}
+    saved = json.loads(env.family.path.read_text())["users"]
+    assert sorted(u["tier"] for u in saved.values()) == ["beta", "family"]
+    # the Python API defaults to beta too
+    user, _ = env.family.invite("Later")
+    assert user["tier"] == "beta"
+
+
+def test_people_listed_before_tiers_load_as_family(tmp_path, fake_client):
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    (tmp_path / "users").mkdir()
+    old = {"id": "u_oldmember1", "name": "Mom", "language": "zh", "timezone": "",
+           "created": 1, "status": "active", "invite_hash": None,
+           "invite_expires": None}
+    odd = {**old, "id": "u_oddmember1", "name": "Odd", "tier": "superuser"}
+    (tmp_path / "users" / "users.json").write_text(json.dumps(
+        {"users": {old["id"]: old, odd["id"]: odd}, "deleting": []}))
+    fam = family_mod.Family(config, client=fake_client)
+    try:
+        assert fam.get("u_oldmember1")["tier"] == "family"
+        assert fam.tier("u_oldmember1") == "family"
+        assert fam.context("u_oldmember1").tier == "family"
+        # an unexpected value is the narrower tier, never family
+        assert fam.tier("u_oddmember1") == "beta"
+        assert {u["id"]: u["tier"] for u in fam.members()} == {
+            "u_oldmember1": "family", "u_oddmember1": "beta"}
+    finally:
+        fam.close()
+
+
+def test_each_members_history_uses_max_history_mb(env, owner):
+    assert DEFAULTS["family"]["max_history_mb"] == 20
+    assert env.config["history"]["max_mb"] == 500  # the owner's, not theirs
+    _, link = env.member(owner)
+    assert env.family.context(link["user"]["id"]).history.max_mb == 20
+    env.config["family"]["max_history_mb"] = 7
+    fam = family_mod.Family(env.config, client=env.fake_client)
+    try:
+        assert fam.context(link["user"]["id"]).history.max_mb == 7
+    finally:
+        fam.close()
+
+
+def test_the_tier_is_logged_never_the_name(env, owner, caplog):
+    with caplog.at_level(logging.INFO, logger="assistant.family"):
+        link = env.invite(owner, name="Zebediah")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert link["user"]["id"] in text and "beta" in text
+    assert "Zebediah" not in text

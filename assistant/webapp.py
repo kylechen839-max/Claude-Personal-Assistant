@@ -999,7 +999,7 @@ class WebAssistant:
         retry without the file."""
         import anthropic
 
-        from assistant.cli import friendly_error
+        from assistant.cli import friendly_error, uses_own_key
 
         try:
             return s.chat.ask(text, on_text=on_text, attachments=attachments)
@@ -1010,7 +1010,7 @@ class WebAssistant:
             too_long = FILE_TOO_LONG.search(str(getattr(e, "message", "") or e))
             return i18n.t("file_too_long" if too_long else "file_unreadable")
         except Exception as e:  # noqa: BLE001 - as get_reply
-            return friendly_error(e, text, lambda m: None)
+            return friendly_error(e, text, lambda m: None, own_key=uses_own_key(s.chat))
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
@@ -1392,7 +1392,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
                language: str = "en", google=None, spotify=None,
-               health=None):
+               health=None, public=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
@@ -1405,7 +1405,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     `max_upload_bytes`.
     `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner).
     `health`: a function returning the watchdog's issues for the owner's
-    banner (watch.banner), or None: /api/state has no "health" then."""
+    banner (watch.banner), or None: /api/state has no "health" then.
+    `public`: a public_site.PublicSite (/welcome, /privacy, /terms, the
+    waitlist), or None."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1616,13 +1618,19 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         # else [assistant] language; "connect Google" for their own account
         sid = web.sid(request) if family is not None else None
         user = family.get(web.user_of(sid)) if sid else None
+        # (or why it is off: a beta tester before the public client is set up)
         tag = (page_tag(user["language"], google is not None
-                        and google.enabled(user["id"])) if user is not None
+                        and (google.enabled(user["id"])
+                             or google.note(user["id"]) is not None)) if user is not None
                else page_tag(language, google is not None and bool(google.owner)))
-        if not tag:
+        if not tag and public is not None:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        return Response(html.replace('<html lang="en">', tag, 1),
+        if public is None:  # no public site: no link to it
+            from assistant.public_site import LOGIN_LINK
+
+            html = html.replace(LOGIN_LINK, "", 1)
+        return Response(html.replace('<html lang="en">', tag, 1) if tag else html,
                         media_type="text/html; charset=utf-8",
                         headers={"Cache-Control": "no-cache"})
 
@@ -1794,6 +1802,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                "health": owner_health(s)}
         if s.user is None:  # the API bill is the owner's business only
             out["month_usd"] = usage.month_usd()
+        elif family is not None:  # their own key: "required" (beta) or "optional"
+            out["api_key"] = "required" if family.tier(s.user) == "beta" else "optional"
         return out
 
     def owner_health(s: Session):
@@ -1929,6 +1939,13 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import family as family_mod
 
     family_mod.register(app, family, web, assistant, error)
+    from assistant import userkeys_web
+
+    userkeys_web.register(app, family, error)  # a person's own Anthropic key
+    if public is not None:
+        from assistant import public_site
+
+        public_site.register(app, public, web, error)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -2153,6 +2170,8 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import watch  # the owner's banner when an app is down
 
     health = watch.banner_source(config, env_file)
+    from assistant import public_site  # /welcome, /privacy, /terms, the waitlist
+
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
@@ -2161,6 +2180,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
                      spotify=spotify, health=health,
+                     public=public_site.from_config(config),
                      **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,

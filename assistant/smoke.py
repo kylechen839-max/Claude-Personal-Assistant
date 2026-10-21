@@ -12,8 +12,9 @@ conversation mode (/api/voice), one hands-free voice turn over the
 WebSocket. It signs out at the end.
 
 --conversation (what the watchdog runs) is one realistic multi-turn
-conversation in a single session instead (run_conversation): a text turn
-that uses a read-only tool, a text turn that depends on the first, an
+conversation in a single session instead (run_conversation): a quick
+question (with the router on, the fast model's turn), a text turn that
+uses a read-only tool, a text turn that depends on the first, an
 audio turn, a hands-free voice turn, and a last text turn while the voice
 socket is still open, all of which must answer. It refuses to run on a
 server without check sessions, so it never writes anything.
@@ -380,6 +381,11 @@ def run_conversation(c: WebClient, wav: Path, info: dict,
         return Outcome("tool call", "FAIL", f"no tool call: expected {want_tool}, "
                        f"saw {used or 'none'}")
 
+    # Short, with no word that needs the main model: with [assistant] router
+    # on, this is the turn the fast model (Haiku) answers. Every later one
+    # says "remember", which stays on the main model for the conversation.
+    attempt("quick turn", lambda: Outcome("quick turn", *judge_turn(
+        c.turn(text=PLAIN_QUESTION), False)))
     attempt("text turn", first)
     attempt("follow-up turn", lambda: remembers(c.turn(text=recall), "follow-up turn"))
     attempt("audio turn", lambda: Outcome("audio turn", *judge_turn(c.turn(wav=wav), True)))
