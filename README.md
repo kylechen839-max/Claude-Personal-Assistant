@@ -1827,9 +1827,9 @@ back), never repeatedly:
 - your phone app shows a banner ("Mom's app is down since 06:13 (healthz:
   HTTP 502)", or that the checks stopped running) on your own instance only;
   family members never see it;
-- the dev team coordinator gets a message through the PC hub's link
-  (`[devteam]`, when set up; `[watch] coordinator = false` turns it off), so
-  it can find the cause and open a PR;
+- the dev team coordinator gets a message through the voice link
+  (`assistant/devteam.py`, `[devteam]`, when set up; `[watch] coordinator =
+  false` turns it off), so it can find the cause and open a PR;
 - `logs/watch.log` has every result, and `data/watch_status.json` the
   current state.
 
@@ -1837,50 +1837,6 @@ An alert names the app, the check and a fixed reason (an error class or an
 HTTP status), never conversation text or a key. When the Claude API itself
 is down, the app says "Claude is unreachable right now. I retried a few
 times; please try again in a minute." instead of a vague error.
-
-## PC hub: chat with the dev team coordinator (desktop only)
-
-The PC hub is a page on this PC's web app where you type to your
-`/build-feature` coordinator session(s) and read their replies, Claude Code
-style (markdown replies, your messages in bubbles, an "In task" / "Idle"
-pill and a sending → queued → working → answered line under your latest
-message). It runs on your Claude plan: messages go out with the Claude
-Code CLI (`claude -p --cloud <id>`), and replies come back through the
-Notion "Hey Claude coordinator inbox" (docs/COORDINATOR_LINK.md).
-
-1. Sign in to Claude Code on the PC once: `claude auth login`.
-2. Put NOTION_TOKEN in `.env` (the integration must reach the page that
-   holds the Assignments database).
-3. In `config.local.toml`:
-
-   ```toml
-   [devteam]
-   hub = true
-   hub_sessions = ["session_..."]   # one window per coordinator, at most 8
-   poll_seconds = 4                 # read Notion at most this often
-   hub_state_file = "data/devhub.json"
-   ```
-
-4. Start the web app (`python -m assistant --mode web`) and open
-   http://127.0.0.1:8765/devteam, or double-click
-   `tools/agent-dashboard/desktop/open-hub.cmd` (Windows) or
-   `open-hub.command` (Mac) for its own app window. Sign in with the web
-   access token once.
-
-The hub only exists when the web app listens on 127.0.0.1, and every hub
-page and route answers 404 to a request that came through a proxy
-(`tailscale serve` included), so it is never on your phone or the cloud
-server. Each window has a – button to hide it (the toolbar's Hidden menu
-brings it back; the choice stays in this browser) and Clear, which deletes
-that window's transcript from `data/devhub.json`.
-
-The hub is off while `TRUSTED_PROXY` (`[webapp] trusted_proxy`) is set:
-every hub request answers 404, because a trusted proxy could vouch for a
-request from elsewhere, and the web app prints "the PC hub is disabled
-while TRUSTED_PROXY is set" at startup instead of the hub link. Open it on
-this PC from a web app started without the proxy setting. Dropping a
-session from `hub_sessions` deletes that window's transcript from the
-file at the next start.
 
 ## Preflight: check everything in one pass
 
@@ -1995,8 +1951,8 @@ tests/          pytest suite (offline; live tests skip without keys)
                               the Docker image, the Pinecone MCP connector,
                               api-contract (real-API conversation, with the secret)
 
-tools/agent-dashboard/  dev-team run dashboard + coordinator grid (claude.ai page), watchdog,
-                        desktop launchers
+docs/WATCHDOG.md  the dev-team dashboard's hourly watchdog prompt (the dashboard
+                  page itself is in the private kylechen839-max/agent-dashboard repo)
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)

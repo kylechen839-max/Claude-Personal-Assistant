@@ -492,7 +492,7 @@ def test_gate_check_runs_each_instance_on_its_side_port(tmp_path):
 def test_candidate_config_shares_nothing_it_could_break():
     cfg = watch.candidate_config(load_config(None, None), "config.mom.toml")
     assert cfg["candidate"] and not cfg["history"]["enabled"]
-    assert cfg["webapp"]["sessions_file"] == "" and not cfg["devteam"]["hub"]
+    assert cfg["webapp"]["sessions_file"] == "" and "hub" not in cfg["devteam"]
     assert cfg["logging"]["file"] == "logs/candidate-config.mom.log"
 
 

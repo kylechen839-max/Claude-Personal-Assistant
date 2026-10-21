@@ -3,12 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
-Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
-shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 124
-JavaScript tests (node:test: `voice-core.test.js` and
-`agent-dashboard.test.mjs`, both also run by pytest).
+**Current test count:** 1611 passed, 44 skipped (Linux build sandbox,
+Python 3.13, 2026-10-20; that sandbox had no eSpeak or PortAudio, so 25
+audio tests failed or errored there, as before this change), plus 67
+JavaScript tests (node:test: `voice-core.test.js` 14, run by pytest too,
+and `backend-router` 33, `family` 9, `i18n` 11).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
 builds and smoke-tests the cloud Docker image. The
@@ -60,7 +59,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_build_feature_skill.py` | 8 | the `/build-feature` skill's dashboard writes (runs, agents, the chat mirror) and the watchdog prompt (`docs/WATCHDOG.md`) |
 | `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
@@ -68,6 +67,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
 | `tests/js/family.test.mjs` | 15 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
+| `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1717,6 +1717,40 @@ screens are staged by setting the same attributes the JS sets (no mic).
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
 
+## Dashboard: close idle agents, ⤡ restore, chat Reply and attachments (2026-10-20)
+
+- **Close idle agents** (Grid toolbar): one click hides every agent window
+  on screen that is done, failed, stopped or silent (never running,
+  queued or a coordinator) with the existing `h: 1` layout flag, saved
+  once, announced "Closed N idle agent windows"; follows the Coordinator
+  picker and Active/All filter; disabled when nothing is idle.
+  **Auto-close idle agents** is an opt-in toggle (`agentDashboard.autoClose`,
+  "1"/"0"); a window restored by hand keeps `k: <state>` in its layout
+  entry and stays shown until its state changes.
+- **Maximize restore** is now an icon button (⤡) beside ⤢, same class and
+  size, `aria-label="Restore <title>"`, `aria-pressed="true"`.
+- **Reply**: selecting text inside one transcript message shows a Reply
+  button; the quote chip (200 shown, 1000 sent, × and Esc clear) is sent
+  as `> ` lines before Kyle's text and shown as a blockquote in his
+  bubble; a failed send restores it with the draft.
+- **Attachments**: manifest now
+  `{"db":{}, "user":{}, "comments":{}, "downloads":true, "assets":{}}`.
+  Paste or drop up to 5 files per message; each is uploaded with
+  `assets.upload` at that gesture (type and size checked first, never
+  retried), shown as a chip (thumbnail for images from `upload()`'s url
+  only), and sent as `[attachment: <name> (<type>, <size>) asset:<id>]`
+  lines counted inside the 4000-byte cap. × deletes an unsent asset;
+  after a send that may have been posted it only drops the chip.
+  Leaving a maximized idle window counts as keeping it shown, so
+  auto-close doesn't hide what Kyle was reading. The coordinator opens them with Artifact `read path=<asset id>` as
+  untrusted data (SKILL.md Chat mirror).
+- Tests: 23 new or updated node:vm tests in
+  `tests/js/agent-dashboard.test.mjs` (6 close-idle/auto-close, 9
+  attachments, 3 Reply, the maximize/desktop tests for ⤡); 20 fail on the
+  previous page. pytest pins: manifest, the localStorage keys (now five),
+  one `assets.upload`/`assets.delete` call site each, thumbnails only from
+  `upload()`. JS: agent-dashboard 144 passed (was 126).
+
 ## Mom's app guides her first steps
 
 - `assistant/web/i18n.js` (only on pages with the "Connect Google" button,
@@ -1888,6 +1922,49 @@ Render/Docker changes) comes separately.
   tools), and tells her how to connect Google if it isn't yet.
 - Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
   Phone cache v9.
+
+## Dashboard moved out, PC hub removed (2026-10-20)
+
+- The agent dashboard page (`tools/agent-dashboard/`: the page, its README
+  with the row schemas, desktop launchers) and its tests
+  (`tests/js/agent-dashboard.test.mjs`, the page checks in
+  `tests/test_agent_dashboard.py`) now live in the private
+  kylechen839-max/agent-dashboard repo (`dashboard/`). The watchdog prompt
+  moved to `docs/WATCHDOG.md`, since the watchdog runs in a session on this
+  repo; SKILL.md points at both.
+- Kyle scrapped the PC hub: `assistant/devhub.py`, `web/devteam.*`, its
+  `create_app(hub=)` hook and startup lines, the `[devteam] hub`,
+  `hub_sessions`, `poll_seconds` and `hub_state_file` settings, the hub
+  sections of README, MANUAL_TEST, SECURITY, PRIVACY and
+  docs/COORDINATOR_LINK.md, and the skill's hub and presence-row steps are
+  gone. `assistant/devteam.py` keeps only the voice link
+  (`message_dev_team` / `check_dev_team`): the hub's message source, window
+  sessions, 12000-character replies and presence reads were dropped; the
+  private atomic state file, the state lock and the whole-tree kill on a
+  CLI timeout stay (they protect the voice link too). A new Notion inbox
+  gets the statuses answered, working and blocked (no `idle`). An old
+  `config.local.toml` with the hub keys still loads (they are ignored).
+- Tests: the skill and watchdog checks moved to
+  `tests/test_build_feature_skill.py` (8; the phase list and the page's
+  +15 min thresholds are pinned there, from the agent-dashboard repo's
+  README); `tests/test_devteam.py` lost the hub/presence tests and gained
+  `test_voice_message_header_prefix_and_cap`,
+  `test_replies_are_capped_for_speech`, `test_inbox_statuses`,
+  `test_pc_hub_is_gone` and `test_old_hub_settings_still_load` (29 tests).
+  `test_inbox_statuses` and `test_pc_hub_is_gone` fail with the old
+  `devteam.py` and `devhub.py` restored. Full suite: 9 failed, 1611 passed,
+  44 skipped, 16 errors (the 25 are the sandbox's eSpeak/PortAudio/wake
+  model tests, as in the baseline); JS 53/53 (`tests/js/*.test.mjs`).
+- Merged master (health watchdog, safe updates, Spotify): `devteam.py`
+  keeps `SOURCES` for "voice" and the watchdog's "watch" (header
+  `[Hey Claude watchdog | …]`, `hc-` ids), `send(text, source="voice")`
+  without the hub's `session=`; `create_app` keeps `health=` and
+  `serve` the candidate guard on `resume_jobs()`, without `hub=`;
+  `watch.candidate_config` no longer sets the removed `[devteam] hub`.
+  New `test_watchdog_alerts_have_their_own_header_and_no_hub_source`
+  (fails on both sides' old `devteam.py`). Full suite: 9 failed,
+  2096 passed, 56 skipped, 26 errors (all 35 the sandbox's
+  eSpeak/PortAudio/wake model set); JS 94/94.
 
 ## Three flaky CI tests, root-caused (2026-10-20)
 
