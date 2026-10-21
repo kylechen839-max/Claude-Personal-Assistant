@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Claude settings: pre-approve `mcp__claude-code-remote__create_session` (Kyle, 2026-10-21) so the coordinator can start sessions on his own machines, such as the trusted relay.
 - Fixed: with `[tts] family_paid_voices` on, beta testers could pick
   ElevenLabs voices on the owner's bill. Paid voices now go only to
   family-tier members (and the owner); a beta tester never sees them, can't
