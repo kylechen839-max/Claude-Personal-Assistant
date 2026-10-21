@@ -8,7 +8,8 @@
   setting `[family] export_max_mb` (default 50). Downloads are built in the
   family data folder and deleted when the download ends, even if the phone
   disconnects first; deleting your account also removes any download still
-  being made.
+  being made. An old, stalled download finishing late no longer frees a newer
+  export's one-at-a-time slot.
 - Fixed: the go-live gate refused every update on a machine without a web
   app (a wake-only Pi, or a family copy that never started), and the wake
   host undid a hand pull there. Such machines now go live after the import

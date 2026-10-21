@@ -5,6 +5,7 @@ their data (GET /api/me/export) or deletes their account (POST
 All offline: the mocked Anthropic client, real SQLite history in tmp_path,
 and a fake Google revoke (no network)."""
 
+import gc
 import io
 import json
 import logging
@@ -342,7 +343,7 @@ def test_delete_removes_an_export_that_was_never_streamed(env, owner, acct):
     dfolder, _ = acct.build(dlink["user"]["id"])
     assert delete_me(mom).status_code == 200
     assert not folder.exists() and not older.exists()
-    assert uid not in acct._busy and uid not in acct._folders
+    assert uid not in acct._busy
     assert dfolder.exists()
     acct.finish(dlink["user"]["id"], dfolder)
 
@@ -380,8 +381,71 @@ def test_a_client_that_leaves_before_the_body_still_cleans_up(env, owner, acct):
     anyio.run(run)
     assert started == [200]
     assert list(acct.tmp_root.iterdir()) == []
-    assert not acct._busy and not acct._folders
+    assert not acct._busy
     assert mom.get("/api/me/export").status_code == 200  # not stuck at 409
+
+
+def test_a_client_that_leaves_mid_body_closes_the_zip_before_cleanup(
+        env, owner, acct, monkeypatch):
+    """The phone drops after the first chunk: the generator is suspended
+    with the zip open. It must be closed before the folder is removed
+    (Windows can't remove an open file), and the folder is gone as soon as
+    the app returns, without waiting for gc."""
+    import anyio
+    from starlette.requests import ClientDisconnect
+
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    plant(env, uid)
+    opened, seen = [], []
+    real_open = open
+
+    def spy_open(*a, **kw):
+        f = real_open(*a, **kw)
+        opened.append(f)
+        return f
+    monkeypatch.setattr(account_mod, "open", spy_open, raising=False)
+    real_finish = acct.finish
+
+    def finish(u, folder):
+        seen.append([f.closed for f in opened])  # at cleanup time
+        real_finish(u, folder)
+    monkeypatch.setattr(acct, "finish", finish)
+    cookie = "; ".join(f"{k}={v}" for k, v in mom.cookies.items())
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+             "http_version": "1.1", "method": "GET", "scheme": "https",
+             "path": "/api/me/export", "raw_path": b"/api/me/export",
+             "query_string": b"", "root_path": "",
+             "headers": [(b"host", b"testserver"), (b"cookie", cookie.encode())],
+             "client": ("127.0.0.1", 5000), "server": ("testserver", 443)}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    bodies = []
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            bodies.append((len(message["body"]), message["more_body"]))
+            raise OSError("the phone went away")  # after the first chunk
+
+    async def run():
+        with pytest.raises((ClientDisconnect, OSError)):
+            await env.app(scope, receive, send)
+        # checked inside the loop, before the app's objects can be collected
+        assert list(acct.tmp_root.iterdir()) == []
+    gc_was = gc.isenabled()
+    gc.disable()
+    try:
+        anyio.run(run)
+    finally:
+        if gc_was:
+            gc.enable()
+    (size, more), = bodies
+    assert size > 0 and more  # really mid-body: the generator is suspended
+    assert len(opened) == 1 and opened[0].closed
+    assert seen and all(seen[0]), seen  # closed before the first cleanup
+    assert not acct._busy
 
 
 def test_startup_sweeps_old_export_folders(env, owner, acct):
@@ -435,6 +499,37 @@ def test_one_export_at_a_time(env, owner, acct):
     folder2, path2 = acct.build(uid)
     assert dad.get("/api/me/export").status_code == 200
     list(acct.stream(uid, folder2, path2))
+
+
+def test_an_old_export_ending_late_never_frees_a_newer_ones_slot(env, owner, acct):
+    """Export 1's download runs past STALE, export 2 starts, and export 1
+    ends while export 2 is still being built (before its folder exists) or
+    after: either way export 2 keeps the slot and a third waits (409)."""
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    plant(env, uid)
+    f1, p1 = acct.build(uid)
+    g1 = acct.stream(uid, f1, p1)
+    next(g1)                                   # export 1's download is under way
+    env.clock.now += account_mod.STALE + 1     # ... and has gone stale
+    real_sweep = acct._sweep
+
+    def sweep():                               # in export 2's build, before mkdtemp
+        g1.close()                             # export 1 ends right then
+        real_sweep()
+    acct._sweep = sweep
+    try:
+        f2, p2 = acct.build(uid)
+    finally:
+        acct._sweep = real_sweep
+    assert not f1.exists() and f2.exists()
+    assert acct._busy.get(uid) is not None
+    assert mom.get("/api/me/export").status_code == 409   # no third export
+    acct.finish(uid, f1)                       # export 1's cleanup again, later
+    assert mom.get("/api/me/export").status_code == 409
+    assert b"".join(acct.stream(uid, f2, p2))  # export 2 ends: its slot frees
+    assert not f2.exists() and not acct._busy
+    assert mom.get("/api/me/export").status_code == 200
 
 
 def test_export_is_rate_limited(env, owner, acct):

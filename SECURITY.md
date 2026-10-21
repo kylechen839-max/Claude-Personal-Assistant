@@ -634,8 +634,13 @@ server (`[family] enabled`, on in the server profile).
     streamed, and removed when the response ends, however it ends: a
     `StreamingResponse` subclass cleans up in `__call__`'s `finally`,
     because a generator's `finally` and a BackgroundTask never run when the
-    phone leaves before the body starts (ASGI 2.4 ClientDisconnect).
-    Deleting the account also removes every `export-<id>.*` folder of
+    phone leaves before the body starts (ASGI 2.4 ClientDisconnect). It
+    closes the body first (Starlette's iterator and our generator), so a
+    phone that leaves mid-download has its zip closed before the folder is
+    removed (Windows can't remove an open file). The one-at-a-time slot
+    holds a token made when the export starts, bound to its folder; only
+    that export frees it, so an old download ending late never frees a
+    newer export's slot. Deleting the account also removes every `export-<id>.*` folder of
     theirs and frees their slot, so no copy outlives the account. Folders
     older than 10 minutes (a crash) are swept at startup and on every
     export; a stuck slot frees after 10 minutes.

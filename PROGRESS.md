@@ -3775,3 +3775,35 @@ shared `clear_session_cookie` that sign-out now uses too).
     or terms.html each fail their test.
 - **Counts** (Linux sandbox, Python 3.13): 2569 passed, 34 skipped (the
   merge commit abf3b0f: 2564 passed, 34 skipped; +5). JS 242 pass.
+
+### Round 3 (judge's two low findings)
+- **An old export can't free a newer one's slot.** The slot is now
+  `_busy[uid] = (started, token, folder)`: `_start` makes a fresh token,
+  `build` binds the folder to it once `mkdtemp` returns (only if the slot
+  is still that token's), a build error frees by token, and `finish` frees
+  only when the slot's folder is its own. Before, the slot was set first
+  but the folder map still named the old folder (and an unset one counted
+  as a match), so a stale download ending during the next export's build
+  freed that export's slot and let a third in. The separate `_folders`
+  map is gone.
+- **A mid-body disconnect closes the zip before cleanup.**
+  `ExportResponse.__call__`'s `finally` now closes the body first: it calls
+  `aclose()` on Starlette's iterator, then `close()` on our own generator.
+  Both are needed, because `aclose()` only ends Starlette's thread-pool
+  wrapper and leaves a sync generator suspended with the file open.
+  Closing the generator runs its `with` and `finally`, so the zip is closed
+  before the folder is removed (Windows can't remove an open file), and
+  the folder is gone when the app returns.
+- **Tests.** `test_account.py` +2 (35): export 1's download goes stale,
+  export 2 starts and export 1 ends inside export 2's build (before its
+  folder exists) and again afterwards; export 2 keeps the slot (a third
+  gets 409) until its own download ends. A raw ASGI 2.4 request whose
+  `send` raises OSError on the first body chunk (`more_body` true): at the
+  first `finish` the zip's file handle is already closed, and the exports
+  folder is empty inside the event loop with gc off.
+  - Revert check (each alone, `__pycache__` cleared): HEAD's account.py
+    fails both. `_done` as an unconditional pop fails the overlap test.
+    Dropping `close_body()` fails the disconnect test, and so does
+    `aclose()` alone without closing the generator (the file is still open).
+- **Counts** (Linux sandbox, Python 3.13): 2571 passed, 34 skipped (round
+  2: 2569 passed, 34 skipped; +2). JS 242 pass.

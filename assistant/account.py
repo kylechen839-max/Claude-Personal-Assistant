@@ -108,8 +108,8 @@ class Account:
         self.clock = clock
         self.tmp_root = Path(tmp_root) if tmp_root else family.dir / EXPORTS_DIR
         self.lock = threading.Lock()
-        self._busy: dict[str, float] = {}        # uid -> when their export started
-        self._folders: dict[str, Path] = {}      # uid -> their export's folder
+        # uid -> (when their export started, its token, its folder once made)
+        self._busy: dict[str, tuple[float, object, Path | None]] = {}
         self._recent: dict[str, deque] = {}      # uid -> export start times
         self._sweep()
 
@@ -147,18 +147,20 @@ class Account:
         with self.lock:
             self._recent.pop(uid, None)
             self._busy.pop(uid, None)
-            self._folders.pop(uid, None)
         self._remove_exports(uid)  # a copy must not outlive the account
         if removed:
             log.info("Account: %s deleted their account", uid)
         return removed
 
     # ---------- export ----------
-    def _start(self, uid: str) -> None:
+    def _start(self, uid: str) -> object:
+        """Take their export slot; returns its token. Only the export holding
+        the token frees the slot, so an old one ending (after it went stale
+        and a newer one started) never frees the newer one's."""
         now = self.clock()
         with self.lock:
-            started = self._busy.get(uid)
-            if started is not None and now - started < STALE:
+            slot = self._busy.get(uid)
+            if slot is not None and now - slot[0] < STALE:
                 raise ExportError("an export is already being made; wait for it", 409)
             recent = self._recent.setdefault(uid, deque())
             while recent and now - recent[0] > RATE_WINDOW:
@@ -166,20 +168,30 @@ class Account:
             if len(recent) >= EXPORTS_PER_HOUR:
                 raise ExportError("too many downloads; try again in an hour", 429)
             recent.append(now)
-            self._busy[uid] = now
+            token = object()
+            self._busy[uid] = (now, token, None)
             # bounded: only people still listed keep an entry
             for other in [k for k in self._recent if k != uid
                           and (not self._recent[k]
                                or now - self._recent[k][-1] > RATE_WINDOW)]:
                 del self._recent[other]
+        return token
 
-    def _done(self, uid: str, folder: Path | None = None) -> None:
-        """Free their export slot (only this export's: a newer one, started
-        after this one went stale, keeps its own)."""
+    def _release(self, uid: str, token: object) -> None:
+        """Free their export slot if it's still this export's."""
         with self.lock:
-            if folder is None or self._folders.get(uid) in (None, folder):
-                self._busy.pop(uid, None)
-                self._folders.pop(uid, None)
+            slot = self._busy.get(uid)
+            if slot is not None and slot[1] is token:
+                del self._busy[uid]
+
+    def _done(self, uid: str, folder: Path) -> None:
+        """Free their export slot if it's still the one whose token this
+        folder was made under (build records it); a newer export, even one
+        whose folder isn't made yet, keeps its own."""
+        with self.lock:
+            slot = self._busy.get(uid)
+            if slot is not None and slot[2] is not None and slot[2] == folder:
+                del self._busy[uid]
 
     def finish(self, uid: str, folder: Path) -> None:
         """The download ended (sent, dropped or never started): remove the
@@ -223,16 +235,18 @@ class Account:
         ctx = self.family.context(uid)
         if user is None or ctx is None:
             raise ExportError("not signed in", 401)
-        self._start(uid)
+        token = self._start(uid)
         try:
             self._sweep()
             folder = Path(tempfile.mkdtemp(prefix=f"{EXPORT_PREFIX}{uid}.",
                                            dir=self._root()))
         except BaseException:
-            self._done(uid)
+            self._release(uid, token)
             raise
-        with self.lock:
-            self._folders[uid] = folder
+        with self.lock:  # bind the folder to this export's slot (if it still has it)
+            slot = self._busy.get(uid)
+            if slot is not None and slot[1] is token:
+                self._busy[uid] = (slot[0], token, folder)
         try:
             path = folder / "hey-claude-data.zip"
             count, size = self._write(path, user, ctx.history)
@@ -304,16 +318,37 @@ def register(app, family, web, error) -> None:
     class ExportResponse(StreamingResponse):
         """Runs `cleanup` when the response ends, however it ends: a
         generator's `finally` (and a BackgroundTask) never run when the
-        client leaves before the body starts (ASGI 2.4: ClientDisconnect)."""
+        client leaves before the body starts (ASGI 2.4: ClientDisconnect).
+        A client that leaves mid-body leaves the generator suspended with
+        the zip open, so the body is closed first: Windows can't remove an
+        open file, and the folder would stay while the slot frees."""
 
         def __init__(self, content, cleanup: Callable[[], None], **kw):
             super().__init__(content, **kw)
+            self.content = content
             self.cleanup = cleanup
+
+        async def close_body(self) -> None:
+            # aclose() only ends Starlette's thread-pool wrapper around a
+            # sync generator, not the generator itself: close both.
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001 - cleanup still runs
+                    log.debug("Account: closing the export stream failed", exc_info=True)
+            close = getattr(self.content, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 - e.g. still running
+                    log.debug("Account: closing the export file failed", exc_info=True)
 
         async def __call__(self, scope, receive, send):
             try:
                 await super().__call__(scope, receive, send)
             finally:
+                await self.close_body()
                 self.cleanup()
 
     account = Account(family) if family is not None else None
