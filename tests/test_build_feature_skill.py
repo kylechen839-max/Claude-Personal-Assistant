@@ -172,3 +172,14 @@ def test_dashboard_url_is_the_current_artifact():
     for path in (WATCHDOG, ROOT / ".claude" / "TEAM_MEMORY.md", ROOT / "MANUAL_TEST.md"):
         text = path.read_text(encoding="utf-8")
         assert new in text and old not in text, path
+
+
+def test_skill_mirrors_thread_replies_and_in_between_updates():
+    """Kyle, 2026-10-21: replies posted only in comment threads never
+    reached the dashboard chat, and he wants the in-between updates, step
+    lines and live status there too, for every coordinator."""
+    skill = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "every reply you post in a comment thread" in skill
+    assert "in-between updates" in skill
+    assert "check that every reply you posted this turn has its mirrored copy" in skill
+    assert "Keep `status.text` on the step you are on" in skill
