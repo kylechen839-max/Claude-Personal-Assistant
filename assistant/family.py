@@ -28,6 +28,16 @@ scopes, signed in through a separate OAuth client ([family]
 public_google_client / GOOGLE_PUBLIC_CLIENT_JSON) whose consent screen asks
 for nothing else. Without that client a beta tester can't connect Google;
 they never fall back to the family client (its consent screen lists Gmail).
+
+Whose Claude bill (bring your own key, userkeys.py): someone who saved
+their own Anthropic key in the app (PUT /api/me/anthropic-key,
+userkeys_web.py) talks to Claude on it, for their chats and their history
+titles alike, and that usage is counted in `<dir>/<id>/usage.json`, never
+the owner's month_usd. Without one, a "family" person uses the owner's key
+(as before); a "beta" tester never does: their turn stops with MissingKey
+("add your key in Settings") before any request is made. The client is
+looked up on every call (UserApi), so a new or removed key applies at once,
+also to a conversation already open.
 """
 
 # No `from __future__ import annotations`: FastAPI must see the real
@@ -161,7 +171,10 @@ class Family:
     atomically). Thread-safe: one lock covers the file, the contexts and
     redeeming, so an invite can't be accepted while it is being removed."""
 
-    def __init__(self, config: dict, client=None, clock=time.time):
+    def __init__(self, config: dict, client=None, clock=time.time,
+                 user_client: Callable[[str], object] | None = None, environ=None):
+        from assistant.userkeys import KeyStore
+
         f = config["family"]
         self.config = config
         self.dir = Path(f["dir"])
@@ -171,6 +184,13 @@ class Family:
         self.max_history_mb = float(f["max_history_mb"])
         self.clock = clock
         self._client = client
+        # anthropic.Anthropic for a person's own key (a seam for tests)
+        self._user_client = user_client or self._new_user_client
+        self.keys = KeyStore(self.dir, environ)  # their Anthropic keys, encrypted
+        # uid -> their client, or None (no usable key of their own); filled
+        # on first use, dropped when they save or remove a key
+        self._user_clients: dict[str, object] = {}
+        self._meters: dict[str, object] = {}  # uid -> their usage.UsageMeter
         self.lock = threading.RLock()
         self.users: dict[str, dict] = {}
         # removed people whose folder isn't deleted yet (e.g. a file was
@@ -296,6 +316,8 @@ class Family:
             self._save(users, deleting)  # OSError: nothing changed, try again
             self.users, self._deleting = users, deleting
             ctx = self._contexts.pop(uid, None)
+            self._user_clients.pop(uid, None)
+            self._meters.pop(uid, None)
             if before_delete is not None:
                 before_delete(uid)
         if ctx is not None:
@@ -514,9 +536,11 @@ class Family:
                                  eventlog=False)
 
         def chat_factory(session_registry):
-            recorder = Recorder(store, "web", client_fn=self.client,
-                                title_model=h["title_model"])
-            return ClaudeChat(client=self.client(), model=a["model"],
+            # their own key (or, for family, the owner's), looked up per call
+            chat_api, title_api = UserApi(self, user["id"]), UserApi(self, user["id"])
+            recorder = Recorder(store, "web", client_fn=title_api.client_or_none,
+                                title_model=h["title_model"], meter=title_api)
+            return ClaudeChat(client=chat_api, meter=chat_api, model=a["model"],
                               max_tokens=a["max_tokens"],
                               max_history=a["max_history"], tools=session_registry,
                               max_tool_rounds=a["max_tool_rounds"], memory=None,
@@ -527,7 +551,12 @@ class Family:
 
         return UserContext(user, registry, store, chat_factory)
 
-    def client(self):
+    def client(self, uid: str | None = None):
+        """The owner's client (uid None), else the one `uid`'s calls use:
+        their own key's, the owner's for a "family" person without one, or
+        MissingKey (a beta tester without a key, or someone no longer listed)."""
+        if uid is not None:
+            return self.api_for(uid)[0]
         if self._client is None:
             import anthropic
 
@@ -536,11 +565,131 @@ class Family:
                                                timeout=a["api_timeout"])
         return self._client
 
+    def _new_user_client(self, key: str):
+        from assistant.userkeys import user_client
+
+        a = self.config["assistant"]  # the same options as the owner's
+        # only their key: never ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+        # from the server's environment (Kyle's)
+        return user_client(key, max_retries=a["api_max_retries"],
+                           timeout=a["api_timeout"])
+
+    def api_for(self, uid: str) -> tuple[object, bool]:
+        """(client, True if it is on their own key) for `uid`'s next call."""
+        from assistant.userkeys import MissingKey
+
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or not valid_id(uid):  # removed: nobody's key
+                raise MissingKey("not a listed person")
+            if uid not in self._user_clients:
+                key = self.keys.load(uid)
+                self._user_clients[uid] = self._user_client(key) if key else None
+            own = self._user_clients[uid]
+        if own is not None:
+            return own, True
+        if tier_of(user) == "family":
+            return self.client(), False
+        raise MissingKey()
+
+    # ---------- their own Anthropic key (userkeys_web.py) ----------
+    def key_status(self, uid: str) -> dict:
+        """What their Settings shows: {set, last4, unreadable, required,
+        available, month_usd}. Never the key."""
+        with self.lock:
+            if uid not in self.users:
+                raise FamilyError("not found", 404)
+            key = self.keys.load(uid)
+            tier = tier_of(self.users[uid])
+        out = {"set": key is not None, "last4": key[-4:] if key else None,
+               # a saved key that no longer opens (USER_DATA_KEY changed)
+               "unreadable": key is None and self.keys.stored(uid),
+               "required": tier == "beta", "available": self.keys.problem() is None}
+        if key is not None:  # their own estimate (usage.py prices)
+            out["month_usd"] = self.meter(uid).month_usd()
+        return out
+
+    def set_key(self, uid: str, key: str) -> bool:
+        """Save their (already checked) key; their next call uses it. False
+        if they were removed meanwhile (nothing written)."""
+        with self.lock:
+            if self.users.get(uid, {}).get("status") != "active" or not valid_id(uid):
+                return False
+            self.keys.save(uid, key)  # KeyProblem 503: no USER_DATA_KEY
+            self._user_clients.pop(uid, None)
+        return True
+
+    def delete_key(self, uid: str) -> bool:
+        """Delete their key; their next call is on the owner's key (family)
+        or stops with MissingKey (beta). False if there was none."""
+        with self.lock:
+            if uid not in self.users or not valid_id(uid):
+                return False
+            had = self.keys.delete(uid)
+            self._user_clients.pop(uid, None)
+        return had
+
+    def meter(self, uid: str):
+        """Their own usage.UsageMeter (`<dir>/<id>/usage.json`)."""
+        from assistant.usage import UsageMeter
+
+        with self.lock:
+            if uid not in self._meters:
+                self._meters[uid] = UsageMeter(self.dir / uid / "usage.json")
+            return self._meters[uid]
+
+    def record_usage(self, uid: str, model: str, usage) -> None:
+        """Count a call made on `uid`'s own key on their meter, unless they
+        were removed meanwhile (their folder is going away)."""
+        with self.lock:
+            if uid in self.users:
+                self.meter(uid).record(model, usage)
+
     def close(self) -> None:
         with self.lock:
             contexts, self._contexts = list(self._contexts.values()), {}
         for ctx in contexts:
             ctx.close()
+
+
+class UserApi:
+    """The Anthropic client one person's conversation uses, looked up on
+    every use (Family.api_for), so a key they save or remove applies to the
+    very next call. ClaudeChat's `client` and `meter` (and the Recorder's):
+    usage on their own key goes on their meter, on the owner's key to the
+    owner's (usage.METER). Raises MissingKey on use when they have none."""
+
+    def __init__(self, family: "Family", uid: str):
+        self._family = family
+        self._uid = uid
+        self.own_key = False  # whose key the last call used (cli.friendly_error)
+
+    def resolve(self):
+        client, self.own_key = self._family.api_for(self._uid)
+        return client
+
+    def client_or_none(self):
+        """For history titles: None without a key (the Recorder then uses
+        the first words as the title)."""
+        from assistant.userkeys import MissingKey
+
+        try:
+            return self.resolve()
+        except MissingKey:
+            return None
+
+    def __getattr__(self, name):  # .messages, .with_options, ...
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self.resolve(), name)
+
+    def record(self, model: str, usage) -> None:
+        if self.own_key:
+            self._family.record_usage(self._uid, model, usage)
+        else:
+            from assistant import usage as owner_usage
+
+            owner_usage.record(model, usage)
 
 
 def _unlink(path: Path, attempts: int = 20) -> None:

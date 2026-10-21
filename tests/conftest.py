@@ -173,7 +173,9 @@ def _env_vars() -> tuple[str, ...]:
     return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID", TOKEN_ENV, CLIENT_ENV,
             WEB_CLIENT_ENV, PUBLIC_CLIENT_ENV,
             # team chat tokens (GITHUB_TOKEN is often set in a dev shell or CI)
-            "SLACK_USER_TOKEN", "DISCORD_BOT_TOKEN", "GITHUB_TOKEN")
+            "SLACK_USER_TOKEN", "DISCORD_BOT_TOKEN", "GITHUB_TOKEN",
+            # the secret that opens people's own Anthropic keys (userkeys.py)
+            "USER_DATA_KEY")
 
 
 @pytest.fixture(autouse=True)

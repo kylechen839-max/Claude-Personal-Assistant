@@ -1,8 +1,6 @@
 <!doctype html>
 <!-- Release check before `[webapp] public_site = true`: these claims depend on
      other public-beta pieces being on master and deployed:
-     - Anthropic "sent with your own API key", and "your key is stored encrypted
-       on the server and used only for your requests": G2 (BYOK)
      - Google "Calendar access only, no Gmail": G1 (beta tier)
      - Notion "once you connect Notion" for beta users: G6 (Notion public OAuth) -->
 <html lang="en">
@@ -72,7 +70,8 @@
       own on the server, so you can find and continue them. You can delete any
       conversation in the History screen; that overwrites its text.</li>
     <li><strong>Your Anthropic API key:</strong> your key is stored encrypted on the
-      server and used only for your requests.</li>
+      server and used only for your requests. We also keep a monthly estimate of
+      the tokens and cost your key has used, shown only to you.</li>
     <li><strong>Your Google sign-in:</strong> a token for your own Calendar, used only
       for you. Disconnecting deletes it; you can also revoke it at
       myaccount.google.com/permissions.</li>
@@ -97,8 +96,8 @@
     automatic backup snapshots of the disk, so a copy can remain in those snapshots
     until they expire.</p>
   <p>To stop Google access at any time, revoke Hey Claude at
-    myaccount.google.com/permissions. To stop API use, delete or rotate your key in
-    the Anthropic Console.</p>
+    myaccount.google.com/permissions. To stop API use, choose Remove key in Settings,
+    or delete or rotate your key in the Anthropic Console.</p>
 
   <h2>Cookies</h2>
   <p>One cookie keeps you signed in. While you connect Google, a second, short-lived
