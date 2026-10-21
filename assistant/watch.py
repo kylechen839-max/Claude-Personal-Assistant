@@ -7,7 +7,8 @@ the host supervisor restarts the app on new code (assistant/host.py).
 Instances: Kyle's own (config.toml + .env) and every family copy
 (config.<name>.toml + .env.<name>, *.local.toml excepted), the same rule as
 scripts/install_family_tasks.ps1. `[watch] enabled = false` in an
-instance's config leaves it out.
+instance's config leaves it out, and so does an env file without a
+WEB_TOKEN (no web app: a wake-only Pi, a family copy that never started).
 
 Each run, per instance:
   quick check   GET /healthz on its port; the page and every script and
@@ -16,9 +17,10 @@ Each run, per instance:
                 `tailscale serve` entry, or [webapp] public_origin).
   functional    after a restart or a new version, after `[watch]
                 functional_hours`, or retried after `retry_minutes` once
-                failed: smoke.py's realistic conversation (text with a
-                read-only tool, a follow-up, audio, hands-free voice, text)
-                in a check session, which saves nothing and can't write.
+                failed: smoke.py's realistic conversation (a quick question
+                the fast model answers, text with a read-only tool, a
+                follow-up, audio, hands-free voice, text) in a check
+                session, which saves nothing and can't write.
   heal          still failing: its scheduled task / service is restarted
                 once; if that doesn't fix it either and the checkout moved
                 past the last version that passed ("last known good"), the
@@ -34,7 +36,9 @@ The go-live check (gate_check), also run by the updater before anything
 restarts on an update and by scripts/deploy.ps1 / deploy.sh: each instance
 is started a second time on a side port (its port + `side_port_offset`,
 127.0.0.1) as `--candidate` (no history, no saved sign-ins, no background
-jobs, its own log), and must pass the same conversation.
+jobs, its own log), and must pass the same conversation. With no instance
+(no web app here) the updater's import and --check smoke decide; with
+requirements.txt not installed nothing goes live until it is.
 
 Results go to `[watch] status_file` (data/watch_status.json, written
 privately) and logs/watch.log. Alerts only on a change (an app starts
@@ -124,7 +128,10 @@ def default_label(name: str) -> str:
 def discover(root: Path = ROOT, tailscale=None) -> list[Instance]:
     """Kyle's instance and each config.<name>.toml with its .env.<name>
     (install_family_tasks.ps1's rule), minus any with [watch] enabled =
-    false. `tailscale`: port -> https URL (tailscale_urls), or None to ask."""
+    false, and minus any whose env file has no WEB_TOKEN: it has no web app
+    to check or gate (a wake-only Pi; a family copy whose app never ran,
+    since the app writes its token on first start). `tailscale`: port ->
+    https URL (tailscale_urls), or None to ask."""
     pairs = []
     if (root / "config.toml").exists():
         pairs.append((MAIN, "config.toml", ".env"))
@@ -145,6 +152,10 @@ def discover(root: Path = ROOT, tailscale=None) -> list[Instance]:
             continue
         watch = cfg["watch"]
         if not watch["enabled"]:
+            continue
+        if not env_token(root, env_file):
+            log.info("%s has no WEB_TOKEN (no web app here, or it never ran); "
+                     "not checked or gated", env_file)
             continue
         port = int(cfg["webapp"]["port"])
         found.append(Instance(name, config, env_file, port,
@@ -188,12 +199,17 @@ def tailscale_urls(run=None) -> dict[int, str]:
     return urls
 
 
-def token_of(root: Path, inst: Instance) -> str | None:
-    """Its WEB_TOKEN, read from its env file (never into this process)."""
+def env_token(root: Path, env_file: str) -> str | None:
+    """WEB_TOKEN from `env_file`, read without loading it into this process."""
     from dotenv import dotenv_values
 
-    path = root / inst.env_file
+    path = root / env_file
     return (dotenv_values(path).get("WEB_TOKEN") or None) if path.exists() else None
+
+
+def token_of(root: Path, inst: Instance) -> str | None:
+    """Its WEB_TOKEN, read from its env file (never into this process)."""
+    return env_token(root, inst.env_file)
 
 
 # ----- commands ----------------------------------------------------------------
@@ -450,14 +466,49 @@ def _stop(child) -> None:
         child.wait(timeout=20)
 
 
+def import_smoke(root: Path) -> tuple[bool, str]:
+    """The updater's smoke: import, then `python -m assistant --check`."""
+    from assistant.updater import Updater
+
+    return Updater(root, python=console_python()).smoke()
+
+
 def gate_check(sha: str, root: Path = ROOT, instances: list[Instance] | None = None,
-               check=candidate_check) -> tuple[bool | None, str]:
+               check=candidate_check, smoke=import_smoke,
+               requirements=None) -> tuple[bool | None, str]:
     """Does `sha` (checked out now) pass the test conversation for every
     instance, each on its side port? (ok, why); ok is None when it only
     failed for outside reasons (external()): try again later, don't refuse
     it. Doesn't take the update lock: the caller holds it, so nothing
-    restarts on `sha` meanwhile."""
+    restarts on `sha` meanwhile.
+
+    requirements.txt not installed (updater.requirements_problem) is None
+    too: nothing runs on `sha` until it is, and then it is checked as usual.
+    No web app here (discover() skips an instance without a WEB_TOKEN, e.g.
+    a wake-only Pi): there is nothing to start on a side port, so `sha`
+    passes on the import and --check smoke alone, run here (a pull by hand
+    never ran it)."""
+    from assistant.updater import requirements_problem
+
+    problem = (requirements or requirements_problem)(root)
+    if problem:
+        log.warning("Go-live check of %s can't run: %s", sha[:7], problem)
+        return None, problem
     instances = discover(root, tailscale={}) if instances is None else instances
+    if not instances:
+        try:
+            ok, why = smoke(root)
+        except Exception as e:  # never take the host down; says nothing about `sha`
+            log.exception("Go-live smoke of %s crashed", sha[:7])
+            return None, f"no web app here; smoke crashed ({_error(e)})"
+        if ok:
+            log.info("Go-live check: no web app here; import and --check smoke "
+                     "passed on %s", sha[:7])
+            return True, ""
+        # the output tail goes to the log only; alerts get fixed words
+        log.warning("Go-live check: no web app here; smoke FAILED on %s: %s",
+                    sha[:7], why)
+        return False, f"no web app here; {why.split(':', 1)[0]}"
     problems, outside = [], True
     for inst in instances:
         failed = _checked(check, root, inst, sha)

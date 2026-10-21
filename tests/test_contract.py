@@ -6,8 +6,11 @@ Each runs offline against the contract-shaped fake (tests/contract_fakes.py)
 and, marked `live`, against the real Anthropic API when ANTHROPIC_API_KEY
 is set: CI's `api-contract` job runs them with the cheapest model
 (CONTRACT_MODEL, default claude-haiku-5-5) and with the configured default
-model, the one that thinks. Without the key the live ones skip. Read-only:
-the only tool is a fake calendar list; nothing is saved anywhere.
+model, the one that thinks, and the web conversation once more with the
+router on (main model plus CONTRACT_MODEL as the fast one), so Haiku's own
+requests (its tool versions, cache_control, max_tokens) meet the real API.
+Without the key the live ones skip. Read-only: the only tool is a fake
+calendar list; nothing is saved anywhere.
 """
 
 from __future__ import annotations
@@ -31,23 +34,45 @@ CHEAP_MODEL = os.environ.get("CONTRACT_MODEL", "claude-haiku-5-5")
 HAVE_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def _live(model):
-    return pytest.param(("live", model), id=f"live-{model}", marks=[
-        pytest.mark.live,
-        pytest.mark.skipif(not HAVE_KEY, reason="ANTHROPIC_API_KEY not set")])
+FAKE_MAIN, FAKE_FAST = "test-model", "test-fast-model"
 
 
-@pytest.fixture(params=[pytest.param(("fake", "test-model"), id="contract-fake"),
-                        _live(CHEAP_MODEL), _live(DEFAULT_MODEL)])
-def api(request):
-    """(make_client, model): a new client per call. Live: real clients,
-    each its own connection pool, as the phone and voice paths have."""
-    kind, model = request.param
+def _live(model, fast=None):
+    return pytest.param(("live", model, fast),
+                        id=f"live-{model}" + (f"-routed-{fast}" if fast else ""), marks=[
+                            pytest.mark.live,
+                            pytest.mark.skipif(not HAVE_KEY,
+                                               reason="ANTHROPIC_API_KEY not set")])
+
+
+PLAIN = [pytest.param(("fake", FAKE_MAIN, None), id="contract-fake"),
+         _live(CHEAP_MODEL), _live(DEFAULT_MODEL)]
+# [assistant] router = "auto": simple turns go to the fast model
+ROUTED = [pytest.param(("fake", FAKE_MAIN, FAKE_FAST), id="contract-fake-routed"),
+          _live(DEFAULT_MODEL, CHEAP_MODEL)]
+
+
+def _make(param):
+    """(make_client, model, fast_model): a new client per call. Live: real
+    clients, each its own connection pool, as the phone and voice paths
+    have."""
+    kind, model, fast = param
     if kind == "fake":
-        return ContractClient, model
+        return ContractClient, model, fast
     import anthropic
 
-    return (lambda: anthropic.Anthropic(max_retries=3, timeout=60)), model
+    return (lambda: anthropic.Anthropic(max_retries=3, timeout=60)), model, fast
+
+
+@pytest.fixture(params=PLAIN)
+def api(request):
+    make, model, _fast = _make(request.param)
+    return make, model
+
+
+@pytest.fixture(params=PLAIN + ROUTED)
+def web_api(request):
+    return _make(request.param)
 
 
 def calendar_tools(calls: list) -> ToolRegistry:
@@ -97,6 +122,102 @@ def test_two_chats_sharing_one_history_then_a_follow_up(api):
     phone.history = voice.history  # back to typing on the phone
     assert "4417" in phone.ask("Thanks. " + RECALL)
     assert not [c for c in calls if c[0] == "create"]
+
+
+def test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn():
+    """Judge B2: the fast model reads the calendar, then asks to delete. Its
+    thinking is signed for it, and the API (like this fake) refuses it in
+    the main model's request; the old code kept that first round in
+    history. The whole turn now runs again on the main model: it reads
+    again, asks, and the delete runs once, the main model's."""
+    client = ContractClient()
+    calls, asked = [], []
+    tools = calendar_tools(calls)
+    tools.confirm = lambda q: asked.append(q) or True
+    tools.register(Tool("delete_calendar_event", "Delete an event from Kyle's calendar.",
+                        {"type": "object", "properties": {"event_id": {"type": "string"}},
+                         "required": ["event_id"]},
+                        lambda event_id: calls.append(("delete", event_id, len(asked)))
+                        or {"status": "deleted"},
+                        confirm_prompt=lambda i: "Delete the dentist?"))
+    chat = ClaudeChat(client=client, model=FAKE_MAIN, fast_model=FAKE_FAST, router="auto",
+                      tools=tools, max_tokens=1024)
+    reply = chat.ask("Get rid of the dentist thing on my calendar tomorrow.")
+    assert reply == "Done, it's off your calendar."
+    models = [r["model"] for r in client.requests]
+    assert models == [FAKE_FAST, FAKE_FAST, FAKE_MAIN, FAKE_MAIN, FAKE_MAIN]
+    for r in client.requests[2:]:  # nothing of the fast model's rounds
+        assert len(r["messages"]) in (1, 3, 5)
+        assert r["messages"][0]["content"][0]["text"].startswith("Get rid of")
+    assert [c[0] for c in calls] == ["list", "list", "delete"]
+    assert calls[-1] == ("delete", "dentist-1", 1) and asked == ["Delete the dentist?"]
+    assert chat.escalated
+    # the next turn stays on the main model and its history is valid
+    assert "4417" not in chat.ask("Thanks. " + RECALL)
+    assert client.requests[-1]["model"] == FAKE_MAIN
+
+
+def _request(**overrides):
+    kwargs = {"model": FAKE_MAIN, "max_tokens": 64,
+              "messages": [{"role": "user", "content": "hi"}]}
+    kwargs.update(overrides)
+    return kwargs
+
+
+@pytest.mark.parametrize("overrides, error", [
+    ({"system": {"type": "text", "text": "x"}}, "system"),
+    ({"system": [{"type": "image", "text": "x"}]}, "system.0"),
+    ({"messages": [{"role": "user", "content": "hi", "context": "notes"}]}, "Extra inputs"),
+    ({"messages": [{"role": "user", "content": "hi", "nudge": "review"}]}, "Extra inputs"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "", "cache_control": {"type": "ephemeral"}}]}]},
+     "empty text"),
+    ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "t", "signature": "s",
+         "cache_control": {"type": "ephemeral"}}]},
+        {"role": "user", "content": "more"}]}, "thinking blocks"),
+    ({"system": [{"type": "text", "text": str(i), "cache_control": {"type": "ephemeral"}}
+                 for i in range(5)]}, "maximum of 4"),
+])
+def test_the_fake_refuses_what_the_api_refuses(overrides, error):
+    """Judge LOW 6: the fake was looser than the API."""
+    import anthropic
+
+    with pytest.raises(anthropic.BadRequestError, match=error):
+        ContractClient().create(**_request(**overrides))
+
+
+def test_the_fake_binds_thinking_signatures_to_the_model():
+    client = ContractClient()
+    first = client.create(**_request(model=FAKE_FAST))
+    thinking = first.content[0]
+    history = [{"role": "user", "content": "hi"},
+               {"role": "assistant", "content": [thinking.model_dump(exclude_none=True)]},
+               {"role": "user", "content": "and?"}]
+    client.create(**_request(model=FAKE_FAST, messages=history))  # its own model: fine
+    import anthropic
+
+    with pytest.raises(anthropic.BadRequestError, match="Invalid `signature`"):
+        client.create(**_request(model=FAKE_MAIN, messages=history))
+    # a well-formed request with the four breakpoints the chat uses at most
+    client.create(**_request(system=[{"type": "text", "text": "s",
+                                      "cache_control": {"type": "ephemeral"}}]))
+
+
+class _ModelLog:
+    """client.messages (the fake's or the real SDK's), noting each request's
+    model: the live run can't see its requests otherwise."""
+
+    def __init__(self, messages, seen: list):
+        self._messages, self._seen = messages, seen
+
+    def create(self, **kwargs):
+        self._seen.append(kwargs.get("model"))
+        return self._messages.create(**kwargs)
+
+    def stream(self, **kwargs):
+        self._seen.append(kwargs.get("model"))
+        return self._messages.stream(**kwargs)
 
 
 class _Response:
@@ -153,27 +274,32 @@ def _connect(client: TestClient):
     return connect
 
 
-def test_realistic_web_conversation_saves_and_writes_nothing(api, tmp_path, monkeypatch):
+def test_realistic_web_conversation_saves_and_writes_nothing(web_api, tmp_path, monkeypatch):
     """What the watchdog runs (smoke --conversation), through the real web
-    app, voice socket included: text with a read-only tool, a follow-up,
-    audio, hands-free voice, then text typed while the voice view is open.
-    Every turn answers; nothing reaches history or memory; the write tool
-    is neither offered nor run."""
+    app, voice socket included: a quick question, text with a read-only
+    tool, a follow-up, audio, hands-free voice, then text typed while the
+    voice view is open. Every turn answers; nothing reaches history or
+    memory; the write tool is neither offered nor run. Routed: the quick
+    question goes to the fast model (the check session routes as usual)."""
     from unittest.mock import MagicMock
 
     from assistant.history import HistoryStore, Recorder
     from tests.voice_fakes import FakeSynth
 
-    make, model = api
+    make, model, fast = web_api
     client = make()
+    seen = []  # the model of each request, in order
+    client.messages = _ModelLog(client.messages, seen)
     calls = []
     store = HistoryStore(tmp_path / "history.sqlite", eventlog=False)
     memory = MagicMock()
     memory.retrieve.return_value = []
+    routing = {"fast_model": fast, "router": "auto"} if fast else {}
 
     def chat_factory(registry):
         return ClaudeChat(client=client, model=model, tools=registry, memory=memory,
-                          max_tokens=1024, recorder=Recorder(store, "web", run_async=False))
+                          max_tokens=1024, recorder=Recorder(store, "web", run_async=False),
+                          **routing)
 
     class Heard:
         def transcribe(self, recording):
@@ -200,14 +326,16 @@ def test_realistic_web_conversation_saves_and_writes_nothing(api, tmp_path, monk
     assert [o.status for o in outcomes if o.status != "PASS"] == [], [
         (o.name, o.status, o.detail) for o in outcomes]
     assert list(got) == ["healthz", "auth required", "login", "check session",
-                         "text turn", "tool call", "follow-up turn", "audio turn",
-                         "voice turn", "last text turn"]
+                         "quick turn", "text turn", "tool call", "follow-up turn",
+                         "audio turn", "voice turn", "last text turn"]
     # the last text turn is typed while the voice view is still open
-    assert voice_open == [0, 0, 0, 1]
+    assert voice_open == [0, 0, 0, 0, 1]
     assert store.count() == 0  # no history
     memory.store.assert_not_called()  # no memory summary, signed out included
     memory.retrieve.assert_not_called()  # and no Pinecone search either
     assert not [c for c in calls if c[0] == "create"]
+    # the quick question went to the fast model, the rest to the main one
+    assert seen[0] == (fast or model) and model in seen
     if isinstance(client, ContractClient):
         offered = {t["name"] for r in client.requests for t in r.get("tools") or []}
         assert offered == {"list_calendar_events"}

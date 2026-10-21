@@ -3365,3 +3365,92 @@ Kyle: "build Haiku routing and caching right now."
   to the main model. Counts (Linux sandbox): 2352 passed, 57 skipped, plus
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
+
+## Release bug fixes: go-live gate, mid-turn escalation, Haiku in the checks (2026-10-21)
+
+A judge's sweep of master (b96e6ed) returned NO-GO; every item is fixed,
+each with an offline test that fails when only its source change is
+reverted (`__pycache__` cleared). Master b96e6ed measured here first:
+2435 passed, 58 skipped; JS 232 pass.
+
+- **B1: the gate refused every commit on a machine without a web app.**
+  An env file without `WEB_TOKEN` (a wake-only Pi, a family copy whose app
+  never ran) made `candidate_check` fail ("no WEB_TOKEN", not outside), so
+  the updater rejected the commit forever, the wake host's `refuse()` did
+  `git reset --keep` on Kyle's pull and deploy said REFUSED. Now
+  `watch.discover` leaves such an instance out (it has no web app to check
+  or gate; INFO line with the env file name), and `gate_check` with no
+  instance runs the updater's import and `--check` smoke itself
+  (`watch.import_smoke`; a pull by hand never ran it) and passes only if
+  that passes (a failure's reason is fixed words, "import failed" or
+  "--check failed", the output tail goes to the log only; a smoke that
+  crashes is inconclusive). Tests: `test_no_web_token_means_no_web_app_to_gate` (the
+  gate isn't False, the smoke ran, a failing smoke refuses),
+  `test_a_hand_pull_on_a_wake_only_pi_is_not_undone` (a wake Host with a
+  real Updater: no `reset --keep`, restarted on the pull);
+  `test_discover_finds_kyles_app_and_each_family_copy` gets tokens in its
+  env files and a never-started copy that is left out.
+- **B2: mid-turn escalation sent Haiku's signed thinking to Sonnet.** Only
+  the escalating response was dropped; Haiku's earlier rounds of the same
+  turn (thinking signed for Haiku, its read-only tool_use and results)
+  stayed, and `request_messages` keeps current-turn thinking, so the real
+  API would refuse Sonnet's request. Now `_run` rewinds the history to
+  Kyle's message (its context kept; `_rewind_turn`, INFO "Rewound N
+  message(s)") and reruns the whole turn on the main model with a fresh
+  set of tool rounds. Only read-only tools could have run (every fast
+  response is checked before dispatch); untrusted text read in the
+  rewound rounds keeps the conversation tainted; the turn's tool events
+  are cleared (the reads run again). Haiku's words already streamed stay
+  the documented limit (README, router.py, SECURITY.md); the reply and
+  history are the main model's only. Tests:
+  `test_a_round_two_escalation_reruns_the_whole_turn_on_the_main_model`
+  (the judge's probe: no Haiku signature, tool_use id or text in any of
+  Sonnet's requests, Sonnet starts from one message, the delete runs once
+  after its one confirmation, the streamed words),
+  `test_a_rewound_turn_keeps_the_conversation_tainted`, and the contract
+  test `test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn`
+  (fails on master with the fake's "Invalid `signature`" 400).
+- **B3: neither the gate nor the watchdog ever reached Haiku.** The test
+  conversation's turns were long or said "remember". `run_conversation`
+  now starts with "What is two plus two?" ("quick turn", must answer);
+  the check session routes as usual. `tests/test_contract.py`'s web
+  conversation also runs routed (`contract-fake-routed`, and live
+  `DEFAULT_MODEL` + `CONTRACT_MODEL` as the fast model in the
+  `api-contract` job) and asserts the first request went to the fast
+  model, so Haiku's tool versions, cache_control and max_tokens meet the
+  real API. Test: `test_conversation_starts_with_a_turn_the_fast_model_answers`.
+- **LOW 4: an uninstalled requirements bump.** `updater.requirements_problem`
+  reads every `name>=x.y` in requirements.txt (markers evaluated with
+  `packaging` when present, else that line is skipped; `==` and unpinned
+  names left to pip) against `importlib.metadata`. `gate_check` returns
+  None ("can't tell yet", never a rejection for good) and deploy refuses
+  with "stop the apps, then run `python -m assistant --update` or
+  `pip install -r requirements.txt`". Tests: the parser
+  (`test_requirements_problem_reads_the_minimums`), the gate
+  (`test_the_gate_waits_for_requirements_to_be_installed`), deploy
+  --no-pull (`test_deploy_refuses_until_requirements_are_installed`).
+  The two `gate_check(NEW, None, ...)` tests now pass `tmp_path` (the
+  check reads the root's requirements.txt; the sandbox's own matches).
+- **LOW 5: `-Restart` restarted apps mid-turn.** Deploy waits up to
+  `deploy.IDLE_WAIT` (120 s) for `/healthz` busy=false, else skips the app
+  and names it. README and `install_family_tasks.ps1` say `-Restart`
+  covers every app here, Kyle's own included. Test:
+  `test_deploy_restart_waits_for_a_turn_to_finish`.
+- **LOW 6: the contract fake was looser than the API.** It now refuses a
+  `system` that isn't a string or text blocks, extra message keys
+  (`context`, `nudge`), cache_control on thinking/server blocks or empty
+  text, more than 4 breakpoints, and thinking signed by another model.
+  Tests: `test_the_fake_refuses_what_the_api_refuses` (7 cases),
+  `test_the_fake_binds_thinking_signatures_to_the_model`.
+- **LOW 7:** `config.mom.toml` no longer sets `[watch] status_file` (only
+  config.toml's is read). The data-path test exempts it as machine-wide;
+  `test_other_instances_set_no_machine_wide_watch_setting` keeps it out.
+- **LOW 8:** `router.READ_ONLY_TOOLS` adds `find_free_time` and
+  `list_calendars`.
+- Revert check: 13 single-change reverts (B1 discover skip, B1 smoke on
+  no instance, B2 rewind, B2 taint, B3 quick turn, LOW 4 gate, LOW 4
+  deploy, LOW 5, LOW 6 per-model signature, LOW 6 system/cache checks,
+  LOW 6 extra keys, LOW 7, LOW 8) each make their tests fail.
+- Counts (Linux sandbox, Python 3.13): 2455 passed, 59 skipped; master b96e6ed: 2435
+  passed, 58 skipped. JS 232 pass. The extra skip is the live routed
+  contract run (no key here).
