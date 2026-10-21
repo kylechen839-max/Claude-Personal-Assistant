@@ -103,6 +103,21 @@
         <p id="google-status" class="hint" hidden></p>
         <button id="spotify-connect" type="button" hidden>Connect Spotify</button>
         <p id="spotify-status" class="hint" hidden></p>
+        <section id="api-key" class="api-key" hidden>
+          <p class="api-key-title">Your Anthropic API key</p>
+          <p id="api-key-state" class="hint" role="status"></p>
+          <p id="api-key-cost" class="hint" hidden></p>
+          <form id="api-key-form" class="api-key-form" autocomplete="off">
+            <input id="api-key-input" type="password" autocomplete="off" autocapitalize="off"
+                   spellcheck="false" maxlength="256" placeholder="sk-ant-…" aria-label="Anthropic API key">
+            <div class="api-key-row">
+              <button id="api-key-save" type="submit">Save key</button>
+              <button id="api-key-remove" type="button" class="danger" hidden>Remove key</button>
+            </div>
+          </form>
+          <p class="hint">You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, open API Keys, tap Create Key, and paste it here.</p>
+          <p class="hint api-key-link">console.anthropic.com/settings/keys</p>
+        </section>
         <section id="family" class="family" hidden>
           <button id="invite-open" type="button">Invite someone</button>
           <form id="invite-form" class="invite-form" autocomplete="off" hidden>

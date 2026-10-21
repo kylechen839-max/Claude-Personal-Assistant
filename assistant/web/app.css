@@ -125,6 +125,15 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .family-list button { min-height: 36px; padding: 0 .7rem; font-weight: 400; }
 .family-list .danger { color: var(--bad-ink); }
 #app[data-account="family"] .tabs { display: none; }
+/* a family member's own Anthropic key (family.js setupKey) */
+.api-key { border-top: 1px solid var(--line); padding: .35rem 1rem .6rem; display: grid; gap: .4rem; }
+.api-key-title { margin: .35rem 0 0; font-size: 1rem; }
+.api-key .hint { margin: 0; }
+.api-key-form { display: grid; gap: .4rem; }
+.api-key-row { display: flex; gap: .4rem; }
+.api-key-row button { min-height: 36px; padding: 0 .7rem; font-weight: 400; }
+.api-key-row .danger { color: var(--bad-ink); }
+.api-key-link { user-select: all; -webkit-user-select: all; }
 /* reply-voice picker (voice-picker.js) */
 .voice-picker { border-top: 1px solid var(--line); padding: .35rem 1rem .5rem; display: grid; gap: .45rem; }
 .voice-picker > label { display: grid; gap: .3rem; font-size: 1rem; }

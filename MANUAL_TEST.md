@@ -610,6 +610,22 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
+      on Render"). On the beta tester's phone, before adding a key, type
+      "hello" and also try hands-free voice.
+  - Should: both answer "Add your Anthropic API key in Settings to start."
+    (in Chinese for a Chinese account); your Render usage shows no new call.
+- [ ] Their ⚙ -> **Your Anthropic API key**: paste a real key of theirs
+      (from console.anthropic.com -> API Keys), **Save key**.
+  - Should: "Checking the key with Anthropic…", then "Your key ending in
+    xxxx is saved." with the right last four; "hello" now gets a reply;
+    their Anthropic console's usage page shows the call, and your
+    owner page's monthly estimate doesn't move.
+- [ ] Paste a wrong key (change one character) and Save.
+  - Should: "Anthropic didn't accept that key", and the old key keeps working.
+- [ ] **Remove key**, confirm.
+  - Should: the next "hello" says to add a key again. On a **Family**
+    account the same steps work, and without a key they use yours as before.
 
 ---
 

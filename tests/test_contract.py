@@ -99,6 +99,38 @@ def test_two_chats_sharing_one_history_then_a_follow_up(api):
     assert not [c for c in calls if c[0] == "create"]
 
 
+def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
+    """Bring your own key (family.UserApi): a beta tester's chat reaches the
+    client through a per-call lookup of their key, never the owner's. A
+    multi-turn conversation with a tool round must work through it, and
+    their one client is reused for every request (thinking signatures)."""
+    from assistant import family as family_mod
+    from assistant.config import load_config
+
+    make, model = api
+    monkeypatch.setenv("USER_DATA_KEY", "s" * 48)
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    config["history"]["enabled"] = False
+    config["web"]["enabled"] = False
+    config["assistant"].update(model=model, max_tokens=1024, router="off")
+    made = []
+    # the owner's client is an object with no API at all: any use fails
+    fam = family_mod.Family(config, client=object(),
+                            user_client=lambda key: made.append(make()) or made[-1])
+    try:
+        user, token = fam.invite("Tess", "en", tier="beta")
+        fam.redeem(token, lambda uid: uid)
+        assert fam.set_key(user["id"], "sk-ant-api03-" + "t" * 40)
+        calls = []
+        chat = fam.context(user["id"]).chat_factory(calendar_tools(calls))
+        assert chat.ask(REMEMBER).strip() and any(c[0] == "list" for c in calls)
+        assert "4417" in chat.ask(RECALL)
+        assert len(made) == 1 and not [c for c in calls if c[0] == "create"]
+    finally:
+        fam.close()
+
+
 class _Response:
     """A requests.Response look-alike over an httpx (TestClient) response."""
 
