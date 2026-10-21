@@ -10,7 +10,13 @@ if [ "$(id -u)" = 0 ]; then
         chown "$APP_UID:$APP_UID" "${DATA_DIR:-/data}"
         chmod 700 "${DATA_DIR:-/data}"
     fi
+    # Dropping the capability bounding set needs CAP_SETPCAP, which some hosts
+    # (Render) don't grant; drop it only where the runtime allows.
+    BOUNDING=
+    if setpriv --bounding-set=-all true 2>/dev/null; then
+        BOUNDING=--bounding-set=-all
+    fi
     exec setpriv --reuid="$APP_UID" --regid="$APP_UID" --clear-groups \
-        --no-new-privs --inh-caps=-all --bounding-set=-all -- "$@"
+        --no-new-privs --inh-caps=-all $BOUNDING -- "$@"
 fi
 exec "$@"
