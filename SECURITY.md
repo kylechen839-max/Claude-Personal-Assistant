@@ -594,6 +594,54 @@ server (`[family] enabled`, on in the server profile).
   `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
   Each person's history is capped at `[family] max_history_mb` (20 MB), not
   the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
+- **Their own Anthropic key** (bring your own key, public beta piece G2;
+  `userkeys.py`, `userkeys_web.py`).
+  - *Storage.* `<dir>/<id>/anthropic_key.enc`, written with `write_private`
+    (mkstemp in the same folder, atomic replace retried on Windows; 0600 on
+    Linux, which does nothing on Windows), as a Fernet token (AES-128-CBC
+    with HMAC-SHA256) whose key is HKDF-SHA256 of the env secret
+    `USER_DATA_KEY` with a per-purpose label (`hey-claude/anthropic-api-key/v1`),
+    so the same secret can later encrypt other tokens without one opening
+    as the other. The person's id is inside the ciphertext: a file copied
+    into another folder doesn't open as theirs. Removing the person deletes
+    it with their folder; **Remove key** deletes the file.
+  - *Fails closed.* Without `USER_DATA_KEY` (or one under 32 characters),
+    PUT answers 503 with the reason and writes nothing, before any check
+    call. `USER_DATA_KEY` is in `SECRET_ENV_VARS` (masked, not passed to
+    child processes) and `ISOLATED_ENV_VARS` (a separate instance such as
+    `.env.mom` refuses to start if it would inherit the owner's from the
+    shell; it sets its own).
+  - *A lost or changed `USER_DATA_KEY`.* Saved keys no longer open; each
+    person is treated as having no key (Settings says "Your saved key can't
+    be read any more. Please enter it again."), nothing crashes, and nobody
+    falls back to the owner's key unless they are family tier. There is no
+    recovery by design: the people re-enter their keys.
+  - *Never shown back or logged.* GET returns `{set, last4, ...}` only; logs
+    have ids and outcomes, never the key (caplog tests at DEBUG), and the
+    `sk-ant-` redact pattern masks any that slipped into a log line anyway.
+    Error messages never hold it, and the check's SDK exceptions are not
+    chained into ours.
+  - *Whose bill.* Their chats and history titles use their own client (an
+    explicit `api_key`, and `auth_token` cleared after construction because
+    SDKs before 0.98 still read `ANTHROPIC_AUTH_TOKEN` from the server's
+    environment; `userkeys.user_client`), looked up per
+    call, so a replaced or removed key applies to the very next call, also
+    in an open conversation. A beta tester without a key gets `MissingKey`
+    before any request ("Add your Anthropic API key in Settings to start");
+    a removed person's open conversation never falls back to the owner's
+    key. Their usage goes to `<dir>/<id>/usage.json`, never the owner's
+    `month_usd`.
+  - *Routes.* Signed-in family sessions only (the owner gets 404: the
+    server's key is theirs), same-origin like every route, the 16 KB body
+    cap, and PUT (it costs a call to Anthropic) at most 5 a minute per
+    person (a bounded `cloud.RateLimiter`), so a tester's session can't be
+    used to test many stolen keys quickly.
+  - *Threat model.* It protects keys against a leaked disk, backup or
+    snapshot of `/data` without the Render environment. It does not protect
+    them against someone who controls the running server or its
+    environment (they hold `USER_DATA_KEY` and see keys in memory while in
+    use): testers trust the operator with their key, as with any hosted
+    app; README tells them to set a spend limit in the Anthropic console.
 - **Speech and sentences in their language.** A Chinese-speaking member's
   recordings go to the Chinese Whisper model and replies to the Mandarin
   voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),

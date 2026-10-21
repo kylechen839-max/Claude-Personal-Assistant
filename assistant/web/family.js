@@ -14,6 +14,10 @@
 // request() (with failover: the router, signed in with a bearer token, to
 // whichever backend is active); the invite link's address comes from the
 // server (its own public address), never this page's. Loaded before app.js.
+// - A family member's or beta tester's Settings: "Your Anthropic API key"
+//   (state.api_key "required" for beta, "optional" for family): save,
+//   replace or remove their own key (/api/me/anthropic-key,
+//   userkeys_web.py). Only the last four characters ever come back.
 "use strict";
 
 (function (root) {
@@ -72,6 +76,17 @@
     return false;
   }
 
+  // JSON from `url` through app.js's request (or a same-origin fetch);
+  // throws the server's error message.
+  async function callJSON(win, url, options = {}) {
+    const res = request ? await request(url, options)
+      : await win.fetch(url, { credentials: "same-origin", ...options });
+    let body = {};
+    try { body = await res.json(); } catch (e) { /* not JSON */ }
+    if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
+    return body;
+  }
+
   // --- the owner's menu ---
   function setupOwner(win, doc) {
     const $ = (id) => doc.getElementById(id);
@@ -83,14 +98,7 @@
     const linkIn = $("invite-link"), list = $("family-list");
     let shown = false;
 
-    async function call(url, options = {}) {
-      const res = request ? await request(url, options)
-        : await win.fetch(url, { credentials: "same-origin", ...options });
-      let body = {};
-      try { body = await res.json(); } catch (e) { /* not JSON */ }
-      if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
-      return body;
-    }
+    const call = (url, options) => callJSON(win, url, options);
     const post = (url, data) => call(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data || {}) });
@@ -268,11 +276,83 @@
     };
   }
 
+  // --- a family member's own Anthropic key ---
+  const KEY_URL = "/api/me/anthropic-key";
+  function setupKey(win, doc) {
+    const $ = (id) => doc.getElementById(id);
+    const box = $("api-key");
+    if (!box) return null;
+    const form = $("api-key-form"), input = $("api-key-input"), save = $("api-key-save");
+    const remove = $("api-key-remove"), state = $("api-key-state"), cost = $("api-key-cost");
+    let mode = null;  // "required" (beta), "optional" (family) or null (hidden)
+
+    function render(st) {
+      const set = Boolean(st.set);
+      save.textContent = set ? "Replace key" : "Save key";
+      remove.hidden = !set;
+      if (set) state.textContent = `Your key ending in ${String(st.last4 || "")} is saved.`;
+      else if (st.available === false) state.textContent = "This server can't store keys yet.";
+      else if (st.unreadable) state.textContent = "Your saved key can't be read any more. Please enter it again.";
+      else state.textContent = mode === "required" ? "Add your key to start talking with Claude."
+        : "Optional: without one, the family's key is used.";
+      const usd = Number(st.month_usd);
+      cost.hidden = !(set && st.month_usd != null && Number.isFinite(usd));
+      cost.textContent = cost.hidden ? "" : `About $${usd.toFixed(2)} this month on your key.`;
+    }
+
+    async function refresh() {
+      if (!mode) return;
+      try { render(await callJSON(win, KEY_URL)); } catch (e) { /* offline: keep it */ }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const key = String(input.value || "").trim();
+      if (!key) return;
+      save.disabled = true;
+      state.textContent = "Checking the key with Anthropic…";
+      try {
+        await callJSON(win, KEY_URL, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }) });
+        input.value = "";  // never kept in the page once saved
+        await refresh();
+      } catch (err) {
+        state.textContent = err.message;
+      } finally {
+        save.disabled = false;
+      }
+    });
+    remove.addEventListener("click", async () => {
+      if (typeof win.confirm === "function" &&
+          !win.confirm("Remove your Anthropic API key from this app?")) return;
+      try {
+        await callJSON(win, KEY_URL, {
+          method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
+        await refresh();
+      } catch (err) { state.textContent = err.message; }
+    });
+    const menu = doc.querySelector("details.menu");
+    if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
+
+    return {
+      show(next) {
+        next = next === "required" || next === "optional" ? next : null;
+        const changed = next !== mode;
+        mode = next;
+        box.hidden = !mode;
+        if (changed) refresh();
+      },
+      refresh,
+    };
+  }
+
   let owner = null;
   let account = null;
+  let keys = null;
   // From app.js after each /api/state: the owner's menu only for the owner
   // with [family] on; a family member's page hides the owner-only tabs and
-  // shows their own "Download my data" / "Delete my account".
+  // shows their own key's settings and "Download my data" / "Delete my account".
   function onState(state, win = root, doc = root.document) {
     if (!doc) return;
     const app = doc.getElementById("app");
@@ -283,10 +363,12 @@
     }
     if (!owner) owner = setupOwner(win, doc);
     if (owner) owner.show(Boolean(state.owner && state.family));
+    if (!keys) keys = setupKey(win, doc);
+    if (keys) keys.show(state.owner === false ? state.api_key : null);
     if (!account) account = setupAccount(win, doc);
     if (account) account.show(state.owner === false);
   }
 
   root.HeyClaudeFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner,
-                           setupAccount, configure, ACCOUNT_TEXT };
+                           setupKey, setupAccount, configure, ACCOUNT_TEXT };
 })(typeof window !== "undefined" ? window : globalThis);

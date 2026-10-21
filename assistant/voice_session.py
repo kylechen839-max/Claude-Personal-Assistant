@@ -38,7 +38,8 @@ import numpy as np
 
 from assistant import audio, i18n
 from assistant.cli import (CJK, get_reply, is_exit, loggable_reply,
-                           strip_wake_phrase, zh_is_yes)
+                           strip_wake_phrase, user_error_key, uses_own_key,
+                           zh_is_yes)
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -596,9 +597,13 @@ class VoiceConversation:
         goodbye = False
         try:
             goodbye = self._turn_body(turn, timer)
-        except Exception:
+        except Exception as e:
             log.exception("Voice turn failed")
-            message = i18n.t("error", self.language)
+            # no key of their own (beta), or theirs was rejected: say so
+            chat = getattr(self.backend, "chat", None) or getattr(
+                getattr(self.backend, "session", None), "chat", None)
+            message = i18n.t(user_error_key(e, uses_own_key(chat)) or "error",
+                             self.language)
             self._send({"type": "error", "turn": turn.id, "message": message})
             turn.sentences.put(Chunk(message, 0, reply=False))
         finally:

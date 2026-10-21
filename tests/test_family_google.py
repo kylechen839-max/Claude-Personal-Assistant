@@ -92,7 +92,8 @@ def g(fake_client, tmp_path, monkeypatch):
     config["calendar"]["token"] = str(tmp_path / "kyle_token.json")
     monkeypatch.setenv("GOOGLE_WEB_CLIENT_JSON", json.dumps(WEB_CLIENT))
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", json.dumps(KYLE))  # Kyle's, on the server
-    fam = family_mod.Family(config, client=fake_client)
+    # a person's own Anthropic key (userkeys.py) gets the same mocked client
+    fam = family_mod.Family(config, client=fake_client, user_client=lambda key: fake_client)
     made = []
     zh_whisper, zh_voice = Whisper("你好"), Voice()
 
@@ -804,7 +805,10 @@ def test_a_beta_registry_never_has_gmail_tools_or_kyle(g, monkeypatch):
     assert not [n for n in tools if "mail" in n or "draft" in n]
     text = json.dumps([t.schema() for t in tools.values()])
     assert "Kyle" not in text and "Tester's" in text
-    # what Claude is sent in a turn: web tools and the calendar, no Gmail, no Kyle
+    # what Claude is sent in a turn (on their own key, as beta testers must):
+    # web tools and the calendar, no Gmail, no Kyle
+    monkeypatch.setenv("USER_DATA_KEY", "k" * 40)
+    assert g.fam.set_key(tester_id, "sk-ant-api03-" + "t" * 40)
     g.client.queue.append(make_response(text_block("Hi.")))
     assert tester.post("/api/turn", json={"text": "hi"}).status_code == 200
     call = g.client.calls[-1]

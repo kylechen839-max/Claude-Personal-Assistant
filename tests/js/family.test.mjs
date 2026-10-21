@@ -342,3 +342,125 @@ test('Delete my account: a "no" sends nothing; a failure says so', async () => {
     assert.equal(t.local.account, 'family');
   }
 });
+
+// --- a family member's own Anthropic key (Settings) ---
+function loadKey({ status = { set: false, last4: null, unreadable: false, required: true,
+                              available: true }, put = { status: 200, body: { set: true, last4: 'wxyz' } },
+                   confirmAnswer = true } = {}) {
+  const ids = ['app', 'api-key', 'api-key-form', 'api-key-input', 'api-key-save', 'api-key-remove',
+    'api-key-state', 'api-key-cost'];
+  const els = Object.fromEntries(ids.map((id) => [id, new El(id, ['api-key', 'api-key-remove', 'api-key-cost'].includes(id))]));
+  const menu = new El('menu');
+  const fetches = [];
+  const asked = [];
+  let current = { ...status };
+  const win = {
+    location: { hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    navigator: {},
+    fetch: async (url, opts = {}) => {
+      const method = opts.method || 'GET';
+      fetches.push({ url, method, body: opts.body });
+      let r = { status: 200, body: current };
+      if (method === 'PUT') {
+        r = put;
+        if (put.status < 300) current = { ...current, set: true, last4: put.body.last4, month_usd: 0 };
+      } else if (method === 'DELETE') {
+        current = { ...current, set: false, last4: null };
+        r = { status: 200, body: { ok: true, deleted: true } };
+      }
+      return { ok: r.status < 300, status: r.status, json: async () => r.body };
+    },
+    confirm: (q) => { asked.push(q); return confirmAnswer; },
+    Intl,
+    document: {
+      getElementById: (id) => els[id] ?? null,
+      querySelector: (sel) => (sel === 'details.menu' ? menu : null),
+      createElement: (tag) => new El(tag),
+    },
+  };
+  win.window = win;
+  vm.createContext(win);
+  vm.runInContext(SCRIPT, win);
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  return { win, els, fetches, asked, flush, api: win.HeyClaudeFamily };
+}
+
+test('the key settings show only for a family member or beta tester, never the owner', async () => {
+  const t = loadKey();
+  t.api.onState({ owner: true, family: true }, t.win, t.win.document);
+  await t.flush();
+  assert.equal(t.els['api-key'].hidden, true);
+  assert.equal(t.fetches.filter((f) => f.url === '/api/me/anthropic-key').length, 0);
+  t.api.onState({ owner: false, api_key: 'required' }, t.win, t.win.document);
+  await t.flush();
+  assert.equal(t.els['api-key'].hidden, false);
+  assert.equal(t.els['api-key-state'].textContent, 'Add your key to start talking with Claude.');
+  assert.equal(t.els['api-key-save'].textContent, 'Save key');
+  assert.equal(t.els['api-key-remove'].hidden, true);
+  // another /api/state with the same mode doesn't ask again
+  t.api.onState({ owner: false, api_key: 'required' }, t.win, t.win.document);
+  await t.flush();
+  assert.equal(t.fetches.length, 1);
+  const fam = loadKey({ status: { set: false, required: false, available: true } });
+  fam.api.onState({ owner: false, api_key: 'optional' }, fam.win, fam.win.document);
+  await fam.flush();
+  assert.equal(fam.els['api-key-state'].textContent, 'Optional: without one, the family\'s key is used.');
+});
+
+test('saving a key PUTs it once, clears the box and shows only the last four', async () => {
+  const t = loadKey();
+  t.api.onState({ owner: false, api_key: 'required' }, t.win, t.win.document);
+  await t.flush();
+  const key = 'sk-ant-api03-' + 'A'.repeat(40) + 'wxyz';
+  t.els['api-key-input'].value = `  ${key} `;
+  await t.els['api-key-form'].fire('submit');
+  const puts = t.fetches.filter((f) => f.method === 'PUT');
+  assert.equal(puts.length, 1);
+  assert.equal(JSON.parse(puts[0].body).key, key);
+  assert.equal(t.els['api-key-input'].value, '');
+  assert.equal(t.els['api-key-state'].textContent, 'Your key ending in wxyz is saved.');
+  assert.equal(t.els['api-key-save'].textContent, 'Replace key');
+  assert.equal(t.els['api-key-remove'].hidden, false);
+  assert.equal(t.els['api-key-cost'].textContent, 'About $0.00 this month on your key.');
+  assert.ok(!JSON.stringify(t.els).includes('A'.repeat(40)));  // nowhere on the page
+  // an empty box sends nothing
+  await t.els['api-key-form'].fire('submit');
+  assert.equal(t.fetches.filter((f) => f.method === 'PUT').length, 1);
+});
+
+test('a refused key shows the server\'s reason', async () => {
+  const t = loadKey({ put: { status: 400, body: { error: "Anthropic didn't accept that key" } } });
+  t.api.onState({ owner: false, api_key: 'required' }, t.win, t.win.document);
+  await t.flush();
+  t.els['api-key-input'].value = 'sk-ant-api03-' + 'x'.repeat(40);
+  await t.els['api-key-form'].fire('submit');
+  assert.equal(t.els['api-key-state'].textContent, "Anthropic didn't accept that key");
+  assert.equal(t.els['api-key-save'].disabled, false);
+});
+
+test('remove asks first, then DELETEs; a key that no longer opens asks for it again', async () => {
+  const t = loadKey({ status: { set: true, last4: 'wxyz', required: true, available: true } });
+  t.api.onState({ owner: false, api_key: 'required' }, t.win, t.win.document);
+  await t.flush();
+  await t.els['api-key-remove'].fire('click');
+  assert.equal(t.asked.length, 1);
+  assert.equal(t.asked[0], 'Remove your Anthropic API key from this app?');
+  assert.equal(t.fetches.filter((f) => f.method === 'DELETE').length, 1);
+  assert.equal(t.els['api-key-remove'].hidden, true);
+  const no = loadKey({ status: { set: true, last4: 'wxyz', required: true }, confirmAnswer: false });
+  no.api.onState({ owner: false, api_key: 'required' }, no.win, no.win.document);
+  await no.flush();
+  await no.els['api-key-remove'].fire('click');
+  assert.equal(no.fetches.filter((f) => f.method === 'DELETE').length, 0);
+  const stale = loadKey({ status: { set: false, unreadable: true, required: true, available: true } });
+  stale.api.onState({ owner: false, api_key: 'required' }, stale.win, stale.win.document);
+  await stale.flush();
+  assert.equal(stale.els['api-key-state'].textContent,
+               "Your saved key can't be read any more. Please enter it again.");
+  const off = loadKey({ status: { set: false, required: true, available: false } });
+  off.api.onState({ owner: false, api_key: 'required' }, off.win, off.win.document);
+  await off.flush();
+  assert.equal(off.els['api-key-state'].textContent, "This server can't store keys yet.");
+});

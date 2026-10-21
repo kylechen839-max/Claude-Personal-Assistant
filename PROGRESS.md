@@ -3811,3 +3811,103 @@ shared `clear_session_cookie` that sign-out now uses too).
   token guards: a delete during a build leaves no slot behind, and a build
   failing before its folder exists never frees a newer export's slot
   (each fails with its guard removed). `test_account.py` 37.
+## Public beta G2: bring your own Anthropic key (2026-10-21)
+
+Kyle has no funding, so public beta testers pay for their own Claude use.
+Gap (a) of the beta brief: every family member's chat and history titles
+ran on the owner's `anthropic.Anthropic()`.
+- **`assistant/userkeys.py`.** Each person's key is kept in
+  `<[family] dir>/<id>/anthropic_key.enc` (`write_private`) as a Fernet
+  token (`cryptography>=44`, already a google-auth dependency; abi3 wheels
+  for win_amd64, manylinux x86_64/aarch64, Python 3.9+). The Fernet key is
+  HKDF-SHA256 of the env secret `USER_DATA_KEY` with the label
+  `hey-claude/anthropic-api-key/v1` (a later Notion token gets its own
+  label). The person's id is inside the ciphertext. Without `USER_DATA_KEY`
+  (or under 32 characters) nothing is stored and the reason is given; a
+  changed `USER_DATA_KEY` makes the file not open, which counts as "no key"
+  (Settings asks to enter it again), never a crash. `check_key` makes one
+  `models.list(limit=1)` call (timeout 10, one retry): 401/403/other 4xx ->
+  400, 408/409/429/5xx and connection errors -> 503, SDK exceptions not
+  chained.
+- **Routes (`assistant/userkeys_web.py`, one additive line in
+  `create_app`).** `GET/PUT/DELETE /api/me/anthropic-key`, each about the
+  signed-in person only. PUT checks the shape (`sk-ant-`, at most 256
+  characters), then `USER_DATA_KEY` (503 before any call), then the live
+  check, then saves; at most 5 PUTs a minute per person
+  (`cloud.RateLimiter`). GET is `{set, last4, unreadable, required,
+  available, month_usd?}`. **The owner gets 404** (decision: the server's
+  own `ANTHROPIC_API_KEY` is theirs; a second personal key would only blur
+  whose bill a turn is on). `/api/state` gives a family session `api_key`:
+  `"required"` (beta) or `"optional"` (family).
+- **Per-person client (`family.py`).** `Family.client(uid)` /
+  `api_for(uid)`: a cached `anthropic.Anthropic(api_key=..., max_retries,
+  timeout)` per person (the owner client's options; an explicit key, so
+  the SDK reads no `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` from the
+  server's environment). Family tier without a key -> the owner's client
+  (as before); beta -> `userkeys.MissingKey` before any request; someone
+  no longer listed -> `MissingKey` (never the owner's key). Their
+  ClaudeChat and Recorder get a `UserApi`, which looks the client up on
+  every call. **Deviation from the brief:** a saved, replaced or removed key
+  drops the cached client instead of `_contexts.pop`: popping the context
+  would leave open conversations on the old key (and a second HistoryStore
+  on the same file), while the per-call lookup makes the change apply at
+  the very next call, in open conversations too.
+- **Errors.** `cli.friendly_error` maps `MissingKey` to the new i18n
+  `no_key` ("Add your Anthropic API key in Settings to start.") and a 401 on
+  their own key (`UserApi.own_key`) to `bad_user_key` ("Your Anthropic API
+  key was rejected. Check it in Settings."); the owner's 401 still says
+  `bad_key`. en and zh. Same in the attachment path (`_ask_with_files`) and
+  in `voice_session._run_turn`'s catch-all (it said only "error").
+- **Cost.** ClaudeChat and Recorder/`ask_title` take a `meter`; calls on a
+  person's own key go to their `usage.UsageMeter` at `<dir>/<id>/usage.json`
+  (not written once they are removed), never the owner's `month_usd`.
+  Family members without a key still count on the owner's. Their GET shows
+  their own estimate.
+- **Settings UI.** ⚙ -> "Your Anthropic API key" (`index.html`,
+  `family.js setupKey`, styles in `app.css`): paste, Save / Replace /
+  Remove (asks first), the last four, this month's estimate, and a short
+  how-to with the console address as plain text (no external link or
+  script). All strings in Chinese too (`i18n.js`). `sw.js` cache v23.
+- **Config.** `USER_DATA_KEY` is in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS` (decision: a separate instance such as `.env.mom`
+  must not inherit the owner's from the shell; it would open the keys
+  under the owner's family folder; it sets its own), `render.yaml`
+  (`generateValue: true`), conftest's cleared vars, and a comment in
+  config.toml `[family]` (no config setting: env only).
+- **Tests.** New `tests/test_userkeys.py` (29): encryption at rest (no
+  plaintext, other folder, other label), fail closed (unset/empty/short),
+  a rotated `USER_DATA_KEY` (no crash, "enter it again", re-entering works),
+  key shapes, `check_key` against the real SDK over an httpx MockTransport
+  (200, 401/403/404 -> 400, 429/500/529/connection -> 503), the person's
+  client ignoring the server's credentials, two people -> two clients for
+  chats and titles, beta without a key -> `no_key` with nothing sent and
+  the turn rolled back, family without a key -> the owner's, replace and
+  delete applying to an open conversation, a removed person never falling
+  back, a rejected own key -> `bad_user_key` (owner still `bad_key`), the
+  file path too, `month_usd` untouched by their calls, no usage file after
+  removal, the routes (owner 404, signed-out 401, another person's key
+  invisible, 400/503, rate limit 429), the voice path (en/zh), and the key
+  never in caplog at DEBUG, users.json, responses or errors. A contract
+  test (`test_contract.py`) runs a beta tester's multi-turn conversation
+  with a tool round through `UserApi` (the fake here; live in CI with the
+  secret). JS: family.test.mjs (+4: shown only to family sessions, PUT once
+  and the box cleared, last four and estimate, a refused key's reason,
+  remove asks first, "can't be read" and "can't store" states) and
+  i18n.test.mjs (+1: every string of the section in Chinese). Existing
+  tests that had a beta-by-default person talk on the owner's key now
+  invite `tier="family"` (4 lines); the G1 beta Gmail test now saves a key
+  for its tester first; the sw.js pin is v25 (after the master merge).
+  - Revert check: 20 Python and 3 JS source reverts, each alone with
+    `__pycache__` cleared, all fail their tests. (The empty-secret check
+    is also covered by the length check; only its message test fails.)
+- **Counts after merging master and the review fixes:** 2543 passed, 35
+  skipped; JS 241. Review round 1 (APPROVED, 3 LOW): an SDK before 0.98
+  sent the server's `ANTHROPIC_AUTH_TOKEN` next to a person's key, so
+  `userkeys.user_client` clears it (test with an old-SDK stand-in); the
+  public privacy page now mentions the usage estimate and Remove key.
+- **Counts before the merge** (Linux sandbox, Python 3.13): 2497 passed, 35 skipped; G1
+  366eab5 in the same sandbox at the same time: 2467 passed, 33 skipped
+  (+29 test_userkeys.py, +1 contract fake; the 2 new skips are the
+  contract test's live variants). Earlier the same day the G1 tree gave
+  2442 passed, 58 skipped: 25 environment-dependent tests skipped then and
+  run now, the same on both trees. JS 241 pass (was 236).

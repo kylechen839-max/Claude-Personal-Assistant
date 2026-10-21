@@ -625,6 +625,22 @@ for all of this except the Google sign-in.
     myaccount.google.com/permissions (their Google account) "Hey Claude"
     is gone if they had connected Google. In Chinese the section reads
     下载我的数据 / 删除我的账户.
+- [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
+      on Render"). On the beta tester's phone, before adding a key, type
+      "hello" and also try hands-free voice.
+  - Should: both answer "Add your Anthropic API key in Settings to start."
+    (in Chinese for a Chinese account); your Render usage shows no new call.
+- [ ] Their ⚙ -> **Your Anthropic API key**: paste a real key of theirs
+      (from console.anthropic.com -> API Keys), **Save key**.
+  - Should: "Checking the key with Anthropic…", then "Your key ending in
+    xxxx is saved." with the right last four; "hello" now gets a reply;
+    their Anthropic console's usage page shows the call, and your
+    owner page's monthly estimate doesn't move.
+- [ ] Paste a wrong key (change one character) and Save.
+  - Should: "Anthropic didn't accept that key", and the old key keeps working.
+- [ ] **Remove key**, confirm.
+  - Should: the next "hello" says to add a key again. On a **Family**
+    account the same steps work, and without a key they use yours as before.
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server
