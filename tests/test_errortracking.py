@@ -1,10 +1,13 @@
 """Optional error tracking (assistant/errortracking.py): off without
 SENTRY_DSN, the privacy options when on, before_send keeping nothing
 personal, and a missing sentry-sdk never stopping the app. A fake
-sentry_sdk module stands in for the real one: nothing is ever sent."""
+sentry_sdk module stands in for the real one, except in the tests that run
+the real SDK in a child process with a capturing transport against a local
+server: nothing is ever sent."""
 
 import json
 import logging
+import os
 import sys
 import types
 
@@ -56,7 +59,11 @@ def test_with_a_dsn_init_gets_the_privacy_options(sentry, monkeypatch, caplog):
     assert kw["send_default_pii"] is False
     assert kw["include_local_variables"] is False
     assert kw["max_breadcrumbs"] == 0
-    assert kw["traces_sample_rate"] == 0
+    # no tracing at all: even traces_sample_rate=0 enables it (and with it
+    # sentry-trace/baggage headers on every outgoing call)
+    assert "traces_sample_rate" not in kw and "traces_sampler" not in kw
+    assert kw["trace_propagation_targets"] == []
+    assert kw["auto_enabling_integrations"] is False
     assert kw["include_source_context"] is False
     assert kw["max_request_body_size"] == "never"
     assert kw["before_send"] is errortracking.before_send
@@ -138,6 +145,31 @@ def test_before_send_keeps_nothing_personal():
     assert out["release"] == "hey-claude-1.0.2"
 
 
+def asyncio_event() -> dict:
+    """asyncio's "Task exception was never retrieved", as sentry-sdk's
+    logging integration reports it: the message is not a format string of
+    ours, it holds the exception's repr."""
+    text = ("Task exception was never retrieved\nfuture: <Task finished "
+            "name='Task-2' coro=<handle() done> exception=ValueError("
+            f'"could not parse tool input {SAID!r}")>')
+    return {"level": "error", "logger": "asyncio",
+            "logentry": {"message": text, "params": [], "formatted": text},
+            "exception": {"values": [{"type": "ValueError", "value": SAID,
+                                      "stacktrace": {"frames": []}}]}}
+
+
+def test_only_this_apps_loggers_keep_their_message():
+    out = errortracking.before_send(asyncio_event())
+    assert SAID not in json.dumps(out) and "Dr. Lee" not in json.dumps(out)
+    assert "logentry" not in out and out["logger"] == "asyncio"
+    assert out["exception"]["values"][0]["type"] == "ValueError"
+    ours = {**asyncio_event(), "logger": "assistant.webapp",
+            "logentry": {"message": "Turn %s failed", "params": [SAID]}}
+    assert errortracking.before_send(ours)["logentry"] == {"message": "Turn %s failed"}
+    for name in ("assistantx", "Assistant.chat", None, 7):
+        assert "logentry" not in errortracking.before_send({**ours, "logger": name})
+
+
 def test_before_send_drops_an_event_it_cannot_clean(monkeypatch):
     def broken(text):
         raise RuntimeError("redaction failed")
@@ -185,3 +217,126 @@ def test_serve_and_cli_start_it(sentry, monkeypatch, tmp_path):
     cli.main(["--mode", "text", "--config", str(tmp_path / "config.toml"),
               "--env-file", str(tmp_path / ".env")])
     assert len(sentry.calls) == 2
+
+
+REAL_SDK = r"""
+import asyncio, gc, http.server, json, sys, threading, urllib.request
+import httpx, sentry_sdk
+from sentry_sdk.transport import Transport
+
+sent = []
+class Capture(Transport):  # nothing leaves this process
+    def capture_envelope(self, envelope):
+        for item in envelope.items:
+            sent.append((item.type, item.payload.json))
+real_init = sentry_sdk.init
+sentry_sdk.init = lambda *a, **k: real_init(*a, transport=Capture, **k)
+
+seen = []
+class Server(http.server.BaseHTTPRequestHandler):  # stands in for Anthropic, Google...
+    def do_GET(self):
+        seen.append({k.lower(): v for k, v in self.headers.items()})
+        self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+    def log_message(self, *a):
+        pass
+srv = http.server.HTTPServer(("127.0.0.1", 0), Server)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+url = f"http://127.0.0.1:{srv.server_port}/v1/messages"
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from assistant import errortracking
+
+app = FastAPI()
+@app.get("/api/ask/{thing}")
+async def ask(thing: str):
+    async with httpx.AsyncClient() as c:
+        await c.get(url)
+    raise ValueError("PROMPT " + thing)
+@app.post("/api/chat")
+def chat(body: dict):
+    httpx.get(url)
+    raise KeyError("BODY " + body["text"])
+@app.get("/ok")
+def ok():
+    httpx.get(url)
+    urllib.request.urlopen(url).read()  # http.client: requests, Google, Pinecone
+    return {"ok": True}
+
+def requests():
+    tc = TestClient(app, raise_server_exceptions=False)
+    tc.get("/api/ask/kyle@example.com?q=SECRETQ",
+           headers={"Authorization": "Bearer TOKENX", "Cookie": "s=COOKIEX"})
+    tc.post("/api/chat", json={"text": "UTTERANCE"})
+    return tc.get("/ok").json()
+
+dsn = sys.argv[1]
+on = errortracking.init({"profile": "server"}, environ={"SENTRY_DSN": dsn} if dsn else {})
+answer = requests()
+
+async def handle(text):
+    raise ValueError(f"could not parse tool input {text!r}")
+async def main():
+    t = asyncio.ensure_future(handle("THERAPIST Dr Lee"))
+    await asyncio.sleep(0.05)
+    del t
+    gc.collect()
+asyncio.run(main())
+gc.collect()
+sentry_sdk.flush()
+print(json.dumps({"on": on, "active": sentry_sdk.get_client().is_active(),
+                  "answer": answer, "outgoing": seen,
+                  "sent": sent}, default=str))
+"""
+
+
+def run_real_sdk(tmp_path, dsn: str) -> dict:
+    import subprocess
+    from pathlib import Path
+
+    pytest.importorskip("sentry_sdk")
+    script = tmp_path / "real_sdk.py"
+    script.write_text(REAL_SDK)
+    root = Path(__file__).resolve().parent.parent
+    env = {k: v for k, v in os.environ.items() if k != errortracking.DSN_ENV}
+    env["PYTHONPATH"] = str(root)
+    r = subprocess.run([sys.executable, str(script), dsn], cwd=tmp_path, env=env,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_real_sdk_adds_no_trace_headers_and_sends_nothing_personal(tmp_path):
+    out = run_real_sdk(tmp_path, DSN)
+    assert out["on"] is True and out["active"] is True
+    assert len(out["outgoing"]) == 4  # every outgoing call, from every route
+    for headers in out["outgoing"]:
+        assert "sentry-trace" not in headers and "baggage" not in headers
+        assert "0123456789abcdef" not in json.dumps(headers)  # the DSN's public key
+    events = [p for t, p in out["sent"] if t == "event"]
+    assert len(events) >= 2  # the route crashes are still reported
+    assert not [t for t, _ in out["sent"] if t == "transaction"]
+    blob = json.dumps(out["sent"])
+    for leaked in ("PROMPT", "UTTERANCE", "SECRETQ", "TOKENX", "COOKIEX",
+                   "kyle@example.com", "BODY", "THERAPIST", "Dr Lee"):
+        assert leaked not in blob, leaked
+
+
+def test_installed_sdk_without_a_dsn_starts_nothing(tmp_path):
+    """sentry-sdk is in requirements.txt: with no DSN it must stay off and
+    the app must work exactly as before."""
+    out = run_real_sdk(tmp_path, "")
+    assert out["on"] is False and out["active"] is False
+    assert out["answer"] == {"ok": True} and out["sent"] == []
+    for headers in out["outgoing"]:
+        assert "sentry-trace" not in headers and "baggage" not in headers
+
+
+def test_sentry_sdk_is_a_requirement_and_the_image_needs_no_switch():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    reqs = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "sentry-sdk>=2,<3" in reqs.splitlines()
+    for name in ("Dockerfile", "render.yaml"):
+        assert "INSTALL_SENTRY" not in (root / name).read_text(encoding="utf-8")

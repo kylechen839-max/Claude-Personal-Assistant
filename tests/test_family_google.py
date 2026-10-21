@@ -124,8 +124,8 @@ def g(fake_client, tmp_path, monkeypatch):
                       en_whisper=en_whisper, en_voice=en_voice, client=fake_client,
                       tmp=tmp_path)
 
-    def member(name="Mom", language="zh"):
-        _, invite = fam.invite(name, language)
+    def member(name="Mom", language="zh", tier="family"):  # Calendar and Gmail
+        _, invite = fam.invite(name, language, tier=tier)
         c = TestClient(app, base_url=BASE)
         assert c.post("/api/invite/accept", json={"invite": invite}).status_code == 200
         uid = next(u["id"] for u in fam.members() if u["name"] == name)
@@ -183,7 +183,8 @@ def test_each_member_has_their_own_token_never_kyles(g):
     mom, mom_id = g.member("Mom", "zh")
     dad, dad_id = g.member("Dad", "en")
     assert mom.get("/api/google/status").json() == {
-        "enabled": True, "connected": False, "disconnect": True}
+        "enabled": True, "connected": False, "disconnect": True, "gmail": True,
+        "note": None}
     assert connected(g, mom, mom_id, "mom")["refresh_token"] == "1//mom-refresh-secret"
     assert dad.get("/api/google/status").json()["connected"] is False  # not Mom's
     assert connected(g, dad, dad_id, "dad")["refresh_token"] == "1//dad-refresh-secret"
@@ -734,6 +735,122 @@ def test_owner_of_stays_for_owner_only_routes(g):
     assert kyle.get("/api/owner-thing").json() == {"ok": True}
     mom, _ = g.member()
     assert mom.get("/api/owner-thing").status_code == 404
+
+
+# --- the public beta's tier (piece G1): Calendar only, its own client -------------
+
+PUBLIC_CLIENT = {"web": {**WEB_CLIENT["web"],
+                         "client_id": "public.apps.googleusercontent.com",
+                         "client_secret": "pub-secret"}}
+GMAIL = ("gmail.readonly", "gmail.compose", "mail.google.com")
+
+
+def consent(client) -> dict:
+    r = client.post("/api/google/connect", json={})
+    assert r.status_code == 200, r.text
+    return parse_qs(urlparse(r.json()["url"]).query)
+
+
+def test_a_beta_consent_screen_asks_for_calendar_only_on_the_public_client(g, monkeypatch):
+    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES, CALENDAR_SCOPE
+
+    monkeypatch.setenv("GOOGLE_PUBLIC_CLIENT_JSON", json.dumps(PUBLIC_CLIENT))
+    assert g.config["gmail"]["enabled"]  # Gmail on for the family, still none for beta
+    tester, tester_id = g.member("Tester", "en", tier="beta")
+    mom, _ = g.member("Mom", "zh")  # family
+    assert tester.get("/api/google/status").json() == {
+        "enabled": True, "connected": False, "disconnect": True, "gmail": False,
+        "note": None}
+    q = consent(tester)
+    scopes = q["scope"][0].split()
+    assert sorted(scopes) == sorted([CALENDAR_SCOPE, *CALENDAR_EXTRA_SCOPES])
+    assert not any(word in q["scope"][0] for word in GMAIL)
+    assert q["client_id"] == ["public.apps.googleusercontent.com"]  # never the family's
+    # the family keeps today's consent screen on the family client
+    fq = consent(mom)
+    assert "gmail.compose" in fq["scope"][0]
+    assert fq["client_id"] == ["family.apps.googleusercontent.com"]
+    # and the code exchange runs on the public client too
+    clients = []
+    real = google_web.GoogleConnect._flow
+
+    def spy(self, user=None, **kw):
+        flow = real(self, user, **kw)
+        clients.append(flow.client_config["client_id"])
+        return flow
+
+    with patch.object(google_web.GoogleConnect, "_flow", spy):
+        r, fetch = callback(tester, start(tester), "tester")
+    assert r.status_code == 303, r.text
+    assert clients == ["public.apps.googleusercontent.com"] * 2  # start, then exchange
+    assert g.fam.google_connected(tester_id)
+
+
+def test_a_beta_registry_never_has_gmail_tools_or_kyle(g, monkeypatch):
+    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES
+
+    monkeypatch.setenv("GOOGLE_PUBLIC_CLIENT_JSON", json.dumps(PUBLIC_CLIENT))
+    assert g.config["gmail"]["enabled"]
+    tester, tester_id = g.member("Tester", "en", tier="beta")
+    # even a token that somehow carries the Gmail scopes
+    path = g.fam.google_token(tester_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({**token_of("tester"),
+                                "scopes": SCOPES + CALENDAR_EXTRA_SCOPES}))
+    g.fam._refresh_tools(tester_id)
+    tools = g.fam.context(tester_id).registry.tools
+    assert {"list_calendar_events", "create_calendar_event", "list_calendars"} <= set(tools)
+    assert not {"email_summary", "read_email", "draft_reply"} & set(tools)
+    assert not [n for n in tools if "mail" in n or "draft" in n]
+    text = json.dumps([t.schema() for t in tools.values()])
+    assert "Kyle" not in text and "Tester's" in text
+    # what Claude is sent in a turn: web tools and the calendar, no Gmail, no Kyle
+    g.client.queue.append(make_response(text_block("Hi.")))
+    assert tester.post("/api/turn", json={"text": "hi"}).status_code == 200
+    call = g.client.calls[-1]
+    sent = {t["name"] for t in call["tools"]}
+    assert "list_calendar_events" in sent and not sent & {"email_summary", "draft_reply"}
+    assert "Kyle" not in json.dumps(call["tools"]) and "Kyle" not in call["system"]
+    # the same token on a family member's account does get Gmail (the gate is the tier)
+    mom, mom_id = g.member("Mom", "en")
+    connected(g, mom, mom_id, "mom")
+    assert "email_summary" in g.fam.context(mom_id).registry.tools
+
+
+def test_beta_without_the_public_client_is_not_set_up(g, monkeypatch, tmp_path):
+    # the family client is set up (env and file): a beta tester must never get it
+    client_file = tmp_path / "family_client.json"
+    client_file.write_text(json.dumps(WEB_CLIENT))
+    g.config["family"]["google_client"] = str(client_file)
+    tester, tester_id = g.member("Tester", "en", tier="beta")
+    assert g.fam.google_client(tester_id) is None
+    assert g.fam.google_client() is not None  # the family's is there
+    # someone no longer listed (removed mid sign-in) is never family either
+    assert g.fam.tier("not-a-user") == "beta"
+    assert g.fam.google_client("not-a-user") is None
+    assert not g.fam.gmail_allowed("not-a-user")
+    status = tester.get("/api/google/status").json()
+    assert status["enabled"] is False and status["gmail"] is False
+    assert status["note"] == "Google isn't set up for beta accounts yet."
+    r = tester.post("/api/google/connect", json={})
+    assert r.status_code == 503
+    assert r.json()["error"] == "Google isn't set up for beta accounts yet."
+    assert not g.connect.pending
+    # the page loads the Google script so the note can be shown
+    assert "data-google" in tester.get("/").text
+    # in her language
+    zh, _ = g.member("Ceshi", "zh", tier="beta")
+    assert zh.get("/api/google/status").json()["note"] == i18n.t("google_beta_off", "zh")
+    # family members are unaffected, with no note
+    mom, _ = g.member("Mom", "en")
+    assert mom.get("/api/google/status").json()["enabled"] is True
+    assert mom.get("/api/google/status").json()["note"] is None
+    # set as a file ([family] public_google_client): beta works, still not the family's
+    public_file = tmp_path / "public_client.json"
+    public_file.write_text(json.dumps(PUBLIC_CLIENT))
+    g.config["family"]["public_google_client"] = str(public_file)
+    assert tester.get("/api/google/status").json()["enabled"] is True
+    assert consent(tester)["client_id"] == ["public.apps.googleusercontent.com"]
 
 
 def test_a_picked_voice_wins_over_the_language_voice():

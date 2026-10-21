@@ -124,8 +124,21 @@ def test_backup_has_every_database_and_no_secret(env, owner, tmp_path):
         assert SECRET_TOKEN.encode() not in data and KEY_CIPHERTEXT not in data
     users = json.loads(zf.read("users/users.json"))["users"]
     assert users[uid]["name"] == "Mom" and "invite_hash" not in users[uid]
+    assert users[uid] == family_mod.public(env.family.users[uid])  # tier included
     manifest = json.loads(zf.read("MANIFEST.json"))
     assert {f["name"] for f in manifest["files"]} == names - {"MANIFEST.json"}
+
+
+def test_family_entries_are_built_from_an_allowlist(env, owner):
+    """A field users.json gains later (a key, a token, a note) stays out of
+    the backup until family.public lists it."""
+    _, uid = add_member(env, owner)
+    with env.family.lock:
+        env.family.users = {uid: {**env.family.users[uid], "invite_hash": "h" * 64,
+                                  "api_key_hint": SECRET_TOKEN, "future_field": 1}}
+    users = json.loads(open_zip(owner.get("/api/backup")).read("users/users.json"))["users"]
+    assert set(users[uid]) == set(family_mod.public(env.family.users[uid]))
+    assert "future_field" not in users[uid] and SECRET_TOKEN not in json.dumps(users)
 
 
 def test_a_database_copy_is_one_consistent_file(env, owner, tmp_path):
@@ -226,6 +239,51 @@ def test_build_assistant_sets_up_the_backup_from_config(tmp_path):
     assert str(b.history_path) == store.path
     assert backup_mod.Backup.from_config(cfg, None, None).history_path is None
     assert DEFAULTS["webapp"]["backup_max_mb"] == 200
+    # [webapp] waitlist_file (the public site's setting) when there is one;
+    # "" = no waitlist in the backup
+    cfg["webapp"]["waitlist_file"] = str(tmp_path / "public" / "list.json")
+    assert backup_mod.Backup.from_config(cfg, store, None).waitlist_path == \
+        tmp_path / "public" / "list.json"
+    cfg["webapp"]["waitlist_file"] = ""
+    assert backup_mod.Backup.from_config(cfg, store, None).waitlist_path is None
+
+
+def test_an_empty_waitlist_setting_leaves_it_out(env, owner, tmp_path):
+    (tmp_path / "data" / "waitlist.json").write_text('{"entries": ["a@example.com"]}')
+    cfg = {**env.config, "webapp": {**env.config["webapp"], "waitlist_file": ""}}
+    env.assistant.backup.waitlist_path = backup_mod.Backup.from_config(
+        cfg, env.owner_store, env.family).waitlist_path
+    assert "waitlist.json" not in open_zip(owner.get("/api/backup")).namelist()
+
+
+def test_startup_sweeps_a_crashed_backups_plaintext(tmp_path, monkeypatch):
+    """build_assistant removes what a crash left in the temp folder, before
+    anyone asks for a backup."""
+    import tempfile
+
+    from assistant import webapp as webapp_mod
+
+    temp = tmp_path / "tmp"
+    old = temp / (backup_mod.TEMP_PREFIX + "crashed")
+    old.mkdir(parents=True)
+    (old / "db-0.sqlite").write_text("the owner's conversations")
+    stale = time.time() - backup_mod.STALE_SECONDS - 60
+    os.utime(old, (stale, stale))
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    for var in ("PINECONE_API_KEY", "PINECONE_INDEX", "NOTION_TOKEN", "GOOGLE_TOKEN_JSON",
+                "GOOGLE_CLIENT_JSON", "HISTORY_PATH", "HA_URL", "HA_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-key")
+    monkeypatch.chdir(tmp_path)  # no credentials.json or token.json here
+    cfg = load_config(None, None)
+    cfg["history"]["path"] = str(tmp_path / "history.sqlite")
+    cfg["family"]["dir"] = str(tmp_path / "users")
+    assistant = webapp_mod.build_assistant(cfg, "print", lambda m: None)
+    try:
+        assert not old.exists()
+        assert assistant.backup.temp_dir == temp
+    finally:
+        assistant.history.close()
 
 
 def test_backup_downloads_through_the_cloud_guard(env, make_cloud):

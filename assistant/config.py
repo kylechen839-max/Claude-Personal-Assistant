@@ -290,6 +290,11 @@ DEFAULTS: dict = {
         # file) and the server's public address (public_origin)
         "google": True,
         "google_client": "",
+        # beta testers' (tier "beta", Calendar only) Web client, in its own
+        # Google Cloud project (GOOGLE_PUBLIC_CLIENT_JSON, or this file);
+        # unset: beta testers can't connect Google (never the family client)
+        "public_google_client": "",
+        "max_history_mb": 20,       # each person's history (not [history] max_mb)
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",
@@ -424,7 +429,8 @@ def load_config(path: str | Path | None = "config.toml",
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
-                   "GOOGLE_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
+                   "GOOGLE_CLIENT_JSON", "GOOGLE_WEB_CLIENT_JSON",
+                   "GOOGLE_PUBLIC_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
                    "DISCORD_BOT_TOKEN", "GITHUB_TOKEN", "SENTRY_DSN")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys

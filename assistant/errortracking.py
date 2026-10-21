@@ -1,18 +1,28 @@
-"""Optional crash reports to Sentry (README "Run it in the cloud").
+"""Optional crash reports to Sentry (README "Uptime, error tracking and
+backups").
 
-Off unless the environment sets SENTRY_DSN, and sentry-sdk is an optional
-package (`pip install sentry-sdk`, not in requirements.txt): with a DSN but
-no package, one warning is logged and the app runs as before.
+Off unless the environment sets SENTRY_DSN: sentry-sdk is installed
+(requirements.txt) but nothing starts without a DSN. Should the package be
+missing (an older install), one warning is logged and the app runs as before.
 
 What a report may hold is decided here, not by Sentry's defaults:
   - no personal data (send_default_pii=False), no local variables, no
-    breadcrumbs, no performance traces, no source lines, no request bodies;
+    breadcrumbs, no source lines, no request bodies; no performance
+    tracing at all (traces_sample_rate stays unset) and no trace headers
+    (sentry-trace, baggage: they would carry the DSN's public key, the
+    route and the release) on calls to Anthropic, Google, Notion...;
+    integrations: Sentry's default set plus FastAPI/Starlette (crashes in
+    routes), none auto-enabled;
   - before_send rebuilds every event from an allowlist: the exception
     *types* and each stack frame's file, function and line (never the
     exception message, which can quote what someone said or a tool's
     input); a log message's format string, never its arguments; the
     request's method and path only (no query string, headers, cookies,
-    body or user); no server name, tags, extra (sys.argv) or modules;
+    body or user); no server name, tags, extra (sys.argv) or modules.
+    The format string only from this app's own loggers ("assistant.*"):
+    asyncio's "Task exception was never retrieved" and libraries'
+    log.error(exc) put an exception's text there, so for any other logger
+    only its name is kept;
   - every string left is passed through config.redact (keys, tokens),
     and anything shaped like an email address is masked too.
 An event that can't be cleaned is dropped, never sent as it is.
@@ -56,19 +66,35 @@ def init(config: dict | None = None, environ=None) -> bool:
         if not _warned:
             _warned = True
             log.warning("%s is set but sentry-sdk isn't installed; error "
-                        "tracking is off (pip install sentry-sdk)", DSN_ENV)
+                        "tracking is off (pip install -r requirements.txt)", DSN_ENV)
         return False
     from assistant import __version__
 
     profile = (config or {}).get("profile") or "local"
+    # traces_sample_rate is left unset: even 0 counts as tracing enabled,
+    # and then every outgoing HTTP call carries sentry-trace and baggage.
+    # max_request_body_size="never" is needed too: without it Starlette's
+    # request extractor reads bodies past their own field limits.
     sentry_sdk.init(dsn=dsn, send_default_pii=False, include_local_variables=False,
-                    max_breadcrumbs=0, traces_sample_rate=0,
+                    max_breadcrumbs=0, trace_propagation_targets=[],
+                    auto_enabling_integrations=False, integrations=_web_integrations(),
                     include_source_context=False, max_request_body_size="never",
                     before_send=before_send, before_breadcrumb=_no_breadcrumb,
                     release=f"hey-claude-{__version__}", environment=profile)
     _started = True
     log.info("Error tracking on (Sentry, environment %s)", profile)
     return True
+
+
+def _web_integrations() -> list:
+    """Crashes in the web app's routes (FastAPI/Starlette): the only
+    integrations added to Sentry's defaults (logging, stdlib, threads...)."""
+    try:
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+    except Exception:  # noqa: BLE001 - FastAPI missing: the defaults only
+        return []
+    return [StarletteIntegration(), FastApiIntegration()]
 
 
 def _no_breadcrumb(crumb, hint=None):
@@ -92,7 +118,8 @@ def _clean(event: dict) -> dict:
     if values:
         out["exception"] = {"values": [_exception(v) for v in values if isinstance(v, dict)]}
     entry = event.get("logentry")
-    if isinstance(entry, dict) and isinstance(entry.get("message"), str):
+    if isinstance(entry, dict) and isinstance(entry.get("message"), str) \
+            and _own_logger(event.get("logger")):
         out["logentry"] = {"message": entry["message"]}  # the format string, no args
     request = event.get("request")
     if isinstance(request, dict):
@@ -104,6 +131,13 @@ def _clean(event: dict) -> dict:
         if cleaned:
             out["request"] = cleaned
     return out
+
+
+def _own_logger(name) -> bool:
+    """This app's loggers log fixed format strings (ids and lengths in the
+    arguments); others may log an exception's text as the message."""
+    return isinstance(name, str) and (name == "assistant"
+                                      or name.startswith("assistant."))
 
 
 def _exception(value: dict) -> dict:

@@ -569,14 +569,15 @@ for all of this except the Google sign-in.
     cloud_url` set on the PC, your phone app (from the PC or Pi) shows a
     "Cloud app" banner while it is down and it goes once it is back.
 - [ ] **Error tracking (optional).** Sentry: a new Python project; copy its
-      DSN into Render's `SENTRY_DSN`, set `INSTALL_SENTRY` to `1`, deploy.
+      DSN into Render's `SENTRY_DSN` and save (it restarts).
   - Should: the log has "Error tracking on (Sentry, environment server)".
     Any report that arrives shows an error type and code lines only: no
     message text, no request body, headers, IP or server name.
 
 - [ ] **Invite family.** On your iPhone open the cloud server's own address
       directly (`https://hey-claude.onrender.com/`, signed in with your
-      token), ⚙ -> Invite someone -> a name, 中文, Create invite link.
+      token), ⚙ -> Invite someone -> a name, 中文, Account **Family
+      (Calendar and Gmail)** (Beta is preselected), Create invite link.
       (Invites and Remove are managed there: with failover the app usually
       talks to the Pi or PC, where family is off and the menu is hidden.)
   - Should: the share sheet opens with the link (or it says it was copied);
@@ -617,6 +618,19 @@ for all of this except the Google sign-in.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
     folder; check Render -> Shell `ls /data/users` if you like.)
+- [ ] **Beta tester (Calendar only).** Invite someone with the Account left
+      on **Beta (Calendar only)** and open the link on another phone,
+      before `GOOGLE_PUBLIC_CLIENT_JSON` is set (BLOCKERS "Beta testers'
+      Google").
+  - Should: your list shows them "Invited · Beta"; on their phone ⚙ has
+    no Connect button and says "Google isn't set up for beta accounts
+    yet."; nothing in the welcome card mentions email.
+- [ ] After setting `GOOGLE_PUBLIC_CLIENT_JSON` (and redeploying), their ⚙
+      -> Connect Google account.
+  - Should: Google's consent page names the **beta** project (not your
+    family one) and asks only for calendar access, with no Gmail line.
+    After signing in, "What's on my calendar tomorrow?" reads their
+    calendar; "Any new email?" says it can't read email.
 
 ---
 

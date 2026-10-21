@@ -103,6 +103,7 @@ class Instance:
     public_url: str = ""
     restart_command: list = field(default_factory=list)
     settings: dict = field(default_factory=dict)  # its whole config
+    remote: bool = False  # [watch] cloud_url: reported, never restarted or deployed here
 
     @property
     def main(self) -> bool:
@@ -865,7 +866,7 @@ class Watch:
         url = str(self.cfg.get("cloud_url") or "").strip().rstrip("/")
         if not url or any(i.name == CLOUD for i in instances):
             return None
-        return Instance(CLOUD, "", "", 0, "Cloud app", public_url=url)
+        return Instance(CLOUD, "", "", 0, "Cloud app", public_url=url, remote=True)
 
     def heal(self, inst: Instance, head: str | None, checks: list[Check],
              health: dict | None) -> tuple[list[Check], dict | None]:
@@ -988,6 +989,8 @@ class Watch:
             # once its successor passes), unless that successor was refused
             bad = [c for c in checks if not c.ok and (
                 c.name != "version" or self.up.gated(head) is False)]
+            if inst.remote:
+                st["remote"] = True  # deploy.py doesn't count it: not this PC's code
             st.update(label=inst.label, port=inst.port, checks=[c.to_dict() for c in checks],
                       version=(health or {}).get("version", ""),
                       started=(health or {}).get("started", st.get("started")))

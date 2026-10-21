@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
+  installed with the app and stays off without it), an owner-only backup
+  download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
+  app (`[watch] cloud_url`). Setup for an UptimeRobot monitor on /healthz is
+  in the README.
+- Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
+  Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
+  sign in through a separate Calendar-only Google client
+  (`GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client`); without it
+  they see "Google isn't set up for beta accounts yet." Each person's history
+  is now capped at `[family] max_history_mb` (20 MB). Existing people stay
+  Family.
 - Cheaper replies: short, simple questions are now answered by Claude Haiku
   5.5 (`[assistant] fast_model`, `router = "auto"`). Anything that changes
   your calendar, notes, email or home, needs a web lookup or real reasoning,

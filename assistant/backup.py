@@ -5,8 +5,9 @@ on the disk is ever added):
 
   history.sqlite            the owner's conversation history (and its
                             failover event log, which lives in the same file)
-  users/users.json          the family list: names, languages, time zones,
-                            status, tier; never an invite's hash
+  users/users.json          the family list as the owner's page shows it
+                            (family.public: names, languages, time zones,
+                            status, tier); never an invite's hash
   users/<id>/history.sqlite each listed family member's own history
   waitlist.json             the public waitlist, if there is one
   MANIFEST.json             when it was made, the version, each file's size
@@ -18,8 +19,10 @@ Each database is copied with sqlite3's online backup into a temp file (a
 consistent copy while the app keeps writing; then switched out of WAL mode
 so the copy is one self-contained file). The zip is built in a private temp
 folder, refused above `[webapp] backup_max_mb`, streamed, and the folder is
-deleted when the download ends (or fails); one left by a crash is removed
-by the next backup. One backup at a time. Logged at INFO with its size only.
+deleted when the download ends (or fails); one left by a crash (over an
+hour old) is removed by the next backup and at startup
+(webapp.build_assistant). One backup at a time. Logged at INFO with its
+size only.
 
 The owner's only: not signed in is 401, and a family member gets 404 (as
 if the route didn't exist; webapp.owner_of).
@@ -41,7 +44,8 @@ log = logging.getLogger(__name__)
 
 TEMP_PREFIX = "hey-claude-backup-"
 STALE_SECONDS = 3600  # a temp folder this old is from a backup that crashed
-WAITLIST_FILE = "waitlist.json"  # beside the family folder (/data on Render)
+WAITLIST_FILE = "waitlist.json"  # in the zip; on disk [webapp] waitlist_file,
+                                 # else beside the family folder (/data on Render)
 
 
 class BackupError(Exception):
@@ -67,9 +71,11 @@ class Backup:
     def from_config(cls, config: dict, store=None, family=None) -> "Backup":
         """`store`: the owner's HistoryStore (None when history is off)."""
         path = getattr(store, "path", None)
-        family_dir = Path(config["family"]["dir"])
+        # [webapp] waitlist_file (public_site.py); "" = no waitlist in the backup
+        waitlist = config["webapp"].get(
+            "waitlist_file", str(Path(config["family"]["dir"]).parent / WAITLIST_FILE))
         return cls(history_path=path if path and path != ":memory:" else None,
-                   family=family, waitlist_path=family_dir.parent / WAITLIST_FILE,
+                   family=family, waitlist_path=waitlist or None,
                    max_bytes=int(float(config["webapp"]["backup_max_mb"]) * 1_000_000))
 
     # ---------- what goes in ----------
@@ -84,15 +90,16 @@ class Backup:
         return dbs
 
     def _members(self) -> dict:
-        """The listed people (never one being removed), minus invite hashes."""
+        """The listed people (never one being removed), each as the owner's
+        page sees them (family.public: an allowlist, never an invite hash
+        or any field added later until it is listed there)."""
         if self.family is None:
             return {}
-        from assistant.family import valid_id
+        from assistant.family import public, valid_id
 
         with self.family.lock:
             users = dict(self.family.users)
-        return {uid: {k: v for k, v in u.items() if k != "invite_hash"}
-                for uid, u in users.items() if valid_id(uid)}
+        return {uid: public(u) for uid, u in users.items() if valid_id(uid)}
 
     @staticmethod
     def _size(path: Path) -> int:

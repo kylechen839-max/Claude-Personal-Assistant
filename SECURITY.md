@@ -513,6 +513,25 @@ server (`[family] enabled`, on in the server profile).
   token included. Not done, on purpose: the token isn't revoked at Google
   on disconnect (deleting it from the server is what stops the assistant;
   they can also remove "Hey Claude" at myaccount.google.com/permissions).
+- **Tiers: beta testers are Calendar only** (public beta piece G1). Each
+  person's `tier` in `users.json` is "family" or "beta"; a new invite is
+  beta unless the owner picks family, a user listed before tiers loads as
+  family, and any other stored value counts as beta (the narrower one).
+  For a beta tester: no Gmail tools, even with `[gmail] enabled` and even
+  if their token somehow carries Gmail scopes (`_google_tools` checks the
+  tier); their consent URL asks only for `calendar.events` and the
+  read-only calendar extras (`GoogleConnect.gmail` → `Family.gmail_allowed`, used for both the
+  start and the code exchange); and they sign in only through the public
+  client (`GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client`,
+  its own Google Cloud project). Without it their Google is off with a
+  "not set up for beta accounts yet" note; there is no fallback to the
+  family client, whose consent screen lists Gmail. The tier is set only by
+  the owner (invite); a beta tester can't change it. Their status
+  (`gmail: false`) also drops every mention of email from their guide and
+  disconnect prompt. Both client JSONs (they hold a client secret) are in
+  `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
+  Each person's history is capped at `[family] max_history_mb` (20 MB), not
+  the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
 - **Speech and sentences in their language.** A Chinese-speaking member's
   recordings go to the Chinese Whisper model and replies to the Mandarin
   voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),
@@ -911,15 +930,25 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
 ## Error tracking and backups (`errortracking.py`, `backup.py`)
 
 - **Error tracking is off unless asked for.** Only with `SENTRY_DSN` set
-  and `sentry-sdk` installed (optional; not in requirements.txt). Without
-  the package the app logs one warning (never the DSN) and runs. Sentry is
-  started with `send_default_pii=False`, `include_local_variables=False`,
-  `max_breadcrumbs=0`, `traces_sample_rate=0`, no source context and
-  `max_request_body_size="never"`, and `before_send` rebuilds every event
+  (`sentry-sdk` is in requirements.txt but never starts without one; an
+  install missing the package logs one warning, never the DSN, and runs).
+  Sentry is started with `send_default_pii=False`,
+  `include_local_variables=False`, `max_breadcrumbs=0`, no source context
+  and `max_request_body_size="never"` (load-bearing: without it Starlette's
+  request extractor reads bodies past their field limits). Tracing is off
+  entirely: `traces_sample_rate` is left unset (even 0 counts as tracing
+  enabled), `trace_propagation_targets=[]`, and no auto-enabling
+  integrations, so no `sentry-trace` or `baggage` header (the DSN's public
+  key, the route, the release) is ever added to calls to Anthropic, Google,
+  Notion or anyone else; tested with the real SDK against a local server.
+  Integrations: Sentry's defaults plus FastAPI/Starlette. `before_send` rebuilds every event
   from an allowlist: exception types and frames' file, function, line and
   module (never the exception message, which can quote a turn, an email or
   a tool input; never `abs_path`, which names the user's home folder); a
-  log record's format string without its arguments; the request's method
+  log record's format string without its arguments, and only from the
+  app's own `assistant.*` loggers (asyncio's "Task exception was never
+  retrieved" and libraries' `log.error(exc)` put exception text there; for
+  them only the logger's name is sent); the request's method
   and path (no host, query string, headers, cookies, body, user or IP); no
   server name, tags, `extra` (sys.argv), modules, threads or breadcrumbs;
   only the `runtime` and `os` contexts. Every remaining string goes through
@@ -927,19 +956,20 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   can't be cleaned is dropped. `SENTRY_DSN` is in `SECRET_ENV_VARS`
   (masked in logs) and `ISOLATED_ENV_VARS` (a family copy that would
   inherit Kyle's from the shell refuses to start).
-  Tests: `tests/test_errortracking.py` (a fake `sentry_sdk`; nothing sent).
+  Tests: `tests/test_errortracking.py` (a fake `sentry_sdk`, and the real
+  SDK in a child process with a capturing transport; nothing sent).
 - **The backup download is the owner's only** (`GET /api/backup`,
   `webapp.owner_of`: 401 signed out, 404 for a family member, CloudGuard's
   sign-in in front on Render). It is built from an allowlist (the history
-  databases, the family list without invite hashes, the waitlist, a
-  manifest), so tokens, `*.enc` keys, sessions and `.env` can't end up in
-  it whatever else is on the disk, and people already removed are left
-  out. Databases are copied with SQLite's online backup, read-only. The
+  databases, the family list as `family.public` shows it, the waitlist
+  (`[webapp] waitlist_file`; "" leaves it out), a manifest), so tokens,
+  `*.enc` keys, sessions and `.env` can't end up in it whatever else is on
+  the disk, and people already removed are left out. Databases are copied with SQLite's online backup, read-only. The
   zip is made in a private temp folder (`mkdtemp`), refused above
   `[webapp] backup_max_mb`, one at a time, sent with `Cache-Control:
   no-store`, and the folder is deleted when the response ends; a crashed
-  backup's folder is removed by the next one after an hour. The log gets
-  its size only. Tests: `tests/test_backup.py`.
+  backup's folder (over an hour old) is removed at startup and by the
+  next backup. The log gets its size only. Tests: `tests/test_backup.py`.
 
 ## Not fixed, on purpose
 

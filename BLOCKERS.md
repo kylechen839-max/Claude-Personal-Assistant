@@ -44,6 +44,20 @@ Only what is still open for Kyle. None of it blocks the code.
       is set there and Google returns there, so a LAN `http://` address or
       a second hostname (e.g. a custom domain next to `*.onrender.com`)
       makes their sign-in fail.
+- [ ] **Beta testers' Google: a Calendar-only OAuth client (~20 min plus
+      Google's review; README "Invite family" -> "Account types").** Only
+      you can: (1) create a *new* Google Cloud project (e.g. "Hey Claude
+      Beta"), enable the Calendar API, and set up its OAuth consent screen
+      with only the `calendar.events`, `calendar.calendarlist.readonly` and
+      `calendar.calendars.readonly` scopes, a support email and the privacy
+      policy link; publish it ("In production", unverified: up to 100
+      users see a warning screen); (2) create a **Web application** client
+      there with redirect URI `https://hey-claude.onrender.com/google/callback`;
+      (3) paste its JSON into `GOOGLE_PUBLIC_CLIENT_JSON` in Render ->
+      Environment; (4) submit the project for verification (demo video of
+      the consent and a calendar question). Never add Gmail scopes to that
+      project. Until (3), beta testers can't connect Google (the app says
+      so); family members are unaffected.
 - [ ] **Measure Render memory with a Chinese-speaking family member.** The
       +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
       estimate, not measured (Hugging Face is blocked in the build
@@ -172,8 +186,7 @@ Only what is still open for Kyle. None of it blocks the code.
       Only you can sign up: an UptimeRobot monitor on
       `https://<your service>.onrender.com/healthz`, and (if you want crash
       reports) a Sentry Python project whose DSN goes into Render's
-      `SENTRY_DSN`, with `INSTALL_SENTRY` set to `1` (README "Uptime, error
-      tracking and backups"). Without them nothing changes: no reports
+      `SENTRY_DSN` (README "Uptime, error tracking and backups"). Without them nothing changes: no reports
       are sent and the PC watchdog's `[watch] cloud_url` still works.
 
 ## Resolved (2026-10-17)

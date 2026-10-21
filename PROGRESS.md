@@ -3366,16 +3366,78 @@ Kyle: "build Haiku routing and caching right now."
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
 
+## Public beta G1: account tiers and Calendar-only Google (2026-10-21)
+
+Kyle: get the app ready for an invite-only public beta (bring-your-own
+key, Calendar-only Google, no funding). This is piece G1 of that plan.
+- **Tiers.** Each person in `users.json` has `tier`: `"family"` or
+  `"beta"`. People listed before tiers load as family, without a rewrite
+  (the field is written on the next save). Any other stored value counts
+  as beta, the narrower tier. `POST /api/invites` takes `tier`; a new
+  invite is **beta** unless the owner picks family, and a bad value gets a
+  400. `public()` (the owner's list) shows the tier. The invite form has an
+  **Account** select (Beta preselected), and the list marks beta people
+  "· Beta", in English and Chinese. The INFO log line gives the id and the
+  tier, never the name.
+- **Beta testers never see or get Gmail.**
+  - `_google_tools` adds Gmail only for tier family, even with `[gmail]
+    enabled` and a token that has the scopes.
+  - The consent URL's scopes come from `GoogleConnect.gmail(uid)` → `Family.gmail_allowed(uid)`: for beta,
+    `calendar.events` plus the read-only calendar extras. The same scopes
+    are used for the code exchange.
+  - `/api/google/status` now also returns `gmail` (false for beta) and
+    `note`. With `gmail` false, i18n.js uses a Calendar-only guide step
+    and examples, and a disconnect question with no "email".
+- **A separate OAuth client.** Beta testers sign in only through
+  `GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client` (its own
+  Google Cloud project). Without it they get no Connect button, the note
+  "Google isn't set up for beta accounts yet." (en/zh, `i18n
+  google_beta_off`), and a 503 with the same text from
+  `/api/google/connect`. They never fall back to the family client. The
+  page keeps `data-google` for them, so the note can show.
+  - `web_client_config` takes an `env` name.
+  - Both Web client JSON variables are now in `SECRET_ENV_VARS` (masked;
+    `watch.py` keeps them from child processes).
+  - render.yaml adds `GOOGLE_PUBLIC_CLIENT_JSON` (sync: false), and
+    conftest clears it.
+- **Gap (c).** `[family] max_history_mb` (20) replaces the global
+  `[history] max_mb` (500) for every person's HistoryStore. It is mirrored
+  in config.toml.
+- `sw.js` cache is now v22.
+- **Tests.**
+  - New, in test_family.py: invite defaults to beta / family on request /
+    bad tier 400; pre-tier users load as family and odd values as beta;
+    `max_history_mb` applied (20, then 7); tier logged without the name.
+  - New, in test_family_google.py:
+    - a beta consent URL has only calendar scopes and the public
+      client_id (start and exchange), while family keeps Gmail on the
+      family client;
+    - a beta registry has no Gmail tools with Gmail enabled and Gmail
+      scopes on the token, and no "Kyle" in schemas or the request;
+    - no public client means no Google, the note and a 503, even with
+      the family client set in both env and file; it then works from
+      `[family] public_google_client`.
+  - New JS: family.test.mjs (tier sent, beta by default; "· Beta" in the
+    list) and i18n.test.mjs (no mail wording for beta, en and zh; the
+    note; the zh labels).
+  - Existing family Google tests now invite with `tier="family"` (the
+    default changed), and four status-dict checks gained `gmail`/`note`.
+  - Revert check: 8 Python and 3 JS source reverts, each made alone with
+    `__pycache__` cleared, all fail their tests.
+  - The "no Kyle" check already held before this change; it guards beta
+    schemas and is not a fix.
+- **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
+  (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
+
 ## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
 
 - **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
-  only with `SENTRY_DSN` set; `sentry-sdk` is not in requirements.txt (the
-  Dockerfile's `INSTALL_SENTRY=1` build argument adds it, `render.yaml`
-  offers both; on a PC or Pi `pip install "sentry-sdk>=2,<3"`). Without the
-  package: one warning, the app runs. Started from `cli.main` (every mode,
+  only with `SENTRY_DSN` set (`render.yaml` offers it); `sentry-sdk` is in
+  requirements.txt since round 2 (round 1 had it optional behind a Docker
+  build argument). Without the package: one warning, the app runs. Started from `cli.main` (every mode,
   the cloud's included) and `webapp.serve`, once. Options:
   `send_default_pii=False`, `include_local_variables=False`,
-  `max_breadcrumbs=0`, `traces_sample_rate=0`, no source context, no
+  `max_breadcrumbs=0`, no tracing (round 2, below), no source context, no
   request bodies. `before_send` rebuilds each event from an allowlist
   (exception types and frames' file/function/line/module, a log record's
   format string, the request's method and path, the runtime/os contexts),
@@ -3384,7 +3446,7 @@ Kyle: "build Haiku routing and caching right now."
   `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`.
 - **Backup download** (`assistant/backup.py`, `GET /api/backup`, owner
   only via `owner_of`): a zip of `history.sqlite`, `users/users.json`
-  (invite hashes removed), each listed member's
+  (each entry `family.public`, round 2), each listed member's
   `users/<id>/history.sqlite`, `waitlist.json` if present and a
   `MANIFEST.json`. An allowlist: no tokens, `*.enc`, sessions, `.env`,
   logs or removed people. Databases are copied with
@@ -3393,7 +3455,8 @@ Kyle: "build Haiku routing and caching right now."
   folder, one at a time (409), refused above `[webapp] backup_max_mb`
   (200; checked before copying and on the zip as it grows), streamed with
   `FileResponse` and deleted by its background task; a crashed one's
-  folder is swept by the next backup after an hour. INFO logs the size
+  folder is swept (after an hour) by the next backup and, since round 2,
+  at startup. INFO logs the size
   only. Wired in `build_assistant` (`assistant.backup`) and registered in
   `create_app`, so the PC and the cloud (`cloud.build_app` reuses
   `create_app`) both have it; `cloud.py` is untouched.
@@ -3416,6 +3479,53 @@ Kyle: "build Haiku routing and caching right now."
   conversations compress less.
 - Deviation from the brief: a family member gets **404** from
   `/api/backup`, not 403, because `owner_of` answers 404 for every
-  owner-only route (as if it didn't exist). The waitlist path is
-  `<[family] dir>/../waitlist.json` (`/data/waitlist.json` on Render),
-  to be lined up with G5's setting when both merge.
+  owner-only route (as if it didn't exist). The waitlist path:
+  round 2 below.
+
+### Round 2 (judge findings)
+
+1. **The DSN's public key went out in trace headers.** Even
+   `traces_sample_rate=0` counts as tracing enabled, and the default
+   `trace_propagation_targets` is `.*`: every outgoing call during a
+   request carried `sentry-trace` and `baggage` (the DSN's public key,
+   the route, the release) to Anthropic, Google, Notion. Now
+   `traces_sample_rate` is not passed, `trace_propagation_targets=[]`,
+   `auto_enabling_integrations=False`, with FastAPI/Starlette added
+   explicitly so route crashes are still reported;
+   `max_request_body_size="never"` stays. Tests: the init options, and the
+   real SDK in a child process (capturing transport, a local HTTP server
+   standing in for the APIs): no `sentry-trace`/`baggage` on httpx (sync
+   and async) or http.client calls, crashes still reported, no
+   transactions, nothing personal in any envelope.
+2. **A cloud outage failed a PC deploy.** The cloud's entry is marked
+   `remote` (`Instance.remote`, written to the status), and `deploy.py`
+   leaves remote entries out of its failing count (one condition). Test:
+   `test_deploy_passes_while_the_cloud_is_down`.
+3. **`logentry.message` isn't always a format string.** It is kept only
+   for the app's own `assistant.*` loggers; for others (asyncio's "Task
+   exception was never retrieved", libraries' `log.error(exc)`) only the
+   logger name goes. Tests: the asyncio event shape, and the real SDK with
+   an unretrieved task exception.
+4. **`sentry-sdk` is always installed** (requirements.txt,
+   `sentry-sdk>=2,<3`, pure Python); `INSTALL_SENTRY` is gone from the
+   Dockerfile and render.yaml. Test: with the real SDK installed and no
+   DSN, nothing starts, nothing is sent, no headers are added and the app
+   answers as before.
+5. **Family entries came from a denylist.** Each is now
+   `family.public(u)` (it includes `tier` from #34). Test: an unknown
+   field and an invite hash in users.json don't reach the zip.
+6. **The waitlist path was hard-coded.** It is
+   `config["webapp"].get("waitlist_file", <[family] dir>/../waitlist.json)`
+   (the setting comes with the public-site PR); `""` leaves the waitlist
+   out. Tests: the setting's path, and `""`.
+7. **A crash-left plaintext copy lingered in the temp folder.**
+   `build_assistant` calls `backup.sweep()` once. Test: a stale
+   `hey-claude-backup-*` folder is gone after `build_assistant`.
+- Merged origin/master (#34, beta tiers): conflicts in `SECRET_ENV_VARS`
+  (both additions kept) and here.
+- Revert check: 13 round-2 mutations (each alone, `__pycache__`
+  cleared), every one fails its test. Dropping only
+  `auto_enabling_integrations=False` fails the options test but not the
+  real-SDK one: with no tracing and no propagation targets it adds no
+  header by itself (defense in depth). The 27 round-1 mutations still all fail (the 28th
+  targeted the removed `traces_sample_rate=0`).

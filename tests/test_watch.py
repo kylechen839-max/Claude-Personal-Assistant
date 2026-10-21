@@ -617,6 +617,32 @@ def test_deploy_switches_after_the_gate_passes(world):
     assert w.up.last_good() == NEW
 
 
+def test_deploy_passes_while_the_cloud_is_down(world):
+    """[watch] cloud_url failing (Render down) isn't this PC's deploy failing."""
+    world.git.head = OLD
+    world.apps.add(8766, version=OLD)
+    world.apps.public["https://hey-claude.onrender.com"] = 503
+
+    def run(cmd, cwd, timeout=0):
+        if cmd[1:3] == ["merge", "--ff-only"]:
+            world.git.head = NEW
+            return 0, ""
+        return world.git(cmd, cwd, timeout)
+
+    world.git.on_restart = lambda name: world.apps.state[8766].update(version=NEW[:7])
+    settings = load_config(None, None)
+    settings["watch"]["cloud_url"] = "https://hey-claude.onrender.com"
+    w = world.make(instances=[make_instance("mom", 8766)], gate=lambda sha: (True, ""),
+                   settings=settings)
+    w.up.run = run
+    out = []
+    assert deploy.deploy(w, output_fn=out.append) == 0, out
+    assert w.status["instances"]["cloud"]["status"] == "failing"
+    assert w.status["instances"]["cloud"]["remote"] is True
+    assert "remote" not in w.status["instances"]["mom"]
+    assert any("Cloud app" in line and "FAILING" in line for line in out)
+
+
 # ----- the banner, the owner's only -----------------------------------------------------
 
 def test_banner_lists_failing_apps_and_stale_checks():

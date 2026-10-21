@@ -20,6 +20,14 @@ and Kyle's tools never read theirs. Nothing else: no Notion, Pinecone
 memory or notes, Kyle's Google, dev team, lecture recorder or tutor, and no
 way to see anyone else's history. Removing someone signs them out and
 deletes their folder, Google token included.
+
+Each person has a tier (`tier` in users.json, chosen at invite): "family"
+(the above; people listed before tiers existed load as this) or "beta" (an
+invite-only public beta tester): Calendar only, never Gmail tools or Gmail
+scopes, signed in through a separate OAuth client ([family]
+public_google_client / GOOGLE_PUBLIC_CLIENT_JSON) whose consent screen asks
+for nothing else. Without that client a beta tester can't connect Google;
+they never fall back to the family client (its consent screen lists Gmail).
 """
 
 # No `from __future__ import annotations`: FastAPI must see the real
@@ -43,6 +51,8 @@ TOKEN_PREFIX = "hcinv."
 LANGUAGES = ("en", "zh")
 MAX_NAME = 40
 STATUSES = ("invited", "active")
+TIERS = ("family", "beta")
+DEFAULT_TIER = "beta"      # a new invite; before tiers everyone was family
 GOOGLE_TOKEN = "google_token.json"  # in <dir>/<id>/
 _ID = re.compile(r"^u_[A-Za-z0-9_-]{8,40}$")
 
@@ -99,10 +109,26 @@ def clean_timezone(tz) -> str:
     return tz
 
 
+def clean_tier(tier) -> str:
+    tier = str(tier or DEFAULT_TIER).strip().lower()
+    if tier not in TIERS:
+        raise FamilyError("tier must be family or beta")
+    return tier
+
+
+def tier_of(user: dict | None) -> str:
+    """Their tier: "family" if users.json predates tiers; anything else
+    unexpected counts as the narrower "beta"."""
+    tier = (user or {}).get("tier", "family")
+    return tier if tier in TIERS else "beta"
+
+
 def public(user: dict) -> dict:
     """A user as the owner's page sees it (never the invite hash)."""
-    return {k: user.get(k) for k in ("id", "name", "language", "timezone",
-                                     "created", "status", "invite_expires")}
+    out = {k: user.get(k) for k in ("id", "name", "language", "timezone",
+                                    "created", "status", "invite_expires")}
+    out["tier"] = tier_of(user)
+    return out
 
 
 @dataclass
@@ -117,6 +143,10 @@ class UserContext:
     @property
     def language(self) -> str:
         return self.user.get("language", "en")
+
+    @property
+    def tier(self) -> str:
+        return tier_of(self.user)
 
     def close(self) -> None:
         if self.history is not None:
@@ -138,6 +168,7 @@ class Family:
         self.path = self.dir / "users.json"
         self.max_users = int(f["max_users"])
         self.invite_days = float(f["invite_days"])
+        self.max_history_mb = float(f["max_history_mb"])
         self.clock = clock
         self._client = client
         self.lock = threading.RLock()
@@ -157,7 +188,8 @@ class Family:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             users = data.get("users", {}) if isinstance(data, dict) else {}
-            self.users = {uid: u for uid, u in users.items()
+            # silently migrated: no tier = listed before tiers = family
+            self.users = {uid: {**u, "tier": tier_of(u)} for uid, u in users.items()
                           if valid_id(uid) and isinstance(u, dict)
                           and u.get("status") in STATUSES}
             deleting = data.get("deleting", []) if isinstance(data, dict) else []
@@ -184,10 +216,11 @@ class Family:
         user["invite_expires"] = int(self.clock() + self.invite_days * 86400)
         return token
 
-    def invite(self, name, language="en", timezone="") -> tuple[dict, str]:
+    def invite(self, name, language="en", timezone="",
+               tier=DEFAULT_TIER) -> tuple[dict, str]:
         """A new person and their one-time token (shown once, never stored)."""
         user = {"name": clean_name(name), "language": clean_language(language),
-                "timezone": clean_timezone(timezone)}
+                "timezone": clean_timezone(timezone), "tier": clean_tier(tier)}
         with self.lock:
             if len(self.users) >= self.max_users:
                 raise FamilyError(f"at most {self.max_users} people", 409)
@@ -197,7 +230,8 @@ class Family:
             users = {**self.users, uid: user}
             self._save(users)
             self.users = users
-        log.info("Family: invited %s (%d people)", uid, len(self.users))
+        log.info("Family: invited %s (%s, %d people)", uid, user["tier"],
+                 len(self.users))
         return public(user), token
 
     def reinvite(self, uid: str) -> tuple[dict, str]:
@@ -326,24 +360,46 @@ class Family:
     def google_token(self, uid: str) -> Path:
         return self.dir / uid / GOOGLE_TOKEN
 
-    def google_client(self) -> dict | None:
-        """The Web application OAuth client they sign in with; None (their
-        Google is off) if it isn't set up."""
-        from assistant.tools.google_auth import web_client_config
+    def tier(self, uid: str | None) -> str:
+        """The owner (None) counts as family; a uid that isn't listed (e.g.
+        removed while signing in) gets the narrower beta, never family."""
+        if not uid:
+            return "family"
+        with self.lock:
+            user = self.users.get(uid)
+        return tier_of(user) if user is not None else "beta"
 
+    def google_client(self, uid: str | None = None) -> dict | None:
+        """The Web application OAuth client `uid` signs in with: family
+        members the family client, beta testers only the public one (never
+        the family client, whose consent screen lists Gmail). None (their
+        Google is off) if it isn't set up."""
+        from assistant.tools.google_auth import PUBLIC_CLIENT_ENV, web_client_config
+
+        f = self.config["family"]
+        beta = uid is not None and self.tier(uid) == "beta"
+        which = "public" if beta else "web"
         try:
-            client = web_client_config(self.config["family"]["google_client"])
+            client = (web_client_config(f["public_google_client"], env=PUBLIC_CLIENT_ENV)
+                      if beta else web_client_config(f["google_client"]))
         except (OSError, ValueError) as e:  # never the value
-            log.warning("Family: the Google web client is unreadable (%s)", e)
+            log.warning("Family: the Google %s client is unreadable (%s)", which, e)
             return None
         if client is not None and "web" not in client:
-            log.warning("Family: the Google client is not a Web application client")
+            log.warning("Family: the Google %s client is not a Web application client",
+                        which)
             return None
         return client
 
-    def google_enabled(self) -> bool:
+    def google_enabled(self, uid: str | None = None) -> bool:
         return bool(self.config["family"]["google"] and own_origin(self.config)
-                    and self.google_client())
+                    and self.google_client(uid))
+
+    def gmail_allowed(self, uid: str | None) -> bool:
+        """May `uid` have Gmail at all? Never a beta tester."""
+        return bool(self.config["gmail"]["enabled"]) and self.tier(uid) == "family"
+
+        return sign_in_scopes(self.gmail_allowed(uid))
 
     def google_connected(self, uid: str) -> bool:
         return valid_id(uid) and self._google_info(uid) is not None
@@ -379,7 +435,7 @@ class Family:
                                save_token=False, environ={}, in_app=True,
                                extras=set(CALENDAR_EXTRA_SCOPES) <= granted_scopes(info)
                                ).tools()
-        if self.config["gmail"]["enabled"] and \
+        if self.config["gmail"]["enabled"] and tier_of(user) == "family" and \
                 set(GMAIL_SCOPES) <= granted_scopes(info):
             from assistant.tools.gmail import GmailInbox
 
@@ -449,9 +505,12 @@ class Family:
             # Their own file, opened directly: history.open_store() would
             # replace the owner's store that record_event() writes to.
             # eventlog=False: nothing to sync to Kyle's Pi or PC.
+            # [family] max_history_mb, not the owner's [history] max_mb: many
+            # people share one small server disk.
             store = HistoryStore(self.dir / user["id"] / "history.sqlite",
                                  retention_days=h["retention_days"],
-                                 max_mb=h["max_mb"], origin=origin_of(self.config),
+                                 max_mb=self.max_history_mb,
+                                 origin=origin_of(self.config),
                                  eventlog=False)
 
         def chat_factory(session_registry):
@@ -538,7 +597,8 @@ def own_origin(config: dict) -> str:
 def register(app, family: "Family | None", web, assistant, error) -> None:
     """The owner's family routes and the public invite acceptance:
 
-      POST   /api/invites             {name, language, timezone?} -> {url, expires_at}
+      POST   /api/invites             {name, language, timezone?, tier?} -> {url, expires_at}
+                                      (tier "beta", the default, or "family")
       GET    /api/users               the invited people (owner only)
       POST   /api/users/{id}/remove   sign them out, delete their history
                                       (also DELETE /api/users/{id}; the page
@@ -583,7 +643,7 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         try:
             user, token = await run_in_threadpool(
                 family.invite, body.get("name"), body.get("language") or "en",
-                body.get("timezone") or "")
+                body.get("timezone") or "", body.get("tier") or DEFAULT_TIER)
         except FamilyError as e:
             return error(str(e), e.status)
         return link(request, user, token)

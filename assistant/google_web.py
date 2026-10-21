@@ -9,9 +9,15 @@ Two kinds of account, one sign-in flow:
   sign in to *their own* Google from their own phone; the token goes to
   `<family dir>/<id>/google_token.json` and the tools join only their own
   conversations (Family.save_google). Kyle's token is never used for them.
+  A beta tester (family.py tier "beta") signs in through the public client
+  (GOOGLE_PUBLIC_CLIENT_JSON / [family] public_google_client) and is asked
+  for Calendar only; without that client their Google stays off (never the
+  family client: its consent screen lists Gmail).
 
-  GET  /api/google/status      {"enabled", "connected", "disconnect"}: the
-                               caller's own account
+  GET  /api/google/status      {"enabled", "connected", "disconnect",
+                               "gmail", "note"}: the caller's own account
+                               (gmail false: no mail wording in the app;
+                               note: why it is off, or null)
   POST /api/google/connect     {"url": Google's consent page}
   POST /api/google/disconnect  a family member's token and tools deleted
   GET  /google/callback        ?state&code from Google -> token file, 303 to /
@@ -117,8 +123,8 @@ class GoogleConnect:
         return origin.rstrip("/") + CALLBACK
 
     def _client(self, user: str | None = None) -> dict | None:
-        if user is not None:
-            return self.family.google_client() if self.family is not None else None
+        if user is not None:  # theirs: the family or the public client by tier
+            return self.family.google_client(user) if self.family is not None else None
         try:
             return client_config(self._cal["credentials"])
         except (OSError, ValueError):
@@ -128,7 +134,7 @@ class GoogleConnect:
     def enabled(self, user: str | None = None) -> bool:
         """Can `user` (None: the owner) connect a Google account here?"""
         if user is not None:
-            return self.family is not None and self.family.google_enabled()
+            return self.family is not None and self.family.google_enabled(user)
         return bool(self.owner and self.config["webapp"]["public_origin"]
                     and self._cal["enabled"] and self._client())
 
@@ -142,11 +148,24 @@ class GoogleConnect:
         except (OSError, ValueError):
             return False
 
+    def gmail(self, user: str | None = None) -> bool:
+        """Does `user`'s sign-in ask for Gmail? Never a beta tester's."""
+        if user is not None:
+            return self.family is not None and self.family.gmail_allowed(user)
+        return bool(self.config["gmail"]["enabled"])
+
+    def note(self, user: str | None) -> str | None:
+        """Why `user` can't connect, when the app should say so."""
+        if user is None or self.family is None or self.enabled(user) \
+                or self.family.tier(user) != "beta":
+            return None
+        return i18n.t("google_beta_off", self.language_of(user))
+
     def _flow(self, user: str | None = None, **kwargs):
         from google_auth_oauthlib.flow import Flow
 
         return Flow.from_client_config(
-            self._client(user), sign_in_scopes(self.config["gmail"]["enabled"]),
+            self._client(user), sign_in_scopes(self.gmail(user)),
             redirect_uri=self._redirect(user), **kwargs)
 
     def start(self, user: str | None = None, sid: str | None = None) -> tuple[str, str]:
@@ -283,7 +302,8 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
         return {"enabled": connect.enabled(s.user), "connected": connect.connected(s.user),
                 # a family member can disconnect here (the owner's token is
                 # managed where it was made)
-                "disconnect": s.user is not None}
+                "disconnect": s.user is not None,
+                "gmail": connect.gmail(s.user), "note": connect.note(s.user)}
 
     @app.post("/api/google/connect")
     async def google_connect(request: Request):
@@ -291,7 +311,7 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
         if err is not None:
             return err
         if not connect.enabled(s.user):
-            return error("Google connect is not set up", 503)
+            return error(connect.note(s.user) or "Google connect is not set up", 503)
         url, nonce = await run_in_threadpool(connect.start, s.user, s.sid)
         response = JSONResponse({"url": url}, headers={"Cache-Control": "no-store"})
         # Lax: sent on Google's top-level redirect back (Strict isn't);
