@@ -21,6 +21,15 @@
   restore is now an icon button (⤡); select text in a chat message and
   Reply to quote it; paste or drop images, PDFs and text files into the
   chat box (up to 5 per message, kept in the dashboard's own file store).
+- Design skills: `.claude/skills/` now has three vendored, pinned skills
+  for UI work (Anthropic `frontend-design`, Vercel `web-design-guidelines`
+  with its rules read locally, Addy Osmani `accessibility`), plus
+  `DESIGN_SKILLS.md` with their sources and where this repo's rules win.
+- Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
+  installed with the app and stays off without it), an owner-only backup
+  download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
+  app (`[watch] cloud_url`). Setup for an UptimeRobot monitor on /healthz is
+  in the README.
 - Beta testers bring their own Anthropic API key: Settings -> Your Anthropic
   API key (checked with Anthropic, stored encrypted with `USER_DATA_KEY`).
   Without one a beta tester is told to add it; family members still use the

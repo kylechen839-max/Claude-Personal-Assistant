@@ -1918,6 +1918,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import memory_web
 
     memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+    if getattr(assistant, "backup", None) is not None:
+        from assistant import backup as backup_mod
+
+        backup_mod.register(app, assistant.backup, owner_of, error)  # Kyle's only
 
     if getattr(assistant, "voices", None) is not None:
         from assistant import voice_picker
@@ -2103,6 +2107,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
         from assistant.voice_picker import VoicePicker
 
         assistant.voices = VoicePicker(config, assistant.tts, family)
+    from assistant.backup import Backup
+
+    assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
+    assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     return assistant
 
 
@@ -2132,6 +2140,9 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
           env_file: str | Path = ".env", output_fn=print) -> int:
     import uvicorn
 
+    from assistant import errortracking
+
+    errortracking.init(config)  # only with SENTRY_DSN set
     web = config["webapp"]
     language = i18n.set_language(config["assistant"]["language"])
     host = host or web["host"]

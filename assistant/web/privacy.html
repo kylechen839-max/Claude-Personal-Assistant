@@ -55,6 +55,12 @@
         <td>Runs the server and its disk, where the data below is stored, and keeps
           the server's logs.</td>
         <td>Always</td></tr>
+      <tr><th scope="row">Sentry (only if the person who runs the server turned
+          error reports on)</th>
+        <td>Error reports: the error's type and where in the code it happened, the
+          request's method and path, and the app and Python version. Never what you
+          said, the error's message, cookies or your IP address.</td>
+        <td>When something fails</td></tr>
     </tbody>
   </table>
   <p>Speech is turned into text on the Hey Claude server itself, and replies are
@@ -94,7 +100,8 @@
     Removing an account signs you out everywhere and deletes your folder on the
     server: conversations, Google sign-in and API key. The hosting company makes
     automatic backup snapshots of the disk, so a copy can remain in those snapshots
-    until they expire.</p>
+    until they expire. The person who runs the server can also download a backup
+    of it; a copy in such a backup remains until they delete that file.</p>
   <p>To stop Google access at any time, revoke Hey Claude at
     myaccount.google.com/permissions. To stop API use, choose Remove key in Settings,
     or delete or rotate your key in the Anthropic Console.</p>

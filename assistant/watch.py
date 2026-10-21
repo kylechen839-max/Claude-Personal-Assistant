@@ -15,6 +15,8 @@ Each run, per instance:
                 stylesheet it loads; the served version against the
                 checkout's HEAD; the address the phone opens (the
                 `tailscale serve` entry, or [webapp] public_origin).
+  cloud         `[watch] cloud_url` (the Render copy): its /healthz only,
+                alerted on like the others, never restarted or rolled back.
   functional    after a restart or a new version, after `[watch]
                 functional_hours`, or retried after `retry_minutes` once
                 failed: smoke.py's realistic conversation (a quick question
@@ -69,6 +71,7 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
 MAIN = "main"  # Kyle's own instance: config.toml + .env
+CLOUD = "cloud"  # [watch] cloud_url: the Render copy, checked but never healed here
 _FAMILY = re.compile(r"^config\.([A-Za-z0-9_-]+)\.toml$")
 OK, FAILING = "ok", "failing"
 # answers on its port, but its env file has no WEB_TOKEN: can't be checked
@@ -107,6 +110,7 @@ class Instance:
     public_url: str = ""
     restart_command: list = field(default_factory=list)
     settings: dict = field(default_factory=dict)  # its whole config
+    remote: bool = False  # [watch] cloud_url: reported, never restarted or deployed here
 
     @property
     def main(self) -> bool:
@@ -921,9 +925,23 @@ class Watch:
         for inst in instances:
             results[inst.name] = self.heal(inst, head, *results[inst.name])
         head = self.head()
-        self.record(instances, results, head, unchecked)
+        recorded = instances
+        cloud = self.cloud(instances)
+        if cloud is not None:  # alerts like the others; never restarted or rolled back
+            health, why = get_health(self.http, cloud.public_url)
+            results[cloud.name] = [Check("healthz", health is not None, why)], health
+            recorded = instances + [cloud]
+        self.record(recorded, results, head, unchecked)
         write_status(self.status_file, self.status)
         return self.status
+
+    def cloud(self, instances: list[Instance]) -> Instance | None:
+        """[watch] cloud_url (Kyle's config.toml) as an instance to check:
+        only its /healthz, from here, whatever version it runs."""
+        url = str(self.cfg.get("cloud_url") or "").strip().rstrip("/")
+        if not url or any(i.name == CLOUD for i in instances):
+            return None
+        return Instance(CLOUD, "", "", 0, "Cloud app", public_url=url, remote=True)
 
     def heal(self, inst: Instance, head: str | None, checks: list[Check],
              health: dict | None) -> tuple[list[Check], dict | None]:
@@ -1055,6 +1073,8 @@ class Watch:
             # once its successor passes), unless that successor was refused
             bad = [c for c in checks if not c.ok and (
                 c.name != "version" or self.up.gated(head) is False)]
+            if inst.remote:
+                st["remote"] = True  # deploy.py doesn't count it: not this PC's code
             st.update(label=inst.label, port=inst.port, checks=[c.to_dict() for c in checks],
                       version=(health or {}).get("version", ""),
                       started=(health or {}).get("started", st.get("started")))
