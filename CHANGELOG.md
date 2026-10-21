@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Claude settings: pre-approve `mcp__claude-code-remote__create_session` (Kyle, 2026-10-21) so the coordinator can start sessions on his own machines, such as the trusted relay.
+- Fixed: CI went red when anthropic 2.0 came out (it sends API keys as a
+  Bearer token, so people's own keys no longer went out as X-Api-Key).
+  requirements.txt now keeps the SDK below 2.
 - Fixed: with `[tts] family_paid_voices` on, beta testers could pick
   ElevenLabs voices on the owner's bill. Paid voices now go only to
   family-tier members (and the owner); a beta tester never sees them, can't
