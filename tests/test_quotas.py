@@ -338,6 +338,41 @@ def test_only_one_spoken_answer_is_transcribed_at_a_time(env, owner):
     assert env.family.quotas.usage[uid].speech == pytest.approx(1.0)
 
 
+
+def test_a_tap_while_a_recording_is_heard_leaves_no_stray_transcript(env, owner):
+    """They tap Yes while their recording is still being transcribed: the
+    tap answers, and the late "no" neither answers nor shows in the turn."""
+    import queue
+    import threading
+
+    ann, uid = member(env, owner)
+    s, pending = asked(env, uid, ann)
+    entered, go = threading.Event(), threading.Event()
+
+    class Slow:
+        def transcribe(self, recording):
+            entered.set()
+            go.wait(10)
+            return "no"
+
+    env.assistant.transcriber = Slow()
+    late = []
+    t = threading.Thread(target=lambda: late.append(ann.post(
+        "/api/confirm", files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})))
+    t.start()
+    assert entered.wait(10)
+    assert env.assistant.answer(s, True, confirm_id=pending.id)  # the tap
+    go.set()
+    t.join(10)
+    assert late[0].status_code == 409 and pending.answer is True
+    shown = []
+    while True:
+        try:
+            shown.append(s.events.get_nowait())
+        except queue.Empty:
+            break
+    assert not [e for e in shown if e.get("type") == "transcript"]
+
 def test_a_failed_spoken_answer_can_be_tried_again(env, owner):
     ann, uid = member(env, owner)
     s, pending = asked(env, uid, ann)

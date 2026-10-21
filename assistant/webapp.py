@@ -1956,6 +1956,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             except BaseException:
                 pending.release()  # they can try again or tap a button
                 raise
+            if s.pending is not pending or pending.answered.is_set():
+                # tapped (or typed) while Whisper ran: that answer stands, and
+                # this transcript must not show up in the turn it continued
+                return error("nothing to confirm", 409)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
