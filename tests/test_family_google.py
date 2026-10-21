@@ -829,6 +829,10 @@ def test_beta_without_the_public_client_is_not_set_up(g, monkeypatch, tmp_path):
     tester, tester_id = g.member("Tester", "en", tier="beta")
     assert g.fam.google_client(tester_id) is None
     assert g.fam.google_client() is not None  # the family's is there
+    # someone no longer listed (removed mid sign-in) is never family either
+    assert g.fam.tier("not-a-user") == "beta"
+    assert g.fam.google_client("not-a-user") is None
+    assert not g.fam.gmail_allowed("not-a-user")
     status = tester.get("/api/google/status").json()
     assert status["enabled"] is False and status["gmail"] is False
     assert status["note"] == "Google isn't set up for beta accounts yet."
