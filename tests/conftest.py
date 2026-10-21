@@ -166,11 +166,12 @@ def check_api_rules(kwargs):
 def _env_vars() -> tuple[str, ...]:
     from assistant.config import ENV_OVERRIDES
 
-    from assistant.tools.google_auth import CLIENT_ENV, TOKEN_ENV, WEB_CLIENT_ENV
+    from assistant.tools.google_auth import (CLIENT_ENV, PUBLIC_CLIENT_ENV, TOKEN_ENV,
+                                             WEB_CLIENT_ENV)
 
     # and Kyle's Google sign-in (the server's), which family tests must not see
     return (*ENV_OVERRIDES, "WEB_TOKEN", "SPOTIFY_CLIENT_ID", TOKEN_ENV, CLIENT_ENV,
-            WEB_CLIENT_ENV,
+            WEB_CLIENT_ENV, PUBLIC_CLIENT_ENV,
             # team chat tokens (GITHUB_TOKEN is often set in a dev shell or CI)
             "SLACK_USER_TOKEN", "DISCORD_BOT_TOKEN", "GITHUB_TOKEN")
 
