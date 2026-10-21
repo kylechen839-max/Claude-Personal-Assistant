@@ -520,7 +520,7 @@ server (`[family] enabled`, on in the server profile).
   For a beta tester: no Gmail tools, even with `[gmail] enabled` and even
   if their token somehow carries Gmail scopes (`_google_tools` checks the
   tier); their consent URL asks only for `calendar.events` and the
-  read-only calendar extras (`Family.google_scopes`, used for both the
+  read-only calendar extras (`GoogleConnect.gmail` → `Family.gmail_allowed`, used for both the
   start and the code exchange); and they sign in only through the public
   client (`GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client`,
   its own Google Cloud project). Without it their Google is off with a

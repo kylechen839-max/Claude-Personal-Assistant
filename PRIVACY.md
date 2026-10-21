@@ -26,6 +26,13 @@ only monthly API token counts and a cost estimate per model: no conversation
 text, notes or names. Only the owner's phone app sees the estimate; Mom's
 instance keeps its own file under `data/mom/`.
 
+Beta testers (invited with the Beta tier): if they connect Google, the app
+asks only to see and edit their Google Calendar events and to read their
+calendar list and settings; it never asks for or reads Gmail. Their Google
+sign-in token is kept only in their own folder on the server and is deleted
+when they disconnect or are removed. Their conversation history is kept on
+the server, at most 20 MB per person (oldest conversations removed first).
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own

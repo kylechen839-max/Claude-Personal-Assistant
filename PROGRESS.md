@@ -3382,7 +3382,7 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
 - **Beta testers never see or get Gmail.**
   - `_google_tools` adds Gmail only for tier family, even with `[gmail]
     enabled` and a token that has the scopes.
-  - The consent URL comes from `Family.google_scopes(uid)`: for beta,
+  - The consent URL's scopes come from `GoogleConnect.gmail(uid)` → `Family.gmail_allowed(uid)`: for beta,
     `calendar.events` plus the read-only calendar extras. The same scopes
     are used for the code exchange.
   - `/api/google/status` now also returns `gmail` (false for beta) and

@@ -361,8 +361,13 @@ class Family:
         return self.dir / uid / GOOGLE_TOKEN
 
     def tier(self, uid: str | None) -> str:
+        """The owner (None) counts as family; a uid that isn't listed (e.g.
+        removed while signing in) gets the narrower beta, never family."""
+        if not uid:
+            return "family"
         with self.lock:
-            return tier_of(self.users.get(uid) if uid else None)
+            user = self.users.get(uid)
+        return tier_of(user) if user is not None else "beta"
 
     def google_client(self, uid: str | None = None) -> dict | None:
         """The Web application OAuth client `uid` signs in with: family
@@ -393,11 +398,6 @@ class Family:
     def gmail_allowed(self, uid: str | None) -> bool:
         """May `uid` have Gmail at all? Never a beta tester."""
         return bool(self.config["gmail"]["enabled"]) and self.tier(uid) == "family"
-
-    def google_scopes(self, uid: str) -> list[str]:
-        """What their consent screen asks for: a beta tester's only
-        calendar.events and the read-only calendar extras."""
-        from assistant.tools.google_auth import sign_in_scopes
 
         return sign_in_scopes(self.gmail_allowed(uid))
 
