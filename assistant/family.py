@@ -608,23 +608,27 @@ class Family:
 
     def replace_notion(self, uid: str, record: dict) -> tuple[bool, str | None]:
         """save_notion() for a (re)connect: (saved, the access token it
-        replaced if that was another one, for the caller to revoke)."""
+        replaced if that was another grant, for the caller to revoke). Not
+        when it's the same bot (Notion may hand the same bot a new token
+        on a reconnect to the same workspace; revoking the old one could
+        end the new grant too)."""
+        from assistant.notion_web import same_bot
+
         with self._notion_lock(uid):
             before = self._notion_record(uid)
             if not self.save_notion(uid, record):
                 return False, None
-        old = before["access_token"] if before is not None else None
-        return True, old if old != record["access_token"] else None
-
-    def revoke_notion(self, uid: str) -> None:
-        """Best effort: ask Notion to revoke their grant (disconnect, "Delete
-        my account", the owner removing them). Waits for a refresh in
-        flight, so the token it revokes is the one stored. Never raises: a
-        failure never blocks deleting."""
-        with self._notion_lock(uid):
-            self._revoke_notion(uid)
+        if before is None or before["access_token"] == record["access_token"] \
+                or same_bot(before, record):
+            return True, None
+        return True, before["access_token"]
 
     def _revoke_notion(self, uid: str) -> None:
+        """Best effort: ask Notion to revoke their stored grant (disconnect,
+        "Delete my account", the owner removing them). The caller holds
+        their Notion lock (not reentrant), so a refresh in flight finished
+        first and the token revoked is the one stored. Never raises: a
+        failure never blocks deleting."""
         try:
             record = self._notion_record(uid)
             if record is None:
@@ -715,11 +719,13 @@ class Family:
                                        and answer["refresh_token"]
                                        else record["refresh_token"])}
             try:
-                if not self.save_notion(uid, fresh, tools=False, expect=failed):
-                    return None
+                saved = self.save_notion(uid, fresh, tools=False, expect=failed)
             except (KeyProblem, OSError) as e:
                 log.warning("Family: saving %s's refreshed Notion token failed (%s)",
                             uid, type(e).__name__)
+                saved = False
+            if not saved:  # not stored: never leave the new token live at Notion
+                notion_web.revoke_quietly(access, uid)
                 return None
         log.info("Family: refreshed %s's Notion token", uid)
         return fresh

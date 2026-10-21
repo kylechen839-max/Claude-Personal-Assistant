@@ -4232,3 +4232,38 @@ and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
 - **Counts** (Linux sandbox, Python 3.13): 2616 passed, 35 skipped; JS
   118 pass. Baseline (the merge, before these fixes): 2609 passed, 35
   skipped; JS 118 (master's #9 removed the dashboard and hub tests).
+
+### G6 Round 3 (two low findings, 2026-10-21)
+- **"Delete my account" holds the Notion lock around revoke and removal.**
+  `Account.delete` takes `Family._notion_lock(uid)` around
+  `Family._revoke_notion` and `Family.remove`, as the owner's Remove does.
+  Before, `revoke_notion` let the lock go before `remove`, so a refresh in
+  that gap could save a new token that the folder then took away without
+  revoking it. `Family.revoke_notion` had no other caller and is removed;
+  the lock isn't reentrant, so callers hold it and call `_revoke_notion`.
+  The Google revoke stays outside the lock.
+- **A refreshed token that isn't saved is revoked.** If `refresh_notion`'s
+  `save_notion` returns False (they were removed, or the sign-in changed)
+  or raises (KeyProblem/OSError), the new access token is revoked quietly
+  instead of being left live at Notion.
+- **A reconnect to the same bot revokes nothing.** `replace_notion` returns
+  no old token when `notion_web.same_bot(old, new)`: the same `bot_id`, or,
+  if either record has none, the same `workspace_id`. Notion may reuse the
+  bot for a workspace, and revoking its old token could end the new grant.
+  A different bot (another workspace) still has its old token revoked.
+  SECURITY.md records this as a deliberate non-fix; README and MANUAL_TEST
+  (same workspace, then another workspace) updated.
+- **Tests**: `tests/test_notion_web.py` +6 (55): "Delete my account" runs
+  `Family.remove` under the Notion lock, and a refresh started in that gap
+  waits, finds nothing and never calls Notion's token endpoint; a refresh
+  whose save is refused (False, or OSError) revokes the new token, logs no
+  token, and leaves the stored one; reconnecting the same bot (with and
+  without a stored `bot_id`) revokes nothing and the new token stays live;
+  `same_bot` cases. The reconnect A -> B test now uses another bot and
+  workspace. The race test's "revoke" case now runs `Account.delete`.
+  - Revert check (`__pycache__` cleared each time): `Account.delete`
+    releasing the lock before `remove` fails the delete-lock test; dropping
+    the refresh revoke fails both refused-save cases; dropping the
+    `same_bot` check fails both same-bot cases.
+- **Counts** (Linux sandbox, Python 3.13): 2622 passed, 35 skipped; JS 118
+  pass. Baseline (round 2): 2616 passed, 35 skipped; JS 118.

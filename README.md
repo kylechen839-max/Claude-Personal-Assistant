@@ -816,7 +816,9 @@ no new assignments, and never your `NOTION_TOKEN`.
 - If they shared no Assignments database, or more than one, Settings says so
   ("share only your Assignments database") and the tools stay off; they tap
   **Reconnect Notion** and share just that one. There is no picker.
-  Reconnecting revokes the grant it replaces.
+  Reconnecting to another workspace revokes the grant it replaces; to the
+  same workspace (the same Notion bot) it just stores the new token, since
+  revoking the old one could end the new grant too.
 - Their sign-in is stored encrypted (`<dir>/<id>/notion.enc`, with the same
   `USER_DATA_KEY` as their Anthropic key; SECURITY.md). Without
   `USER_DATA_KEY` the server refuses to connect Notion and says why.

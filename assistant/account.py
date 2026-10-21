@@ -16,7 +16,7 @@ Deleting reuses Family.remove: it drops them from users.json, signs out
 every session of theirs (cookies, live voice calls) and deletes
 `<dir>/<id>/`: history, Google token, and every other per-person file
 (their own API key, Notion token), with its retry for files locked on
-Windows. Notion (POST /v1/oauth/revoke, Family.revoke_notion) and Google
+Windows. Notion (POST /v1/oauth/revoke, under their Notion lock) and Google
 (POST https://oauth2.googleapis.com/revoke) are told first, the token in
 the body, never the URL, so neither grant outlives the account; a failure
 there never blocks the delete and is logged without the token.
@@ -120,11 +120,11 @@ class Account:
 
     # ---------- delete ----------
     def revoke_token(self, uid: str) -> None:
-        """Best effort: their Notion and Google grants, before the folder
-        (and the token files) goes. Never raises; never logs a token."""
+        """Best effort: their Google grant, before the folder (and the token
+        file) goes. Never raises; never logs a token. (Notion's is revoked
+        in delete(), under their Notion lock.)"""
         from assistant.tools.google_auth import load_token_info
 
-        self.family.revoke_notion(uid)  # never raises (Family.revoke_notion)
         try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
             info = load_token_info(self.family.google_token(uid), environ={})
         except (OSError, ValueError):
@@ -145,7 +145,12 @@ class Account:
         if self.family.get(uid) is None:
             return False
         self.revoke_token(uid)
-        removed = self.family.remove(uid, sign_out)
+        # Notion's revoke and the removal under one hold of their Notion
+        # lock (as the owner's Remove): a refresh can't save a new token in
+        # between that the folder would take away unrevoked. Never raises.
+        with self.family._notion_lock(uid):
+            self.family._revoke_notion(uid)
+            removed = self.family.remove(uid, sign_out)
         with self.lock:
             self._recent.pop(uid, None)
             self._busy.pop(uid, None)

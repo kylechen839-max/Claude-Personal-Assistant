@@ -857,8 +857,17 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   blocks the delete. They take the same per-person lock as a refresh
   (Disconnect around revoke + delete, Remove around revoke + removal), so a
   refresh in flight finishes first and its new token is the one revoked;
-  a disconnect never comes back. A reconnect revokes the grant it replaced
-  (read and saved under that lock) once the new one is stored.
+  a disconnect never comes back. "Delete my account" holds it around the
+  Notion revoke and the removal too (round 3: before, it let go between
+  them), and a refreshed token that isn't saved (the sign-in changed, or
+  the write failed) is revoked straight away. A reconnect to another bot
+  (another workspace) revokes the grant it replaced (read and saved under
+  that lock) once the new one is stored. **Deliberate non-fix:** a
+  reconnect to the same bot (same `bot_id`; if either record has none,
+  the same `workspace_id`) revokes nothing, because Notion may reuse the
+  bot and revoking its old token could end the new grant; the old token
+  is no longer stored anywhere, and the person can remove the connection
+  in Notion's Settings -> Connections.
 - **Logs**: ids, counts and error type names only. The SDK gets its own
   logger at ERROR, because its warnings quote Notion's error messages,
   which can echo a request body (a filter holding a title); Notion's error

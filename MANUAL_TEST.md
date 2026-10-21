@@ -674,6 +674,16 @@ for all of this except the Google sign-in.
       as done".
   - Should: it reads that account's row (never yours), asks before changing
     it, and after "yes" the row's Status is Done in Notion.
+- [ ] ⚙ -> **Connect Notion** again, the same workspace and the same
+      database, Allow. Then ask "What assignments do I have this week?"
+  - Should: it still lists that row (the old sign-in wasn't revoked under
+    the new one), and Settings -> **Connections** in Notion shows "Hey
+    Claude" once.
+- [ ] If that Notion account has a second workspace with its own
+      Assignments database: Connect Notion again, pick the second
+      workspace, share its database, Allow, then ask for assignments.
+  - Should: it reads the second workspace's rows; in the first
+    workspace's Settings -> **Connections** "Hey Claude" is gone.
 - [ ] ⚙ -> **Disconnect Notion**, OK. Then in that Notion account open
       Settings -> **Connections**.
   - Should: "Hey Claude" is no longer listed; asking about assignments

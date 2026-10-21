@@ -669,9 +669,10 @@ ACCESS_3 = "ntn_" + "C" * 46
 def test_reconnect_revokes_the_grant_it_replaces(n):
     tess, uid = n.member()
     connect(n, tess)                          # grant A
-    n.fake.answer = token_answer(access_token=ACCESS_3)
+    n.fake.answer = token_answer(access_token=ACCESS_3, bot_id="b0t-2d",
+                                 workspace_id="w0rk-2d", workspace_name="Other")
     n.fake.valid.add(ACCESS_3)
-    connect(n, tess)                          # grant B replaces it
+    connect(n, tess)                          # grant B (another workspace's bot)
     assert n.fam._notion_record(uid)["access_token"] == ACCESS_3
     assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS}]
     assert ACCESS not in n.fake.valid and ACCESS_3 in n.fake.valid
@@ -684,6 +685,34 @@ def test_reconnect_with_the_same_token_revokes_nothing(n):
     connect(n, tess)  # Notion answered with the same access token again
     assert n.fake.calls("/v1/oauth/revoke") == []
     assert n.fam._notion_record(uid)["access_token"] == ACCESS
+
+
+@pytest.mark.parametrize("old_bot", ["b0t-1d", None])
+def test_reconnecting_the_same_bot_revokes_nothing(n, old_bot):
+    # Notion may reuse the bot for the same workspace: revoking the old
+    # token could end the new grant. With no bot_id stored, by workspace_id.
+    tess, uid = n.member()
+    n.fake.answer = token_answer(bot_id=old_bot)
+    connect(n, tess)
+    n.fake.answer = token_answer(access_token=ACCESS_3)  # same bot, same workspace
+    n.fake.valid.add(ACCESS_3)
+    connect(n, tess)
+    assert n.fake.calls("/v1/oauth/revoke") == []
+    assert n.fam._notion_record(uid)["access_token"] == ACCESS_3
+    assert ACCESS_3 in n.fake.valid
+    assert tess.get("/api/notion/status").json()["connected"] is True
+
+
+def test_same_bot():
+    same = notion_web.same_bot
+    assert same({"bot_id": "b1", "workspace_id": "w1"}, {"bot_id": "b1", "workspace_id": "w1"})
+    assert not same({"bot_id": "b1", "workspace_id": "w1"},
+                    {"bot_id": "b2", "workspace_id": "w1"})  # bot_id decides
+    assert same({"bot_id": None, "workspace_id": "w1"}, {"bot_id": "b2", "workspace_id": "w1"})
+    assert not same({"bot_id": None, "workspace_id": "w1"},
+                    {"bot_id": "b2", "workspace_id": "w2"})
+    assert not same({"bot_id": None, "workspace_id": None},
+                    {"bot_id": None, "workspace_id": None})  # nothing to go on: revoke
 
 
 def _blocked_refresh(n, monkeypatch, uid):
@@ -704,15 +733,16 @@ def _blocked_refresh(n, monkeypatch, uid):
     return t, release, result
 
 
-@pytest.mark.parametrize("how", ["disconnect", "revoke"])
+@pytest.mark.parametrize("how", ["disconnect", "delete"])
 def test_disconnect_during_a_refresh_stays_disconnected(n, monkeypatch, how):
     tess, uid = n.member()
     connect(n, tess)
     refreshing, release, _ = _blocked_refresh(n, monkeypatch, uid)
     if how == "disconnect":
         other = threading.Thread(target=n.fam.disconnect_notion, args=(uid,))
-    else:  # "Delete my account" (account.py) revokes first
-        other = threading.Thread(target=n.fam.revoke_notion, args=(uid,))
+    else:  # "Delete my account" (account.py)
+        other = threading.Thread(target=n.app.state.account.delete,
+                                 args=(uid, n.app.state.family_sign_out))
     other.start()
     other.join(0.3)  # it waits for the refresh in flight
     release.set()
@@ -762,6 +792,52 @@ def test_owner_removal_revokes_and_removes_under_the_notion_lock(n, monkeypatch)
     assert held == [True]
     assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS}]
     assert not (n.tmp / "users" / uid).exists()
+
+
+def test_deleting_my_account_revokes_and_removes_under_the_notion_lock(n, monkeypatch):
+    tess, uid = n.member()
+    connect(n, tess)
+    held, refreshed = [], []
+    original = n.fam.remove
+
+    def remove(who, *args, **kwargs):
+        held.append(n.fam._notion_locks[who].locked())
+        # a turn's 401 on the just-revoked token, in another thread: it must
+        # wait, not save a new token the folder would take away unrevoked
+        t = threading.Thread(target=lambda: refreshed.append(n.fam.refresh_notion(who, ACCESS)))
+        t.start()
+        t.join(0.3)
+        assert t.is_alive()
+        result = original(who, *args, **kwargs)
+        t.join(5)
+        return result
+
+    monkeypatch.setattr(n.fam, "remove", remove)
+    assert tess.post("/api/me/delete", json={"confirm": "DELETE"}).status_code == 200
+    assert held == [True]
+    assert refreshed == [None]  # gone by the time it got the lock
+    assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS}]
+    assert [n.fake.body(r)["grant_type"] for r in n.fake.calls("/v1/oauth/token")] \
+        == ["authorization_code"]  # never refreshed
+    assert not (n.tmp / "users" / uid).exists()
+
+
+@pytest.mark.parametrize("why", ["changed", "error"])
+def test_a_refresh_whose_save_is_refused_revokes_the_new_token(n, monkeypatch, caplog, why):
+    tess, uid = n.member()
+    connect(n, tess)
+    if why == "changed":
+        monkeypatch.setattr(n.fam, "save_notion", lambda *a, **k: False)
+    else:
+        def broken(*a, **k):
+            raise OSError("disk full")
+        monkeypatch.setattr(n.fam, "save_notion", broken)
+    with caplog.at_level(logging.DEBUG):
+        assert n.fam.refresh_notion(uid, ACCESS) is None
+    assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS_2}]
+    assert ACCESS_2 not in n.fake.valid
+    assert n.fam._notion_record(uid)["access_token"] == ACCESS
+    assert all(t not in caplog.text for t in (ACCESS, ACCESS_2, REFRESH))
 
 
 def test_a_429_never_stalls_a_turn_or_a_delete(n, monkeypatch):

@@ -180,6 +180,16 @@ def record_of(answer) -> dict:
     return {k: answer.get(k) if isinstance(answer.get(k), str) else None for k in keep}
 
 
+def same_bot(old: dict, new: dict) -> bool:
+    """Are two records the same Notion bot (a reconnect to the same
+    workspace)? By bot_id; if either has none, by workspace_id. Then the
+    old token isn't revoked: Notion may reuse the bot, and revoking could
+    end the new grant too."""
+    if old.get("bot_id") and new.get("bot_id"):
+        return old["bot_id"] == new["bot_id"]
+    return bool(old.get("workspace_id")) and old.get("workspace_id") == new.get("workspace_id")
+
+
 def is_assignments(source) -> bool:
     """Has this data source the Assignments schema the tools use?"""
     from assistant.tools.notion import STATUSES
@@ -338,7 +348,7 @@ class NotionConnect:
         if not saved:  # removed meanwhile, or not stored: don't leave a grant behind
             revoke_quietly(record["access_token"], uid)
             return False, uid
-        if old is not None:  # never left live at Notion once replaced
+        if old is not None:  # another bot's grant: never left live once replaced
             revoke_quietly(old, uid)
         log.info("Notion: %s connected workspace %s (%s)", uid, record["workspace_id"],
                  "Assignments database found" if found else "no single Assignments database")
