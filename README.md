@@ -737,8 +737,23 @@ in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
 
 ## Public beta: landing page and waitlist (cloud)
 
-The server also has a small public site, served by the app itself (no
-JavaScript, no outside fonts or scripts, the same strict CSP as the app):
+The server can also serve a small public site, from the app itself (no
+JavaScript, no outside fonts or scripts, the same strict CSP as the app).
+It is **off** (`[webapp] public_site = false`, on the server too): the pages
+promise beta tiers (Calendar only), your own Anthropic key stored encrypted,
+and Notion sign-in, so turn it on only once those have landed and are
+deployed (the comment at the top of `assistant/web/landing.html` and
+`privacy.html` lists each claim). Then turn it on for the server with a
+one-line change, through a PR like any other: `"public_site": True` in the
+server profile's `"webapp"` settings (`SERVER_PROFILE` in
+`assistant/config.py`). On a PC, the same in `config.local.toml`:
+
+```toml
+[webapp]
+public_site = true
+```
+
+With it on:
 
 - `https://<cloud>/welcome`: what Hey Claude does, "invite-only beta",
   "bring your own Anthropic API key", and the waitlist form (email and an
@@ -746,8 +761,8 @@ JavaScript, no outside fonts or scripts, the same strict CSP as the app):
 - `https://<cloud>/privacy` and `https://<cloud>/terms`: the beta's privacy
   notice and plain-language terms.
 
-`/` stays the app: signed out, it is still the sign-in page, now with a
-**What is Hey Claude?** link to `/welcome`. Invited people and your own
+`/` stays the app: signed out, it is still the sign-in page, with a
+**What is Hey Claude?** link to `/welcome` (only while the site is on). Invited people and your own
 phone keep the address they already have, and the PWA's home-screen icon
 keeps opening the app, not a marketing page. Share `/welcome` publicly.
 
@@ -759,7 +774,7 @@ Settings (`[webapp]` in `config.toml`):
   Read them, change the wording in `assistant/web/privacy.html` and
   `terms.html` if needed, then set it to `false`.
 - `waitlist_file`: where entries are kept (`/data/waitlist.json` on Render,
-  on the disk; `data/waitlist.json` locally; empty = waitlist closed).
+  on the disk; empty = waitlist closed, the default on a PC).
 
 **Inviting someone from the waitlist.**
 
@@ -782,8 +797,8 @@ curl -X DELETE -H "Authorization: Bearer $WEB_TOKEN" -H "Content-Length: 0" \
 ```
 
 The waitlist keeps at most 2000 entries; addresses are lower-cased and
-listed once (a repeat still gets "thanks", so the form never tells whether
-someone else is on it). Each network address can post 5 times an hour, and
+listed once (a repeat gets "thanks", and once the list is full everyone
+gets "full", so the form never tells whether someone else is on it). Each network address can post 5 times an hour, and
 a hidden field that only bots fill in drops their posts without a word. The
 log records only counts, never an address or a note.
 

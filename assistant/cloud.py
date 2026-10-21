@@ -479,6 +479,9 @@ class CloudGuard:
         if not self.limiter.allow(ip):
             return await _json(send, 429, {"error": "too many requests"},
                                {"Retry-After": "60", **extra})
+        # the client as worked out here, for the app's own per-client limits
+        # (public_site.py's waitlist); request.state can't be set by a client
+        scope = {**scope, "state": {**(scope.get("state") or {}), "client_key": ip}}
         public_get = PUBLIC_GET | (FAILOVER_PUBLIC_GET if self.failover_role else set())
         public_post = PUBLIC_POST | (FAILOVER_PUBLIC_POST if self.failover_role else set())
         invite = method == "POST" and path in INVITE_POST

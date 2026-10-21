@@ -3452,3 +3452,47 @@ Counts (Linux sandbox): 2471 passed, 58 skipped (master b96e6ed baseline
 
 Known gaps: no CAPTCHA and no confirmation email, both on purpose
 (SECURITY.md). The page wording is a draft for Kyle.
+
+### Round 2 (judge: CHANGES_NEEDED, 5 findings)
+1. **The waitlist limit counted the proxy, not the visitor.** It used the
+   web app's `client_ip` (the rightmost X-Forwarded-For hop, no
+   `client_ip_header`). CloudGuard now puts the client key it already
+   worked out into `scope["state"]["client_key"]`, and the waitlist uses
+   that, falling back to the web app's address off the cloud. Tests: two
+   private hops, `client_ip_header = "cf-connecting-ip"`, and off the cloud.
+2. **A full list told who was on it.** At the cap, every post now gets
+   "full", whether or not the address is already listed. Test: a listed
+   and a new address get the same answer at 2000.
+3. **The pages promise pieces that aren't on master yet** (G1 Calendar
+   only, G2 BYOK, G6 Notion), and master auto-deploys. New
+   `[webapp] public_site = false` (default, and in the server profile).
+   While it is off, the four pages and every waitlist route answer 404,
+   and the sign-in page drops its /welcome link. A comment at the top of
+   landing.html and privacy.html lists each dependent claim for the
+   release check. Tests: site off (404 and no link, en and zh, and through
+   `cloud.build_app`'s server profile); site on works as before.
+4. **Untested protections.** New tests: a slow waitlist body gets 408
+   after the short sign-in deadline (ASGI-level, about 0.2 s); a
+   cross-site `POST /api/waitlist`, `.../remove` and `DELETE` each get 403.
+5. **`waitlist_file` defaulted to `data/waitlist.json`,** which opened a
+   public write endpoint on a PC. The default is now "" (closed); only
+   the server profile sets `/data/waitlist.json`. Mom's `""` line is gone,
+   since the default covers it.
+
+Revert check: each fix undone alone (`__pycache__` cleared), and each
+fails its test. That covers the scope key in cloud.py, its use in
+public_site.py, the cap/duplicate order, `from_config`'s switch, the
+`public_site` default, the login-link removal, the `or waitlist` deadline,
+and the `waitlist_file` default. The cross-site tests fail with the web
+app's same-site check removed.
+
+Known issue, not fixed here: the web app's own sign-in `LoginLimiter`
+(`/api/login`, `/api/invite/accept`) has the same split. It counts the
+web app's `client_ip` (rightmost hop), while CloudGuard counts its own
+client key. Behind two private hops or Cloudflare, the app-side lockout
+groups visitors by proxy. CloudGuard's own wrong-token checks are keyed
+correctly, and the right token is never locked out. The fix is the same
+scope key, in webapp.py.
+
+Counts (Linux sandbox): 2480 passed, 58 skipped (round 1: 2471; master
+b96e6ed: 2435 passed, 58 skipped); JS 232 pass.

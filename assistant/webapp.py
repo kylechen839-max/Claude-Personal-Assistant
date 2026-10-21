@@ -1622,10 +1622,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         tag = (page_tag(user["language"], google is not None
                         and google.enabled(user["id"])) if user is not None
                else page_tag(language, google is not None and bool(google.owner)))
-        if not tag:
+        if not tag and public is not None:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        return Response(html.replace('<html lang="en">', tag, 1),
+        if public is None:  # no public site: no link to it
+            from assistant.public_site import LOGIN_LINK
+
+            html = html.replace(LOGIN_LINK, "", 1)
+        return Response(html.replace('<html lang="en">', tag, 1) if tag else html,
                         media_type="text/html; charset=utf-8",
                         headers={"Cache-Control": "no-cache"})
 

@@ -445,6 +445,10 @@ Someone who steals the unlocked phone has the assistant, as with any app.
 
 New public routes for the beta: `GET /welcome`, `/privacy`, `/terms` and
 `/site.css`, and `POST /api/waitlist`. Tests in `tests/test_public_site.py`.
+All of them exist only with `[webapp] public_site = true`: it is off by
+default and in the server profile (404, and no link on the sign-in page),
+and `waitlist_file` is empty by default, so a PC never has a public write
+endpoint.
 
 - **No script on the pages.** They are static HTML filled in on the
   server (the support email, the draft note, the form's status), with no
@@ -459,10 +463,16 @@ New public routes for the beta: `GET /welcome`, `/privacy`, `/terms` and
   sign-in call's 2 s body deadline; the 16 KB body cap and per-address
   request budget apply as everywhere. Then, in the app: 5 posts per
   address (IPv6 /64) per hour (`cloud.RateLimiter` with an hour window,
-  bounded table), a honeypot field (a filled one gets the same "thanks" and
-  is dropped), strict address parsing and lower-casing, the note cut to 300
+  bounded table). The address is the one CloudGuard worked out (its
+  `client_ip_header`, or the rightmost X-Forwarded-For hop outside the
+  trusted networks), passed in the request scope, which a client can't
+  set; off the cloud, the web app's own client address. Then there is a
+  honeypot field (a filled one gets the same "thanks" and is dropped),
+  strict address parsing and lower-casing, the note cut to 300
   characters with control characters removed, at most 2000 entries. A
-  repeat or a full list never reveals whether an address is on it.
+  repeat gets "thanks", and at the cap every post gets "full", listed or
+  not, so no answer reveals whether an address is on it. Cross-site posts
+  (and the owner's remove) get 403 from the web app's same-site check.
 - **Storage.** `[webapp] waitlist_file`, written with
   `google_auth.write_private` (temp file in the same folder, 0600 on
   Linux, atomic replace with retries on Windows). A file that can't be

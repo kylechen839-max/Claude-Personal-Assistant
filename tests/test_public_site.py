@@ -36,11 +36,13 @@ def site_env(make_cloud, fake_client, tmp_path):
     def build(**webapp_settings):
         config = load_config(None, None)
         config["family"].update(enabled=True, dir=str(tmp_path / "users"))
-        config["webapp"].update({"waitlist_file": str(tmp_path / "data" / "waitlist.json"),
+        config["webapp"].update({"public_site": True,
+                                 "waitlist_file": str(tmp_path / "data" / "waitlist.json"),
                                  **webapp_settings})
         clock = Clock()
         fam = Family(config, client=fake_client)
-        site = public_site.PublicSite(config, clock=clock)
+        site = (public_site.PublicSite(config, clock=clock)
+                if config["webapp"]["public_site"] else None)
         limiter = cloud.BoundedLoginLimiter(clock=clock)
         assistant = webapp.WebAssistant(
             lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
@@ -61,9 +63,9 @@ def site_env(make_cloud, fake_client, tmp_path):
         env.family.close()
 
 
-def join(client, email=EMAIL, note=NOTE, ip=PUBLIC, **extra):
+def join(client, email=EMAIL, note=NOTE, ip=PUBLIC, extra_headers=None, **extra):
     return client.post("/api/waitlist", data={"email": email, "note": note, **extra},
-                       headers=via_proxy(ip))
+                       headers={**via_proxy(ip), **(extra_headers or {})})
 
 
 def stored(env):
@@ -269,9 +271,25 @@ def test_waitlist_cap_holds(site_env):
         for i in range(public_site.MAX_ENTRIES)]}), encoding="utf-8")
     r = join(env.client, email="new@example.com")
     assert r.headers["location"] == "/welcome?waitlist=full#waitlist"
-    # someone already on it still gets "thanks" (nothing about other people)
-    r = join(env.client, email="U7@example.com", ip="198.51.100.5")
-    assert r.headers["location"].endswith("thanks#waitlist")
+    assert len(stored(env)) == public_site.MAX_ENTRIES == 2000
+    assert "new@example.com" not in env.file.read_text(encoding="utf-8")
+
+
+def test_a_full_list_answers_the_same_for_listed_addresses(site_env):
+    """Judge round 1: at the cap, an address already on the list got
+    "thanks" and a new one "full", so the answer told who was on it."""
+    env = site_env()
+    env.file.parent.mkdir(parents=True)
+    env.file.write_text(json.dumps({"version": 1, "entries": [
+        {"id": f"{i:016x}", "email": f"u{i}@example.com", "note": "", "joined": ""}
+        for i in range(public_site.MAX_ENTRIES)]}), encoding="utf-8")
+    new = join(env.client, email="new@example.com")
+    listed = join(env.client, email="U7@example.com", ip="198.51.100.5")
+    assert listed.headers["location"] == new.headers["location"] == \
+        "/welcome?waitlist=full#waitlist"
+    r = env.client.post("/api/waitlist", json={"email": "u8@example.com"},
+                        headers=via_proxy("198.51.100.6"))
+    assert r.status_code == 503
     assert len(stored(env)) == public_site.MAX_ENTRIES == 2000
     assert "new@example.com" not in env.file.read_text(encoding="utf-8")
 
@@ -392,18 +410,21 @@ def test_new_settings_have_defaults_and_config_toml_lines():
 
     web = DEFAULTS["webapp"]
     assert web["support_email"] == "" and web["legal_draft"] is True
-    assert web["waitlist_file"] == "data/waitlist.json"
+    # off by default, and no public write endpoint on a PC (judge round 1)
+    assert web["public_site"] is False and web["waitlist_file"] == ""
     with open(Path(__file__).resolve().parent.parent / "config.toml", "rb") as f:
         shipped = tomllib.load(f)["webapp"]
-    for key in ("support_email", "legal_draft", "waitlist_file"):
+    for key in ("public_site", "support_email", "legal_draft", "waitlist_file"):
         assert shipped[key] == web[key], key
     server = load_config(None, None, profile="server")["webapp"]
     assert server["waitlist_file"] == "/data/waitlist.json"  # on the disk
+    assert server["public_site"] is False  # turned on at the beta's launch
 
 
 def test_build_app_serves_the_public_site(monkeypatch, fake_client, tmp_path):
     cfg = load_config(None, None, profile="server")
-    cfg["webapp"].update(sessions_file="", waitlist_file=str(tmp_path / "w.json"))
+    cfg["webapp"].update(sessions_file="", waitlist_file=str(tmp_path / "w.json"),
+                         public_site=True)
     cfg["family"]["dir"] = str(tmp_path / "users")
     assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
                                                            model="m", tools=reg),
@@ -417,3 +438,149 @@ def test_build_app_serves_the_public_site(monkeypatch, fake_client, tmp_path):
         "ok": True}
     assert json.loads((tmp_path / "w.json").read_text())["entries"][0]["email"] == \
         "a@example.com"
+
+
+def test_build_app_without_the_public_site(fake_client, tmp_path):
+    """Judge round 1: master auto-deploys, and the pages promise pieces
+    still to come, so the server profile leaves the site off: no pages,
+    no waitlist, no link on the sign-in page."""
+    from fastapi.testclient import TestClient
+
+    cfg = load_config(None, None, profile="server")
+    cfg["webapp"].update(sessions_file="", waitlist_file=str(tmp_path / "w.json"))
+    cfg["family"]["dir"] = str(tmp_path / "users")
+    assert public_site.from_config(cfg) is None
+    assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
+                                                           model="m", tools=reg),
+                                    FakeTranscriber(), PrintTTS())
+    client = TestClient(cloud.build_app(cfg, assistant, TOKEN),
+                        base_url="https://testserver")
+    for path in ("/welcome", "/privacy", "/terms", "/site.css"):
+        assert client.get(path).status_code == 404, path
+    assert client.post("/api/waitlist", json={"email": "a@example.com"}).status_code == 404
+    assert not (tmp_path / "w.json").exists()
+    page = client.get("/")
+    assert page.status_code == 200 and "Hey Claude" in page.text
+    assert "/welcome" not in page.text and "login-more" not in page.text
+
+
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_site_off_means_404_and_no_link(site_env, language):
+    env = site_env(public_site=False)
+    for method, path in (("GET", "/welcome"), ("GET", "/privacy"), ("GET", "/terms"),
+                         ("GET", "/site.css"), ("POST", "/api/waitlist")):
+        r = env.client.request(method, path, headers=via_proxy(PUBLIC))
+        assert r.status_code == 404, path
+    assert env.client.get("/api/waitlist", headers=OWNER).status_code == 404
+    assert env.client.get("/waitlist", headers=OWNER).status_code == 404
+    page = env.client.get("/", headers=via_proxy(PUBLIC)).text
+    assert 'id="login-form"' in page and "/welcome" not in page
+    on = site_env().client.get("/", headers=via_proxy(PUBLIC)).text
+    assert public_site.LOGIN_LINK in on
+
+
+# --- who a post counts against (judge round 1) ------------------------------------
+
+def test_two_proxy_hops_count_per_visitor(site_env):
+    """A second private hop (X-Forwarded-For "visitor, 10.x"): CloudGuard
+    keys the rightmost address outside its trusted networks; the waitlist
+    used the rightmost hop, so 5 visitors used up everyone's hour."""
+    env = site_env()
+    for i in range(public_site.PER_HOUR + 3):
+        r = join(env.client, email=f"a{i}@example.com", ip=f"198.51.100.{i + 1}, 10.9.9.9")
+        assert r.headers["location"].endswith("thanks#waitlist"), i
+    for _ in range(public_site.PER_HOUR):
+        join(env.client, email="same@example.com", ip="198.51.100.200, 10.9.9.9")
+    r = join(env.client, email="same2@example.com", ip="198.51.100.200, 10.9.9.9")
+    assert r.headers["location"].endswith("busy#waitlist")  # still per visitor
+
+
+def test_client_ip_header_counts_per_visitor(site_env):
+    """Behind Cloudflare ([cloud] client_ip_header = "cf-connecting-ip")
+    every post arrives from a Cloudflare address."""
+    env = site_env()
+    env.guard.client_ip_header = "cf-connecting-ip"
+    for i in range(public_site.PER_HOUR + 3):
+        r = join(env.client, email=f"b{i}@example.com", ip="172.70.1.1",
+                 extra_headers={"CF-Connecting-IP": f"198.51.100.{i + 1}"})
+        assert r.headers["location"].endswith("thanks#waitlist"), i
+    for _ in range(public_site.PER_HOUR):
+        join(env.client, email="c@example.com", ip="172.70.1.1",
+             extra_headers={"CF-Connecting-IP": "198.51.100.200"})
+    r = join(env.client, email="d@example.com", ip="172.70.1.1",
+             extra_headers={"CF-Connecting-IP": "198.51.100.200"})
+    assert r.headers["location"].endswith("busy#waitlist")
+
+
+def test_off_the_cloud_the_web_apps_own_address_counts(fake_client, tmp_path):
+    """Without CloudGuard (a PC with the site on) the limit still holds."""
+    from fastapi.testclient import TestClient
+
+    config = load_config(None, None)
+    config["webapp"].update(public_site=True, waitlist_file=str(tmp_path / "w.json"))
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber(), PrintTTS())
+    app = webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                            public=public_site.from_config(config))
+    client = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    answers = [client.post("/api/waitlist", data={"email": f"e{i}@example.com"})
+               .headers["location"] for i in range(public_site.PER_HOUR + 1)]
+    assert answers[-2].endswith("thanks#waitlist") and answers[-1].endswith("busy#waitlist")
+
+
+# --- body deadline and cross-site posts (judge round 1) ----------------------------
+
+def test_a_slow_waitlist_body_gets_the_short_deadline(site_env):
+    """Waitlist posts get the sign-in call's body deadline (login_timeout),
+    not the signed-in one (body_timeout + size / rate)."""
+    import asyncio
+
+    env = site_env()
+    env.guard.login_timeout = 0.2
+    env.guard.body_timeout = 60
+    sent = []
+
+    async def receive():
+        if not sent:
+            sent.append(1)
+            return {"type": "http.request", "body": b"email=", "more_body": True}
+        await asyncio.sleep(3600)  # the rest never comes
+
+    out = []
+
+    async def send(message):
+        out.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/api/waitlist",
+             "raw_path": b"/api/waitlist", "query_string": b"", "scheme": "http",
+             "http_version": "1.1", "root_path": "", "server": ("testserver", 443),
+             "client": ("10.1.2.3", 40000),
+             "headers": [(b"host", b"testserver"), (b"content-length", b"1000"),
+                         (b"content-type", b"application/x-www-form-urlencoded"),
+                         (b"x-forwarded-for", PUBLIC.encode()),
+                         (b"x-forwarded-proto", b"https")]}
+
+    async def run():
+        await asyncio.wait_for(env.guard(scope, receive, send), 5)
+
+    asyncio.run(run())
+    assert out[0]["status"] == 408
+    assert env.guard.waitlist_slots.count == 0  # its slot is given back
+
+
+def test_cross_site_waitlist_posts_are_refused(site_env):
+    env = site_env()
+    cross = {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}
+    r = join(env.client, extra_headers=cross)
+    assert r.status_code == 403 and not env.file.exists()
+    join(env.client)
+    entry = stored(env)[0]
+    r = env.client.post(f"/api/waitlist/{entry['id']}/remove",
+                        headers={**OWNER, **via_proxy(PUBLIC), **cross})
+    assert r.status_code == 403
+    r = env.client.request("DELETE", f"/api/waitlist/{entry['id']}",
+                           headers={**OWNER, **via_proxy(PUBLIC), **cross,
+                                    "Content-Length": "0"})
+    assert r.status_code == 403
+    assert len(stored(env)) == 1

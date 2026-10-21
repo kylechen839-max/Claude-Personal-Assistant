@@ -11,11 +11,17 @@
   GET    /waitlist                   the owner's list (web/waitlist.html), with
                                      a remove button per entry
 
+All of it is off unless `[webapp] public_site` is true (it is turned on at
+the public beta's launch): then these routes don't exist (404) and the
+sign-in page has no link to /welcome.
+
 The form works without JavaScript: a plain POST, then a 303 back to
 /welcome?waitlist=<state>. A JSON post gets JSON back. Entries are kept in
 `[webapp] waitlist_file` (a private file written atomically): addresses
 lower-cased and de-duplicated, the note cut to MAX_NOTE characters, at most
-MAX_ENTRIES of them. Each address may post PER_HOUR times an hour; a filled
+MAX_ENTRIES of them. Each address may post PER_HOUR times an hour (the
+client address CloudGuard worked out, from the scope; off the cloud the web
+app's own client_ip); a filled
 honeypot field is dropped without a word. Entries are deleted by an opaque id,
 so an address never sits in a URL (or the access log). The log gets counts
 only, never an address or a note.
@@ -45,6 +51,7 @@ PAGES = {"/welcome": "landing.html", "/privacy": "privacy.html",
 MAX_ENTRIES = 2000
 MAX_NOTE = 300
 PER_HOUR = 5               # waitlist posts per address an hour
+CLIENT_KEY = "client_key"  # scope["state"] key CloudGuard sets (cloud.py)
 HONEYPOT = "website"       # hidden from people by site.css; bots fill it in
 # The landing page's notice after a post (?waitlist=<state>). A repeat of an
 # address already on the list gets "thanks" too: the page never tells
@@ -61,6 +68,8 @@ NOTICES = {
 }
 STATUS = {"thanks": 200, "invalid": 400, "busy": 429, "full": 503,
           "closed": 503, "error": 503}
+# The sign-in page's link here (web/index.html); taken out when the site is off.
+LOGIN_LINK = '<p class="login-more"><a href="/welcome">What is Hey Claude?</a></p>'
 DRAFT_NOTE = ('<p class="draft" role="note"><strong>Draft: Kyle to review.</strong> '
               'This wording is not final yet.</p>')
 
@@ -135,11 +144,13 @@ class Waitlist:
             return "closed"
         with self.lock:
             entries = self._load()
-            if any(e.get("email") == email for e in entries):
-                return "thanks"  # kept as first given
+            # "full" for everyone once at the cap, already listed or not: the
+            # answer never tells whether an address is on the list
             if len(entries) >= self.max_entries:
                 log.warning("Waitlist: full (%d entries)", len(entries))
                 return "full"
+            if any(e.get("email") == email for e in entries):
+                return "thanks"  # kept as first given
             entries.append({"id": secrets.token_hex(8), "email": email,
                             "note": note,
                             "joined": datetime.now(timezone.utc)
@@ -190,11 +201,10 @@ class PublicSite:
                 .replace("{{DRAFT}}", DRAFT_NOTE if self.draft else "")
                 .replace("{{WAITLIST_STATUS}}", status))
 
-    def join(self, ip: str, fields: dict) -> str:
-        """One waitlist post: its state (a NOTICES key)."""
-        from assistant.cloud import client_key
-
-        if not self.limiter.allow(client_key(ip)):
+    def join(self, key: str, fields: dict) -> str:
+        """One waitlist post from client `key` (cloud.client_key form): its
+        state (a NOTICES key)."""
+        if not self.limiter.allow(key):
             log.warning("Waitlist: one address over its limit")
             return "busy"
         if fields.get(HONEYPOT):
@@ -212,8 +222,19 @@ class PublicSite:
             return "error"
 
 
-def from_config(config: dict) -> PublicSite:
-    return PublicSite(config)
+def from_config(config: dict) -> "PublicSite | None":
+    """The site, or None while `[webapp] public_site` is off."""
+    return PublicSite(config) if config["webapp"]["public_site"] else None
+
+
+def client_key_of(request, web) -> str:
+    """Who a post counts against: the key CloudGuard computed for this
+    request (its client_ip_header or the rightmost untrusted
+    X-Forwarded-For hop, IPv6 per /64), else the web app's own address."""
+    from assistant.cloud import client_key
+
+    key = (request.scope.get("state") or {}).get(CLIENT_KEY)
+    return key if isinstance(key, str) and key else client_key(web.client_ip(request))
 
 
 def owner_page(entries: list[dict]) -> str:
@@ -276,7 +297,7 @@ def register(app, site: PublicSite, web, error) -> None:
                 return error("send a form or JSON", 415)
         except Exception:  # noqa: BLE001 - any malformed body
             fields = {}
-        state = await run_in_threadpool(site.join, web.client_ip(request), fields)
+        state = await run_in_threadpool(site.join, client_key_of(request, web), fields)
         if as_json:
             if state == "thanks":
                 return {"ok": True}

@@ -598,6 +598,9 @@ for all of this except the Google sign-in.
     folder; check Render -> Shell `ls /data/users` if you like.)
 
 ### Public site and waitlist (~10 min)
+Only at the beta's launch, after `public_site` is turned on for the server
+(README "Public beta"). Before that, `/welcome` answers "not found" and the
+sign-in page has no link to it.
 - [ ] On your iPhone, in a private Safari tab (signed out), open
       `https://<cloud>/welcome`, then Privacy and Terms from its footer.
   - Should: readable at phone width without zooming or sideways scrolling,
