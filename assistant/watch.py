@@ -375,11 +375,10 @@ def describe(checks: list[Check]) -> str:
 def candidate_config(config: dict, config_path: str | Path) -> dict:
     """cli --candidate: a copy that shares nothing it could break with the
     running instance: no history (not even opening the database), no saved
-    sign-ins, no PC hub, no resumed lecture jobs (webapp.serve), its own log."""
+    sign-ins, no resumed lecture jobs (webapp.serve), its own log."""
     config["candidate"] = True
     config["history"]["enabled"] = False
     config["webapp"]["sessions_file"] = ""
-    config["devteam"]["hub"] = False
     config["logging"]["file"] = f"logs/candidate-{Path(config_path).stem}.log"
     return config
 
