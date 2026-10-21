@@ -280,6 +280,37 @@ def test_alerts_only_when_the_state_changes(world):
     assert status["instances"]["main"]["status"] == "ok"
 
 
+def test_cloud_url_is_checked_and_alerted_on_but_never_healed(world):
+    """[watch] cloud_url: the Render copy's /healthz, from Kyle's PC. Down:
+    one alert, no restart or rollback here; back: one recovery alert."""
+    cloud = "https://hey-claude.onrender.com"
+    world.apps.add(8765)
+    world.apps.public[cloud] = 200
+    settings = load_config(None, None)
+    settings["watch"]["cloud_url"] = cloud + "/"
+    w = world.make(settings=settings)
+    status = w.run()
+    assert status["instances"]["cloud"]["status"] == "ok"
+    assert status["instances"]["cloud"]["label"] == "Cloud app"
+    assert world.sent == []
+    world.apps.public[cloud] = 502
+    for _ in range(3):
+        later(world)
+        status = w.run()
+    assert world.sent == [s for s in world.sent if s.startswith("Cloud app is failing")]
+    assert len(world.sent) == 1 and "healthz: HTTP 502" in world.sent[0]
+    assert world.git.restarts == [] and world.git.resets() == []
+    assert status["instances"]["main"]["status"] == "ok"
+    banner = watch.banner(status, now=world.clock())
+    assert [i["label"] for i in banner["issues"]] == ["Cloud app"]
+    world.apps.public[cloud] = 200
+    w.run()
+    assert len(world.sent) == 2 and world.sent[1].startswith("Cloud app recovered at")
+    # off by default: no cloud entry at all
+    assert DEFAULTS["watch"]["cloud_url"] == ""
+    assert "cloud" not in world.make().run()["instances"]
+
+
 def test_self_heal_restarts_once_per_failure(world):
     world.apps.add(8765, up=False)
     w = world.make()

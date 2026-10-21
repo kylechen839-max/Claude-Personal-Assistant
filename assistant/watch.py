@@ -14,6 +14,8 @@ Each run, per instance:
                 stylesheet it loads; the served version against the
                 checkout's HEAD; the address the phone opens (the
                 `tailscale serve` entry, or [webapp] public_origin).
+  cloud         `[watch] cloud_url` (the Render copy): its /healthz only,
+                alerted on like the others, never restarted or rolled back.
   functional    after a restart or a new version, after `[watch]
                 functional_hours`, or retried after `retry_minutes` once
                 failed: smoke.py's realistic conversation (text with a
@@ -65,6 +67,7 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
 MAIN = "main"  # Kyle's own instance: config.toml + .env
+CLOUD = "cloud"  # [watch] cloud_url: the Render copy, checked but never healed here
 _FAMILY = re.compile(r"^config\.([A-Za-z0-9_-]+)\.toml$")
 OK, FAILING = "ok", "failing"
 MAX_EVENTS = 20
@@ -846,9 +849,23 @@ class Watch:
         for inst in instances:
             results[inst.name] = self.heal(inst, head, *results[inst.name])
         head = self.head()
-        self.record(instances, results, head)
+        recorded = instances
+        cloud = self.cloud(instances)
+        if cloud is not None:  # alerts like the others; never restarted or rolled back
+            health, why = get_health(self.http, cloud.public_url)
+            results[cloud.name] = [Check("healthz", health is not None, why)], health
+            recorded = instances + [cloud]
+        self.record(recorded, results, head)
         write_status(self.status_file, self.status)
         return self.status
+
+    def cloud(self, instances: list[Instance]) -> Instance | None:
+        """[watch] cloud_url (Kyle's config.toml) as an instance to check:
+        only its /healthz, from here, whatever version it runs."""
+        url = str(self.cfg.get("cloud_url") or "").strip().rstrip("/")
+        if not url or any(i.name == CLOUD for i in instances):
+            return None
+        return Instance(CLOUD, "", "", 0, "Cloud app", public_url=url)
 
     def heal(self, inst: Instance, head: str | None, checks: list[Check],
              health: dict | None) -> tuple[list[Check], dict | None]:

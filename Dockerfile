@@ -20,6 +20,10 @@ WORKDIR /app
 COPY requirements.txt .
 # openWakeWord isn't installed: the server has no microphone or wake word.
 RUN pip install -r requirements.txt
+# Optional crash reports (README "Uptime, error tracking and backups"):
+# INSTALL_SENTRY=1 adds sentry-sdk; it reports only once SENTRY_DSN is set.
+ARG INSTALL_SENTRY=0
+RUN if [ "$INSTALL_SENTRY" = "1" ]; then pip install "sentry-sdk>=2,<3"; fi
 
 # Speech models are baked in at build time so a cold start downloads nothing
 # (HF_HUB_OFFLINE=1 below: nothing is fetched at run time either).

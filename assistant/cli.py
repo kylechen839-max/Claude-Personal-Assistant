@@ -1004,6 +1004,9 @@ def main(argv=None) -> int:
 
         candidate_config(config, args.config)
     log_file = setup_logging(config)
+    from assistant import errortracking
+
+    errortracking.init(config)  # crash reports, only with SENTRY_DSN set
     usage.configure(config["assistant"]["usage_file"])  # API token totals
     if separate and config["teamchat"]["enabled"]:
         # a family member's instance: Kyle's team chat tokens may be in the

@@ -69,6 +69,15 @@ services:
         sync: false
       - key: FAILOVER_BACKENDS      # e.g. pi=https://pi.tail1234.ts.net,pc=https://kyle-pc.tail1234.ts.net
         sync: false
+      # Optional crash reports (README "Uptime, error tracking and
+      # backups"): a Sentry project's DSN; empty = off. INSTALL_SENTRY=1
+      # (a build argument: Render passes environment variables to the
+      # Docker build) puts sentry-sdk in the image; with a DSN but no
+      # sentry-sdk the app logs one warning and runs.
+      - key: SENTRY_DSN
+        sync: false
+      - key: INSTALL_SENTRY
+        value: "0"
 
   - type: web
     name: pinecone-mcp

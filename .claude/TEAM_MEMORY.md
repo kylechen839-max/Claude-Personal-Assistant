@@ -255,6 +255,12 @@ as the work. Never put secrets, tokens or personal data in this file.
     every script before sign-in; on the cloud a 401 leaves it missing until
     a reload).
   - Hands-free voice is in `voice_ws.py` and `voice_session.py`.
+  - The cloud starts through `cloud.serve`, never `webapp.serve`: a
+    process-wide startup hook (e.g. `errortracking.init`) goes in
+    `cli.main`; a route both get goes in `webapp.create_app` (reused by
+    `cloud.build_app`), with its settings attached in `build_assistant`.
+    Owner-only routes use `owner_of`, which answers a family member 404,
+    not 403.
 - **History and failover:**
   - `history.py` projects the event log. Other modules use
     `history.record_event()` and never touch its tables.

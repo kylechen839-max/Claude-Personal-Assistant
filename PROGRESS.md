@@ -3365,3 +3365,57 @@ Kyle: "build Haiku routing and caching right now."
   to the main model. Counts (Linux sandbox): 2352 passed, 57 skipped, plus
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
+
+## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
+
+- **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
+  only with `SENTRY_DSN` set; `sentry-sdk` is not in requirements.txt (the
+  Dockerfile's `INSTALL_SENTRY=1` build argument adds it, `render.yaml`
+  offers both; on a PC or Pi `pip install "sentry-sdk>=2,<3"`). Without the
+  package: one warning, the app runs. Started from `cli.main` (every mode,
+  the cloud's included) and `webapp.serve`, once. Options:
+  `send_default_pii=False`, `include_local_variables=False`,
+  `max_breadcrumbs=0`, `traces_sample_rate=0`, no source context, no
+  request bodies. `before_send` rebuilds each event from an allowlist
+  (exception types and frames' file/function/line/module, a log record's
+  format string, the request's method and path, the runtime/os contexts),
+  runs every string through `config.redact` and masks email-shaped text;
+  an event it can't clean is dropped. `SENTRY_DSN` joins
+  `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`.
+- **Backup download** (`assistant/backup.py`, `GET /api/backup`, owner
+  only via `owner_of`): a zip of `history.sqlite`, `users/users.json`
+  (invite hashes removed), each listed member's
+  `users/<id>/history.sqlite`, `waitlist.json` if present and a
+  `MANIFEST.json`. An allowlist: no tokens, `*.enc`, sessions, `.env`,
+  logs or removed people. Databases are copied with
+  `sqlite3.Connection.backup` (read-only source), switched to
+  `journal_mode=DELETE` so each is one file. Built in a private temp
+  folder, one at a time (409), refused above `[webapp] backup_max_mb`
+  (200; checked before copying and on the zip as it grows), streamed with
+  `FileResponse` and deleted by its background task; a crashed one's
+  folder is swept by the next backup after an hour. INFO logs the size
+  only. Wired in `build_assistant` (`assistant.backup`) and registered in
+  `create_app`, so the PC and the cloud (`cloud.build_app` reuses
+  `create_app`) both have it; `cloud.py` is untouched.
+- **Uptime:** `[watch] cloud_url` (default `""`): the PC watchdog also
+  checks the cloud copy's `/healthz` and alerts on a change like the other
+  instances (banner, coordinator); it is never restarted, rolled back or
+  gated from the PC. README "Uptime, error tracking and backups":
+  UptimeRobot on `/healthz`, Sentry setup, and how Render's daily disk
+  snapshots relate to `/api/backup`.
+- Tests: `tests/test_errortracking.py` (8, a fake `sentry_sdk` in
+  `sys.modules`; nothing is sent), `tests/test_backup.py` (10, real SQLite
+  in tmp_path, plus one through CloudGuard), and
+  `test_cloud_url_is_checked_and_alerted_on_but_never_healed` in
+  `tests/test_watch.py`. Revert check: 28 source mutations (each undone
+  alone, `__pycache__` cleared), every one fails its test.
+- Counts (Linux sandbox, Python 3.13): 2454 passed, 58 skipped (master
+  b96e6ed: 2435 passed, 58 skipped; +19 new tests). No JS changed.
+- Measured (Linux sandbox, not Render): a 22.0 MB history (20,000
+  messages of repetitive text) zips to 2.3 MB in 0.27 s; real
+  conversations compress less.
+- Deviation from the brief: a family member gets **404** from
+  `/api/backup`, not 403, because `owner_of` answers 404 for every
+  owner-only route (as if it didn't exist). The waitlist path is
+  `<[family] dir>/../waitlist.json` (`/data/waitlist.json` on Render),
+  to be lined up with G5's setting when both merge.
