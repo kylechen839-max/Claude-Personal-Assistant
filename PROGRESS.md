@@ -65,7 +65,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
-| `test_account.py` | 33 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
 | `tests/js/family.test.mjs` | 15 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
@@ -3807,3 +3807,7 @@ shared `clear_session_cookie` that sign-out now uses too).
     `aclose()` alone without closing the generator (the file is still open).
 - **Counts** (Linux sandbox, Python 3.13): 2571 passed, 34 skipped (round
   2: 2569 passed, 34 skipped; +2). JS 242 pass.
+- **Round 3 review** (APPROVED, 1 LOW test gap): two more tests pin the
+  token guards: a delete during a build leaves no slot behind, and a build
+  failing before its folder exists never frees a newer export's slot
+  (each fails with its guard removed). `test_account.py` 37.

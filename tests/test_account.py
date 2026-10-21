@@ -532,6 +532,48 @@ def test_an_old_export_ending_late_never_frees_a_newer_ones_slot(env, owner, acc
     assert mom.get("/api/me/export").status_code == 200
 
 
+
+def test_a_delete_during_a_build_leaves_no_slot_behind(env, owner, acct):
+    """The account is deleted while its export is being built (after the
+    slot is taken, before the folder is bound to it): the build must not
+    bring the slot back for an account that no longer exists."""
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    plant(env, uid)
+    real_sweep = acct._sweep
+
+    def sweep():                               # in the build, before mkdtemp
+        acct._busy.pop(uid, None)              # what delete does to the slot
+        real_sweep()
+    acct._sweep = sweep
+    try:
+        folder, path = acct.build(uid)
+    finally:
+        acct._sweep = real_sweep
+    assert uid not in acct._busy
+    acct.finish(uid, folder)
+
+
+def test_a_build_failing_early_never_frees_a_newer_exports_slot(env, owner, acct, monkeypatch):
+    """Export 1 stalls past STALE before its folder is made; export 2 takes
+    the slot; export 1's mkdtemp then fails. Export 2 keeps its slot."""
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    real_sweep = acct._sweep
+    newer = {}
+
+    def sweep():                               # export 1, before its mkdtemp
+        env.clock.now += account_mod.STALE + 1
+        acct._sweep = real_sweep
+        newer["token"] = acct._start(uid)      # export 2 takes over the slot
+    acct._sweep = sweep
+    monkeypatch.setattr(account_mod.tempfile, "mkdtemp",
+                        lambda **kw: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        acct.build(uid)
+    slot = acct._busy.get(uid)
+    assert slot is not None and slot[1] is newer["token"]
+
 def test_export_is_rate_limited(env, owner, acct):
     mom, link = env.member(owner)
     for _ in range(account_mod.EXPORTS_PER_HOUR):
