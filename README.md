@@ -703,6 +703,18 @@ while the cloud is the active backend.
 4. **Remove** (also at the cloud's address) signs them out everywhere and
    deletes their conversations (if a file can't be deleted right away, it
    is retried later).
+5. They can also manage their own account from ⚙ on their phone:
+   **Download my data** saves a zip of their conversations (JSON, one file
+   each) and profile (name, language, time zone, tier, created date),
+   never tokens or keys; at most `[family] export_max_mb` (50 MB), one at a
+   time, three an hour. **Delete my account** (type `DELETE` or their
+   name, then confirm; it can't be undone) revokes their Google sign-in
+   at Google, signs them out everywhere and deletes their whole folder,
+   exactly like **Remove**, and removes any download of theirs still
+   being made (zips are built in `<family dir>/.exports/` and deleted when
+   the download ends). You can't delete or export your own (owner)
+   account this way. Render's disk snapshots keep a copy until they
+   expire.
 
 **Account types (tiers).** Each person is either **Family** or **Beta**
 (`tier` in `users.json`; the owner's list marks beta people "· Beta"):

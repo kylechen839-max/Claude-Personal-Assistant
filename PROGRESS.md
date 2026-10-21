@@ -64,7 +64,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
-| `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
+| `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -901,7 +902,7 @@ A read-only claude.ai page for checking on `/build-feature` runs at a
 glance, apart from the chat list (LLM Council verdict, 2026-10-19). It
 is not part of the assistant and loads nothing from it.
 - `tools/agent-dashboard/index.html`: the page behind
-  https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (the master publishes
+  https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn (the master publishes
   it). One subscription to the `runs` collection (newest 100). A summary
   line ("2 need you · 1 running · 1 silent"), then one card per run with a
   state pill and a coloured edge: needs you (PR ready or blocked), silent
@@ -3755,6 +3756,147 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
     schemas and is not a fix.
 - **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
+
+## Public beta G4: account self-service (2026-10-21)
+Kyle: let invited people manage their own account. New module
+`assistant/account.py`; small additive hooks in `family.py`
+(`app.state.family_sign_out`) and `webapp.py` (`account.register`, and a
+shared `clear_session_cookie` that sign-out now uses too).
+- **`POST /api/me/delete`** (a family member's own cookie session; the
+  owner gets 403, signed out 401, `[family]` off 404, cross-site 403 from
+  the existing guard). Needs `{"confirm": "DELETE"}` or their name (any
+  case). First a best-effort Google revoke (`Account.revoke`, default
+  `revoke_google`: POST to `oauth2.googleapis.com/revoke` with the
+  refresh token in the body); a failure is logged with the error type and
+  the delete goes on. Then `Family.remove(uid, sign_out)`, the owner's
+  Remove path: every session and voice call of theirs signed out, the whole
+  `<dir>/<id>/` deleted (history, Google token, and G2's
+  `anthropic_key.enc` / `notion.enc`), with the existing retry. The
+  response deletes the cookie and sends `Clear-Site-Data: "cookies"`.
+- **`GET /api/me/export`**: a zip with `profile.json` (id, name,
+  language, time zone, tier, created) and `conversations/<id>.json`
+  (`history.export(conv, "json")`, archived included). Nothing is copied
+  from their folder, so no token or key file can get in. Bounded by
+  `[family] export_max_mb` (new, 50; content before compression, 413),
+  one at a time per person (409), 3 per hour per person (429). Built in a
+  `mkdtemp` folder, streamed, removed when sent; one left by a dropped
+  download is swept by the next export after 10 minutes.
+- **UI** (`family.js` `setupAccount`, markup in `index.html`): a family
+  member's ⚙ has **Download my data** (fetched and saved as a file, so an
+  error never replaces the page) and **Delete my account** (typed
+  confirmation, a confirm() saying it can't be undone, then back to the
+  sign-in page). English and Chinese (`i18n.js`). `sw.js` cache v24 (v23
+  is taken by PR #35).
+- **Tests.** `tests/test_account.py` (28): whole folder gone with planted
+  key, Notion and Google files and history; every session signed out;
+  revoke called with the refresh token before the folder goes; delete
+  succeeds when revoke raises (no token in the log); revoke posts the
+  token in the body; confirmation required (6 bad values) and the name
+  works; owner (cookie and Bearer) refused; another member's id in body or
+  query ignored; cross-site and Origin-mismatch 403; export holds
+  conversations and profile, no tokens or keys, never another member's or
+  the owner's text; cap (413) with nothing left behind; temp folder
+  removed; dropped downloads swept; one at a time; rate limit per person;
+  rate map bounded; caplog shows ids only. JS: family.test.mjs +5 (shown
+  only to family members, download saved as a file, refusals explained,
+  delete needs the word and a yes then signs out, no/failed cases) and
+  i18n.test.mjs +1 (every account string in both languages).
+  `test_webapp.py`'s sw.js check now expects v24.
+  - Revert check: 18 source reverts (account.py pieces and the route
+    hook), each alone with `__pycache__` cleared, all fail their tests;
+    family.js and i18n.js reverted alone fail the 6 and 1 JS tests.
+- **Counts** (Linux sandbox, Python 3.13): 2495 passed, 33 skipped,
+  2528 collected (master 5d18d7e: 2442 passed, 58 skipped, 2500
+  collected; +28 new tests; the other 25 were skips that passed in this
+  run because the sandbox's model and network checks differed between
+  runs, not because of this change). JS 242 pass (was 236).
+### Round 2 (judge findings, after merging master e45ee95)
+- **No export outlives the account.** Exports now live in
+  `<family dir>/.exports/export-<id>.<random>` (made 0700), not the shared
+  `<system temp>/hey-claude-exports`. `.exports` can never be an id
+  (`u_...`), and the "." separator keeps one id's folders apart from
+  another's. Account tracks each person's export folder; **Delete my
+  account** removes all their `export-<id>.*` folders and frees their
+  slot. Cleanup no longer depends on the generator starting: the export is
+  an `ExportResponse` (a `StreamingResponse` whose `__call__` cleans up in
+  `finally`), because with ASGI 2.4 Starlette raises ClientDisconnect
+  before the body and runs neither the generator's `finally` nor a
+  BackgroundTask. Folders older than 10 minutes are swept at startup (when
+  `register` makes the Account) as well as on every export. No backup
+  download exists on master, and `Family.remove`/`_load` only touch valid
+  ids, so neither sees `.exports` (tested).
+- **Archived conversations** are in the export test now (one of the two
+  planted ones is archived).
+- **/privacy and /terms** say people can download their data and delete
+  their account themselves in Settings; the support-email route stays.
+  Still `legal_draft` until Kyle approves. (Not in the sw.js shell, so no
+  cache bump.)
+- Docs: SECURITY's rate-limit wording (only an export that starts counts,
+  one ending in 413 too; 409/429 refusals don't); the table's
+  `family.test.mjs` count is 15.
+- **Tests.** `test_account.py` +5 (33): an export built and never
+  streamed is gone after the delete (and an earlier run's, but not another
+  person's); a raw ASGI 2.4 request whose `send` raises OSError at the
+  response start leaves no folder and no busy slot; the startup sweep
+  removes an old folder and keeps a fresh one; exports sit in
+  `<family dir>/.exports` at 0700 and survive another person's removal and
+  a reload of the list; the pages' self-service sentences (and that
+  family.js calls both routes).
+  - Revert check (each alone, `__pycache__` cleared): dropping the delete's
+    folder removal, using a plain StreamingResponse, dropping the startup
+    sweep, `archived=False`, the old temp root, and the old privacy.html
+    or terms.html each fail their test.
+- **Counts** (Linux sandbox, Python 3.13): 2569 passed, 34 skipped (the
+  merge commit abf3b0f: 2564 passed, 34 skipped; +5). JS 242 pass.
+### Round 3 (judge's two low findings)
+- **An old export can't free a newer one's slot.** The slot is now
+  `_busy[uid] = (started, token, folder)`: `_start` makes a fresh token,
+  `build` binds the folder to it once `mkdtemp` returns (only if the slot
+  is still that token's), a build error frees by token, and `finish` frees
+  only when the slot's folder is its own. Before, the slot was set first
+  but the folder map still named the old folder (and an unset one counted
+  as a match), so a stale download ending during the next export's build
+  freed that export's slot and let a third in. The separate `_folders`
+  map is gone.
+- **A mid-body disconnect closes the zip before cleanup.**
+  `ExportResponse.__call__`'s `finally` now closes the body first: it calls
+  `aclose()` on Starlette's iterator, then `close()` on our own generator.
+  Both are needed, because `aclose()` only ends Starlette's thread-pool
+  wrapper and leaves a sync generator suspended with the file open.
+  Closing the generator runs its `with` and `finally`, so the zip is closed
+  before the folder is removed (Windows can't remove an open file), and
+  the folder is gone when the app returns.
+- **Tests.** `test_account.py` +2 (35): export 1's download goes stale,
+  export 2 starts and export 1 ends inside export 2's build (before its
+  folder exists) and again afterwards; export 2 keeps the slot (a third
+  gets 409) until its own download ends. A raw ASGI 2.4 request whose
+  `send` raises OSError on the first body chunk (`more_body` true): at the
+  first `finish` the zip's file handle is already closed, and the exports
+  folder is empty inside the event loop with gc off.
+  - Revert check (each alone, `__pycache__` cleared): HEAD's account.py
+    fails both. `_done` as an unconditional pop fails the overlap test.
+    Dropping `close_body()` fails the disconnect test, and so does
+    `aclose()` alone without closing the generator (the file is still open).
+- **Counts** (Linux sandbox, Python 3.13): 2571 passed, 34 skipped (round
+  2: 2569 passed, 34 skipped; +2). JS 242 pass.
+- **Round 3 review** (APPROVED, 1 LOW test gap): two more tests pin the
+  token guards: a delete during a build leaves no slot behind, and a build
+  failing before its folder exists never frees a newer export's slot
+  (each fails with its guard removed). `test_account.py` 37.
+## Dev team dashboard: new artifact URL (2026-10-21)
+- The old dashboard artifact stopped delivering chat wakes to the
+  coordinator; a fresh copy of the same page wakes it reliably. Every
+  reference now points at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn:
+  the page's `LAUNCHER_KINDS`, both desktop launchers (CRLF and LF/exec bit
+  kept), the dashboard README and watchdog prompt, MANUAL_TEST, the
+  Dev team dashboard section above, TEAM_MEMORY (plus a dated lesson) and
+  the test that pins the URL. The page itself lives on in the
+  agent-dashboard repo, which also gets a static `moved.html` for the old
+  artifact.
+- **Tests.** `test_agent_dashboard.py` pins the new URL; with the old
+  launchers and page it fails 4 tests (launcher URL and the page/desktop
+  byte-for-byte checks). test_docs + test_agent_dashboard: 75 passed,
+  1 skipped (Linux sandbox, Python 3.13).
 
 ## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
 

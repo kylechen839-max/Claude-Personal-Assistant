@@ -304,6 +304,9 @@ DEFAULTS: dict = {
         "turns_per_minute": 6,
         "turns_per_day": 200,       # a day in their own time zone (else UTC)
         "stt_seconds_per_day": 1800,  # seconds of their speech transcribed
+        # "Download my data" (account.py): the zip's contents, before
+        # compression, at most this big
+        "export_max_mb": 50,
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",

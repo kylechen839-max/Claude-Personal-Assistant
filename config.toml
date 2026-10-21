@@ -262,6 +262,7 @@ max_history_mb = 20           # each person's own history size cap (their [histo
 turns_per_minute = 6          # messages (typed, push-to-talk or voice) a minute
 turns_per_day = 200           # messages a day
 stt_seconds_per_day = 1800    # seconds of their speech turned into text a day (30 min)
+export_max_mb = 50            # "Download my data": the zip's contents (before compression) at most this big
 # Each person's own Anthropic API key (Settings -> "Your Anthropic API key"): beta
 # testers must add one (they pay for their own use); family members may. Stored
 # encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret

@@ -34,6 +34,17 @@ sign-in token is kept only in their own folder on the server and is deleted
 when they disconnect or are removed. Their conversation history is kept on
 the server, at most 20 MB per person (oldest conversations removed first).
 
+Invited people can download or delete their own account at any time from
+Settings. Download my data gives a zip of their conversations and profile
+(name, language, time zone, account type, date joined); it never includes
+Google sign-in tokens or API keys. The zip is built on the server only for
+the download and removed when it ends, or when the account is deleted.
+Delete my account takes effect at once in the app: it asks Google to revoke Hey Claude's access, signs them out on every
+device and permanently deletes their conversations, Google connection and any
+key they added. Render's automatic disk snapshots may keep a copy until they
+expire; they are not used to restore individual accounts. A backup the
+owner downloaded earlier also keeps its copy until the owner deletes it.
+
 If the owner turns on error reports (`SENTRY_DSN`), a crash or an error the
 app logs sends Sentry the error's type, where in the code it happened (file,
 function, line), the request's method and path, the app version and profile,

@@ -631,6 +631,21 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **Download my data** (a test invite, signed in on a second phone or
+      a private Safari window, after a short chat): ⚙ -> **Download my
+      data**.
+  - Should: iOS offers to save `hey-claude-data.zip`; opened in Files it
+    holds `profile.json` (name, language, time zone, tier, created) and a
+    `conversations/` file per chat, and nothing else. A fourth download
+    within the hour says "Too many downloads". On your own (owner) phone
+    there is no such button.
+- [ ] **Delete my account** (same test person): ⚙ -> **Delete my
+      account**, type `DELETE`, tap **Delete everything**, answer OK.
+  - Should: the phone goes back to the sign-in page. Your list no longer
+    shows them, their other phone is signed out too, and at
+    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    is gone if they had connected Google. In Chinese the section reads
+    下载我的数据 / 删除我的账户.
 - [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
       on Render"). On the beta tester's phone, before adding a key, type
       "hello" and also try hands-free voice.
@@ -860,7 +875,7 @@ phone app installed from the cloud URL with Tailscale on.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
 
 ## Agent run dashboard (optional, ~10 min)
-The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
+The dev team's run list at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn
 (the page, its README and its desktop launchers are in the private
 kylechen839-max/agent-dashboard repo, under `dashboard/`).
 The dashboard is desktop only (no phone layout).
