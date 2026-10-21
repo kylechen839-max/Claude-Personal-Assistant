@@ -117,6 +117,12 @@ EN = {
     "spotify_not_found": "I couldn't find {query} on Spotify.",
     "spotify_nothing_playing": "Nothing is playing on Spotify right now.",
     "still_working": "I'm still working on your last request.",
+    # an invited person's limits (quotas.py)
+    "limit_minute": "That's a lot of messages at once. Please wait a minute and try again.",
+    "limit_day": "You've reached today's limit of {per_day} messages. "
+                 "You can talk to me again tomorrow.",
+    "limit_speech": "You've used today's {minutes} minutes of speech. "
+                    "You can still type, and talking works again tomorrow.",
     "google_reconnect": "Reconnect Google from the app's settings: tap the gear, "
                         "then \"Connect Google account\".",
 }
@@ -206,6 +212,9 @@ ZH = {
     "spotify_not_found": "在 Spotify 上没找到“{query}”。",
     "spotify_nothing_playing": "Spotify 现在没有在播放。",
     "still_working": "我还在处理你上一个请求。",
+    "limit_minute": "一下子消息太多了，请等一分钟再试。",
+    "limit_day": "你今天的 {per_day} 条消息已经用完了，明天再来找我吧。",
+    "limit_speech": "你今天的 {minutes} 分钟语音已经用完了。还可以打字，明天就能再说话了。",
     "google_reconnect": "请在应用的设置里重新连接 Google：点齿轮，再点“连接 Google 账户”。",
 }
 

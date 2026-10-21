@@ -626,6 +626,14 @@ for all of this except the Google sign-in.
 - [ ] **Remove key**, confirm.
   - Should: the next "hello" says to add a key again. On a **Family**
     account the same steps work, and without a key they use yours as before.
+- [ ] **Their limits.** On an invited person's phone, type seven short
+      messages ("1", "2", ...) as fast as you can, then wait a minute and
+      send one more. Repeat with hands-free voice (seven quick questions).
+  - Should: the seventh gets "That's a lot of messages at once. Please wait
+    a minute and try again." (Chinese on a Chinese account), shown and, in
+    voice, spoken, with no reply from Claude and nothing added to that
+    conversation in History; after the minute they answer normally. On your
+    own phone the same burst is answered every time.
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server

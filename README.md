@@ -757,6 +757,18 @@ and, for Chinese, speech recognition with the multilingual Whisper model
 Those load the first time a Chinese-speaking person talks and are shared by
 everyone who speaks Chinese; English speakers keep the server's own.
 
+**Their limits.** Everyone you invite (family and beta alike; never you)
+can send at most `turns_per_minute` messages a minute (6) and
+`turns_per_day` a day (200), typed, push-to-talk or hands-free together,
+and have `stt_seconds_per_day` seconds of speech turned into text a day
+(1800, half an hour). Past one, the app says so in their language (e.g.
+"You've reached today's limit of 200 messages. You can talk to me again
+tomorrow.") instead of answering: nothing goes to Claude and their
+conversation is left as it was. When their speech time is used up they can
+still type. A day is their own calendar day (the time zone you gave them,
+else UTC). The counts are kept in memory, so restarting or redeploying the
+server resets them. `0` turns a limit off.
+
 **Their own Google.** Once it is set up (below), they tap ⚙ -> **Connect
 Google account** on their own phone and sign in to *their* Google account.
 Then they can ask about their calendar (add, move, delete; deletes ask
@@ -794,7 +806,8 @@ Calendar and Gmail, the dev team, the lecture recorder and tutor, your
 history, failover, or the invite menu. Their **Sign out everywhere** signs
 out only their own phones; yours signs out only yours. Settings: `[family]`
 in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
-`google_client`, `public_google_client`, `max_history_mb`, `zh_stt_model`,
+`google_client`, `public_google_client`, `max_history_mb`,
+`turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`, `zh_stt_model`,
 `zh_piper_voice`).
 
 ## Public beta: landing page and waitlist (cloud)

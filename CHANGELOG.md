@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Invited people (family and beta) now have per-person limits: 6 messages a
+  minute, 200 a day and 30 minutes of speech recognition a day by default
+  (`[family] turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`; 0 =
+  off). Over a limit, the app says so in their language and nothing is sent to
+  Claude. When speech time runs out they can still type. The owner is never
+  limited. Counts are kept in memory, so a restart resets them.
 - Beta testers bring their own Anthropic API key: Settings -> Your Anthropic
   API key (checked with Anthropic, stored encrypted with `USER_DATA_KEY`).
   Without one a beta tester is told to add it; family members still use the

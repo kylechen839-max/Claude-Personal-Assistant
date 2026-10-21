@@ -301,6 +301,11 @@ DEFAULTS: dict = {
         # unset: beta testers can't connect Google (never the family client)
         "public_google_client": "",
         "max_history_mb": 20,       # each person's history (not [history] max_mb)
+        # each invited person's limits (quotas.py; never the owner's), in
+        # memory: a restart resets them. 0 = no limit
+        "turns_per_minute": 6,
+        "turns_per_day": 200,       # a day in their own time zone (else UTC)
+        "stt_seconds_per_day": 1800,  # seconds of their speech transcribed
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",

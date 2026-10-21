@@ -208,14 +208,19 @@ def add_voice_routes(app, assistant, allowed_origins=(),
 
         language = getattr(session, "language", None)  # e.g. a family member's
 
-        def transcribe(samples):
-            return assistant.transcribe(samples, language)
+        def transcribe(samples):  # counted toward an invited person's speech
+            return assistant.transcribe(samples, language,
+                                        user=getattr(session, "user", None))
+
+        def limit(audio, count):  # an invited person's limits (quotas.py)
+            return assistant.limit_message(session, audio=audio, count=count)
 
         conv = VoiceConversation(
             WebBackend(assistant, session), transcribe,
             lambda text: assistant.synthesize(text, session, language),  # their own voice
             send, clock=clock, idle_timeout=v["idle_timeout"],
-            max_session=v["max_session_minutes"] * 60, language=language)
+            max_session=v["max_session_minutes"] * 60, language=language,
+            limit=limit)
         live[sid] = (conv, ws)
         if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")

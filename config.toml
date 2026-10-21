@@ -258,6 +258,11 @@ google = true                 # they may connect their own Google from their pho
 google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
 public_google_client = ""     # beta testers' Calendar-only Web client (own GCP project); GOOGLE_PUBLIC_CLIENT_JSON overrides; "" = no Google for beta
 max_history_mb = 20           # each person's own history size cap (their [history] max_mb)
+# Each invited person's limits (never yours); counted in memory, so a restart resets
+# them; 0 = no limit. A day is their own calendar day (their time zone, else UTC).
+turns_per_minute = 6          # messages (typed, push-to-talk or voice) a minute
+turns_per_day = 200           # messages a day
+stt_seconds_per_day = 1800    # seconds of their speech turned into text a day (30 min)
 # Each person's own Anthropic API key (Settings -> "Your Anthropic API key"): beta
 # testers must add one (they pay for their own use); family members may. Stored
 # encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret
