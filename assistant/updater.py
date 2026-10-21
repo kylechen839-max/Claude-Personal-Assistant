@@ -640,7 +640,11 @@ class Updater:
         if smoke:
             ok, why = self.smoke()
             if not ok:
-                return self.rollback(old, new, why, requirements)
+                # A failed --check (no mic, no audio device, no key) says
+                # nothing about the code: undo it now but try it again at
+                # the next check. Only a failed import rejects it for good.
+                return self.rollback(old, new, why, requirements,
+                                     reject=not why.startswith(SMOKE_CHECK_FAILED))
         if self.gate is not None:  # nothing restarts on it while we hold the lock
             ok, why = self.gate(new)
             if ok is None:  # Claude or the internet down: no verdict on `new`
