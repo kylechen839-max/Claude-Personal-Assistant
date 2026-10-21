@@ -108,6 +108,14 @@
     "Copy the invite link below.": "请复制下面的邀请链接。",
     "Active": "已加入",
     "Invited": "已邀请",
+    "Active · Beta": "已加入 · 测试版",
+    "Invited · Beta": "已邀请 · 测试版",
+    "Account": "账户类型",
+    "Beta (Calendar only)": "测试版（只有日历）",
+    "Family (Calendar and Gmail)": "家人（日历和 Gmail）",
+    "Google isn't set up for beta accounts yet.": "测试版账户暂时还不能连接 Google。",
+    "Disconnect your Google account? I won't see your calendar any more.":
+      "要断开你的 Google 账户吗？之后我就看不到你的日历了。",
     "New link": "新链接",
     "Remove": "移除",
     "This invite link has expired or was already used. Ask for a new one.":
@@ -281,6 +289,13 @@
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
+    ["Connect your own Google account so I can see your calendar: tap the gear at " +
+      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "account. If Google says it hasn't verified " +
+      "this app, tap \"Advanced\", then \"Go to … (unsafe)\"."]:
+      "连接你的 Google 账户，我就能看你的日历：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "用你自己的 Google 账户登录。" +
+      "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
   const PATTERNS = [
     [/^Working: (.+)…$/, "正在处理：$1…"],
@@ -396,14 +411,20 @@
     "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
+  // a beta tester's (status "gmail": false): Calendar only, no mail wording
+  const STEP_GOOGLE_CALENDAR = "Connect your own Google account so I can see your calendar: " +
+    "tap the gear at the top right, then \"Connect Google account\", and sign in with your " +
+    "own Google account. If Google says it hasn't verified this app, tap \"Advanced\", " +
+    "then \"Go to … (unsafe)\".";
 
   // Shown (with the steps, or alone once they're done) until she taps Got it.
   const EXAMPLES_ALWAYS = ["\"What's the weather tomorrow?\"",
     "\"How do I make braised pork belly?\"",
     "\"How do you say 'thank you for dinner' in English?\"",
     "\"Help me write a birthday message to my friend.\""];
-  const EXAMPLES_GOOGLE = ["\"What's on my calendar tomorrow?\"",
-    "\"Add a doctor's appointment Friday at 10am.\"",
+  const EXAMPLES_CALENDAR = ["\"What's on my calendar tomorrow?\"",
+    "\"Add a doctor's appointment Friday at 10am.\""];
+  const EXAMPLES_GOOGLE = [...EXAMPLES_CALENDAR,
     "\"Any new email today?\"",
     "\"Help me reply to that email.\" (I only write a draft; you send it.)"];
 
@@ -422,10 +443,12 @@
     try { dismissed = win.sessionStorage?.getItem("guideDismissed") === "1"; } catch (e) { /* private */ }
     const steps = [];
     if (!standalone(win)) steps.push(STEP_HOME);
-    if (st.enabled && !st.connected) steps.push(STEP_GOOGLE);
+    const mail = st.gmail !== false;  // false: a beta tester, Calendar only
+    if (st.enabled && !st.connected) steps.push(mail ? STEP_GOOGLE : STEP_GOOGLE_CALENDAR);
     let seen = false;
     try { seen = win.localStorage?.getItem("examplesSeen") === "1"; } catch (e) { /* private */ }
-    const examples = seen ? [] : [...EXAMPLES_ALWAYS, ...(st.connected ? EXAMPLES_GOOGLE : [])];
+    const examples = seen ? [] : [...EXAMPLES_ALWAYS,
+      ...(st.connected ? (mail ? EXAMPLES_GOOGLE : EXAMPLES_CALENDAR) : [])];
     if ((!steps.length && !examples.length) || dismissed) { box.hidden = true; return; }
     const lines = [];
     if (steps.length) {
@@ -466,6 +489,7 @@
     }
 
     let signedIn = false;
+    let mail = true;  // the last status's "gmail" (false: no mail wording)
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
@@ -473,11 +497,15 @@
         if (!res.ok) return;  // not signed in yet, or the button is off
         const st = await res.json();
         signedIn = true;
+        mail = st.gmail !== false;
         renderGuide(win, doc, st, say);
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
-        if (hint) {
+        if (hint && !st.enabled && st.note) {  // e.g. not set up for beta accounts yet
+          hint.hidden = false;
+          hint.textContent = say(String(st.note));
+        } else if (hint) {
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = say("Google account connected.");
         }
@@ -503,7 +531,9 @@
     });
     if (unlink) {
       unlink.addEventListener("click", async () => {
-        const ask = say("Disconnect your Google account? I won't see your calendar or email any more.");
+        const ask = say(mail
+          ? "Disconnect your Google account? I won't see your calendar or email any more."
+          : "Disconnect your Google account? I won't see your calendar any more.");
         if (typeof win.confirm === "function" && !win.confirm(ask)) return;
         unlink.disabled = true;
         let ok = false;

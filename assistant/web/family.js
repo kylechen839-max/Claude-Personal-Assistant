@@ -76,6 +76,7 @@
     if (!box) return null;
     const openBtn = $("invite-open"), form = $("invite-form"), nameIn = $("invite-name");
     const langIn = $("invite-language"), tzIn = $("invite-tz"), status = $("invite-status");
+    const tierIn = $("invite-tier");  // "beta" (the default) or "family"
     const linkIn = $("invite-link"), list = $("family-list");
     let shown = false;
 
@@ -113,7 +114,8 @@
       label.textContent = user.name;
       const state = doc.createElement("span");
       state.className = "hint";
-      state.textContent = user.status === "active" ? "Active" : "Invited";
+      state.textContent = (user.status === "active" ? "Active" : "Invited") +
+        (user.tier === "beta" ? " · Beta" : "");
       const again = doc.createElement("button");
       again.type = "button";
       again.textContent = "New link";
@@ -158,7 +160,8 @@
       status.textContent = "";
       try {
         const body = await post("/api/invites", {
-          name: nameIn.value.trim(), language: langIn.value, timezone: tzIn ? tzIn.value.trim() : "" });
+          name: nameIn.value.trim(), language: langIn.value, timezone: tzIn ? tzIn.value.trim() : "",
+          tier: tierIn && tierIn.value ? tierIn.value : "beta" });
         nameIn.value = "";
         form.hidden = true;
         await share(body.url);

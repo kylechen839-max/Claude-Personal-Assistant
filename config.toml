@@ -256,6 +256,8 @@ max_users = 10                # people you can invite
 invite_days = 30              # an invite link works this many days, and only once
 google = true                 # they may connect their own Google from their phone (Calendar, Gmail drafts)
 google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
+public_google_client = ""     # beta testers' Calendar-only Web client (own GCP project); GOOGLE_PUBLIC_CLIENT_JSON overrides; "" = no Google for beta
+max_history_mb = 20           # each person's own history size cap (their [history] max_mb)
 zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
 zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
 

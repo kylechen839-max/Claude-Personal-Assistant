@@ -1619,8 +1619,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         # else [assistant] language; "connect Google" for their own account
         sid = web.sid(request) if family is not None else None
         user = family.get(web.user_of(sid)) if sid else None
+        # (or why it is off: a beta tester before the public client is set up)
         tag = (page_tag(user["language"], google is not None
-                        and google.enabled(user["id"])) if user is not None
+                        and (google.enabled(user["id"])
+                             or google.note(user["id"]) is not None)) if user is not None
                else page_tag(language, google is not None and bool(google.owner)))
         if not tag and public is not None:
             return FileResponse(STATIC / "index.html", media_type="text/html")
