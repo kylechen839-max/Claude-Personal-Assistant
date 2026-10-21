@@ -613,8 +613,9 @@ server (`[family] enabled`, on in the server profile).
     Error messages never hold it, and the check's SDK exceptions are not
     chained into ours.
   - *Whose bill.* Their chats and history titles use their own client (an
-    explicit `api_key`, so the SDK reads no `ANTHROPIC_API_KEY` /
-    `ANTHROPIC_AUTH_TOKEN` from the server's environment), looked up per
+    explicit `api_key`, and `auth_token` cleared after construction because
+    SDKs before 0.98 still read `ANTHROPIC_AUTH_TOKEN` from the server's
+    environment; `userkeys.user_client`), looked up per
     call, so a replaced or removed key applies to the very next call, also
     in an open conversation. A beta tester without a key gets `MissingKey`
     before any request ("Add your Anthropic API key in Settings to start");

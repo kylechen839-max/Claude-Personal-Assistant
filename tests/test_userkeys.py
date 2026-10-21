@@ -6,6 +6,7 @@ key (Family's `user_client` seam); the key check (userkeys.check_key) is
 replaced, or run against the real SDK over an httpx MockTransport."""
 
 import logging
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -262,6 +263,27 @@ def test_a_persons_client_never_carries_the_servers_credentials(monkeypatch, tmp
     a = config["assistant"]
     assert (client.max_retries, client.timeout) == (a["api_max_retries"], a["api_timeout"])
 
+
+
+def test_an_older_sdk_that_reads_the_bearer_token_anyway_is_cleared(monkeypatch, tmp_path):
+    """anthropic < 0.98 read ANTHROPIC_AUTH_TOKEN even with an explicit
+    api_key and sent it next to X-Api-Key. Both a person's chat client and
+    the key check must drop it."""
+    import anthropic
+
+    class OldSdk(anthropic.Anthropic):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "owner-bearer-token")
+    monkeypatch.setattr(anthropic, "Anthropic", OldSdk)
+    assert "Authorization" in OldSdk(api_key=KEY_A).auth_headers  # the old behaviour
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    for client in (family_mod.Family(config)._new_user_client(KEY_A),
+                   userkeys.user_client(KEY_A, timeout=10, max_retries=1)):
+        assert client.auth_token is None and client.auth_headers == {"X-Api-Key": KEY_A}
 
 # --- whose client each conversation uses -------------------------------------------
 

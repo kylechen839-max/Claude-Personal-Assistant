@@ -3644,11 +3644,16 @@ ran on the owner's `anthropic.Anthropic()`.
   i18n.test.mjs (+1: every string of the section in Chinese). Existing
   tests that had a beta-by-default person talk on the owner's key now
   invite `tier="family"` (4 lines); the G1 beta Gmail test now saves a key
-  for its tester first; the sw.js pin is v23.
+  for its tester first; the sw.js pin is v25 (after the master merge).
   - Revert check: 20 Python and 3 JS source reverts, each alone with
     `__pycache__` cleared, all fail their tests. (The empty-secret check
     is also covered by the length check; only its message test fails.)
-- **Counts** (Linux sandbox, Python 3.13): 2497 passed, 35 skipped; G1
+- **Counts after merging master and the review fixes:** 2543 passed, 35
+  skipped; JS 241. Review round 1 (APPROVED, 3 LOW): an SDK before 0.98
+  sent the server's `ANTHROPIC_AUTH_TOKEN` next to a person's key, so
+  `userkeys.user_client` clears it (test with an old-SDK stand-in); the
+  public privacy page now mentions the usage estimate and Remove key.
+- **Counts before the merge** (Linux sandbox, Python 3.13): 2497 passed, 35 skipped; G1
   366eab5 in the same sandbox at the same time: 2467 passed, 33 skipped
   (+29 test_userkeys.py, +1 contract fake; the 2 new skips are the
   contract test's live variants). Earlier the same day the G1 tree gave

@@ -101,6 +101,17 @@ def last4(key: str) -> str:
     return key[-4:]
 
 
+def user_client(key: str, **options):
+    """An Anthropic client on `key` alone. SDKs before 0.98 also read
+    ANTHROPIC_AUTH_TOKEN from the environment when api_key is given and
+    send it as a bearer token, so it is cleared after construction."""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=key, **options)
+    client.auth_token = None
+    return client
+
+
 def check_key(key: str) -> None:
     """Ask Anthropic whether `key` works (one cheap read-only call). Raises
     KeyProblem 400 if it was refused, 503 if the check couldn't run (network,
@@ -108,7 +119,7 @@ def check_key(key: str) -> None:
     import anthropic
 
     try:
-        anthropic.Anthropic(api_key=key, timeout=10, max_retries=1).models.list(limit=1)
+        user_client(key, timeout=10, max_retries=1).models.list(limit=1)
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError):
         raise KeyProblem("Anthropic didn't accept that key") from None
     except anthropic.APIStatusError as e:

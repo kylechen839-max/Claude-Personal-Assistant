@@ -566,13 +566,13 @@ class Family:
         return self._client
 
     def _new_user_client(self, key: str):
-        import anthropic
+        from assistant.userkeys import user_client
 
         a = self.config["assistant"]  # the same options as the owner's
-        # an explicit api_key: the SDK reads no credential from the server's
-        # environment (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are Kyle's)
-        return anthropic.Anthropic(api_key=key, max_retries=a["api_max_retries"],
-                                   timeout=a["api_timeout"])
+        # only their key: never ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+        # from the server's environment (Kyle's)
+        return user_client(key, max_retries=a["api_max_retries"],
+                           timeout=a["api_timeout"])
 
     def api_for(self, uid: str) -> tuple[object, bool]:
         """(client, True if it is on their own key) for `uid`'s next call."""
