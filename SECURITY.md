@@ -1063,7 +1063,59 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   and Spotify token files with the running app (a refresh may rewrite
   them, atomically, as either process already could).
 
+## Error tracking and backups (`errortracking.py`, `backup.py`)
+
+- **Error tracking is off unless asked for.** Only with `SENTRY_DSN` set
+  (`sentry-sdk` is in requirements.txt but never starts without one; an
+  install missing the package logs one warning, never the DSN, and runs).
+  Sentry is started with `send_default_pii=False`,
+  `include_local_variables=False`, `max_breadcrumbs=0`, no source context
+  and `max_request_body_size="never"` (load-bearing: without it Starlette's
+  request extractor reads bodies past their field limits). Tracing is off
+  entirely: `traces_sample_rate` is left unset (even 0 counts as tracing
+  enabled), `trace_propagation_targets=[]`, and no auto-enabling
+  integrations, so no `sentry-trace` or `baggage` header (the DSN's public
+  key, the route, the release) is ever added to calls to Anthropic, Google,
+  Notion or anyone else; tested with the real SDK against a local server.
+  Integrations: Sentry's defaults plus FastAPI/Starlette. `before_send` rebuilds every event
+  from an allowlist: exception types and frames' file, function, line and
+  module (never the exception message, which can quote a turn, an email or
+  a tool input; never `abs_path`, which names the user's home folder); a
+  log record's format string without its arguments, and only from the
+  app's own `assistant.*` loggers (asyncio's "Task exception was never
+  retrieved" and libraries' `log.error(exc)` put exception text there; for
+  them only the logger's name is sent); the request's method
+  and path (no host, query string, headers, cookies, body, user or IP); no
+  server name, tags, `extra` (sys.argv), modules, threads or breadcrumbs;
+  only the `runtime` and `os` contexts. Every remaining string goes through
+  `config.redact`, and email-shaped strings are masked. An event that
+  can't be cleaned is dropped. `SENTRY_DSN` is in `SECRET_ENV_VARS`
+  (masked in logs) and `ISOLATED_ENV_VARS` (a family copy that would
+  inherit Kyle's from the shell refuses to start).
+  Tests: `tests/test_errortracking.py` (a fake `sentry_sdk`, and the real
+  SDK in a child process with a capturing transport; nothing sent).
+- **The backup download is the owner's only** (`GET /api/backup`,
+  `webapp.owner_of`: 401 signed out, 404 for a family member, CloudGuard's
+  sign-in in front on Render). It is built from an allowlist (the history
+  databases, the family list as `family.public` shows it, the waitlist
+  (`[webapp] waitlist_file`; "" leaves it out), a manifest), so tokens,
+  `*.enc` keys, sessions and `.env` can't end up in it whatever else is on
+  the disk, and people already removed are left out. Databases are copied with SQLite's online backup, read-only. The
+  zip is made in a private temp folder (`mkdtemp`), refused above
+  `[webapp] backup_max_mb`, one at a time, sent with `Cache-Control:
+  no-store`, and the folder is deleted when the response ends; a crashed
+  backup's folder (over an hour old) is removed at startup and by the
+  next backup. The log gets its size only. Tests: `tests/test_backup.py`.
+
 ## Not fixed, on purpose
+
+- **A backup is a plain zip of everyone's conversations.** It holds no
+  secret that unlocks anything, but it does hold Kyle's and the family's
+  history and the waitlist's addresses, unencrypted: whoever has the file
+  can read them. Kept simple on purpose (any SQLite tool opens it); the
+  README says to store it privately. A conversation deleted after a backup
+  stays in that backup (and in Render's disk snapshots) until the file is
+  deleted.
 
 - **Calendar data from Kyle's own events.** Treating every calendar
   listing like web content would make every move ask for confirmation (a

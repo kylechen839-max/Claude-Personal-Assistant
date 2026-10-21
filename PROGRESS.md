@@ -3681,6 +3681,113 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
 - **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
 
+## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
+
+- **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
+  only with `SENTRY_DSN` set (`render.yaml` offers it); `sentry-sdk` is in
+  requirements.txt since round 2 (round 1 had it optional behind a Docker
+  build argument). Without the package: one warning, the app runs. Started from `cli.main` (every mode,
+  the cloud's included) and `webapp.serve`, once. Options:
+  `send_default_pii=False`, `include_local_variables=False`,
+  `max_breadcrumbs=0`, no tracing (round 2, below), no source context, no
+  request bodies. `before_send` rebuilds each event from an allowlist
+  (exception types and frames' file/function/line/module, a log record's
+  format string, the request's method and path, the runtime/os contexts),
+  runs every string through `config.redact` and masks email-shaped text;
+  an event it can't clean is dropped. `SENTRY_DSN` joins
+  `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`.
+- **Backup download** (`assistant/backup.py`, `GET /api/backup`, owner
+  only via `owner_of`): a zip of `history.sqlite`, `users/users.json`
+  (each entry `family.public`, round 2), each listed member's
+  `users/<id>/history.sqlite`, `waitlist.json` if present and a
+  `MANIFEST.json`. An allowlist: no tokens, `*.enc`, sessions, `.env`,
+  logs or removed people. Databases are copied with
+  `sqlite3.Connection.backup` (read-only source), switched to
+  `journal_mode=DELETE` so each is one file. Built in a private temp
+  folder, one at a time (409), refused above `[webapp] backup_max_mb`
+  (200; checked before copying and on the zip as it grows), streamed with
+  `FileResponse` and deleted by its background task; a crashed one's
+  folder is swept (after an hour) by the next backup and, since round 2,
+  at startup. INFO logs the size
+  only. Wired in `build_assistant` (`assistant.backup`) and registered in
+  `create_app`, so the PC and the cloud (`cloud.build_app` reuses
+  `create_app`) both have it; `cloud.py` is untouched.
+- **Uptime:** `[watch] cloud_url` (default `""`): the PC watchdog also
+  checks the cloud copy's `/healthz` and alerts on a change like the other
+  instances (banner, coordinator); it is never restarted, rolled back or
+  gated from the PC. README "Uptime, error tracking and backups":
+  UptimeRobot on `/healthz`, Sentry setup, and how Render's daily disk
+  snapshots relate to `/api/backup`.
+- Tests: `tests/test_errortracking.py` (8, a fake `sentry_sdk` in
+  `sys.modules`; nothing is sent), `tests/test_backup.py` (10, real SQLite
+  in tmp_path, plus one through CloudGuard), and
+  `test_cloud_url_is_checked_and_alerted_on_but_never_healed` in
+  `tests/test_watch.py`. Revert check: 28 source mutations (each undone
+  alone, `__pycache__` cleared), every one fails its test.
+- Counts (Linux sandbox, Python 3.13): 2454 passed, 58 skipped (master
+  b96e6ed: 2435 passed, 58 skipped; +19 new tests). No JS changed.
+- Measured (Linux sandbox, not Render): a 22.0 MB history (20,000
+  messages of repetitive text) zips to 2.3 MB in 0.27 s; real
+  conversations compress less.
+- Deviation from the brief: a family member gets **404** from
+  `/api/backup`, not 403, because `owner_of` answers 404 for every
+  owner-only route (as if it didn't exist). The waitlist path:
+  round 2 below.
+
+### Round 2 (judge findings)
+
+1. **The DSN's public key went out in trace headers.** Even
+   `traces_sample_rate=0` counts as tracing enabled, and the default
+   `trace_propagation_targets` is `.*`: every outgoing call during a
+   request carried `sentry-trace` and `baggage` (the DSN's public key,
+   the route, the release) to Anthropic, Google, Notion. Now
+   `traces_sample_rate` is not passed, `trace_propagation_targets=[]`,
+   `auto_enabling_integrations=False`, with FastAPI/Starlette added
+   explicitly so route crashes are still reported;
+   `max_request_body_size="never"` stays. Tests: the init options, and the
+   real SDK in a child process (capturing transport, a local HTTP server
+   standing in for the APIs): no `sentry-trace`/`baggage` on httpx (sync
+   and async) or http.client calls, crashes still reported, no
+   transactions, nothing personal in any envelope.
+2. **A cloud outage failed a PC deploy.** The cloud's entry is marked
+   `remote` (`Instance.remote`, written to the status), and `deploy.py`
+   leaves remote entries out of its failing count (one condition). Test:
+   `test_deploy_passes_while_the_cloud_is_down`.
+3. **`logentry.message` isn't always a format string.** It is kept only
+   for the app's own `assistant.*` loggers; for others (asyncio's "Task
+   exception was never retrieved", libraries' `log.error(exc)`) only the
+   logger name goes. Tests: the asyncio event shape, and the real SDK with
+   an unretrieved task exception.
+4. **`sentry-sdk` is always installed** (requirements.txt,
+   `sentry-sdk>=2,<3`, pure Python); `INSTALL_SENTRY` is gone from the
+   Dockerfile and render.yaml. Test: with the real SDK installed and no
+   DSN, nothing starts, nothing is sent, no headers are added and the app
+   answers as before.
+5. **Family entries came from a denylist.** Each is now
+   `family.public(u)` (it includes `tier` from #34). Test: an unknown
+   field and an invite hash in users.json don't reach the zip.
+6. **The waitlist path was hard-coded.** It is
+   now `[webapp] waitlist_file` (from the public-site PR; the server profile
+   sets `/data/waitlist.json`); `""`, the default, leaves the waitlist out.
+   Tests: the setting's path, and `""`.
+7. **A crash-left plaintext copy lingered in the temp folder.**
+   `build_assistant` calls `backup.sweep()` once. Test: a stale
+   `hey-claude-backup-*` folder is gone after `build_assistant`.
+- Merged origin/master (#34, beta tiers): conflicts in `SECRET_ENV_VARS`
+  (both additions kept) and here.
+- Revert check: 13 round-2 mutations (each alone, `__pycache__`
+  cleared), every one fails its test. Dropping only
+  `auto_enabling_integrations=False` fails the options test but not the
+  real-SDK one: with no tracing and no propagation targets it adds no
+  header by itself (defense in depth). The 27 round-1 mutations still all fail (the 28th
+  targeted the removed `traces_sample_rate=0`).
+
+- **After round 2:** merged master #35 (public site; `[webapp]
+  waitlist_file` now decides the backup's waitlist, "" leaves it out).
+  Round-2 review (CHANGES: 1 MED, 4 LOW, all docs): PRIVACY.md and the
+  public privacy page now describe the owner's backup and Sentry
+  accurately (a Sentry row in both tables). Counts: 2539 passed, 33
+  skipped; JS 236.
 ## Public beta G2: bring your own Anthropic key (2026-10-21)
 
 Kyle has no funding, so public beta testers pay for their own Claude use.
