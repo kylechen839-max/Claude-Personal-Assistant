@@ -552,6 +552,27 @@ for all of this except the Google sign-in.
 - [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
 - [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
+- [ ] **Backup.** Signed in as yourself in Safari, open
+      `https://hey-claude.onrender.com/api/backup`; open the zip on a computer.
+  - Should: a `hey-claude-backup-<date>.zip` with `history.sqlite`,
+    `users/users.json`, a `users/<id>/history.sqlite` per family member and
+    `MANIFEST.json`; no `google_token.json` and no `.enc` file. The
+    history opens in an SQLite viewer (e.g. DB Browser for SQLite) with
+    your recent conversations. Render's Logs show one "Backup downloaded
+    (N bytes)" line. In a family member's signed-in app the same address
+    says "not found".
+- [ ] **Uptime.** UptimeRobot: add an HTTP(s) monitor on
+      `https://hey-claude.onrender.com/healthz` (README "Uptime, error
+      tracking and backups"), then Render -> hey-claude -> Suspend for 10
+      minutes, then Resume.
+  - Should: one "down" email, then one "up" email. With `[watch]
+    cloud_url` set on the PC, your phone app (from the PC or Pi) shows a
+    "Cloud app" banner while it is down and it goes once it is back.
+- [ ] **Error tracking (optional).** Sentry: a new Python project; copy its
+      DSN into Render's `SENTRY_DSN` and save (it restarts).
+  - Should: the log has "Error tracking on (Sentry, environment server)".
+    Any report that arrives shows an error type and code lines only: no
+    message text, no request body, headers, IP or server name.
 
 - [ ] **Invite family.** On your iPhone open the cloud server's own address
       directly (`https://hey-claude.onrender.com/`, signed in with your
@@ -610,6 +631,22 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
+      on Render"). On the beta tester's phone, before adding a key, type
+      "hello" and also try hands-free voice.
+  - Should: both answer "Add your Anthropic API key in Settings to start."
+    (in Chinese for a Chinese account); your Render usage shows no new call.
+- [ ] Their ⚙ -> **Your Anthropic API key**: paste a real key of theirs
+      (from console.anthropic.com -> API Keys), **Save key**.
+  - Should: "Checking the key with Anthropic…", then "Your key ending in
+    xxxx is saved." with the right last four; "hello" now gets a reply;
+    their Anthropic console's usage page shows the call, and your
+    owner page's monthly estimate doesn't move.
+- [ ] Paste a wrong key (change one character) and Save.
+  - Should: "Anthropic didn't accept that key", and the old key keeps working.
+- [ ] **Remove key**, confirm.
+  - Should: the next "hello" says to add a key again. On a **Family**
+    account the same steps work, and without a key they use yours as before.
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server
@@ -816,7 +853,8 @@ phone app installed from the cloud URL with Tailscale on.
 
 ## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn
-(see tools/agent-dashboard/README.md).
+(the page, its README and its desktop launchers are in the private
+kylechen839-max/agent-dashboard repo, under `dashboard/`).
 The dashboard is desktop only (no phone layout).
 - [ ] Open it on the PC in Chrome or Edge, signed in to claude.ai.
   - Should: a summary line at the top (for example "1 running") and one
@@ -838,9 +876,11 @@ The dashboard is desktop only (no phone layout).
     monospace body that is easy to read in both modes. They match what the
     master's session at claude.ai/code says. The artifact frame on
     claude.ai does not keep growing taller.
-- [ ] Press ⤢ on the coordinator window, then Esc; then ⤢ and Restore.
-  - Should: the window fills the workspace with its conversation; Esc
-    and Restore both put every window back.
+- [ ] Press ⤢ on the coordinator window, then Esc; then ⤢ and the ⤡
+      button that takes its place.
+  - Should: the window fills the workspace with its conversation; ⤡
+    looks like ⤢ (same size and spot); Esc and ⤡ both put every window
+    back.
 - [ ] Tap All recent, then Active only, and reload.
   - Should: All recent adds finished runs from the last two weeks; the
     choice survives the reload.
@@ -892,14 +932,32 @@ The dashboard is desktop only (no phone layout).
     "running" if that applies); the restored one comes back in its old
     place and size; Show all brings back the other. A coordinator hidden
     with a half-typed message still has it when restored.
+- [ ] With some agents done or failed, press Close idle agents; then
+      turn on Auto-close idle agents, restore one from Hidden, and wait
+      for the next agent to finish.
+  - Should: only finished/silent agent windows close (never the
+    coordinator or a running one) and the button greys out; with
+    auto-close on, finishing agents disappear into Hidden by themselves,
+    the one you restored stays, and the toggle is still on after a reload.
+- [ ] Select a few words in one of the coordinator's messages, press the
+      Reply button that appears, type "why?" and send.
+  - Should: Reply shows only for a selection inside one message; the
+    quote shows over the box; your bubble shows it as a grey quote above
+    "why?", and the coordinator answers about that text.
+- [ ] Paste a screenshot into a coordinator's chat box, drop a PDF on
+      it, then send "please look at these".
+  - Should: each shows as a chip (the screenshot with a thumbnail) and
+    × removes one; after Send your bubble shows the chips, and the
+    coordinator replies that it opened both files.
 - [ ] Switch to Grid, reload the page, then switch to Runs and reload.
   - Should: each reload opens the view you left it on.
-- [ ] On Windows, double-click tools/agent-dashboard/desktop/open-dashboard.cmd.
+- [ ] On Windows, double-click dashboard/desktop/open-dashboard.cmd
+      from the agent-dashboard repo.
   - Should: the dashboard opens in its own Chrome or Edge window with no
     address bar, already signed in to claude.ai, and can be pinned to the
     taskbar.
-- [ ] On a Mac, double-click tools/agent-dashboard/desktop/open-dashboard.command
-      (the first time, right-click it and choose Open).
+- [ ] On a Mac, double-click dashboard/desktop/open-dashboard.command
+      from the agent-dashboard repo (the first time, right-click it and choose Open).
   - Should: the same, in its own Chrome or Edge window, already signed
     in, and no Finder window opens.
 - [ ] On the dashboard, press Get desktop app (top right), then Windows
@@ -910,42 +968,28 @@ The dashboard is desktop only (no phone layout).
     and double-click; the launcher opens the dashboard in its own window.
     Declining the save shows no error.
 
-## PC hub (optional, ~10 min)
+## Dev team by voice (optional, ~10 min)
 Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
-`[devteam] hub = true` with your coordinator in `hub_sessions` in
-`config.local.toml` (README "PC hub").
-- [ ] Start the web app on the PC, double-click
-      tools/agent-dashboard/desktop/open-hub.cmd and sign in with the
-      access token.
-  - Should: an app window with one coordinator window per session, a
-    presence pill ("Idle" or "In task: …") and an empty chat box.
-- [ ] Type "status?" and press Enter while the coordinator is idle.
-  - Should: the box clears at once; the line under your message goes
-    Sending…, Queued, then "Coordinator · working: Reading your message"
-    within a minute, then the markdown reply appears full width. Note
-    whether an idle session started the turn by itself (not verified
-    before).
-- [ ] Send a message while the coordinator is mid-task.
-  - Should: it shows Queued (and a Queued badge) until the coordinator
-    reads it at the end of its step.
+`[devteam] enabled = true` with `coordinator_session` in `config.local.toml`
+(docs/COORDINATOR_LINK.md).
+- [ ] While the coordinator session is idle, say "Hey Claude, ask the dev
+      team for a status update", then a minute later "did the dev team
+      answer?".
+  - Should: it says the message was sent, then reads the coordinator's
+    reply. Note whether the idle session started the turn by itself (not
+    verified before).
 - [ ] Let the coordinator's cloud session expire (a day idle), then send.
   - Should: note whether the CLI revives it or says it is gone (not
-    verified before); a failure shows "Not sent: …" and your text comes
-    back in the box.
-- [ ] Ask "check_dev_team" by voice after a hub conversation.
-  - Should: Hey Claude never reads out a hub reply.
-- [ ] Hide a window, wait for a reply, then restore it from Hidden.
-  - Should: the menu marks it "new reply"; restored, the reply is there.
-- [ ] From the phone over `tailscale serve`, open https://<pc>/devteam.
-  - Should: "not found".
-- [ ] Press Clear in a window and confirm.
-  - Should: the conversation disappears and stays gone after a reload.
-- [ ] Unplug the network (or turn off Wi-Fi), send from a hub window and
-      wait for `[devteam] timeout` (60 s by default).
-  - Should: the message shows "Not sent: … didn't answer in time", no
-    `node.exe` for Claude Code is left in Task Manager, and the same
-    window takes another message straight away (no "one message at a
-    time").
+    verified before); a failure is said in one plain sentence.
+- [ ] Unplug the network (or turn off Wi-Fi), send a message and wait for
+      `[devteam] timeout` (60 s by default).
+  - Should: Hey Claude says Claude Code didn't answer in time, and no
+    `node.exe` for Claude Code is left in Task Manager.
+- [ ] On the PC, after updating, open http://127.0.0.1:8765/devteam and
+      check the web app's startup lines.
+  - Should: "not found", and no "PC hub on ..." line (the PC hub was
+    removed). If `data/devhub.json` is still there (the old hub's saved
+    chat), delete it; nothing reads it any more.
 
 ## Health checks and safe updates (~15 min)
 Needs the PC's apps installed as tasks (yours and the family copies).

@@ -232,7 +232,8 @@ def test_invite_for_a_removed_person_fails(env, owner):
 def test_a_family_member_has_web_tools_only(env, owner):
     env.config["web"]["location"] = {"city": "Kyle's town", "region": "", "country": "",
                                      "timezone": ""}
-    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai")
+    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai",
+                          tier="family")  # the owner's key (no key of her own)
     uid = link["user"]["id"]
     ctx = env.family.context(uid)
     assert ctx.registry.tools == {}
@@ -261,7 +262,7 @@ def test_a_family_member_has_web_tools_only(env, owner):
 def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
     cid = seed_owner_conversation(env.owner_store)
     assert owner.get(f"/api/conversations/{cid}").status_code == 200
-    mom, _ = env.member(owner)
+    mom, _ = env.member(owner, tier="family")  # on the owner's key
     assert mom.get(f"/api/conversations/{cid}").status_code == 404
     assert mom.get(f"/api/conversations/{cid}/export").status_code == 404
     assert mom.post(f"/api/conversations/{cid}/continue").status_code == 404
@@ -337,7 +338,7 @@ def test_only_the_owner_sees_the_api_cost(env, owner):
     from assistant import usage
     from tests.conftest import make_usage
 
-    mom, _ = env.member(owner, language="en")
+    mom, _ = env.member(owner, language="en", tier="family")  # on the owner's key
     env.fake_client.queue.append(make_response(text_block("Hi."),
                                                usage=make_usage(1000, 100)))
     assert mom.post("/api/turn", json={"text": "hello"}).status_code == 200
@@ -661,27 +662,6 @@ def test_invite_links_point_at_this_server(env, owner, monkeypatch, failover, ex
     env.config["webapp"]["public_origin"] = "https://public.example.com"
     r = owner.post("/api/invites", json={"name": "Dad"})
     assert r.json()["url"].startswith("https://public.example.com/#invite=")
-
-
-def test_the_pc_hub_is_the_owners_only(env, tmp_path):
-    """Merge of family accounts with the PC hub (/devteam): a family member
-    signed in on the PC's loopback web app must not reach Kyle's coordinator
-    sessions (require_owner, 404 as if absent)."""
-    from assistant import devhub
-    from tests.test_devhub import LOOPBACK, SID, make_hub
-
-    devhub.install(env.app, make_hub(tmp_path))
-    owner = TestClient(env.app, base_url=BASE, client=LOOPBACK)
-    login(owner)
-    link = env.invite(owner)
-    mom = TestClient(env.app, base_url=BASE, client=LOOPBACK)
-    assert mom.post("/api/invite/accept",
-                    json={"invite": token_of(link["url"])}).status_code == 200
-    assert mom.get("/api/devteam/state").status_code == 404
-    for path in ("/api/devteam/send", "/api/devteam/clear"):
-        r = mom.post(path, json={"session": SID, "text": "x"})
-        assert r.status_code == 404, path
-    assert owner.get("/api/devteam/state").status_code == 200
 
 
 # --- tiers (public beta piece G1) -----------------------------------------------

@@ -1107,8 +1107,9 @@ def generate_title(client, messages: list[dict],
 
 
 def ask_title(client, messages: list[dict],
-              model: str = DEFAULT_TITLE_MODEL) -> tuple[str, str] | None:
-    """(title, summary) from the model, or None if that failed."""
+              model: str = DEFAULT_TITLE_MODEL, meter=None) -> tuple[str, str] | None:
+    """(title, summary) from the model, or None if that failed. `meter`:
+    where the call's usage is counted (None = the owner's usage.METER)."""
     text = message_transcript(messages, max_chars=6000)
     if not text or client is None:
         return None
@@ -1120,7 +1121,7 @@ def ask_title(client, messages: list[dict],
             messages=[{"role": "user", "content": text}])
         from assistant import usage
 
-        usage.record(model, getattr(response, "usage", None))
+        (meter or usage).record(model, getattr(response, "usage", None))
         raw = "".join(b.text for b in response.content if b.type == "text")
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         data = json.loads(match.group(0)) if match else {}
@@ -1251,11 +1252,12 @@ class Recorder:
     def __init__(self, store: HistoryStore | None, source: str, *,
                  incognito: bool = False, client_fn: Callable | None = None,
                  title_model: str = DEFAULT_TITLE_MODEL,
-                 run_async: bool = True):
+                 run_async: bool = True, meter=None):
         self.store = store
         self.source = source
         self.incognito = incognito
         self.client_fn = client_fn  # returns the Anthropic client for titles
+        self.meter = meter  # where title calls are counted (ask_title)
         self.title_model = title_model
         self.run_async = run_async
         self.conversation_id: str | None = None
@@ -1358,7 +1360,8 @@ class Recorder:
                 self.store.delete(cid)
                 return
             client = self.client_fn() if self.client_fn else None
-            asked = ask_title(client, conv["messages"], self.title_model)
+            asked = ask_title(client, conv["messages"], self.title_model,
+                              meter=self.meter)
             # Resumed again before this ran: titled, but not marked ended.
             ended = cid != self.conversation_id
             if conv["title"]:

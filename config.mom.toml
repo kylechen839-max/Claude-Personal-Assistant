@@ -73,7 +73,6 @@ enabled = false
 [devteam]
 enabled = false
 state_file = "data/mom/devteam.json"
-hub_state_file = "data/mom/devhub.json"
 
 [logging]
 file = "logs/mom.log"

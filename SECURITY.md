@@ -594,6 +594,54 @@ server (`[family] enabled`, on in the server profile).
   `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
   Each person's history is capped at `[family] max_history_mb` (20 MB), not
   the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
+- **Their own Anthropic key** (bring your own key, public beta piece G2;
+  `userkeys.py`, `userkeys_web.py`).
+  - *Storage.* `<dir>/<id>/anthropic_key.enc`, written with `write_private`
+    (mkstemp in the same folder, atomic replace retried on Windows; 0600 on
+    Linux, which does nothing on Windows), as a Fernet token (AES-128-CBC
+    with HMAC-SHA256) whose key is HKDF-SHA256 of the env secret
+    `USER_DATA_KEY` with a per-purpose label (`hey-claude/anthropic-api-key/v1`),
+    so the same secret can later encrypt other tokens without one opening
+    as the other. The person's id is inside the ciphertext: a file copied
+    into another folder doesn't open as theirs. Removing the person deletes
+    it with their folder; **Remove key** deletes the file.
+  - *Fails closed.* Without `USER_DATA_KEY` (or one under 32 characters),
+    PUT answers 503 with the reason and writes nothing, before any check
+    call. `USER_DATA_KEY` is in `SECRET_ENV_VARS` (masked, not passed to
+    child processes) and `ISOLATED_ENV_VARS` (a separate instance such as
+    `.env.mom` refuses to start if it would inherit the owner's from the
+    shell; it sets its own).
+  - *A lost or changed `USER_DATA_KEY`.* Saved keys no longer open; each
+    person is treated as having no key (Settings says "Your saved key can't
+    be read any more. Please enter it again."), nothing crashes, and nobody
+    falls back to the owner's key unless they are family tier. There is no
+    recovery by design: the people re-enter their keys.
+  - *Never shown back or logged.* GET returns `{set, last4, ...}` only; logs
+    have ids and outcomes, never the key (caplog tests at DEBUG), and the
+    `sk-ant-` redact pattern masks any that slipped into a log line anyway.
+    Error messages never hold it, and the check's SDK exceptions are not
+    chained into ours.
+  - *Whose bill.* Their chats and history titles use their own client (an
+    explicit `api_key`, and `auth_token` cleared after construction because
+    SDKs before 0.98 still read `ANTHROPIC_AUTH_TOKEN` from the server's
+    environment; `userkeys.user_client`), looked up per
+    call, so a replaced or removed key applies to the very next call, also
+    in an open conversation. A beta tester without a key gets `MissingKey`
+    before any request ("Add your Anthropic API key in Settings to start");
+    a removed person's open conversation never falls back to the owner's
+    key. Their usage goes to `<dir>/<id>/usage.json`, never the owner's
+    `month_usd`.
+  - *Routes.* Signed-in family sessions only (the owner gets 404: the
+    server's key is theirs), same-origin like every route, the 16 KB body
+    cap, and PUT (it costs a call to Anthropic) at most 5 a minute per
+    person (a bounded `cloud.RateLimiter`), so a tester's session can't be
+    used to test many stolen keys quickly.
+  - *Threat model.* It protects keys against a leaked disk, backup or
+    snapshot of `/data` without the Render environment. It does not protect
+    them against someone who controls the running server or its
+    environment (they hold `USER_DATA_KEY` and see keys in memory while in
+    use): testers trust the operator with their key, as with any hosted
+    app; README tells them to set a spend limit in the Anthropic console.
 - **Speech and sentences in their language.** A Chinese-speaking member's
   recordings go to the Chinese Whisper model and replies to the Mandarin
   voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),
@@ -651,48 +699,15 @@ server reads their replies with (`[tts] picker`, on by default).
 - Voice names from ElevenLabs are cut to one printable line of 60
   characters and shown with `textContent` only.
 
-## PC hub (`/devteam`): loopback only
+## PC hub: removed (2026-10-20)
 
-The hub (assistant/devhub.py) lets a signed-in browser on the PC queue
-messages into Kyle's coordinator sessions, which can start coding work, so
-it is kept to the PC itself:
-
-- It is built only when `[devteam] hub = true` and the web app binds a
-  loopback address; the cloud server profile and any `0.0.0.0` bind never
-  have it.
-- Every `/devteam` page and `/api/devteam/*` route answers 404 unless the
-  peer is loopback, there is no `X-Forwarded-For` and no
-  `Tailscale-User-Login` header, and no configured trusted proxy vouches
-  for the request. `tailscale serve` adds those headers, so the phone and
-  the tailnet never reach it.
-- The `/api/devteam/*` routes need the owner's sign-in
-  (`require_owner`: a family member's session gets 404; the same cookie, `WebAuth`, `LoginLimiter`, CSP and
-  cross-origin guard; a cross-origin POST gets 403). The sign-in form on
-  the page posts to the existing `/api/login`.
-- Messages go to the CLI on stdin, never on its command line. Coordinator
-  replies are shown as text (markdown built with createElement and
-  textContent; http(s) links only). The page has no inline script
-  (`script-src 'self'`).
-- One message in flight per window; at most 8 windows, 200 messages a
-  window, 12000 characters a message or reply. No message or reply text
-  is logged at INFO. A CLI that hangs past `[devteam] timeout` has its
-  whole process tree killed (`taskkill /T` on Windows), so the window is
-  freed.
-- With `trusted_proxy` set the hub fails closed (every request 404) and
-  `serve` warns at startup that it is disabled.
-- **At rest:** the transcript and pending reply ids are in
-  `hub_state_file` (`data/devhub.json`), written privately (0600 on
-  Linux/macOS; Windows uses the folder's permissions) and atomically.
-  Clear rewrites the file without that window's messages, and a session
-  dropped from `hub_sessions` is removed from the file at the next start
-  (with its pending reply ids); older copies of
-  the text may remain in free disk blocks until overwritten, as with any
-  file delete.
-
-Left as is: `/devteam`, `/devteam.js` and `/devteam.css` are served to a
-loopback request without a sign-in, because they hold no data and the page
-has to show the sign-in form. A DNS-rebinding page could load them, but it
-has no session cookie for 127.0.0.1, so every `/api/devteam` call is 401.
+The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was
+removed: no route, module or `[devteam] hub*` setting is left
+(`tests/test_devteam.py::test_pc_hub_is_gone`). Kyle reaches the
+coordinator by voice (`message_dev_team`, under the same `confirm_if_untrusted`
+rule as before) or from the dashboard. An old `data/devhub.json` on the PC is
+no longer read or written; delete it by hand to drop its saved transcript
+(MANUAL_TEST.md).
 
 ## Google sign-in from the phone (`google_web.py`, `config.mom.toml`)
 
@@ -1006,7 +1021,7 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   skips a still-busy app and names it, as `Watch.switch` and the host
   supervisor already did.
 - **Side-port copies** listen on 127.0.0.1 only, don't open the history
-  database or the saved sign-ins, don't start the PC hub or lecture jobs,
+  database or the saved sign-ins, don't resume lecture jobs,
   and are stopped after the check.
 - **Deliberately not done:** the watchdog's coordinator alert goes through
   Claude Code (`claude -p --cloud`), so its text (app names, versions,
@@ -1015,7 +1030,59 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   and Spotify token files with the running app (a refresh may rewrite
   them, atomically, as either process already could).
 
+## Error tracking and backups (`errortracking.py`, `backup.py`)
+
+- **Error tracking is off unless asked for.** Only with `SENTRY_DSN` set
+  (`sentry-sdk` is in requirements.txt but never starts without one; an
+  install missing the package logs one warning, never the DSN, and runs).
+  Sentry is started with `send_default_pii=False`,
+  `include_local_variables=False`, `max_breadcrumbs=0`, no source context
+  and `max_request_body_size="never"` (load-bearing: without it Starlette's
+  request extractor reads bodies past their field limits). Tracing is off
+  entirely: `traces_sample_rate` is left unset (even 0 counts as tracing
+  enabled), `trace_propagation_targets=[]`, and no auto-enabling
+  integrations, so no `sentry-trace` or `baggage` header (the DSN's public
+  key, the route, the release) is ever added to calls to Anthropic, Google,
+  Notion or anyone else; tested with the real SDK against a local server.
+  Integrations: Sentry's defaults plus FastAPI/Starlette. `before_send` rebuilds every event
+  from an allowlist: exception types and frames' file, function, line and
+  module (never the exception message, which can quote a turn, an email or
+  a tool input; never `abs_path`, which names the user's home folder); a
+  log record's format string without its arguments, and only from the
+  app's own `assistant.*` loggers (asyncio's "Task exception was never
+  retrieved" and libraries' `log.error(exc)` put exception text there; for
+  them only the logger's name is sent); the request's method
+  and path (no host, query string, headers, cookies, body, user or IP); no
+  server name, tags, `extra` (sys.argv), modules, threads or breadcrumbs;
+  only the `runtime` and `os` contexts. Every remaining string goes through
+  `config.redact`, and email-shaped strings are masked. An event that
+  can't be cleaned is dropped. `SENTRY_DSN` is in `SECRET_ENV_VARS`
+  (masked in logs) and `ISOLATED_ENV_VARS` (a family copy that would
+  inherit Kyle's from the shell refuses to start).
+  Tests: `tests/test_errortracking.py` (a fake `sentry_sdk`, and the real
+  SDK in a child process with a capturing transport; nothing sent).
+- **The backup download is the owner's only** (`GET /api/backup`,
+  `webapp.owner_of`: 401 signed out, 404 for a family member, CloudGuard's
+  sign-in in front on Render). It is built from an allowlist (the history
+  databases, the family list as `family.public` shows it, the waitlist
+  (`[webapp] waitlist_file`; "" leaves it out), a manifest), so tokens,
+  `*.enc` keys, sessions and `.env` can't end up in it whatever else is on
+  the disk, and people already removed are left out. Databases are copied with SQLite's online backup, read-only. The
+  zip is made in a private temp folder (`mkdtemp`), refused above
+  `[webapp] backup_max_mb`, one at a time, sent with `Cache-Control:
+  no-store`, and the folder is deleted when the response ends; a crashed
+  backup's folder (over an hour old) is removed at startup and by the
+  next backup. The log gets its size only. Tests: `tests/test_backup.py`.
+
 ## Not fixed, on purpose
+
+- **A backup is a plain zip of everyone's conversations.** It holds no
+  secret that unlocks anything, but it does hold Kyle's and the family's
+  history and the waitlist's addresses, unencrypted: whoever has the file
+  can read them. Kept simple on purpose (any SQLite tool opens it); the
+  README says to store it privately. A conversation deleted after a backup
+  stays in that backup (and in Render's disk snapshots) until the file is
+  deleted.
 
 - **Calendar data from Kyle's own events.** Treating every calendar
   listing like web content would make every move ask for confirmation (a
@@ -1093,7 +1160,8 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   tells Claude that web text is information, not instructions. That helps
   but isn't a guarantee, which is why the checks above live in code.
 - **The dev-team dashboard posts Kyle's chat messages as comments.** The
-  page (tools/agent-dashboard) declares the full `comments` grant so each
+  page (now in the private kylechen839-max/agent-dashboard repo, whose
+  SECURITY.md covers it) declares the full `comments` grant so each
   coordinator window's chat box can call `comments.sendToClaude`. There is
   exactly one call site, run only from Kyle's own Send press or Enter,
   one call at a time, never at load, on a timer or as a retry (a test
@@ -1104,6 +1172,20 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   that receives such a comment treats it as Kyle's words about its own
   run, within that run's scope only: it may re-order or stop work, but
   never changes permissions, touches secrets or routes around a denial.
+- **Chat attachments in the dashboard's asset store (deliberate).** The
+  page declares `assets: {}` (editors only: Kyle as owner; every other
+  viewer gets `null` and no attachment UI). Files are uploaded only at
+  Kyle's paste or drop, at most 5 per message, type and size checked
+  first, never retried; one `upload` and one `delete` call site (pinned
+  by a test), and delete only for a chip Kyle removes before sending.
+  Thumbnails use only the url `upload()` returned (same-origin path or
+  https), as an `<img>`, never script or markup; chat text is never a
+  url. The comment carries only the name (through `text()`, 80
+  characters, brackets swapped), type, size and opaque asset id. The
+  coordinator opens the file with Artifact `read` and treats its content
+  as untrusted data, never as instructions. Deliberate non-fix: assets
+  live as long as the artifact (no pruning; Kyle can delete them from
+  claude.ai), and any editor of the artifact can open them.
 - **Conversation text in Kyle's private db subtree (deliberate).** The
   master mirrors what it tells Kyle, and his messages, to
   `data/users/<Kyle's id>/chat-<sessionTail>/msgs`. claude.ai keeps

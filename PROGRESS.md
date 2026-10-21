@@ -3,12 +3,11 @@
 All seven stages are done. Run the tests with `pytest` from the project root
 (venv active). The final hands-on checks are in `MANUAL_TEST.md`.
 
-**Current test count:** 1474 passed, 45 skipped (Linux build sandbox,
-Python 3.13, 2026-10-19; that sandbox had no eSpeak, PortAudio or
-shellcheck, so 25 audio tests failed or errored there, as before this
-change, and the launcher shellcheck test skipped), plus 124
-JavaScript tests (node:test: `voice-core.test.js` and
-`agent-dashboard.test.mjs`, both also run by pytest).
+**Current test count:** 1611 passed, 44 skipped (Linux build sandbox,
+Python 3.13, 2026-10-20; that sandbox had no eSpeak or PortAudio, so 25
+audio tests failed or errored there, as before this change), plus 67
+JavaScript tests (node:test: `voice-core.test.js` 14, run by pytest too,
+and `backend-router` 33, `family` 9, `i18n` 11).
 CI (`.github/workflows/tests.yml`) runs the same suite on every
 push and weekly on Ubuntu (Python 3.10, 3.12) and Windows (3.12), and
 builds and smoke-tests the cloud Docker image. The
@@ -60,13 +59,12 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
 | `test_webfeatures.py` | 25 | lecture/tutor routes in the phone app |
 | `test_features_deploy.py` | 8 | lecture/tutor auth on local, failover and cloud; history hooks |
-| `test_agent_dashboard.py` | 48 | dev team dashboard page, manifest, the one sendToClaude call site, desktop launchers, skill writes (runs, agents and the chat mirror), watchdog prompt |
+| `test_build_feature_skill.py` | 8 | the `/build-feature` skill's dashboard writes (runs, agents, the chat mirror) and the watchdog prompt (`docs/WATCHDOG.md`) |
 | `test_attachments.py` | 40 | chat attachments ("+"): sniffing, limits, PDF pages (incremental saves), Claude's 400s, `/api/turn`, history markers, taint, logs, rollback, cloud page files public |
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
-| `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -1716,6 +1714,40 @@ screens are staged by setting the same attributes the JS sets (no mic).
 - Tests: `tests/js/voice-core.test.js` (unsure frames end the turn; audio
   text reaches captions), full suite 1494 passed, 46 skipped.
 
+## Dashboard: close idle agents, ⤡ restore, chat Reply and attachments (2026-10-20)
+
+- **Close idle agents** (Grid toolbar): one click hides every agent window
+  on screen that is done, failed, stopped or silent (never running,
+  queued or a coordinator) with the existing `h: 1` layout flag, saved
+  once, announced "Closed N idle agent windows"; follows the Coordinator
+  picker and Active/All filter; disabled when nothing is idle.
+  **Auto-close idle agents** is an opt-in toggle (`agentDashboard.autoClose`,
+  "1"/"0"); a window restored by hand keeps `k: <state>` in its layout
+  entry and stays shown until its state changes.
+- **Maximize restore** is now an icon button (⤡) beside ⤢, same class and
+  size, `aria-label="Restore <title>"`, `aria-pressed="true"`.
+- **Reply**: selecting text inside one transcript message shows a Reply
+  button; the quote chip (200 shown, 1000 sent, × and Esc clear) is sent
+  as `> ` lines before Kyle's text and shown as a blockquote in his
+  bubble; a failed send restores it with the draft.
+- **Attachments**: manifest now
+  `{"db":{}, "user":{}, "comments":{}, "downloads":true, "assets":{}}`.
+  Paste or drop up to 5 files per message; each is uploaded with
+  `assets.upload` at that gesture (type and size checked first, never
+  retried), shown as a chip (thumbnail for images from `upload()`'s url
+  only), and sent as `[attachment: <name> (<type>, <size>) asset:<id>]`
+  lines counted inside the 4000-byte cap. × deletes an unsent asset;
+  after a send that may have been posted it only drops the chip.
+  Leaving a maximized idle window counts as keeping it shown, so
+  auto-close doesn't hide what Kyle was reading. The coordinator opens them with Artifact `read path=<asset id>` as
+  untrusted data (SKILL.md Chat mirror).
+- Tests: 23 new or updated node:vm tests in
+  `tests/js/agent-dashboard.test.mjs` (6 close-idle/auto-close, 9
+  attachments, 3 Reply, the maximize/desktop tests for ⤡); 20 fail on the
+  previous page. pytest pins: manifest, the localStorage keys (now five),
+  one `assets.upload`/`assets.delete` call site each, thumbnails only from
+  `upload()`. JS: agent-dashboard 144 passed (was 126).
+
 ## Mom's app guides her first steps
 
 - `assistant/web/i18n.js` (only on pages with the "Connect Google" button,
@@ -1887,6 +1919,49 @@ Render/Docker changes) comes separately.
   tools), and tells her how to connect Google if it isn't yet.
 - Tests: `tests/test_chat.py` +1, `tests/js/i18n.test.mjs` updated.
   Phone cache v9.
+
+## Dashboard moved out, PC hub removed (2026-10-20)
+
+- The agent dashboard page (`tools/agent-dashboard/`: the page, its README
+  with the row schemas, desktop launchers) and its tests
+  (`tests/js/agent-dashboard.test.mjs`, the page checks in
+  `tests/test_agent_dashboard.py`) now live in the private
+  kylechen839-max/agent-dashboard repo (`dashboard/`). The watchdog prompt
+  moved to `docs/WATCHDOG.md`, since the watchdog runs in a session on this
+  repo; SKILL.md points at both.
+- Kyle scrapped the PC hub: `assistant/devhub.py`, `web/devteam.*`, its
+  `create_app(hub=)` hook and startup lines, the `[devteam] hub`,
+  `hub_sessions`, `poll_seconds` and `hub_state_file` settings, the hub
+  sections of README, MANUAL_TEST, SECURITY, PRIVACY and
+  docs/COORDINATOR_LINK.md, and the skill's hub and presence-row steps are
+  gone. `assistant/devteam.py` keeps only the voice link
+  (`message_dev_team` / `check_dev_team`): the hub's message source, window
+  sessions, 12000-character replies and presence reads were dropped; the
+  private atomic state file, the state lock and the whole-tree kill on a
+  CLI timeout stay (they protect the voice link too). A new Notion inbox
+  gets the statuses answered, working and blocked (no `idle`). An old
+  `config.local.toml` with the hub keys still loads (they are ignored).
+- Tests: the skill and watchdog checks moved to
+  `tests/test_build_feature_skill.py` (8; the phase list and the page's
+  +15 min thresholds are pinned there, from the agent-dashboard repo's
+  README); `tests/test_devteam.py` lost the hub/presence tests and gained
+  `test_voice_message_header_prefix_and_cap`,
+  `test_replies_are_capped_for_speech`, `test_inbox_statuses`,
+  `test_pc_hub_is_gone` and `test_old_hub_settings_still_load` (29 tests).
+  `test_inbox_statuses` and `test_pc_hub_is_gone` fail with the old
+  `devteam.py` and `devhub.py` restored. Full suite: 9 failed, 1611 passed,
+  44 skipped, 16 errors (the 25 are the sandbox's eSpeak/PortAudio/wake
+  model tests, as in the baseline); JS 53/53 (`tests/js/*.test.mjs`).
+- Merged master (health watchdog, safe updates, Spotify): `devteam.py`
+  keeps `SOURCES` for "voice" and the watchdog's "watch" (header
+  `[Hey Claude watchdog | …]`, `hc-` ids), `send(text, source="voice")`
+  without the hub's `session=`; `create_app` keeps `health=` and
+  `serve` the candidate guard on `resume_jobs()`, without `hub=`;
+  `watch.candidate_config` no longer sets the removed `[devteam] hub`.
+  New `test_watchdog_alerts_have_their_own_header_and_no_hub_source`
+  (fails on both sides' old `devteam.py`). Full suite: 9 failed,
+  2096 passed, 56 skipped, 26 errors (all 35 the sandbox's
+  eSpeak/PortAudio/wake model set); JS 94/94.
 
 ## Three flaky CI tests, root-caused (2026-10-20)
 
@@ -3695,3 +3770,211 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
   launchers and page it fails 4 tests (launcher URL and the page/desktop
   byte-for-byte checks). test_docs + test_agent_dashboard: 75 passed,
   1 skipped (Linux sandbox, Python 3.13).
+
+## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
+
+- **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
+  only with `SENTRY_DSN` set (`render.yaml` offers it); `sentry-sdk` is in
+  requirements.txt since round 2 (round 1 had it optional behind a Docker
+  build argument). Without the package: one warning, the app runs. Started from `cli.main` (every mode,
+  the cloud's included) and `webapp.serve`, once. Options:
+  `send_default_pii=False`, `include_local_variables=False`,
+  `max_breadcrumbs=0`, no tracing (round 2, below), no source context, no
+  request bodies. `before_send` rebuilds each event from an allowlist
+  (exception types and frames' file/function/line/module, a log record's
+  format string, the request's method and path, the runtime/os contexts),
+  runs every string through `config.redact` and masks email-shaped text;
+  an event it can't clean is dropped. `SENTRY_DSN` joins
+  `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`.
+- **Backup download** (`assistant/backup.py`, `GET /api/backup`, owner
+  only via `owner_of`): a zip of `history.sqlite`, `users/users.json`
+  (each entry `family.public`, round 2), each listed member's
+  `users/<id>/history.sqlite`, `waitlist.json` if present and a
+  `MANIFEST.json`. An allowlist: no tokens, `*.enc`, sessions, `.env`,
+  logs or removed people. Databases are copied with
+  `sqlite3.Connection.backup` (read-only source), switched to
+  `journal_mode=DELETE` so each is one file. Built in a private temp
+  folder, one at a time (409), refused above `[webapp] backup_max_mb`
+  (200; checked before copying and on the zip as it grows), streamed with
+  `FileResponse` and deleted by its background task; a crashed one's
+  folder is swept (after an hour) by the next backup and, since round 2,
+  at startup. INFO logs the size
+  only. Wired in `build_assistant` (`assistant.backup`) and registered in
+  `create_app`, so the PC and the cloud (`cloud.build_app` reuses
+  `create_app`) both have it; `cloud.py` is untouched.
+- **Uptime:** `[watch] cloud_url` (default `""`): the PC watchdog also
+  checks the cloud copy's `/healthz` and alerts on a change like the other
+  instances (banner, coordinator); it is never restarted, rolled back or
+  gated from the PC. README "Uptime, error tracking and backups":
+  UptimeRobot on `/healthz`, Sentry setup, and how Render's daily disk
+  snapshots relate to `/api/backup`.
+- Tests: `tests/test_errortracking.py` (8, a fake `sentry_sdk` in
+  `sys.modules`; nothing is sent), `tests/test_backup.py` (10, real SQLite
+  in tmp_path, plus one through CloudGuard), and
+  `test_cloud_url_is_checked_and_alerted_on_but_never_healed` in
+  `tests/test_watch.py`. Revert check: 28 source mutations (each undone
+  alone, `__pycache__` cleared), every one fails its test.
+- Counts (Linux sandbox, Python 3.13): 2454 passed, 58 skipped (master
+  b96e6ed: 2435 passed, 58 skipped; +19 new tests). No JS changed.
+- Measured (Linux sandbox, not Render): a 22.0 MB history (20,000
+  messages of repetitive text) zips to 2.3 MB in 0.27 s; real
+  conversations compress less.
+- Deviation from the brief: a family member gets **404** from
+  `/api/backup`, not 403, because `owner_of` answers 404 for every
+  owner-only route (as if it didn't exist). The waitlist path:
+  round 2 below.
+
+### Round 2 (judge findings)
+
+1. **The DSN's public key went out in trace headers.** Even
+   `traces_sample_rate=0` counts as tracing enabled, and the default
+   `trace_propagation_targets` is `.*`: every outgoing call during a
+   request carried `sentry-trace` and `baggage` (the DSN's public key,
+   the route, the release) to Anthropic, Google, Notion. Now
+   `traces_sample_rate` is not passed, `trace_propagation_targets=[]`,
+   `auto_enabling_integrations=False`, with FastAPI/Starlette added
+   explicitly so route crashes are still reported;
+   `max_request_body_size="never"` stays. Tests: the init options, and the
+   real SDK in a child process (capturing transport, a local HTTP server
+   standing in for the APIs): no `sentry-trace`/`baggage` on httpx (sync
+   and async) or http.client calls, crashes still reported, no
+   transactions, nothing personal in any envelope.
+2. **A cloud outage failed a PC deploy.** The cloud's entry is marked
+   `remote` (`Instance.remote`, written to the status), and `deploy.py`
+   leaves remote entries out of its failing count (one condition). Test:
+   `test_deploy_passes_while_the_cloud_is_down`.
+3. **`logentry.message` isn't always a format string.** It is kept only
+   for the app's own `assistant.*` loggers; for others (asyncio's "Task
+   exception was never retrieved", libraries' `log.error(exc)`) only the
+   logger name goes. Tests: the asyncio event shape, and the real SDK with
+   an unretrieved task exception.
+4. **`sentry-sdk` is always installed** (requirements.txt,
+   `sentry-sdk>=2,<3`, pure Python); `INSTALL_SENTRY` is gone from the
+   Dockerfile and render.yaml. Test: with the real SDK installed and no
+   DSN, nothing starts, nothing is sent, no headers are added and the app
+   answers as before.
+5. **Family entries came from a denylist.** Each is now
+   `family.public(u)` (it includes `tier` from #34). Test: an unknown
+   field and an invite hash in users.json don't reach the zip.
+6. **The waitlist path was hard-coded.** It is
+   now `[webapp] waitlist_file` (from the public-site PR; the server profile
+   sets `/data/waitlist.json`); `""`, the default, leaves the waitlist out.
+   Tests: the setting's path, and `""`.
+7. **A crash-left plaintext copy lingered in the temp folder.**
+   `build_assistant` calls `backup.sweep()` once. Test: a stale
+   `hey-claude-backup-*` folder is gone after `build_assistant`.
+- Merged origin/master (#34, beta tiers): conflicts in `SECRET_ENV_VARS`
+  (both additions kept) and here.
+- Revert check: 13 round-2 mutations (each alone, `__pycache__`
+  cleared), every one fails its test. Dropping only
+  `auto_enabling_integrations=False` fails the options test but not the
+  real-SDK one: with no tracing and no propagation targets it adds no
+  header by itself (defense in depth). The 27 round-1 mutations still all fail (the 28th
+  targeted the removed `traces_sample_rate=0`).
+
+- **After round 2:** merged master #35 (public site; `[webapp]
+  waitlist_file` now decides the backup's waitlist, "" leaves it out).
+  Round-2 review (CHANGES: 1 MED, 4 LOW, all docs): PRIVACY.md and the
+  public privacy page now describe the owner's backup and Sentry
+  accurately (a Sentry row in both tables). Counts: 2539 passed, 33
+  skipped; JS 236.
+## Public beta G2: bring your own Anthropic key (2026-10-21)
+
+Kyle has no funding, so public beta testers pay for their own Claude use.
+Gap (a) of the beta brief: every family member's chat and history titles
+ran on the owner's `anthropic.Anthropic()`.
+- **`assistant/userkeys.py`.** Each person's key is kept in
+  `<[family] dir>/<id>/anthropic_key.enc` (`write_private`) as a Fernet
+  token (`cryptography>=44`, already a google-auth dependency; abi3 wheels
+  for win_amd64, manylinux x86_64/aarch64, Python 3.9+). The Fernet key is
+  HKDF-SHA256 of the env secret `USER_DATA_KEY` with the label
+  `hey-claude/anthropic-api-key/v1` (a later Notion token gets its own
+  label). The person's id is inside the ciphertext. Without `USER_DATA_KEY`
+  (or under 32 characters) nothing is stored and the reason is given; a
+  changed `USER_DATA_KEY` makes the file not open, which counts as "no key"
+  (Settings asks to enter it again), never a crash. `check_key` makes one
+  `models.list(limit=1)` call (timeout 10, one retry): 401/403/other 4xx ->
+  400, 408/409/429/5xx and connection errors -> 503, SDK exceptions not
+  chained.
+- **Routes (`assistant/userkeys_web.py`, one additive line in
+  `create_app`).** `GET/PUT/DELETE /api/me/anthropic-key`, each about the
+  signed-in person only. PUT checks the shape (`sk-ant-`, at most 256
+  characters), then `USER_DATA_KEY` (503 before any call), then the live
+  check, then saves; at most 5 PUTs a minute per person
+  (`cloud.RateLimiter`). GET is `{set, last4, unreadable, required,
+  available, month_usd?}`. **The owner gets 404** (decision: the server's
+  own `ANTHROPIC_API_KEY` is theirs; a second personal key would only blur
+  whose bill a turn is on). `/api/state` gives a family session `api_key`:
+  `"required"` (beta) or `"optional"` (family).
+- **Per-person client (`family.py`).** `Family.client(uid)` /
+  `api_for(uid)`: a cached `anthropic.Anthropic(api_key=..., max_retries,
+  timeout)` per person (the owner client's options; an explicit key, so
+  the SDK reads no `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` from the
+  server's environment). Family tier without a key -> the owner's client
+  (as before); beta -> `userkeys.MissingKey` before any request; someone
+  no longer listed -> `MissingKey` (never the owner's key). Their
+  ClaudeChat and Recorder get a `UserApi`, which looks the client up on
+  every call. **Deviation from the brief:** a saved, replaced or removed key
+  drops the cached client instead of `_contexts.pop`: popping the context
+  would leave open conversations on the old key (and a second HistoryStore
+  on the same file), while the per-call lookup makes the change apply at
+  the very next call, in open conversations too.
+- **Errors.** `cli.friendly_error` maps `MissingKey` to the new i18n
+  `no_key` ("Add your Anthropic API key in Settings to start.") and a 401 on
+  their own key (`UserApi.own_key`) to `bad_user_key` ("Your Anthropic API
+  key was rejected. Check it in Settings."); the owner's 401 still says
+  `bad_key`. en and zh. Same in the attachment path (`_ask_with_files`) and
+  in `voice_session._run_turn`'s catch-all (it said only "error").
+- **Cost.** ClaudeChat and Recorder/`ask_title` take a `meter`; calls on a
+  person's own key go to their `usage.UsageMeter` at `<dir>/<id>/usage.json`
+  (not written once they are removed), never the owner's `month_usd`.
+  Family members without a key still count on the owner's. Their GET shows
+  their own estimate.
+- **Settings UI.** ⚙ -> "Your Anthropic API key" (`index.html`,
+  `family.js setupKey`, styles in `app.css`): paste, Save / Replace /
+  Remove (asks first), the last four, this month's estimate, and a short
+  how-to with the console address as plain text (no external link or
+  script). All strings in Chinese too (`i18n.js`). `sw.js` cache v23.
+- **Config.** `USER_DATA_KEY` is in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS` (decision: a separate instance such as `.env.mom`
+  must not inherit the owner's from the shell; it would open the keys
+  under the owner's family folder; it sets its own), `render.yaml`
+  (`generateValue: true`), conftest's cleared vars, and a comment in
+  config.toml `[family]` (no config setting: env only).
+- **Tests.** New `tests/test_userkeys.py` (29): encryption at rest (no
+  plaintext, other folder, other label), fail closed (unset/empty/short),
+  a rotated `USER_DATA_KEY` (no crash, "enter it again", re-entering works),
+  key shapes, `check_key` against the real SDK over an httpx MockTransport
+  (200, 401/403/404 -> 400, 429/500/529/connection -> 503), the person's
+  client ignoring the server's credentials, two people -> two clients for
+  chats and titles, beta without a key -> `no_key` with nothing sent and
+  the turn rolled back, family without a key -> the owner's, replace and
+  delete applying to an open conversation, a removed person never falling
+  back, a rejected own key -> `bad_user_key` (owner still `bad_key`), the
+  file path too, `month_usd` untouched by their calls, no usage file after
+  removal, the routes (owner 404, signed-out 401, another person's key
+  invisible, 400/503, rate limit 429), the voice path (en/zh), and the key
+  never in caplog at DEBUG, users.json, responses or errors. A contract
+  test (`test_contract.py`) runs a beta tester's multi-turn conversation
+  with a tool round through `UserApi` (the fake here; live in CI with the
+  secret). JS: family.test.mjs (+4: shown only to family sessions, PUT once
+  and the box cleared, last four and estimate, a refused key's reason,
+  remove asks first, "can't be read" and "can't store" states) and
+  i18n.test.mjs (+1: every string of the section in Chinese). Existing
+  tests that had a beta-by-default person talk on the owner's key now
+  invite `tier="family"` (4 lines); the G1 beta Gmail test now saves a key
+  for its tester first; the sw.js pin is v25 (after the master merge).
+  - Revert check: 20 Python and 3 JS source reverts, each alone with
+    `__pycache__` cleared, all fail their tests. (The empty-secret check
+    is also covered by the length check; only its message test fails.)
+- **Counts after merging master and the review fixes:** 2543 passed, 35
+  skipped; JS 241. Review round 1 (APPROVED, 3 LOW): an SDK before 0.98
+  sent the server's `ANTHROPIC_AUTH_TOKEN` next to a person's key, so
+  `userkeys.user_client` clears it (test with an old-SDK stand-in); the
+  public privacy page now mentions the usage estimate and Remove key.
+- **Counts before the merge** (Linux sandbox, Python 3.13): 2497 passed, 35 skipped; G1
+  366eab5 in the same sandbox at the same time: 2467 passed, 33 skipped
+  (+29 test_userkeys.py, +1 contract fake; the 2 new skips are the
+  contract test's live variants). Earlier the same day the G1 tree gave
+  2442 passed, 58 skipped: 25 environment-dependent tests skipped then and
+  run now, the same on both trees. JS 241 pass (was 236).

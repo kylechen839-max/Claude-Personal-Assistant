@@ -26,6 +26,9 @@ requests>=2.0
 # 2.199 adds Calendar event labels (eventLabelVersion, labelProperties)
 google-api-python-client>=2.199
 google-auth-oauthlib>=1.2
+# Encrypts people's own Anthropic keys (userkeys.py; already pulled in by
+# google-auth). abi3 wheels for Windows x64, Linux x86_64/aarch64 (Pi), Python 3.9+
+cryptography>=44
 google-auth-httplib2>=0.2
 notion-client>=3.0
 pinecone>=7.0
@@ -40,6 +43,9 @@ uvicorn>=0.27
 websockets>=12  # voice conversation mode (WebSocket)
 python-multipart>=0.0.9
 httpx>=0.27  # FastAPI's TestClient in the tests
+# Crash reports (errortracking.py): pure Python; nothing starts or is sent
+# unless SENTRY_DSN is set
+sentry-sdk>=2,<3
 # Homework tutor photos: check the type, resize, strip EXIF
 pillow>=10
 tomli>=2.0; python_version < "3.11"
