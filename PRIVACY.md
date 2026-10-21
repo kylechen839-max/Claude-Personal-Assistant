@@ -57,6 +57,14 @@ owner removes entries at /waitlist (also on request). Render's daily disk
 snapshots keep a copy until they expire. The /welcome, /privacy and /terms
 pages and the waitlist form are public; everything else still needs sign-in.
 
+If you add your own Anthropic API key, we check it once with Anthropic, then
+store it encrypted on our server in your account folder, and use it only to
+send your conversations to Anthropic. We never show it back (only its last four
+characters) or write it to logs. Your Claude usage is billed to your Anthropic
+account under Anthropic's terms. Removing the key in Settings, or deleting your
+account, deletes it. We also keep a monthly token and cost estimate for your
+key in your folder, shown only to you.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own

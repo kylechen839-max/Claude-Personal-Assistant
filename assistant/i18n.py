@@ -26,6 +26,8 @@ EN = {
     "error": "Sorry, something went wrong.",
     "no_internet": "Sorry, I can't reach the internet right now.",
     "bad_key": "Sorry, my Anthropic API key isn't working. Please check it.",
+    "no_key": "Add your Anthropic API key in Settings to start.",
+    "bad_user_key": "Your Anthropic API key was rejected. Check it in Settings.",
     "rate_limited": "I'm getting too many requests right now. Try again in a minute.",
     "api_error": "Sorry, something went wrong talking to Claude.",
     "claude_down": "Claude is unreachable right now. I retried a few times; "
@@ -124,6 +126,8 @@ ZH = {
     "error": "抱歉，出了点问题。",
     "no_internet": "抱歉，现在连不上网络。",
     "bad_key": "抱歉，Anthropic 密钥不能用了，请检查一下。",
+    "no_key": "请先在设置里添加你的 Anthropic API 密钥。",
+    "bad_user_key": "你的 Anthropic API 密钥被拒绝了，请到设置里检查一下。",
     "rate_limited": "现在请求太多了，请过一分钟再试。",
     "api_error": "抱歉，连接 Claude 时出了点问题。",
     "claude_down": "现在连不上 Claude，已经重试了几次，请过一分钟再试。",

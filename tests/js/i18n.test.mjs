@@ -377,3 +377,31 @@ test('the invite form\'s tier labels are translated', () => {
   assert.equal(t('Family (Calendar and Gmail)'), '家人（日历和 Gmail）');
   assert.equal(t('Active · Beta'), '已加入 · 测试版');
 });
+
+test('every string of the "Your Anthropic API key" settings is translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  // the section's own text in index.html (text nodes and the aria-label)
+  const html = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+  const section = html.match(/<section id="api-key"[\s\S]*?<\/section>/)[0];
+  const texts = [...section.matchAll(/>([^<>]+)</g)].map((m) => m[1].replace(/\s+/g, ' ').trim())
+    .filter((x) => x && !x.startsWith('console.anthropic.com'));  // the address stays
+  texts.push(section.match(/aria-label="([^"]+)"/)[1]);
+  assert.ok(texts.length >= 5, texts.join('|'));
+  for (const en of texts) assert.notEqual(t(en), en, en);
+  // what family.js and the server (userkeys_web.py, userkeys.py) say there
+  const family = readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8');
+  const keyPart = family.slice(family.indexOf('function setupKey'), family.indexOf('let owner = null'));
+  const said = [...keyPart.matchAll(/"([A-Z][^"]* [^"]{4,})"/g)].map((m) => m[1]);  // sentences
+  said.push('Save key', 'Replace key');
+  assert.ok(said.length >= 8, said.join('|'));
+  for (const en of said) assert.notEqual(t(en), en, en);
+  for (const en of ["that doesn't look like an Anthropic API key (it starts with sk-ant-)",
+    "Anthropic didn't accept that key", "couldn't reach Anthropic to check the key; try again",
+    "couldn't check the key with Anthropic; try again", 'too many tries; wait a minute',
+    "this server can't store keys yet (its owner needs to set USER_DATA_KEY)"]) {
+    assert.notEqual(t(en), en, en);
+  }
+  assert.equal(t('Your key ending in wxyz is saved.'), '你的密钥（结尾 wxyz）已保存。');
+  assert.equal(t('About $1.25 this month on your key.'), '这个月用你的密钥大约花了 $1.25。');
+});

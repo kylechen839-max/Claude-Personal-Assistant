@@ -199,8 +199,12 @@ class ClaudeChat:
                  max_history: int = 40, tools=None, max_tool_rounds: int = 6,
                  memory=None, recorder=None, language: str = "en",
                  user_name: str | None = None, timezone: str | None = None,
-                 fast_model: str | None = None, router: str = "off"):
+                 fast_model: str | None = None, router: str = "off",
+                 meter=None):
         self._client = client
+        # Where this chat's API usage is counted: None = usage.METER (the
+        # owner's bill); a family member's own key counts on theirs (family.py)
+        self.meter = meter
         # A family member's name (family.py): the prompts say it, not "Kyle"
         self.user_name = user_name or None
         self.timezone = timezone or None  # IANA name; None = this machine's
@@ -255,6 +259,9 @@ class ClaudeChat:
         # A health check's conversation (webapp.WebAssistant.start_check):
         # nothing is saved (no history, no memory summary, no review offer).
         self.check_mode = False
+
+    def _count_usage(self, model: str, response) -> None:
+        (self.meter or usage).record(model, getattr(response, "usage", None))
 
     @property
     def client(self):
@@ -653,7 +660,7 @@ class ClaudeChat:
             response = self.client.messages.create(
                 model=model, max_tokens=200, system=SUMMARY_PROMPT,
                 messages=[{"role": "user", "content": text}])
-            usage.record(model, getattr(response, "usage", None))
+            self._count_usage(model, response)
             summary = "".join(b.text for b in response.content
                               if b.type == "text").strip()
             if not summary or summary.upper().startswith("NOTHING"):
@@ -726,7 +733,7 @@ class ClaudeChat:
             if self.tools:
                 kwargs["tools"] = self.tools.schemas(model)
             response = self._create(kwargs, on_text, cancel)
-            usage.record(model, getattr(response, "usage", None))
+            self._count_usage(model, response)
             if model != self.model and self.tools and needs_main_for(
                     b.name for b in response.content if b.type == "tool_use"):
                 # The fast model wants to change something. Its response is
