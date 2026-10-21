@@ -276,9 +276,11 @@ def ask_to_delete(answer, **kw):
 
 @pytest.mark.parametrize("answer, yes", [
     ("yes", True), ("Yeah, delete it.", True), ("go ahead", True), ("Yes please.", True),
-    ("no", False), ("okay, and what about Friday?", False), ("okay", False),
-    ("yes but not that one", False), ("what's the weather", False), ("", False)])
+    ("okay", True), ("Yep!", True), ("ya", True),  # Kyle's list (2026-10-21)
+    ("no", False), ("yes but not that one", False), ("Cancel.", False),
+    ("stop", False)])
 def test_only_an_explicit_yes_confirms(answer, yes):
+    """A clear yes or no is final at once (unclear answers: test_confirm_ux)."""
     conv, chat, events, client, deleted, asked = ask_to_delete(answer)
     conv.chunk_played(1, asked["index"])  # the page heard the whole question
     conv.utterance(2, SPEECH)

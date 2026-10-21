@@ -437,10 +437,12 @@ phone (or yours signed in as her test user).
   - Should: a Chinese yes/no question is spoken; "不要" cancels (nothing
     added). Repeat and say "好的": the event appears in her Google Calendar.
     Repeat once more and answer "还是明天吧" (out loud, in voice
-    conversation): not a yes, nothing added.
+    conversation): not a yes; it says "不好意思，我没听清。" once, then
+    "还是没听清，所以我没有做。" if she answers unclearly again, and nothing is
+    added.
 - [ ] Ask it to draft a reply to one email; answer "可以吗？".
-  - Should: a question is not a yes: no draft. Answer "是的": a draft
-    appears in her Gmail Drafts, nothing is sent.
+  - Should: a question is not a yes: it asks once more ("不好意思，我没听清。").
+    Answer "是的": a draft appears in her Gmail Drafts, nothing is sent.
 - [ ] Say "再见".
   - Should: "再见！" and the conversation ends.
 
@@ -499,6 +501,20 @@ with the stopwatch button.
     Repeat and say "no": the event stays. Repeat and talk over the question
     ("okay, and what about Friday?"): it says "OK, I won't delete it", the
     event stays, and it then answers about Friday.
+- [ ] Misheard yes (voice view, a real phone mic): delete a test event and
+      answer "ya", "yep", "okay" or "sure" in your normal voice.
+  - Should: each one deletes it after a single question. Then answer with
+    something unclear ("hmm", "the dentist"): it says "Sorry, I didn't
+    catch that. Please say yes or no." once; say "yes" and it deletes. Do
+    it again and stay unclear twice: it says "I still didn't catch that, so
+    I left it", the event stays, and it never asks a third time.
+- [ ] Move without a question: in a new conversation, "What's on tomorrow?"
+      (with only your own events, none with notes), then "Move the test
+      event to 4".
+  - Should: it moves it without asking anything, neither the app nor
+    Claude ("are you sure?"). If it does ask, note whether tomorrow had an
+    invite from someone else, an event with notes, or a shared calendar
+    (those make every change ask, on purpose).
 - [ ] Follow-up cue: after an answer finishes, wait.
   - Should: a very quiet low note and **Still listening…** with the mic
     meter lit; after about 5 s the label goes back to **Listening** without

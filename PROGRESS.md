@@ -65,6 +65,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `test_confirm_ux.py` | 123 | yes/no answers: misheard yeses, one more try then cancel (text, PC voice, phone voice, `/api/confirm`), calendar moves without a question |
 | `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
@@ -4449,3 +4450,85 @@ Kyle approves the wording and picks the address first, in a separate PR).
     all three Remove tests.
 - **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
   over master's 2649 passed, 35 skipped); JS 118 pass.
+
+## Confirmations that don't nag (2026-10-21)
+
+Kyle: moving a calendar event asked for confirmation, and the app asked up
+to three times because speech-to-text misheard his "yes".
+
+- **Why a move asked.** Not a `confirm_prompt`: `move_calendar_event` has
+  only `confirm_if_untrusted`, and create/update ask without taint only for
+  guest changes. Two causes remained: (1) Claude asking "are you sure?" on
+  its own (only the delete tool told it not to), then the app's own
+  question on top when the conversation was tainted; (2) taint from the
+  listing every move starts with. `list_events` marks the result untrusted
+  when any listed event has notes (`description`), even Kyle's own
+  (`organizer.self` True), or is an invite, a Gmail-made event, a
+  `guestsCanModify` event, or comes from a calendar he doesn't own
+  (`calendar="all"` takes in subscribed holiday calendars). From then on
+  `ClaudeChat.tainted()` (`has_marked_results`) makes every change ask.
+  The taint rules are unchanged (SECURITY.md "Calendar data from Kyle's
+  own events"); cause 1 is fixed.
+- **Tool descriptions.** `create_calendar_event`, `move_calendar_event`
+  and `update_calendar_event` end with `JUST_DO_IT` ("just call the tool:
+  don't ask him to confirm first yourself"). Their `confirm_if_untrusted`,
+  guest questions and every delete question are unchanged.
+- **One answer classifier.** `cli.classify_answer` returns "yes", "no" or
+  "unclear", ignoring case and punctuation (and the iPhone's curly
+  apostrophe). Yes: yes/yeah/yep/yup/ya/yah/yea, sure, ok/okay, do it, go
+  ahead, please, correct, right, yes please, affirmative, sounds good,
+  alright, 是/对/好/可以/行 (the existing whole-answer Chinese rule), in a
+  short answer (at most 8 words) of yes words and filler. Any negation is a
+  no. Everything else is unclear. `cli.is_yes` and
+  `voice_session.is_explicit_yes` are now this one rule (they were two
+  lists; "okay" alone used to be a no in the voice view).
+- **One more try, then cancel.** An unclear answer gets "Sorry, I didn't
+  catch that. Please say yes or no." once; a second unclear one cancels
+  with "I still didn't catch that, so I left it." A clear no cancels at
+  once. Same in all four places: `text_confirm`, `voice_confirm` (PC; a
+  barge-in over the second question is still a no), the voice view
+  (`VoiceConversation._ask_again`: same turn, same pending question, a new
+  "confirm" event with `again: true` and a new question chunk; only that
+  chunk's own "played" opens it, so a stale "played" or an early answer is
+  "not heard" = no, and talking over it is "interrupted" = no), and
+  `/api/confirm` (`WebAssistant.ask_again`: the same confirmation id is
+  asked again; no page change needed, `app.js` already shows a new
+  "confirm"). The cancelled tool result now tells Claude to say so in one
+  short sentence and not to call the tool or ask again, so it doesn't
+  re-ask by itself.
+- **Logs.** INFO has lengths and the verdict ("Voice confirmation (11
+  chars) -> unclear", "Confirmation of turn 1 unclear: asking once more");
+  the answer text stays at DEBUG (caplog tests).
+- **Tests** (+125): new `tests/test_confirm_ux.py` (123: 50 yeses incl.
+  misheard ones, 25 noes, 26 unclear; a move with no taint runs with no
+  question; a delete asks exactly once; a misheard delete answer asks once
+  more then cancels; a move after listing an outside invite still asks;
+  own-event notes still taint (pins the reported cause); calendar edit
+  descriptions; text, PC voice, hands-free voice and `/api/confirm`
+  re-ask flows, including a barge-in on the second question, a stale
+  "played", and a clear no that never re-asks), plus
+  `test_voice_ws.py::test_unclear_answer_is_asked_again_over_the_socket`.
+  Changed: `test_voice.py::test_only_an_explicit_yes_confirms` ("okay" is
+  now a yes; "ya", "Yep!", "Cancel.", "stop" added; the unclear answers
+  moved to the re-ask tests) and one `test_voice_ws.py` case ("okay, and
+  what about Friday?" now re-asks, so the clear-no case says "Nope, cancel
+  that.").
+  - Revert check (old source, with only `classify_answer`/`JUST_DO_IT`/
+    `text_confirm(output_fn=)` shims so the file imports): 6 calendar/text
+    tests fail as expected (descriptions, misheard delete, text re-ask) and
+    every classifier, re-ask and voice test fails; the move-without-taint,
+    delete-asks-once, tainted-move and own-notes tests pass on the old code
+    too, as they should (they guard behaviour that must not change).
+- **Round 2 (judge, 5 low findings).** Digits are words (`[a-z0-9']+`), so
+  "Yes, 11" to "move it to 10?" is unclear, not a yes; an answer with "?"
+  or "？" ("Right?", "Okay?") is unclear; 没错 and a repeated yes
+  (是的是的, 对对对, 好的好的) are yeses while 不对 and 错了 stay noes; the
+  stale-"played" test now delivers the late report inside `_ask_again`
+  (before the new question's audio exists) and fails without the
+  `pending.chunk = None` guard; SECURITY, README and MANUAL_TEST no longer
+  say any other answer is a no. Revert check: the old `cli.py` fails the
+  15 new classifier cases ("okay 4 pm" was already unclear), and removing
+  the guard fails the stale-"played" test.
+- **Counts** (Linux sandbox, Python 3.13): 2793 passed, 35 skipped (+125
+  over master 5f42072's 2668 passed, 35 skipped); JS 158 pass (every file
+  in `tests/js`, none changed).

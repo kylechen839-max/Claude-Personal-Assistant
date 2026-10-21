@@ -63,6 +63,13 @@ CACHE_ENTRIES = 20
 _EMAIL = re.compile(r"^[^@\s,;<>\"()]+@[^@\s,;<>\"()]+\.[^@\s,;<>\"()]+$")
 
 
+# Creating, moving and changing an event aren't destructive: once Kyle has
+# said what he wants, the model shouldn't ask "are you sure?" on top of the
+# app's own question (asked only when it is needed: guests, untrusted text).
+JUST_DO_IT = ("When Kyle asks for this, just call the tool: don't ask him to "
+              "confirm first yourself.")
+
+
 def is_from_others(event: dict) -> bool:
     """Could someone other than Kyle have written this event's title or
     location? The Calendar API sets organizer.self only when it is true, so
@@ -1003,7 +1010,8 @@ class GoogleCalendar:
             Tool("create_calendar_event",
                  "Create an event on Kyle's calendar. For an all-day event "
                  "pass dates only (YYYY-MM-DD) as start and end. Inviting "
-                 "guests emails them, so Kyle is asked first automatically.",
+                 "guests emails them, so Kyle is asked first automatically. "
+                 + JUST_DO_IT,
                  {"type": "object", "properties": {
                      "title": {"type": "string"},
                      "start": {"type": "string", "description":
@@ -1027,7 +1035,7 @@ class GoogleCalendar:
             Tool("move_calendar_event",
                  "Move an existing event to a new time, keeping its length "
                  "unless new_end is given. Get event_id from "
-                 "list_calendar_events first.",
+                 "list_calendar_events first. " + JUST_DO_IT,
                  {"type": "object", "properties": {
                      "event_id": {"type": "string"},
                      "new_start": {"type": "string", "description": iso},
@@ -1042,7 +1050,8 @@ class GoogleCalendar:
                  "reminders, repeat rule, busy/free, visibility, guests or "
                  "Meet link (only the fields given change). Get event_id "
                  "from list_calendar_events first. Adding or removing guests "
-                 "emails them, so Kyle is asked first automatically.",
+                 "emails them, so Kyle is asked first automatically. "
+                 + JUST_DO_IT,
                  {"type": "object", "properties": {
                      "event_id": {"type": "string"},
                      "title": {"type": "string"}, "location": {"type": "string"},
