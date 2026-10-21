@@ -1391,7 +1391,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                limiter: LoginLimiter | None = None, reap_interval: float = 30,
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
-               language: str = "en", google=None, hub=None, spotify=None,
+               language: str = "en", google=None, spotify=None,
                health=None, public=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
@@ -1400,7 +1400,6 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     routes are added before any wrapping, so they get the same auth.
     `language` "zh" serves the page as lang="zh-CN" (i18n.js translates it);
     `google`: a google_web.GoogleConnect for the "connect Google" button.
-    `hub`: a devhub.Hub (the PC hub at /devteam, loopback requests only).
     `max_attachment_bytes` / `max_image_bytes`: per file attached to a
     turn (PDF or text / photo); the whole request stays under
     `max_upload_bytes`.
@@ -1951,10 +1950,6 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         from assistant import public_site
 
         public_site.register(app, public, web, error)
-    if hub is not None:
-        from assistant import devhub
-
-        devhub.install(app, hub)
     if failover:
         return wrap_failover(app, token, failover, web)
     return app
@@ -2140,10 +2135,6 @@ def family_speech(config: dict) -> SpeechByLanguage:
                             transcriber, voice)
 
 
-HUB_PROXY_WARNING = ("WARNING: the PC hub is disabled while TRUSTED_PROXY is "
-                     "set; open it on this PC without the proxy.")
-
-
 def serve(config: dict, host: str | None = None, port: int | None = None,
           tts_name: str | None = None, show_token: bool = False,
           env_file: str | Path = ".env", output_fn=print) -> int:
@@ -2179,9 +2170,6 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import webfeatures  # lecture recorder + homework tutor
 
     features = webfeatures.Features(config, assistant)
-    from assistant import devhub  # the PC hub: only on a loopback bind
-
-    hub = devhub.Hub(config) if devhub.enabled(config, host) else None
     from assistant import google_web  # the owner's and family members' Google
 
     google = google_web.from_config(config, assistant)
@@ -2202,7 +2190,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      sessions_file=web["sessions_file"] or None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
-                     hub=hub, spotify=spotify, health=health,
+                     spotify=spotify, health=health,
                      public=public_site.from_config(config),
                      **attachment_limits(config))
     if failover.role:
@@ -2211,14 +2199,6 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
         start_history_sync(config, assistant, token, failover)
     if not config.get("candidate"):  # a side-port check copy (cli --candidate)
         features.resume_jobs()  # lecture jobs cut off by a restart
-    if hub is not None and trusted_proxy:
-        # Every hub route answers 404 to a request a trusted proxy vouches
-        # for (devhub.from_this_machine), so say so instead of a dead link.
-        output_fn(HUB_PROXY_WARNING)
-        log.warning(HUB_PROXY_WARNING)
-    elif hub is not None:
-        output_fn(f"PC hub on http://{host}:{port}/devteam "
-                  f"({len(hub.sessions)} coordinator window(s)).")
     output_fn(f"Web app on http://{host}:{port} (Ctrl+C to stop)."
               + (f" On your phone, use `tailscale serve --https=443 "
                  f"http://127.0.0.1:{port}`." if local else ""))

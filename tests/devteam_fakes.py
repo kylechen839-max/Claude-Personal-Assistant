@@ -1,5 +1,5 @@
-"""Shared fakes for the dev team link and the PC hub: the Claude Code CLI
-(subprocess.run) and the Notion client, with the real API shapes."""
+"""Fakes for the dev team voice link: the Claude Code CLI (subprocess.run
+and Popen) and the Notion client, with the real API shapes."""
 
 import json
 from types import SimpleNamespace
@@ -28,9 +28,9 @@ def ok_run():
                                       "url": f"https://claude.ai/code/{SID}"}))
 
 
-def row(rid, reply, status="answered", trashed=False, edited=None):
+def row(rid, reply, status="answered", trashed=False):
     return {"in_trash": trashed, "object": "page",
-            "last_edited_time": edited or "2026-10-20T15:30:00.000Z", "properties": {
+            "last_edited_time": "2026-10-20T15:30:00.000Z", "properties": {
         "Reply ID": {"title": [{"plain_text": rid}]},
         "Reply": {"rich_text": [{"plain_text": reply}]},
         "Status": {"select": {"name": status}},
