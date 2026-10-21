@@ -53,7 +53,7 @@ DEFAULTS: dict = {
         "picker": True,
         "voices_dir": "voices",          # the Piper voices offered
         "voice_file": "data/voice_choice.json",  # the owner's pick ("" = not kept)
-        "family_paid_voices": False,     # family members may pick ElevenLabs
+        "family_paid_voices": False,     # family-tier members (never beta) may pick ElevenLabs
     },
     "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
     "wake": {

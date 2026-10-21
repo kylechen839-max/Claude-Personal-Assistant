@@ -40,7 +40,7 @@ elevenlabs_model = "eleven_flash_v2_5"
 picker = true
 voices_dir = "voices"         # Piper voices found here are offered
 voice_file = "data/voice_choice.json"  # your pick; a family member's is in their own folder
-family_paid_voices = false    # true = family members may pick ElevenLabs voices (your bill)
+family_paid_voices = false    # true = family-tier members only (never beta testers) may pick ElevenLabs voices (your bill)
 
 [stt]
 model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi

@@ -76,6 +76,29 @@ def revoke_google(token: str, timeout: float = 5.0) -> None:
         raise RuntimeError(f"HTTP {r.status_code}")
 
 
+def revoke_google_grant(family, uid: str, revoke: Callable[[str], None] | None = None,
+                        label: str = "Account") -> None:
+    """Best effort: revoke `uid`'s Google grant, read from their own token
+    file, before their folder (and the file) goes. Shared by "Delete my
+    account" (Account.revoke_token) and the owner's Remove (family.py).
+    `revoke` defaults to revoke_google. Never raises; never logs a token."""
+    from assistant.tools.google_auth import load_token_info
+
+    try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
+        info = load_token_info(family.google_token(uid), environ={})
+    except (OSError, ValueError):
+        info = None
+    token = (info or {}).get("refresh_token") or (info or {}).get("token")
+    if not token:
+        return
+    try:
+        (revoke or revoke_google)(token)
+        log.info("%s: revoked %s's Google grant", label, uid)
+    except Exception as e:  # noqa: BLE001 - removing goes ahead regardless
+        log.warning("%s: revoking %s's Google grant failed (%s); "
+                    "deleting anyway", label, uid, type(e).__name__)
+
+
 def confirmed(given, user: dict) -> bool:
     """The typed confirmation: DELETE, or their account name (any case)."""
     if not isinstance(given, str) or len(given) > 200:
@@ -123,21 +146,7 @@ class Account:
         """Best effort: their Google grant, before the folder (and the token
         file) goes. Never raises; never logs a token. (Notion's is revoked
         in delete(), under their Notion lock.)"""
-        from assistant.tools.google_auth import load_token_info
-
-        try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
-            info = load_token_info(self.family.google_token(uid), environ={})
-        except (OSError, ValueError):
-            info = None
-        token = (info or {}).get("refresh_token") or (info or {}).get("token")
-        if not token:
-            return
-        try:
-            self.revoke(token)
-            log.info("Account: revoked %s's Google grant", uid)
-        except Exception as e:  # noqa: BLE001 - deleting goes ahead regardless
-            log.warning("Account: revoking %s's Google grant failed (%s); "
-                        "deleting anyway", uid, type(e).__name__)
+        revoke_google_grant(self.family, uid, self.revoke)
 
     def delete(self, uid: str, sign_out: Callable[[str], None]) -> bool:
         """Revoke, then Family.remove (sign out, delete the folder). False

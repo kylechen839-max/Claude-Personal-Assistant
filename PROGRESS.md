@@ -1329,7 +1329,11 @@ still the default.
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use. Kokoro's model is
   Apache-2.0, `kokoro-onnx` is MIT, and it pulls in `phonemizer` (GPL-3.0)
-  and a bundled espeak-ng (GPL-3.0); also fine for personal use.
+  and a bundled espeak-ng (GPL-3.0); also fine for personal use. The cloud's
+  Docker image (with piper-tts) is built on Render from this repo and never
+  published; serving replies over a network to beta testers is not
+  distribution under GPL-3.0 (it isn't the AGPL), so no source offer is
+  owed. Publishing the image or shipping it to someone would be.
 - **Kokoro and pyttsx3 can't share a process on Linux**: kokoro-onnx loads
   its own libespeak-ng, and pyttsx3's eSpeak driver then crashed the process
   in the test suite. The app only ever builds one engine (and the web app's
@@ -4378,3 +4382,70 @@ key for family members without their own).
     the `add_speech` guard alone (2), the new INFO log line (1).
   - Counts (Linux sandbox): 2619 passed, 36 skipped; the merge commit
     142a0b2 in the same sandbox: 2613 passed, 36 skipped (+6). JS 241 pass.
+
+## Public beta launch prep (2026-10-21)
+
+From the public beta go/no-go review. Prepares the launch; does not turn
+it on (`public_site`, `legal_draft` and `support_email` are unchanged:
+Kyle approves the wording and picks the address first, in a separate PR).
+
+- **Integrated count on master** 4b770b5 (G1-G7 all merged), Linux
+  sandbox, Python 3.13: 2649 passed, 35 skipped (measured on a clean
+  export of 4b770b5); JS 118 pass.
+- **Paid voices never reach beta testers.** `voice_picker.Catalog.paid_ok`
+  allowed any invited person ElevenLabs voices once `[tts]
+  family_paid_voices` was on, whatever their tier, so a beta tester could
+  run up Kyle's ElevenLabs bill. It now also asks the Family
+  (`Family.tier(uid) == "family"`; someone unknown or no longer listed
+  counts as beta, and without a Family nobody but the owner gets them).
+  `paid_ok` gates the listing (`voices`, the `custom` box) and `find`,
+  which `choose`, the preview and the reply voice (`voice_of` ->
+  `engine_for`) all go through, so a paid voice saved earlier falls back
+  to the default for a beta tester. The `config.toml` comment says
+  "family-tier members only (never beta testers)".
+- **The owner's Remove revokes Google too.** `family.py`'s
+  `revoke_and_remove` revoked only Notion; "Delete my account" revoked
+  both. The Google revoke moved from `Account.revoke_token` into
+  `account.revoke_google_grant(family, uid, revoke=None, label=...)`,
+  which both now call (Account passes its own `revoke`, so its behaviour
+  and log lines are unchanged). Remove runs it first, only for a listed
+  id, best effort (a failure is logged with the exception type, never
+  the token, and the removal goes ahead), then the Notion revoke and
+  removal under the Notion lock as before.
+- **Docs.** BLOCKERS has one ordered "Public beta launch" item (Render
+  env, legal approval, the launch PR before Google and Notion since they
+  need `/privacy` and `/terms`, then Google, verification, Notion,
+  Sentry/UptimeRobot, `family_paid_voices`, a dry run, invites, the tag),
+  pointing to the existing items. README's Render step lists
+  `GOOGLE_PUBLIC_CLIENT_JSON`, `NOTION_OAUTH_CLIENT_ID`/`_SECRET`,
+  `SENTRY_DSN`, `PUBLIC_ORIGIN` and `USER_DATA_KEY`; its `[family]` key
+  list is one complete list matching `DEFAULTS` (it had a broken
+  duplicate and lacked `enabled`, `export_max_mb`); "Persistent disk" says
+  to watch Render's disk graph and drops a stale "until merged" sentence.
+  The release-check comments in `landing.html` and `privacy.html` list the
+  remaining deploy checks instead of G1/G2/G6 (still HTML comments; the
+  pages are served by the server, not the service worker, so no cache
+  bump). CHANGELOG Unreleased: the dashboard, dev team, launcher, hub and
+  design-skill bullets are in a "Dev tooling" subsection at its end, the
+  dashboard ones folded into one that says it lives in its own repo (the
+  old ones named `tools/agent-dashboard/`, a hub and a phone layout that
+  are gone). MANUAL_TEST: Remove also clears "Hey Claude" from their
+  Google permissions; a Beta account never sees paid voices.
+- **Tests** (+3, 1 changed):
+  - `test_voice_picker.py`: `test_paid_voices_are_family_tier_only_even_when_allowed`
+    (through the routes: a beta tester with `family_paid_voices` on sees
+    no paid voice and no ID box, `choose` gets 400, a paid voice saved for
+    them falls back to the default engine; a family-tier member and the
+    owner can list and choose it). `test_family_members_get_paid_voices_only_if_allowed`
+    now passes a Family stand-in and checks beta, unlisted and no-Family.
+  - `test_account.py`: the owner's Remove revokes the refresh token before
+    the folder goes (INFO line has the id, no token; an unknown id revokes
+    nothing); a revoke failure still removes them.
+  - `test_family_google.py::test_removing_a_member_deletes_their_token`
+    now fakes the revoke (it would otherwise call Google) and checks it.
+  - Revert checks (source only, `__pycache__` cleared): the
+    `voice_picker.py` change fails both voice tests (`assert True is False`:
+    the beta tester was offered the ID box); the `family.py` call fails
+    all three Remove tests.
+- **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
+  over master's 2649 passed, 35 skipped); JS 118 pass.

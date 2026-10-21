@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed: with `[tts] family_paid_voices` on, beta testers could pick
+  ElevenLabs voices on the owner's bill. Paid voices now go only to
+  family-tier members (and the owner); a beta tester never sees them, can't
+  choose one, and a paid voice saved earlier falls back to the default.
+- Fixed: the owner's Remove now revokes the person's Google sign-in at Google
+  (best effort, before their folder is deleted), as Delete my account already
+  did; it already revoked Notion.
 - Invited people (beta and family) can connect their own Notion from Settings:
   Connect Notion signs in with Notion's own consent page, and their
   Assignments database gives them two tools on their own account: list
@@ -28,32 +35,6 @@
   disconnects first; deleting your account also removes any download still
   being made. An old, stalled download finishing late no longer frees a newer
   export's one-at-a-time slot.
-- The dev team dashboard moved to a new artifact URL (the old one stopped
-  waking the coordinator); re-download the desktop launcher from Get
-  desktop app.
-- Dev team: the master merges its own PRs (merge commit) once CI is green
-  and the judge approved, or turns on GitHub auto-merge where allowed.
-- Dev team: the master re-arms the dashboard watch after every publish and
-  after every container restart, and never stops it. A stopped-and-remade
-  watch was dropped on restart, which is why dashboard messages kept
-  going unanswered.
-- The agent dashboard (page, row schemas, desktop launchers and their
-  tests) moved to its own private repo, kylechen839-max/agent-dashboard.
-  The dashboard watchdog prompt is now `docs/WATCHDOG.md`.
-- Removed the PC hub (`/devteam` on the PC's web app) and its `[devteam]
-  hub`, `hub_sessions`, `poll_seconds` and `hub_state_file` settings (old
-  values in `config.local.toml` are ignored). Talk to the dev team by voice
-  (`message_dev_team`) or from the dashboard. You can delete an old
-  `data/devhub.json`.
-- Agent dashboard: "Close idle agents" in the Grid toolbar (never
-  coordinator windows) and an opt-in auto-close; the maximized window's
-  restore is now an icon button (⤡); select text in a chat message and
-  Reply to quote it; paste or drop images, PDFs and text files into the
-  chat box (up to 5 per message, kept in the dashboard's own file store).
-- Design skills: `.claude/skills/` now has three vendored, pinned skills
-  for UI work (Anthropic `frontend-design`, Vercel `web-design-guidelines`
-  with its rules read locally, Addy Osmani `accessibility`), plus
-  `DESIGN_SKILLS.md` with their sources and where this repo's rules win.
 - Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
   installed with the app and stays off without it), an owner-only backup
   download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
@@ -248,18 +229,6 @@
   file is locked). Invites and removals are managed at the cloud server's own
   address. "Sign out everywhere" is now per person. A session the server
   doesn't list is never treated as the owner.
-- Agent dashboard Grid: a Coordinator picker shows only the chosen
-  coordinator session's windows (default All); the choice is kept per
-  viewer, and Forget clears a pick whose session has no recent runs.
-- Agent dashboard: desktop-only (the phone layout is gone). Windows can be
-  hidden and restored from "Hidden (N)" or Show all, the Runs view and
-  window chrome got a calmer unified look, and "Get desktop app" saves the
-  Windows or Mac launcher (as a small zip) for the dashboard or the hub.
-- Dev team link: a timed-out Claude Code CLI on Windows is stopped with its
-  whole process tree.
-- Dev team dashboard: the coordinator chat always shows whether the
-  coordinator is in a task or idle, and a message sent mid-task shows as
-  queued until the coordinator reads it.
 - Chinese (Mandarin) mode (`[assistant] language = "zh"`) and a `config.mom.toml`
   template for a separate family-member instance (new `--env-file` flag):
   Chinese replies, Mandarin speech recognition (Whisper `small`), a Mandarin
@@ -271,41 +240,46 @@
   phone. A separate instance refuses to start if the owner's Google, history,
   web-token, Notion or Pinecone variables are inherited from the shell.
 - Phone app cache v5.
-- Dev team dashboard: the coordinator chat looks like the Claude Code app
-  (full-width replies, your messages in bubbles, collapsible activity
-  rows, an animated working line) and shows each message's delivery:
-  Sending, Delivered, Seen by coordinator, Working, or an amber warning
-  when the coordinator hasn't picked it up after 2 minutes.
-- Dev team dashboard: the Grid is now a full-screen window workspace.
-  Windows auto-tile, with a dark monospace body, run colours, maximize
-  (Esc or Restore), an Active only / All recent filter, and a slim
-  one-row layout on the phone.
-- Dev team dashboard: each coordinator window has a chat box. Type to
-  the coordinator (sent as a comment to Claude) and read everything it
-  tells you, rendered as markdown; the coordinator mirrors its messages
-  to your private dashboard storage.
-- Dev team dashboard: the Grid view shows one panel per `/build-feature`
-  coordinator (phase, round, elapsed time and its latest status lines)
-  with a tile for each researcher, builder and judge, all written by the
-  master. Tiles can be dragged and resized on a desktop, each with a
-  status badge, and the layout is remembered on that device; a panel
-  shows only its newest run when a session ran several. Message
-  coordinator opens claude.ai's own comment box (press Send to Claude);
-  Open session is the fallback.
-- Dev team: `/build-feature` masters may watch the dashboard for
-  comments (ArtifactComments is pre-approved in `.claude/settings.json`).
-- Dev team dashboard: desktop launchers open it in its own Chrome or Edge
-  window on Windows and macOS (`tools/agent-dashboard/desktop/`).
-- Dev team: a read-only agent run dashboard (a private claude.ai page,
-  source in `tools/agent-dashboard/`). One row per `/build-feature` run;
-  the page itself flags runs that have gone quiet past their phase's limit.
-  PR-ready, blocked and dead runs untouched for 7 days count as done.
+
+### Dev tooling
+
+- The agent run dashboard (the private claude.ai page that shows each
+  `/build-feature` run) moved, with its row schemas, desktop launchers and
+  their tests, to its own private repo, kylechen839-max/agent-dashboard;
+  its changes are recorded there. This repo keeps the master's side
+  (`.claude/skills/build-feature/SKILL.md`) and the dashboard watchdog
+  prompt (`docs/WATCHDOG.md`). During this release the dashboard gained one
+  row per run with quiet runs flagged, a desktop-only window workspace (a
+  window per coordinator, researcher, builder and judge, a coordinator
+  picker, hide and restore, close idle agents), a chat box per coordinator
+  with delivery states and attachments, and "Get desktop app" launchers
+  for Windows and macOS. It also moved to a new artifact URL (the old one
+  stopped waking the coordinator); re-download the desktop launcher from
+  Get desktop app.
 - Dev team: `/build-feature` writes a status row at each phase, marks a run
   done when its PR is merged or closed, and stops a phase that runs past
   its time limit with a blocker note.
+- Dev team: masters may watch the dashboard for comments (ArtifactComments
+  is pre-approved in `.claude/settings.json`), re-arm that watch after every
+  publish and container restart, and never stop it. A stopped-and-remade
+  watch was dropped on restart, which is why dashboard messages kept going
+  unanswered.
 - Dev team: an hourly watchdog marks runs whose session died and sends at
   most one phone push per session, including "needs you (approval)" when a
   run waits on a permission prompt.
+- Dev team: the master merges its own PRs (merge commit) once CI is green
+  and the judge approved, or turns on GitHub auto-merge where allowed.
+- Removed the PC hub (`/devteam` on the PC's web app) and its `[devteam]
+  hub`, `hub_sessions`, `poll_seconds` and `hub_state_file` settings (old
+  values in `config.local.toml` are ignored). Talk to the dev team by voice
+  (`message_dev_team`) or from the dashboard. You can delete an old
+  `data/devhub.json`.
+- Dev team link: a timed-out Claude Code CLI on Windows is stopped with its
+  whole process tree.
+- Design skills: `.claude/skills/` now has three vendored, pinned skills
+  for UI work (Anthropic `frontend-design`, Vercel `web-design-guidelines`
+  with its rules read locally, Addy Osmani `accessibility`), plus
+  `DESIGN_SKILLS.md` with their sources and where this repo's rules win.
 
 ## 1.0.2 (2026-10-19)
 

@@ -3,6 +3,56 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Public beta launch (in this order; each step points to its own
+      item below rather than repeating it).** Nothing in code is missing;
+      these are Render, Google, Notion and wording steps only Kyle can do.
+      1. **Render environment.** `USER_DATA_KEY` exists (item
+         "`USER_DATA_KEY` on Render") and is never changed again: a new
+         value makes every tester's stored key and Notion token unreadable.
+         `PUBLIC_ORIGIN` is the exact https origin people open (no
+         trailing slash). Decide on a custom domain *now*: changing it
+         later changes the Google and Notion redirect URIs and the cookies
+         (everyone signs in again).
+      2. **Approve the legal pages.** Read `assistant/web/privacy.html`
+         and `terms.html` (MANUAL_TEST "Public site and waitlist"), fix any
+         wording, and pick a support email address.
+      3. **The launch PR** (one small PR, after step 2): `"public_site":
+         True` in `SERVER_PROFILE` `"webapp"` (`assistant/config.py`), plus
+         `support_email = "<address>"` and `legal_draft = false` in
+         `config.toml` `[webapp]`. After Render redeploys, open `/welcome`,
+         `/privacy` and `/terms` signed out (a private tab). Until this PR
+         `/privacy` and `/terms` answer 404, and Google's consent screen
+         and Notion's integration form both need those URLs, so it must be
+         live before steps 4 and 6.
+      4. **Google for beta testers:** item "Beta testers' Google" below: a
+         *new* GCP project, consent screen with only `calendar.events`,
+         `calendar.calendarlist.readonly` and `calendar.calendars.readonly`,
+         published "In production" unverified (100-user cap), a Web
+         client with redirect `<PUBLIC_ORIGIN>/google/callback`, then its
+         JSON in `GOOGLE_PUBLIC_CLIENT_JSON`.
+      5. **Optional: Google verification.** Verify the domain in Search
+         Console (Google's review wants a domain you own, so this goes
+         with a custom domain), then submit the project for
+         verification with a demo video (consent, then a calendar
+         question). Lifts the warning screen and the 100-user cap.
+      6. **Notion:** item "Testers' Notion" below: the public integration,
+         then `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET`.
+      7. **Optional:** item "Cloud uptime alerts and error tracking"
+         (UptimeRobot on `/healthz`, Sentry's `SENTRY_DSN`).
+      8. **`[tts] family_paid_voices`:** leave it off unless you want
+         family-tier members on your ElevenLabs bill. Since this release it
+         never reaches beta testers (they are refused in the list, when
+         choosing and at reply time), so turning it on is safe for them.
+      9. **Dry run on a second phone** with a test invite of each tier:
+         MANUAL_TEST "Cloud server on Render" (invite, Beta tester, own
+         Anthropic key, own Notion, Download my data, Delete my account,
+         limits) and "Public site and waitlist". Watch Render's disk graph
+         (README "Persistent disk").
+      10. **Invite** the first testers from `/waitlist` (README "Inviting
+          someone from the waitlist").
+      11. **Tag 1.1.0** in the GitHub UI after the judge's final GO on
+          that exact SHA (the version bump and CHANGELOG date land in the
+          release PR first).
 - [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
       project folder: `.\scripts\install_watch_task.ps1` (or
       `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden

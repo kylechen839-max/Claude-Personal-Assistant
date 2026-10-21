@@ -127,6 +127,47 @@ def test_delete_without_google_skips_revoke(env, owner, acct):
     assert acct.revoked == []
 
 
+def test_owners_remove_revokes_google_first(env, owner, acct, monkeypatch, caplog):
+    # the owner's Remove (family.py) revokes Google as "Delete my account"
+    # does, through the same helper, before the folder goes
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    folder, _ = plant(env, uid)
+    seen = []
+    monkeypatch.setattr(account_mod, "revoke_google",
+                        lambda token: seen.append((token, folder.exists())))
+    caplog.set_level(logging.DEBUG)
+    assert owner.post(f"/api/users/{uid}/remove", json={}).status_code == 200
+    assert seen == [(REFRESH, True)] and not folder.exists()
+    assert uid not in env.family.users
+    assert any(uid in r.getMessage() and "revoked" in r.getMessage()
+               for r in caplog.records if r.levelno == logging.INFO)
+    assert REFRESH not in caplog.text and ACCESS not in caplog.text
+    # an unknown id: nothing to revoke, still a 404
+    assert owner.post("/api/users/u_nobody12345/remove", json={}).status_code == 404
+    assert len(seen) == 1
+
+
+def test_owners_remove_goes_ahead_when_google_revoke_fails(env, owner, acct,
+                                                           monkeypatch, caplog):
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    folder, _ = plant(env, uid)
+    calls = []
+
+    def broken(token):
+        calls.append(token)
+        raise ConnectionError(f"couldn't reach Google with {token}")
+    monkeypatch.setattr(account_mod, "revoke_google", broken)
+    caplog.set_level(logging.DEBUG)
+    assert owner.post(f"/api/users/{uid}/remove", json={}).status_code == 200
+    assert calls == [REFRESH]
+    assert not folder.exists() and uid not in env.family.users
+    assert any("revoking" in r.getMessage() and "ConnectionError" in r.getMessage()
+               for r in caplog.records)
+    assert REFRESH not in caplog.text and ACCESS not in caplog.text
+
+
 def test_revoke_google_posts_the_token_in_the_body(monkeypatch):
     calls = []
 
