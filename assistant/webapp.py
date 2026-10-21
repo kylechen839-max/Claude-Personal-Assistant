@@ -1515,10 +1515,22 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     family = getattr(assistant, "family", None)  # family.Family, or None
     if hasattr(assistant, "user_of"):
         assistant.user_of = web.user_of  # which family member a session is
+    from assistant import proactive as proactive_mod
+    from assistant.push import Push
+
+    # phone notifications and study briefings (attached in build_assistant)
+    push = getattr(assistant, "push", None)
+    push = push if isinstance(push, Push) else None
+    briefings = getattr(assistant, "proactive", None)
+    briefings = briefings if isinstance(briefings, proactive_mod.Scheduler) else None
 
     @asynccontextmanager
     async def lifespan(app):
         stop = threading.Event()
+        if briefings is not None:
+            if briefings.deadlines is None:  # the student deadline store, if any
+                briefings.deadlines = getattr(assistant, "deadlines", None)
+            briefings.start()
 
         def reaper():
             while not stop.wait(reap_interval):
@@ -1533,6 +1545,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             yield
         finally:
             stop.set()
+            if briefings is not None:
+                briefings.stop()
             await run_in_threadpool(assistant.shutdown)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None,
@@ -1726,7 +1740,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("spotify.js", "text/javascript"),
                         ("notion.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
-                        ("ui.js", "text/javascript")):
+                        ("ui.js", "text/javascript"),
+                        ("brief.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2049,6 +2064,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import notion_web
 
     notion_web.register(app, family, web, error)  # a person's own Notion
+    # each person's own notifications and study brief
+    proactive_mod.register(app, assistant, push, briefings, error)
     if public is not None:
         from assistant import public_site
 
@@ -2102,6 +2119,10 @@ def start_history_sync(config: dict, assistant, token: str, failover):
     syncer = Syncer(sync_log, peers, TokenAuthority(token), failover.role)
     stop = threading.Event()
     interval = float(config["failover"]["sync_interval"])
+    briefings = getattr(assistant, "proactive", None)
+    if getattr(briefings, "jobs", None) is not None:
+        # the owner's briefing claims (proactive.py) sync before they count
+        briefings.jobs.sync = syncer.sync_all
     thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
                               name="history-sync", daemon=True)
     thread.start()
@@ -2220,6 +2241,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
 
     assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
+    from assistant import proactive
+
+    # phone notifications and the study briefings' scheduler (create_app starts it)
+    assistant.push, assistant.proactive = proactive.from_config(config, client, family, store)
     return assistant
 
 

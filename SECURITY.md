@@ -1233,6 +1233,89 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   backup's folder (over an hour old) is removed at startup and by the
   next backup. The log gets its size only. Tests: `tests/test_backup.py`.
 
+## Study briefings and phone notifications (`push.py`, `proactive.py`)
+
+- **Subscriptions are sealed per person.** A browser's push subscription
+  (endpoint plus its p256dh/auth keys) is stored with `userkeys.seal`
+  under its own label (`PUSH_LABEL`) and the person's id, in
+  `<[family] dir>/<id>/push.enc` (the owner's in `[push] owner_dir`),
+  written privately and atomically. A file copied into another person's
+  folder doesn't open as theirs. Without a usable `USER_DATA_KEY`
+  nothing is stored (503). Removing a person deletes the file with their
+  folder; "Turn off notifications" deletes it when their last device goes.
+  At most 5 devices per person; the oldest is dropped.
+- **No server-side request forgery through a subscription.** The server
+  POSTs to the endpoint a client gave it, so only `https` endpoints on
+  port 443 at a known push service are accepted (`PUSH_HOSTS`: Apple,
+  Google FCM, Mozilla, Windows; the host or a subdomain of it, no
+  user:password). An internal address, a look-alike host or a plain
+  http URL is refused with 400 and never stored.
+- **The VAPID private key** comes from `VAPID_PRIVATE_KEY` (in
+  `SECRET_ENV_VARS`, so it is redacted from logs, and `ISOLATED_ENV_VARS`)
+  or is generated once into `owner_dir/vapid_private.txt`, written 0600 on
+  Linux/Pi (on Windows the file's folder permissions apply). It is never
+  sent or logged; only the public key is served (`GET /api/push/key`,
+  signed in).
+- **Payloads are end-to-end encrypted** (RFC 8291 aes128gcm, by
+  pywebpush): the push service sees only the size and timing. The
+  notification's text can show on the lock screen; it is a short message
+  about the person's own deadlines.
+- **Claude sees only extracted fields.** A rule that fires sends one
+  request with course, title, kind, due date and days left (each cut to
+  80 characters, control characters removed): no Canvas page or email
+  text, no grades, no URLs, no tools, so a hostile title can at worst
+  word that person's own notification oddly (at most 240 characters). The
+  proactive path never writes to a calendar, Notion or the deadline
+  store. No call is made unless a rule fires, and opening the brief never
+  calls Claude.
+- **One person, their own data.** Every route needs sign-in (a test calls
+  them without it and expects 401); the owner and each invited person see
+  and change only their own subscriptions and brief; a removed person's
+  session is signed out. The brief's Play audio is bound to the session
+  that asked for it (another session gets 404). With `[push] enabled` off
+  the routes answer 404.
+- **The tap stays on this site.** `sw.js` resolves the payload's url the
+  way the browser will (`new URL(url, origin)`; browsers drop tabs and
+  newlines, so `"/<tab>/evil.example"` would be `https://evil.example/`)
+  and opens it only if the origin is the app's own (`/#brief` for anything
+  else). The server already sends only a plain path: no control
+  characters, spaces, backslashes, scheme or host (`push.safe_path`). It
+  shows text, never HTML; `brief.js` writes the brief with `textContent`.
+- **Bounded, and never twice.** At most `max_per_day` notifications per
+  person per day, none in quiet hours, 500 items read per run, 8 per
+  rule; the fired keys (`student:<uid>:<rule>:<date>`) are recorded in a
+  private file before the push is sent, so a crash or restart never sends
+  one twice (a crash between the two loses that one instead). If no
+  device took it and none was gone, and the error can pass (a network
+  error, 429, a 5xx), the keys, the day's slot and the "seen" ids are
+  taken back and the next check sends the same words again (no new Claude
+  call). Any other 4xx (a changed VAPID key, a refused JWT) is not
+  retried: logged at WARNING with its status only, so a broken setup
+  costs one try and one Claude call a day, not one per check. The state file holds item ids and dates, never
+  titles.
+- **The owner on Pi/PC/cloud.** Subscriptions and the VAPID key are per
+  backend, so there is no leader gate: the backend that holds a device
+  sends to it. Each device's push is claimed in the shared history log
+  (`failover.leader.JobRunner` with no peers to defer to, synced by the
+  history Syncer on the Pi and PC; key
+  `student:owner:<date>:<device hash>:<rules hash>`), so a device saved
+  on two backends (one `VAPID_PRIVATE_KEY` on both) gets it once. A claim
+  whose send failed has no "done" marker: it counts for 10 minutes
+  (`CLAIM_TTL`), then the next check tries again.
+- **An old brief doesn't outlive its data.** The last message is kept in
+  memory only, and dropped when a deadline it named is no longer in the
+  store (checked on every read), when the person is removed (at the next
+  check, and on any read), or by `Scheduler.forget(uid)`.
+- **Logs:** ids, rule names, counts, lengths and HTTP statuses at INFO;
+  the message text only at DEBUG; endpoints and keys never (caplog tests).
+- **Not done: one subscription list across backends.** A subscription
+  lives on the backend that saved it (Pi, PC or cloud) and is sent from
+  there, from that backend's own deadline store; it isn't copied to the
+  others. If that backend is down at briefing time, that phone misses it.
+  The cloud can't reach the Pi or PC, so it only sees their claims after
+  they sync with it; two backends holding the same device at the same
+  minute could, across a partition, both send it.
+
 ## Not fixed, on purpose
 
 - **A backup is a plain zip of everyone's conversations.** It holds no

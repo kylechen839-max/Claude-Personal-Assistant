@@ -306,6 +306,33 @@ def _connect(client: TestClient):
     return connect
 
 
+def test_a_study_briefing_is_one_plain_request_the_api_accepts(api):
+    """proactive.Scheduler.compose: one request from extracted fields, no
+    tools, no thinking, answered with text. Its failures fall back to the
+    template, so the check is that Claude's text came back, not the template."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from assistant import proactive
+
+    make, model = api
+    client = make()
+    now = datetime(2026, 10, 21, 7, 35, tzinfo=ZoneInfo("America/New_York"))
+    settings = proactive.Settings(model=model)
+    items = [{"id": "a1", "course": "CHEM 110", "title": "Lab report 3", "kind": "assignment",
+              "due": "2026-10-21", "status": "confirmed", "source": "ics"},
+             {"id": "x1", "course": "PHYS 201", "title": "Midterm", "kind": "exam",
+              "due": "2026-10-31T10:00:00-04:00", "status": "confirmed", "source": "ics"}]
+    fires = proactive.evaluate(now, items, None, settings, "owner")
+    assert [f.rule for f in fires] == ["exam", "morning"]
+    text = proactive.Scheduler(settings, push=None, client=client).compose(None, fires, now)
+    assert text and len(text) <= proactive.MAX_BODY
+    assert text != proactive.template(fires)
+    if isinstance(client, ContractClient):
+        [request] = client.requests
+        assert "tools" not in request and "thinking" not in request
+
+
 def test_realistic_web_conversation_saves_and_writes_nothing(web_api, tmp_path, monkeypatch):
     """What the watchdog runs (smoke --conversation), through the real web
     app, voice socket included: a quick question, text with a read-only

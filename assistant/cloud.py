@@ -104,7 +104,10 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # code of its "Connect Notion" button (its API needs sign-in)
               "/notion/callback", "/notion.js",
               # the public site (public_site.py): landing, privacy, terms
-              "/welcome", "/privacy", "/terms", "/site.css"}
+              "/welcome", "/privacy", "/terms", "/site.css",
+              # "Enable notifications" and the study brief's page code (its
+              # /api/push and /api/student/brief routes need sign-in)
+              "/brief.js"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it

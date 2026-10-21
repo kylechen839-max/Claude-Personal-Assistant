@@ -4449,3 +4449,165 @@ Kyle approves the wording and picks the address first, in a separate PR).
     all three Remove tests.
 - **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
   over master's 2649 passed, 35 skipped); JS 118 pass.
+
+## Student assistant P2: study briefings and phone notifications (2026-10-21)
+Branch `claude/student-proactive` from master 3b7ae54. The app speaks up
+first: rules over the student deadline store (P1's `DeadlineStore`, built
+in parallel) decide when a notification is worth sending; Claude only
+words it.
+- **`assistant/push.py`** (new): Web Push. The VAPID key comes from
+  `VAPID_PRIVATE_KEY` or is generated once into `[push] owner_dir`
+  (`write_private`); `GET /api/push/key` serves the public key. Each
+  person's subscriptions (at most 5, oldest dropped, same endpoint
+  replaced) are sealed with `userkeys.seal(PUSH_LABEL, uid)` in their own
+  folder (`<family dir>/<id>/push.enc`, the owner's in `owner_dir`); no
+  usable `USER_DATA_KEY` -> 503 and nothing stored. Endpoints must be
+  https:443 at a known push service (Apple, FCM, Mozilla, Windows), so a
+  subscription can't aim the server at an internal address. `send()` uses
+  pywebpush (aes128gcm, VAPID `sub` = `[push] subject` or the public
+  https origin); a 404/410 forgets that device.
+- **`assistant/proactive.py`** (new): `evaluate()` is pure Python over
+  the store's rows: morning (07:30, due today/tomorrow and exams this
+  week), evening (20:30, due tomorrow), weekly (Sunday 18:00, the week),
+  exam (14/7/3/1 days out while no review blocks are planned; P3's
+  planner can pass `reviews`), new items since the last run (not on the
+  first run; not when another rule in the same push already lists them),
+  and after-class (class-kind items, `class_minutes` after the start).
+  `Scheduler.run_person` skips anyone without a device before reading
+  anything, respects quiet hours in the person's time zone and
+  `max_per_day`, records the keys `student:<uid>:<rule>:<date>` in
+  `proactive.json` (private, ids and dates only, bounded) before sending,
+  sends rules due together as one push, and asks Claude once (fast model,
+  no tools, a JSON of course/title/kind/due/days_left only), falling back
+  to a template (a beta tester without a key, an API error). The owner's
+  keys also go through `failover.leader.JobRunner` on a failover setup.
+  The thread wakes every `check_minutes` or at the next morning / evening
+  / weekly / end-of-quiet time, whichever is first. `GET
+  /api/student/brief` returns the last message (memory only) or a
+  template summary of the week, plus an `/api/audio/<id>` link (the reply
+  audio route, bound to the session).
+- **Wiring**: `build_assistant` attaches `assistant.push` and
+  `assistant.proactive` (none on a `--candidate` copy); `create_app`'s
+  lifespan starts and stops the scheduler, taking `assistant.deadlines`
+  (P1) as its store, and registers the four routes. `brief.js` is in the
+  static routes, `sw.js` SHELL (cache v28) and CloudGuard `PUBLIC_GET`.
+  `sw.js` has `push` (always shows a notification; text cut, url only a
+  path on this site) and `notificationclick` (focus the open app and
+  post it a message, else open `/#brief`). `index.html`: the menu's
+  "Enable notifications" button and status line, and the `#brief-view`
+  screen; `app.js` four hook lines (show, refreshState, configure).
+  Config `[push]` and `[proactive]` in DEFAULTS and config.toml (server
+  profile: `owner_dir = /data/student`; `config.mom.toml` its own
+  folder); `VAPID_PRIVATE_KEY` in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS`; requirements `pywebpush>=2.5`, `cryptography>=47`.
+- **UI** (`assistant/web/brief.js`, new): the permission is asked first
+  thing in the tap (iOS asks only from a gesture), then
+  `pushManager.subscribe` with the VAPID key and `POST
+  /api/push/subscribe`; "Turn off notifications" unsubscribes at the
+  server and in the browser; outside the Home Screen app an iPhone is
+  told to add it. The brief shows text with `textContent` and a Play
+  button that plays only when tapped. Chinese strings in i18n.js.
+- **Tests** (+55 pytest, +17 JS):
+  - `tests/test_push.py` (30): sealed at rest (no endpoint or key in the
+    file), fails closed without `USER_DATA_KEY`, refused endpoints
+    (metadata address, localhost, look-alike host, userinfo, port, http,
+    too long), the real push services, 5-device cap, VAPID made once
+    (0600 on Linux) and from the env, the payload and claims passed to
+    pywebpush (patched), 410/404 forget the device and 500 keeps it, real
+    pywebpush in curl mode signs and encrypts our subscription, per-person
+    files (a copied file doesn't open; removal deletes it), caplog,
+    requirements pins.
+  - `tests/test_proactive.py` (24), on a pinned clock with a stub store:
+    **failing-first `test_two_ticks_on_the_same_day_send_exactly_one_morning_push`**,
+    no repeat after a restart, no Claude call and no push when no rule
+    fires (and without a store or a device the store isn't read), quiet
+    hours in each person's own zone, the daily cap and one push for rules
+    due together, exam marks and planned reviews, new items, after-class,
+    only extracted fields (no description, grade, URL, source key; no
+    tools), Claude's text vs the template, a beta tester without a key
+    (no call on Kyle's key), JobRunner with a shared `MemoryEventLog`
+    (PC stands down while the Pi is up; the cloud sees it done), caplog,
+    bounded private state, settings validation, the next wake time, no
+    scheduler on a candidate copy, and the routes (401 signed out; the
+    owner's key/subscribe/brief/audio/unsubscribe; a member's own brief
+    whose audio the owner's session can't fetch; 404 with push off; the
+    lifespan starts the scheduler with `assistant.deadlines`).
+  - `tests/test_contract.py`: the briefing request against the contract
+    fake (and live models in CI's api-contract job).
+  - `tests/js/sw-push.test.mjs` (7) and `tests/js/brief.test.mjs` (10).
+  - Changed: `test_webapp.py` cache version v28 and `/brief.js` in its
+    public list.
+  - Revert checks (source only): without the fired-key check both
+    same-day and restart tests fail (2 pushes); without the host check 4
+    endpoint cases fail; without the 404/410 branch the gone-device test
+    fails; without quiet hours or the cap their tests fail.
+- **Counts** (Linux sandbox, Python 3.13): 2710 passed, 37 skipped (master
+  3b7ae54: 2655 passed, 35 skipped; the 2 new skips are the live
+  contract runs without `ANTHROPIC_API_KEY`); JS 135 pass (was 118).
+- **Open:** subscriptions live on the backend that saved them (SECURITY
+  "Not done: per-backend subscriptions"); the owner's export/delete of
+  `data/student` is P1's `account.py` piece.
+
+### Round 2: the judge's five findings (2026-10-21)
+1. **The owner's briefings were lost when the backend holding the phone
+   wasn't the leader** (MED). The owner's `JobRunner` now has no leader
+   gate (`proactive.owner_jobs`: `LeaderCheck(role, [])`): the backend
+   that holds a device sends to it. Each device's push is claimed in the
+   shared log (`student:owner:<date>:<device hash>:<rules hash>`), so a
+   device saved on two backends gets it once; the claims sync through the
+   history `Syncer` (`webapp.start_history_sync` sets `jobs.sync`).
+   SECURITY and README corrected. Tests (separate `owner_dir` per
+   backend, shared `MemoryEventLog`): Pi up with no device + PC with the
+   phone -> exactly one push all morning; one device on both -> one push;
+   different devices -> one each; the Syncer wiring. The old test shared
+   one folder across backends, which hid the bug; it is replaced.
+2. **A tap could open another site** (LOW). `sw.js` `safeUrl` resolves
+   with `new URL(url, self.location.origin)` and requires the same
+   origin; `push.safe_path` refuses control characters, spaces,
+   backslashes, a scheme or a host. Tab, newline and CRLF cases in
+   `sw-push.test.mjs` and `test_push.py`.
+3. **A bad port answered 500** (LOW). `.port` is read inside the `try`:
+   `:99999` and `:abc` are 400 (unit cases and through the route).
+4. **A failed push lost the day's brief** (LOW). `Push.deliver` reports
+   delivered / failed / gone; with nothing delivered, something failed and
+   nothing gone, the keys, the day's slot and the "seen" ids are taken
+   back and the next check sends it. A claimed send that fails leaves no
+   "done" marker; it is tried again after `CLAIM_TTL`. Tests: 503 then
+   sent at the next check (and the evening slot still free); 410 is not
+   retried; a failed claimed send is retried once the claim expires.
+5. **An old brief stayed in memory after a delete** (LOW). The kept brief
+   remembers its item ids; a read drops it when one is no longer in the
+   store, the next check drops briefs of people no longer listed, a read
+   for a removed person drops it, and `Scheduler.forget(uid)` is there
+   for callers.
+- Python 3.10: `proactive.py` and `push.py` import and run `evaluate()`
+  under CPython 3.10.20 (uv). No `from __future__ import annotations` in
+  `proactive.py` on purpose: FastAPI must see `Request` in its routes.
+- Revert checks against the round-1 source: all 10 new or changed
+  Python cases fail (bad port: `ValueError` -> 500; tab/newline url
+  passes; failed push not retried; brief kept). With only the leader gate
+  put back into `owner_jobs`, the Pi-leads and different-devices tests
+  fail. The old `safeUrl` fails 2 sw-push tests.
+- **Counts** (Linux sandbox, Python 3.13): 2720 passed, 37 skipped; JS
+  135 pass.
+
+### Round 3: the judge's two LOW findings (2026-10-21)
+1. **A permanent push error was retried at every check**, with a Claude
+   call each time. `push.retryable(status)`: only no answer (network),
+   429 and 5xx are "failed" (retried); any other 4xx is "refused": kept
+   device, no take-back, a WARNING with the status. A retry reuses the
+   words it already had (`Scheduler._retry_text`, keyed by the fire keys,
+   bounded, dropped on success, `forget` or removal), so it makes no new
+   Claude call. Tests: 400/403/413 over five checks -> one push attempt
+   and one Claude call; 429 twice then OK -> three attempts, one Claude
+   call, the same words.
+2. **The production wiring was untested.** `test_from_config_gives_the_owner_jobs_no_leader_gate`
+   builds the scheduler through `proactive.from_config` (`[failover]
+   role = "pc"`, a Pi peer, a real `HistoryStore`): the owner's
+   `LeaderCheck` has no higher peers, and with the Pi probed healthy the
+   PC still sends to the phone it holds.
+- Revert checks: the round-2 `push.py`/`proactive.py` fail the three 4xx
+  cases and the reuse test; the round-1 leader gate put back into
+  `from_config` fails the wiring test.
+- **Counts** (Linux sandbox, Python 3.13): 2725 passed, 37 skipped; JS
+  135 pass.

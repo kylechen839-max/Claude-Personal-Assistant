@@ -1266,6 +1266,45 @@ phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
 
+### Study briefings (notifications)
+The phone app can speak up first: a notification in the morning with
+what's due today and tomorrow, in the evening with what's due tomorrow, a
+look at the week on Sunday, exam reminders (14, 7, 3 and 1 day out, while
+no review is planned), new deadlines it captured, and a "how did class
+go?" after a class. Tapping one opens the brief in the app with a
+**Play** button (it never plays by itself).
+
+- **Turn it on:** Settings -> **Enable notifications**, then allow them.
+  On an iPhone this works only in the app added to the Home Screen
+  (iOS 16.4 or later); in Safari the menu says to add it first. Tap
+  **Turn off notifications** to stop (that phone only).
+- **Needs** `USER_DATA_KEY` on the server (subscriptions are stored
+  encrypted; without it the button says the server can't store them yet)
+  and deadlines to talk about: the student deadline store (Canvas sync,
+  screenshots); without one nothing is ever sent. The server makes its
+  own VAPID key once (`[push] owner_dir`, Render: `/data/student`), or set
+  `VAPID_PRIVATE_KEY` (a raw P-256 key in base64url) in `.env`. A new key
+  means tapping Enable again on every phone. For Apple, set `[push]
+  subject` to `mailto:you@example.com` unless `[webapp] public_origin` is
+  an https address.
+- **How much:** at most `[proactive] max_per_day` (2) a day, none in
+  quiet hours (`quiet_start` 22:00 to `quiet_end` 07:30, in each person's
+  own time zone), and rules due at the same time go as one notification.
+  The times are `morning`, `evening`, `weekly_day` and `weekly_time`;
+  `check_minutes` is how often it looks; `exam_days` and `class_minutes`
+  tune the exam and class rules.
+- **Claude** is asked only when a rule fires: one short message
+  (`[proactive] model`, default the fast model) from the course, title,
+  kind and due date only; no page or email text, no grades, no tools. A
+  beta tester without their own key, or a failed call, gets a plain
+  template instead. Opening the brief never calls Claude.
+- On a Pi/PC/cloud setup, each backend keeps the subscriptions made
+  through it and sends to them itself, whichever backend leads; a phone
+  saved on two backends still gets each briefing once (a claim in the
+  shared history log). If the backend a phone subscribed through is down
+  at briefing time, that phone misses it, so enable notifications from
+  the backend that is normally in use.
+
 ## Smart home (Home Assistant)
 
 "Turn off the bedroom lights", "set the living room light to 50%", "is the
@@ -2018,6 +2057,8 @@ assistant/
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
                 notion.py, notes.py, web.py, history.py, spotify.py, tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)
+  push.py       phone notifications: VAPID key, sealed subscriptions, Web Push
+  proactive.py  study briefings: deadline rules, scheduler thread, /api/student/brief
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

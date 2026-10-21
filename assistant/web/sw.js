@@ -1,8 +1,10 @@
 // Makes the page installable and opens it quickly. Only the app shell is
 // cached (network first, so updates show up); API calls, reply audio and
 // anything else are never cached.
-const CACHE = "hey-claude-shell-v27";
-const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/spotify.js", "/notion.js", "/voice-picker.js",
+// Also shows the study briefings' push notifications (push.py) and opens
+// the brief (/#brief, brief.js) when one is tapped.
+const CACHE = "hey-claude-shell-v28";
+const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/spotify.js", "/notion.js", "/voice-picker.js", "/brief.js",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];
 
 self.addEventListener("install", (e) => {
@@ -25,4 +27,55 @@ self.addEventListener("fetch", (e) => {
       return res;
     })
     .catch(() => caches.match(e.request)));
+});
+
+// --- push notifications (push.py sends {title, body, url}) ---
+const BRIEF_URL = "/#brief";
+const MAX_TITLE = 80;
+const MAX_BODY = 300;
+
+// Only a path on this site: a payload can never send the tap elsewhere.
+// Resolved the way the browser will ("/\t/evil.example" drops the tab and
+// becomes https://evil.example/), then its origin must be ours.
+function safeUrl(url) {
+  if (typeof url !== "string" || !url.startsWith("/")) return BRIEF_URL;
+  let resolved;
+  try { resolved = new URL(url, self.location.origin); } catch (err) { return BRIEF_URL; }
+  if (resolved.origin !== self.location.origin) return BRIEF_URL;
+  return resolved.pathname + resolved.search + resolved.hash;
+}
+
+function payloadOf(data) {
+  let body = {};
+  try { body = data ? data.json() : {}; } catch (err) { body = {}; }
+  if (!body || typeof body !== "object") body = {};
+  return {
+    title: typeof body.title === "string" && body.title ? body.title.slice(0, MAX_TITLE) : "Hey Claude",
+    body: typeof body.body === "string" ? body.body.slice(0, MAX_BODY) : "",
+    url: safeUrl(body.url),
+  };
+}
+
+self.addEventListener("push", (e) => {
+  // iOS wants every push to show a notification (userVisibleOnly)
+  const p = payloadOf(e.data);
+  e.waitUntil(self.registration.showNotification(p.title, {
+    body: p.body, icon: "/icon-192.png", badge: "/icon-192.png",
+    tag: "hey-claude-brief", data: { url: p.url },
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = safeUrl(e.notification.data && e.notification.data.url);
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then((list) => {
+      for (const client of list) {
+        if (new URL(client.url).origin === location.origin && "focus" in client) {
+          client.postMessage({ type: "open", url });  // brief.js opens the brief
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(url);  // the brief, with a Play button (no autoplay)
+    }));
 });

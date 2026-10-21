@@ -25,6 +25,7 @@
 <script src="/spotify.js" defer></script>
 <script src="/notion.js" defer></script>
 <script src="/voice-picker.js" defer></script>
+<script src="/brief.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -107,6 +108,8 @@
         <button id="notion-disconnect" type="button" hidden>Disconnect Notion</button>
         <p id="notion-status" class="hint" hidden></p>
         <p id="notion-detail" class="hint" hidden></p>
+        <button id="push-toggle" type="button" hidden>Enable notifications</button>
+        <p id="push-status" class="hint" role="status" hidden></p>
         <button id="spotify-connect" type="button" hidden>Connect Spotify</button>
         <p id="spotify-status" class="hint" hidden></p>
         <section id="api-key" class="api-key" hidden>
@@ -292,6 +295,20 @@
   </header>
   <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
   <p id="memory-status" class="status center" role="status"></p>
+</main>
+
+<main id="brief-view" class="history brief" hidden aria-labelledby="brief-title">
+  <header class="bar">
+    <button id="brief-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="brief-title" tabindex="-1">Brief</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <p id="brief-when" class="meta"></p>
+  <p id="brief-text" class="summary" aria-live="polite"></p>
+  <button id="brief-play" class="primary" type="button" hidden>Play</button>
+  <p id="brief-status" class="status center" role="status"></p>
 </main>
 
 <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
