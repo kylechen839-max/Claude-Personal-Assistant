@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Invited people can download their data (a zip of their conversations and
+  profile) and delete their account (revokes Google access, signs out
+  everywhere, deletes everything) from Settings, in English and Chinese. New
+  setting `[family] export_max_mb` (default 50). Downloads are built in the
+  family data folder and deleted when the download ends, even if the phone
+  disconnects first; deleting your account also removes any download still
+  being made. An old, stalled download finishing late no longer frees a newer
+  export's one-at-a-time slot.
 - The dev team dashboard moved to a new artifact URL (the old one stopped
   waking the coordinator); re-download the desktop launcher from Get
   desktop app.

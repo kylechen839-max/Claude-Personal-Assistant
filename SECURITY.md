@@ -650,6 +650,54 @@ server (`[family] enabled`, on in the server profile).
   language, and each turn's thread runs `i18n.using(its language)`, so a
   tool's confirmation question is asked in the language of the person who
   will answer it.
+- **Download my data / Delete my account** (`account.py`, public beta
+  piece G4). Both routes take no id: they act on the caller's own cookie
+  session only, so nobody can name another account (an `id` in the body
+  or query is ignored). The owner (cookie, Bearer WEB_TOKEN or failover
+  token) gets 403; not signed in is 401; with `[family]` off, 404.
+  Cross-site requests get 403 from webapp's guard before the route.
+  - `POST /api/me/delete` needs `{"confirm": "DELETE"}` or their account
+    name (any case); anything else is 400 and changes nothing. It first
+    asks Google to revoke their grant (the refresh token, in the POST body
+    to `oauth2.googleapis.com/revoke`, never a URL; 5 s timeout); a
+    failure is logged with the error type only and never blocks the
+    delete. Then `Family.remove` (the same path as the owner's Remove):
+    every session of theirs and live voice call is signed out and
+    `<dir>/<id>/` is deleted in one rmtree (history, Google token, their
+    own API key and Notion token files), retried as above. The response
+    deletes the cookie and sends `Clear-Site-Data: "cookies"`.
+  - `GET /api/me/export` is a zip of `profile.json` (id, name, language,
+    time zone, tier, created) and one `history.export(conv, "json")` file
+    per conversation (archived ones included; text masked with
+    `config.redact` as in the single-conversation export). Nothing is
+    copied from their folder, so no token or key file can be included.
+    Bounded: `[family] export_max_mb` (50 MB) of content before
+    compression (413 past it), one export at a time per person (409), 3
+    per person per hour (429; every export that starts counts, one that
+    ends in 413 too, but a 409 or 429 refusal doesn't), and the rate map
+    keeps only people with an export in the last hour. Built in
+    `mkdtemp` (0700) under `<family dir>/.exports/` (made 0700; not the
+    shared system temp folder; `.exports` can't be a person's id, which
+    must match `u_...`, so `Family.remove` and the list never touch it),
+    streamed, and removed when the response ends, however it ends: a
+    `StreamingResponse` subclass cleans up in `__call__`'s `finally`,
+    because a generator's `finally` and a BackgroundTask never run when the
+    phone leaves before the body starts (ASGI 2.4 ClientDisconnect). It
+    closes the body first (Starlette's iterator and our generator), so a
+    phone that leaves mid-download has its zip closed before the folder is
+    removed (Windows can't remove an open file). The one-at-a-time slot
+    holds a token made when the export starts, bound to its folder; only
+    that export frees it, so an old download ending late never frees a
+    newer export's slot. Deleting the account also removes every `export-<id>.*` folder of
+    theirs and frees their slot, so no copy outlives the account. Folders
+    older than 10 minutes (a crash) are swept at startup and on every
+    export; a stuck slot frees after 10 minutes.
+  - Logs: ids, counts and sizes only; never names, titles, text or tokens
+    (caplog test).
+  - Not done, on purpose: no delete grace period or undo (the person asked
+    twice, typed and confirmed); Render's disk snapshots still hold a copy
+    until they expire (PRIVACY wording from the master). The owner's own
+    data isn't exported here: Kyle has the whole server.
 
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that

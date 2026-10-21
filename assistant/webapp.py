@@ -1725,8 +1725,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     def signed_out():
         response = JSONResponse({"ok": True})
-        response.delete_cookie(COOKIE, path="/", secure=True, httponly=True,
-                               samesite="strict")
+        clear_session_cookie(response)
         return response
 
     async def end_voice(sids) -> None:
@@ -1943,6 +1942,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import family as family_mod
 
     family_mod.register(app, family, web, assistant, error)
+    from assistant import account
+
+    account.register(app, family, web, error)  # their own export / delete
     from assistant import userkeys_web
 
     userkeys_web.register(app, family, error)  # a person's own Anthropic key
@@ -2033,6 +2035,12 @@ def _static_route(name: str, media_type: str):
         return FileResponse(STATIC / name, media_type=media_type)
     serve_file.__name__ = f"static_{name.replace('.', '_')}"
     return serve_file
+
+
+def clear_session_cookie(response) -> None:
+    """Sign-out's cookie removal (also account.py's "Delete my account")."""
+    response.delete_cookie(COOKIE, path="/", secure=True, httponly=True,
+                           samesite="strict")
 
 
 async def _wait(seconds: float) -> None:

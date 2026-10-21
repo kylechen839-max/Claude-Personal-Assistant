@@ -345,7 +345,12 @@ def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
     # The turn's marks use time.monotonic (about 16 ms ticks on Windows), the
     # renders time.perf_counter, so with no slow Whisper the difference can
     # come out a few ms below zero (-0.005 s once): allow 50 ms of clock slack.
-    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
+    # The room scales with the OS-voice work before the first audio (3/4 of
+    # it, at least 0.6 s): a loaded Windows runner spent 1.1 s outside the
+    # renders once around 3 failed tries and their logged traceback, and 0.47 s
+    # once in the fake Claude stream of the slow-Whisper case. Had the OS
+    # voice not been taken out, the pipeline would read at least os_voice.
+    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.6, 0.75 * os_voice)
 
 
 @pytest.mark.slow
