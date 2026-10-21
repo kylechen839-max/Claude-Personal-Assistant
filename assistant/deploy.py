@@ -13,12 +13,16 @@ the host supervisors and the watchdog leave HEAD alone meanwhile):
      phone banner are told, and nothing restarts: the old version keeps
      running. Passed: the instances restart on it (the host supervisor
      restarts Kyle's own app, health-checked with rollback; the others
-     through their scheduled tasks), and once they all answer on it the
-     watchdog runs the test conversation against each live app, restarting
-     or rolling back to the last version that passed if one fails.
+     through their scheduled tasks, each once no turn is running on it,
+     waiting up to IDLE_WAIT, else it is skipped and named), and once they
+     all answer on it the watchdog runs the test conversation against each
+     live app, restarting or rolling back to the last version that passed
+     if one fails.
 
 Never touches config, .env or data/. A pull that changes requirements.txt
-is undone unless --requirements is given (then pip runs first).
+is undone unless --requirements is given (then pip runs first); with
+requirements.txt not installed (a pull by hand, then --no-pull) nothing
+switches until pip has run (updater.requirements_problem).
 """
 
 from __future__ import annotations
@@ -30,10 +34,12 @@ import sys
 from pathlib import Path
 
 from assistant import watch
+from assistant.updater import requirements_problem
 
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
+IDLE_WAIT = 120  # seconds an app in the middle of a turn gets before it is skipped
 
 
 def running_versions(w: watch.Watch, instances) -> dict[str, str]:
@@ -42,6 +48,19 @@ def running_versions(w: watch.Watch, instances) -> dict[str, str]:
         health, _ = watch.get_health(w.http, inst.local)
         out[inst.name] = str((health or {}).get("version") or "")
     return out
+
+
+def wait_until_idle(w: watch.Watch, inst, timeout: float = IDLE_WAIT) -> bool:
+    """Wait (up to `timeout`) for no turn or voice conversation on `inst`
+    (/healthz busy); True once idle or not answering (nothing to cut off)."""
+    deadline = w.clock() + timeout
+    while True:
+        health, _ = watch.get_health(w.http, inst.local)
+        if not (health or {}).get("busy"):
+            return True
+        if w.clock() >= deadline:
+            return False
+        w.sleep(2)
 
 
 def deploy(w: watch.Watch, pull: bool = True, restart: bool = False,
@@ -78,6 +97,12 @@ def deploy(w: watch.Watch, pull: bool = True, restart: bool = False,
                 up.rollback(old, new, "pip install failed", requirements=True)
                 output_fn("pip install failed; back on the old version.")
                 return 1
+        missing = requirements_problem(w.root)
+        if missing:  # e.g. --no-pull after a pull by hand that bumped requirements
+            if pull and old and new != old:
+                up.git("reset", "--keep", old)
+            output_fn(f"REFUSED: {missing}. Nothing was switched.")
+            return 1
         behind = [n for n, v in before.items() if v != new[:7]]
         if not behind:
             output_fn(f"{new[:7]} is already live everywhere.")
@@ -111,13 +136,22 @@ def deploy(w: watch.Watch, pull: bool = True, restart: bool = False,
             up._save_state(applied=new)  # the host restarts on it, with rollback
     finally:
         up.release()
+    busy = []
     for inst in instances:
         if w.host_runs(inst):
-            continue  # its host supervisor restarts it (within a minute)
+            continue  # its host supervisor restarts it (within a minute), when idle
         if restart or before.get(inst.name) != new[:7]:
+            if not wait_until_idle(w, inst):  # never cut off someone's turn
+                busy.append(inst.name)
+                output_fn(f"{inst.label} is in the middle of a turn; not restarted. "
+                          + ("Run this again later." if before.get(inst.name) == new[:7]
+                             else "The watchdog switches it once it is idle."))
+                continue
             output_fn(f"Restarting {inst.label}...")
             w.restart(inst)
     for inst in instances:
+        if inst.name in busy:
+            continue
         if not w.wait_for(inst, new, timeout=watch.SWITCH_WAIT + 120):
             output_fn(f"{inst.label} isn't answering on {new[:7]} yet.")
     output_fn("Test conversation with each app...")

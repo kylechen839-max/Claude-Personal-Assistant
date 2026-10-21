@@ -10,11 +10,14 @@ Two layers, with no extra API call:
    phrasing.
 2. After a fast-model response (needs_main_for): if it calls any tool not
    in READ_ONLY_TOOLS, that response is thrown away before anything runs
-   or enters history, and the main model answers the turn
+   or enters history, the fast model's earlier rounds of the turn go too
+   (its thinking is signed for it and would be refused in the main
+   model's request; only read-only tools ran in them), and the main model
+   answers the whole turn again from the user's message
    (chat.ClaudeChat._run, logged as "escalated_tool"). So a change is
    always made by the main model, whatever the words were. Words the fast
    model already streamed before its tool call may have been shown or
-   spoken.
+   spoken; the main model doesn't see them.
 
 Once a conversation needed the main model it stays there until it is reset
 (chat.ClaudeChat.escalated): the prompt cache is per model, and the fast
@@ -43,7 +46,7 @@ MAX_CJK_CHARS = 30  # Chinese has no spaces: count characters
 # the main model. Web search and fetch run on Anthropic's side and are
 # allowed on either model.
 READ_ONLY_TOOLS = frozenset({
-    "list_calendar_events",               # calendar.py
+    "list_calendar_events", "find_free_time", "list_calendars",  # calendar.py
     "list_assignments",                   # notion.py
     "email_summary", "read_email",        # gmail.py
     "recall_notes", "list_recent_notes",  # notes.py

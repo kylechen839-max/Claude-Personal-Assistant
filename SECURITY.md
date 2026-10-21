@@ -192,7 +192,16 @@ never reaches the conversation history recorder or the memory summary
 (`memory.transcript()`), and a note can't be re-stored as if Kyle had said
 it. The model router (`assistant/router.py`) sends every turn of a
 conversation with untrusted content or an attachment to the main model,
-and confirmations are the same on either model. Usage logs and route logs
+and confirmations are the same on either model. When the fast model asks
+for a tool that isn't read-only, nothing of its turn is kept: that
+response is dropped before dispatch, its earlier rounds (read-only calls
+only, since every fast response is checked before anything runs) are
+rewound to the user's message, and the main model answers the whole turn,
+so its request never carries thinking signed for another model. Untrusted
+text read in the rewound rounds keeps the conversation tainted (only
+`reset()` clears that). Deliberate non-fix: words the fast model streamed
+before its tool call may already have been shown or spoken, and the main
+model doesn't see them. Usage logs and route logs
 hold model names, reason codes and token counts only; the usage file
 (`[assistant] usage_file`) holds monthly totals per model, written
 privately and atomically, and only the owner's `/api/state` shows the
@@ -970,6 +979,32 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   shorter than the lock's age limit (3 h). Writes to
   `logs/update-state.json` take a lock, so concurrent writers can't lose
   a rejected commit or the last known good.
+- **No web app, no false refusal.** An instance whose env file has no
+  `WEB_TOKEN` (a wake-only Pi, a family copy that never started) is not
+  checked or gated (`watch.discover`); with no instance left, a commit
+  goes live only after the updater's import and `--check` smoke, run by
+  the gate itself (a pull by hand never ran it). Only a failed import
+  refuses it; a failed `--check` (no mic, no audio device, no API key are
+  this machine's, not the code's) is inconclusive, retried with the
+  backoff and alerted after 3 tries. Before, every commit was refused
+  there and the wake host undid Kyle's pull. An instance skipped for its
+  missing token that answers on its port anyway (its WEB_TOKEN set only in
+  the environment) is shown as "unchecked" in the status and the owner's
+  banner, with one alert, not left out silently. Deliberately unchanged:
+  the automatic updater's own smoke (`Updater._update`) still rolls back
+  and rejects on a `--check` failure, as before; it is a separate path.
+- **Requirements must be installed first.** The gate and deploy compare
+  the installed versions (`importlib.metadata`) with every `>=` minimum in
+  `requirements.txt` whose environment marker applies here
+  (`updater.requirements_problem`): the gate answers "can't tell yet"
+  (never a rejection for good), deploy refuses with what to run.
+  Deliberately simple: `==` pins, upper bounds and unmarked names are left
+  to pip; a marker that can't be read (no `packaging`) skips its line.
+- **Restarts wait for turns.** `deploy --restart` (and
+  `install_family_tasks.ps1 -Restart`, which covers every app here, Kyle's
+  own included) waits up to 2 minutes for `/healthz` `busy: false`, then
+  skips a still-busy app and names it, as `Watch.switch` and the host
+  supervisor already did.
 - **Side-port copies** listen on 127.0.0.1 only, don't open the history
   database or the saved sign-ins, don't start the PC hub or lecture jobs,
   and are stopped after the check.

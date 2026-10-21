@@ -994,6 +994,15 @@ Needs the PC's apps installed as tasks (yours and the family copies).
   - Should: "Go-live check of <sha> ... a few minutes", then the apps
     restart and "is live and passed". Your phone keeps working throughout
     except for a few seconds during the restart.
+- [ ] Start a long question in Mom's app (or yours), and while it is
+      answering run `.\scripts\install_family_tasks.ps1 -Restart`.
+  - Should: the answer finishes before that app restarts (or, if it takes
+    over 2 minutes, "... is in the middle of a turn; not restarted").
+- [ ] On a wake-only Pi (no web app, no `WEB_TOKEN` in `.env`): `git pull`
+      there when there is something new, then wait 2 minutes.
+  - Should: `logs/host-wake.log` says the go-live check passed and the
+    wake listener restarted on the new version; `git log -1` still shows
+    the pulled commit (it was not undone).
 - [ ] Unplug the network for a functional check (`python -m assistant.watch
       --functional`), then type a question in the phone app.
   - Should: the reply says "Claude is unreachable right now..." or "can't
@@ -1043,6 +1052,12 @@ Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
   - Should: `Route: claude-sonnet-5-5 (keyword)`, then
     `Route: claude-sonnet-5-5 (sticky)`: once a conversation needed Sonnet
     it stays there.
+- [ ] In a new conversation ask "what's on my calendar tomorrow", then,
+      once it answered, "get rid of the first one".
+  - Should: it asks "Delete ...?" before anything is deleted (say no).
+    `logs/assistant.log` may show `Route: claude-sonnet-5-5
+    (escalated_tool)` and `Rewound N message(s) of the fast model's turn`;
+    either way there is no "Invalid `signature`" error.
 - [ ] Set `CLAUDE_ROUTER=off` and start again.
   - Should: every route line says `claude-sonnet-5-5 (off)`.
 - [ ] Phone app as the owner: open the page's state (`/api/state` after

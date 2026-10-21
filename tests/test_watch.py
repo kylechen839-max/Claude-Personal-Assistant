@@ -181,15 +181,17 @@ def test_discover_finds_kyles_app_and_each_family_copy(tmp_path):
     never *.local.toml; [watch] enabled = false leaves one out; each one's
     port (config.<name>.local.toml included), label and phone address."""
     files = {
-        "config.toml": "", ".env": "",
+        "config.toml": "", ".env": f"WEB_TOKEN={TOKEN}\n",
         "config.local.toml": "[webapp]\nport = 8765\n",
         "config.mom.toml": '[watch]\nlabel = "Mom\'s app"\n',
         "config.mom.local.toml": '[webapp]\nport = 8766\npublic_origin = '
                                  '"https://pc.tail1.ts.net:8443"\n',
-        ".env.mom": "",
-        "config.kai.toml": "[webapp]\nport = 8767\n", ".env.kai": "",
+        ".env.mom": f"WEB_TOKEN={TOKEN}-mom\n",
+        "config.kai.toml": "[webapp]\nport = 8767\n", ".env.kai": f"WEB_TOKEN={TOKEN}-kai\n",
         "config.orphan.toml": "",  # no .env.orphan
         "config.off.toml": "[watch]\nenabled = false\n", ".env.off": "",
+        # created, never started: its app writes WEB_TOKEN on first start
+        "config.new.toml": "[webapp]\nport = 8768\n", ".env.new": "ANTHROPIC_API_KEY=x\n",
     }
     for name, text in files.items():
         (tmp_path / name).write_text(text)
@@ -852,8 +854,22 @@ def test_conversation_passes_and_keeps_the_voice_socket_open_for_the_last_turn()
     got = conversation(http, voice)
     assert all(o.status == "PASS" for o in got.values()), got
     assert list(got)[-2:] == ["voice turn", "last text turn"]
-    assert len(http.turns) == 4 and "Thanks." in http.turns[-1]
+    assert len(http.turns) == 5 and "Thanks." in http.turns[-1]
     assert order == ["voice", "end"]
+
+
+def test_conversation_starts_with_a_turn_the_fast_model_answers():
+    """Judge B3: every turn said "remember" or was long, so neither the gate
+    nor the watchdog ever sent a request to Haiku. The first turn is now a
+    short one with no main-model word, and it must answer."""
+    from assistant import router
+
+    http = ConversationHTTP()
+    got = conversation(http)
+    assert list(got)[4] == "quick turn" and got["quick turn"].status == "PASS"
+    chat = SimpleNamespace(model="main", fast_model="fast", router="auto", history=[],
+                           tainted=lambda: False, escalated=False)
+    assert router.choose_model(chat, http.turns[0]) == ("fast", "simple")
 
 
 def test_conversation_fails_without_the_tool_call_or_the_memory():
@@ -1124,9 +1140,9 @@ def test_a_commit_that_crashes_on_start_is_refused(tmp_path):
     assert ok is False and "did not start (exit 1)" in why and len(started) == 2
 
 
-def test_gate_retries_once_before_rejecting():
+def test_gate_retries_once_before_rejecting(tmp_path):
     results = iter([[watch.Check("text turn", False, "HTTP 500")], []])
-    ok, _ = watch.gate_check(NEW, None, [make_instance()],
+    ok, _ = watch.gate_check(NEW, tmp_path, [make_instance()],
                              check=lambda root, i, sha: next(results))
     assert ok is True  # a fluke the second time round
     calls = []
@@ -1134,8 +1150,195 @@ def test_gate_retries_once_before_rejecting():
     def always(root, i, sha):
         calls.append(sha)
         return [watch.Check("text turn", False, "HTTP 500")]
-    ok, _ = watch.gate_check(NEW, None, [make_instance()], check=always)
+    ok, _ = watch.gate_check(NEW, tmp_path, [make_instance()], check=always)
     assert ok is False and len(calls) == 2
+
+
+def no_side_port(root, inst, sha):
+    raise AssertionError(f"{inst.name} has no web app to start on a side port")
+
+
+def wake_only(root):
+    """A wake-only Pi (or a family copy that never ran): no WEB_TOKEN."""
+    (root / "config.toml").write_text("")
+    (root / ".env").write_text("ANTHROPIC_API_KEY=x\n")
+
+
+def test_no_web_token_means_no_web_app_to_gate(tmp_path):
+    """Judge B1: candidate_check said "no WEB_TOKEN" (not outside), so the
+    gate refused every commit on a machine without a web app. Now there is
+    nothing to start on a side port, and the import/--check smoke decides."""
+    wake_only(tmp_path)
+    assert watch.discover(tmp_path, tailscale={}) == []
+    smoked = []
+    ok, why = watch.gate_check(NEW, tmp_path, check=no_side_port,
+                               smoke=lambda root: smoked.append(root) or (True, "ok"))
+    assert ok is True and why == "" and smoked == [tmp_path]
+    ok, why = watch.gate_check(NEW, tmp_path, check=no_side_port,
+                               smoke=lambda root: (False, "import failed: Traceback..."))
+    assert ok is False and why == "no web app here; import failed"  # fixed words
+
+    def crash(root):
+        raise OSError("no python")
+    ok, why = watch.gate_check(NEW, tmp_path, check=no_side_port, smoke=crash)
+    assert ok is None and why == "no web app here; smoke crashed (OSError)"
+
+
+def test_a_check_failure_without_a_web_app_is_inconclusive(tmp_path):
+    """Judge N1: `--check` also fails for the machine's reasons (an
+    unplugged mic, no audio device, no API key), so with no web app it
+    must not refuse the commit for good; only an import failure does."""
+    wake_only(tmp_path)
+    ok, why = watch.gate_check(NEW, tmp_path, check=no_side_port, smoke=lambda root: (
+        False, "--check failed: [FAIL] Microphone: no input device"))
+    assert ok is None and why == "no web app here; --check failed"
+    # the real smoke's words, both steps
+    for out, verdict in (((1, "ImportError: x"), False), ((0, ""), None)):
+        steps = iter([out, (1, "[FAIL] Microphone: no input device\n")])
+        up = Updater(root=tmp_path, run=lambda cmd, cwd, timeout=0, s=steps: next(s))
+        ok, _ = watch.gate_check(NEW, tmp_path, check=no_side_port,
+                                 smoke=lambda root, u=up: u.smoke())
+        assert ok is verdict
+
+
+def test_a_hand_pull_on_a_pi_with_no_mic_is_not_undone(tmp_path):
+    """Judge N1 on the wake host: the pull stays, nothing is rejected for
+    good, and the check is tried again later (the hosts' backoff)."""
+    wake_only(tmp_path)
+    git = FakeGit(head=OLD)
+    up = Updater(root=tmp_path, run=git, gate=lambda sha: watch.gate_check(
+        sha, tmp_path, check=no_side_port,
+        smoke=lambda root: (False, "--check failed: [FAIL] Microphone")))
+    started = []
+    h = host.Host("wake", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
+                  popen=lambda cmd: started.append(cmd) or SimpleNamespace(
+                      poll=lambda: None, terminate=lambda: None, wait=lambda timeout: 0),
+                  sleep=lambda s: None)
+    h.updater = up
+    h.start()
+    git.head = NEW
+    h.restart_by_hand(NEW)
+    assert git.resets() == [] and up.gated(NEW) is None and up.rejected() == []
+    assert up.inconclusive(NEW)["count"] == 1 and len(started) == 1
+
+
+def test_an_app_with_its_token_only_in_the_environment_is_reported(world):
+    """Judge N2: ensure_web_token writes nothing to .env when WEB_TOKEN is
+    in the environment, so discover() skipped a running app silently. Now
+    it is a status entry, alerted once, shown while it lasts."""
+    (world.root / ".env").write_text("ANTHROPIC_API_KEY=x\n")  # no WEB_TOKEN
+    world.apps.add(8765)
+    w = watch.Watch(world.root, http=world.apps, run=world.git,
+                    updater=Updater(root=world.root, run=world.git, clock=world.clock),
+                    alerts=watch.Alerts(world.sent.append), smoke_fn=passing_smoke,
+                    clock=world.clock, sleep=world.clock.sleep,
+                    settings=load_config(None, None))
+    status = w.run()
+    main = status["instances"]["main"]
+    assert main["status"] == watch.UNCHECKED and main["what"] == watch.UNCHECKED_WHAT
+    assert len(world.sent) == 1 and "WEB_TOKEN" in world.sent[0]
+    assert watch.banner(status, now=world.clock())["issues"][0]["instance"] == "main"
+    out = []
+    watch.print_status(status, out.append)
+    assert out[0].startswith("UNCHECKED") and "can't be checked" in out[0]
+    world.clock.sleep(300)
+    w.run()
+    assert len(world.sent) == 1  # no alert storm
+    world.apps.state.clear()  # nothing answers any more: nothing to report
+    assert "main" not in w.run()["instances"]
+
+
+def test_a_hand_pull_on_a_wake_only_pi_is_not_undone(tmp_path):
+    """Judge B1: the wake host ran the gate on Kyle's pull, it failed for
+    the missing token, and refuse() did `git reset --keep` back."""
+    wake_only(tmp_path)
+    git = FakeGit(head=OLD)
+    up = Updater(root=tmp_path, run=git, gate=lambda sha: watch.gate_check(
+        sha, tmp_path, check=no_side_port, smoke=lambda root: (True, "ok")))
+    started = []
+    h = host.Host("wake", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
+                  popen=lambda cmd: started.append(cmd) or SimpleNamespace(
+                      poll=lambda: None, terminate=lambda: None, wait=lambda timeout: 0),
+                  sleep=lambda s: None)
+    h.updater = up
+    h.start()
+    git.head = NEW  # Kyle's git pull
+    h.restart_by_hand(NEW)
+    assert git.resets() == [] and up.gated(NEW) is True
+    assert len(started) == 2 and h.child_sha == NEW
+
+
+def test_requirements_problem_reads_the_minimums(tmp_path):
+    """Judge LOW 4: a requirements bump the venv never got."""
+    from importlib.metadata import PackageNotFoundError
+
+    from assistant.updater import requirements_problem
+
+    assert requirements_problem(tmp_path) is None  # no requirements.txt
+    (tmp_path / "requirements.txt").write_text(
+        "# a comment\nanthropic>=0.77\nnumpy >= 1.24  # why\npiper-tts==1.8.0\ntzdata\n"
+        'uvicorn[standard]>=0.27\nkokoro-onnx>=0.4; python_version < "3"\n'
+        "pytest>=8.0\n")
+    have = {"anthropic": "0.77.1", "numpy": "1.24.0", "uvicorn": "0.30.0",
+            "pytest": "8.0"}
+
+    def version(name):
+        if name not in have:
+            raise PackageNotFoundError(name)
+        return have[name]
+    assert requirements_problem(tmp_path, version) is None
+    have["anthropic"] = "0.75.0"
+    del have["pytest"]
+    problem = requirements_problem(tmp_path, version)
+    assert problem.startswith("requirements.txt isn't installed: anthropic 0.75.0 "
+                              "(needs >=0.77), pytest not installed (needs >=8.0)")
+    assert "pip install -r requirements.txt" in problem
+    assert "python -m assistant --update" in problem
+
+
+def test_the_gate_waits_for_requirements_to_be_installed(tmp_path):
+    """Not a rejection (that would be for good): None, so nothing runs on
+    it and it is checked again once pip has run."""
+    ok, why = watch.gate_check(NEW, tmp_path, [make_instance()], check=no_side_port,
+                               requirements=lambda root: "requirements.txt isn't "
+                               "installed: anthropic 0.75 (needs >=0.77)")
+    assert ok is None and "anthropic" in why
+
+
+def test_deploy_refuses_until_requirements_are_installed(world):
+    """install_family_tasks.ps1 -Restart runs deploy --no-pull: it never
+    compared requirements."""
+    (world.root / "requirements.txt").write_text("hey-claude-no-such-package>=1.0\n")
+    world.apps.add(8766, version=NEW)
+    w = world.make(instances=[make_instance("mom", 8766)], gate=lambda sha: (True, ""))
+    out = []
+    assert deploy.deploy(w, pull=False, restart=True, output_fn=out.append) == 1
+    assert world.git.restarts == [] and world.git.resets() == []
+    assert any(line.startswith("REFUSED: requirements.txt isn't installed: "
+                               "hey-claude-no-such-package not installed") for line in out)
+
+
+def test_deploy_restart_waits_for_a_turn_to_finish(world):
+    """Judge LOW 5: -Restart restarted an app in the middle of someone's
+    turn. It waits (bounded) for /healthz busy=false, else skips it."""
+    world.apps.add(8766, version=NEW)
+    world.apps.state[8766]["busy"] = True
+    w = world.make(instances=[make_instance("mom", 8766)], gate=lambda sha: (True, ""))
+    out = []
+    deploy.deploy(w, pull=False, restart=True, output_fn=out.append)
+    assert world.git.restarts == []
+    assert any("in the middle of a turn; not restarted" in line for line in out)
+    naps = []
+
+    def nap(seconds):  # the turn ends after a few seconds
+        naps.append(seconds)
+        world.clock.sleep(seconds)
+        if len(naps) == 3:
+            world.apps.state[8766]["busy"] = False
+    w.sleep = nap
+    out.clear()
+    assert deploy.deploy(w, pull=False, restart=True, output_fn=out.append) == 0, out
+    assert world.git.restarts == ["mom"] and len(naps) >= 3
 
 
 def subprocess_dead_pid() -> int:
