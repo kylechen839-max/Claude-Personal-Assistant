@@ -36,6 +36,9 @@ EN = {
     "file_unreadable": "Claude couldn't read that file.",
     "say_yes_no": " Please say yes or no.",
     "no_answer": "No answer, so I didn't do it.",
+    # an unclear answer to a yes/no question: asked once more, then dropped
+    "confirm_again": "Sorry, I didn't catch that.",
+    "confirm_unclear": "I still didn't catch that, so I left it.",
     "not_caught": "I didn't catch that. Try again?",
     "wont_delete": "OK, I won't delete it.",
     "wont_do": "OK, I won't do that.",
@@ -144,6 +147,8 @@ ZH = {
     "file_unreadable": "Claude 读不了这个文件。",
     "say_yes_no": "请说“是”或者“不”。",
     "no_answer": "没有听到回答，所以我没有做。",
+    "confirm_again": "不好意思，我没听清。",
+    "confirm_unclear": "还是没听清，所以我没有做。",
     "not_caught": "我没听清楚，请再说一遍？",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",

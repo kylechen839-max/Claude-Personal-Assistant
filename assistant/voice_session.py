@@ -37,9 +37,9 @@ from typing import Callable
 import numpy as np
 
 from assistant import audio, i18n
-from assistant.cli import (CJK, get_reply, is_exit, loggable_reply,
-                           strip_wake_phrase, user_error_key, uses_own_key,
-                           zh_is_yes)
+from assistant.cli import (classify_answer, get_reply, is_exit, is_yes,
+                           loggable_reply, strip_wake_phrase, user_error_key,
+                           uses_own_key)
 from assistant.sentences import SentenceSplitter
 from assistant.timing import TurnTimer
 
@@ -127,28 +127,11 @@ def fast_wav(tts, text: str) -> bytes | None:
 
 # --- spoken confirmations ------------------------------------------------------
 
-_YES = {"yes", "yeah", "yep", "yup", "yea", "sure", "confirm", "confirmed",
-        "correct", "absolutely", "definitely", "affirmative"}
-_YES_PHRASES = ("go ahead", "do it", "delete it", "please do", "move it",
-                "change it", "open it", "that's right", "thats right")
-# Words that may sit around a yes without changing it ("yes please do it").
-_FILLER = {"please", "do", "it", "go", "ahead", "delete", "move", "change", "open",
-           "that", "that's", "thats", "right", "ok", "okay", "sure", "hey", "claude",
-           "the", "event", "one", "now", "thanks", "thank", "you"}
-
-
 def is_explicit_yes(text: str) -> bool:
     """Only a clear, short yes confirms a spoken question: "yes", "yeah,
-    delete it", "go ahead". Anything with other content ("okay, and what
-    about Friday?", "yes but not that one", a new question) is a no."""
-    if CJK.search(text):
-        return zh_is_yes(text)  # "好的", "是的，删吧"; not "是谁", "好，等一下"
-    words = re.findall(r"[a-z']+", text.lower())
-    if not words or len(words) > 6:
-        return False
-    phrase = " ".join(words)
-    has_yes = bool(set(words) & _YES) or any(p in phrase for p in _YES_PHRASES)
-    return has_yes and all(w in _YES or w in _FILLER for w in words)
+    delete it", "go ahead", "好的" (cli.classify_answer). Other content
+    ("okay, and what about Friday?") is never a yes."""
+    return is_yes(text)
 
 
 def decline_message(question: str, lang: str | None = None) -> str:
@@ -305,6 +288,7 @@ class PendingConfirm:
     chunk: int | None = None  # index of the question's audio chunk
     played: bool = False
     answering: bool = False
+    asked_again: bool = False  # an unclear answer got "sorry, I didn't catch that"
 
 
 class VoiceConversation:
@@ -511,7 +495,8 @@ class VoiceConversation:
             log.info("Kept the spoken part of the interrupted reply (%d chars)",
                      len(spoken))
 
-    def _decline(self, pending: PendingConfirm, why: str, text: str = "") -> None:
+    def _decline(self, pending: PendingConfirm, why: str, text: str = "",
+                 sentence: str | None = None) -> None:
         """Answer `pending` with no and say so (call with the lock held)."""
         if self.pending is pending:
             self.pending = None
@@ -520,9 +505,31 @@ class VoiceConversation:
                     "yes": False, "reason": why})
         turn = self.current
         if turn is not None and turn.id == pending.turn and not turn.finished:
-            turn.sentences.put(Chunk(decline_message(pending.question, self.language),
+            turn.sentences.put(Chunk(sentence or decline_message(pending.question,
+                                                                 self.language),
                                      0, reply=False))
         self.backend.answer(False)
+
+    def _ask_again(self, pending: PendingConfirm, text: str) -> None:
+        """An unclear answer: the same question stays open (same turn, same
+        confirmation) for one more answer, after "sorry, I didn't catch
+        that". Like the first time, it only counts once it was heard to the
+        end, and talking over it is a no. Call with the lock held."""
+        turn = self.current
+        if turn is None or turn.id != pending.turn or turn.finished or \
+                turn.stop.is_set():
+            self._decline(pending, "turn ended", text)
+            return
+        pending.asked_again = True
+        pending.answering = False
+        pending.played = False
+        pending.chunk = None  # a late "played" for the first question doesn't count
+        again = i18n.t("confirm_again", self.language)
+        log.info("Confirmation of turn %s unclear: asking once more", pending.turn)
+        self._send({"type": "confirm", "turn": turn.id, "question": again,
+                    "again": True})
+        turn.sentences.put(Chunk(again + question_suffix(self.language), 0,
+                                 reply=False, question=True))
 
     def _answer(self, pending: PendingConfirm, utterance_id: int, samples) -> None:
         try:
@@ -530,14 +537,21 @@ class VoiceConversation:
         except Exception:
             log.exception("Transcribing a confirmation failed")
             text = ""
-        yes = is_explicit_yes(text)
-        log.info("Voice confirmation (%d chars) -> %s", len(text), "yes" if yes else "no")
+        verdict = classify_answer(text)
+        log.info("Voice confirmation (%d chars) -> %s", len(text), verdict)
         log.debug("Voice confirmation text: %r", text)
         with self.lock:
             if self.pending is not pending:
                 return  # ended or declined meanwhile
-            if not yes:
-                self._decline(pending, "not a clear yes", text)
+            if verdict == "unclear" and not pending.asked_again:
+                self._ask_again(pending, text)
+                return
+            if verdict == "unclear":
+                self._decline(pending, "still unclear", text,
+                              sentence=i18n.t("confirm_unclear", self.language))
+                return
+            if verdict == "no":
+                self._decline(pending, "said no", text)
                 return
             self.pending = None
             self._send({"type": "confirm_answer", "turn": pending.turn,
