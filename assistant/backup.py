@@ -44,8 +44,7 @@ log = logging.getLogger(__name__)
 
 TEMP_PREFIX = "hey-claude-backup-"
 STALE_SECONDS = 3600  # a temp folder this old is from a backup that crashed
-WAITLIST_FILE = "waitlist.json"  # in the zip; on disk [webapp] waitlist_file,
-                                 # else beside the family folder (/data on Render)
+WAITLIST_FILE = "waitlist.json"  # in the zip; on disk [webapp] waitlist_file
 
 
 class BackupError(Exception):

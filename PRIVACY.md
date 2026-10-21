@@ -17,6 +17,7 @@ except to the services listed below, using your own keys.
 | **Slack / Discord / GitHub** (only if `[teamchat]` is on) | Reads and searches you ask for, with your token; the message, issue or file text goes to Anthropic so Claude can sum it up, as with email. Nothing is ever posted. Slack direct messages are never passed to Claude or logged. A digest you approve is saved in your Notion. Logs hold only counts and service names. A family member's instance never uses team chat | When you ask about team chat |
 | **Web search / fetch** (Anthropic-run tools) | The search query or URL | When Claude decides to look something up |
 | **ElevenLabs** (only if `ELEVENLABS_API_KEY` is set) | The reply text to be spoken | Each reply |
+| **Sentry** (only if `SENTRY_DSN` is set) | Error reports: the error's type and code location, the request's method and path, the app version and Python version. Never what you said, the error's message, cookies, IP or request contents | When something fails |
 | **Hugging Face / GitHub releases** | Nothing about you: model downloads. Kokoro is checksum-verified at setup; Piper voices download at setup, and the Whisper and openWakeWord models on first use, without a checksum check | Once per model |
 
 Some requests are answered by Claude Haiku instead of Claude Sonnet; both are
@@ -33,12 +34,21 @@ sign-in token is kept only in their own folder on the server and is deleted
 when they disconnect or are removed. Their conversation history is kept on
 the server, at most 20 MB per person (oldest conversations removed first).
 
-If the owner turns on error reports (`SENTRY_DSN`), a crash sends Sentry the
-error's type and where in the code it happened, the request's method and path,
-and the operating system and Python version. Error reports never include what
-you said or typed, the error's message, your email, cookies, IP address or
-request contents. There is no tracing, and no Sentry headers are added to the
-app's calls to Claude, Google or Notion.
+If the owner turns on error reports (`SENTRY_DSN`), a crash or an error the
+app logs sends Sentry the error's type, where in the code it happened (file,
+function, line), the request's method and path, the app version and profile,
+the Python version, and for the app's own error logs the logger's name and its
+fixed message template. Error reports never include what you said or typed,
+the error's message, your email, cookies, IP address or request contents.
+There is no tracing, and no Sentry headers are added to the app's calls to
+Claude, Google or Notion.
+
+The owner can download a backup of the cloud server (`GET /api/backup`, the
+owner only): every account's conversations, the family list (names,
+languages, time zones, account types; no sign-in tokens or API keys) and the
+waitlist. A conversation or account deleted after a backup was downloaded
+stays in that backup file until the owner deletes it.
+
 Waitlist (cloud, only once `[webapp] public_site` is on): the email address
 and optional note (at most 300 characters) people leave on /welcome, and the
 date, in a private file (`[webapp] waitlist_file`, `/data/waitlist.json`).
@@ -106,7 +116,8 @@ zone, invite status and only a SHA-256 hash of their one-time invite link in
 server's admin, can read). Their messages go to Anthropic under your API
 key, and their web searches send only their time zone as location. Their
 data is never synced to your Pi or PC, never put in Pinecone or Notion, and
-not visible to your account in the app. Removing someone signs them out and
+not visible to your account in the app, except in the owner's backup
+download, which holds every account's conversations. Removing someone signs them out and
 deletes their folder and entry; if a file can't be deleted right away, the
 server retries at the next start, the next removal, or when you open the
 family list.

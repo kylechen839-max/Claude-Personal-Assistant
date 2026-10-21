@@ -3659,3 +3659,10 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
   real-SDK one: with no tracing and no propagation targets it adds no
   header by itself (defense in depth). The 27 round-1 mutations still all fail (the 28th
   targeted the removed `traces_sample_rate=0`).
+
+- **After round 2:** merged master #35 (public site; `[webapp]
+  waitlist_file` now decides the backup's waitlist, "" leaves it out).
+  Round-2 review (CHANGES: 1 MED, 4 LOW, all docs): PRIVACY.md and the
+  public privacy page now describe the owner's backup and Sentry
+  accurately (a Sentry row in both tables). Counts: 2539 passed, 33
+  skipped; JS 236.
