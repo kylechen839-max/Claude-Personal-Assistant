@@ -372,7 +372,8 @@ member's in their own folder (deleted when you remove them), and it is used
 from the next reply on, in push-to-talk and voice conversations alike.
 Family members can't pick ElevenLabs voices (your bill) unless you set
 `[tts] family_paid_voices = true`, and even then only family-tier members
-can; beta testers never see or get them. A voice that has gone away (file deleted,
+can; beta testers never see or get them, even when ElevenLabs is the server's
+default `[tts] engine` (they hear its local fallback). A voice that has gone away (file deleted,
 key removed) falls back to the default with one log line. "Use the phone's
 voice" in the same menu still wins over all of these. `[tts] picker =
 false` turns the picker off.
@@ -877,10 +878,12 @@ The server can also serve a small public site, from the app itself (no
 JavaScript, no outside fonts or scripts, the same strict CSP as the app).
 It is **off** (`[webapp] public_site = false`, on the server too): the pages
 promise beta tiers (Calendar only), your own Anthropic key stored encrypted,
-and Notion sign-in. Those are all built; turn it on only once they are set
-up on Render and the legal pages are approved (BLOCKERS.md, "Public beta
-launch"; the comment at the top of `assistant/web/landing.html` and
-`privacy.html` lists the deploy checks). Then turn it on for the server with a
+and Notion sign-in. Those are all built; turn it on once the legal pages
+are approved, and before setting up the beta Google project and the Notion
+integration (their forms need the live /privacy and /terms), then set their
+Render variables before inviting anyone (BLOCKERS.md, "Public beta launch";
+the comment at the top of `assistant/web/landing.html` and `privacy.html`
+lists the deploy checks). Then turn it on for the server with a
 one-line change, through a PR like any other: `"public_site": True` in the
 server profile's `"webapp"` settings (`SERVER_PROFILE` in
 `assistant/config.py`). On a PC, the same in `config.local.toml`:

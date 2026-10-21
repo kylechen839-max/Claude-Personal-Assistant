@@ -442,6 +442,34 @@ def test_paid_voices_are_family_tier_only_even_when_allowed(env, owner):
     assert rachel in ids(owner.get("/api/voices").json()["voices"])
 
 
+
+def test_a_paid_server_default_is_never_a_beta_testers_voice(env, owner, monkeypatch):
+    """[tts] engine = "elevenlabs" on a server with family on: the owner and
+    a family member allowed paid voices hear it; a beta tester, or family
+    without family_paid_voices, hears its local fallback (no owner bill)."""
+    from assistant.tts_elevenlabs import ElevenLabsTTS
+
+    paid = ElevenLabsTTS(env.default)
+    env.assistant.tts = paid
+    monkeypatch.setattr(env.picker, "engine_for", lambda user, language: paid)
+    tester, tester_id = env.member(owner, "Tester", "en")  # beta
+    r = owner.post("/api/invites", json={"name": "Dad", "language": "en", "tier": "family"})
+    dad = env.client()
+    assert dad.post("/api/invite/accept", json={
+        "invite": r.json()["url"].split("#invite=", 1)[1]}).status_code == 200
+    dad_id = env.family.members()[-1]["id"]
+    for c in (owner, tester, dad):
+        c.get("/api/state")
+    by_user = {s.user: s for s in env.assistant.sessions.values()}
+    assert env.assistant.tts_for(by_user[None]) is paid
+    assert env.assistant.tts_for(by_user[tester_id]) is env.default
+    env.picker.catalog.family_paid = False
+    assert env.assistant.tts_for(by_user[dad_id]) is env.default
+    env.picker.catalog.family_paid = True
+    assert env.assistant.tts_for(by_user[dad_id]) is paid
+    env.picker.catalog.family_paid = True
+    assert env.assistant.tts_for(by_user[tester_id]) is env.default  # beta even so
+
 def test_replies_use_the_persons_voice_from_the_next_reply(env, owner):
     a, a_id = env.member(owner, "Dad", "en")
     a.get("/api/state")

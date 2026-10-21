@@ -5,7 +5,8 @@
 - Fixed: with `[tts] family_paid_voices` on, beta testers could pick
   ElevenLabs voices on the owner's bill. Paid voices now go only to
   family-tier members (and the owner); a beta tester never sees them, can't
-  choose one, and a paid voice saved earlier falls back to the default.
+  choose one, a paid voice saved earlier falls back to the default, and an
+  ElevenLabs server default speaks to them with its local fallback.
 - Fixed: the owner's Remove now revokes the person's Google sign-in at Google
   (best effort, before their folder is deleted), as Delete my account already
   did; it already revoked Notion.
