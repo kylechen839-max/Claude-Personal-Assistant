@@ -68,6 +68,9 @@ EN = {
     "draft_also": " Careful: replies also go to {others}.",
     "draft_instead": " Careful: replies go to {others}, not to the sender {sender}.",
     "google_failed": "Google sign-in didn't finish. Go back to the app and try again.",
+    "notion_failed": "Notion sign-in didn't finish. Go back to the app and try again.",
+    "notion_reconnect": "The Notion sign-in stopped working. Reconnect Notion from the "
+                        "app's settings: tap the gear, then \"Connect Notion\".",
     "google_beta_off": "Google isn't set up for beta accounts yet.",
     "note_delete": "Do you want me to delete the note: {text}?",
     "note_delete_any": "Do you want me to delete that note?",
@@ -170,6 +173,8 @@ ZH = {
     "draft_also": "注意：回复也会发给 {others}。",
     "draft_instead": "注意：回复会发给 {others}，而不是发件人 {sender}。",
     "google_failed": "Google 登录没有完成。请回到应用里再试一次。",
+    "notion_failed": "Notion 登录没有完成。请回到应用里再试一次。",
+    "notion_reconnect": "Notion 连接已失效。请在应用的设置里重新连接 Notion：点齿轮，再点“连接 Notion”。",
     "google_beta_off": "测试版账户暂时还不能连接 Google。",
     "note_delete": "要我删除这条记忆吗：{text}？",
     "note_delete_any": "要我删除这条记忆吗？",

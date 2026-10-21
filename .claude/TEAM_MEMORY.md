@@ -288,6 +288,15 @@ as the work. Never put secrets, tokens or personal data in this file.
   only after `watch.gate_check` passed on a side port. On the PC, update
   with `scripts/deploy.ps1`, never `git pull` + restart. A new read-only
   tool the check may use goes in `tools.READ_ONLY_TOOLS`.
+- **Invited people's own accounts:** Google (`google_web.py`), their
+  Anthropic key (`userkeys.py`) and Notion (`notion_web.py`); secrets at
+  rest go through `userkeys.seal`/`unseal` with a label of their own.
+  Lesson (2026-10-21): `notion_client.Client` adds a console handler to
+  its logger on every construction and its warnings quote Notion's error
+  messages (which can echo a title): pass `logger=`, and never
+  `NotionAssignments(token=...)` with a maybe-empty token (it falls back
+  to `NOTION_TOKEN`). Tests reach Notion only through
+  `notion_web.TRANSPORT` (an httpx MockTransport).
 - **Ownership:** PRIVACY.md, CHANGELOG.md and version bumps belong to the
   master at release time; builders send wording instead.
 

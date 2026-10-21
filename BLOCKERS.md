@@ -68,6 +68,22 @@ Only what is still open for Kyle. None of it blocks the code.
       enter their key again). Until it is set, beta testers can't save a key
       (the app says why) and so can't talk to Claude; family members keep
       using your key.
+- [ ] **Testers' Notion: a public Notion integration (~10 min; README
+      "Invite family" -> "Notion for beta testers").** Only you can: (1) at
+      notion.so/profile/integrations create a **Public** integration ("Any
+      workspace"), capabilities Read content + Update content, no user
+      information with email; (2) fill in the company name, website, privacy
+      policy `https://hey-claude.onrender.com/privacy`, terms
+      `https://hey-claude.onrender.com/terms` and a support email, and the
+      redirect URI `https://hey-claude.onrender.com/notion/callback`;
+      (3) paste its OAuth client ID and secret (shown once) into
+      `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET` in Render ->
+      Environment. Optional: publish an "Assignments" template page and set
+      it as the integration's template. No Marketplace listing is needed
+      (Notion's review is for listings; unverified from the sandbox, where
+      developers.notion.com is blocked). Needs `PUBLIC_ORIGIN` and
+      `USER_DATA_KEY` (above). Until (3) the "Connect Notion" button stays
+      hidden.
 - [ ] **Measure Render memory with a Chinese-speaking family member.** The
       +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
       estimate, not measured (Hugging Face is blocked in the build

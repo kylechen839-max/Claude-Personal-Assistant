@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Invited people (beta and family) can connect their own Notion from Settings:
+  Connect Notion signs in with Notion's own consent page, and their
+  Assignments database gives them two tools on their own account: list
+  assignments and mark one Not started / In progress / Done (asks first once
+  the conversation holds Notion text). The sign-in is stored encrypted on the
+  server; Disconnect, Delete my account and the owner's Remove revoke it at
+  Notion. Needs a public Notion integration (`NOTION_OAUTH_CLIENT_ID` /
+  `NOTION_OAUTH_CLIENT_SECRET`, `[family] notion`). Reconnecting to another
+  workspace revokes the previous grant; Notion rate limits delay a request by at most 2 s (one
+  retry). Requires notion-client 3.1 or later.
 - Invited people (family and beta) now have per-person limits: 6 messages a
   minute, 200 a day and 30 minutes of speech recognition a day by default
   (`[family] turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`; 0 =

@@ -707,7 +707,8 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js",  # reloads the page after an update (host.py)
           "/attachments.js",  # the chat's "+" (attachments.py checks the files)
-          "/memory.js"]  # the Memory screen's code (its data needs the owner)
+          "/memory.js",  # the Memory screen's code (its data needs the owner)
+          "/notion.js"]  # an invited person's "Connect Notion" button (routes need sign-in)
 
 
 def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
@@ -1366,6 +1367,6 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v26" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v27" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw

@@ -4105,6 +4105,175 @@ ran on the owner's `anthropic.Anthropic()`.
   contract test's live variants). Earlier the same day the G1 tree gave
   2442 passed, 58 skipped: 25 environment-dependent tests skipped then and
   run now, the same on both trees. JS 241 pass (was 236).
+## Public beta G6: Notion sign-in for invited people (2026-10-21)
+Built on `claude/account-self-service` (G4, PR #41), which revokes on
+self-delete. Any invited person (beta or family) can connect their own
+Notion workspace and gets exactly two tools on their own token.
+- **`assistant/notion_web.py`** (new), mirroring `google_web.GoogleConnect`:
+  `GET /api/notion/status` (`{enabled, connected, workspace, database}`),
+  `POST /api/notion/connect` (`{url}` of
+  `api.notion.com/v1/oauth/authorize?owner=user`), `POST
+  /api/notion/disconnect`, `GET /notion/callback`. The same state + nonce
+  cookie (`hc_notion`, Lax, path `/notion/callback`, 10 min) + session +
+  still-listed checks, 4 pending per person and 32 in all; the owner gets
+  404. The code is exchanged with notion-client's own `oauth.token`
+  (Basic auth, JSON body); no PKCE (Notion documents none). Then one
+  data-source search (page_size 100, one page): exactly one data source
+  with the Assignments schema (`Assignment` title, `Status` status with the
+  three options, `Due` date) is used, preferring the copy of the
+  integration's template (`duplicated_template_id` = the database's parent
+  page); none or several -> `database: null` and Settings says to share
+  only that database and reconnect (no picker, by decision). A grant that
+  can't be saved (removed meanwhile, write failed) is revoked at once.
+  The SDK gets its own logger at ERROR (its default adds a console handler
+  per client, and its warnings quote Notion's messages, which can echo a
+  title); a 10 s timeout per request.
+- **`assistant/userkeys.py`**: generic `seal(label, uid, payload)` /
+  `unseal(...)` (Fernet/HKDF under a label, the uid inside the ciphertext);
+  `KeyStore` now uses them (same behaviour and messages); `NOTION_LABEL =
+  hey-claude/notion-token/v1`. `<dir>/<id>/notion.enc` holds `{uid,
+  access_token, refresh_token, bot_id, workspace_id, workspace_name,
+  database_id, data_source_id, database_title}`; never Notion's `owner`
+  (their email). Without a usable `USER_DATA_KEY` connect answers 503 and
+  the callback never exchanges the code.
+- **`assistant/family.py`**: `notion_enabled/notion_status/save_notion/
+  disconnect_notion/revoke_notion/refresh_notion` and `_notion_tools`
+  (registered next to Google's; `_refresh_tools` swaps them in place).
+  The tools are `NotionAssignments.tools()` re-bound: a client built on
+  their token (never `token=`, whose falsy fallback is `NOTION_TOKEN`),
+  `untrusted_output` and `private` on both, "Kyle's ... his" rewritten,
+  and only `list_assignments` / `update_assignment_status` (the update
+  keeps `confirm_if_untrusted`). A 401 refreshes once under a per-person
+  lock (a second turn that waited uses the new token); a refresh token is
+  replaced only if Notion sends one; a failed refresh says "reconnect
+  Notion" (i18n `notion_reconnect`, en/zh). Notion's error text is replaced
+  by its code before it reaches Claude or the tool-failure log.
+- **Revoke** (`POST /v1/oauth/revoke`, token in the body) on Disconnect, on
+  "Delete my account" (`Account.revoke_token`, before Google's) and on the
+  owner's Remove (`remove_user`, before `Family.remove`). Best effort: a
+  failure is logged by type and never blocks; `notion.enc` goes with the
+  folder (`_finish_deletes` rmtree).
+- **Wiring**: one line in `create_app` after `userkeys_web.register`;
+  `/notion.js` in the static routes, `sw.js` SHELL (cache v27) and
+  CloudGuard `PUBLIC_GET` with `/notion/callback`. Config: `[family] notion
+  = true` (DEFAULTS and config.toml), `NOTION_OAUTH_CLIENT_ID` /
+  `NOTION_OAUTH_CLIENT_SECRET` in `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`,
+  render.yaml (`sync: false`) and conftest's cleared variables. No redirect
+  setting: it is `own_origin + /notion/callback`.
+- **UI**: `assistant/web/notion.js` (new): Connect / Reconnect / Disconnect
+  Notion beside Google's, shown only for an invited person's session, the
+  workspace and database names as text only, a confirm before disconnect,
+  and only Notion's authorize URL is followed. en and zh strings in
+  i18n.js. The public privacy page now describes the Notion sign-in (what
+  is stored, revoke on disconnect/delete, the Connections page); its and
+  landing.html's release-check comments say G6 is built and goes live
+  with the Render variables.
+- **Tests.** New `tests/test_notion_web.py` (42): every Notion call
+  through the real notion-client over an httpx MockTransport with Notion's
+  response shapes (the token answer with `owner.user.person.email`, the
+  2025-09-03 data-source search), asserting Basic auth and the JSON bodies:
+  the full connect (URL params, cookie flags, only `notion.enc` written, no
+  plaintext, private mode, not openable under the Anthropic label or as
+  someone else), tools only after connecting (in place, in an open
+  conversation), a real turn's tool list without "Kyle", seven refused
+  callbacks (unknown, reused, no cookie, other browser, signed out,
+  removed, no code) with no exchange and no file, a denied consent in
+  Chinese, a refused code, a grant that can't be saved being revoked, no
+  `USER_DATA_KEY` (503 and no exchange), off without the integration or the
+  switch, owner 404 / signed-out 401, pending bounds, five no-single-match
+  schemas, the template preference, a failed search, untrusted + private
+  flags, `NOTION_TOKEN` set and never sent, refresh once keeping the
+  refresh token, a rotated one stored, a failed refresh -> "Reconnect
+  Notion", two concurrent turns -> one refresh, Notion's error text kept
+  out of Claude and the log, disconnect revoke + delete, a failed revoke
+  still deleting, owner removal and self-delete revoking first (and
+  deleting when it fails), `Family.remove` deleting `notion.enc`, a
+  caplog at DEBUG with no token, code, nonce, secret, email, workspace,
+  database or assignment title, config/deploy/page wiring, and
+  seal/unseal. `test_cloud.py` +1 (a made-up state on the public callback
+  -> 400 through CloudGuard, status still needs sign-in). JS: new
+  `tests/js/notion.test.mjs` (9).
+  - Revert check: 34 Python and 6 JS source reverts, each alone with
+    `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1`, all fail their
+    tests (the two best-effort revoke guards are reverted together: either
+    one alone still catches the failure). Not
+    revert-checked: passing `token=` instead of a client (it would make a
+    real Notion call), and the owner 404 (structural: the owner's session
+    has no id).
+- **Counts** (Linux sandbox, Python 3.13): 2647 passed, 36 skipped (+42
+  test_notion_web.py, +1 test_cloud.py); JS 256 pass (+9). Baseline on this
+  branch: 2604 passed, 36 skipped; JS 247. Existing tests touched: the
+  sw.js pin is v27, `/notion.js` joins test_webapp's public list, and
+  test_docs knows the two tool names.
+### G6 Round 2 (review fixes, 2026-10-21)
+Merged `claude/account-self-service` (6f09947, with master 0005342: the
+ops PR, design skills and #9, which removed the PC hub and moved the
+dashboard); the only conflict was `ISOLATED_ENV_VARS` (both `SENTRY_DSN`
+and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
+- **Reconnect revokes the old grant.** `Family.replace_notion` reads the
+  stored record and saves the new one under the per-person Notion lock;
+  `NotionConnect.finish` then revokes the old access token (quietly) if it
+  differs from the new one.
+- **A disconnect can't be undone by a refresh in flight.**
+  `disconnect_notion` holds the per-person Notion lock around revoke +
+  delete, `revoke_notion` (used by "Delete my account") takes it too, and
+  the owner's Remove holds it around revoke + `Family.remove`; a refresh
+  in flight finishes first and its new token is the one revoked. Belt and
+  braces: `save_notion(expect=...)` saves a refreshed record only if the
+  file still holds the token the refresh started from.
+- **Rate limits are bounded.** `notion_web.api()` passes notion-client's
+  `RetryOptions(max_retries=1, max_retry_delay_ms=2000)` (3.1's default
+  honours `Retry-After` up to 60 s, twice: about 2.5 min of stall on a
+  voice turn, disconnect or delete). requirements.txt: `notion-client>=3.1`
+  (a 3.0 install, which has no retries, is left as it is).
+- **Tests**: `tests/test_notion_web.py` +7 (49): reconnect A -> B revokes
+  A only and B stays live; the same token again revokes nothing;
+  disconnect and revoke while a refresh is blocked inside `refresh_grant`
+  (file gone, status not connected, the refreshed token revoked); a
+  refresh never saves over a changed or deleted sign-in; the owner's
+  Remove runs `Family.remove` under the Notion lock; a 429 with
+  `retry-after: 60` sleeps once, at most 2 s (`time.sleep` patched), for
+  a search and a revoke.
+  - Revert check (`__pycache__` cleared each time): the finish revoke,
+    the disconnect/revoke lock, the `expect` check, the Remove lock and the
+    retry options, each reverted alone, fail their tests.
+- **Counts** (Linux sandbox, Python 3.13): 2616 passed, 35 skipped; JS
+  118 pass. Baseline (the merge, before these fixes): 2609 passed, 35
+  skipped; JS 118 (master's #9 removed the dashboard and hub tests).
+### G6 Round 3 (two low findings, 2026-10-21)
+- **"Delete my account" holds the Notion lock around revoke and removal.**
+  `Account.delete` takes `Family._notion_lock(uid)` around
+  `Family._revoke_notion` and `Family.remove`, as the owner's Remove does.
+  Before, `revoke_notion` let the lock go before `remove`, so a refresh in
+  that gap could save a new token that the folder then took away without
+  revoking it. `Family.revoke_notion` had no other caller and is removed;
+  the lock isn't reentrant, so callers hold it and call `_revoke_notion`.
+  The Google revoke stays outside the lock.
+- **A refreshed token that isn't saved is revoked.** If `refresh_notion`'s
+  `save_notion` returns False (they were removed, or the sign-in changed)
+  or raises (KeyProblem/OSError), the new access token is revoked quietly
+  instead of being left live at Notion.
+- **A reconnect to the same bot revokes nothing.** `replace_notion` returns
+  no old token when `notion_web.same_bot(old, new)`: the same `bot_id`, or,
+  if either record has none, the same `workspace_id`. Notion may reuse the
+  bot for a workspace, and revoking its old token could end the new grant.
+  A different bot (another workspace) still has its old token revoked.
+  SECURITY.md records this as a deliberate non-fix; README and MANUAL_TEST
+  (same workspace, then another workspace) updated.
+- **Tests**: `tests/test_notion_web.py` +6 (55): "Delete my account" runs
+  `Family.remove` under the Notion lock, and a refresh started in that gap
+  waits, finds nothing and never calls Notion's token endpoint; a refresh
+  whose save is refused (False, or OSError) revokes the new token, logs no
+  token, and leaves the stored one; reconnecting the same bot (with and
+  without a stored `bot_id`) revokes nothing and the new token stays live;
+  `same_bot` cases. The reconnect A -> B test now uses another bot and
+  workspace. The race test's "revoke" case now runs `Account.delete`.
+  - Revert check (`__pycache__` cleared each time): `Account.delete`
+    releasing the lock before `remove` fails the delete-lock test; dropping
+    the refresh revoke fails both refused-save cases; dropping the
+    `same_bot` check fails both same-bot cases.
+- **Counts** (Linux sandbox, Python 3.13): 2622 passed, 35 skipped; JS 118
+  pass. Baseline (round 2): 2616 passed, 35 skipped; JS 118.
 
 ## Public beta G3: per-person limits (2026-10-21)
 

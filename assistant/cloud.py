@@ -99,6 +99,10 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # Strict session cookie isn't sent on it, so google_web.py
               # checks the one-time state and its browser-binding cookie
               "/google/callback",
+              # the same for an invited person's own Notion (notion_web.py:
+              # one-time state + hc_notion binding cookie), and the page
+              # code of its "Connect Notion" button (its API needs sign-in)
+              "/notion/callback", "/notion.js",
               # the public site (public_site.py): landing, privacy, terms
               "/welcome", "/privacy", "/terms", "/site.css"}
 PUBLIC_POST = {"/api/login"}

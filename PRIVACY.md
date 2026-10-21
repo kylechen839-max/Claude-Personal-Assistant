@@ -76,6 +76,17 @@ account under Anthropic's terms. Removing the key in Settings, or deleting your
 account, deletes it. We also keep a monthly token and cost estimate for your
 key in your folder, shown only to you.
 
+If you connect Notion, the server stores, encrypted with a server secret and
+readable only for your own requests: a Notion access token and refresh token
+for the pages you chose to share, your workspace's id and name, and the id and
+name of the Assignments database it found. Notion's record of your email
+address is not stored. Your assignment titles, due dates and statuses are read
+from Notion when you ask and sent to Anthropic as part of the conversation;
+status changes you ask for are written back to Notion. Disconnecting, deleting
+your account, or being removed asks Notion to revoke the token and deletes it;
+you can also remove Hey Claude in Notion under Settings, Connections.
+Reconnecting to a different workspace also revokes the previous connection at
+Notion; reconnecting to the same workspace keeps only the new sign-in.
 To keep the shared server fair, the app counts how many messages each invited
 person sends and how many seconds of their speech it transcribes, per minute
 and per day. Only the counts, and the times of the messages sent in the last

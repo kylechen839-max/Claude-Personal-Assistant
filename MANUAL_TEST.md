@@ -644,7 +644,8 @@ for all of this except the Google sign-in.
   - Should: the phone goes back to the sign-in page. Your list no longer
     shows them, their other phone is signed out too, and at
     myaccount.google.com/permissions (their Google account) "Hey Claude"
-    is gone if they had connected Google. In Chinese the section reads
+    is gone if they had connected Google (and from their Notion's Settings
+    -> Connections if they had connected Notion). In Chinese the section reads
     下载我的数据 / 删除我的账户.
 - [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
       on Render"). On the beta tester's phone, before adding a key, type
@@ -662,6 +663,32 @@ for all of this except the Google sign-in.
 - [ ] **Remove key**, confirm.
   - Should: the next "hello" says to add a key again. On a **Family**
     account the same steps work, and without a key they use yours as before.
+- [ ] **A tester's own Notion** (after BLOCKERS "Testers' Notion"). With a
+      second Notion account (not yours) that has an Assignments database
+      (Assignment, Status, Due) with one row due this week: on the test
+      person's phone ⚙ -> **Connect Notion**, share only that database,
+      Allow.
+  - Should: back in the app; ⚙ shows "Notion connected." and the workspace
+    and database names. In Chinese the buttons read 连接 Notion / 断开 Notion.
+- [ ] Ask "What assignments do I have this week?", then "Mark <that one>
+      as done".
+  - Should: it reads that account's row (never yours), asks before changing
+    it, and after "yes" the row's Status is Done in Notion.
+- [ ] ⚙ -> **Connect Notion** again, the same workspace and the same
+      database, Allow. Then ask "What assignments do I have this week?"
+  - Should: it still lists that row (the old sign-in wasn't revoked under
+    the new one), and Settings -> **Connections** in Notion shows "Hey
+    Claude" once.
+- [ ] If that Notion account has a second workspace with its own
+      Assignments database: Connect Notion again, pick the second
+      workspace, share its database, Allow, then ask for assignments.
+  - Should: it reads the second workspace's rows; in the first
+    workspace's Settings -> **Connections** "Hey Claude" is gone.
+- [ ] ⚙ -> **Disconnect Notion**, OK. Then in that Notion account open
+      Settings -> **Connections**.
+  - Should: "Hey Claude" is no longer listed; asking about assignments
+    again says it can't see them. Reconnecting while sharing no database
+    (or two) shows "couldn't find exactly one Assignments database".
 - [ ] **Their limits.** On an invited person's phone, type seven short
       messages ("1", "2", ...) as fast as you can, then wait a minute and
       send one more. Repeat with hands-free voice (seven quick questions).

@@ -4,7 +4,8 @@ and "Delete my account" in their own Settings (web/family.js).
   GET  /api/me/export   a zip of their conversations (history.export JSON)
                         and profile; never tokens or keys
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
-                        Google grant (best effort), then Family.remove
+                        Notion and Google grants (best effort), then
+                        Family.remove
 
 Both are for the signed-in person's own session only: there is no id in
 the path or body, so nobody can name someone else's account. The owner
@@ -15,10 +16,10 @@ Deleting reuses Family.remove: it drops them from users.json, signs out
 every session of theirs (cookies, live voice calls) and deletes
 `<dir>/<id>/`: history, Google token, and every other per-person file
 (their own API key, Notion token), with its retry for files locked on
-Windows. Google is told first (POST https://oauth2.googleapis.com/revoke,
-the token in the body, never the URL), so the grant doesn't outlive the
-account; a failure there never blocks the delete and is logged without
-the token.
+Windows. Notion (POST /v1/oauth/revoke, under their Notion lock) and Google
+(POST https://oauth2.googleapis.com/revoke) are told first, the token in
+the body, never the URL, so neither grant outlives the account; a failure
+there never blocks the delete and is logged without the token.
 
 An export is built in a private folder under the family data dir
 (`<dir>/.exports/export-<id>.*`, mkdtemp, 0700; `.exports` can never be a
@@ -120,7 +121,8 @@ class Account:
     # ---------- delete ----------
     def revoke_token(self, uid: str) -> None:
         """Best effort: their Google grant, before the folder (and the token
-        file) goes. Never raises; never logs the token."""
+        file) goes. Never raises; never logs a token. (Notion's is revoked
+        in delete(), under their Notion lock.)"""
         from assistant.tools.google_auth import load_token_info
 
         try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
@@ -143,7 +145,12 @@ class Account:
         if self.family.get(uid) is None:
             return False
         self.revoke_token(uid)
-        removed = self.family.remove(uid, sign_out)
+        # Notion's revoke and the removal under one hold of their Notion
+        # lock (as the owner's Remove): a refresh can't save a new token in
+        # between that the folder would take away unrevoked. Never raises.
+        with self.family._notion_lock(uid):
+            self.family._revoke_notion(uid)
+            removed = self.family.remove(uid, sign_out)
         with self.lock:
             self._recent.pop(uid, None)
             self._busy.pop(uid, None)

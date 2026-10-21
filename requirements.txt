@@ -30,7 +30,7 @@ google-auth-oauthlib>=1.2
 # google-auth). abi3 wheels for Windows x64, Linux x86_64/aarch64 (Pi), Python 3.9+
 cryptography>=44
 google-auth-httplib2>=0.2
-notion-client>=3.0
+notion-client>=3.1
 pinecone>=7.0
 tzlocal>=5.0
 tzdata

@@ -92,6 +92,18 @@
     "Spotify connected.": "Spotify 已连接。",
     "Opening Spotify…": "正在打开 Spotify…",
     "Couldn't start the Spotify sign-in.": "无法开始 Spotify 登录。",
+    // an invited person's own Notion (notion.js, notion_web.py)
+    "Connect Notion": "连接 Notion",
+    "Reconnect Notion": "重新连接 Notion",
+    "Disconnect Notion": "断开 Notion",
+    "Notion connected.": "Notion 已连接。",
+    "Notion is connected, but I couldn't find exactly one Assignments database. Tap \"Reconnect Notion\" and share only your Assignments database.":
+      "Notion 已连接，但我没有找到唯一的作业（Assignments）数据库。请点“重新连接 Notion”，只共享你的作业数据库。",
+    "Opening Notion…": "正在打开 Notion…",
+    "Couldn't start the Notion sign-in.": "无法开始 Notion 登录。",
+    "Disconnect Notion? I won't see your assignments any more.":
+      "要断开 Notion 吗？之后我就看不到你的作业了。",
+    "Notion disconnected.": "Notion 已断开。",
     "Disconnect Google account": "断开 Google 账户",
     "Disconnect your Google account? I won't see your calendar or email any more.":
       "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
