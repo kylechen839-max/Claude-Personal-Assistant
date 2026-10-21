@@ -253,16 +253,35 @@ def test_other_instances_keep_every_data_file_in_their_own_folder(name):
     other = load_config(name, None, profile="")
     folder = f"data/{name.split('.')[1]}/"
     checked = []
+    # Machine-wide, not per instance: the watchdog reads it from config.toml
+    # only (watch.Watch), and only Kyle's own app shows its banner.
+    machine_wide = {("watch", "status_file")}
     for section, values in DEFAULTS.items():
         if not isinstance(values, dict):
             continue
         for key, default in values.items():
+            if (section, key) in machine_wide:
+                continue
             if isinstance(default, str) and default.startswith("data/"):
                 value = other[section][key]
                 assert value == "" or value.startswith(folder), (section, key, value)
                 assert value != owner[section][key], (section, key)
                 checked.append(f"{section}.{key}")
     assert "assistant.usage_file" in checked and "history.path" in checked
+
+
+@pytest.mark.parametrize("name", _other_instances())
+def test_other_instances_set_no_machine_wide_watch_setting(name):
+    """Judge LOW 7: config.mom.toml set [watch] status_file, which nothing
+    reads (the watchdog reads config.toml only), suggesting a per-instance
+    status file that doesn't exist."""
+    from pathlib import Path
+
+    from assistant.config import tomllib
+
+    path = Path(__file__).resolve().parent.parent / name
+    watch = tomllib.loads(path.read_text(encoding="utf-8")).get("watch") or {}
+    assert "status_file" not in watch
 
 
 def test_google_connect_without_a_token_never_signs_in_here(tmp_path, monkeypatch):
