@@ -7,6 +7,13 @@
   download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
   app (`[watch] cloud_url`). Setup for an UptimeRobot monitor on /healthz is
   in the README.
+- Public beta pages (off until launch, `[webapp] public_site`): /welcome
+  (landing page with a waitlist), /privacy and /terms (drafts, `[webapp]
+  legal_draft`), and an owner-only /waitlist list. The waitlist is
+  rate-limited per visitor, de-duplicated, capped at 2000 entries and never
+  logged; `waitlist_file` is empty (closed) except on the cloud server. New
+  settings: `[webapp] public_site`, `support_email`, `legal_draft`,
+  `waitlist_file`.
 - Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
   Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
   sign in through a separate Calendar-only Google client

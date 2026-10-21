@@ -3366,6 +3366,136 @@ Kyle: "build Haiku routing and caching right now."
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
 
+## Public beta G5: public pages and waitlist (2026-10-21)
+
+What it does:
+- New `assistant/public_site.py` with static `web/landing.html`,
+  `privacy.html`, `terms.html`, `waitlist.html` and `site.css`. The pages
+  are `/welcome`, `/privacy` and `/terms`, public in CloudGuard
+  (`cloud.PUBLIC_GET`). They have no JavaScript, no inline CSS, no CDN
+  and no web fonts, and the app's CSP is unchanged. They are semantic
+  HTML, fit a phone's width, and follow light/dark through
+  `prefers-color-scheme`.
+- `/` stays the app. Signed out, it is still the sign-in page, now with a
+  "What is Hey Claude?" link to `/welcome` (translated on the Chinese
+  page). Invited people and installed home-screen icons keep working
+  unchanged, and a marketing page never sits between the owner and the
+  app. Because index.html, app.css and i18n.js changed, the sw.js cache is
+  now v22.
+- `POST /api/waitlist` takes a form (303 back to
+  `/welcome?waitlist=<state>`, so it works with no JS) or JSON. CloudGuard
+  gives it its own body pool (`WAITLIST_POST`, `waitlist_slots`) with the
+  sign-in body deadline. The app then applies:
+  - 5 posts per address an hour (`cloud.RateLimiter` gained a `window`);
+  - a honeypot field;
+  - strict, lower-cased and de-duplicated addresses;
+  - a note of at most 300 characters;
+  - at most 2000 entries.
+
+  Entries go to `[webapp] waitlist_file` via `google_auth.write_private`:
+  `/data/waitlist.json` in the server profile, `data/waitlist.json`
+  locally, "" on Mom's instance (closed). A file that can't be read is
+  never overwritten. Logs hold counts only.
+- Owner only (`require_owner`: 401 when signed out, 404 for a family
+  member): `GET /api/waitlist`, the `GET /waitlist` HTML list with Remove
+  buttons, and `DELETE /api/waitlist/<id>` / `POST .../<id>/remove`. The
+  brief named `DELETE /api/waitlist/<email>`; this deletes by a random
+  entry id instead, so an address never appears in a URL or the uvicorn
+  access log.
+- New settings: `[webapp] support_email` (fills `{{SUPPORT_EMAIL}}` on
+  privacy/terms; "" = "the person who runs this server") and
+  `legal_draft = true` (a visible "Draft: Kyle to review" note), plus
+  `waitlist_file`. All three have commented lines in config.toml.
+- The privacy page follows PRIVACY.md and the real beta data flows:
+  - who gets what: Anthropic under the user's own key, Calendar-only
+    Google, Notion once connected, Anthropic-run web search with the time
+    zone, Render as host;
+  - speech is transcribed on the server and not kept;
+  - what is stored, including the key ("stored encrypted on the server
+    and used only for your requests", for G2);
+  - IP addresses in the logs;
+  - deletion on request, and Render's daily snapshots keeping a copy until
+    they expire.
+
+  The terms are short: beta, as is, your own API costs, acceptable use,
+  and that the beta can end at any time.
+
+Tested: `tests/test_public_site.py`, 36 tests, offline, behind a real
+CloudGuard:
+- the pages are public and carry the CSP, and every other route still
+  answers 401;
+- an HTML parse finds no inline script or style, no event handlers and no
+  outside assets;
+- normalizing and de-duplication, and a private file with no temp
+  leftovers;
+- the note cap and bad addresses;
+- the honeypot (same answer as a person, nothing stored);
+- the per-address hourly limit and the 2000 cap;
+- a corrupt file is never overwritten, and the waitlist is closed without
+  a file;
+- caplog: no address or note at any level;
+- owner list/delete with escaped notes, and a family member gets 404;
+- separate pools for sign-in and waitlist posts, and the body cap;
+- support email and draft note on/off, and a malformed support email is
+  dropped;
+- `build_app` serves it, and the config/config.toml mirror.
+
+Revert check: 14 source reverts, each undone alone with `__pycache__`
+cleared, and each fails its test. The reverts were the PUBLIC_GET
+entries, the WAITLIST_POST public flag, the waitlist pool, the
+RateLimiter window, the honeypot, de-duplication, the rate limit, the
+cap, lower-casing, the note cap, the support email, `require_owner`, the
+login link, and a debug log of the address.
+
+Counts (Linux sandbox): 2471 passed, 58 skipped (master b96e6ed baseline
+2435 passed, 58 skipped); JS 232 pass.
+
+Known gaps: no CAPTCHA and no confirmation email, both on purpose
+(SECURITY.md). The page wording is a draft for Kyle.
+
+### Round 2 (judge: CHANGES_NEEDED, 5 findings)
+1. **The waitlist limit counted the proxy, not the visitor.** It used the
+   web app's `client_ip` (the rightmost X-Forwarded-For hop, no
+   `client_ip_header`). CloudGuard now puts the client key it already
+   worked out into `scope["state"]["client_key"]`, and the waitlist uses
+   that, falling back to the web app's address off the cloud. Tests: two
+   private hops, `client_ip_header = "cf-connecting-ip"`, and off the cloud.
+2. **A full list told who was on it.** At the cap, every post now gets
+   "full", whether or not the address is already listed. Test: a listed
+   and a new address get the same answer at 2000.
+3. **The pages promise pieces that aren't on master yet** (G1 Calendar
+   only, G2 BYOK, G6 Notion), and master auto-deploys. New
+   `[webapp] public_site = false` (default, and in the server profile).
+   While it is off, the four pages and every waitlist route answer 404,
+   and the sign-in page drops its /welcome link. A comment at the top of
+   landing.html and privacy.html lists each dependent claim for the
+   release check. Tests: site off (404 and no link, en and zh, and through
+   `cloud.build_app`'s server profile); site on works as before.
+4. **Untested protections.** New tests: a slow waitlist body gets 408
+   after the short sign-in deadline (ASGI-level, about 0.2 s); a
+   cross-site `POST /api/waitlist`, `.../remove` and `DELETE` each get 403.
+5. **`waitlist_file` defaulted to `data/waitlist.json`,** which opened a
+   public write endpoint on a PC. The default is now "" (closed); only
+   the server profile sets `/data/waitlist.json`. Mom's `""` line is gone,
+   since the default covers it.
+
+Revert check: each fix undone alone (`__pycache__` cleared), and each
+fails its test. That covers the scope key in cloud.py, its use in
+public_site.py, the cap/duplicate order, `from_config`'s switch, the
+`public_site` default, the login-link removal, the `or waitlist` deadline,
+and the `waitlist_file` default. The cross-site tests fail with the web
+app's same-site check removed.
+
+Known issue, not fixed here: the web app's own sign-in `LoginLimiter`
+(`/api/login`, `/api/invite/accept`) has the same split. It counts the
+web app's `client_ip` (rightmost hop), while CloudGuard counts its own
+client key. Behind two private hops or Cloudflare, the app-side lockout
+groups visitors by proxy. CloudGuard's own wrong-token checks are keyed
+correctly, and the right token is never locked out. The fix is the same
+scope key, in webapp.py.
+
+Counts (Linux sandbox): 2480 passed, 58 skipped (round 1: 2471; master
+b96e6ed: 2435 passed, 58 skipped); JS 232 pass.
 ## Public beta G1: account tiers and Calendar-only Google (2026-10-21)
 
 Kyle: get the app ready for an invite-only public beta (bring-your-own

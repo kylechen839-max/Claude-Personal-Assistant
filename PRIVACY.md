@@ -39,6 +39,13 @@ and the operating system and Python version. Error reports never include what
 you said or typed, the error's message, your email, cookies, IP address or
 request contents. There is no tracing, and no Sentry headers are added to the
 app's calls to Claude, Google or Notion.
+Waitlist (cloud, only once `[webapp] public_site` is on): the email address
+and optional note (at most 300 characters) people leave on /welcome, and the
+date, in a private file (`[webapp] waitlist_file`, `/data/waitlist.json`).
+Used only to invite them by hand; never logged, never sent to Claude. The
+owner removes entries at /waitlist (also on request). Render's daily disk
+snapshots keep a copy until they expire. The /welcome, /privacy and /terms
+pages and the waitlist form are public; everything else still needs sign-in.
 
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves

@@ -1392,7 +1392,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                sessions_file: str | Path | None = None,
                voice: dict | None = None, failover=None, features=None,
                language: str = "en", google=None, hub=None, spotify=None,
-               health=None):
+               health=None, public=None):
     """The ASGI app. With `failover` (a failover.peers.FailoverSettings
     with a role), it is wrapped in failover.edge.EdgeMiddleware: bearer
     tokens as well as cookies, CORS for the app origin (FAILOVER.md).
@@ -1406,7 +1406,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     `max_upload_bytes`.
     `spotify`: a spotify_web.SpotifyConnect for "Connect Spotify" (owner).
     `health`: a function returning the watchdog's issues for the owner's
-    banner (watch.banner), or None: /api/state has no "health" then."""
+    banner (watch.banner), or None: /api/state has no "health" then.
+    `public`: a public_site.PublicSite (/welcome, /privacy, /terms, the
+    waitlist), or None."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI, Request
@@ -1622,10 +1624,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         and (google.enabled(user["id"])
                              or google.note(user["id"]) is not None)) if user is not None
                else page_tag(language, google is not None and bool(google.owner)))
-        if not tag:
+        if not tag and public is not None:
             return FileResponse(STATIC / "index.html", media_type="text/html")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        return Response(html.replace('<html lang="en">', tag, 1),
+        if public is None:  # no public site: no link to it
+            from assistant.public_site import LOGIN_LINK
+
+            html = html.replace(LOGIN_LINK, "", 1)
+        return Response(html.replace('<html lang="en">', tag, 1) if tag else html,
                         media_type="text/html; charset=utf-8",
                         headers={"Cache-Control": "no-cache"})
 
@@ -1936,6 +1942,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import family as family_mod
 
     family_mod.register(app, family, web, assistant, error)
+    if public is not None:
+        from assistant import public_site
+
+        public_site.register(app, public, web, error)
     if hub is not None:
         from assistant import devhub
 
@@ -2178,6 +2188,8 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
     from assistant import watch  # the owner's banner when an app is down
 
     health = watch.banner_source(config, env_file)
+    from assistant import public_site  # /welcome, /privacy, /terms, the waitlist
+
     app = create_app(assistant, token, allowed_origins=web["allowed_origins"],
                      max_upload_bytes=int(float(web["max_upload_mb"]) * 1_000_000),
                      max_audio_seconds=float(web["max_audio_seconds"]),
@@ -2186,6 +2198,7 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
                      voice=config.get("voice"), failover=failover,
                      features=features, language=language, google=google,
                      hub=hub, spotify=spotify, health=health,
+                     public=public_site.from_config(config),
                      **attachment_limits(config))
     if failover.role:
         log.info("Failover role %s; backends: %s", failover.role,

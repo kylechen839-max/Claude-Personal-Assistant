@@ -16,6 +16,7 @@
     "). You only need to do this once on this phone.": "里）。这部手机只需要输入一次。",
     "Access token": "访问令牌",
     "Sign in": "登录",
+    "What is Hey Claude?": "Hey Claude 是什么？",
     "Incognito": "无痕",
     "Backend in use": "正在使用的服务器",
     "Conversation history": "对话记录",

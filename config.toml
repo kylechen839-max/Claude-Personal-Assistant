@@ -125,6 +125,12 @@ public_origin = ""            # the https:// address the phone opens (Google ret
                               # <public_origin>/google/callback); needed for google_connect
                               # and family members' Google (PUBLIC_ORIGIN overrides it)
 backup_max_mb = 200           # the owner's backup download (GET /api/backup) is refused above this
+public_site = false           # true: /welcome, /privacy, /terms and the waitlist (public beta;
+                              # only once beta tiers, BYOK and Notion sign-in have landed)
+support_email = ""            # contact shown on /privacy and /terms ("" = "contact the owner")
+legal_draft = true            # a visible "Draft: Kyle to review" note on /privacy and /terms
+waitlist_file = ""            # /welcome's waitlist (emails + notes, a private file); "" = closed.
+                              # The server profile uses /data/waitlist.json (on the disk)
 
 [voice]                       # hands-free voice conversation in the phone web app
 vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)
