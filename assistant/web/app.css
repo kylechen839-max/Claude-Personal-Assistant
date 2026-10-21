@@ -85,6 +85,8 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .login form { display: grid; gap: .75rem; margin-top: 1.75rem; }
 .login input { text-align: center; font-size: 1.0625rem; }
 .login button[type=submit] { min-height: 50px; border-radius: var(--r-md); font-size: 1.0625rem; }
+.login .login-more { margin-top: 1.5rem; font-size: .9375rem; }
+.login .login-more a { color: var(--accent-ink); }
 .login .error { margin: 1rem 0 0; padding: .7rem .9rem; border-radius: var(--r-md); background: var(--bad-soft); }
 
 /* ---------- main chat ---------- */

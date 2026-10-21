@@ -611,6 +611,30 @@ for all of this except the Google sign-in.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
 
+### Public site and waitlist (~10 min)
+Only at the beta's launch, after `public_site` is turned on for the server
+(README "Public beta"). Before that, `/welcome` answers "not found" and the
+sign-in page has no link to it.
+- [ ] On your iPhone, in a private Safari tab (signed out), open
+      `https://<cloud>/welcome`, then Privacy and Terms from its footer.
+  - Should: readable at phone width without zooming or sideways scrolling,
+    in light and in dark mode (Settings -> Display); the privacy and
+    terms pages show the yellow "Draft: Kyle to review" note.
+- [ ] Read both pages as the person responsible for them. Fix any wording
+      in `assistant/web/privacy.html` / `terms.html`, set `support_email`,
+      and `legal_draft = false` once you're happy.
+  - Should: after a redeploy the draft note is gone and the contact line
+    shows your support address as a link.
+- [ ] Join the waitlist with your own second address and a short note.
+  - Should: back on the page with "Thanks! You're on the list."
+- [ ] With VoiceOver on (Settings -> Accessibility), swipe through the form.
+  - Should: it reads Email, the optional question and the button, and
+    never a "Leave this empty" field.
+- [ ] Signed in at the cloud's address, open `https://<cloud>/waitlist`.
+  - Should: your entry with its note and date; Remove takes it off the list.
+- [ ] The signed-out sign-in page at `https://<cloud>/`.
+  - Should: a "What is Hey Claude?" link under the form opens `/welcome`.
+
 ---
 
 ## Email, notes, lectures, tutor (optional, ~20 min)

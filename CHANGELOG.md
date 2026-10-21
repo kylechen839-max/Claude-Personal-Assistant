@@ -17,6 +17,13 @@
   installed; `install_family_tasks.ps1 -Restart` waits for a running turn
   and restarts every app, your own included. A web app whose WEB_TOKEN is
   only in the environment shows as "unchecked".
+- Public beta pages (off until launch, `[webapp] public_site`): /welcome
+  (landing page with a waitlist), /privacy and /terms (drafts, `[webapp]
+  legal_draft`), and an owner-only /waitlist list. The waitlist is
+  rate-limited per visitor, de-duplicated, capped at 2000 entries and never
+  logged; `waitlist_file` is empty (closed) except on the cloud server. New
+  settings: `[webapp] public_site`, `support_email`, `legal_draft`,
+  `waitlist_file`.
 - Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
   Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
   sign in through a separate Calendar-only Google client
