@@ -65,6 +65,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
+| `test_account.py` | 28 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
 | `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
@@ -3428,3 +3429,58 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
     schemas and is not a fix.
 - **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
+
+## Public beta G4: account self-service (2026-10-21)
+
+Kyle: let invited people manage their own account. New module
+`assistant/account.py`; small additive hooks in `family.py`
+(`app.state.family_sign_out`) and `webapp.py` (`account.register`, and a
+shared `clear_session_cookie` that sign-out now uses too).
+- **`POST /api/me/delete`** (a family member's own cookie session; the
+  owner gets 403, signed out 401, `[family]` off 404, cross-site 403 from
+  the existing guard). Needs `{"confirm": "DELETE"}` or their name (any
+  case). First a best-effort Google revoke (`Account.revoke`, default
+  `revoke_google`: POST to `oauth2.googleapis.com/revoke` with the
+  refresh token in the body); a failure is logged with the error type and
+  the delete goes on. Then `Family.remove(uid, sign_out)`, the owner's
+  Remove path: every session and voice call of theirs signed out, the whole
+  `<dir>/<id>/` deleted (history, Google token, and G2's
+  `anthropic_key.enc` / `notion.enc`), with the existing retry. The
+  response deletes the cookie and sends `Clear-Site-Data: "cookies"`.
+- **`GET /api/me/export`**: a zip with `profile.json` (id, name,
+  language, time zone, tier, created) and `conversations/<id>.json`
+  (`history.export(conv, "json")`, archived included). Nothing is copied
+  from their folder, so no token or key file can get in. Bounded by
+  `[family] export_max_mb` (new, 50; content before compression, 413),
+  one at a time per person (409), 3 per hour per person (429). Built in a
+  `mkdtemp` folder, streamed, removed when sent; one left by a dropped
+  download is swept by the next export after 10 minutes.
+- **UI** (`family.js` `setupAccount`, markup in `index.html`): a family
+  member's ⚙ has **Download my data** (fetched and saved as a file, so an
+  error never replaces the page) and **Delete my account** (typed
+  confirmation, a confirm() saying it can't be undone, then back to the
+  sign-in page). English and Chinese (`i18n.js`). `sw.js` cache v24 (v23
+  is taken by PR #35).
+- **Tests.** `tests/test_account.py` (28): whole folder gone with planted
+  key, Notion and Google files and history; every session signed out;
+  revoke called with the refresh token before the folder goes; delete
+  succeeds when revoke raises (no token in the log); revoke posts the
+  token in the body; confirmation required (6 bad values) and the name
+  works; owner (cookie and Bearer) refused; another member's id in body or
+  query ignored; cross-site and Origin-mismatch 403; export holds
+  conversations and profile, no tokens or keys, never another member's or
+  the owner's text; cap (413) with nothing left behind; temp folder
+  removed; dropped downloads swept; one at a time; rate limit per person;
+  rate map bounded; caplog shows ids only. JS: family.test.mjs +5 (shown
+  only to family members, download saved as a file, refusals explained,
+  delete needs the word and a yes then signs out, no/failed cases) and
+  i18n.test.mjs +1 (every account string in both languages).
+  `test_webapp.py`'s sw.js check now expects v24.
+  - Revert check: 18 source reverts (account.py pieces and the route
+    hook), each alone with `__pycache__` cleared, all fail their tests;
+    family.js and i18n.js reverted alone fail the 6 and 1 JS tests.
+- **Counts** (Linux sandbox, Python 3.13): 2495 passed, 33 skipped,
+  2528 collected (master 5d18d7e: 2442 passed, 58 skipped, 2500
+  collected; +28 new tests; the other 25 were skips that passed in this
+  run because the sandbox's model and network checks differed between
+  runs, not because of this change). JS 242 pass (was 236).

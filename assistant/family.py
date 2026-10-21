@@ -399,8 +399,6 @@ class Family:
         """May `uid` have Gmail at all? Never a beta tester."""
         return bool(self.config["gmail"]["enabled"]) and self.tier(uid) == "family"
 
-        return sign_in_scopes(self.gmail_allowed(uid))
-
     def google_connected(self, uid: str) -> bool:
         return valid_id(uid) and self._google_info(uid) is not None
 
@@ -677,6 +675,8 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
                 except Exception:
                     log.exception("Family: hanging up a voice conversation failed")
         assistant.drop_user(uid)
+
+    app.state.family_sign_out = sign_out  # account.py's "Delete my account"
 
     @app.post("/api/users/{uid}/remove")
     @app.delete("/api/users/{uid}")

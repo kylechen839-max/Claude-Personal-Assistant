@@ -229,3 +229,116 @@ test('an invite sends the chosen tier, beta by default; the list marks beta peop
   await t.els['invite-form'].fire('submit');
   assert.equal(JSON.parse(t.fetches.find((f) => f.url === '/api/invites').opts.body).tier, 'family');
 });
+
+// --- a family member's own "Download my data" / "Delete my account" ---------
+
+function loadAccount({ responses = {}, answer = true, store = { account: 'family' } } = {}) {
+  const ids = ['app', 'account-self', 'account-export', 'account-delete-open',
+    'account-delete-form', 'account-delete-confirm', 'account-status'];
+  const els = Object.fromEntries(ids.map((id) => [id, new El(id, ['account-self', 'account-delete-form'].includes(id))]));
+  const fetches = [], events = [], clicked = [], asked = [];
+  const local = { ...store };
+  const body = new El('body');
+  const win = {
+    location: { hash: '', pathname: '/', replace: (url) => events.push(['replace', url]) },
+    localStorage: {
+      getItem: (k) => (k in local ? local[k] : null),
+      setItem: (k, v) => { local[k] = String(v); },
+      removeItem: (k) => { delete local[k]; },
+    },
+    fetch: async (url, opts = {}) => {
+      fetches.push({ url, opts });
+      const r = responses[url] ?? { status: 404, body: {} };
+      if (r.throws) throw new Error('offline');
+      return { ok: r.status < 300, status: r.status, json: async () => r.body,
+               blob: async () => ({ size: 3 }) };
+    },
+    confirm: (q) => { asked.push(q); return answer; },
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} },
+    setTimeout: () => 0,
+    document: {
+      body,
+      getElementById: (id) => els[id] ?? null,
+      querySelector: () => null,
+      createElement: (tag) => {
+        const a = new El(tag);
+        a.click = () => clicked.push({ href: a.href, download: a.download });
+        a.remove = () => {};
+        return a;
+      },
+    },
+  };
+  win.window = win;
+  vm.createContext(win);
+  vm.runInContext(SCRIPT, win);
+  return { win, els, fetches, events, clicked, asked, local, api: win.HeyClaudeFamily };
+}
+
+test('the account section shows only on a family member\'s page', () => {
+  const t = loadAccount();
+  t.api.onState({ owner: true, family: true }, t.win, t.win.document);
+  assert.equal(t.els['account-self'].hidden, true);
+  t.api.onState({ owner: false }, t.win, t.win.document);
+  assert.equal(t.els['account-self'].hidden, false);
+});
+
+test('Download my data saves the zip as a file', async () => {
+  const t = loadAccount({ responses: { '/api/me/export': { status: 200, body: {} } } });
+  t.api.onState({ owner: false }, t.win, t.win.document);
+  await t.els['account-export'].fire('click');
+  assert.equal(t.fetches.length, 1);
+  assert.equal(t.fetches[0].url, '/api/me/export');
+  assert.equal(t.fetches[0].opts.method, undefined);  // a GET
+  assert.deepEqual(t.clicked, [{ href: 'blob:x', download: 'hey-claude-data.zip' }]);
+  assert.equal(t.els['account-status'].textContent, t.api.ACCOUNT_TEXT.started);
+  assert.equal(t.events.length, 0);  // never navigates
+});
+
+test('Download my data: a refusal is explained, never saved', async () => {
+  const T = loadAccount().api.ACCOUNT_TEXT;
+  for (const [status, text] of [[409, T.busy], [429, T.tooMany], [413, T.tooLarge], [500, T.failed]]) {
+    const t = loadAccount({ responses: { '/api/me/export': { status, body: { error: 'x' } } } });
+    t.api.onState({ owner: false }, t.win, t.win.document);
+    await t.els['account-export'].fire('click');
+    assert.equal(t.els['account-status'].textContent, text, String(status));
+    assert.equal(t.clicked.length, 0);
+    assert.equal(t.els['account-export'].disabled, false);
+  }
+});
+
+test('Delete my account: needs the typed word and a yes, then signs out', async () => {
+  const t = loadAccount({ responses: { '/api/me/delete': { status: 200, body: { ok: true } } } });
+  t.api.onState({ owner: false }, t.win, t.win.document);
+  await t.els['account-delete-open'].fire('click');
+  assert.equal(t.els['account-delete-form'].hidden, false);
+  await t.els['account-delete-form'].fire('submit');  // nothing typed
+  assert.equal(t.fetches.length, 0);
+  assert.equal(t.els['account-status'].textContent, t.api.ACCOUNT_TEXT.typeIt);
+  t.els['account-delete-confirm'].value = ' DELETE ';
+  await t.els['account-delete-form'].fire('submit');
+  assert.match(t.asked[0], /can't be undone/);
+  assert.equal(t.fetches.length, 1);
+  const f = t.fetches[0];
+  assert.equal(f.url, '/api/me/delete');
+  assert.equal(f.opts.method, 'POST');
+  assert.deepEqual(JSON.parse(f.opts.body), { confirm: 'DELETE' });
+  assert.equal(t.local.account, undefined);
+  assert.deepEqual(t.events, [['replace', '/']]);
+});
+
+test('Delete my account: a "no" sends nothing; a failure says so', async () => {
+  const no = loadAccount({ answer: false });
+  no.api.onState({ owner: false }, no.win, no.win.document);
+  no.els['account-delete-confirm'].value = 'DELETE';
+  await no.els['account-delete-form'].fire('submit');
+  assert.equal(no.fetches.length, 0);
+  for (const [r, key] of [[{ status: 400 }, 'typeIt'], [{ status: 500 }, 'notDeleted'], [{ throws: true }, 'notDeleted']]) {
+    const t = loadAccount({ responses: { '/api/me/delete': { body: {}, ...r } } });
+    t.api.onState({ owner: false }, t.win, t.win.document);
+    t.els['account-delete-confirm'].value = 'DELETE';
+    await t.els['account-delete-form'].fire('submit');
+    assert.equal(t.els['account-status'].textContent, t.api.ACCOUNT_TEXT[key]);
+    assert.equal(t.events.length, 0);
+    assert.equal(t.local.account, 'family');
+  }
+});

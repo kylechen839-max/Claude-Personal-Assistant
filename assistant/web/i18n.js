@@ -96,6 +96,25 @@
       "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
     "Google account disconnected.": "Google 账户已断开。",
     "Couldn't disconnect. Try again.": "没能断开，请再试一次。",
+    // a family member's own account (family.js setupAccount, account.py)
+    "Download my data": "下载我的数据",
+    "Delete my account": "删除我的账户",
+    "This deletes your account, your conversations and your connected Google account from this app. It can't be undone.":
+      "这会从这个应用里删除你的账户、你的对话和你连接的 Google 账户。删除后无法恢复。",
+    "Type DELETE (or your name) to confirm": "输入 DELETE（或你的名字）确认",
+    "Delete everything": "全部删除",
+    "Preparing your download…": "正在准备下载…",
+    "Your download has started.": "已开始下载。",
+    "A download is already being made. Wait for it.": "正在准备另一个下载，请稍等。",
+    "Too many downloads. Try again in an hour.": "下载次数太多了，请一小时后再试。",
+    "Your data is too large to download here. Ask the person who invited you for a copy.":
+      "你的数据太大，无法在这里下载。请让邀请你的人帮你导出一份。",
+    "Couldn't download. Try again.": "下载失败，请再试一次。",
+    "Type DELETE (or your name) to confirm.": "请输入 DELETE（或你的名字）确认。",
+    "Delete your account and everything in it? This can't be undone.":
+      "要删除你的账户和里面的所有内容吗？删除后无法恢复。",
+    "Deleting…": "正在删除…",
+    "Couldn't delete your account. Try again.": "没能删除你的账户，请再试一次。",
     "Invite someone": "邀请家人",
     "Name": "名字",
     "Language": "语言",

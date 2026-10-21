@@ -291,6 +291,9 @@ DEFAULTS: dict = {
         # unset: beta testers can't connect Google (never the family client)
         "public_google_client": "",
         "max_history_mb": 20,       # each person's history (not [history] max_mb)
+        # "Download my data" (account.py): the zip's contents, before
+        # compression, at most this big
+        "export_max_mb": 50,
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",

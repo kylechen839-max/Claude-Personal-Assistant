@@ -127,6 +127,18 @@
           <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
           <ul id="family-list" class="family-list"></ul>
         </section>
+        <section id="account-self" class="family account-self" hidden>
+          <button id="account-export" type="button">Download my data</button>
+          <button id="account-delete-open" type="button" class="danger">Delete my account</button>
+          <form id="account-delete-form" class="invite-form" autocomplete="off" hidden>
+            <p class="hint">This deletes your account, your conversations and your connected Google account from this app. It can't be undone.</p>
+            <label>Type DELETE (or your name) to confirm
+              <input id="account-delete-confirm" type="text" maxlength="60" autocapitalize="off"
+                     spellcheck="false" required></label>
+            <button type="submit" class="danger">Delete everything</button>
+          </form>
+          <p id="account-status" class="hint" role="status"></p>
+        </section>
         <button id="logout" type="button">Sign out</button>
         <button id="logout-all" type="button">Sign out everywhere</button>
       </div>

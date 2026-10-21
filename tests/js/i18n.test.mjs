@@ -377,3 +377,25 @@ test('the invite form\'s tier labels are translated', () => {
   assert.equal(t('Family (Calendar and Gmail)'), '家人（日历和 Gmail）');
   assert.equal(t('Active · Beta'), '已加入 · 测试版');
 });
+
+test('the account section (Download my data, Delete my account) is all in Chinese', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  // every message family.js shows there...
+  const famWin = {};
+  famWin.window = famWin;
+  vm.createContext(famWin);
+  vm.runInContext(readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8'), famWin);
+  const messages = Object.values(famWin.HeyClaudeFamily.ACCOUNT_TEXT);
+  assert.ok(messages.length >= 10);
+  // ...and every text in its markup
+  const html = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+  const section = html.match(/<section id="account-self"[\s\S]*?<\/section>/)[0];
+  const texts = [...section.matchAll(/>([^<>]+)</g)].map((m) => m[1].replace(/\s+/g, ' ').trim()).filter(Boolean);
+  assert.ok(texts.includes('Download my data') && texts.includes('Delete my account'));
+  for (const en of [...messages, ...texts]) {
+    const zh = t(en);
+    assert.notEqual(zh, en, en);
+    assert.match(zh, /[一-鿿]/, en);
+  }
+});

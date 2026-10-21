@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Invited people can download their data (a zip of their conversations and
+  profile) and delete their account (revokes Google access, signs out
+  everywhere, deletes everything) from Settings, in English and Chinese. New
+  setting `[family] export_max_mb` (default 50).
 - Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
   Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
   sign in through a separate Calendar-only Google client

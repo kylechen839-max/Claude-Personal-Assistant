@@ -33,6 +33,15 @@ sign-in token is kept only in their own folder on the server and is deleted
 when they disconnect or are removed. Their conversation history is kept on
 the server, at most 20 MB per person (oldest conversations removed first).
 
+Invited people can download or delete their own account at any time from
+Settings. Download my data gives a zip of their conversations and profile
+(name, language, time zone, account type, date joined); it never includes
+Google sign-in tokens or API keys. Delete my account takes effect at once in
+the app: it asks Google to revoke Hey Claude's access, signs them out on every
+device and permanently deletes their conversations, Google connection and any
+key they added. Render's automatic disk snapshots may keep a copy until they
+expire; they are not used to restore individual accounts.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own

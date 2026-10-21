@@ -6,6 +6,9 @@
 // - The owner's menu: "Invite someone" (name, language) makes a one-time
 //   link and opens the share sheet (or copies it); the list shows who is
 //   invited or active, with "New link" and "Remove".
+// - A family member's own Settings: "Download my data" (GET /api/me/export,
+//   saved as a file) and "Delete my account" (typed confirmation, then
+//   POST /api/me/delete; it signs this phone out). account.py.
 // app.js calls configure({ request }) and acceptInvite() first thing, and
 // onState(state) on every /api/state. The owner's calls go through that
 // request() (with failover: the router, signed in with a bearer token, to
@@ -181,9 +184,95 @@
     };
   }
 
+  // --- a family member's own account (assistant/account.py) ---
+  // Every message this section shows (i18n.js has each one in Chinese).
+  const ACCOUNT_TEXT = {
+    preparing: "Preparing your download…",
+    started: "Your download has started.",
+    busy: "A download is already being made. Wait for it.",
+    tooMany: "Too many downloads. Try again in an hour.",
+    tooLarge: "Your data is too large to download here. Ask the person who invited you for a copy.",
+    failed: "Couldn't download. Try again.",
+    typeIt: "Type DELETE (or your name) to confirm.",
+    ask: "Delete your account and everything in it? This can't be undone.",
+    deleting: "Deleting…",
+    notDeleted: "Couldn't delete your account. Try again.",
+  };
+
+  function setupAccount(win, doc) {
+    const $ = (id) => doc.getElementById(id);
+    const box = $("account-self");
+    if (!box) return null;
+    const exportBtn = $("account-export"), openBtn = $("account-delete-open");
+    const form = $("account-delete-form"), confirmIn = $("account-delete-confirm");
+    const status = $("account-status");
+    const say = (text) => { if (status) status.textContent = text; };
+    const send = (url, options = {}) => (request ? request(url, options)
+      : win.fetch(url, { credentials: "same-origin", cache: "no-store", ...options }));
+
+    exportBtn.addEventListener("click", async () => {
+      exportBtn.disabled = true;
+      say(ACCOUNT_TEXT.preparing);
+      try {
+        const res = await send("/api/me/export");
+        if (!res.ok) {
+          say(res.status === 409 ? ACCOUNT_TEXT.busy : res.status === 429 ? ACCOUNT_TEXT.tooMany
+            : res.status === 413 ? ACCOUNT_TEXT.tooLarge : ACCOUNT_TEXT.failed);
+          return;
+        }
+        // a file save, not a navigation: an error never replaces the page
+        const url = win.URL.createObjectURL(await res.blob());
+        const a = doc.createElement("a");
+        a.href = url;
+        a.download = "hey-claude-data.zip";
+        doc.body.appendChild(a);
+        a.click();
+        a.remove();
+        win.setTimeout(() => win.URL.revokeObjectURL(url), 60000);
+        say(ACCOUNT_TEXT.started);
+      } catch (e) {
+        say(ACCOUNT_TEXT.failed);
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+    openBtn.addEventListener("click", () => {
+      form.hidden = !form.hidden;
+      say("");
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const typed = String(confirmIn.value || "").trim();
+      if (!typed) { say(ACCOUNT_TEXT.typeIt); return; }
+      if (typeof win.confirm === "function" && !win.confirm(ACCOUNT_TEXT.ask)) return;
+      say(ACCOUNT_TEXT.deleting);
+      let res = null;
+      try {
+        res = await send("/api/me/delete", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: typed }) });
+      } catch (err) { /* shown below */ }
+      if (res && res.ok) {
+        const s = storage(win);
+        try { if (s) s.removeItem(ACCOUNT_KEY); } catch (err) { /* ignore */ }
+        win.location.replace("/");  // signed out: the sign-in page
+        return;
+      }
+      say(res && res.status === 400 ? ACCOUNT_TEXT.typeIt : ACCOUNT_TEXT.notDeleted);
+    });
+    return {
+      show(on) {
+        box.hidden = !on;
+        if (!on) form.hidden = true;
+      },
+    };
+  }
+
   let owner = null;
+  let account = null;
   // From app.js after each /api/state: the owner's menu only for the owner
-  // with [family] on; a family member's page hides the owner-only tabs.
+  // with [family] on; a family member's page hides the owner-only tabs and
+  // shows their own "Download my data" / "Delete my account".
   function onState(state, win = root, doc = root.document) {
     if (!doc) return;
     const app = doc.getElementById("app");
@@ -194,7 +283,10 @@
     }
     if (!owner) owner = setupOwner(win, doc);
     if (owner) owner.show(Boolean(state.owner && state.family));
+    if (!account) account = setupAccount(win, doc);
+    if (account) account.show(state.owner === false);
   }
 
-  root.HeyClaudeFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner, configure };
+  root.HeyClaudeFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner,
+                           setupAccount, configure, ACCOUNT_TEXT };
 })(typeof window !== "undefined" ? window : globalThis);
