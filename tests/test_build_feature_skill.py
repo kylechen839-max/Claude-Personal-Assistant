@@ -143,14 +143,23 @@ def test_watchdog_prompt_is_one_fenced_block():
     assert "pr_ready, blocked, done or dead" in prompt
 
 
-def test_skill_resets_the_dashboard_watch_after_every_publish():
-    """A republish leaves the old watch listed but stops its wakes; only an
-    off-then-on reset brings them back (2026-10-21)."""
+def test_skill_rearms_the_dashboard_watch_and_never_stops_it():
+    """A watch stopped and re-made was dropped at the next container
+    restart (2026-10-21); the master re-arms after publishes and restarts."""
     skill = SKILL.read_text(encoding="utf-8")
     rule = next(line for line in skill.splitlines()
                 if line.startswith("- After EVERY publish of the dashboard"))
-    assert "on:false" in rule and rule.index("on:false") < rule.rindex('action:"watch"')
-    assert '"since"' in rule
-    assert "Never stop the dashboard watch" not in skill
+    assert "container restarted" in rule and "restored" in rule
+    assert "Never stop the dashboard watch with `on:false`" in rule
     memory = (ROOT / ".claude" / "TEAM_MEMORY.md").read_text(encoding="utf-8")
-    assert "reset it (`on:false`, then `watch` again)" in memory
+    assert "Never stop it with\n    `on:false`" in memory or "Never stop it with `on:false`" in memory
+    assert "after every container restart" in memory
+
+
+def test_skill_merges_its_own_prs_on_green():
+    """Kyle, 2026-10-21: merge PRs automatically once CI passes."""
+    skill = SKILL.read_text(encoding="utf-8")
+    rule = skill[skill.index("7. **Merging on green**"):skill.index("8. **End the run.**")]
+    assert "merge commit" in rule and "enable_pr_auto_merge" in rule
+    assert "Never merge a red, conflicted or unapproved PR" in rule
+    assert "Merging** is Kyle's job" not in skill
