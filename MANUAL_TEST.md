@@ -552,6 +552,27 @@ for all of this except the Google sign-in.
 - [ ] Render -> hey-claude -> Disks shows `hey-claude-data`, 1 GB, at `/data`.
 - [ ] In a private Safari tab, open `https://hey-claude.onrender.com/api/state`.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
+- [ ] **Backup.** Signed in as yourself in Safari, open
+      `https://hey-claude.onrender.com/api/backup`; open the zip on a computer.
+  - Should: a `hey-claude-backup-<date>.zip` with `history.sqlite`,
+    `users/users.json`, a `users/<id>/history.sqlite` per family member and
+    `MANIFEST.json`; no `google_token.json` and no `.enc` file. The
+    history opens in an SQLite viewer (e.g. DB Browser for SQLite) with
+    your recent conversations. Render's Logs show one "Backup downloaded
+    (N bytes)" line. In a family member's signed-in app the same address
+    says "not found".
+- [ ] **Uptime.** UptimeRobot: add an HTTP(s) monitor on
+      `https://hey-claude.onrender.com/healthz` (README "Uptime, error
+      tracking and backups"), then Render -> hey-claude -> Suspend for 10
+      minutes, then Resume.
+  - Should: one "down" email, then one "up" email. With `[watch]
+    cloud_url` set on the PC, your phone app (from the PC or Pi) shows a
+    "Cloud app" banner while it is down and it goes once it is back.
+- [ ] **Error tracking (optional).** Sentry: a new Python project; copy its
+      DSN into Render's `SENTRY_DSN` and save (it restarts).
+  - Should: the log has "Error tracking on (Sentry, environment server)".
+    Any report that arrives shows an error type and code lines only: no
+    message text, no request body, headers, IP or server name.
 
 - [ ] **Invite family.** On your iPhone open the cloud server's own address
       directly (`https://hey-claude.onrender.com/`, signed in with your
@@ -610,6 +631,22 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
+      on Render"). On the beta tester's phone, before adding a key, type
+      "hello" and also try hands-free voice.
+  - Should: both answer "Add your Anthropic API key in Settings to start."
+    (in Chinese for a Chinese account); your Render usage shows no new call.
+- [ ] Their ⚙ -> **Your Anthropic API key**: paste a real key of theirs
+      (from console.anthropic.com -> API Keys), **Save key**.
+  - Should: "Checking the key with Anthropic…", then "Your key ending in
+    xxxx is saved." with the right last four; "hello" now gets a reply;
+    their Anthropic console's usage page shows the call, and your
+    owner page's monthly estimate doesn't move.
+- [ ] Paste a wrong key (change one character) and Save.
+  - Should: "Anthropic didn't accept that key", and the old key keeps working.
+- [ ] **Remove key**, confirm.
+  - Should: the next "hello" says to add a key again. On a **Family**
+    account the same steps work, and without a key they use yours as before.
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server

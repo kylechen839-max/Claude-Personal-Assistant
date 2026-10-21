@@ -592,7 +592,7 @@ def test_a_failed_turn_keeps_the_older_attachments(fake_client, monkeypatch):
 # --- family and cloud ---------------------------------------------------------------------
 
 def test_family_attachments_go_to_their_own_chat(env, owner):
-    mom, link = env.member(owner, name="Mom", language="zh")
+    mom, link = env.member(owner, name="Mom", language="zh", tier="family")
     env.fake_client.queue.append(make_response(text_block("这是一张照片。")))
     env.fake_client.queue.append(make_response(text_block("标题")))
     r = mom.post("/api/turn", data={"text": "这是什么？"},

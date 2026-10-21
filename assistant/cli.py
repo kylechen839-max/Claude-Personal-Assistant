@@ -178,7 +178,26 @@ def get_reply(chat: ClaudeChat, user_text: str, output_fn=print,
     try:
         return chat.ask(user_text, **ask_options)
     except Exception as e:
-        return friendly_error(e, user_text, output_fn)
+        return friendly_error(e, user_text, output_fn, own_key=uses_own_key(chat))
+
+
+def uses_own_key(chat) -> bool:
+    """True if the chat's last call was on a family member's own Anthropic
+    key (family.UserApi), so a 401 is theirs to fix, not Kyle's."""
+    return getattr(getattr(chat, "_client", None), "own_key", False) is True
+
+
+def user_error_key(e: Exception, own_key: bool = False) -> str | None:
+    """The i18n sentence for errors about a person's own Anthropic key:
+    "no_key" (none saved, userkeys.MissingKey) or "bad_user_key" (theirs
+    was rejected); None for anything else."""
+    from assistant.userkeys import MissingKey
+
+    if isinstance(e, MissingKey):
+        return "no_key"
+    if own_key and isinstance(e, anthropic.AuthenticationError):
+        return "bad_user_key"
+    return None
 
 
 # The API itself is down or overloaded (500, 503, 529), not this computer's
@@ -188,8 +207,16 @@ CLAUDE_DOWN = tuple(c for c in (getattr(anthropic, n, None) for n in (
     if isinstance(c, type))
 
 
-def friendly_error(e: Exception, user_text: str = "", output_fn=print) -> str:
-    """Log a failed request and return a short sentence to speak instead."""
+def friendly_error(e: Exception, user_text: str = "", output_fn=print,
+                   own_key: bool = False) -> str:
+    """Log a failed request and return a short sentence to speak instead.
+    `own_key`: the request was on a family member's own key (uses_own_key)."""
+    key = user_error_key(e, own_key)
+    if key is not None:  # never the key itself: ids and kinds only
+        log.warning("Their own Anthropic key: %s (%s)",
+                    "none saved" if key == "no_key" else "rejected", type(e).__name__)
+        output_fn(i18n.t(key))
+        return i18n.t(key)
     if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")
@@ -1004,6 +1031,9 @@ def main(argv=None) -> int:
 
         candidate_config(config, args.config)
     log_file = setup_logging(config)
+    from assistant import errortracking
+
+    errortracking.init(config)  # crash reports, only with SENTRY_DSN set
     usage.configure(config["assistant"]["usage_file"])  # API token totals
     if separate and config["teamchat"]["enabled"]:
         # a family member's instance: Kyle's team chat tokens may be in the

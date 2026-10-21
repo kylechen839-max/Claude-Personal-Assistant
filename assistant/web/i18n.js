@@ -116,6 +116,34 @@
     "Google isn't set up for beta accounts yet.": "测试版账户暂时还不能连接 Google。",
     "Disconnect your Google account? I won't see your calendar any more.":
       "要断开你的 Google 账户吗？之后我就看不到你的日历了。",
+    // a person's own Anthropic key (family.js setupKey, userkeys_web.py)
+    "Your Anthropic API key": "你的 Anthropic API 密钥",
+    "Anthropic API key": "Anthropic API 密钥",
+    "Save key": "保存密钥",
+    "Replace key": "更换密钥",
+    "Remove key": "删除密钥",
+    ["You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, " +
+      "open API Keys, tap Create Key, and paste it here."]:
+      "用多少由你自己向 Anthropic 付费。获取密钥：登录 console.anthropic.com，" +
+      "打开 API Keys，点 Create Key，然后粘贴到这里。",
+    "This server can't store keys yet.": "这个服务器暂时还不能保存密钥。",
+    "Your saved key can't be read any more. Please enter it again.":
+      "你保存的密钥已经读不出来了，请重新输入。",
+    "Add your key to start talking with Claude.": "添加你的密钥，就可以开始和 Claude 对话了。",
+    "Optional: without one, the family's key is used.": "可选：不添加的话，会用家里的密钥。",
+    "Checking the key with Anthropic…": "正在向 Anthropic 核对密钥…",
+    "Remove your Anthropic API key from this app?": "要从这个应用里删除你的 Anthropic API 密钥吗？",
+    "that doesn't look like an Anthropic API key (it starts with sk-ant-)":
+      "这看起来不像 Anthropic API 密钥（它以 sk-ant- 开头）",
+    "paste your Anthropic API key": "请粘贴你的 Anthropic API 密钥",
+    "Anthropic didn't accept that key": "Anthropic 没有接受这个密钥",
+    "couldn't reach Anthropic to check the key; try again": "连不上 Anthropic 核对密钥，请再试一次",
+    "couldn't check the key with Anthropic; try again": "暂时没法向 Anthropic 核对密钥，请再试一次",
+    "too many tries; wait a minute": "尝试次数太多了，请等一分钟",
+    "this server can't store keys yet (its owner needs to set USER_DATA_KEY)":
+      "这个服务器暂时还不能保存密钥（需要管理员设置 USER_DATA_KEY）",
+    "couldn't save the key; try again": "密钥没能保存，请再试一次",
+    "couldn't remove the key; try again": "密钥没能删除，请再试一次",
     "New link": "新链接",
     "Remove": "移除",
     "This invite link has expired or was already used. Ask for a new one.":
@@ -323,6 +351,8 @@
     [/^Delete all (\d+) notes? with no date\? This can't be undone\.$/, "要删除日期未知的全部 $1 条记忆吗？删除后无法恢复。"],
     [/^Default \((.+)\)$/, "默认（$1）"],
     [/^(.+) · paid$/, "$1 · 付费"],
+    [/^Your key ending in (\S{1,4}) is saved\.$/, "你的密钥（结尾 $1）已保存。"],
+    [/^About \$(\d+\.\d\d) this month on your key\.$/, "这个月用你的密钥大约花了 $$$1。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
   // The line a message with attachments ends with, "[photo] [file: a.pdf]"

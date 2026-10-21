@@ -999,7 +999,7 @@ class WebAssistant:
         retry without the file."""
         import anthropic
 
-        from assistant.cli import friendly_error
+        from assistant.cli import friendly_error, uses_own_key
 
         try:
             return s.chat.ask(text, on_text=on_text, attachments=attachments)
@@ -1010,7 +1010,7 @@ class WebAssistant:
             too_long = FILE_TOO_LONG.search(str(getattr(e, "message", "") or e))
             return i18n.t("file_too_long" if too_long else "file_unreadable")
         except Exception as e:  # noqa: BLE001 - as get_reply
-            return friendly_error(e, text, lambda m: None)
+            return friendly_error(e, text, lambda m: None, own_key=uses_own_key(s.chat))
 
     def _reply(self, s: Session, text: str, ended: bool = False) -> None:
         s.events.put({"type": "reply", "text": text,
@@ -1803,6 +1803,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                "health": owner_health(s)}
         if s.user is None:  # the API bill is the owner's business only
             out["month_usd"] = usage.month_usd()
+        elif family is not None:  # their own key: "required" (beta) or "optional"
+            out["api_key"] = "required" if family.tier(s.user) == "beta" else "optional"
         return out
 
     def owner_health(s: Session):
@@ -1917,6 +1919,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import memory_web
 
     memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+    if getattr(assistant, "backup", None) is not None:
+        from assistant import backup as backup_mod
+
+        backup_mod.register(app, assistant.backup, owner_of, error)  # Kyle's only
 
     if getattr(assistant, "voices", None) is not None:
         from assistant import voice_picker
@@ -1938,6 +1944,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import family as family_mod
 
     family_mod.register(app, family, web, assistant, error)
+    from assistant import userkeys_web
+
+    userkeys_web.register(app, family, error)  # a person's own Anthropic key
     if public is not None:
         from assistant import public_site
 
@@ -2103,6 +2112,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
         from assistant.voice_picker import VoicePicker
 
         assistant.voices = VoicePicker(config, assistant.tts, family)
+    from assistant.backup import Backup
+
+    assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
+    assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     return assistant
 
 
@@ -2136,6 +2149,9 @@ def serve(config: dict, host: str | None = None, port: int | None = None,
           env_file: str | Path = ".env", output_fn=print) -> int:
     import uvicorn
 
+    from assistant import errortracking
+
+    errortracking.init(config)  # only with SENTRY_DSN set
     web = config["webapp"]
     language = i18n.set_language(config["assistant"]["language"])
     host = host or web["host"]

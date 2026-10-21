@@ -124,6 +124,7 @@ google_connect = false        # true: a "connect Google" button in the phone app
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
                               # and family members' Google (PUBLIC_ORIGIN overrides it)
+backup_max_mb = 200           # the owner's backup download (GET /api/backup) is refused above this
 public_site = false           # true: /welcome, /privacy, /terms and the waitlist (public beta;
                               # only once beta tiers, BYOK and Notion sign-in have landed)
 support_email = ""            # contact shown on /privacy and /terms ("" = "contact the owner")
@@ -166,6 +167,8 @@ banner = true                 # your phone app shows a banner while an app is do
 coordinator = true            # tell the dev team coordinator ([devteam]) when something breaks or recovers
 status_file = "data/watch_status.json"
 stale_minutes = 30            # the banner says the checks stopped after this long without one
+cloud_url = ""                # e.g. "https://hey-claude.onrender.com": also check the cloud copy's /healthz
+                              # (alerts only; this PC never restarts or rolls back the cloud)
 
 [history]
 # Every conversation (wake word, text, phone) is saved here and can be
@@ -258,6 +261,10 @@ google = true                 # they may connect their own Google from their pho
 google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
 public_google_client = ""     # beta testers' Calendar-only Web client (own GCP project); GOOGLE_PUBLIC_CLIENT_JSON overrides; "" = no Google for beta
 max_history_mb = 20           # each person's own history size cap (their [history] max_mb)
+# Each person's own Anthropic API key (Settings -> "Your Anthropic API key"): beta
+# testers must add one (they pay for their own use); family members may. Stored
+# encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret
+# USER_DATA_KEY (no config setting; Render generates it; without it keys aren't stored).
 zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
 zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
 

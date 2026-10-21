@@ -232,7 +232,8 @@ def test_invite_for_a_removed_person_fails(env, owner):
 def test_a_family_member_has_web_tools_only(env, owner):
     env.config["web"]["location"] = {"city": "Kyle's town", "region": "", "country": "",
                                      "timezone": ""}
-    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai")
+    mom, link = env.member(owner, name="Mom", language="en", timezone="Asia/Shanghai",
+                          tier="family")  # the owner's key (no key of her own)
     uid = link["user"]["id"]
     ctx = env.family.context(uid)
     assert ctx.registry.tools == {}
@@ -261,7 +262,7 @@ def test_a_family_member_has_web_tools_only(env, owner):
 def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
     cid = seed_owner_conversation(env.owner_store)
     assert owner.get(f"/api/conversations/{cid}").status_code == 200
-    mom, _ = env.member(owner)
+    mom, _ = env.member(owner, tier="family")  # on the owner's key
     assert mom.get(f"/api/conversations/{cid}").status_code == 404
     assert mom.get(f"/api/conversations/{cid}/export").status_code == 404
     assert mom.post(f"/api/conversations/{cid}/continue").status_code == 404
@@ -337,7 +338,7 @@ def test_only_the_owner_sees_the_api_cost(env, owner):
     from assistant import usage
     from tests.conftest import make_usage
 
-    mom, _ = env.member(owner, language="en")
+    mom, _ = env.member(owner, language="en", tier="family")  # on the owner's key
     env.fake_client.queue.append(make_response(text_block("Hi."),
                                                usage=make_usage(1000, 100)))
     assert mom.post("/api/turn", json={"text": "hello"}).status_code == 200
