@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Beta testers bring their own Anthropic API key: Settings -> Your Anthropic
+  API key (checked with Anthropic, stored encrypted with `USER_DATA_KEY`).
+  Without one a beta tester is told to add it; family members still use the
+  owner's key unless they add their own. Their usage no longer counts toward
+  the owner's monthly estimate.
 - Public beta pages (off until launch, `[webapp] public_site`): /welcome
   (landing page with a waitlist), /privacy and /terms (drafts, `[webapp]
   legal_draft`), and an owner-only /waitlist list. The waitlist is
