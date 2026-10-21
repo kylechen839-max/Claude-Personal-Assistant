@@ -10,6 +10,10 @@
   disconnects first; deleting your account also removes any download still
   being made. An old, stalled download finishing late no longer frees a newer
   export's one-at-a-time slot.
+- Design skills: `.claude/skills/` now has three vendored, pinned skills
+  for UI work (Anthropic `frontend-design`, Vercel `web-design-guidelines`
+  with its rules read locally, Addy Osmani `accessibility`), plus
+  `DESIGN_SKILLS.md` with their sources and where this repo's rules win.
 - Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
   installed with the app and stays off without it), an owner-only backup
   download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
