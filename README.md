@@ -912,9 +912,8 @@ nothing is written there yet: conversations live in memory and end with
 each deploy (long-term memory in Pinecone is unaffected). Everything outside
 `/data` is wiped on each deploy. Render's free instance type can't have a disk, which is one more
 reason the service is on a paid plan. Render takes daily snapshots of the
-disk, but that is the only backup: export your history now and then with
-the history export command (it arrives with the conversation-history
-feature) and keep the file somewhere else. With a disk, Render runs exactly
+disk; for a copy somewhere else, download a backup now and then
+(`/api/backup`, below). With a disk, Render runs exactly
 one instance and a deploy has a short gap of downtime.
 
 1. **Push** this branch to GitHub (merged into master).
@@ -969,6 +968,61 @@ trusts forwarded headers only from 10.x addresses, Render's; set
 `CLOUD_TRUSTED_PROXIES` to your proxy's network, e.g. `172.18.0.0/16`, or to
 nothing). After the first Render deploy, the log's first five "Proxy check"
 lines show what Render's proxy sends; see BLOCKERS.md.
+
+### Uptime, error tracking and backups
+
+**Uptime alerts (free).** At [UptimeRobot](https://uptimerobot.com) (free
+plan): sign up, **Add New Monitor** -> HTTP(s), URL
+`https://hey-claude.onrender.com/healthz` (your service's address), every
+5 minutes, and your email as the alert contact. `/healthz` needs no token
+and says nothing but "ok" and the version, so the monitor holds no secret.
+If the PC watchdog runs (README "Health checks and safe updates"), it can
+check the cloud copy too: set `[watch] cloud_url =
+"https://hey-claude.onrender.com"` in the PC's `config.toml`. It then
+checks that address's `/healthz` every 5 minutes and alerts (the phone
+banner, the dev team coordinator) when it starts failing and when it
+recovers; it never restarts or rolls back the cloud (Render does its own
+health checks on `/healthz` and restarts the service).
+
+**Error tracking (optional, free tier).** Crash reports go to
+[Sentry](https://sentry.io) only when `SENTRY_DSN` is set. `sentry-sdk`
+is in `requirements.txt` (and so in the image), but without a DSN it never
+starts: nothing is sent anywhere and the app runs exactly as before. On
+Render: create a Python project in Sentry and copy its DSN into
+`SENTRY_DSN` (Environment -> Save; it restarts). On a PC or Pi: put
+`SENTRY_DSN=...` in `.env` (a family copy's `.env.<name>` must set its own;
+one inherited from the shell stops it, as with the other secrets). An
+install from before this change gets `sentry-sdk` with the next
+`pip install -r requirements.txt`; until then a DSN only logs one warning.
+A report holds the error's type, where in the code it happened (file,
+function, line) and the request's method and path; never the error's
+message, what anyone said or typed, replies, request bodies, headers,
+cookies, query strings, IP addresses, the machine's name or local
+variables, and keys and tokens are masked. No performance tracing, and no
+Sentry headers are added to the app's calls to Claude, Google or Notion
+(SECURITY.md, "Error tracking and backups").
+
+**Backups.** Render snapshots the `/data` disk once a day (how long it
+keeps them: Render's disk docs); a snapshot restores the whole disk in
+place (Render -> hey-claude -> Disks), so it helps when a deploy or a bug
+damages the data, but it lives in the same Render account and can't hand
+you one file. For a copy you keep yourself,
+sign in on the phone or a computer as the owner and open
+`https://hey-claude.onrender.com/api/backup`: it downloads a zip with
+- `history.sqlite`: your conversation history (a consistent copy, taken
+  while the app keeps running),
+- `users/users.json` and `users/<id>/history.sqlite`: the family list and
+  each member's own history,
+- `waitlist.json`, if there is one, and `MANIFEST.json` (when, which
+  version, each file's size).
+
+It never holds Google tokens, keys or any `.enc` file, signed-in sessions,
+`.env`, logs or lecture audio, or anyone already removed, so the zip is
+safe to store off-site, but it is everyone's conversations: keep it
+private. A family member's sign-in gets "not found". Above
+`[webapp] backup_max_mb` (200) it is refused; raise the setting if the
+history grows past it. To restore one database, stop the service and copy
+the file back to `/data` (Render Shell), or open it with any SQLite tool.
 
 ## Email, notes, lectures and homework help
 
@@ -1690,7 +1744,9 @@ put `WEB_TOKEN` in its env file): `/healthz` on its port, the page and every
 script and stylesheet it loads, that it runs the checked-out version, and
 the address the phone opens (`[webapp] public_origin`, else the `tailscale
 serve` entry for its port; set `[watch] public_url` to override, `""` to
-skip). After every restart or new version, every `functional_hours` (6) and,
+skip). With `[watch] cloud_url` set, the cloud copy's `/healthz` is checked
+too, alerted on like the others but never restarted or rolled back from
+here (README "Uptime, error tracking and backups"). After every restart or new version, every `functional_hours` (6) and,
 once failed, every `retry_minutes` (30), it also has a **test conversation**
 with it, the way people use it, in one session: a quick question ("What is
 two plus two?", short and with no change words, so with the router on it is

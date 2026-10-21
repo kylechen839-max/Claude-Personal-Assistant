@@ -79,6 +79,10 @@ services:
         sync: false
       - key: FAILOVER_BACKENDS      # e.g. pi=https://pi.tail1234.ts.net,pc=https://kyle-pc.tail1234.ts.net
         sync: false
+      # Optional crash reports (README "Uptime, error tracking and
+      # backups"): a Sentry project's DSN; empty = off (nothing is sent).
+      - key: SENTRY_DSN
+        sync: false
 
   - type: web
     name: pinecone-mcp
