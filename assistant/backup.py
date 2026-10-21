@@ -72,8 +72,7 @@ class Backup:
         """`store`: the owner's HistoryStore (None when history is off)."""
         path = getattr(store, "path", None)
         # [webapp] waitlist_file (public_site.py); "" = no waitlist in the backup
-        waitlist = config["webapp"].get(
-            "waitlist_file", str(Path(config["family"]["dir"]).parent / WAITLIST_FILE))
+        waitlist = config["webapp"].get("waitlist_file", "")
         return cls(history_path=path if path and path != ":memory:" else None,
                    family=family, waitlist_path=waitlist or None,
                    max_bytes=int(float(config["webapp"]["backup_max_mb"]) * 1_000_000))

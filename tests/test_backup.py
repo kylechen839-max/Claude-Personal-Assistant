@@ -233,6 +233,8 @@ def test_build_assistant_sets_up_the_backup_from_config(tmp_path):
     cfg = load_config(None, None)
     cfg["family"]["dir"] = str(tmp_path / "users")
     cfg["webapp"]["backup_max_mb"] = 7
+    assert backup_mod.Backup.from_config(cfg, None, None).waitlist_path is None  # closed by default
+    cfg["webapp"]["waitlist_file"] = str(tmp_path / "waitlist.json")
     store = SimpleNamespace(path=str(tmp_path / "history.sqlite"))
     b = backup_mod.Backup.from_config(cfg, store, None)
     assert b.max_bytes == 7_000_000 and b.waitlist_path == tmp_path / "waitlist.json"

@@ -3645,9 +3645,9 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
    `family.public(u)` (it includes `tier` from #34). Test: an unknown
    field and an invite hash in users.json don't reach the zip.
 6. **The waitlist path was hard-coded.** It is
-   `config["webapp"].get("waitlist_file", <[family] dir>/../waitlist.json)`
-   (the setting comes with the public-site PR); `""` leaves the waitlist
-   out. Tests: the setting's path, and `""`.
+   now `[webapp] waitlist_file` (from the public-site PR; the server profile
+   sets `/data/waitlist.json`); `""`, the default, leaves the waitlist out.
+   Tests: the setting's path, and `""`.
 7. **A crash-left plaintext copy lingered in the temp folder.**
    `build_assistant` calls `backup.sweep()` once. Test: a stale
    `hey-claude-backup-*` folder is gone after `build_assistant`.
