@@ -625,11 +625,20 @@ server (`[family] enabled`, on in the server profile).
     copied from their folder, so no token or key file can be included.
     Bounded: `[family] export_max_mb` (50 MB) of content before
     compression (413 past it), one export at a time per person (409), 3
-    per person per hour (429; a refused one counts), and the rate map
+    per person per hour (429; every export that starts counts, one that
+    ends in 413 too, but a 409 or 429 refusal doesn't), and the rate map
     keeps only people with an export in the last hour. Built in
-    `mkdtemp` (0700) under the system temp folder, streamed, and removed
-    when sent; a folder a dropped download leaves is removed by the next
-    export after 10 minutes, and its slot frees after 10 minutes.
+    `mkdtemp` (0700) under `<family dir>/.exports/` (made 0700; not the
+    shared system temp folder; `.exports` can't be a person's id, which
+    must match `u_...`, so `Family.remove` and the list never touch it),
+    streamed, and removed when the response ends, however it ends: a
+    `StreamingResponse` subclass cleans up in `__call__`'s `finally`,
+    because a generator's `finally` and a BackgroundTask never run when the
+    phone leaves before the body starts (ASGI 2.4 ClientDisconnect).
+    Deleting the account also removes every `export-<id>.*` folder of
+    theirs and frees their slot, so no copy outlives the account. Folders
+    older than 10 minutes (a crash) are swept at startup and on every
+    export; a stuck slot frees after 10 minutes.
   - Logs: ids, counts and sizes only; never names, titles, text or tokens
     (caplog test).
   - Not done, on purpose: no delete grace period or undo (the person asked

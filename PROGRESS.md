@@ -65,8 +65,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
-| `test_account.py` | 28 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
-| `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
+| `test_account.py` | 33 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `tests/js/family.test.mjs` | 15 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 | `tests/js/agent-dashboard.test.mjs` | 112 | dev team dashboard: the page's own script in node:vm (run and agent states, the window workspace, links, text only, error codes for every query, maximize, filter, the coordinator chat and its markdown, window layout) |
 
 ## Stage 1 - Core chat ✅
@@ -3736,3 +3736,42 @@ shared `clear_session_cookie` that sign-out now uses too).
   collected; +28 new tests; the other 25 were skips that passed in this
   run because the sandbox's model and network checks differed between
   runs, not because of this change). JS 242 pass (was 236).
+
+### Round 2 (judge findings, after merging master e45ee95)
+- **No export outlives the account.** Exports now live in
+  `<family dir>/.exports/export-<id>.<random>` (made 0700), not the shared
+  `<system temp>/hey-claude-exports`. `.exports` can never be an id
+  (`u_...`), and the "." separator keeps one id's folders apart from
+  another's. Account tracks each person's export folder; **Delete my
+  account** removes all their `export-<id>.*` folders and frees their
+  slot. Cleanup no longer depends on the generator starting: the export is
+  an `ExportResponse` (a `StreamingResponse` whose `__call__` cleans up in
+  `finally`), because with ASGI 2.4 Starlette raises ClientDisconnect
+  before the body and runs neither the generator's `finally` nor a
+  BackgroundTask. Folders older than 10 minutes are swept at startup (when
+  `register` makes the Account) as well as on every export. No backup
+  download exists on master, and `Family.remove`/`_load` only touch valid
+  ids, so neither sees `.exports` (tested).
+- **Archived conversations** are in the export test now (one of the two
+  planted ones is archived).
+- **/privacy and /terms** say people can download their data and delete
+  their account themselves in Settings; the support-email route stays.
+  Still `legal_draft` until Kyle approves. (Not in the sw.js shell, so no
+  cache bump.)
+- Docs: SECURITY's rate-limit wording (only an export that starts counts,
+  one ending in 413 too; 409/429 refusals don't); the table's
+  `family.test.mjs` count is 15.
+- **Tests.** `test_account.py` +5 (33): an export built and never
+  streamed is gone after the delete (and an earlier run's, but not another
+  person's); a raw ASGI 2.4 request whose `send` raises OSError at the
+  response start leaves no folder and no busy slot; the startup sweep
+  removes an old folder and keeps a fresh one; exports sit in
+  `<family dir>/.exports` at 0700 and survive another person's removal and
+  a reload of the list; the pages' self-service sentences (and that
+  family.js calls both routes).
+  - Revert check (each alone, `__pycache__` cleared): dropping the delete's
+    folder removal, using a plain StreamingResponse, dropping the startup
+    sweep, `archived=False`, the old temp root, and the old privacy.html
+    or terms.html each fail their test.
+- **Counts** (Linux sandbox, Python 3.13): 2569 passed, 34 skipped (the
+  merge commit abf3b0f: 2564 passed, 34 skipped; +5). JS 242 pass.

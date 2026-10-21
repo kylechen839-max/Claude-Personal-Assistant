@@ -710,7 +710,9 @@ while the cloud is the active backend.
    time, three an hour. **Delete my account** (type `DELETE` or their
    name, then confirm; it can't be undone) revokes their Google sign-in
    at Google, signs them out everywhere and deletes their whole folder,
-   exactly like **Remove**. You can't delete or export your own (owner)
+   exactly like **Remove**, and removes any download of theirs still
+   being made (zips are built in `<family dir>/.exports/` and deleted when
+   the download ends). You can't delete or export your own (owner)
    account this way. Render's disk snapshots keep a copy until they
    expire.
 

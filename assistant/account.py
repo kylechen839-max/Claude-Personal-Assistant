@@ -20,10 +20,14 @@ the token in the body, never the URL), so the grant doesn't outlive the
 account; a failure there never blocks the delete and is logged without
 the token.
 
-An export is built in a private temp folder (mkdtemp, 0700), streamed,
-then removed; folders a dropped download left behind are swept on the next
-export. Bounded: [family] export_max_mb of content (before compression),
-one export at a time per person, EXPORTS_PER_HOUR per person. Logs carry
+An export is built in a private folder under the family data dir
+(`<dir>/.exports/export-<id>.*`, mkdtemp, 0700; `.exports` can never be a
+person's id), streamed, then removed when the response ends, however it
+ends (ExportResponse), including a client that leaves before the body
+starts. Deleting the account also removes their export folders, and
+folders older than STALE are swept at startup and on every export.
+Bounded: [family] export_max_mb of content (before compression), one
+export at a time per person, EXPORTS_PER_HOUR per person. Logs carry
 ids and sizes only, never names, titles, text or tokens.
 """
 
@@ -31,6 +35,7 @@ ids and sizes only, never names, titles, text or tokens.
 # Request class in the route signatures (imported inside register()).
 import json
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -50,6 +55,7 @@ STALE = 600.0          # an export (or its temp folder) older than this is aband
 CHUNK = 64 * 1024
 PAGE = 200             # conversations read per history.list call
 EXPORT_PREFIX = "export-"
+EXPORTS_DIR = ".exports"  # in the family dir; never a valid id (family._ID)
 
 
 class ExportError(Exception):
@@ -92,18 +98,20 @@ def profile(user: dict) -> dict:
 
 class Account:
     """The export and delete logic, separate from the routes so tests can
-    swap `revoke`, `clock` and `tmp_root`."""
+    swap `revoke`, `clock` and `tmp_root`. Sweeps stale export folders
+    when it's made (at startup)."""
 
     def __init__(self, family, revoke: Callable[[str], None] = revoke_google,
                  clock=time.time, tmp_root: str | Path | None = None):
         self.family = family
         self.revoke = revoke
         self.clock = clock
-        self.tmp_root = Path(tmp_root) if tmp_root else \
-            Path(tempfile.gettempdir()) / "hey-claude-exports"
+        self.tmp_root = Path(tmp_root) if tmp_root else family.dir / EXPORTS_DIR
         self.lock = threading.Lock()
         self._busy: dict[str, float] = {}        # uid -> when their export started
+        self._folders: dict[str, Path] = {}      # uid -> their export's folder
         self._recent: dict[str, deque] = {}      # uid -> export start times
+        self._sweep()
 
     @property
     def max_bytes(self) -> int:
@@ -139,6 +147,8 @@ class Account:
         with self.lock:
             self._recent.pop(uid, None)
             self._busy.pop(uid, None)
+            self._folders.pop(uid, None)
+        self._remove_exports(uid)  # a copy must not outlive the account
         if removed:
             log.info("Account: %s deleted their account", uid)
         return removed
@@ -163,12 +173,31 @@ class Account:
                                or now - self._recent[k][-1] > RATE_WINDOW)]:
                 del self._recent[other]
 
-    def _done(self, uid: str) -> None:
+    def _done(self, uid: str, folder: Path | None = None) -> None:
+        """Free their export slot (only this export's: a newer one, started
+        after this one went stale, keeps its own)."""
         with self.lock:
-            self._busy.pop(uid, None)
+            if folder is None or self._folders.get(uid) in (None, folder):
+                self._busy.pop(uid, None)
+                self._folders.pop(uid, None)
+
+    def finish(self, uid: str, folder: Path) -> None:
+        """The download ended (sent, dropped or never started): remove the
+        folder and free the slot. Idempotent."""
+        shutil.rmtree(folder, ignore_errors=True)
+        self._done(uid, folder)
+
+    def _remove_exports(self, uid: str) -> None:
+        """Every export folder of theirs, this run's or an earlier one's
+        (`export-<id>.<random>`: "." is in neither an id nor mkdtemp's
+        suffix, so one id's glob never matches another's)."""
+        if not self.tmp_root.is_dir():
+            return
+        for folder in self.tmp_root.glob(f"{EXPORT_PREFIX}{uid}.*"):
+            shutil.rmtree(folder, ignore_errors=True)
 
     def _sweep(self) -> None:
-        """Remove temp folders a dropped download left behind."""
+        """Remove export folders a dropped download (or a crash) left behind."""
         if not self.tmp_root.is_dir():
             return
         now = time.time()
@@ -178,6 +207,14 @@ class Account:
                     shutil.rmtree(folder, ignore_errors=True)
             except OSError:
                 pass
+
+    def _root(self) -> Path:
+        """The private exports folder (0700; chmod does nothing on Windows,
+        where the family dir's own permissions apply)."""
+        self.tmp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            os.chmod(self.tmp_root, 0o700)
+        return self.tmp_root
 
     def build(self, uid: str) -> tuple[Path, Path]:
         """(temp folder, zip in it). The caller streams the zip and calls
@@ -189,17 +226,18 @@ class Account:
         self._start(uid)
         try:
             self._sweep()
-            self.tmp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            folder = Path(tempfile.mkdtemp(prefix=EXPORT_PREFIX, dir=self.tmp_root))
+            folder = Path(tempfile.mkdtemp(prefix=f"{EXPORT_PREFIX}{uid}.",
+                                           dir=self._root()))
         except BaseException:
             self._done(uid)
             raise
+        with self.lock:
+            self._folders[uid] = folder
         try:
             path = folder / "hey-claude-data.zip"
             count, size = self._write(path, user, ctx.history)
         except BaseException:
-            shutil.rmtree(folder, ignore_errors=True)
-            self._done(uid)
+            self.finish(uid, folder)
             raise
         log.info("Account: %s exported %d conversation(s), %d bytes", uid, count, size)
         return folder, path
@@ -241,14 +279,14 @@ class Account:
 
     def stream(self, uid: str, folder: Path, path: Path):
         """The zip in chunks; the folder goes (and the export slot frees)
-        when it's sent, or when the download is dropped."""
+        when it's sent or dropped mid-way. One never started is cleaned up
+        by ExportResponse (or the sweep, or deleting the account)."""
         try:
             with open(path, "rb") as f:
                 while chunk := f.read(CHUNK):
                     yield chunk
         finally:
-            shutil.rmtree(folder, ignore_errors=True)
-            self._done(uid)
+            self.finish(uid, folder)
 
 
 # ---------- HTTP (added by webapp.create_app, after family.register) ----------
@@ -262,6 +300,21 @@ def register(app, family, web, error) -> None:
     from starlette.concurrency import run_in_threadpool
 
     from assistant import webapp
+
+    class ExportResponse(StreamingResponse):
+        """Runs `cleanup` when the response ends, however it ends: a
+        generator's `finally` (and a BackgroundTask) never run when the
+        client leaves before the body starts (ASGI 2.4: ClientDisconnect)."""
+
+        def __init__(self, content, cleanup: Callable[[], None], **kw):
+            super().__init__(content, **kw)
+            self.cleanup = cleanup
+
+        async def __call__(self, scope, receive, send):
+            try:
+                await super().__call__(scope, receive, send)
+            finally:
+                self.cleanup()
 
     account = Account(family) if family is not None else None
     app.state.account = account  # tests swap its revoke, clock and tmp_root
@@ -317,8 +370,9 @@ def register(app, family, web, error) -> None:
             if e.status == 413:
                 log.warning("Account: %s's export is over the cap", uid)
             return error(str(e), e.status)
-        return StreamingResponse(
-            account.stream(uid, folder, path), media_type="application/zip",
+        return ExportResponse(
+            account.stream(uid, folder, path),
+            lambda: account.finish(uid, folder), media_type="application/zip",
             headers={"Content-Disposition":
                      'attachment; filename="hey-claude-data.zip"',
                      "Content-Length": str(path.stat().st_size)})

@@ -8,6 +8,8 @@ and a fake Google revoke (no network)."""
 import io
 import json
 import logging
+import os
+import time
 import zipfile
 
 import pytest
@@ -26,13 +28,13 @@ KEY_FILES = {"anthropic_key.enc": "sk-ant-SECRET-key", "notion.enc": "ntn_SECRET
 
 @pytest.fixture
 def acct(env, tmp_path):
-    """The Account object with a recording fake revoke, the env's clock and
-    a temp root inside tmp_path."""
+    """The Account object with a recording fake revoke and the env's clock;
+    exports go to its default place, `<family dir>/.exports` (in tmp_path)."""
     a = env.app.state.account
     a.revoked = []
     a.revoke = a.revoked.append
     a.clock = lambda: env.clock.now
-    a.tmp_root = tmp_path / "exports"
+    assert a.tmp_root == env.family.dir / ".exports"
     return a
 
 
@@ -232,6 +234,7 @@ def test_export_has_their_conversations_and_profile(env, owner, acct):
     mom, link = env.member(owner, name="Mom", language="zh", timezone="Asia/Shanghai")
     uid = link["user"]["id"]
     _, ids = plant(env, uid, [("Dentist", "dentist on friday"), ("Groceries", "buy milk")])
+    env.family.context(uid).history.update(ids[0], archived=True)  # still theirs
     r = mom.get("/api/me/export")
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == "application/zip"
@@ -326,6 +329,96 @@ def test_a_dropped_download_is_swept_later(env, owner, acct):
     assert not folder.exists()
 
 
+def test_delete_removes_an_export_that_was_never_streamed(env, owner, acct):
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    plant(env, uid)
+    folder, path = acct.build(uid)  # built; the download never starts
+    assert path.exists() and acct._busy.get(uid) is not None
+    # and one an earlier run left (not in this run's map)
+    older = acct.tmp_root / f"export-{uid}.left"
+    older.mkdir()
+    dad, dlink = env.member(owner, name="Dad")  # someone else's stays
+    dfolder, _ = acct.build(dlink["user"]["id"])
+    assert delete_me(mom).status_code == 200
+    assert not folder.exists() and not older.exists()
+    assert uid not in acct._busy and uid not in acct._folders
+    assert dfolder.exists()
+    acct.finish(dlink["user"]["id"], dfolder)
+
+
+def test_a_client_that_leaves_before_the_body_still_cleans_up(env, owner, acct):
+    """ASGI 2.4: the server's send raises OSError at the response start;
+    Starlette turns it into ClientDisconnect and the generator never runs."""
+    import anyio
+    from starlette.requests import ClientDisconnect
+
+    mom, link = env.member(owner)
+    uid = link["user"]["id"]
+    plant(env, uid)
+    cookie = "; ".join(f"{k}={v}" for k, v in mom.cookies.items())
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+             "http_version": "1.1", "method": "GET", "scheme": "https",
+             "path": "/api/me/export", "raw_path": b"/api/me/export",
+             "query_string": b"", "root_path": "",
+             "headers": [(b"host", b"testserver"), (b"cookie", cookie.encode())],
+             "client": ("127.0.0.1", 5000), "server": ("testserver", 443)}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    started = []
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            started.append(message["status"])
+            raise OSError("the phone went away")
+
+    async def run():
+        with pytest.raises((ClientDisconnect, OSError)):
+            await env.app(scope, receive, send)
+    anyio.run(run)
+    assert started == [200]
+    assert list(acct.tmp_root.iterdir()) == []
+    assert not acct._busy and not acct._folders
+    assert mom.get("/api/me/export").status_code == 200  # not stuck at 409
+
+
+def test_startup_sweeps_old_export_folders(env, owner, acct):
+    root = env.family.dir / ".exports"
+    root.mkdir(parents=True, exist_ok=True)
+    old, fresh = root / "export-u_gone12345.abc", root / "export-u_live12345.def"
+    old.mkdir()
+    (old / "hey-claude-data.zip").write_bytes(b"PK")
+    fresh.mkdir()
+    then = time.time() - 3600
+    os.utime(old, (then, then))
+    account_mod.Account(env.family)  # what register() makes at startup
+    assert not old.exists()
+    assert fresh.exists()  # maybe another process's download in progress
+
+
+def test_exports_live_privately_in_the_family_dir(env, owner, acct):
+    from assistant import family as family_mod
+
+    assert not family_mod.valid_id(account_mod.EXPORTS_DIR)  # never someone's folder
+    mom, link = env.member(owner)
+    dad, dlink = env.member(owner, name="Dad")
+    uid = link["user"]["id"]
+    folder, _ = acct.build(uid)
+    assert folder.parent == env.family.dir / ".exports"
+    if os.name != "nt":
+        assert (folder.parent.stat().st_mode & 0o777) == 0o700
+        assert (folder.stat().st_mode & 0o777) == 0o700
+    # removing someone else, and reloading the list, leave it alone
+    assert env.family.remove(dlink["user"]["id"])
+    assert folder.exists()
+    again = family_mod.Family(env.config)
+    assert set(again.users) == {uid} and folder.exists()
+    acct.finish(uid, folder)
+    assert not folder.exists() and not acct._busy
+
+
 def test_one_export_at_a_time(env, owner, acct):
     mom, link = env.member(owner)
     uid = link["user"]["id"]
@@ -385,3 +478,22 @@ def test_logs_carry_ids_only(env, owner, acct, caplog):
     assert any(uid in m and "exported" in m for m in info)
     assert any(uid in m and "deleted their account" in m for m in info)
     assert any(uid in m and "revoked" in m for m in info)
+
+
+# --- the public pages say so ------------------------------------------------------
+
+def test_privacy_and_terms_pages_mention_self_service():
+    """/privacy and /terms tell people they can do it themselves in Settings
+    (true: family.js calls these routes), and keep the support-email route."""
+    from pathlib import Path
+
+    web = Path(account_mod.__file__).parent / "web"
+    js = (web / "family.js").read_text(encoding="utf-8")
+    assert '"/api/me/export"' in js and '"/api/me/delete"' in js
+    for page in ("privacy.html", "terms.html"):
+        text = " ".join((web / page).read_text(encoding="utf-8").split())
+        assert "download your data and delete your account yourself in Settings" in text \
+            or ("In Settings you can download your data" in text
+                and "delete your account yourself" in text), page
+    privacy = " ".join((web / "privacy.html").read_text(encoding="utf-8").split())
+    assert "ask at {{SUPPORT_EMAIL}} to have your account" in privacy

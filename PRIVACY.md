@@ -36,7 +36,8 @@ the server, at most 20 MB per person (oldest conversations removed first).
 Invited people can download or delete their own account at any time from
 Settings. Download my data gives a zip of their conversations and profile
 (name, language, time zone, account type, date joined); it never includes
-Google sign-in tokens or API keys. Delete my account takes effect at once in
+Google sign-in tokens or API keys. The zip is built on the server only for
+the download and removed when it ends, or when the account is deleted. Delete my account takes effect at once in
 the app: it asks Google to revoke Hey Claude's access, signs them out on every
 device and permanently deletes their conversations, Google connection and any
 key they added. Render's automatic disk snapshots may keep a copy until they
