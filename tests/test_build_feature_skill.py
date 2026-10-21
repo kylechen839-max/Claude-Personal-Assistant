@@ -92,7 +92,8 @@ def test_skill_mirrors_the_chat():
     assert "that start-of-turn write is the pickup write above: one write that carries `seen_ref`" in flat
     assert flat.count("At the end of EVERY turn") == 1
     assert ('Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, '
-            'merges; not every tool call.') in flat
+            'merges, a batch of reads or commands') in flat
+    assert "not every tool call." in flat
     assert ("At the start of EVERY turn, set `status` working with a step text, and check "
             "`ArtifactComments action:\"watch\"` lists the dashboard; re-arm it if it's missing. "
             "Watches can silently disappear.") in flat
