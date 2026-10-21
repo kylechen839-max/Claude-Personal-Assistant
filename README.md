@@ -735,6 +735,58 @@ out only their own phones; yours signs out only yours. Settings: `[family]`
 in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
 `google_client`, `zh_stt_model`, `zh_piper_voice`).
 
+## Public beta: landing page and waitlist (cloud)
+
+The server also has a small public site, served by the app itself (no
+JavaScript, no outside fonts or scripts, the same strict CSP as the app):
+
+- `https://<cloud>/welcome`: what Hey Claude does, "invite-only beta",
+  "bring your own Anthropic API key", and the waitlist form (email and an
+  optional "what would you use it for", at most 300 characters).
+- `https://<cloud>/privacy` and `https://<cloud>/terms`: the beta's privacy
+  notice and plain-language terms.
+
+`/` stays the app: signed out, it is still the sign-in page, now with a
+**What is Hey Claude?** link to `/welcome`. Invited people and your own
+phone keep the address they already have, and the PWA's home-screen icon
+keeps opening the app, not a marketing page. Share `/welcome` publicly.
+
+Settings (`[webapp]` in `config.toml`):
+
+- `support_email`: the contact shown on the privacy and terms pages
+  (empty = "the person who runs this server").
+- `legal_draft = true` shows a "Draft: Kyle to review" note on both pages.
+  Read them, change the wording in `assistant/web/privacy.html` and
+  `terms.html` if needed, then set it to `false`.
+- `waitlist_file`: where entries are kept (`/data/waitlist.json` on Render,
+  on the disk; `data/waitlist.json` locally; empty = waitlist closed).
+
+**Inviting someone from the waitlist.**
+
+1. Signed in with your token at the cloud's address, open
+   `https://<cloud>/waitlist`. It lists each address, its note and date
+   (only you can see it; a family member gets "not found").
+2. In the app, ⚙ -> **Invite someone** (see "Invite family (cloud)" above)
+   makes their link. Email it to them yourself; nothing is sent
+   automatically.
+3. Back on `/waitlist`, **Remove** their entry. Remove is also how you
+   delete someone who asks.
+
+Or with curl (the entry ids come from the list; an address never goes in
+a URL, so it never lands in an access log):
+
+```
+curl -H "Authorization: Bearer $WEB_TOKEN" https://<cloud>/api/waitlist
+curl -X DELETE -H "Authorization: Bearer $WEB_TOKEN" -H "Content-Length: 0" \
+     https://<cloud>/api/waitlist/<id>
+```
+
+The waitlist keeps at most 2000 entries; addresses are lower-cased and
+listed once (a repeat still gets "thanks", so the form never tells whether
+someone else is on it). Each network address can post 5 times an hour, and
+a hidden field that only bots fill in drops their posts without a word. The
+log records only counts, never an address or a note.
+
 ## Run it in the cloud (Render)
 
 The phone web app can also run 24/7 on a small paid server at

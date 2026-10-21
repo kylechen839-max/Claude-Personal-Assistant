@@ -139,6 +139,12 @@ DEFAULTS: dict = {
                                     # (needs a Web application OAuth client)
         "public_origin": "",        # https://... the phone opens; Google
                                     # returns to <public_origin>/google/callback
+        # The public pages (/welcome, /privacy, /terms; public_site.py)
+        "support_email": "",        # contact on the privacy and terms pages
+                                    # ("" = "contact the owner")
+        "legal_draft": True,        # a visible "Draft" note on privacy and terms
+        "waitlist_file": "data/waitlist.json",  # POST /api/waitlist entries
+                                    # (a private file; "" = waitlist closed)
     },
     # python -m assistant --mode web on a public server (ASSISTANT_PROFILE=server)
     "cloud": {
@@ -306,7 +312,8 @@ SERVER_PROFILE: dict = {
     "calendar": {"save_token": False},
     "web": {"browser": False},
     "webapp": {"host": "0.0.0.0", "max_upload_mb": 4,
-               "sessions_file": "/data/web_sessions.json"},  # on the disk
+               "sessions_file": "/data/web_sessions.json",  # on the disk
+               "waitlist_file": "/data/waitlist.json"},  # on the disk
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},

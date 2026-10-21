@@ -56,6 +56,7 @@ path = "data/mom/history.sqlite"
 [webapp]
 port = 8766                   # Kyle's own instance keeps 8765
 sessions_file = "data/mom/web_sessions.json"
+waitlist_file = ""            # no public waitlist on her instance
 google_connect = true
 public_origin = ""            # set in config.mom.local.toml (see above)
 allowed_origins = []          # set in config.mom.local.toml if a proxy rewrites Host

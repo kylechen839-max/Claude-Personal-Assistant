@@ -124,6 +124,10 @@ google_connect = false        # true: a "connect Google" button in the phone app
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
                               # and family members' Google (PUBLIC_ORIGIN overrides it)
+support_email = ""            # contact shown on /privacy and /terms ("" = "contact the owner")
+legal_draft = true            # a visible "Draft: Kyle to review" note on /privacy and /terms
+waitlist_file = "data/waitlist.json"  # /welcome's waitlist (emails + notes, a private file;
+                              # /data/waitlist.json on the server; "" = waitlist closed)
 
 [voice]                       # hands-free voice conversation in the phone web app
 vad = "silero"                # "silero" (browser neural VAD) or "energy" (simpler)

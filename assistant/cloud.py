@@ -34,6 +34,10 @@ for the public internet with no Tailscale in front:
   cookie isn't sent on it, and google_web.py accepts only a pending,
   one-time state from the browser that started it (family members connect
   their own Google from their phones).
+- The public site (public_site.py: /welcome, /privacy, /terms and their
+  stylesheet) needs no sign-in, nor does joining its waitlist (POST
+  /api/waitlist), which gets a body pool of its own with the sign-in
+  call's short deadline; the waitlist's owner routes need the owner.
 - Errors never reach the client as stack traces.
 - With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
   the derived `hc1.` bearer tokens (checked here, never counted as wrong
@@ -94,12 +98,17 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # Google's redirect back after a family member's sign-in: the
               # Strict session cookie isn't sent on it, so google_web.py
               # checks the one-time state and its browser-binding cookie
-              "/google/callback"}
+              "/google/callback",
+              # the public site (public_site.py): landing, privacy, terms
+              "/welcome", "/privacy", "/terms", "/site.css"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py): public and limited like the login
 # call, but its body is an invite, not WEB_TOKEN, so the web app checks it
 # (wrong ones count toward the same shared lockout there).
 INVITE_POST = {"/api/invite/accept"}
+# Joining the waitlist (public_site.py): anyone may post, from a pool of its
+# own (a flood can't take the sign-in slots) with the sign-in body deadline.
+WAITLIST_POST = {"/api/waitlist"}
 # with failover on: the router module (loaded before sign-in) and the token
 # trade, whose body (WEB_TOKEN) is checked here like /api/login's
 FAILOVER_PUBLIC_GET = {"/backend-router.js"}
@@ -223,10 +232,13 @@ class Slots:
 
 
 class RateLimiter:
-    """At most `per_minute` requests per address in any 60 s window."""
+    """At most `per_minute` requests per address in any 60 s window (or
+    any `window` seconds: the waitlist counts per hour)."""
 
-    def __init__(self, per_minute=120, clock=time.monotonic, max_tracked=10000):
+    def __init__(self, per_minute=120, clock=time.monotonic, max_tracked=10000,
+                 window: float = 60):
         self.per_minute = per_minute
+        self.window = window
         self.clock = clock
         self.max_tracked = max_tracked
         self.hits: dict[str, deque] = {}
@@ -236,11 +248,12 @@ class RateLimiter:
         with self.lock:
             now = self.clock()
             if len(self.hits) >= self.max_tracked and ip not in self.hits:
-                for k in [k for k, q in self.hits.items() if not q or q[-1] <= now - 60]:
+                for k in [k for k, q in self.hits.items()
+                          if not q or q[-1] <= now - self.window]:
                     del self.hits[k]
                 _cap(self.hits, self.max_tracked - 1)
             q = self.hits.setdefault(ip, deque())
-            while q and q[0] <= now - 60:
+            while q and q[0] <= now - self.window:
                 q.popleft()
             if len(q) >= self.per_minute:
                 return False
@@ -285,6 +298,7 @@ class CloudGuard:
         # Bearer tokens) can never use up the slots of signed-in ones.
         self.slots = Slots(max_busy_per_ip, max_busy)
         self.login_slots = Slots(max_busy_per_ip, max_login_busy)
+        self.waitlist_slots = Slots(max_busy_per_ip, max_login_busy)  # WAITLIST_POST
         # failover voice sockets waiting for their first-message token
         self.preauth_slots = Slots(max_busy_per_ip, max_login_busy * 4)
         self.login_timeout = login_timeout  # a 16 KB sign-in body is quick
@@ -468,8 +482,9 @@ class CloudGuard:
         public_get = PUBLIC_GET | (FAILOVER_PUBLIC_GET if self.failover_role else set())
         public_post = PUBLIC_POST | (FAILOVER_PUBLIC_POST if self.failover_role else set())
         invite = method == "POST" and path in INVITE_POST
+        waitlist = method == "POST" and path in WAITLIST_POST
         public = ((method in ("GET", "HEAD") and path in public_get)
-                  or (method == "POST" and path in public_post) or invite)
+                  or (method == "POST" and path in public_post) or invite or waitlist)
         bearer = _bearer(scope)
         login = method == "POST" and path in public_post and bearer is None
         invite = invite and bearer is None
@@ -493,7 +508,8 @@ class CloudGuard:
         if not has_body:
             body = None  # nothing read: the app gets the server's receive
         else:
-            pool = self.login_slots if signing_in else self.slots
+            pool = (self.login_slots if signing_in else
+                    self.waitlist_slots if waitlist else self.slots)
             # a locked-out address may still sign in (right token), one try at a time
             if not pool.take(ip, limit=1 if signing_in and self.lockout.blocked(ip)
                              else None):
@@ -502,7 +518,7 @@ class CloudGuard:
             try:
                 limit = (self.max_upload_bytes if is_upload(path)
                          else self.max_body_bytes)
-                timeout = (self.login_timeout if signing_in else
+                timeout = (self.login_timeout if signing_in or waitlist else
                            self.body_timeout + limit / self.min_upload_rate)
                 body, error = await _read_body(scope, receive, limit, timeout)
                 if error:
@@ -697,6 +713,7 @@ def build_app(config: dict, web_assistant, token: str):
     from assistant.failover.tokens import TokenAuthority
 
     from assistant import google_web  # the owner's and family members' Google
+    from assistant import public_site  # /welcome, /privacy, /terms, the waitlist
     from assistant import webfeatures  # lecture recorder + homework tutor
     from assistant.attachments import limits as attachment_limits
 
@@ -712,6 +729,7 @@ def build_app(config: dict, web_assistant, token: str):
                             features=features,
                             language=config["assistant"]["language"],
                             google=google_web.from_config(config, web_assistant),
+                            public=public_site.from_config(config),
                             **attachment_limits(config))
     features.resume_jobs()  # lecture jobs cut off by a redeploy
     return CloudGuard(
