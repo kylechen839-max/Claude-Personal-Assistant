@@ -16,10 +16,15 @@ and, once they tap "Connect Google account" on their own phone, their own
 Google Calendar and Gmail (read, drafts only; deletes ask first) from
 `<dir>/<id>/google_token.json` (google_web.py signs them in). Their token
 is only ever read from that file, never from GOOGLE_TOKEN_JSON (Kyle's),
-and Kyle's tools never read theirs. Nothing else: no Notion, Pinecone
-memory or notes, Kyle's Google, dev team, lecture recorder or tutor, and no
-way to see anyone else's history. Removing someone signs them out and
-deletes their folder, Google token included.
+and Kyle's tools never read theirs. Once they tap "Connect Notion"
+(notion_web.py, either tier), their own Notion's Assignments database:
+`list_assignments` and `update_assignment_status` only, on their own token
+from `<dir>/<id>/notion.enc` (encrypted, userkeys.NOTION_LABEL), never
+NOTION_TOKEN (Kyle's). Nothing else: no Kyle's Notion, Pinecone memory or
+notes, Kyle's Google, dev team, lecture recorder or tutor, and no way to
+see anyone else's history. Removing someone signs them out and deletes
+their folder, Google token and Notion token included (the Notion grant is
+revoked first, best effort).
 
 Each person has a tier (`tier` in users.json, chosen at invite): "family"
 (the above; people listed before tiers existed load as this) or "beta" (an
@@ -64,6 +69,7 @@ STATUSES = ("invited", "active")
 TIERS = ("family", "beta")
 DEFAULT_TIER = "beta"      # a new invite; before tiers everyone was family
 GOOGLE_TOKEN = "google_token.json"  # in <dir>/<id>/
+NOTION_FILE = "notion.enc"          # in <dir>/<id>/: their Notion sign-in, encrypted
 _ID = re.compile(r"^u_[A-Za-z0-9_-]{8,40}$")
 
 
@@ -73,6 +79,16 @@ class FamilyError(ValueError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+class NotionReconnect(RuntimeError):
+    """Their Notion sign-in is gone or refused even after a refresh: the
+    tool tells Claude (in their language) to have them reconnect it."""
+
+
+class NotionFailed(RuntimeError):
+    """Notion refused a call; the message is Notion's error code only (its
+    own message can quote a title)."""
 
 
 def hash_token(token: str) -> str:
@@ -191,6 +207,10 @@ class Family:
         # on first use, dropped when they save or remove a key
         self._user_clients: dict[str, object] = {}
         self._meters: dict[str, object] = {}  # uid -> their usage.UsageMeter
+        # uid -> (access token, their NotionAssignments on it); and one lock
+        # per person so two turns never both refresh their Notion token
+        self._notion_apis: dict[str, tuple[str, object]] = {}
+        self._notion_locks: dict[str, threading.Lock] = {}
         self.lock = threading.RLock()
         self.users: dict[str, dict] = {}
         # removed people whose folder isn't deleted yet (e.g. a file was
@@ -318,6 +338,8 @@ class Family:
             ctx = self._contexts.pop(uid, None)
             self._user_clients.pop(uid, None)
             self._meters.pop(uid, None)
+            self._drop_notion_api(uid)
+            self._notion_locks.pop(uid, None)
             if before_delete is not None:
                 before_delete(uid)
         if ctx is not None:
@@ -364,10 +386,10 @@ class Family:
             return ctx
 
     def _register_tools(self, user: dict, registry) -> None:
-        """Web search and fetch, and their own Google once connected. No
-        browser (it would open on the server), no Notion, memory, notes,
-        history, Kyle's Google or dev team."""
-        registry.register(*self._google_tools(user))
+        """Web search and fetch, and their own Google and Notion once
+        connected. No browser (it would open on the server), no Kyle's
+        Notion, memory, notes, history, Kyle's Google or dev team."""
+        registry.register(*self._google_tools(user), *self._notion_tools(user))
         web = self.config["web"]
         if not web["enabled"]:
             return
@@ -496,6 +518,252 @@ class Family:
             self._refresh_tools(uid)
         log.info("Family: %s disconnected their Google account", uid)
         return had
+
+    # ---------- their own Notion (notion_web.py signs them in) ----------
+    def notion_file(self, uid: str) -> Path:
+        return self.dir / uid / NOTION_FILE
+
+    def notion_enabled(self, uid: str | None = None) -> bool:
+        """May an invited person (either tier) connect Notion here? Needs
+        [family] notion, the public integration's id and secret, and this
+        server's address (the redirect URI)."""
+        from assistant.notion_web import oauth_client
+
+        return bool(self.config["family"]["notion"] and own_origin(self.config)
+                    and oauth_client() is not None)
+
+    def _notion_record(self, uid: str) -> dict | None:
+        """Their saved sign-in (access_token, refresh_token, workspace_*,
+        database_id, data_source_id, database_title), or None."""
+        from assistant.userkeys import NOTION_LABEL, unseal
+
+        if not valid_id(uid):
+            return None
+        try:
+            raw = self.notion_file(uid).read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            log.warning("Family: %s's Notion file is unreadable (%s)", uid, type(e).__name__)
+            return None
+        data = unseal(NOTION_LABEL, uid, raw, self.keys.environ, what="Notion sign-in",
+                      redo="connect Notion again")
+        if data is None or not isinstance(data.get("access_token"), str) \
+                or not data["access_token"]:
+            return None
+        return data
+
+    def notion_status(self, uid: str) -> dict:
+        """{connected, workspace, database} for their Settings; never a token."""
+        record = self._notion_record(uid) if uid in self.users else None
+        if record is None:
+            return {"connected": False, "workspace": None, "database": None}
+        return {"connected": True, "workspace": record.get("workspace_name"),
+                "database": (record.get("database_title") or None)
+                if record.get("data_source_id") else None}
+
+    def notion_connected(self, uid: str) -> bool:
+        return self.notion_status(uid)["connected"]
+
+    def save_notion(self, uid: str, record: dict, tools: bool = True) -> bool:
+        """Store their sign-in (encrypted, privately, atomically) and give
+        their open conversations the tools. False if they were removed
+        meanwhile (nothing written). KeyProblem 503 without USER_DATA_KEY."""
+        from assistant.tools.google_auth import write_private
+        from assistant.userkeys import NOTION_LABEL, seal
+
+        record = {k: v for k, v in record.items() if k != "uid"}
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or user.get("status") != "active" or not valid_id(uid):
+                return False
+            text = seal(NOTION_LABEL, uid, record, self.keys.environ)
+            path = self.notion_file(uid)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_private(path, text)
+            self._notion_apis.pop(uid, None)  # the next call uses the new token
+            if tools:
+                self._refresh_tools(uid)
+        log.info("Family: %s saved their Notion sign-in", uid)
+        return True
+
+    def revoke_notion(self, uid: str) -> None:
+        """Best effort: ask Notion to revoke their grant (disconnect, "Delete
+        my account", the owner removing them). Never raises: a failure never
+        blocks deleting."""
+        try:
+            record = self._notion_record(uid)
+            if record is None:
+                return
+            from assistant.notion_web import revoke_quietly
+
+            revoke_quietly(record["access_token"], uid)
+        except Exception as e:  # noqa: BLE001 - deleting goes ahead regardless
+            log.warning("Family: revoking %s's Notion failed (%s)", uid, type(e).__name__)
+
+    def disconnect_notion(self, uid: str) -> bool:
+        """Revoke (best effort), delete their sign-in, take the tools away.
+        False if there was nothing to delete."""
+        if uid not in self.users or not valid_id(uid):
+            return False
+        self.revoke_notion(uid)  # the network, outside the lock
+        with self.lock:
+            path = self.notion_file(uid)
+            had = path.exists()
+            _unlink(path)
+            self._drop_notion_api(uid)
+            self._refresh_tools(uid)
+        log.info("Family: %s disconnected their Notion", uid)
+        return had
+
+    def _drop_notion_api(self, uid: str) -> None:
+        with self.lock:
+            cached = self._notion_apis.pop(uid, None)
+        if cached is not None:
+            try:
+                cached[1]._client.close()  # never .client: it can read NOTION_TOKEN
+            except Exception:  # noqa: BLE001 - only frees a connection pool
+                log.debug("Family: closing a Notion client failed", exc_info=True)
+
+    def _notion_api(self, uid: str, record: dict):
+        """Their NotionAssignments on `record`'s token (cached per token).
+        Always given its own client: with a falsy token, NotionAssignments
+        would fall back to NOTION_TOKEN (Kyle's)."""
+        from assistant import notion_web
+        from assistant.tools.notion import NotionAssignments
+
+        token = record["access_token"]
+        with self.lock:  # one check-and-swap: no network here
+            cached = self._notion_apis.get(uid)
+            if cached is not None and cached[0] == token:
+                return cached[1]
+            user = self.users.get(uid) or {}
+            made = NotionAssignments(record["database_id"], client=notion_web.api(token),
+                                     data_source_id=record["data_source_id"],
+                                     timezone=user.get("timezone") or None)
+            if uid in self.users:  # bounded: listed people only
+                # an older one is left to the GC, not closed: another turn
+                # may still be using it
+                self._notion_apis[uid] = (token, made)
+        return made
+
+    def refresh_notion(self, uid: str, failed: str) -> dict | None:
+        """After a 401 on access token `failed`: their record with a new
+        access token, or None (reconnect). One refresh at a time per person;
+        a turn that waited uses the token the other one got. Keeps the old
+        refresh token if Notion sends none back."""
+        from assistant import notion_web
+        from assistant.userkeys import KeyProblem
+
+        with self.lock:
+            if uid not in self.users:
+                return None
+            lock = self._notion_locks.setdefault(uid, threading.Lock())
+        with lock:
+            record = self._notion_record(uid)
+            if record is None:
+                return None
+            if record["access_token"] != failed:
+                return record  # refreshed meanwhile
+            if not record.get("refresh_token"):
+                return None
+            try:
+                answer = notion_web.refresh_grant(record["refresh_token"])
+                access = notion_web.record_of(answer)["access_token"]
+            except Exception as e:  # never the message
+                log.warning("Family: refreshing %s's Notion token failed (%s)",
+                            uid, type(e).__name__)
+                return None
+            fresh = {**record, "access_token": access,
+                     "refresh_token": (answer.get("refresh_token")
+                                       if isinstance(answer.get("refresh_token"), str)
+                                       and answer["refresh_token"]
+                                       else record["refresh_token"])}
+            try:
+                if not self.save_notion(uid, fresh, tools=False):
+                    return None
+            except (KeyProblem, OSError) as e:
+                log.warning("Family: saving %s's refreshed Notion token failed (%s)",
+                            uid, type(e).__name__)
+                return None
+        log.info("Family: refreshed %s's Notion token", uid)
+        return fresh
+
+    def _notion_tools(self, user: dict) -> list:
+        """list_assignments and update_assignment_status on their own
+        Notion (none until they connect and one Assignments database was
+        found). Both results hold Notion text: untrusted (a title could be
+        written to steer Claude) and private (titles stay out of the log)."""
+        if not (self.config["family"]["notion"] and valid_id(user.get("id"))):
+            return []
+        uid = user["id"]
+        record = self._notion_record(uid)
+        if record is None or not record.get("database_id") \
+                or not record.get("data_source_id"):
+            return []
+        lang = user.get("language")
+        methods = {"list_assignments": "list_assignments",
+                   "update_assignment_status": "update_status"}
+        name = "the user" if lang == "zh" else user["name"]
+        out = []
+        for t in self._notion_api(uid, record).tools():
+            if t.name not in methods:
+                continue
+            extra = {}
+            if t.confirm_if_untrusted is not None:
+                extra["confirm_if_untrusted"] = self._notion_question(uid)
+            out.append(replace(
+                t, handler=self._notion_handler(uid, methods[t.name], lang),
+                untrusted_output=True, private=True,
+                description=t.description.replace("Kyle's", f"{name}'s")
+                .replace("Kyle", name).replace(" his ", " their "), **extra))
+        return out
+
+    def _notion_question(self, uid: str):
+        def ask(tool_input: dict) -> str:
+            record = self._notion_record(uid)
+            try:
+                return self._notion_api(uid, record).describe_for_update(tool_input)
+            except Exception:  # noqa: BLE001 - disconnected meanwhile: still ask
+                what = tool_input.get("name") or "that assignment"
+                return f"Do you want me to mark {what} as {tool_input.get('status')}?"
+        return ask
+
+    def _notion_handler(self, uid: str, method: str, lang: str | None):
+        """A tool handler on their current token: a 401 refreshes it once
+        (refresh_notion), then says "reconnect Notion". Notion's own error
+        messages (they can quote a title) never reach the log."""
+        from assistant import i18n
+
+        def call(record, kwargs):
+            from notion_client.errors import is_notion_client_error
+
+            try:
+                return getattr(self._notion_api(uid, record), method)(**kwargs), None
+            except Exception as e:
+                if not is_notion_client_error(e):
+                    raise
+                if getattr(e, "status", None) == 401:
+                    return None, e
+                code = getattr(getattr(e, "code", None), "value", None) or type(e).__name__
+                raise NotionFailed(f"Notion said {code}") from None
+
+        def run(**kwargs):
+            record = self._notion_record(uid)
+            if record is None or not record.get("data_source_id"):
+                raise NotionReconnect(i18n.t("notion_reconnect", lang))
+            result, denied = call(record, kwargs)
+            if denied is None:
+                return result
+            record = self.refresh_notion(uid, record["access_token"])
+            if record is None:
+                raise NotionReconnect(i18n.t("notion_reconnect", lang))
+            result, denied = call(record, kwargs)
+            if denied is not None:
+                raise NotionReconnect(i18n.t("notion_reconnect", lang))
+            return result
+
+        return run
 
     def _refresh_tools(self, uid: str) -> None:
         """Their open conversations' tools after a connect or disconnect:
@@ -832,6 +1100,8 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
     async def remove_user(uid: str, session=Depends(webapp.require_owner)):
         if (e := off()) is not None:
             return e
+        # best effort, never blocks the removal (notion.enc goes with the folder)
+        await run_in_threadpool(family.revoke_notion, uid)
         try:
             removed = await run_in_threadpool(family.remove, uid, sign_out)
         except OSError:

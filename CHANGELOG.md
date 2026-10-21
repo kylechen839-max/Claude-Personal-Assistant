@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Invited people (beta and family) can connect their own Notion from Settings:
+  Connect Notion signs in with Notion's own consent page, and their
+  Assignments database gives them two tools on their own account: list
+  assignments and mark one Not started / In progress / Done (asks first once
+  the conversation holds Notion text). The sign-in is stored encrypted on the
+  server; Disconnect, Delete my account and the owner's Remove revoke it at
+  Notion. Needs a public Notion integration (`NOTION_OAUTH_CLIENT_ID` /
+  `NOTION_OAUTH_CLIENT_SECRET`, `[family] notion`).
 - Invited people can download their data (a zip of their conversations and
   profile) and delete their account (revokes Google access, signs out
   everywhere, deletes everything) from Settings, in English and Chinese. New

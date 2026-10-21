@@ -34,6 +34,7 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "month_usd", "cache_read",  # /api/state field, usage log
                      "chat_channels", "chat_read", "chat_search", "chat_files",
                      "chat_read_file", "chat_save_digest",
+                     "list_assignments", "update_assignment_status",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

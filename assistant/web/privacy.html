@@ -2,7 +2,9 @@
 <!-- Release check before `[webapp] public_site = true`: these claims depend on
      other public-beta pieces being on master and deployed:
      - Google "Calendar access only, no Gmail": G1 (beta tier)
-     - Notion "once you connect Notion" for beta users: G6 (Notion public OAuth) -->
+     - Notion "once you connect Notion" for beta users: G6 (Notion public OAuth;
+       built in notion_web.py, live once NOTION_OAUTH_CLIENT_ID/_SECRET are set
+       on Render) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -44,8 +46,9 @@
           after your yes, Google emails them.</td>
         <td>When you ask about or change your calendar</td></tr>
       <tr><th scope="row">Notion</th>
-        <td>Reads of your assignments and the status changes you ask for, once
-          you connect Notion.</td>
+        <td>Reads of your Assignments database and the status changes you ask
+          for, once you connect Notion. Only the pages you choose to share on
+          Notion's own consent screen.</td>
         <td>When you ask</td></tr>
       <tr><th scope="row">Web search (run by Anthropic)</th>
         <td>The search words or the web address, and your time zone as a rough
@@ -75,6 +78,10 @@
     <li><strong>Your Google sign-in:</strong> a token for your own Calendar, used only
       for you. Disconnecting deletes it; you can also revoke it at
       myaccount.google.com/permissions.</li>
+    <li><strong>Your Notion sign-in:</strong> a token for the Notion pages you shared,
+      your workspace's name and the name of the Assignments database it found,
+      stored encrypted and used only for you. Not your Notion email address.
+      Disconnecting asks Notion to end access and deletes it.</li>
     <li><strong>Signed-in browsers:</strong> a session id and when it was last used,
       so you stay signed in. "Sign out everywhere" ends them.</li>
     <li><strong>Waitlist:</strong> the email address you gave, your optional note
@@ -91,19 +98,20 @@
 
   <h2>Deleting your data</h2>
   <p>In Settings you can download your data (your conversations and profile) and
-    delete your account yourself. Deleting it asks Google to end Hey Claude's
-    access. You can also ask at {{SUPPORT_EMAIL}} to have your account or your
+    delete your account yourself. Deleting it asks Google and Notion to end Hey
+    Claude's access. You can also ask at {{SUPPORT_EMAIL}} to have your account or your
     waitlist entry deleted.
     Removing an account signs you out everywhere and deletes your folder on the
-    server: conversations, Google sign-in and API key. The hosting company makes
+    server: conversations, Google and Notion sign-ins and API key. The hosting company makes
     automatic backup snapshots of the disk, so a copy can remain in those snapshots
     until they expire.</p>
   <p>To stop Google access at any time, revoke Hey Claude at
-    myaccount.google.com/permissions. To stop API use, choose Remove key in Settings,
+    myaccount.google.com/permissions. To stop Notion access, remove Hey Claude in
+    Notion under Settings, Connections. To stop API use, choose Remove key in Settings,
     or delete or rotate your key in the Anthropic Console.</p>
 
   <h2>Cookies</h2>
-  <p>One cookie keeps you signed in. While you connect Google, a second, short-lived
+  <p>One cookie keeps you signed in. While you connect Google or Notion, a second, short-lived
     cookie ties that sign-in to your browser. Neither is shared with other sites, and
     there are no advertising or analytics cookies.</p>
 

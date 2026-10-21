@@ -4,7 +4,8 @@ and "Delete my account" in their own Settings (web/family.js).
   GET  /api/me/export   a zip of their conversations (history.export JSON)
                         and profile; never tokens or keys
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
-                        Google grant (best effort), then Family.remove
+                        Notion and Google grants (best effort), then
+                        Family.remove
 
 Both are for the signed-in person's own session only: there is no id in
 the path or body, so nobody can name someone else's account. The owner
@@ -15,10 +16,10 @@ Deleting reuses Family.remove: it drops them from users.json, signs out
 every session of theirs (cookies, live voice calls) and deletes
 `<dir>/<id>/`: history, Google token, and every other per-person file
 (their own API key, Notion token), with its retry for files locked on
-Windows. Google is told first (POST https://oauth2.googleapis.com/revoke,
-the token in the body, never the URL), so the grant doesn't outlive the
-account; a failure there never blocks the delete and is logged without
-the token.
+Windows. Notion (POST /v1/oauth/revoke, Family.revoke_notion) and Google
+(POST https://oauth2.googleapis.com/revoke) are told first, the token in
+the body, never the URL, so neither grant outlives the account; a failure
+there never blocks the delete and is logged without the token.
 
 An export is built in a private folder under the family data dir
 (`<dir>/.exports/export-<id>.*`, mkdtemp, 0700; `.exports` can never be a
@@ -119,10 +120,11 @@ class Account:
 
     # ---------- delete ----------
     def revoke_token(self, uid: str) -> None:
-        """Best effort: their Google grant, before the folder (and the token
-        file) goes. Never raises; never logs the token."""
+        """Best effort: their Notion and Google grants, before the folder
+        (and the token files) goes. Never raises; never logs a token."""
         from assistant.tools.google_auth import load_token_info
 
+        self.family.revoke_notion(uid)  # never raises (Family.revoke_notion)
         try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
             info = load_token_info(self.family.google_token(uid), environ={})
         except (OSError, ValueError):

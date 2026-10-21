@@ -708,8 +708,8 @@ while the cloud is the active backend.
    each) and profile (name, language, time zone, tier, created date),
    never tokens or keys; at most `[family] export_max_mb` (50 MB), one at a
    time, three an hour. **Delete my account** (type `DELETE` or their
-   name, then confirm; it can't be undone) revokes their Google sign-in
-   at Google, signs them out everywhere and deletes their whole folder,
+   name, then confirm; it can't be undone) revokes their Notion and Google
+   sign-ins at Notion and Google, signs them out everywhere and deletes their whole folder,
    exactly like **Remove**, and removes any download of theirs still
    being made (zips are built in `<family dir>/.exports/` and deleted when
    the download ends). You can't delete or export your own (owner)
@@ -801,13 +801,56 @@ For **beta testers**, repeat steps 1-3 in a *new* Google Cloud project
 verification (sensitive scopes: a privacy policy and a demo video, no paid
 assessment); until then it works as an unverified app for up to 100 users.
 
+### Notion for beta testers
+
+Anyone you invited (Beta or Family) can connect *their own* Notion from ⚙
+-> **Connect Notion**. Notion's consent page lets them pick the pages to
+share; they share their Assignments database (properties `Assignment`
+(title), `Status` (status with `Not started`, `In progress`, `Done`) and
+`Due` (date), like yours). Then they get exactly two tools on their own
+token: "what assignments do I have this week?" (`list_assignments`) and "mark
+my essay done" (`update_assignment_status`, which asks first once the
+conversation holds Notion text). Nothing else of Notion: no lecture recorder,
+no new assignments, and never your `NOTION_TOKEN`.
+
+- If they shared no Assignments database, or more than one, Settings says so
+  ("share only your Assignments database") and the tools stay off; they tap
+  **Reconnect Notion** and share just that one. There is no picker.
+- Their sign-in is stored encrypted (`<dir>/<id>/notion.enc`, with the same
+  `USER_DATA_KEY` as their Anthropic key; SECURITY.md). Without
+  `USER_DATA_KEY` the server refuses to connect Notion and says why.
+- **Disconnect Notion**, **Delete my account** and **Remove** revoke the
+  token at Notion (best effort: a failure there never stops the delete) and
+  delete the file.
+
+One-time setup for you:
+
+1. notion.so/profile/integrations -> **New integration**, type **Public**,
+   capabilities *Read content* and *Update content* (no user information
+   with email). Fill in the company name, website, privacy policy URL
+   (`https://<cloud>/privacy`), terms URL (`https://<cloud>/terms`) and
+   support email. Redirect URI: `https://<cloud>/notion/callback` (e.g.
+   `https://hey-claude.onrender.com/notion/callback`). It doesn't need a
+   Marketplace listing.
+2. Copy the **OAuth client ID** and **OAuth client secret** (the secret is
+   shown once) into Render -> hey-claude -> Environment as
+   `NOTION_OAUTH_CLIENT_ID` and `NOTION_OAUTH_CLIENT_SECRET`, with
+   `PUBLIC_ORIGIN` set (the redirect URI comes from it), then Save.
+3. Optional: publish an "Assignments" template page and set it as the
+   integration's template; testers who pick it get a copy, which is chosen
+   even if they also share another matching database.
+
+Without step 2 (or with `[family] notion = false`) the button stays hidden.
+A custom domain later changes the redirect URI: update it in the
+integration too.
+
 What they never get: your Notion, Pinecone memory and notes, your Google
 Calendar and Gmail, the dev team, the lecture recorder and tutor, your
 history, failover, or the invite menu. Their **Sign out everywhere** signs
 out only their own phones; yours signs out only yours. Settings: `[family]`
 in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
-`google_client`, `public_google_client`, `max_history_mb`, `zh_stt_model`,
-`zh_piper_voice`).
+`google_client`, `public_google_client`, `notion`, `max_history_mb`,
+`zh_stt_model`, `zh_piper_voice`).
 
 ## Public beta: landing page and waitlist (cloud)
 

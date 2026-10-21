@@ -300,7 +300,11 @@ DEFAULTS: dict = {
         # Google Cloud project (GOOGLE_PUBLIC_CLIENT_JSON, or this file);
         # unset: beta testers can't connect Google (never the family client)
         "public_google_client": "",
-        "max_history_mb": 20,       # each person's history (not [history] max_mb)
+        # Their own Notion's Assignments database (notion_web.py, either
+        # tier): needs a public Notion integration (NOTION_OAUTH_CLIENT_ID,
+        # NOTION_OAUTH_CLIENT_SECRET), the server's address and USER_DATA_KEY
+        "notion": True,
+        "max_history_mb": 20,      # each person's history (not [history] max_mb)
         # "Download my data" (account.py): the zip's contents, before
         # compression, at most this big
         "export_max_mb": 50,
@@ -370,7 +374,8 @@ ENV_OVERRIDES = {
 ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
-                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "USER_DATA_KEY")
+                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "USER_DATA_KEY",
+                     "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET")
 # USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
 # so a separate instance sets its own (or none) and never borrows the
 # owner's from the shell.
@@ -447,7 +452,9 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "GOOGLE_PUBLIC_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
                    "DISCORD_BOT_TOKEN", "GITHUB_TOKEN",
                    # opens the people's own Anthropic keys (userkeys.py)
-                   "USER_DATA_KEY")
+                   "USER_DATA_KEY",
+                   # the public Notion integration (notion_web.py)
+                   "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens

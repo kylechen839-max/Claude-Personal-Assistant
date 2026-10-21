@@ -842,6 +842,66 @@ a PKCE challenge, `access_type=offline` and the redirect
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
 
+## Notion sign-in for invited people (`notion_web.py`, public beta G6)
+
+A family member or beta tester can connect their own Notion through a
+public Notion integration (`NOTION_OAUTH_CLIENT_ID` /
+`NOTION_OAUTH_CLIENT_SECRET`, both in `SECRET_ENV_VARS` and
+`ISOLATED_ENV_VARS`). The owner gets 404 from every `/api/notion/*` route:
+Kyle's Notion stays `NOTION_TOKEN` on his machines.
+
+- **The callback is authenticated exactly like Google's** (above): random
+  `state` made only for a signed-in session, in memory only (4 per person,
+  32 in all, 10 minutes), used once, bound to the person and session; plus
+  the `hc_notion` HttpOnly, Secure, `SameSite=Lax` cookie (path
+  `/notion/callback`) whose nonce's SHA-256 is kept with the state and
+  compared in constant time. An unknown, replayed, `error=` or
+  other-browser callback, a signed-out session or a removed person gets a
+  400 before any call to Notion, and nothing is written. CloudGuard lets
+  `/notion/callback` (and the page code `/notion.js`) through without a
+  session; every other route needs one.
+- **No PKCE** (Notion doesn't document it): the client secret never leaves
+  the server (Basic auth on the token call, never in a URL or the page) and
+  a code only works with the registered redirect URI. The redirect URI is
+  `own_origin + /notion/callback`, never taken from the request.
+- **Stored encrypted, bound to the person.** The token answer is kept as
+  `<dir>/<id>/notion.enc`: Fernet under an HKDF key from `USER_DATA_KEY`
+  with its own label (`hey-claude/notion-token/v1`), so it never opens as an
+  Anthropic key file or the other way round, with the person's id inside
+  the ciphertext (a file copied into another folder doesn't open). Written
+  with `write_private`. Only the access and refresh tokens, bot and
+  workspace ids, workspace name and the chosen database's ids and title
+  are kept; Notion's `owner.user` (their email) is dropped. Without a usable
+  `USER_DATA_KEY` connect answers 503 and no code is ever exchanged.
+- **Their token only.** The two tools (`list_assignments`,
+  `update_assignment_status`) always get a client built on the person's own
+  token: `NotionAssignments` would otherwise fall back to `NOTION_TOKEN`
+  (a test sets Kyle's and checks no request carries it). Both results are
+  `untrusted_output` (a title can be written to steer Claude) and
+  `private`; the status change asks first once the conversation is tainted.
+- **Refresh**: only after a 401, once, under a per-person lock (two turns
+  never both refresh; the second uses the first's new token). A new refresh
+  token is stored when Notion sends one, else the old one is kept. If the
+  refresh fails the tool says "reconnect Notion".
+- **Revoked on the way out**: Disconnect, "Delete my account" and the
+  owner's Remove call `POST /v1/oauth/revoke` (token in the JSON body)
+  before the file goes. Best effort: a failure is logged by type and never
+  blocks the delete.
+- **Logs**: ids, counts and error type names only. The SDK gets its own
+  logger at ERROR, because its warnings quote Notion's error messages,
+  which can echo a request body (a filter holding a title); Notion's error
+  text is also replaced by its error code before it reaches Claude or the
+  tool-failure log. A caplog test checks that no token, code, nonce,
+  client secret, email, workspace name, database title or assignment title
+  is logged at any level.
+- **Bounded**: pending sign-ins as above; one search (`page_size` 100, one
+  page) at connect; a 10 s timeout per request; the cached per-person
+  client and refresh lock exist only for listed people and go on removal.
+- Not fixed (deliberate): no database picker. Exactly one shared data
+  source with the Assignments schema is used (preferring the copy of the
+  integration's template); otherwise the tools stay off and Settings says
+  to share only that database and reconnect.
+
 ## Smart home (`tools/home_assistant.py`)
 
 Home Assistant controls physical things, including the front door, so its

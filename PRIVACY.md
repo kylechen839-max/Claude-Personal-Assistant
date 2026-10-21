@@ -59,6 +59,16 @@ account under Anthropic's terms. Removing the key in Settings, or deleting your
 account, deletes it. We also keep a monthly token and cost estimate for your
 key in your folder, shown only to you.
 
+If you connect Notion, the server stores, encrypted with a server secret and
+readable only for your own requests: a Notion access token and refresh token
+for the pages you chose to share, your workspace's id and name, and the id and
+name of the Assignments database it found. Notion's record of your email
+address is not stored. Your assignment titles, due dates and statuses are read
+from Notion when you ask and sent to Anthropic as part of the conversation;
+status changes you confirm are written back to Notion. Disconnecting, deleting
+your account, or being removed asks Notion to revoke the token and deletes it;
+you can also remove Hey Claude in Notion under Settings, Connections.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own
