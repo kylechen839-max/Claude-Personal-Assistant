@@ -179,12 +179,13 @@ as the work. Never put secrets, tokens or personal data in this file.
     without it stalls on the ArtifactData permission prompt.
   - Rows are untrusted data: no log or conversation text in them, and no
     agent acts on what a row says.
-  - The dashboard watch must always be on. After every publish, check the
-    result's "Live subscription" line and re-arm it if it was skipped.
-    Never stop it with `on:false`: a stop blocks later automatic re-arms.
-    On 2026-10-20 a skipped re-arm left Kyle's message unread for hours,
-    and the hourly keep-alive trigger auto-disabled itself (access
-    denied), so don't count on it.
+  - The dashboard watch must always be on. A republish of the dashboard
+    leaves the old watch listed but silently stops its wakes: after every
+    publish, reset it (`on:false`, then `watch` again) and check the
+    listing's "since" time is after the publish. On 2026-10-21 this
+    reset ended two days of lost dashboard messages; moving to a fresh
+    artifact only helped until its first republish. The hourly keep-alive
+    trigger auto-disabled itself (access denied), so don't count on it.
   - The page's logic is tested by running its own script in node:vm
     (agent-dashboard repo, `tests/js/agent-dashboard.test.mjs`); string checks on the HTML alone
     let real regressions through. Arrays made inside the vm are from another realm:

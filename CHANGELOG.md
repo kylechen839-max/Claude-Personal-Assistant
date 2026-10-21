@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Dev team: after every dashboard publish the master resets its watch
+  (off, then on). A republish silently stopped dashboard wakes, which is
+  why messages went unanswered for two days.
 - The agent dashboard (page, row schemas, desktop launchers and their
   tests) moved to its own private repo, kylechen839-max/agent-dashboard.
   The dashboard watchdog prompt is now `docs/WATCHDOG.md`.

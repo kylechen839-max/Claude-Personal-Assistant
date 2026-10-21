@@ -141,3 +141,16 @@ def test_watchdog_prompt_is_one_fenced_block():
         assert needed in prompt, needed
     # The watchdog never touches a terminal row.
     assert "pr_ready, blocked, done or dead" in prompt
+
+
+def test_skill_resets_the_dashboard_watch_after_every_publish():
+    """A republish leaves the old watch listed but stops its wakes; only an
+    off-then-on reset brings them back (2026-10-21)."""
+    skill = SKILL.read_text(encoding="utf-8")
+    rule = next(line for line in skill.splitlines()
+                if line.startswith("- After EVERY publish of the dashboard"))
+    assert "on:false" in rule and rule.index("on:false") < rule.rindex('action:"watch"')
+    assert '"since"' in rule
+    assert "Never stop the dashboard watch" not in skill
+    memory = (ROOT / ".claude" / "TEAM_MEMORY.md").read_text(encoding="utf-8")
+    assert "reset it (`on:false`, then `watch` again)" in memory
