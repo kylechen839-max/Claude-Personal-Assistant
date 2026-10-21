@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed: CI went red when anthropic 2.0 came out (it sends API keys as a
+  Bearer token, so people's own keys no longer went out as X-Api-Key).
+  requirements.txt now keeps the SDK below 2.
 - Fixed: with `[tts] family_paid_voices` on, beta testers could pick
   ElevenLabs voices on the owner's bill. Paid voices now go only to
   family-tier members (and the owner); a beta tester never sees them, can't

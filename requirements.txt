@@ -1,5 +1,5 @@
 # 0.77+: messages.create takes output_config (lecture notes use structured outputs)
-anthropic>=0.77
+anthropic>=0.77,<2  # 2.0 sends API keys as a Bearer token; userkeys tests pin X-Api-Key
 numpy>=1.24
 pyttsx3>=2.90
 # Piper neural TTS; wheels for Windows x64, Linux x86_64 and aarch64 (Pi), Python 3.9+
