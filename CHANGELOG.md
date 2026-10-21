@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Invited people (family and beta) now have per-person limits: 6 messages a
+  minute, 200 a day and 30 minutes of speech recognition a day by default
+  (`[family] turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`; 0 =
+  off). Over a limit, the app says so in their language and nothing is sent to
+  Claude. When speech time runs out they can still type. The owner is never
+  limited. Counts are kept in memory, so a restart resets them. A spoken
+  yes/no is only transcribed once per question, and when speech time is used
+  up it isn't heard; the question stays open for the buttons or typing.
 - Invited people can download their data (a zip of their conversations and
   profile) and delete their account (revokes Google access, signs out
   everywhere, deletes everything) from Settings, in English and Chinese. New

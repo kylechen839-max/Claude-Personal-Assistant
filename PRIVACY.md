@@ -76,6 +76,13 @@ account under Anthropic's terms. Removing the key in Settings, or deleting your
 account, deletes it. We also keep a monthly token and cost estimate for your
 key in your folder, shown only to you.
 
+To keep the shared server fair, the app counts how many messages each invited
+person sends and how many seconds of their speech it transcribes, per minute
+and per day. Only the counts, and the times of the messages sent in the last
+minute, are kept, with their account id, in the server's memory. They are never written to disk, they reset when the server restarts,
+and they are deleted when the account is removed. No text or audio is kept for
+this.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own
