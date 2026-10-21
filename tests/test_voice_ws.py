@@ -345,7 +345,10 @@ def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
     # The turn's marks use time.monotonic (about 16 ms ticks on Windows), the
     # renders time.perf_counter, so with no slow Whisper the difference can
     # come out a few ms below zero (-0.005 s once): allow 50 ms of clock slack.
-    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
+    # The slow-Whisper case (0.1 s renders) gets the same 0.6 s of room: with
+    # 0.3 s a loaded Windows runner failed it once (the fake Claude stream
+    # alone took 0.47 s), and its renders are too short to tell apart anyway.
+    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + 0.75 * 0.8
 
 
 @pytest.mark.slow
