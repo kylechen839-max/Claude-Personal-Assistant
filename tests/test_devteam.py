@@ -1,6 +1,7 @@
 """Dev team coordinator link: sending through the Claude Code CLI (mocked)
 and reading replies from the Notion inbox (mocked)."""
 
+import inspect
 import json
 import subprocess
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from assistant import devteam
 from assistant.config import DEFAULTS
 from assistant.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
                                session_id)
@@ -170,57 +172,44 @@ def test_prompt_mentions_dev_team(tmp_path):
     assert "message_dev_team" in ClaudeChat(client=object(), tools=registry).build_system()
 
 
-def test_hub_source_sets_header_prefix_and_cap(tmp_path):
+def test_voice_message_header_prefix_and_cap(tmp_path):
     run = ok_run()
-    team = link(tmp_path, run=run)
-    voice = team.send("x" * 5000)
-    assert voice["reply_id"].startswith("hc-")
-    assert run.calls[0][1]["input"].startswith(f"[Hey Claude voice | reply id {voice['reply_id']}]")
-    assert "x" * 4000 + "\n" in run.calls[0][1]["input"]
-    assert "x" * 4001 not in run.calls[0][1]["input"]
-    hub = team.send("y" * 13000, source="hub", session="cse_other1")
-    assert hub["reply_id"].startswith("hub-")
-    args, kw = run.calls[1]
-    assert args[3] == "cse_other1"  # the hub's window, not coordinator_session
-    assert kw["input"].startswith(f"[Hey Claude hub | reply id {hub['reply_id']}]")
-    assert "y" * 12000 + "\n" in kw["input"] and "y" * 12001 not in kw["input"]
+    sent = link(tmp_path, run=run).send("x" * 5000)
+    assert sent["reply_id"].startswith("hc-")
+    message = run.calls[0][1]["input"]
+    assert message.startswith(f"[Hey Claude voice | reply id {sent['reply_id']}]")
+    assert "x" * 4000 + "\n" in message and "x" * 4001 not in message
 
 
-def test_replies_max_chars(tmp_path):
+def test_watchdog_alerts_have_their_own_header_and_no_hub_source(tmp_path):
+    """watch.py sends with source="watch"; the hub's source is gone."""
+    run = ok_run()
+    sent = link(tmp_path, run=run).send("Mom's app is failing", source="watch")
+    assert sent["reply_id"].startswith("hc-")
+    message = run.calls[0][1]["input"]
+    assert message.startswith(f"[Hey Claude watchdog | reply id {sent['reply_id']}]")
+    assert set(devteam.SOURCES) == {"voice", "watch"}
+    assert "session" not in inspect.signature(devteam.CoordinatorLink.send).parameters
+
+
+def test_replies_are_capped_for_speech(tmp_path):
     notion = FakeNotion()
     team = link(tmp_path, notion=notion)
-    a = team.send("x")["reply_id"]
-    b = team.send("y")["reply_id"]
-    notion.rows = [row(a, "r" * 5000)]
-    assert len(team.replies()[0]["reply"]) == 1200  # voice: unchanged
-    notion.rows = [row(b, "s" * 15000)]
-    assert len(team.replies(max_chars=12000)[0]["reply"]) == 12000
+    rid = team.send("x")["reply_id"]
+    notion.rows = [row(rid, "r" * 5000)]
+    assert len(team.replies()[0]["reply"]) == 1200
 
 
-def test_presence_reads_the_newest_row(tmp_path):
-    notion = FakeNotion()
-    team = link(tmp_path, notion=notion)
-    assert team.presence() == {"status": "", "text": "", "at": ""}
-    tail = SID.split("_", 1)[1]
-    notion.rows = [row(f"presence-{tail}", "Running the judge " * 10, status="working",
-                       edited="2026-10-20T15:31:00.000Z"),
-                   row(f"presence-{tail}", "older", status="idle")]
-    got = team.presence()
-    assert got["status"] == "working" and got["at"] == "2026-10-20T15:31:00.000Z"
-    assert len(got["text"]) == 80
-    q = notion.queries[-1]
-    assert q["filter"] == {"or": [{"property": "Reply ID", "title": {"equals": f"presence-{tail}"}}]}
-    assert q["sorts"][0]["direction"] == "descending"
-    assert team.pending() == []  # reading presence never adds or pops a reply
-
-
-def test_inbox_has_the_idle_status(tmp_path):
+def test_inbox_statuses(tmp_path):
+    """The PC hub (and its idle presence rows) is gone: a new inbox gets
+    only the three reply statuses."""
     notion = FakeNotion(existing=False)
     team = link(tmp_path, notion=notion,
                 assignments=SimpleNamespace(parent_page_id=lambda: "p"))
-    team.presence()
+    team.send("x")
+    team.replies()
     options = notion.created[0]["initial_data_source"]["properties"]["Status"]["select"]["options"]
-    assert [o["name"] for o in options] == ["answered", "working", "blocked", "idle"]
+    assert [o["name"] for o in options] == ["answered", "working", "blocked"]
 
 
 def test_state_is_written_privately_and_atomically(tmp_path, monkeypatch):
@@ -308,3 +297,30 @@ def test_pending_and_save_wait_for_the_state_lock(tmp_path):
         assert done.is_set()
     assert team.pending() == ["hc-new"]
     assert "hc-new" in (tmp_path / "devteam.json").read_text()
+
+
+def test_pc_hub_is_gone():
+    """The PC hub (/devteam on the web app) was removed on 2026-10-20: no
+    module, no create_app hook, no [devteam] hub settings."""
+    import importlib.util
+    import inspect
+
+    from assistant import webapp
+
+    assert importlib.util.find_spec("assistant.devhub") is None
+    assert "hub" not in inspect.signature(webapp.create_app).parameters
+    assert not hasattr(webapp, "HUB_PROXY_WARNING")
+    assert set(DEFAULTS["devteam"]) == {"enabled", "coordinator_session", "claude_command",
+                                        "repo_dir", "timeout", "state_file"}
+
+
+def test_old_hub_settings_still_load(tmp_path):
+    """A PC whose config.local.toml still has the hub keys starts as before."""
+    from assistant.config import load_config
+
+    (tmp_path / "config.toml").write_text("")
+    (tmp_path / "config.local.toml").write_text(
+        '[devteam]\nhub = true\nhub_sessions = ["session_x"]\npoll_seconds = 4\n'
+        'hub_state_file = "data/devhub.json"\n')
+    config = load_config(tmp_path / "config.toml", env_file=None, profile="")
+    assert config["devteam"]["enabled"] is False

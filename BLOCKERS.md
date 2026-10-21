@@ -208,6 +208,12 @@ Only what is still open for Kyle. None of it blocks the code.
       `SPOTIFY_CLIENT_ID`, set `[spotify] enabled = true` in
       `config.local.toml`, and run `python -m assistant.tools.spotify` once
       (README "Spotify by voice"). Until then the Spotify tools stay off.
+- [ ] **Cloud uptime alerts and error tracking (optional, free, ~10 min).**
+      Only you can sign up: an UptimeRobot monitor on
+      `https://<your service>.onrender.com/healthz`, and (if you want crash
+      reports) a Sentry Python project whose DSN goes into Render's
+      `SENTRY_DSN` (README "Uptime, error tracking and backups"). Without them nothing changes: no reports
+      are sent and the PC watchdog's `[watch] cloud_url` still works.
 
 ## Resolved (2026-10-17)
 - Anthropic API key in `.env`; default model `claude-sonnet-5-5`

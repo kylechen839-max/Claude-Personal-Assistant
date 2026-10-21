@@ -17,6 +17,7 @@ except to the services listed below, using your own keys.
 | **Slack / Discord / GitHub** (only if `[teamchat]` is on) | Reads and searches you ask for, with your token; the message, issue or file text goes to Anthropic so Claude can sum it up, as with email. Nothing is ever posted. Slack direct messages are never passed to Claude or logged. A digest you approve is saved in your Notion. Logs hold only counts and service names. A family member's instance never uses team chat | When you ask about team chat |
 | **Web search / fetch** (Anthropic-run tools) | The search query or URL | When Claude decides to look something up |
 | **ElevenLabs** (only if `ELEVENLABS_API_KEY` is set) | The reply text to be spoken | Each reply |
+| **Sentry** (only if `SENTRY_DSN` is set) | Error reports: the error's type and code location, the request's method and path, the app version and Python version. Never what you said, the error's message, cookies, IP or request contents | When something fails |
 | **Hugging Face / GitHub releases** | Nothing about you: model downloads. Kokoro is checksum-verified at setup; Piper voices download at setup, and the Whisper and openWakeWord models on first use, without a checksum check | Once per model |
 
 Some requests are answered by Claude Haiku instead of Claude Sonnet; both are
@@ -37,11 +38,27 @@ Invited people can download or delete their own account at any time from
 Settings. Download my data gives a zip of their conversations and profile
 (name, language, time zone, account type, date joined); it never includes
 Google sign-in tokens or API keys. The zip is built on the server only for
-the download and removed when it ends, or when the account is deleted. Delete my account takes effect at once in
-the app: it asks Google to revoke Hey Claude's access, signs them out on every
+the download and removed when it ends, or when the account is deleted.
+Delete my account takes effect at once in the app: it asks Google to revoke Hey Claude's access, signs them out on every
 device and permanently deletes their conversations, Google connection and any
 key they added. Render's automatic disk snapshots may keep a copy until they
-expire; they are not used to restore individual accounts.
+expire; they are not used to restore individual accounts. A backup the
+owner downloaded earlier also keeps its copy until the owner deletes it.
+
+If the owner turns on error reports (`SENTRY_DSN`), a crash or an error the
+app logs sends Sentry the error's type, where in the code it happened (file,
+function, line), the request's method and path, the app version and profile,
+the Python version, and for the app's own error logs the logger's name and its
+fixed message template. Error reports never include what you said or typed,
+the error's message, your email, cookies, IP address or request contents.
+There is no tracing, and no Sentry headers are added to the app's calls to
+Claude, Google or Notion.
+
+The owner can download a backup of the cloud server (`GET /api/backup`, the
+owner only): every account's conversations, the family list (names,
+languages, time zones, account types; no sign-in tokens or API keys) and the
+waitlist. A conversation or account deleted after a backup was downloaded
+stays in that backup file until the owner deletes it.
 
 Waitlist (cloud, only once `[webapp] public_site` is on): the email address
 and optional note (at most 300 characters) people leave on /welcome, and the
@@ -99,8 +116,7 @@ All paths are relative to the project folder unless noted. On Render the
 | Health checks (watchdog) | `data/watch_status.json` (private file), `logs/watch.log` | Each app's check results: names, versions, times and fixed reasons such as "healthz: HTTP 502", never what anyone said. Its test conversations (a made-up question about your calendar, a number to remember) go to Anthropic like any turn, read your calendar or assignments (read-only), never search or save memory, and are never saved to history. When the dev team coordinator is set up, a change (an app down or recovered, a version refused) is sent to your own Claude Code session with the same fixed wording |
 | Logs | `logs/assistant.log` (rotating, ~4 MB max); on Render, the same lines also go to Render's log service (its dashboard and retention) | INFO level records lengths, yes/no answers and tool names, **not** what you said, replies, email text or memory summaries. Those appear only at DEBUG, which is off by default |
 | Downloaded models | `models/`, `voices/` | No personal data |
-| PC hub (optional) | `data/devhub.json` on the PC (`[devteam] hub_state_file`), a private file | The messages you type to the dev team coordinator and its replies, at most 200 per window. Clear deletes a window's conversation; removing a session from `hub_sessions` deletes its saved conversation at the next start. Messages go to your own Claude Code cloud session through the CLI; replies are read from your Notion "Hey Claude coordinator inbox" |
-| Dev team dashboard chat | The dashboard artifact's db on claude.ai, under your private `data/users/<your id>/chat-<session>/msgs` subtree (readable only by you) | Your messages to a `/build-feature` coordinator and its replies, written by the coordinator; the page only reads them. Messages you send from the chat box are also posted as comments on the artifact (claude.ai asks for consent once). Chats older than 30 days are pruned. The page's browser storage holds only the view, window layout, filter and the coordinator you picked (one claude.ai session link); it never leaves your browser |
+| Dev team dashboard chat | The dashboard artifact's db on claude.ai (the page now lives in the private kylechen839-max/agent-dashboard repo; this repo's `/build-feature` master writes the chat), under your private `data/users/<your id>/chat-<session>/msgs` subtree (readable only by you) | Your messages to a `/build-feature` coordinator and its replies, written by the coordinator; the page only reads them. Messages you send from the chat box are also posted as comments on the artifact (claude.ai asks for consent once). Chats older than 30 days are pruned. Files you paste or drop into the chat box are stored in the dashboard artifact's asset store, which only you (its owner and editor) can open, and kept until you delete them or the artifact. The page's browser storage holds only the view, window layout (including which windows you hid), filter, the coordinator you picked (one claude.ai session link) and whether auto-close is on; it never leaves your browser |
 
 ## Your controls
 
@@ -128,7 +144,8 @@ zone, invite status and only a SHA-256 hash of their one-time invite link in
 server's admin, can read). Their messages go to Anthropic under your API
 key, and their web searches send only their time zone as location. Their
 data is never synced to your Pi or PC, never put in Pinecone or Notion, and
-not visible to your account in the app. Removing someone signs them out and
+not visible to your account in the app, except in the owner's backup
+download, which holds every account's conversations. Removing someone signs them out and
 deletes their folder and entry; if a file can't be deleted right away, the
 server retries at the next start, the next removal, or when you open the
 family list.

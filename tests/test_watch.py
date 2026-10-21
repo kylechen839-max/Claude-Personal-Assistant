@@ -282,6 +282,37 @@ def test_alerts_only_when_the_state_changes(world):
     assert status["instances"]["main"]["status"] == "ok"
 
 
+def test_cloud_url_is_checked_and_alerted_on_but_never_healed(world):
+    """[watch] cloud_url: the Render copy's /healthz, from Kyle's PC. Down:
+    one alert, no restart or rollback here; back: one recovery alert."""
+    cloud = "https://hey-claude.onrender.com"
+    world.apps.add(8765)
+    world.apps.public[cloud] = 200
+    settings = load_config(None, None)
+    settings["watch"]["cloud_url"] = cloud + "/"
+    w = world.make(settings=settings)
+    status = w.run()
+    assert status["instances"]["cloud"]["status"] == "ok"
+    assert status["instances"]["cloud"]["label"] == "Cloud app"
+    assert world.sent == []
+    world.apps.public[cloud] = 502
+    for _ in range(3):
+        later(world)
+        status = w.run()
+    assert world.sent == [s for s in world.sent if s.startswith("Cloud app is failing")]
+    assert len(world.sent) == 1 and "healthz: HTTP 502" in world.sent[0]
+    assert world.git.restarts == [] and world.git.resets() == []
+    assert status["instances"]["main"]["status"] == "ok"
+    banner = watch.banner(status, now=world.clock())
+    assert [i["label"] for i in banner["issues"]] == ["Cloud app"]
+    world.apps.public[cloud] = 200
+    w.run()
+    assert len(world.sent) == 2 and world.sent[1].startswith("Cloud app recovered at")
+    # off by default: no cloud entry at all
+    assert DEFAULTS["watch"]["cloud_url"] == ""
+    assert "cloud" not in world.make().run()["instances"]
+
+
 def test_self_heal_restarts_once_per_failure(world):
     world.apps.add(8765, up=False)
     w = world.make()
@@ -461,7 +492,7 @@ def test_gate_check_runs_each_instance_on_its_side_port(tmp_path):
 def test_candidate_config_shares_nothing_it_could_break():
     cfg = watch.candidate_config(load_config(None, None), "config.mom.toml")
     assert cfg["candidate"] and not cfg["history"]["enabled"]
-    assert cfg["webapp"]["sessions_file"] == "" and not cfg["devteam"]["hub"]
+    assert cfg["webapp"]["sessions_file"] == "" and "hub" not in cfg["devteam"]
     assert cfg["logging"]["file"] == "logs/candidate-config.mom.log"
 
 
@@ -586,6 +617,32 @@ def test_deploy_switches_after_the_gate_passes(world):
     assert deploy.deploy(w, output_fn=out.append) == 0, out
     assert world.git.restarts == ["mom"] and w.up.applied() == NEW
     assert w.up.last_good() == NEW
+
+
+def test_deploy_passes_while_the_cloud_is_down(world):
+    """[watch] cloud_url failing (Render down) isn't this PC's deploy failing."""
+    world.git.head = OLD
+    world.apps.add(8766, version=OLD)
+    world.apps.public["https://hey-claude.onrender.com"] = 503
+
+    def run(cmd, cwd, timeout=0):
+        if cmd[1:3] == ["merge", "--ff-only"]:
+            world.git.head = NEW
+            return 0, ""
+        return world.git(cmd, cwd, timeout)
+
+    world.git.on_restart = lambda name: world.apps.state[8766].update(version=NEW[:7])
+    settings = load_config(None, None)
+    settings["watch"]["cloud_url"] = "https://hey-claude.onrender.com"
+    w = world.make(instances=[make_instance("mom", 8766)], gate=lambda sha: (True, ""),
+                   settings=settings)
+    w.up.run = run
+    out = []
+    assert deploy.deploy(w, output_fn=out.append) == 0, out
+    assert w.status["instances"]["cloud"]["status"] == "failing"
+    assert w.status["instances"]["cloud"]["remote"] is True
+    assert "remote" not in w.status["instances"]["mom"]
+    assert any("Cloud app" in line and "FAILING" in line for line in out)
 
 
 # ----- the banner, the owner's only -----------------------------------------------------
