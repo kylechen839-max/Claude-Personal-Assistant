@@ -331,3 +331,49 @@ test('Chinese page: the new attachment errors are translated', () => {
                '这个文件太长了，Claude 处理不了（PDF 最多 100 页）。');
   assert.equal(t("Claude couldn't read that file."), 'Claude 读不了这个文件。');
 });
+
+test('a beta tester (gmail false) never sees mail wording', async () => {
+  const gs = { enabled: true, connected: false, disconnect: true, gmail: false, note: null };
+  for (const lang of ['en', 'zh-CN']) {
+    const p = page(lang, { gstatus: gs });
+    await p.flush();
+    assert.equal(p.guide.hidden, false);
+    assert.doesNotMatch(p.guideText.textContent, /email|邮件|family|家人/);
+    assert.match(p.guideText.textContent, lang === 'en' ? /see your calendar:/ : /我就能看你的日历：/);
+  }
+  const done = page('en', { gstatus: { ...gs, connected: true }, standalone: true });
+  await done.flush();
+  assert.match(done.guideText.textContent, /What's on my calendar tomorrow/);
+  assert.doesNotMatch(done.guideText.textContent, /email/);
+  for (const fn of done.unlink.listeners.click) await fn();
+  assert.deepEqual(done.asked, ["Disconnect your Google account? I won't see your calendar any more."]);
+  const zh = page('zh-CN', { gstatus: { ...gs, connected: true }, standalone: true });
+  await zh.flush();
+  for (const fn of zh.unlink.listeners.click) await fn();
+  assert.deepEqual(zh.asked, ['要断开你的 Google 账户吗？之后我就看不到你的日历了。']);
+  // a family member's status keeps today's wording
+  const fam = page('en', { gstatus: { ...gs, gmail: true, connected: true }, standalone: true });
+  await fam.flush();
+  assert.match(fam.guideText.textContent, /Any new email today/);
+});
+
+test('a beta tester without the public client sees why Google is off', async () => {
+  const note = "Google isn't set up for beta accounts yet.";
+  for (const [lang, said] of [['en', note], ['zh-CN', '测试版账户暂时还不能连接 Google。']]) {
+    const p = page(lang, { gstatus: { enabled: false, connected: false, disconnect: true,
+                                      gmail: false, note } });
+    await p.flush();
+    assert.equal(p.google.hidden, true);
+    assert.equal(p.hint.hidden, false);
+    assert.equal(p.hint.textContent, said);
+  }
+});
+
+test('the invite form\'s tier labels are translated', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.HeyClaudeI18n.translate(s);
+  assert.equal(t('Account'), '账户类型');
+  assert.equal(t('Beta (Calendar only)'), '测试版（只有日历）');
+  assert.equal(t('Family (Calendar and Gmail)'), '家人（日历和 Gmail）');
+  assert.equal(t('Active · Beta'), '已加入 · 测试版');
+});

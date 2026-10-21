@@ -79,7 +79,8 @@ def test_status_and_consent_url(setup):
     connect, _, client, _ = setup
     login(client)
     assert client.get("/api/google/status").json() == {"enabled": True, "connected": False,
-                                                       "disconnect": False}
+                                                       "disconnect": False,
+                                                       "gmail": True, "note": None}
     q = start(client)
     assert q["redirect_uri"] == [ORIGIN + "/google/callback"]
     assert q["access_type"] == ["offline"] and q["prompt"] == ["consent"]
@@ -130,7 +131,8 @@ def test_callback_saves_the_token_and_adds_the_tools(setup, caplog):
         assert assistant.tools.has(name), name
         assert session.registry.has(name), name
     assert client.get("/api/google/status").json() == {"enabled": True, "connected": True,
-                                                       "disconnect": False}
+                                                       "disconnect": False,
+                                                       "gmail": True, "note": None}
     # replaying the same callback does nothing
     with patch("google_auth_oauthlib.flow.Flow.fetch_token") as again:
         r = client.get("/google/callback", params={"state": state, "code": "4/secret-code"},
