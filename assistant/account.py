@@ -1,8 +1,9 @@
 """Account self-service for invited people (family.py): "Download my data"
 and "Delete my account" in their own Settings (web/family.js).
 
-  GET  /api/me/export   a zip of their conversations (history.export JSON)
-                        and profile; never tokens or keys
+  GET  /api/me/export   a zip of their conversations (history.export JSON),
+                        profile and school deadlines (deadlines.json); never
+                        tokens, keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
                         Notion and Google grants (best effort), then
                         Family.remove
@@ -291,6 +292,10 @@ class Account:
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             add(zf, "profile.json", json.dumps(profile(user), indent=2,
                                                ensure_ascii=False))
+            due = getattr(self.family, "deadlines", None)
+            if due is not None:  # their school deadlines; never their Canvas link
+                add(zf, "deadlines.json", json.dumps(due.export(user["id"]), indent=2,
+                                                     ensure_ascii=False))
             offset = 0
             while store is not None:
                 page = store.list(limit=PAGE, offset=offset, archived=None)

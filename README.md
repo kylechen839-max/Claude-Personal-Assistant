@@ -637,7 +637,10 @@ One-time setup on the PC (PowerShell, in the project folder):
    to her log (`logs/mom.log`), since the sign-in task runs hidden. The
    same check runs whenever `[webapp] google_connect` is on. Your team chat
    tokens don't matter here: an instance started with an `--env-file`
-   other than `.env` never turns team chat on.
+   other than `.env` never turns team chat on. School deadlines are off in
+   such a copy too unless its config gives it its own `[student] dir`
+   (otherwise it would share your deadlines file); `config.mom.toml` sets
+   `data/mom/student` and leaves them off.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
@@ -1265,6 +1268,52 @@ reply is spoken with the maths read naturally ("x squared over 2"). The
 phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
+
+### Student deadlines (Canvas)
+"What's due this week?", "when is my physics midterm?", "add my lab report,
+due Friday at 5". Deadlines (exams, assignments, quizzes, classes) are kept
+per person, captured from Canvas, from Canvas's notification emails, or
+said by hand, and the phone menu's **School deadlines** card shows "What I
+captured" with **Looks right**, **This date is right** / **Not this one**
+(when two sources disagree on a date) and **Delete**. Four tools:
+`list_deadlines`, `confirm_deadline`, `add_deadline` and `delete_deadline`
+(delete always asks first; adding or confirming asks too once the
+conversation holds captured text, which is written by other people).
+
+Connecting Canvas never uses a school password. Either:
+
+- **Calendar feed link** (simplest): in Canvas open **Calendar** ->
+  **Calendar Feed** and copy the link
+  (`https://<school>/feeds/calendars/user_….ics`). The link itself is the
+  secret (anyone with it can read your Canvas calendar): treat it like a
+  password.
+- **Access token**: Canvas -> **Account** -> **Settings** -> **New access
+  token**, plus your school's Canvas address. It reads the planner
+  (assignments, quizzes, discussions, calendar events) and, with `[canvas]
+  pages` on, the pages in your courses' modules, where Claude picks out the
+  dates.
+
+You (the owner) put `CANVAS_ICS_URL`, or `CANVAS_TOKEN` with `[canvas]
+base_url` (or `CANVAS_BASE_URL`), in `.env` (on Render: Environment).
+Invited people paste theirs in the card; it is stored encrypted with
+`USER_DATA_KEY` (without it the server says it can't store sign-ins) and
+deleted on **Disconnect Canvas** (which can also delete what came from
+Canvas) and with their account. **Sync now** fetches everything at most
+every `[student] sync_minutes` (15) per person. With `[student] gmail` on
+and Gmail connected, Canvas's notification emails from the last two weeks
+are read too (read-only; each email once), with `[student] extract_model`
+(default: the fast model). Each person's own Claude key is used for that
+when they have one.
+
+Re-syncing never duplicates anything. A date you confirmed is never
+changed by a sync (the card still shows what Canvas says now), a deleted
+item doesn't come back, and items more than 60 days past are dropped.
+Your deadlines are in `[student] dir` (`data/student`; Render
+`/data/student`); an invited person's are in their own folder under
+`[family] dir`, in their "Download my data" zip, and deleted with their
+account. Limits: `[student] max_items` (2000) per person and
+`max_per_source` (500) per source. `[student] enabled = false` turns it
+all off.
 
 ## Smart home (Home Assistant)
 
@@ -2016,8 +2065,12 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, history.py, spotify.py, tool registry
+                notion.py, notes.py, web.py, history.py, spotify.py, deadlines.py,
+                tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)
+  deadlines.py  each person's school deadlines (SQLite): sync upserts, conflicts, deletes
+  canvas.py     Canvas calendar feed, REST API, school lookup, Claude date extraction
+  student_web.py  the phone app's "School deadlines" card: connect Canvas, sync, list
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

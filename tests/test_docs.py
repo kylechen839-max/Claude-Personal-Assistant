@@ -35,6 +35,8 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "chat_channels", "chat_read", "chat_search", "chat_files",
                      "chat_read_file", "chat_save_digest",
                      "list_assignments", "update_assignment_status",
+                     "list_deadlines", "confirm_deadline", "add_deadline",
+                     "delete_deadline",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

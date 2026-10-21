@@ -269,6 +269,13 @@ as the work. Never put secrets, tokens or personal data in this file.
     every script before sign-in; on the cloud a 401 leaves it missing until
     a reload).
   - Hands-free voice is in `voice_ws.py` and `voice_session.py`.
+  - Lesson (2026-10-21, student deadlines): a state-changing route needs a
+    POST form (the failover preflight allows only GET and POST; DELETE can
+    be an alias), and any non-GET request without a Content-Length gets a
+    411 from `create_app` (tests send `Content-Length: 0`). httpx logs every
+    request URL at INFO: a URL that is itself a secret (a Canvas feed link)
+    relies on `setup_logging` keeping httpx at WARNING plus a redact
+    pattern in `config._SECRET_PATTERNS`.
   - The cloud starts through `cloud.serve`, never `webapp.serve`: a
     process-wide startup hook (e.g. `errortracking.init`) goes in
     `cli.main`; a route both get goes in `webapp.create_app` (reused by

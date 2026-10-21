@@ -90,6 +90,7 @@ def g(fake_client, tmp_path, monkeypatch):
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
     config["webapp"]["public_origin"] = ORIGIN
     config["calendar"]["token"] = str(tmp_path / "kyle_token.json")
+    config["student"]["enabled"] = False  # their deadlines: tests/test_student_web.py
     monkeypatch.setenv("GOOGLE_WEB_CLIENT_JSON", json.dumps(WEB_CLIENT))
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", json.dumps(KYLE))  # Kyle's, on the server
     # a person's own Anthropic key (userkeys.py) gets the same mocked client

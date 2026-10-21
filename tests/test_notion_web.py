@@ -189,6 +189,7 @@ def n(fake_client, tmp_path, monkeypatch):
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
     config["webapp"]["public_origin"] = ORIGIN
     config["web"]["enabled"] = False  # only the tools this piece adds
+    config["student"]["enabled"] = False  # (their deadlines: tests/test_student_web.py)
     fam = family_mod.Family(config, client=fake_client, user_client=lambda key: fake_client)
     assistant = webapp.WebAssistant(
         lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),

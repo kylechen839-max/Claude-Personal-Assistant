@@ -1725,6 +1725,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("memory.js", "text/javascript"),
                         ("spotify.js", "text/javascript"),
                         ("notion.js", "text/javascript"),
+                        ("student.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
@@ -2049,6 +2050,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import notion_web
 
     notion_web.register(app, family, web, error)  # a person's own Notion
+    from assistant import student_web
+
+    student_web.register(app, family, web, error)  # each person's own deadlines
     if public is not None:
         from assistant import public_site
 

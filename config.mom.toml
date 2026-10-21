@@ -90,3 +90,7 @@ digest_state_file = "data/mom/teamchat_digests.json"
 
 [watch]
 label = "Mom's app"           # in the watchdog's alerts and Kyle's banner
+
+[student]                     # school deadlines: off for her; her own file if switched on
+enabled = false
+dir = "data/mom/student"

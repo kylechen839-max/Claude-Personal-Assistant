@@ -187,6 +187,7 @@ def test_build_tools_registers_web(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("NOTION_TOKEN", raising=False)
     cfg = load_config(None, None)
+    cfg["student"]["enabled"] = False  # only the web tools here
     names = {s["name"] for s in cli.build_tools(cfg, lambda *_: None).schemas()}
     assert names == {"web_search", "web_fetch", "open_in_browser"}
     cfg["web"]["browser"] = False

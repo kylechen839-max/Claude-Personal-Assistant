@@ -4449,3 +4449,173 @@ Kyle approves the wording and picks the address first, in a separate PR).
     all three Remove tests.
 - **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
   over master's 2649 passed, 35 skipped); JS 118 pass.
+
+## Student assistant P1: school deadlines from Canvas (2026-10-21)
+The data foundation of the student assistant: each person's deadlines
+(exams, assignments, quizzes, classes), captured from Canvas, Canvas's
+notification emails or said by hand, with conflict handling, for the owner
+and every invited person. P2 (scheduler and push) and P3 (planner, quiz,
+screenshot import) read it through `DeadlineStore.list(uid)`.
+- **`assistant/deadlines.py`** (new): `DeadlineStore`, one SQLite per
+  person (the owner's `[student] dir`/deadlines.sqlite, an invited
+  person's `<[family] dir>/<id>/deadlines.sqlite`), `secure_delete=ON`, WAL
+  with a TRUNCATE checkpoint after every delete, one short connection per
+  call (nothing holds a file open), reads never create a file. API (uid
+  None = the owner): `list(uid)` -> `{id, course, title, kind, due,
+  status, source, source_due, captured_at}` soonest first, copies that
+  agree shown once; `propose(uid, candidates, source)` upserts on
+  (source, source_key); the same item (course code + title) with another
+  date from another source is a `conflict` on both; a confirmed date is
+  never overwritten (only `source_due` follows the feed); dismissed stays
+  dismissed; a deleted synced row leaves a SHA-256 tombstone of its key so
+  it doesn't come back; `resolve(uid, id, "confirm"|"dismiss"|date)`,
+  `add` (by hand, confirmed), `delete`, `delete_source`, `export`.
+  Bounded by `[student] max_items` / `max_per_source`; rows over 60 days
+  past are pruned and never re-added. `open_store(config)` gives the
+  process one store per config (owner tools, Family, routes share it);
+  Family sets `member_guard` so a write for someone just removed is
+  refused under Family's lock.
+- **`assistant/canvas.py`** (new): a bounded RFC 5545 reader (unfolding,
+  VEVENT/VTODO, VALARM skipped, DTSTART/DUE with `VALUE=DATE`, `Z`, `TZID`
+  or floating, SUMMARY's `[course]`, UID kinds; 2 MB, 2000 events, no new
+  dependency); `public_url` (https, port 443, no userinfo, every resolved
+  address `is_global`); `fetch_ics` (each redirect hop checked, size cap
+  while streaming); `CanvasAPI(base, token, http)` on httpx (planner items,
+  courses, assignments, module pages; `Link rel="next"` on the same host
+  only; 403/`X-Rate-Limit-Remaining` and 429 backoff 1, 2, 4 s);
+  `find_school` (Canvas's own lookup, else a guess from a domain);
+  `extract_from_pages` (structured output like `lecture.summarize`, never a
+  forced tool call; only {title, course, kind, due} kept, keyed by text so
+  a re-read doesn't duplicate; usage on the person's meter).
+- **`assistant/student_web.py`** (new): `StudentSync` (credentials, sync,
+  throttle) and the routes: `GET /api/student/items`, `POST
+  /api/student/canvas` ({ics_url} or {base_url, token}; invited people
+  only, sealed under `canvas.CANVAS_LABEL` in `<id>/canvas.enc`, 503
+  without `USER_DATA_KEY`; the owner gets 409 and uses `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` + `[canvas] base_url`), `POST /api/student/disconnect`
+  ({delete_items}), `POST /api/student/sync` (429 + Retry-After within
+  `sync_minutes`, 409 while one runs), `POST .../items/{id}/resolve`,
+  `DELETE` (and `POST .../delete`) for an item or a source, `GET
+  /api/student/schools` (10 a minute). Sync reads the feed or the planner
+  (and module pages with `[canvas] pages`), then with `[student] gmail`
+  the Canvas emails of the last 14 days (`GmailInbox.search`, read-only,
+  each email once), on the person's own key when they have one
+  (`family.UserApi`); errors come back as codes only.
+- **`assistant/tools/deadlines.py`** (new): `list_deadlines`
+  (`untrusted_output`, `private`), `confirm_deadline` and `add_deadline`
+  (`confirm_if_untrusted`), `delete_deadline` (`confirm_prompt` always);
+  questions in English and Chinese (i18n `deadline_*`).
+- **Phase B wiring**: `cli.register_student` in `build_tools`;
+  `cli.owner_gmail` split out of `register_gmail` (same behaviour);
+  `Family._deadline_tools` in `_register_tools`, `Family.gmail_inbox`
+  (now also used by `_google_tools`), `Family.while_listed`; `account`
+  export adds `deadlines.json` (never the Canvas link); one
+  `student_web.register` line in `create_app`; `[student]` and `[canvas]`
+  in `DEFAULTS` and config.toml, `[student] dir = "/data/student"` in the
+  server profile, `config.mom.toml` off with its own folder;
+  `CANVAS_BASE_URL` override; `CANVAS_TOKEN`/`CANVAS_ICS_URL` in
+  `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`, render.yaml, .env.example and
+  conftest's cleared variables; redaction patterns for feed links and
+  Canvas tokens.
+- **UI**: `assistant/web/student.js` (new, self-contained: builds its
+  own "School deadlines" card in `#student` or before the API key section,
+  text only). Not yet on the page: `/student.js` still needs the static
+  route, `sw.js` SHELL (cache bump), `cloud.py` `PUBLIC_GET` and a script
+  tag in index.html, which the P2 branch owns. Chinese strings for the card
+  (i18n.js) are left for that merge too.
+- **Tests.** New `tests/test_deadlines.py` (23), `tests/test_canvas.py`
+  (31), `tests/test_student_web.py` (27), `tests/js/student.test.mjs` (7),
+  `tests/test_contract.py` +3 (the extraction request against the
+  contract fake, plus two `output_config` refusals; live variants run in
+  CI's api-contract job), and the fixture `tests/fixtures/canvas_feed.ics`
+  in Canvas's shape (CRLF, folded lines, `VALUE=DATE`, `TZID`, a VALARM,
+  `event-assignment-123`; kept byte-exact by .gitattributes). The fake
+  Canvas answers with Canvas's planner JSON, `Link rel="next"`, the 403
+  rate limit; Claude with the Messages API's shape. Existing tests
+  updated for the new default tools: test_family's isolation test now
+  expects exactly the member's own four deadline tools bound to her id;
+  the Notion and family-Google fixtures turn `[student]` off (only the
+  tools that piece adds); test_config_cli turns it off with the rest;
+  test_account expects `deadlines.json` in the export; test_docs knows the
+  tool names.
+  - Failing first: `test_resyncing_the_same_feed_adds_no_duplicates` and
+    `test_a_confirmed_date_survives_a_changed_feed`. Reverting the
+    (source, source_key) upsert fails both (`added 3 != 0`, a second copy);
+    reverting the confirmed-date guard fails the second
+    (`2026-11-11T04:59:00Z != 2026-11-04T04:59:00Z`).
+  - Found while testing: a feed's long-past item was re-added on every
+    sync and pruned again (now skipped at proposal).
+- **Counts** (Linux sandbox, Python 3.13, not real hardware): 2739
+  passed, 37 skipped (+84 passed, +2 skipped: the live variants of the
+  extraction contract test, which need `ANTHROPIC_API_KEY`) over master
+  3b7ae54's 2655 passed, 35 skipped; JS 125 pass (+7).
+### P1 Round 2 (judge: CHANGES_NEEDED, 7 findings)
+- **HIGH 1, repeated titles:** a title that one source repeats under other
+  keys (a weekly "Lecture", a lab) was a conflict, and confirming one
+  dismissed the others. Now only rows from *different* sources can
+  conflict or be dismissed, and only when each is its source's only copy
+  of the item (`DeadlineStore._singles`). Several Canvas emails about one
+  item never conflict: the newest email's date wins, older ones that
+  disagree are dismissed and ones that agree follow it. `list` collapses
+  same-date copies across sources only (two same-day "Lab" rows from one
+  feed both show). The judge's probe now gives 0 conflicts, and
+  confirming one lecture leaves the other two drafts.
+- **MED 2, unbounded API answers:** every Canvas API answer (and the
+  school lookup) is now streamed up to `MAX_API_BYTES` (2 MB); a listing
+  keeps at most `MAX_API_ITEMS` (1000).
+- **MED 3, separate instances:** `cli.main` turns `[student]` off for an
+  instance started with its own `--env-file` unless its config sets its
+  own `[student] dir` (logged); README's family-copy section says so.
+- **LOW 4, no overall time limit:** a feed fetch has `FETCH_SECONDS` (60)
+  in all and a whole sync `SYNC_SECONDS` (180), checked between chunks,
+  requests and backoff sleeps; past it the remaining sources (Gmail too)
+  report `timed_out`.
+- **LOW 5, rate limit and module pages:** a 403 is a rate limit only with
+  "Rate Limit Exceeded" or no quota left (Canvas sends
+  `X-Rate-Limit-Remaining` on every answer; FakeCanvas now does too); a
+  course or page that can't be read is skipped, and only a rate limit or
+  the deadline stops the modules step.
+- **LOW 6, SECURITY wording:** a password field is ignored and never
+  stored (it isn't a 400). The "Bounded" bullet lists the new caps.
+- **LOW 7, page wiring:** `/student.js` added (one line each) to the
+  static routes, `sw.js` SHELL (cache version left for the merge),
+  CloudGuard `PUBLIC_GET`, index.html and test_webapp's public list;
+  Chinese for every fixed string of the card in i18n.js (the dynamic
+  pieces became separate elements, confirm() questions are translated).
+- **Tests** (+10 Python, +1 JS): test_deadlines (repeated titles, newest
+  email), test_canvas (plain 403, skipped page/course, size and item caps,
+  slow-drip deadline), test_student_web (one sync deadline, password not
+  stored + SECURITY wording, page wiring), test_config_cli (separate
+  instance), student.test.mjs (every fixed string translated). Each was
+  revert-checked against its source change alone (`__pycache__` cleared):
+  all fail without it.
+- **Counts** (Linux sandbox, Python 3.13): 2749 passed, 37 skipped (+94
+  over master 3b7ae54's 2655 / 35); JS 126 pass.
+### P1 Round 3 (judge: CHANGES_NEEDED; findings 1, 2, 4 here, 3 at merge)
+- **1, the newest email by Gmail's arrival time:** rows from one sync
+  share `captured_at`, and Gmail lists newest first, so the oldest email
+  was taken as the newest and the right date was dismissed for good. The
+  arrival time (Gmail's `internalDate`, set on arrival, not the sender's
+  Date header) now goes `GmailInbox.search` (`received`) ->
+  `email_texts` -> `extract_from_pages` (`sent_at`) -> a new `sent_at`
+  column (added to older files on open). The newest is the highest
+  `sent_at` (else `captured_at`, then the earlier row of one sync). Older
+  emails are now `superseded`, hidden from `list()` but not dismissed:
+  deleting a bad newest email brings the older one back.
+- **2, a confirmed email date is always an anchor:** a confirmed gmail row
+  that isn't the newest still takes part, so a newer email that disagrees
+  shows as `conflict`; confirming the newer one dismisses the old answer.
+- **4, the separate-instance off-switch compares resolved paths**
+  (`./data/student`, `data/../data/student` or the absolute path are all
+  the owner's folder).
+- **Tests** (+4, 2 extended): test_deadlines (both emails in one
+  `propose`, newest first, and delete brings the older back; a confirmed
+  email date vs a newer email; a round-2 file without `sent_at`),
+  test_canvas (arrival time carried through extraction; the search and
+  `email_texts` shapes), test_config_cli (three spellings of the owner's
+  folder). Revert-checked: the round-2 store logic fails the two store
+  tests; dropping the time from `email_texts` and the plain string compare
+  each fail theirs. The judge's r2a.py probe now gives Nov 9 draft / Nov 2
+  superseded, and confirmed + newer -> conflict.
+- **Counts** (Linux sandbox, Python 3.13): 2753 passed, 37 skipped (+98
+  over master 3b7ae54's 2655 / 35); JS 126 pass.

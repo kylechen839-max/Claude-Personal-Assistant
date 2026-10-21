@@ -110,8 +110,9 @@ def test_build_tools_and_memory_respect_config(tmp_path, monkeypatch):
     names = {s["name"] for s in cli.build_tools(cfg, lambda *_: None).schemas()}
     assert {"list_calendar_events", "delete_calendar_event", "list_assignments",
             "update_assignment_status"} <= names
+    assert {"list_deadlines", "delete_deadline"} <= names  # [student] on by default
     cfg["calendar"]["enabled"] = cfg["notion"]["enabled"] = False
-    cfg["web"]["enabled"] = False
+    cfg["web"]["enabled"] = cfg["student"]["enabled"] = False
     assert not cli.build_tools(cfg, lambda *_: None)
     assert cli.build_memory(cfg).index_name == "project-context"
     cfg["memory"]["enabled"] = False
@@ -398,6 +399,39 @@ def test_separate_instance_starts_with_its_own_env_file(tmp_path, monkeypatch):
     assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.mom"]) == 0
     monkeypatch.setenv("NOTION_TOKEN", "kyles")  # Kyle's own instance: unchanged
     assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+
+
+def test_separate_instance_never_shares_the_owners_deadlines(tmp_path, monkeypatch):
+    """Judge round 2, MED 3: a copy with its own env file (Kai's) and no
+    [student] dir of its own would read and write Kyle's deadlines file:
+    deadlines are off there. With its own dir (config.mom.toml's), they stay
+    on; Kyle's own instance is unchanged."""
+    from assistant import webapp
+
+    _no_inherited(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    (tmp_path / ".env.kai").write_text("WEB_TOKEN=" + "k" * 43 + "\n")
+    seen = []
+    monkeypatch.setattr(webapp, "serve", lambda config, **kw: seen.append(config) or 0)
+    said = []  # (setup_logging replaces the root handlers, so not caplog)
+    monkeypatch.setattr(cli.log, "info", lambda msg, *a: said.append(msg % a))
+    assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["student"]["enabled"] is False
+    assert any(s.startswith("Student deadlines off: a separate instance") for s in said)
+    (tmp_path / "kai.toml").write_text('[student]\ndir = "data/kai/student"\n')
+    assert cli.main(["--mode", "web", "--config", "kai.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["student"]["enabled"] is True
+    # Judge round 3, LOW 4: the owner's folder spelled another way is still his
+    for same in ("./data/student", "data/../data/student",
+                 str((tmp_path / "data" / "student").resolve())):
+        (tmp_path / "kai.toml").write_text(f'[student]\ndir = "{same}"\n'.replace("\\", "/"))
+        assert cli.main(["--mode", "web", "--config", "kai.toml",
+                         "--env-file", ".env.kai"]) == 0
+        assert seen[-1]["student"]["enabled"] is False, same
+    monkeypatch.setenv("WEB_TOKEN", "o" * 43)
+    assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+    assert seen[-1]["student"]["enabled"] is True
 
 
 def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):

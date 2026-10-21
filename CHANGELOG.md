@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Student deadlines: connect Canvas (calendar feed link or access token,
+  never a password) and Hey Claude keeps track of exams, assignments and
+  quizzes, plus Canvas notification emails (newest email by Gmail's arrival
+  time wins). A "School deadlines" card lists what was captured, to confirm,
+  fix conflicting dates or delete. Re-syncs never duplicate, and confirmed
+  dates are never overwritten. New voice tools: list, confirm, add and delete
+  deadlines. New settings: `[student]`, `[canvas]`; `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` / `CANVAS_BASE_URL`. A separate family instance without its
+  own `[student] dir` has deadlines turned off.
+
 - Dev team: every coordinator mirrors all its replies (comment-thread replies
   too), its in-between updates and step lines to the dashboard chat, and
   keeps the live status on the current step, like the Claude app.
