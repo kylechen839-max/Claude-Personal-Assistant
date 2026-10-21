@@ -737,12 +737,17 @@ class ClaudeChat:
             if model != self.model and self.tools and needs_main_for(
                     b.name for b in response.content if b.type == "tool_use"):
                 # The fast model wants to change something. Its response is
-                # dropped before anything runs or enters history, and the
-                # main model answers this turn (and the rest of it).
-                model = self._turn_model = self.model
+                # dropped before anything runs, and so are its earlier rounds
+                # of this turn (their thinking is signed for the fast model
+                # and the main model's request would be refused): the main
+                # model answers the whole turn again from Kyle's message.
+                # Only read-only tools ran (every fast response is checked
+                # here first); the main model runs any it needs again.
+                self._turn_model = self.model
                 self.escalated = True
-                log.info("Route: %s (escalated_tool)", model)
-                continue
+                log.info("Route: %s (escalated_tool)", self.model)
+                self._rewind_turn()
+                return self._run(on_text, cancel)
             if response.stop_reason == "pause_turn":
                 # A long server-side search/fetch paused; send the partial
                 # turn back unchanged (no new user message) to resume it.
@@ -793,6 +798,25 @@ class ClaudeChat:
                 raise _Cancelled("".join(b.text for b in response.content
                                          if b.type == "text"))
         return "Sorry, that took too many steps. Could you ask a simpler way?"
+
+    def _rewind_turn(self) -> int:
+        """Back to the start of this turn: Kyle's message (with its context)
+        stays, everything after it goes, and the turn's tool events with it
+        (they run again). Untrusted text it read keeps the conversation
+        tainted: only reset() clears that. Returns how many messages went."""
+        start = next((i for i, m in enumerate(self.history)
+                      if m is self._turn_start), None)
+        if start is None:
+            return 0
+        dropped = self.history[start + 1:]
+        if dropped and self.tools and has_untrusted_content(
+                dropped, self.tools.untrusted_names()):
+            self.untrusted_context = True
+        del self.history[start + 1:]
+        self._turn_events = []
+        if dropped:
+            log.info("Rewound %d message(s) of the fast model's turn", len(dropped))
+        return len(dropped)
 
     def _note_server_tools(self, blocks) -> None:
         from assistant.history import tool_event

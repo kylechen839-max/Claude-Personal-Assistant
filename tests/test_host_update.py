@@ -73,9 +73,9 @@ def repos(tmp_path, monkeypatch):
 class Recorder:
     """Real git, fake python (pip and the smoke run)."""
 
-    def __init__(self, smoke_ok=True, pip_ok=True):
+    def __init__(self, smoke_ok=True, pip_ok=True, import_ok=True):
         self.python_calls = []
-        self.smoke_ok, self.pip_ok = smoke_ok, pip_ok
+        self.smoke_ok, self.pip_ok, self.import_ok = smoke_ok, pip_ok, import_ok
 
     def __call__(self, cmd, cwd, timeout=0):
         if cmd[0] == "git":
@@ -88,6 +88,8 @@ class Recorder:
         if "--check" in cmd:
             return (0, "All required checks passed.") if self.smoke_ok else \
                 (1, "[FAIL] ANTHROPIC_API_KEY: not set")
+        if cmd[1:2] == ["-c"] and not self.import_ok:
+            return 1, "ModuleNotFoundError: No module named 'broken'"
         return 0, ""
 
 
@@ -302,9 +304,9 @@ def test_failed_smoke_rolls_back_and_rejects(repos):
     bad = publish(dev, "requirements.txt", "anthropic\nbroken\n")
     (home / "config.toml").write_text('[update]\nenabled = true\n# local\n')
     said = []
-    up, rec = make(repos, Recorder(smoke_ok=False), said)
+    up, rec = make(repos, Recorder(import_ok=False), said)
     r = up.update(allow_requirements=True)
-    assert r.status == ROLLED_BACK and "ANTHROPIC_API_KEY" in r.detail
+    assert r.status == ROLLED_BACK and "No module named" in r.detail
     assert git(home, "rev-parse", "HEAD") == old
     assert (home / "requirements.txt").read_text() == "anthropic\n"
     assert "# local" in (home / "config.toml").read_text()  # --keep kept it
@@ -317,6 +319,23 @@ def test_failed_smoke_rolls_back_and_rejects(repos):
     up.run = Recorder()
     assert up.update(allow_requirements=True).status == UPDATED
     assert git(home, "rev-parse", "HEAD") == newer
+
+
+def test_a_failed_check_rolls_back_but_is_tried_again(repos):
+    """--check failing (no mic, no audio device, no key) says nothing about
+    the code: the update is undone now, never rejected for good."""
+    dev, home, _ = repos
+    old = git(home, "rev-parse", "HEAD")
+    new = publish(dev, "app.py", "v = 2\n")
+    (home / "config.toml").write_text('[update]\nenabled = true\n')
+    up, rec = make(repos, Recorder(smoke_ok=False))
+    r = up.update()
+    assert r.status == ROLLED_BACK and "ANTHROPIC_API_KEY" in r.detail
+    assert git(home, "rev-parse", "HEAD") == old
+    assert new not in up.rejected()
+    up.run = Recorder()  # the mic is back
+    assert up.update().status == UPDATED
+    assert git(home, "rev-parse", "HEAD") == new
 
 
 def test_failed_pip_rolls_back(repos):

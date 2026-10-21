@@ -8,16 +8,25 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
 - roles alternate, starting with a user turn; every tool_use has its
   tool_result in the next message; content blocks are of known types;
 - every reply starts with a thinking block whose signature is bound to this
-  client ("this conversation"): one signed by another client fails with the
-  API's 400 "Invalid `signature` in `thinking` block" (the bug of
-  2026-10-20, when hands-free voice shared the phone's conversation);
+  client ("this conversation") and to the model that wrote it: one signed
+  by another client, or by another model (Haiku's thinking sent to Sonnet
+  after a mid-turn escalation), fails with the API's 400 "Invalid
+  `signature` in `thinking` block" (the bug of 2026-10-20, when hands-free
+  voice shared the phone's conversation);
 - while a tool loop runs, the assistant message before the tool results
-  must still start with its thinking block (the API's rule with thinking on).
+  must still start with its thinking block (the API's rule with thinking on);
+- `system` is a string or a list of text blocks; a message has only `role`
+  and `content` (a leaked "context" or "nudge" key is refused);
+- cache_control: at most 4 breakpoints in a request (tools, system and
+  messages together), never on a thinking or server tool block, never on
+  an empty text block.
 
 Its answers are scripted from the request: a calendar question calls
-list_calendar_events when offered, a tool result gets a short summary, and
+list_calendar_events when offered, a tool result gets a short summary,
 "what number did I ask you to remember" is answered from the number in an
-earlier user message actually sent (so lost history fails the check).
+earlier user message actually sent (so lost history fails the check), and
+"get rid of ... on my calendar" lists the events, then deletes one with
+delete_calendar_event when offered.
 """
 
 from __future__ import annotations
@@ -36,6 +45,10 @@ from anthropic.types import Message
 KNOWN_BLOCKS = {"text", "image", "document", "tool_use", "tool_result", "thinking",
                 "redacted_thinking", "server_tool_use", "web_search_tool_result",
                 "web_fetch_tool_result"}
+# blocks that may not carry cache_control
+NOT_CACHEABLE = {"thinking", "redacted_thinking", "server_tool_use",
+                 "web_search_tool_result", "web_fetch_tool_result"}
+MAX_CACHE_BREAKPOINTS = 4
 _NUMBER = re.compile(r"number (\d{4})")
 
 
@@ -71,21 +84,30 @@ class ContractClient:
         self.messages = self  # client.messages.create(...)
 
     # --- the contract ---
-    def sign(self, thinking: str) -> str:
-        return hmac.new(self.key, thinking.encode(), hashlib.sha256).hexdigest()
+    def sign(self, thinking: str, model: str) -> str:
+        """Bound to this client and to the model that thought it."""
+        return hmac.new(self.key, f"{model}\n{thinking}".encode(),
+                        hashlib.sha256).hexdigest()
 
     def validate(self, kwargs: dict) -> None:
         msgs = kwargs.get("messages") or []
+        model = str(kwargs.get("model", ""))
+        self.validate_system(kwargs.get("system"))
+        self.validate_cache_control(kwargs)
         if not msgs or msgs[0]["role"] != "user":
             raise bad_request("messages: the first message must use the user role")
         for i, m in enumerate(msgs):
+            extra = sorted(set(m) - {"role", "content"})
+            if extra:
+                raise bad_request(f"messages.{i}.{extra[0]}: Extra inputs are not permitted")
             if i and m["role"] == msgs[i - 1]["role"]:
                 raise bad_request(f"messages.{i}: roles must alternate")
             for j, b in enumerate(_blocks(m)):
                 kind = b.get("type")
                 if kind not in KNOWN_BLOCKS:
                     raise bad_request(f"messages.{i}.content.{j}: unknown type {kind!r}")
-                if kind == "thinking" and b.get("signature") != self.sign(b.get("thinking", "")):
+                if kind == "thinking" and b.get("signature") != self.sign(
+                        b.get("thinking", ""), model):
                     raise bad_request(f"messages.{i}.content.{j}: Invalid `signature` "
                                       "in `thinking` block")
             if m["role"] == "assistant":
@@ -102,6 +124,40 @@ class ContractClient:
                 raise bad_request("messages: with thinking on, the assistant message "
                                   "before tool results must start with a thinking block")
 
+    @staticmethod
+    def validate_system(system) -> None:
+        if system is None or isinstance(system, str):
+            return
+        if not isinstance(system, list):
+            raise bad_request("system: Input should be a valid list")
+        for i, b in enumerate(system):
+            if not isinstance(b, dict) or b.get("type") != "text" \
+                    or not isinstance(b.get("text"), str):
+                raise bad_request(f"system.{i}: Input tag does not match the expected "
+                                  "tag 'text'")
+
+    @staticmethod
+    def validate_cache_control(kwargs: dict) -> None:
+        blocks = [("tools", t) for t in kwargs.get("tools") or []]
+        system = kwargs.get("system")
+        if isinstance(system, list):
+            blocks += [("system", b) for b in system]
+        for i, m in enumerate(kwargs.get("messages") or []):
+            if isinstance(m.get("content"), list):
+                blocks += [(f"messages.{i}", b) for b in m["content"]]
+        marked = [(where, b) for where, b in blocks
+                  if isinstance(b, dict) and b.get("cache_control") is not None]
+        for where, b in marked:
+            if b.get("type") in NOT_CACHEABLE:
+                raise bad_request(f"{where}: cache_control cannot be set for "
+                                  f"{b.get('type')} blocks")
+            if b.get("type") == "text" and not b.get("text"):
+                raise bad_request(f"{where}: cache_control cannot be set for empty "
+                                  "text blocks")
+        if len(marked) > MAX_CACHE_BREAKPOINTS:
+            raise bad_request(f"A maximum of {MAX_CACHE_BREAKPOINTS} blocks with "
+                              f"cache_control may be provided. Found {len(marked)}.")
+
     # --- the script ---
     def respond(self, kwargs: dict) -> Message:
         self.validate(kwargs)
@@ -112,10 +168,22 @@ class ContractClient:
         tools = {t["name"] for t in kwargs.get("tools") or []}
         last = msgs[-1]
         asked = next((_text_of(m) for m in reversed(msgs) if _is_user_turn(m)), "")
+        model = str(kwargs.get("model", ""))
         thinking = f"Planning reply {n}."
-        content = [{"type": "thinking", "thinking": thinking, "signature": self.sign(thinking)}]
+        content = [{"type": "thinking", "thinking": thinking,
+                    "signature": self.sign(thinking, model)}]
         stop = "end_turn"
-        if not _is_user_turn(last):  # tool results came back
+        called = ({b.get("name") for b in _blocks(msgs[-2]) if b.get("type") == "tool_use"}
+                  if len(msgs) >= 2 else set())
+        if not _is_user_turn(last) and called == {"list_calendar_events"} \
+                and "get rid of" in asked.lower() and "delete_calendar_event" in tools:
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "delete_calendar_event",
+                            "input": {"event_id": "dentist-1"}})
+            stop = "tool_use"
+        elif not _is_user_turn(last) and called == {"delete_calendar_event"}:
+            content.append({"type": "text", "text": "Done, it's off your calendar."})
+        elif not _is_user_turn(last):  # tool results came back
             content.append({"type": "text", "text": "Tomorrow you have two events."})
         elif "calendar" in asked.lower() and "list_calendar_events" in tools:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
