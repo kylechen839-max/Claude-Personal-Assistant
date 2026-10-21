@@ -157,7 +157,8 @@ def deploy(w: watch.Watch, pull: bool = True, restart: bool = False,
     output_fn("Test conversation with each app...")
     status = w.run(force_functional=True)
     failing = [i for i in (status.get("instances") or {}).values()
-               if i.get("status") == watch.FAILING]
+               if i.get("status") == watch.FAILING
+               and not i.get("remote")]  # the cloud ([watch] cloud_url) isn't deployed here
     watch.print_status(status, output_fn)
     if failing:
         output_fn("Something failed after the switch; the watchdog restarted or "

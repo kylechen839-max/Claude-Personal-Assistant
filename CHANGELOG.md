@@ -8,6 +8,11 @@
   off). Over a limit, the app says so in their language and nothing is sent to
   Claude. When speech time runs out they can still type. The owner is never
   limited. Counts are kept in memory, so a restart resets them.
+- Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
+  installed with the app and stays off without it), an owner-only backup
+  download (`GET /api/backup`), and the PC's watchdog can also watch the cloud
+  app (`[watch] cloud_url`). Setup for an UptimeRobot monitor on /healthz is
+  in the README.
 - Beta testers bring their own Anthropic API key: Settings -> Your Anthropic
   API key (checked with Anthropic, stored encrypted with `USER_DATA_KEY`).
   Without one a beta tester is told to add it; family members still use the

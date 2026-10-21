@@ -139,6 +139,7 @@ DEFAULTS: dict = {
                                     # (needs a Web application OAuth client)
         "public_origin": "",        # https://... the phone opens; Google
                                     # returns to <public_origin>/google/callback
+        "backup_max_mb": 200,       # GET /api/backup (owner): refused above this
         # The public pages (/welcome, /privacy, /terms, the waitlist;
         # public_site.py). Off until the public beta launches: the pages
         # describe beta tiers, BYOK and Notion sign-in.
@@ -225,6 +226,9 @@ DEFAULTS: dict = {
         "coordinator": True,        # tell the dev team coordinator ([devteam])
         "status_file": "data/watch_status.json",
         "stale_minutes": 30,        # banner: "checks stopped" after this long
+        # the cloud copy (Render), e.g. https://hey-claude.onrender.com: its
+        # /healthz is checked and alerted on; never restarted from here
+        "cloud_url": "",
     },
     "lecture": {
         "enabled": True,
@@ -372,7 +376,8 @@ ENV_OVERRIDES = {
 ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "GOOGLE_CREDENTIALS", "HISTORY_PATH", "WEB_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
-                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "USER_DATA_KEY")
+                     "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "SENTRY_DSN",
+                     "USER_DATA_KEY")
 # USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
 # so a separate instance sets its own (or none) and never borrows the
 # owner's from the shell.
@@ -447,7 +452,7 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "ELEVENLABS_API_KEY", "WEB_TOKEN", "GOOGLE_TOKEN_JSON",
                    "GOOGLE_CLIENT_JSON", "GOOGLE_WEB_CLIENT_JSON",
                    "GOOGLE_PUBLIC_CLIENT_JSON", "HA_TOKEN", "SLACK_USER_TOKEN",
-                   "DISCORD_BOT_TOKEN", "GITHUB_TOKEN",
+                   "DISCORD_BOT_TOKEN", "GITHUB_TOKEN", "SENTRY_DSN",
                    # opens the people's own Anthropic keys (userkeys.py)
                    "USER_DATA_KEY")
 _SECRET_PATTERNS = [
