@@ -902,7 +902,7 @@ A read-only claude.ai page for checking on `/build-feature` runs at a
 glance, apart from the chat list (LLM Council verdict, 2026-10-19). It
 is not part of the assistant and loads nothing from it.
 - `tools/agent-dashboard/index.html`: the page behind
-  https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (the master publishes
+  https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn (the master publishes
   it). One subscription to the `runs` collection (newest 100). A summary
   line ("2 need you · 1 running · 1 silent"), then one card per run with a
   state pill and a coloured edge: needs you (PR ready or blocked), silent
@@ -3758,7 +3758,6 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
 
 ## Public beta G4: account self-service (2026-10-21)
-
 Kyle: let invited people manage their own account. New module
 `assistant/account.py`; small additive hooks in `family.py`
 (`app.state.family_sign_out`) and `webapp.py` (`account.register`, and a
@@ -3811,7 +3810,6 @@ shared `clear_session_cookie` that sign-out now uses too).
   collected; +28 new tests; the other 25 were skips that passed in this
   run because the sandbox's model and network checks differed between
   runs, not because of this change). JS 242 pass (was 236).
-
 ### Round 2 (judge findings, after merging master e45ee95)
 - **No export outlives the account.** Exports now live in
   `<family dir>/.exports/export-<id>.<random>` (made 0700), not the shared
@@ -3850,7 +3848,6 @@ shared `clear_session_cookie` that sign-out now uses too).
     or terms.html each fail their test.
 - **Counts** (Linux sandbox, Python 3.13): 2569 passed, 34 skipped (the
   merge commit abf3b0f: 2564 passed, 34 skipped; +5). JS 242 pass.
-
 ### Round 3 (judge's two low findings)
 - **An old export can't free a newer one's slot.** The slot is now
   `_busy[uid] = (started, token, folder)`: `_start` makes a fresh token,
@@ -3886,6 +3883,21 @@ shared `clear_session_cookie` that sign-out now uses too).
   token guards: a delete during a build leaves no slot behind, and a build
   failing before its folder exists never frees a newer export's slot
   (each fails with its guard removed). `test_account.py` 37.
+## Dev team dashboard: new artifact URL (2026-10-21)
+- The old dashboard artifact stopped delivering chat wakes to the
+  coordinator; a fresh copy of the same page wakes it reliably. Every
+  reference now points at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn:
+  the page's `LAUNCHER_KINDS`, both desktop launchers (CRLF and LF/exec bit
+  kept), the dashboard README and watchdog prompt, MANUAL_TEST, the
+  Dev team dashboard section above, TEAM_MEMORY (plus a dated lesson) and
+  the test that pins the URL. The page itself lives on in the
+  agent-dashboard repo, which also gets a static `moved.html` for the old
+  artifact.
+- **Tests.** `test_agent_dashboard.py` pins the new URL; with the old
+  launchers and page it fails 4 tests (launcher URL and the page/desktop
+  byte-for-byte checks). test_docs + test_agent_dashboard: 75 passed,
+  1 skipped (Linux sandbox, Python 3.13).
+
 ## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
 
 - **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
