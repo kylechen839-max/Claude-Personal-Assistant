@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Design skills: `.claude/skills/` now has three vendored, pinned skills
+  for UI work (Anthropic `frontend-design`, Vercel `web-design-guidelines`
+  with its rules read locally, Addy Osmani `accessibility`), plus
+  `DESIGN_SKILLS.md` with their sources and where this repo's rules win.
 - Fixed: the go-live gate refused every update on a machine without a web
   app (a wake-only Pi, or a family copy that never started), and the wake
   host undid a hand pull there. Such machines now go live after the import
