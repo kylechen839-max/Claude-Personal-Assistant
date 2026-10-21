@@ -594,6 +594,34 @@ server (`[family] enabled`, on in the server profile).
   `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
   Each person's history is capped at `[family] max_history_mb` (20 MB), not
   the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
+- **Per-person limits** (public beta piece G3, `quotas.py`). Every invited
+  person (either tier; never the owner) gets `[family] turns_per_minute`
+  (6), `turns_per_day` (200) and `stt_seconds_per_day` (1800), counted by
+  their user id across all their browsers and the voice view, so one
+  account can't run up CPU (Whisper is one shared lock) or, on the owner's
+  key, cost. Checked before a typed/push-to-talk turn starts
+  (`WebAssistant.start_turn`) and before Whisper runs on a hands-free
+  utterance; a refusal is a sentence in their language, with no request to
+  Claude and no history change. Every recording transcribed for them (a
+  spoken yes/no too) adds its length, measured from the audio, after it is
+  transcribed. The maps are bounded (idle people pruned, at most 1000
+  kept) and logs carry the id and the limit's name only. Deliberate
+  non-fixes: the counts are in memory, so a restart resets them (a beta
+  tester could gain a day's allowance from a deploy); the day total can go
+  past the speech limit by one recording per session in flight (each up
+  to `[voice] max_utterance_s`, 30 s, or `[webapp] max_audio_seconds` for
+  push-to-talk; a person with several tabs or phones open can overshoot by
+  one clip on each), since each clip was allowed when it started; and a
+  spoken yes/no in the voice view is counted but never refused (refusing
+  it there would only make it a "no"). A recorded answer to the page's
+  question (`/api/confirm`) is checked for speech time before Whisper:
+  out of time, it isn't transcribed, the page shows the limit sentence and
+  the question stays open for the buttons or a typed yes (a refusal is
+  never a "no"). Only one recording per question is transcribed at a time
+  (`PendingConfirm.claim`); a burst of recordings gets 409 without running
+  Whisper, and a failed transcription releases the claim. A turn still in
+  flight when someone is removed can't bring their counters back
+  (`UserQuotas.is_listed`).
 - **Their own Anthropic key** (bring your own key, public beta piece G2;
   `userkeys.py`, `userkeys_web.py`).
   - *Storage.* `<dir>/<id>/anthropic_key.enc`, written with `write_private`

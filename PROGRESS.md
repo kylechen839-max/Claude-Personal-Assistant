@@ -4105,9 +4105,7 @@ ran on the owner's `anthropic.Anthropic()`.
   contract test's live variants). Earlier the same day the G1 tree gave
   2442 passed, 58 skipped: 25 environment-dependent tests skipped then and
   run now, the same on both trees. JS 241 pass (was 236).
-
 ## Public beta G6: Notion sign-in for invited people (2026-10-21)
-
 Built on `claude/account-self-service` (G4, PR #41), which revokes on
 self-delete. Any invited person (beta or family) can connect their own
 Notion workspace and gets exactly two tools on their own token.
@@ -4207,9 +4205,7 @@ Notion workspace and gets exactly two tools on their own token.
   branch: 2604 passed, 36 skipped; JS 247. Existing tests touched: the
   sw.js pin is v27, `/notion.js` joins test_webapp's public list, and
   test_docs knows the two tool names.
-
 ### G6 Round 2 (review fixes, 2026-10-21)
-
 Merged `claude/account-self-service` (6f09947, with master 0005342: the
 ops PR, design skills and #9, which removed the PC hub and moved the
 dashboard); the only conflict was `ISOLATED_ENV_VARS` (both `SENTRY_DSN`
@@ -4244,7 +4240,6 @@ and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
 - **Counts** (Linux sandbox, Python 3.13): 2616 passed, 35 skipped; JS
   118 pass. Baseline (the merge, before these fixes): 2609 passed, 35
   skipped; JS 118 (master's #9 removed the dashboard and hub tests).
-
 ### G6 Round 3 (two low findings, 2026-10-21)
 - **"Delete my account" holds the Notion lock around revoke and removal.**
   `Account.delete` takes `Family._notion_lock(uid)` around
@@ -4279,3 +4274,107 @@ and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
     `same_bot` check fails both same-bot cases.
 - **Counts** (Linux sandbox, Python 3.13): 2622 passed, 35 skipped; JS 118
   pass. Baseline (round 2): 2616 passed, 35 skipped; JS 118.
+
+## Public beta G3: per-person limits (2026-10-21)
+
+Gap (d) of the beta brief: nothing stopped one invited account from running
+turns or Whisper without end (CPU on the shared server; cost on the owner's
+key for family members without their own).
+- **`assistant/quotas.py`** (`UserQuotas`, shaped like
+  `cloud.RateLimiter`): per person (user id, across all their browsers and
+  the voice view) a sliding 60-second window of turns, turns per day and
+  seconds of speech transcribed per day. New `[family]` keys
+  `turns_per_minute` (6), `turns_per_day` (200) and `stt_seconds_per_day`
+  (1800), in `DEFAULTS` and config.toml; 0 = no limit. A day is the
+  person's own calendar day (their `timezone` from users.json), UTC when
+  they have none or it doesn't load. **In memory only** (decision: a
+  restart resets the counts; nothing personal is written). Bounded: people
+  with nothing counted in the current minute or their day are pruned when
+  room is needed, at most 1000 kept (oldest dropped); a removed person's
+  counts are forgotten (`Family.remove`).
+- **Where it is checked.** `Family.quotas` is the one instance; the owner
+  (session user None) is never looked up.
+  - `WebAssistant.start_turn` (typed, push-to-talk and attachment turns,
+    all through `/api/turn`): `limit_message` counts the turn or refuses
+    it before the thread starts; a refusal puts `{"type": "error",
+    "message": <sentence>}` and "done" (the page already shows server
+    sentences), so nothing is sent to Claude, the conversation and history
+    are untouched and the stale-conversation end doesn't run. A recording
+    also needs speech time left; typing still works when it is used up.
+  - `VoiceConversation._turn_body` (hands-free, via a `limit` callable
+    from `voice_ws.py`): checked before Whisper (nothing counted), then the
+    turn is counted just before Claude is asked, so noise heard as nothing
+    and "goodbye" don't use up turns. The refusal is sent as an error event
+    and spoken (`Chunk(reply=False)`).
+  - Speech seconds: `WebAssistant.transcribe(..., user=)` adds the
+    recording's length (samples / 16 kHz, measured from the audio) after
+    Whisper ran, also when it failed. Every path that transcribes for a
+    person passes it: push-to-talk, the voice socket (turns and spoken
+    yes/no), `/api/confirm`'s recorded answer, `transcribe_upload`. A spoken
+    yes/no in the voice view is counted but never refused (it belongs to
+    a running turn; refusing would only make it a "no"); a recorded answer
+    to the page's question is checked for speech time first (round 2). A
+    clip already started finishes, so the day's total can go past the
+    limit by one recording per session in flight. The lecture recorder
+    and tutor are owner-only (`require_owner`), so not limited.
+- **Sentences** (i18n.py, en + zh): `limit_minute`, `limit_day` (with the
+  day's number), `limit_speech` (minutes, "you can still type"). No JS
+  change: the page and voice view show the server's sentence; sw.js not
+  bumped.
+- **Logs:** INFO `Limits: refused a turn for <id> (<limit>)` and
+  `Voice turn <n>: refused (a limit)`; the speech total at DEBUG. No text.
+- **Tests.** New `tests/test_quotas.py` (19): each limit refuses at the
+  boundary and lets the next window through (minute, UTC day, the
+  person's own Asia/Shanghai day, an unknown zone as UTC, speech for
+  recordings only, 0 = off); bounded memory and pruning; defaults and
+  config; en/zh sentences; the web path (refused with no Anthropic call,
+  chat history and saved messages unchanged, the lock released, allowed
+  after the minute), the zh refusal, the owner never limited (web and
+  voice, nothing even tracked), recordings refused before Whisper while
+  typing still works, every transcription counted (failed Whisper,
+  `transcribe_upload`, `/api/confirm`), removal forgets, caplog (id and
+  limit only; no utterance, name or sentence), and the voice socket (minute
+  limit before Whisper, empty speech not counted, zh speech limit before
+  Whisper with no call to Claude).
+  - Revert check: 13 single source reverts, each alone with `__pycache__`
+    cleared (the Family attribute, `forget`, the start_turn refusal, the
+    speech count in `transcribe`, `/api/confirm`'s user, both voice checks,
+    the voice socket's `limit` and `user`, the zh sentence, a config
+    default, the owner guard, pruning): every one fails at least one test.
+- **Counts** (Linux sandbox, Python 3.13): 2586 passed, 36 skipped; master
+  7d55f8e in the same sandbox at the same time: 2567 passed, 36 skipped
+  (+19). JS 241 pass (unchanged).
+- **Round 2** (review fixes, after merging master 770e642):
+  - `/api/confirm` with a recording: checked for speech time first
+    (`WebAssistant.speech_refusal`, speech only: a spoken answer to a turn
+    already counted isn't a new turn). Out of time: 429 with the
+    `limit_speech` sentence in their language, Whisper doesn't run and the
+    question stays open (the page shows the sentence and the buttons again;
+    a tap or a typed yes still answers it; a refusal is never a "no").
+    Then the question is claimed (`PendingConfirm.claim`, under its own
+    lock, like the voice view's `pending.answering`): a second recording
+    for the same question gets 409 without running Whisper, and a failed
+    decode or transcription releases the claim so they can try again.
+  - A turn in flight when someone is removed can't bring their counters
+    back: `UserQuotas(is_listed=...)` (Family: `uid in self.users`, so
+    people being deleted are out too), checked under the quota lock by
+    `check`, `admit` and `add_speech`. `Family.remove` swaps the list before
+    `forget`, so either order of the race ends with no entry.
+  - Docs: the overshoot is "one recording per session in flight"
+    (quotas.py, SECURITY, above); PRIVACY says the times of the last
+    minute's messages are kept too. `tzdata` was already in
+    requirements.txt (unconditional), so zoneinfo works on Windows.
+  - Tests (+6 in `tests/test_quotas.py`): five concurrent recordings with
+    speech used up (all 429, Whisper never ran, question still pending and
+    unclaimed, a tap then answers it; caplog: INFO `Limits: refused a
+    spoken answer for <id> (limit_speech)`, no name or question); one slow transcription holding the
+    claim while four more get 409 (Whisper ran once, 1 s counted); a failed
+    transcription and an unreadable upload both release the claim; a
+    spoken yes at the turns-per-minute limit still answers; admit, remove,
+    add_speech leaves no entry; unlisted ids never counted. Revert check,
+    each alone with `__pycache__` cleared: the whole webapp change (3
+    fail), the claim (1), the releases (1), the speech check (1),
+    `turns=False` (1), the Family `is_listed` (1), the quota guards (2),
+    the `add_speech` guard alone (2), the new INFO log line (1).
+  - Counts (Linux sandbox): 2619 passed, 36 skipped; the merge commit
+    142a0b2 in the same sandbox: 2613 passed, 36 skipped (+6). JS 241 pass.

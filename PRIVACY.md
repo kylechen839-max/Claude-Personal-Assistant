@@ -87,6 +87,12 @@ your account, or being removed asks Notion to revoke the token and deletes it;
 you can also remove Hey Claude in Notion under Settings, Connections.
 Reconnecting to a different workspace also revokes the previous connection at
 Notion; reconnecting to the same workspace keeps only the new sign-in.
+To keep the shared server fair, the app counts how many messages each invited
+person sends and how many seconds of their speech it transcribes, per minute
+and per day. Only the counts, and the times of the messages sent in the last
+minute, are kept, with their account id, in the server's memory. They are never written to disk, they reset when the server restarts,
+and they are deleted when the account is removed. No text or audio is kept for
+this.
 
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves

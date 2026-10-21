@@ -316,6 +316,9 @@ class VoiceConversation:
     functions (the web app passes its shared, locked ones, for the
     session's language). `language` ("en"/"zh"; None = the server's) is
     the one its own sentences are said in ("Please say yes or no").
+    `limit(audio, count)`, if given, is WebAssistant.limit_message for its
+    session (an invited person's limits, quotas.py): a sentence refuses the
+    turn, None lets it go on.
 
     Turns run one at a time on one worker thread, so the conversation never
     has two requests in flight. A new utterance cancels the running turn and
@@ -326,9 +329,11 @@ class VoiceConversation:
                  synthesize: Callable[[str], bytes],
                  send: Callable[..., None], *, clock=time.monotonic,
                  idle_timeout: float = 120, max_session: float = 1800,
-                 wake_phrase: str | None = "Hey Claude", language: str | None = None):
+                 wake_phrase: str | None = "Hey Claude", language: str | None = None,
+                 limit: Callable[..., str | None] | None = None):
         self.backend = backend
         self.language = language
+        self.limit = limit
         backend.conv = self
         self.transcribe = transcribe
         self.synthesize = synthesize
@@ -624,10 +629,24 @@ class VoiceConversation:
                         "summary": timer.summary()})
         return goodbye
 
+    def _refused(self, turn: VoiceTurn, audio: bool, count: bool) -> bool:
+        """Say the limit's sentence instead of answering; True if refused."""
+        message = self.limit(audio=audio, count=count) if self.limit else None
+        if not message:
+            return False
+        turn.samples = None
+        log.info("Voice turn %s: refused (a limit)", turn.id)
+        self._send({"type": "error", "turn": turn.id, "message": message})
+        turn.sentences.put(Chunk(message, 0, reply=False))
+        return True
+
     def _turn_body(self, turn: VoiceTurn, timer: TurnTimer) -> bool:
         """Transcribe and answer. True if it was "goodbye"."""
         if turn.stop.is_set():
             return False  # superseded while waiting: skip Whisper entirely
+        # over a limit (quotas.py): refused before Whisper, nothing counted
+        if self._refused(turn, audio=True, count=False):
+            return False
         heard = self.transcribe(turn.samples)
         turn.samples = None
         timer.mark("transcript")
@@ -640,6 +659,9 @@ class VoiceConversation:
         if is_exit(text):
             turn.sentences.put(Chunk(i18n.t("goodbye", self.language), 0, reply=False))
             return True
+        # counted only now, as Claude is asked (noise heard as nothing isn't)
+        if self._refused(turn, audio=False, count=True):
+            return False
         streamed = []
 
         def on_text(delta):

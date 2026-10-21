@@ -602,6 +602,24 @@ class PendingConfirm:
     id: str = field(default_factory=lambda: secrets.token_urlsafe(8))
     answered: threading.Event = field(default_factory=threading.Event)
     answer: bool = False
+    # a spoken answer being transcribed (/api/confirm): one at a time, so
+    # a burst of recordings can't each run Whisper (claim/release)
+    answering: bool = False
+    _claim: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def claim(self) -> bool:
+        """Take the question for a spoken answer; False if one is already
+        being transcribed."""
+        with self._claim:
+            if self.answering:
+                return False
+            self.answering = True
+            return True
+
+    def release(self) -> None:
+        """A spoken answer failed: the question can be answered again."""
+        with self._claim:
+            self.answering = False
 
 
 class Session:
@@ -921,6 +939,42 @@ class WebAssistant:
             self.family.close()  # family members' history files
         self._tts_pool.shutdown(wait=False)
 
+    # an invited person's limits (quotas.py); the owner has none
+    def limit_message(self, s: Session, audio: bool = False,
+                      count: bool = True) -> str | None:
+        """Why this session's person may not start a turn now (`audio`: one
+        that needs Whisper), as a sentence in their language; None if it may
+        go ahead, and then (`count`) it is counted. Always None for the
+        owner's sessions."""
+        quotas = getattr(self.family, "quotas", None) if s.user is not None else None
+        if quotas is None:
+            return None
+        why = quotas.admit(s.user, audio) if count else quotas.check(s.user, audio)
+        if why is None:
+            return None
+        log.info("Limits: refused a turn for %s (%s)", s.user, why)
+        return i18n.t(why, s.language, **quotas.message_values())
+
+    def speech_refusal(self, s: Session) -> str | None:
+        """Why this session's person may not have a recording transcribed
+        now (their speech time today is used up), as a sentence in their
+        language; None if it may. Only speech: answering a question asked
+        in a turn already counted isn't a new turn. None for the owner."""
+        quotas = getattr(self.family, "quotas", None) if s.user is not None else None
+        if quotas is None:
+            return None
+        why = quotas.check(s.user, audio=True, turns=False)
+        if why is None:
+            return None
+        log.info("Limits: refused a spoken answer for %s (%s)", s.user, why)
+        return i18n.t(why, s.language, **quotas.message_values())
+
+    def _count_speech(self, user: str | None, recording) -> None:
+        """Add a recording's length to `user`'s speech today (quotas.py)."""
+        quotas = getattr(self.family, "quotas", None) if user is not None else None
+        if quotas is not None:
+            quotas.add_speech(user, len(recording) / audio.SAMPLE_RATE)
+
     # turns
     def start_turn(self, s: Session, text: str | None = None,
                    recording: np.ndarray | None = None,
@@ -934,6 +988,12 @@ class WebAssistant:
             return False
         while not s.events.empty():  # leftovers of an abandoned turn
             s.events.get_nowait()
+        refused = self.limit_message(s, audio=recording is not None)
+        if refused:  # over their limit: no turn, nothing sent, history as it was
+            s.events.put({"type": "error", "message": refused})
+            s.events.put({"type": "done"})
+            s.busy.release()
+            return True
         if (s.chat.history
                 and self.clock() - s.last_active > self.conversation_timeout):
             s.busy.release()
@@ -959,7 +1019,7 @@ class WebAssistant:
 
         try:
             if recording is not None:
-                text = self.transcribe(recording, s.language)
+                text = self.transcribe(recording, s.language, user=s.user)
                 s.events.put({"type": "transcript", "text": text})
                 log.info("Web heard %d chars", len(text))
                 log.debug("Web heard: %r", text)
@@ -1110,16 +1170,22 @@ class WebAssistant:
                 yield item
 
     # speech
-    def transcribe(self, recording: np.ndarray, language: str | None = None) -> str:
-        """Whisper for `language` (a session's; None = the server's)."""
+    def transcribe(self, recording: np.ndarray, language: str | None = None,
+                   user: str | None = None) -> str:
+        """Whisper for `language` (a session's; None = the server's). With
+        `user` (an invited person's id) its length counts toward their
+        speech today, also when Whisper fails."""
         found = self.speech.transcriber(language) if self.speech and language else None
-        with self._stt_lock:  # one at a time, whichever model (CPU, memory)
-            return (found or self.transcriber).transcribe(recording)
+        try:
+            with self._stt_lock:  # one at a time, whichever model (CPU, memory)
+                return (found or self.transcriber).transcribe(recording)
+        finally:
+            self._count_speech(user, recording)
 
     def transcribe_upload(self, data: bytes, max_seconds: float | None = 60,
-                          language: str | None = None) -> str:
+                          language: str | None = None, user: str | None = None) -> str:
         """A browser recording (any format) to text."""
-        return self.transcribe(decode_upload(data, max_seconds), language)
+        return self.transcribe(decode_upload(data, max_seconds), language, user)
 
     def _language_tts(self, language: str | None):
         """The voice for `language` (a family member's, e.g. Mandarin), else
@@ -1872,11 +1938,27 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return err
         answer = str(fields.get("answer") or fields.get("text") or "")
         if data:
-            recording, err = await decode(data)
-            if err:
-                return err
-            answer = await run_in_threadpool(assistant.transcribe, recording,
-                                             s.language)
+            # out of speech time: not transcribed and not a "no"; the
+            # question stays open for the buttons or a typed yes
+            refused = assistant.speech_refusal(s)
+            if refused:
+                return error(refused, 429)
+            if not pending.claim():  # another recording is being heard
+                return error("already answering", 409)
+            try:
+                recording, err = await decode(data)
+                if err:
+                    pending.release()
+                    return err
+                answer = await run_in_threadpool(assistant.transcribe, recording,
+                                                 s.language, s.user)
+            except BaseException:
+                pending.release()  # they can try again or tap a button
+                raise
+            if s.pending is not pending or pending.answered.is_set():
+                # tapped (or typed) while Whisper ran: that answer stands, and
+                # this transcript must not show up in the turn it continued
+                return error("nothing to confirm", 409)
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")

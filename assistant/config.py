@@ -302,7 +302,12 @@ DEFAULTS: dict = {
         # tier): needs a public Notion integration (NOTION_OAUTH_CLIENT_ID,
         # NOTION_OAUTH_CLIENT_SECRET), the server's address and USER_DATA_KEY
         "notion": True,
-        "max_history_mb": 20,      # each person's history (not [history] max_mb)
+        "max_history_mb": 20,       # each person's history (not [history] max_mb)
+        # each invited person's limits (quotas.py; never the owner's), in
+        # memory: a restart resets them. 0 = no limit
+        "turns_per_minute": 6,
+        "turns_per_day": 200,       # a day in their own time zone (else UTC)
+        "stt_seconds_per_day": 1800,  # seconds of their speech transcribed
         # "Download my data" (account.py): the zip's contents, before
         # compression, at most this big
         "export_max_mb": 50,

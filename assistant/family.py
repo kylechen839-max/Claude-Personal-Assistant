@@ -43,6 +43,10 @@ the owner's month_usd. Without one, a "family" person uses the owner's key
 ("add your key in Settings") before any request is made. The client is
 looked up on every call (UserApi), so a new or removed key applies at once,
 also to a conversation already open.
+
+Everyone invited, either tier, has limits on turns per minute and per day
+and on speech transcribed per day (`Family.quotas`, quotas.py); the owner
+has none.
 """
 
 # No `from __future__ import annotations`: FastAPI must see the real
@@ -189,6 +193,7 @@ class Family:
 
     def __init__(self, config: dict, client=None, clock=time.time,
                  user_client: Callable[[str], object] | None = None, environ=None):
+        from assistant.quotas import UserQuotas
         from assistant.userkeys import KeyStore
 
         f = config["family"]
@@ -218,6 +223,15 @@ class Family:
         # the next removal and when the owner opens the list
         self._deleting: set[str] = set()
         self._contexts: dict[str, UserContext] = {}
+        # their turns and speech per minute and day (in memory), never the
+        # owner's; a day in their own time zone (users.json is swapped
+        # whole, so reading it without the lock is safe)
+        self.quotas = UserQuotas.from_config(
+            config, clock=clock,
+            timezone_of=lambda uid: (self.users.get(uid) or {}).get("timezone"),
+            # removed (or being deleted): nothing counted, so a turn in
+            # flight can't bring back their counters after forget()
+            is_listed=lambda uid: uid in self.users)
         self._load()
         self._finish_deletes()
 
@@ -340,6 +354,7 @@ class Family:
             self._meters.pop(uid, None)
             self._drop_notion_api(uid)
             self._notion_locks.pop(uid, None)
+            self.quotas.forget(uid)
             if before_delete is not None:
                 before_delete(uid)
         if ctx is not None:
