@@ -867,7 +867,7 @@ phone app installed from the cloud URL with Tailscale on.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
 
 ## Agent run dashboard (optional, ~10 min)
-The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
+The dev team's run list at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn
 (the page, its README and its desktop launchers are in the private
 kylechen839-max/agent-dashboard repo, under `dashboard/`).
 The dashboard is desktop only (no phone layout).

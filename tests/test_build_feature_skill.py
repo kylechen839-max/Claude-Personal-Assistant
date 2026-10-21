@@ -163,3 +163,12 @@ def test_skill_merges_its_own_prs_on_green():
     assert "merge commit" in rule and "enable_pr_auto_merge" in rule
     assert "Never merge a red, conflicted or unapproved PR" in rule
     assert "Merging** is Kyle's job" not in skill
+
+
+def test_dashboard_url_is_the_current_artifact():
+    """The dashboard moved on 2026-10-21: the old artifact stopped waking
+    the coordinator. Nothing here may point at it any more."""
+    new, old = "BWYCUWxJxBvG6MJvnsaqvn", "CpPTyJkkHZ7CK8jsPYZq4G"
+    for path in (WATCHDOG, ROOT / ".claude" / "TEAM_MEMORY.md", ROOT / "MANUAL_TEST.md"):
+        text = path.read_text(encoding="utf-8")
+        assert new in text and old not in text, path

@@ -10,6 +10,9 @@
   disconnects first; deleting your account also removes any download still
   being made. An old, stalled download finishing late no longer frees a newer
   export's one-at-a-time slot.
+- The dev team dashboard moved to a new artifact URL (the old one stopped
+  waking the coordinator); re-download the desktop launcher from Get
+  desktop app.
 - Dev team: the master merges its own PRs (merge commit) once CI is green
   and the judge approved, or turns on GitHub auto-merge where allowed.
 - Dev team: the master re-arms the dashboard watch after every publish and
