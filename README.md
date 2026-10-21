@@ -278,8 +278,11 @@ conversation send it to `model`. Words can miss a phrasing, so there is a
 second check: if Haiku answers with any tool call that isn't read-only
 (the list is `READ_ONLY_TOOLS` in `router.py`: calendar, assignment, email,
 notes and home *reads*), that answer is dropped before anything runs and
-`model` answers instead. Every change is therefore made by `model` (words
-Haiku said before its tool call may already have been spoken). Once a
+`model` answers the whole turn again from your message (any read Haiku made
+earlier in the turn is dropped too and run again if needed; its signed
+thinking can't be sent to another model). Every change is therefore made by
+`model` (words Haiku said before its tool call may already have been
+spoken). Once a
 conversation needed `model` it stays there until it ends. Confirmations are
 the same on either model. The tools and system prompt are the same bytes on
 every request and are cached by the API (5 minutes); the date and recalled
@@ -664,7 +667,12 @@ sign in to Windows and restart after a crash:
 ```
 
 A copy already running in a window is stopped first (you can then close the
-window). Your own app is `install_windows_service.ps1`'s job and isn't touched.
+window). Installing the tasks leaves your own app alone (that's
+`install_windows_service.ps1`'s job), but `-Restart` covers **every** app
+here, yours included (it runs `python -m assistant.deploy --no-pull
+--restart`: the go-live check, then each app restarts once it is idle; one
+still in the middle of a turn after 2 minutes is skipped and named; your
+own app under its host supervisor is restarted by the supervisor).
 
 ## Invite family (cloud)
 
@@ -775,6 +783,73 @@ out only their own phones; yours signs out only yours. Settings: `[family]`
 in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
 `google_client`, `public_google_client`, `max_history_mb`, `zh_stt_model`,
 `zh_piper_voice`).
+
+## Public beta: landing page and waitlist (cloud)
+
+The server can also serve a small public site, from the app itself (no
+JavaScript, no outside fonts or scripts, the same strict CSP as the app).
+It is **off** (`[webapp] public_site = false`, on the server too): the pages
+promise beta tiers (Calendar only), your own Anthropic key stored encrypted,
+and Notion sign-in, so turn it on only once those have landed and are
+deployed (the comment at the top of `assistant/web/landing.html` and
+`privacy.html` lists each claim). Then turn it on for the server with a
+one-line change, through a PR like any other: `"public_site": True` in the
+server profile's `"webapp"` settings (`SERVER_PROFILE` in
+`assistant/config.py`). On a PC, the same in `config.local.toml`:
+
+```toml
+[webapp]
+public_site = true
+```
+
+With it on:
+
+- `https://<cloud>/welcome`: what Hey Claude does, "invite-only beta",
+  "bring your own Anthropic API key", and the waitlist form (email and an
+  optional "what would you use it for", at most 300 characters).
+- `https://<cloud>/privacy` and `https://<cloud>/terms`: the beta's privacy
+  notice and plain-language terms.
+
+`/` stays the app: signed out, it is still the sign-in page, with a
+**What is Hey Claude?** link to `/welcome` (only while the site is on). Invited people and your own
+phone keep the address they already have, and the PWA's home-screen icon
+keeps opening the app, not a marketing page. Share `/welcome` publicly.
+
+Settings (`[webapp]` in `config.toml`):
+
+- `support_email`: the contact shown on the privacy and terms pages
+  (empty = "the person who runs this server").
+- `legal_draft = true` shows a "Draft: Kyle to review" note on both pages.
+  Read them, change the wording in `assistant/web/privacy.html` and
+  `terms.html` if needed, then set it to `false`.
+- `waitlist_file`: where entries are kept (`/data/waitlist.json` on Render,
+  on the disk; empty = waitlist closed, the default on a PC).
+
+**Inviting someone from the waitlist.**
+
+1. Signed in with your token at the cloud's address, open
+   `https://<cloud>/waitlist`. It lists each address, its note and date
+   (only you can see it; a family member gets "not found").
+2. In the app, ⚙ -> **Invite someone** (see "Invite family (cloud)" above)
+   makes their link. Email it to them yourself; nothing is sent
+   automatically.
+3. Back on `/waitlist`, **Remove** their entry. Remove is also how you
+   delete someone who asks.
+
+Or with curl (the entry ids come from the list; an address never goes in
+a URL, so it never lands in an access log):
+
+```
+curl -H "Authorization: Bearer $WEB_TOKEN" https://<cloud>/api/waitlist
+curl -X DELETE -H "Authorization: Bearer $WEB_TOKEN" -H "Content-Length: 0" \
+     https://<cloud>/api/waitlist/<id>
+```
+
+The waitlist keeps at most 2000 entries; addresses are lower-cased and
+listed once (a repeat gets "thanks", and once the list is full everyone
+gets "full", so the form never tells whether someone else is on it). Each network address can post 5 times an hour, and
+a hidden field that only bots fill in drops their posts without a word. The
+log records only counts, never an address or a note.
 
 ## Run it in the cloud (Render)
 
@@ -1579,14 +1654,20 @@ last results; `python -m assistant.watch --functional` runs everything now.
 
 **What it checks.** Every 5 minutes, for each instance (`config.toml` with
 `.env`, and every `config.<name>.toml` with its `.env.<name>`, the same rule
-as `install_family_tasks.ps1`): `/healthz` on its port, the page and every
+as `install_family_tasks.ps1`; one whose env file has no `WEB_TOKEN` has no
+web app yet, e.g. a wake-only Pi or a family copy that never started, and
+is left out; if something answers on its port anyway, its token is set only
+in the environment, and `--status` and your banner show it as "running, but
+WEB_TOKEN isn't in its env file, so it can't be checked", with one alert:
+put `WEB_TOKEN` in its env file): `/healthz` on its port, the page and every
 script and stylesheet it loads, that it runs the checked-out version, and
 the address the phone opens (`[webapp] public_origin`, else the `tailscale
 serve` entry for its port; set `[watch] public_url` to override, `""` to
 skip). After every restart or new version, every `functional_hours` (6) and,
 once failed, every `retry_minutes` (30), it also has a **test conversation**
-with it, the way people use it, in one session: a text turn that makes it
-use a read-only tool (the calendar, else the assignments list, else web
+with it, the way people use it, in one session: a quick question ("What is
+two plus two?", short and with no change words, so with the router on it is
+the turn Haiku answers), a text turn that makes it use a read-only tool (the calendar, else the assignments list, else web
 search), a follow-up that depends on the first turn, a spoken turn
 (`tests/fixtures/hey_claude_calendar_tomorrow.wav`), a hands-free voice turn
 over `/api/voice`, and a last text turn typed while the voice view is still
@@ -1638,7 +1719,24 @@ and the old version keeps running. **Update with one command** instead of
 ```
 
 (`./scripts/deploy.sh` on the Pi; `--no-pull`, `--restart`, `--requirements`.)
-`install_family_tasks.ps1 -Restart` goes through the same check.
+`install_family_tasks.ps1 -Restart` goes through the same check. Before
+anything switches, the installed packages must meet every `>=` minimum in
+`requirements.txt`; after a pull by hand that raised one, the gate and
+deploy refuse with what's missing until you stop the apps and run
+`pip install -r requirements.txt` (or `python -m assistant --update`).
+A `>=` line with no environment marker that a machine can't or won't
+install (no wheel for it there, say) makes every go-live check on that
+machine "can't tell yet", and the alert after 3 tries names the package:
+give such a line a marker instead (as `openwakeword>=0.6; platform_system
+!= "Linux"` and the Kokoro lines already have), and the check skips it
+where the marker says it doesn't apply. An
+app in the middle of someone's turn is waited for (up to 2 minutes), then
+left running and named, instead of being restarted mid-answer. On a
+machine with no web app (a wake-only Pi), there is nothing to start on a
+side port: new code must pass the import and `--check` smoke only. A
+failed import refuses it; a failed `--check` (often this machine's: an
+unplugged mic, no audio device, no API key) is "can't tell yet", tried again
+later and reported after 3 tries, never a refusal for good.
 
 **Where you hear about it.** Only when something changes (an app starts
 failing, or recovers) and for one-off events (a version refused or rolled

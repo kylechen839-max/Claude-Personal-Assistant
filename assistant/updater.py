@@ -99,6 +99,78 @@ def short(sha: str | None) -> str:
     return (sha or "")[:7]
 
 
+# "name>=1.2" (extras and spaces allowed); other pins are left to pip
+_MINIMUM = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*>=\s*(\d+(?:\.\d+)*)")
+# Updater.smoke()'s reasons start with one of these: an import failure is the
+# code's; a --check failure may be this machine's (no mic, no API key)
+SMOKE_IMPORT_FAILED, SMOKE_CHECK_FAILED = "import failed", "--check failed"
+INSTALL_HINT = ("stop the apps, then run `python -m assistant --update` or "
+                "`pip install -r requirements.txt`")
+
+
+def _release(version: str) -> tuple[int, ...] | None:
+    """(1, 24) for "1.24.0", "1.24rc1" or "1.24.post2"; None if unreadable."""
+    m = re.match(r"\d+(?:\.\d+)*", version.strip())
+    if not m:
+        return None
+    parts = [int(p) for p in m.group().split(".")]
+    while len(parts) > 1 and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
+def _marker_applies(marker: str) -> bool | None:
+    """Does an environment marker ("python_version >= '3.11'") hold here?
+    None when it can't be read (no `packaging`): the line is skipped."""
+    try:
+        from packaging.markers import Marker
+
+        return Marker(marker).evaluate()
+    except Exception:  # noqa: BLE001 - no packaging, or a marker it can't parse
+        return None
+
+
+def requirements_problem(root: Path = ROOT, version=None) -> str | None:
+    """Is each `name>=x.y` in requirements.txt installed here at x.y or
+    newer (importlib.metadata)? None if so, or with no requirements.txt;
+    else what's missing and what to run. A pull by hand (or deploy
+    --no-pull) can bring a requirements bump the venv never got; the new
+    code may import fine and then fail on the missing feature. Lines whose
+    environment marker doesn't apply here are skipped, and so are other
+    pins (==, none): pip handles those."""
+    from importlib import metadata
+
+    path = Path(root) / "requirements.txt"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    version = version or metadata.version
+    missing = []
+    for line in lines:
+        spec, _, marker = line.split("#", 1)[0].partition(";")
+        m = _MINIMUM.match(spec.strip())
+        if not m or (marker.strip() and not _marker_applies(marker.strip())):
+            continue
+        name, wanted = m.group(1), m.group(2)
+        try:
+            have = version(name)
+        except metadata.PackageNotFoundError:
+            missing.append(f"{name} not installed (needs >={wanted})")
+            continue
+        except Exception as e:  # noqa: BLE001 - broken metadata: pip's problem, not ours
+            log.debug("Can't read the installed version of %s: %s", name, type(e).__name__)
+            continue
+        installed = _release(str(have or ""))
+        if installed is not None and installed < _release(wanted):
+            missing.append(f"{name} {have} (needs >={wanted})")
+    if not missing:
+        return None
+    more = f" and {len(missing) - 3} more" if len(missing) > 3 else ""
+    return ("requirements.txt isn't installed: " + ", ".join(missing[:3]) + more
+            + "; " + INSTALL_HINT)
+
+
 def default_signers_path() -> Path:
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
@@ -484,11 +556,12 @@ class Updater:
         code, out = self.run([self.python, "-c", "import assistant.cli, assistant.host, "
                               "assistant.updater"], self.root, 300)
         if code != 0:
-            return False, "import failed: " + out.strip()[-300:]
+            return False, f"{SMOKE_IMPORT_FAILED}: " + out.strip()[-300:]
         code, out = self.run([self.python, "-m", "assistant", "--check"], self.root, 600)
         fails = [line for line in out.splitlines() if line.startswith("[FAIL]")]
         if code != 0:
-            return False, "--check failed: " + ("; ".join(fails) or out.strip()[-300:])
+            return False, f"{SMOKE_CHECK_FAILED}: " + ("; ".join(fails)
+                                                       or out.strip()[-300:])
         return True, "import and --check ok"
 
     # --- the update ---
@@ -567,7 +640,11 @@ class Updater:
         if smoke:
             ok, why = self.smoke()
             if not ok:
-                return self.rollback(old, new, why, requirements)
+                # A failed --check (no mic, no audio device, no key) says
+                # nothing about the code: undo it now but try it again at
+                # the next check. Only a failed import rejects it for good.
+                return self.rollback(old, new, why, requirements,
+                                     reject=not why.startswith(SMOKE_CHECK_FAILED))
         if self.gate is not None:  # nothing restarts on it while we hold the lock
             ok, why = self.gate(new)
             if ok is None:  # Claude or the internet down: no verdict on `new`

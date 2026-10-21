@@ -42,6 +42,14 @@ device and permanently deletes their conversations, Google connection and any
 key they added. Render's automatic disk snapshots may keep a copy until they
 expire; they are not used to restore individual accounts.
 
+Waitlist (cloud, only once `[webapp] public_site` is on): the email address
+and optional note (at most 300 characters) people leave on /welcome, and the
+date, in a private file (`[webapp] waitlist_file`, `/data/waitlist.json`).
+Used only to invite them by hand; never logged, never sent to Claude. The
+owner removes entries at /waitlist (also on request). Render's daily disk
+snapshots keep a copy until they expire. The /welcome, /privacy and /terms
+pages and the waitlist form are public; everything else still needs sign-in.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
 voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
 the machine that recorded it, except your phone's recording going to your own

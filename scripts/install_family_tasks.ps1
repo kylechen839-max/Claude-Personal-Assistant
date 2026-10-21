@@ -19,15 +19,19 @@
     closed. No administrator rights needed. Windows PowerShell 5.1 and 7.
 
         .\scripts\install_family_tasks.ps1              # install and start
-        .\scripts\install_family_tasks.ps1 -Restart     # restart them (after an update)
+        .\scripts\install_family_tasks.ps1 -Restart     # restart every app, yours too (after an update)
         .\scripts\install_family_tasks.ps1 -Watch       # also install the watchdog task
         .\scripts\install_family_tasks.ps1 -Uninstall   # stop and remove the tasks
 
-    -Restart goes through the go-live check (python -m assistant.deploy
-    --no-pull --restart): the code checked out now must first pass each
-    app's test conversation on a side port; if it fails, nothing restarts
-    and the old version keeps running. After the restart each app is
-    checked again live. Better still, update with .\scripts\deploy.ps1.
+    -Restart restarts every app on this PC, your own included (not only
+    the family copies), through the go-live check (python -m
+    assistant.deploy --no-pull --restart): the installed packages must
+    meet requirements.txt, and the code checked out now must first pass
+    each app's test conversation on a side port; if not, nothing restarts
+    and the old version keeps running. An app in the middle of a turn is
+    waited for (up to 2 minutes), then skipped and named. After the
+    restart each app is checked again live. Better still, update with
+    .\scripts\deploy.ps1.
 
     -Watch also installs \HeyClaude\Watch (scripts\install_watch_task.ps1),
     which checks every app every 5 minutes and heals or reports problems.

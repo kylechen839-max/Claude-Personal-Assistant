@@ -6,6 +6,28 @@
   profile) and delete their account (revokes Google access, signs out
   everywhere, deletes everything) from Settings, in English and Chinese. New
   setting `[family] export_max_mb` (default 50).
+- Fixed: the go-live gate refused every update on a machine without a web
+  app (a wake-only Pi, or a family copy that never started), and the wake
+  host undid a hand pull there. Such machines now go live after the import
+  smoke; a failing `--check` (no mic, no audio device, no key) is retried
+  and reported instead of refusing for good, in the gate and the automatic
+  updater alike.
+- Fixed: when Haiku moved to a change mid-turn, Sonnet received Haiku's
+  signed thinking, which the API rejects; the whole turn now reruns on Sonnet
+  from your message.
+- The watchdog and go-live test conversation start with a quick question
+  Haiku answers, and the api-contract CI job also runs with routing on.
+- The gate and deploy refuse until the packages in requirements.txt are
+  installed; `install_family_tasks.ps1 -Restart` waits for a running turn
+  and restarts every app, your own included. A web app whose WEB_TOKEN is
+  only in the environment shows as "unchecked".
+- Public beta pages (off until launch, `[webapp] public_site`): /welcome
+  (landing page with a waitlist), /privacy and /terms (drafts, `[webapp]
+  legal_draft`), and an owner-only /waitlist list. The waitlist is
+  rate-limited per visitor, de-duplicated, capped at 2000 entries and never
+  logged; `waitlist_file` is empty (closed) except on the cloud server. New
+  settings: `[webapp] public_site`, `support_email`, `legal_draft`,
+  `waitlist_file`.
 - Invite tiers: new invites are Beta (Calendar only) by default; Family keeps
   Calendar and Gmail. Beta testers never get Gmail tools or Gmail scopes and
   sign in through a separate Calendar-only Google client

@@ -3367,6 +3367,258 @@ Kyle: "build Haiku routing and caching right now."
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
 
+## Release bug fixes: go-live gate, mid-turn escalation, Haiku in the checks (2026-10-21)
+
+A judge's sweep of master (b96e6ed) returned NO-GO; every item is fixed,
+each with an offline test that fails when only its source change is
+reverted (`__pycache__` cleared). Master b96e6ed measured here first:
+2435 passed, 58 skipped; JS 232 pass.
+
+- **B1: the gate refused every commit on a machine without a web app.**
+  An env file without `WEB_TOKEN` (a wake-only Pi, a family copy whose app
+  never ran) made `candidate_check` fail ("no WEB_TOKEN", not outside), so
+  the updater rejected the commit forever, the wake host's `refuse()` did
+  `git reset --keep` on Kyle's pull and deploy said REFUSED. Now
+  `watch.discover` leaves such an instance out (it has no web app to check
+  or gate; INFO line with the env file name), and `gate_check` with no
+  instance runs the updater's import and `--check` smoke itself
+  (`watch.import_smoke`; a pull by hand never ran it) and passes only if
+  that passes (a failure's reason is fixed words, "import failed" or
+  "--check failed", the output tail goes to the log only; a smoke that
+  crashes is inconclusive). Tests: `test_no_web_token_means_no_web_app_to_gate` (the
+  gate isn't False, the smoke ran, a failing smoke refuses),
+  `test_a_hand_pull_on_a_wake_only_pi_is_not_undone` (a wake Host with a
+  real Updater: no `reset --keep`, restarted on the pull);
+  `test_discover_finds_kyles_app_and_each_family_copy` gets tokens in its
+  env files and a never-started copy that is left out.
+- **B2: mid-turn escalation sent Haiku's signed thinking to Sonnet.** Only
+  the escalating response was dropped; Haiku's earlier rounds of the same
+  turn (thinking signed for Haiku, its read-only tool_use and results)
+  stayed, and `request_messages` keeps current-turn thinking, so the real
+  API would refuse Sonnet's request. Now `_run` rewinds the history to
+  Kyle's message (its context kept; `_rewind_turn`, INFO "Rewound N
+  message(s)") and reruns the whole turn on the main model with a fresh
+  set of tool rounds. Only read-only tools could have run (every fast
+  response is checked before dispatch); untrusted text read in the
+  rewound rounds keeps the conversation tainted; the turn's tool events
+  are cleared (the reads run again). Haiku's words already streamed stay
+  the documented limit (README, router.py, SECURITY.md); the reply and
+  history are the main model's only. Tests:
+  `test_a_round_two_escalation_reruns_the_whole_turn_on_the_main_model`
+  (the judge's probe: no Haiku signature, tool_use id or text in any of
+  Sonnet's requests, Sonnet starts from one message, the delete runs once
+  after its one confirmation, the streamed words),
+  `test_a_rewound_turn_keeps_the_conversation_tainted`, and the contract
+  test `test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn`
+  (fails on master with the fake's "Invalid `signature`" 400).
+- **B3: neither the gate nor the watchdog ever reached Haiku.** The test
+  conversation's turns were long or said "remember". `run_conversation`
+  now starts with "What is two plus two?" ("quick turn", must answer);
+  the check session routes as usual. `tests/test_contract.py`'s web
+  conversation also runs routed (`contract-fake-routed`, and live
+  `DEFAULT_MODEL` + `CONTRACT_MODEL` as the fast model in the
+  `api-contract` job) and asserts the first request went to the fast
+  model, so Haiku's tool versions, cache_control and max_tokens meet the
+  real API. Test: `test_conversation_starts_with_a_turn_the_fast_model_answers`.
+- **LOW 4: an uninstalled requirements bump.** `updater.requirements_problem`
+  reads every `name>=x.y` in requirements.txt (markers evaluated with
+  `packaging` when present, else that line is skipped; `==` and unpinned
+  names left to pip) against `importlib.metadata`. `gate_check` returns
+  None ("can't tell yet", never a rejection for good) and deploy refuses
+  with "stop the apps, then run `python -m assistant --update` or
+  `pip install -r requirements.txt`". Tests: the parser
+  (`test_requirements_problem_reads_the_minimums`), the gate
+  (`test_the_gate_waits_for_requirements_to_be_installed`), deploy
+  --no-pull (`test_deploy_refuses_until_requirements_are_installed`).
+  The two `gate_check(NEW, None, ...)` tests now pass `tmp_path` (the
+  check reads the root's requirements.txt; the sandbox's own matches).
+- **LOW 5: `-Restart` restarted apps mid-turn.** Deploy waits up to
+  `deploy.IDLE_WAIT` (120 s) for `/healthz` busy=false, else skips the app
+  and names it. README and `install_family_tasks.ps1` say `-Restart`
+  covers every app here, Kyle's own included. Test:
+  `test_deploy_restart_waits_for_a_turn_to_finish`.
+- **LOW 6: the contract fake was looser than the API.** It now refuses a
+  `system` that isn't a string or text blocks, extra message keys
+  (`context`, `nudge`), cache_control on thinking/server blocks or empty
+  text, more than 4 breakpoints, and thinking signed by another model.
+  Tests: `test_the_fake_refuses_what_the_api_refuses` (7 cases),
+  `test_the_fake_binds_thinking_signatures_to_the_model`.
+- **LOW 7:** `config.mom.toml` no longer sets `[watch] status_file` (only
+  config.toml's is read). The data-path test exempts it as machine-wide;
+  `test_other_instances_set_no_machine_wide_watch_setting` keeps it out.
+- **LOW 8:** `router.READ_ONLY_TOOLS` adds `find_free_time` and
+  `list_calendars`.
+- Revert check: 13 single-change reverts (B1 discover skip, B1 smoke on
+  no instance, B2 rewind, B2 taint, B3 quick turn, LOW 4 gate, LOW 4
+  deploy, LOW 5, LOW 6 per-model signature, LOW 6 system/cache checks,
+  LOW 6 extra keys, LOW 7, LOW 8) each make their tests fail.
+- Counts (Linux sandbox, Python 3.13): 2455 passed, 59 skipped; master b96e6ed: 2435
+  passed, 58 skipped. JS 232 pass. The extra skip is the live routed
+  contract run (no key here).
+
+### Round 3 (judge findings on the B1 fix)
+
+- **N1: with no web app, a `--check` failure refused the commit for good.**
+  `--check` also fails for the machine's reasons (an unplugged mic, no
+  audio device, no API key). The no-web-app branch of `gate_check` now
+  refuses only when the import step fails (`updater.SMOKE_IMPORT_FAILED`,
+  the prefix `Updater.smoke()` already gives each step); a `--check`
+  failure is None: inconclusive, retried with the hosts' backoff, alerted
+  after 3 tries. The automatic updater's own smoke (`Updater._update`) is
+  a separate path and is unchanged: it still rolls back and rejects on a
+  `--check` failure, as on master. Tests:
+  `test_a_check_failure_without_a_web_app_is_inconclusive` (also through
+  the real `Updater.smoke()` words for both steps) and
+  `test_a_hand_pull_on_a_pi_with_no_mic_is_not_undone` (no reset, not
+  rejected, one inconclusive try noted).
+- **N2: an app with WEB_TOKEN only in the environment wasn't watched.**
+  `discover(untokened=...)` hands back the instances it skipped for a
+  missing token; the watchdog asks each one's `/healthz`, and one that
+  answers gets a WARNING line and a status entry "unchecked: running, but
+  WEB_TOKEN isn't in its env file, so it can't be checked" (in `--status`
+  and the owner's banner), alerted once when it starts, dropped when it no
+  longer answers. Test:
+  `test_an_app_with_its_token_only_in_the_environment_is_reported` (the
+  fake HTTP world: status, one alert over two runs, banner, `--status`
+  line, gone once down).
+- **N3 (docs):** README "Health checks and safe updates" says a `>=` line
+  without a marker that a machine can't install makes its gate "can't
+  tell yet" (the alert names the package), and to give such a line an
+  environment marker.
+- Revert check: N1 and N2 reverts fail their tests; the 13 round-2 reverts
+  re-run on this tree still fail theirs.
+- Counts (Linux sandbox, Python 3.13): 2458 passed, 59 skipped (round 2: 2455 passed, 59
+  skipped; master b96e6ed: 2435 passed, 58 skipped). JS 232 pass.
+## Public beta G5: public pages and waitlist (2026-10-21)
+
+What it does:
+- New `assistant/public_site.py` with static `web/landing.html`,
+  `privacy.html`, `terms.html`, `waitlist.html` and `site.css`. The pages
+  are `/welcome`, `/privacy` and `/terms`, public in CloudGuard
+  (`cloud.PUBLIC_GET`). They have no JavaScript, no inline CSS, no CDN
+  and no web fonts, and the app's CSP is unchanged. They are semantic
+  HTML, fit a phone's width, and follow light/dark through
+  `prefers-color-scheme`.
+- `/` stays the app. Signed out, it is still the sign-in page, now with a
+  "What is Hey Claude?" link to `/welcome` (translated on the Chinese
+  page). Invited people and installed home-screen icons keep working
+  unchanged, and a marketing page never sits between the owner and the
+  app. Because index.html, app.css and i18n.js changed, the sw.js cache is
+  now v22.
+- `POST /api/waitlist` takes a form (303 back to
+  `/welcome?waitlist=<state>`, so it works with no JS) or JSON. CloudGuard
+  gives it its own body pool (`WAITLIST_POST`, `waitlist_slots`) with the
+  sign-in body deadline. The app then applies:
+  - 5 posts per address an hour (`cloud.RateLimiter` gained a `window`);
+  - a honeypot field;
+  - strict, lower-cased and de-duplicated addresses;
+  - a note of at most 300 characters;
+  - at most 2000 entries.
+
+  Entries go to `[webapp] waitlist_file` via `google_auth.write_private`:
+  `/data/waitlist.json` in the server profile, `data/waitlist.json`
+  locally, "" on Mom's instance (closed). A file that can't be read is
+  never overwritten. Logs hold counts only.
+- Owner only (`require_owner`: 401 when signed out, 404 for a family
+  member): `GET /api/waitlist`, the `GET /waitlist` HTML list with Remove
+  buttons, and `DELETE /api/waitlist/<id>` / `POST .../<id>/remove`. The
+  brief named `DELETE /api/waitlist/<email>`; this deletes by a random
+  entry id instead, so an address never appears in a URL or the uvicorn
+  access log.
+- New settings: `[webapp] support_email` (fills `{{SUPPORT_EMAIL}}` on
+  privacy/terms; "" = "the person who runs this server") and
+  `legal_draft = true` (a visible "Draft: Kyle to review" note), plus
+  `waitlist_file`. All three have commented lines in config.toml.
+- The privacy page follows PRIVACY.md and the real beta data flows:
+  - who gets what: Anthropic under the user's own key, Calendar-only
+    Google, Notion once connected, Anthropic-run web search with the time
+    zone, Render as host;
+  - speech is transcribed on the server and not kept;
+  - what is stored, including the key ("stored encrypted on the server
+    and used only for your requests", for G2);
+  - IP addresses in the logs;
+  - deletion on request, and Render's daily snapshots keeping a copy until
+    they expire.
+
+  The terms are short: beta, as is, your own API costs, acceptable use,
+  and that the beta can end at any time.
+
+Tested: `tests/test_public_site.py`, 36 tests, offline, behind a real
+CloudGuard:
+- the pages are public and carry the CSP, and every other route still
+  answers 401;
+- an HTML parse finds no inline script or style, no event handlers and no
+  outside assets;
+- normalizing and de-duplication, and a private file with no temp
+  leftovers;
+- the note cap and bad addresses;
+- the honeypot (same answer as a person, nothing stored);
+- the per-address hourly limit and the 2000 cap;
+- a corrupt file is never overwritten, and the waitlist is closed without
+  a file;
+- caplog: no address or note at any level;
+- owner list/delete with escaped notes, and a family member gets 404;
+- separate pools for sign-in and waitlist posts, and the body cap;
+- support email and draft note on/off, and a malformed support email is
+  dropped;
+- `build_app` serves it, and the config/config.toml mirror.
+
+Revert check: 14 source reverts, each undone alone with `__pycache__`
+cleared, and each fails its test. The reverts were the PUBLIC_GET
+entries, the WAITLIST_POST public flag, the waitlist pool, the
+RateLimiter window, the honeypot, de-duplication, the rate limit, the
+cap, lower-casing, the note cap, the support email, `require_owner`, the
+login link, and a debug log of the address.
+
+Counts (Linux sandbox): 2471 passed, 58 skipped (master b96e6ed baseline
+2435 passed, 58 skipped); JS 232 pass.
+
+Known gaps: no CAPTCHA and no confirmation email, both on purpose
+(SECURITY.md). The page wording is a draft for Kyle.
+
+### Round 2 (judge: CHANGES_NEEDED, 5 findings)
+1. **The waitlist limit counted the proxy, not the visitor.** It used the
+   web app's `client_ip` (the rightmost X-Forwarded-For hop, no
+   `client_ip_header`). CloudGuard now puts the client key it already
+   worked out into `scope["state"]["client_key"]`, and the waitlist uses
+   that, falling back to the web app's address off the cloud. Tests: two
+   private hops, `client_ip_header = "cf-connecting-ip"`, and off the cloud.
+2. **A full list told who was on it.** At the cap, every post now gets
+   "full", whether or not the address is already listed. Test: a listed
+   and a new address get the same answer at 2000.
+3. **The pages promise pieces that aren't on master yet** (G1 Calendar
+   only, G2 BYOK, G6 Notion), and master auto-deploys. New
+   `[webapp] public_site = false` (default, and in the server profile).
+   While it is off, the four pages and every waitlist route answer 404,
+   and the sign-in page drops its /welcome link. A comment at the top of
+   landing.html and privacy.html lists each dependent claim for the
+   release check. Tests: site off (404 and no link, en and zh, and through
+   `cloud.build_app`'s server profile); site on works as before.
+4. **Untested protections.** New tests: a slow waitlist body gets 408
+   after the short sign-in deadline (ASGI-level, about 0.2 s); a
+   cross-site `POST /api/waitlist`, `.../remove` and `DELETE` each get 403.
+5. **`waitlist_file` defaulted to `data/waitlist.json`,** which opened a
+   public write endpoint on a PC. The default is now "" (closed); only
+   the server profile sets `/data/waitlist.json`. Mom's `""` line is gone,
+   since the default covers it.
+
+Revert check: each fix undone alone (`__pycache__` cleared), and each
+fails its test. That covers the scope key in cloud.py, its use in
+public_site.py, the cap/duplicate order, `from_config`'s switch, the
+`public_site` default, the login-link removal, the `or waitlist` deadline,
+and the `waitlist_file` default. The cross-site tests fail with the web
+app's same-site check removed.
+
+Known issue, not fixed here: the web app's own sign-in `LoginLimiter`
+(`/api/login`, `/api/invite/accept`) has the same split. It counts the
+web app's `client_ip` (rightmost hop), while CloudGuard counts its own
+client key. Behind two private hops or Cloudflare, the app-side lockout
+groups visitors by proxy. CloudGuard's own wrong-token checks are keyed
+correctly, and the right token is never locked out. The fix is the same
+scope key, in webapp.py.
+
+Counts (Linux sandbox): 2480 passed, 58 skipped (round 1: 2471; master
+b96e6ed: 2435 passed, 58 skipped); JS 232 pass.
 ## Public beta G1: account tiers and Calendar-only Google (2026-10-21)
 
 Kyle: get the app ready for an invite-only public beta (bring-your-own
