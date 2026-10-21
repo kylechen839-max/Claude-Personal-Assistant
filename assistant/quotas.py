@@ -14,7 +14,14 @@ view; any browser or phone). Where it is checked (webapp.py, voice_ws.py):
 - every recording transcribed for them (a spoken yes/no too) adds its
   length to today's speech seconds, measured from the audio before it is
   transcribed. A clip already started finishes: the day's total can go
-  past the limit by at most one recording, and the next one is refused.
+  past the limit by one recording per session in flight (a person with
+  several phones or tabs open can overshoot by one clip on each), and the
+  next one is refused. A spoken yes/no (/api/confirm) is checked for speech
+  time only (it is part of a turn already counted), and only one recording
+  per question is transcribed at a time.
+
+Someone removed (Family.remove) is forgotten, and nothing is counted for
+them afterwards: a turn still in flight can't bring their counters back.
 
 A refusal is a key of a sentence in i18n.py ("limit_minute", "limit_day",
 "limit_speech"), said in their language; nothing is sent to Claude and
@@ -55,18 +62,22 @@ class _Usage:
 class UserQuotas:
     """Thread-safe per-person counters. `clock` is wall-clock seconds
     (time.time): days are calendar days. `timezone_of(uid)` gives their
-    IANA zone name, or "" / None for UTC."""
+    IANA zone name, or "" / None for UTC. `is_listed(uid)`: False once
+    they were removed; nothing is counted for them then."""
 
     def __init__(self, turns_per_minute: int = 6, turns_per_day: int = 200,
                  stt_seconds_per_day: float = 1800, clock=time.time,
                  timezone_of: Callable[[str], str | None] | None = None,
-                 max_tracked: int = 1000):
+                 max_tracked: int = 1000,
+                 is_listed: Callable[[str], bool] | None = None):
         self.turns_per_minute = int(turns_per_minute)
         self.turns_per_day = int(turns_per_day)
         self.stt_seconds_per_day = float(stt_seconds_per_day)
         self.clock = clock
         self.timezone_of = timezone_of or (lambda uid: None)
         self.max_tracked = max(1, int(max_tracked))
+        # still a listed person? (Family: in users.json, not being deleted)
+        self.is_listed = is_listed or (lambda uid: True)
         self.usage: dict[str, _Usage] = {}
         self._zones: dict[str, object] = {}
         self.lock = threading.Lock()
@@ -129,27 +140,42 @@ class UserQuotas:
                     u.day != self.day(uid, now):
                 del self.usage[uid]
 
-    def _refusal(self, u: _Usage, audio: bool) -> str | None:
-        if self.turns_per_minute > 0 and len(u.minute) >= self.turns_per_minute:
+    def _refusal(self, u: _Usage, audio: bool, turns: bool = True) -> str | None:
+        if turns and self.turns_per_minute > 0 and \
+                len(u.minute) >= self.turns_per_minute:
             return "limit_minute"
-        if self.turns_per_day > 0 and u.turns >= self.turns_per_day:
+        if turns and self.turns_per_day > 0 and u.turns >= self.turns_per_day:
             return "limit_day"
         if audio and self.stt_seconds_per_day > 0 and \
                 u.speech >= self.stt_seconds_per_day:
             return "limit_speech"
         return None
 
-    def check(self, uid: str, audio: bool = False) -> str | None:
+    def _listed(self, uid: str) -> bool:
+        """Is `uid` still someone to count (call with the lock held)? A
+        turn in flight when they were removed must not bring their
+        counters back after forget()."""
+        try:
+            return bool(self.is_listed(uid))
+        except Exception:
+            return False
+
+    def check(self, uid: str, audio: bool = False, turns: bool = True) -> str | None:
         """Why a turn (`audio`: one that needs Whisper) would be refused
-        now, or None. Counts nothing."""
+        now, or None. Counts nothing. `turns=False`: only speech time (a
+        spoken answer inside a turn already counted)."""
         with self.lock:
+            if not self._listed(uid):
+                return None
             now = self.clock()
-            return self._refusal(self._get(uid, now), audio)
+            return self._refusal(self._get(uid, now), audio, turns)
 
     def admit(self, uid: str, audio: bool = False) -> str | None:
         """check(), and when allowed count the turn. Returns the refusal
         key, or None (the turn may go ahead)."""
         with self.lock:
+            if not self._listed(uid):  # removed meanwhile: nothing to count
+                return None
             now = self.clock()
             u = self._get(uid, now)
             why = self._refusal(u, audio)
@@ -163,6 +189,8 @@ class UserQuotas:
         if seconds <= 0:
             return
         with self.lock:
+            if not self._listed(uid):  # removed while it was transcribed
+                return
             u = self._get(uid, self.clock())
             u.speech += float(seconds)
             total = u.speech

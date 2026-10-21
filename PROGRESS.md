@@ -3925,9 +3925,12 @@ key for family members without their own).
     Whisper ran, also when it failed. Every path that transcribes for a
     person passes it: push-to-talk, the voice socket (turns and spoken
     yes/no), `/api/confirm`'s recorded answer, `transcribe_upload`. A spoken
-    yes/no is counted but never refused (it belongs to a running turn;
-    refusing would only make it a "no"). The lecture recorder and tutor are
-    owner-only (`require_owner`), so not limited.
+    yes/no in the voice view is counted but never refused (it belongs to
+    a running turn; refusing would only make it a "no"); a recorded answer
+    to the page's question is checked for speech time first (round 2). A
+    clip already started finishes, so the day's total can go past the
+    limit by one recording per session in flight. The lecture recorder
+    and tutor are owner-only (`require_owner`), so not limited.
 - **Sentences** (i18n.py, en + zh): `limit_minute`, `limit_day` (with the
   day's number), `limit_speech` (minutes, "you can still type"). No JS
   change: the page and voice view show the server's sentence; sw.js not
@@ -3955,3 +3958,37 @@ key for family members without their own).
 - **Counts** (Linux sandbox, Python 3.13): 2586 passed, 36 skipped; master
   7d55f8e in the same sandbox at the same time: 2567 passed, 36 skipped
   (+19). JS 241 pass (unchanged).
+- **Round 2** (review fixes, after merging master 770e642):
+  - `/api/confirm` with a recording: checked for speech time first
+    (`WebAssistant.speech_refusal`, speech only: a spoken answer to a turn
+    already counted isn't a new turn). Out of time: 429 with the
+    `limit_speech` sentence in their language, Whisper doesn't run and the
+    question stays open (the page shows the sentence and the buttons again;
+    a tap or a typed yes still answers it; a refusal is never a "no").
+    Then the question is claimed (`PendingConfirm.claim`, under its own
+    lock, like the voice view's `pending.answering`): a second recording
+    for the same question gets 409 without running Whisper, and a failed
+    decode or transcription releases the claim so they can try again.
+  - A turn in flight when someone is removed can't bring their counters
+    back: `UserQuotas(is_listed=...)` (Family: `uid in self.users`, so
+    people being deleted are out too), checked under the quota lock by
+    `check`, `admit` and `add_speech`. `Family.remove` swaps the list before
+    `forget`, so either order of the race ends with no entry.
+  - Docs: the overshoot is "one recording per session in flight"
+    (quotas.py, SECURITY, above); PRIVACY says the times of the last
+    minute's messages are kept too. `tzdata` was already in
+    requirements.txt (unconditional), so zoneinfo works on Windows.
+  - Tests (+6 in `tests/test_quotas.py`): five concurrent recordings with
+    speech used up (all 429, Whisper never ran, question still pending and
+    unclaimed, a tap then answers it; caplog: INFO `Limits: refused a
+    spoken answer for <id> (limit_speech)`, no name or question); one slow transcription holding the
+    claim while four more get 409 (Whisper ran once, 1 s counted); a failed
+    transcription and an unreadable upload both release the claim; a
+    spoken yes at the turns-per-minute limit still answers; admit, remove,
+    add_speech leaves no entry; unlisted ids never counted. Revert check,
+    each alone with `__pycache__` cleared: the whole webapp change (3
+    fail), the claim (1), the releases (1), the speech check (1),
+    `turns=False` (1), the Family `is_listed` (1), the quota guards (2),
+    the `add_speech` guard alone (2), the new INFO log line (1).
+  - Counts (Linux sandbox): 2619 passed, 36 skipped; the merge commit
+    142a0b2 in the same sandbox: 2613 passed, 36 skipped (+6). JS 241 pass.

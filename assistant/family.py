@@ -208,7 +208,10 @@ class Family:
         # whole, so reading it without the lock is safe)
         self.quotas = UserQuotas.from_config(
             config, clock=clock,
-            timezone_of=lambda uid: (self.users.get(uid) or {}).get("timezone"))
+            timezone_of=lambda uid: (self.users.get(uid) or {}).get("timezone"),
+            # removed (or being deleted): nothing counted, so a turn in
+            # flight can't bring back their counters after forget()
+            is_listed=lambda uid: uid in self.users)
         self._load()
         self._finish_deletes()
 

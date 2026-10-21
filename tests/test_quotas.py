@@ -250,6 +250,149 @@ def test_a_spoken_answer_counts_toward_their_speech(env, owner):
     assert env.family.quotas.usage[uid].speech == pytest.approx(1.5)
 
 
+def asked(env, uid, ann):
+    """A question pending in their push-to-talk session (as _confirm sets)."""
+    from assistant.webapp import PendingConfirm
+
+    env.fake_client.queue.append(make_response(text_block("Hi.")))
+    ann.post("/api/turn", json={"text": "hi"})
+    s = session_of(env, uid)
+    s.pending = PendingConfirm("Delete it?")
+    return s, s.pending
+
+
+def post_all(ann, n):
+    """`n` spoken answers sent at once; their responses."""
+    import threading
+
+    out = [None] * n
+
+    def send(i):
+        out[i] = ann.post("/api/confirm",
+                          files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})
+
+    threads = [threading.Thread(target=send, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    return out
+
+
+def test_a_spoken_answer_with_no_speech_left_isnt_heard_and_stays_open(
+        env, owner, caplog):
+    """Out of speech time: Whisper never runs (not even for a burst of
+    recordings) and it is never a "no"; the buttons still answer it."""
+    q = env.family.quotas
+    q.stt_seconds_per_day = 60
+    ann, uid = member(env, owner)
+    s, pending = asked(env, uid, ann)
+    q.add_speech(uid, 60)
+    env.assistant.transcriber = FakeTranscriber(*["yes"] * 5)
+    with caplog.at_level(logging.DEBUG):
+        responses = post_all(ann, 5)
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert f"Limits: refused a spoken answer for {uid} (limit_speech)" in info
+    everything = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Ann" not in everything and "Delete it?" not in everything
+    for r in responses:
+        assert r.status_code == 429
+        assert r.json() == {"error": i18n.t("limit_speech", "en", minutes=1)}
+    assert env.assistant.transcriber.heard == []  # Whisper never ran
+    assert s.pending is pending and not pending.answered.is_set()
+    assert not pending.answering
+    assert q.usage[uid].speech == pytest.approx(60)  # nothing more counted
+    r = ann.post("/api/confirm", json={"answer": "yes"})  # a tap still works
+    assert r.status_code == 200 and pending.answer is True
+
+
+def test_only_one_spoken_answer_is_transcribed_at_a_time(env, owner):
+    import threading
+
+    ann, uid = member(env, owner)
+    s, pending = asked(env, uid, ann)
+    entered, go = threading.Event(), threading.Event()
+
+    class Slow:
+        heard = 0
+
+        def transcribe(self, recording):
+            Slow.heard += 1
+            entered.set()
+            go.wait(10)
+            return "yes"
+
+    env.assistant.transcriber = Slow()
+    first = []
+    t = threading.Thread(target=lambda: first.append(ann.post(
+        "/api/confirm", files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})))
+    t.start()
+    assert entered.wait(10)
+    others = post_all(ann, 4)
+    assert [r.status_code for r in others] == [409] * 4
+    assert all(r.json() == {"error": "already answering"} for r in others)
+    go.set()
+    t.join(10)
+    assert first[0].status_code == 200 and pending.answer is True
+    assert Slow.heard == 1  # Whisper ran exactly once
+    assert env.family.quotas.usage[uid].speech == pytest.approx(1.0)
+
+
+def test_a_failed_spoken_answer_can_be_tried_again(env, owner):
+    ann, uid = member(env, owner)
+    s, pending = asked(env, uid, ann)
+
+    class Broken:
+        def transcribe(self, recording):
+            raise RuntimeError("whisper broke")
+
+    env.assistant.transcriber = Broken()
+    try:
+        r = ann.post("/api/confirm", files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})
+        assert r.status_code >= 500
+    except RuntimeError:
+        pass  # the test client re-raises the server's error
+    assert not pending.answering and not pending.answered.is_set()
+    r = ann.post("/api/confirm", files={"audio": ("a.wav", b"not audio", "audio/wav")})
+    assert 400 <= r.status_code < 500  # unreadable: also released
+    assert not pending.answering
+    env.assistant.transcriber = FakeTranscriber("yes")
+    r = ann.post("/api/confirm", files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})
+    assert r.status_code == 200 and pending.answer is True
+
+
+def test_a_spoken_answer_isnt_a_new_turn(env, owner):
+    """At the turns-per-minute limit, the turn already running can still
+    get its spoken yes (only speech time is checked)."""
+    env.family.quotas.turns_per_minute = 1
+    ann, uid = member(env, owner)
+    s, pending = asked(env, uid, ann)
+    env.assistant.transcriber = FakeTranscriber("yes")
+    r = ann.post("/api/confirm", files={"audio": ("a.wav", wav_bytes(1), "audio/wav")})
+    assert r.status_code == 200 and pending.answer is True
+
+
+def test_a_turn_in_flight_cant_bring_back_a_removed_persons_counts(env, owner):
+    ann, uid = member(env, owner)
+    q = env.family.quotas
+    assert q.admit(uid) is None  # a turn admitted, still running...
+    env.family.remove(uid)       # ...when they are removed
+    q.add_speech(uid, 2.0)       # its recording finishes afterwards
+    assert q.admit(uid) is None and q.check(uid, audio=True) is None
+    assert uid not in q.usage
+
+
+def test_unlisted_ids_are_never_counted():
+    listed = {"u_a"}
+    q = quotas(Now(), turns_per_day=1, is_listed=listed.__contains__)
+    assert q.admit("u_a") is None
+    listed.clear()
+    q.forget("u_a")
+    q.add_speech("u_a", 5)
+    assert q.admit("u_a") is None
+    assert q.usage == {}
+
+
 def test_removing_someone_forgets_their_counts(env, owner):
     ann, uid = member(env, owner)
     env.fake_client.queue.append(make_response(text_block("Hi.")))

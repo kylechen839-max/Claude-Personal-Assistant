@@ -7,7 +7,9 @@
   (`[family] turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`; 0 =
   off). Over a limit, the app says so in their language and nothing is sent to
   Claude. When speech time runs out they can still type. The owner is never
-  limited. Counts are kept in memory, so a restart resets them.
+  limited. Counts are kept in memory, so a restart resets them. A spoken
+  yes/no is only transcribed once per question, and when speech time is used
+  up it isn't heard; the question stays open for the buttons or typing.
 - Ops: optional error reports (only with `SENTRY_DSN` set; sentry-sdk is now
   installed with the app and stays off without it), an owner-only backup
   download (`GET /api/backup`), and the PC's watchdog can also watch the cloud

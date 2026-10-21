@@ -67,8 +67,8 @@ key in your folder, shown only to you.
 
 To keep the shared server fair, the app counts how many messages each invited
 person sends and how many seconds of their speech it transcribes, per minute
-and per day. Only the counts are kept, with their account id, in the server's
-memory. They are never written to disk, they reset when the server restarts,
+and per day. Only the counts, and the times of the messages sent in the last
+minute, are kept, with their account id, in the server's memory. They are never written to disk, they reset when the server restarts,
 and they are deleted when the account is removed. No text or audio is kept for
 this.
 

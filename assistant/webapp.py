@@ -602,6 +602,24 @@ class PendingConfirm:
     id: str = field(default_factory=lambda: secrets.token_urlsafe(8))
     answered: threading.Event = field(default_factory=threading.Event)
     answer: bool = False
+    # a spoken answer being transcribed (/api/confirm): one at a time, so
+    # a burst of recordings can't each run Whisper (claim/release)
+    answering: bool = False
+    _claim: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def claim(self) -> bool:
+        """Take the question for a spoken answer; False if one is already
+        being transcribed."""
+        with self._claim:
+            if self.answering:
+                return False
+            self.answering = True
+            return True
+
+    def release(self) -> None:
+        """A spoken answer failed: the question can be answered again."""
+        with self._claim:
+            self.answering = False
 
 
 class Session:
@@ -935,6 +953,20 @@ class WebAssistant:
         if why is None:
             return None
         log.info("Limits: refused a turn for %s (%s)", s.user, why)
+        return i18n.t(why, s.language, **quotas.message_values())
+
+    def speech_refusal(self, s: Session) -> str | None:
+        """Why this session's person may not have a recording transcribed
+        now (their speech time today is used up), as a sentence in their
+        language; None if it may. Only speech: answering a question asked
+        in a turn already counted isn't a new turn. None for the owner."""
+        quotas = getattr(self.family, "quotas", None) if s.user is not None else None
+        if quotas is None:
+            return None
+        why = quotas.check(s.user, audio=True, turns=False)
+        if why is None:
+            return None
+        log.info("Limits: refused a spoken answer for %s (%s)", s.user, why)
         return i18n.t(why, s.language, **quotas.message_values())
 
     def _count_speech(self, user: str | None, recording) -> None:
@@ -1907,11 +1939,23 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return err
         answer = str(fields.get("answer") or fields.get("text") or "")
         if data:
-            recording, err = await decode(data)
-            if err:
-                return err
-            answer = await run_in_threadpool(assistant.transcribe, recording,
-                                             s.language, s.user)
+            # out of speech time: not transcribed and not a "no"; the
+            # question stays open for the buttons or a typed yes
+            refused = assistant.speech_refusal(s)
+            if refused:
+                return error(refused, 429)
+            if not pending.claim():  # another recording is being heard
+                return error("already answering", 409)
+            try:
+                recording, err = await decode(data)
+                if err:
+                    pending.release()
+                    return err
+                answer = await run_in_threadpool(assistant.transcribe, recording,
+                                                 s.language, s.user)
+            except BaseException:
+                pending.release()  # they can try again or tap a button
+                raise
             s.events.put({"type": "transcript", "text": answer})
         yes = is_yes(answer)
         log.info("Web confirmation -> %s", "yes" if yes else "no")
