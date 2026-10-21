@@ -594,3 +594,14 @@ def test_the_key_never_reaches_the_log_at_any_level(env, owner, caplog, monkeypa
         assert KEY_A not in record.getMessage()
         assert KEY_A not in str(record.args) and KEY_A not in (record.exc_text or "")
     assert KEY_A not in caplog.text
+
+
+def test_requirements_keep_the_sdk_below_2():
+    """anthropic 2.0 (2026-10-21) sends an API key as `Authorization: Bearer`,
+    so a person's client would no longer send X-Api-Key as the tests above
+    require. Stay on 1.x until userkeys is moved to the new auth."""
+    from pathlib import Path
+
+    reqs = (Path(__file__).resolve().parent.parent / "requirements.txt").read_text(encoding="utf-8")
+    line = next(l for l in reqs.splitlines() if l.startswith("anthropic"))
+    assert line.split("#")[0].strip() == "anthropic>=0.77,<2"
