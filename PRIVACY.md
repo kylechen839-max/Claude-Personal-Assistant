@@ -153,8 +153,9 @@ server's admin, can read). Their messages go to Anthropic under your API
 key, and their web searches send only their time zone as location. Their
 data is never synced to your Pi or PC, never put in Pinecone or Notion, and
 not visible to your account in the app, except in the owner's backup
-download, which holds every account's conversations. Removing someone signs them out and
-deletes their folder and entry; if a file can't be deleted right away, the
+download, which holds every account's conversations. Removing someone first
+asks Google and Notion to revoke Hey Claude's access (best effort), then signs
+them out and deletes their folder and entry; if a file can't be deleted right away, the
 server retries at the next start, the next removal, or when you open the
 family list.
 

@@ -689,7 +689,10 @@ server (`[family] enabled`, on in the server profile).
     asks Google to revoke their grant (the refresh token, in the POST body
     to `oauth2.googleapis.com/revoke`, never a URL; 5 s timeout); a
     failure is logged with the error type only and never blocks the
-    delete. Then `Family.remove` (the same path as the owner's Remove):
+    delete. The owner's Remove (`POST /api/users/{id}/remove`) does the
+    same Google revoke first, through the same helper
+    (`account.revoke_google_grant`), only for a listed id. Then
+    `Family.remove` (the same path as the owner's Remove):
     every session of theirs and live voice call is signed out and
     `<dir>/<id>/` is deleted in one rmtree (history, Google token, their
     own API key and Notion token files), retried as above. The response
@@ -758,7 +761,9 @@ server reads their replies with (`[tts] picker`, on by default).
 - **Money.** ElevenLabs voices are listed only with `ELEVENLABS_API_KEY`
   set, and offered to family members only with `[tts]
   family_paid_voices = true` (off by default: they would spend the owner's
-  plan). The voice list is fetched at most hourly (failures: every 5
+  plan), and then only to the family tier: a beta tester (or anyone not
+  listed, per `Family.tier`) is refused in the listing, in `choose` and
+  when their saved voice is looked up for a reply. The voice list is fetched at most hourly (failures: every 5
   minutes); the key goes only in the `xi-api-key` header and is never
   logged. Preview clips are cached (the last 8), so tapping Preview again
   costs nothing. Callers asking for the same clip at once share one render,

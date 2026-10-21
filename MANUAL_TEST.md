@@ -397,6 +397,8 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 - [ ] With `ELEVENLABS_API_KEY` in `.env` (optional, paid): restart.
   - Should: your ElevenLabs voices appear with a small **paid** tag, and an
     "ElevenLabs voice ID" box; a family member's phone shows neither.
+    With `[tts] family_paid_voices = true` on the cloud, a **Family**
+    account sees them too, and a **Beta** account still sees neither.
 - [ ] On the cloud with a family member signed in on another phone: each
       picks a different voice.
   - Should: each hears only their own; changing one doesn't change the
@@ -617,7 +619,9 @@ for all of this except the Google sign-in.
 - [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
-    folder; check Render -> Shell `ls /data/users` if you like.)
+    folder; check Render -> Shell `ls /data/users` if you like.) At
+    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    is gone too: Remove revokes their Google grant first.
 - [ ] **Beta tester (Calendar only).** Invite someone with the Account left
       on **Beta (Calendar only)** and open the link on another phone,
       before `GOOGLE_PUBLIC_CLIENT_JSON` is set (BLOCKERS "Beta testers'

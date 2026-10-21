@@ -361,14 +361,19 @@ def test_disconnect_removes_the_token_and_the_tools(g):
     assert mom.get("/api/google/status").json()["connected"] is False
 
 
-def test_removing_a_member_deletes_their_token(g):
+def test_removing_a_member_deletes_their_token(g, monkeypatch):
+    from assistant import account
+
     mom, mom_id = g.member("Mom")
     dad, dad_id = g.member("Dad", "en")
-    connected(g, mom, mom_id, "mom")
+    mom_token = connected(g, mom, mom_id, "mom")
     connected(g, dad, dad_id, "dad")
+    revoked = []  # no network: the Remove revokes her grant first
+    monkeypatch.setattr(account, "revoke_google", revoked.append)
     kyle = TestClient(g.app, base_url=BASE)
     login(kyle)
     assert kyle.post(f"/api/users/{mom_id}/remove", json={}).status_code == 200
+    assert revoked == [mom_token.get("refresh_token") or mom_token["token"]]
     assert not g.fam.google_token(mom_id).exists()
     assert not (g.tmp / "users" / mom_id).exists()
     assert g.fam.google_token(dad_id).exists()  # Dad's stays

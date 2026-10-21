@@ -1199,14 +1199,29 @@ class WebAssistant:
         if language is None and session is not None:
             language = session.language
         default = self._language_tts(language)
-        if self.voices is None or session is None:
+        if session is None:
             return default
-        try:
-            engine = self.voices.engine_for(session.user, session.language)
-        except Exception:
-            log.exception("Choosing a voice failed; using the default")
-            return default
-        return default if engine is self.tts else engine
+        engine = default
+        if self.voices is not None:
+            try:
+                engine = self.voices.engine_for(session.user, session.language)
+            except Exception:
+                log.exception("Choosing a voice failed; using the default")
+            else:
+                engine = default if engine is self.tts else engine
+        return self._unpaid(engine, session.user)
+
+    def _unpaid(self, engine, user):
+        """ElevenLabs bills the owner: an invited person who may not use paid
+        voices (a beta tester, or family without [tts] family_paid_voices)
+        hears its local fallback even when it is the server's default."""
+        from assistant.tts_elevenlabs import ElevenLabsTTS
+
+        if user is None or not isinstance(engine, ElevenLabsTTS):
+            return engine
+        if self.voices is not None and self.voices.catalog.paid_ok(user):
+            return engine
+        return engine.fallback
 
     def render(self, engine, text: str) -> bytes:
         """`text` spoken by `engine`, as WAV bytes (in the TTS thread)."""

@@ -23,8 +23,8 @@ from `<dir>/<id>/notion.enc` (encrypted, userkeys.NOTION_LABEL), never
 NOTION_TOKEN (Kyle's). Nothing else: no Kyle's Notion, Pinecone memory or
 notes, Kyle's Google, dev team, lecture recorder or tutor, and no way to
 see anyone else's history. Removing someone signs them out and deletes
-their folder, Google token and Notion token included (the Notion grant is
-revoked first, best effort).
+their folder, Google token and Notion token included (the Google and
+Notion grants are revoked first, best effort).
 
 Each person has a tier (`tier` in users.json, chosen at invite): "family"
 (the above; people listed before tiers existed load as this) or "beta" (an
@@ -1071,7 +1071,9 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
       POST   /api/invites             {name, language, timezone?, tier?} -> {url, expires_at}
                                       (tier "beta", the default, or "family")
       GET    /api/users               the invited people (owner only)
-      POST   /api/users/{id}/remove   sign them out, delete their history
+      POST   /api/users/{id}/remove   revoke their Google and Notion grants
+                                      (best effort), sign them out, delete
+                                      their history
                                       (also DELETE /api/users/{id}; the page
                                       posts: the failover preflight allows
                                       only GET and POST cross-origin)
@@ -1158,9 +1160,15 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
             return e
 
         def revoke_and_remove(uid: str) -> bool:
-            # the revoke is best effort, never blocks the removal (notion.enc
-            # goes with the folder); under their Notion lock, so a refresh
-            # in flight finishes first and none saves in between
+            # the revokes are best effort, never block the removal (the
+            # token files go with the folder). Google first, as "Delete my
+            # account" does (account.py's helper), only for someone listed:
+            # uid comes from the path. Notion under their Notion lock, so a
+            # refresh in flight finishes first and none saves in between
+            if family.get(uid) is not None:
+                from assistant.account import revoke_google_grant
+
+                revoke_google_grant(family, uid, label="Family")
             with family._notion_lock(uid):
                 family._revoke_notion(uid)
                 return family.remove(uid, sign_out)
