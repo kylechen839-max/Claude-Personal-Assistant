@@ -333,6 +333,38 @@ SEARCH_QUESTION = "Search the web: what's the weather in London today? One sente
 PLAIN_QUESTION = "What is two plus two?"
 
 
+_ZH_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_ZH_UNITS = {"十": 10, "百": 100, "千": 1000}
+_ZH_RUN = re.compile("[" + "".join(_ZH_DIGITS) + "".join(_ZH_UNITS) + "]+")
+
+
+def _zh_number(run: str) -> str:
+    """A run of Chinese numerals as digits: 四八二一 (read digit by digit)
+    or 四千八百二十一 / 四千零二十一 (positional). '' when it isn't one."""
+    if not any(ch in _ZH_UNITS for ch in run):
+        return "".join(str(_ZH_DIGITS[ch]) for ch in run)
+    total, digit = 0, None
+    for ch in run:
+        if ch in _ZH_UNITS:
+            total += (1 if digit is None else digit) * _ZH_UNITS[ch]
+            digit = None
+        else:
+            digit = _ZH_DIGITS[ch]
+    return str(total + (digit or 0))
+
+
+def reply_has_number(reply: str, code: str) -> bool:
+    """Whether a reply still holds the remembered number: as digits (also
+    full-width, or grouped like 4,821 / 4 821) or in Chinese numerals, which
+    a Chinese instance may answer in."""
+    text = reply.translate({0xFF10 + i: str(i) for i in range(10)})
+    text = re.sub(r"(?<=\d)[,.\s'  ](?=\d)", "", text)
+    if code in text:
+        return True
+    return any(_zh_number(m.group()) == code for m in _ZH_RUN.finditer(reply))
+
+
 def run_conversation(c: WebClient, wav: Path, info: dict,
                      voice_ws=voice_turn) -> list[Outcome]:
     """One realistic conversation in this (check) session: what people do.
@@ -357,12 +389,13 @@ def run_conversation(c: WebClient, wav: Path, info: dict,
     if question is None:
         question = (SEARCH_QUESTION if "web_search" in (info.get("server_tools") or [])
                     else PLAIN_QUESTION)
-    recall = "What number did I ask you to remember? Reply with just the number."
+    recall = ("What number did I ask you to remember? Reply with just the number, "
+              "in digits.")
 
     def remembers(events, name):
         status, detail = judge_turn(events, False)
         reply = next((e.get("text", "") for e in events if e.get("type") == "reply"), "")
-        if status == "PASS" and code not in reply:
+        if status == "PASS" and not reply_has_number(reply, code):
             return Outcome(name, "FAIL", f"forgot the number from the first turn "
                            f"(replied {shorten(reply)!r})")
         return Outcome(name, status, detail)

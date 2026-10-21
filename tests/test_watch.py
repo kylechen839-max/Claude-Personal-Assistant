@@ -880,6 +880,39 @@ def test_conversation_fails_without_the_tool_call_or_the_memory():
     assert got["follow-up turn"].reason == "lost the conversation"
 
 
+@pytest.mark.parametrize("reply", [
+    "It's 4821.", "4,821", "4 821", "４８２１", "号码是四千八百二十一。", "四八二一",
+    "是 4821。",
+])
+def test_the_remembered_number_counts_in_any_way_it_is_written(reply):
+    """The family deploy was refused twice: Mom's Chinese instance answered
+    the recall turn in Chinese numerals and the gate, looking only for the
+    digits, called it "lost the conversation" (Kai once failed on a grouped
+    number). The number still counts however it is written."""
+    assert smoke.reply_has_number(reply, "4821")
+
+
+@pytest.mark.parametrize("reply", ["I don't remember.", "4812", "四千八百一十二",
+                                   "一二三四", "Okay."])
+def test_a_wrong_or_missing_number_still_fails(reply):
+    assert not smoke.reply_has_number(reply, "4821")
+
+
+def test_a_chinese_reply_passes_the_follow_up_turns():
+    class Chinese(ConversationHTTP):
+        def post(self, url, **kw):
+            response = super().post(url, **kw)
+            if "What number" in ((kw.get("json") or {}).get("text", "")):
+                zh = "".join("零一二三四五六七八九"[int(d)] for d in self.code)
+                response = type(response)(200, [json.dumps(e) for e in (
+                    {"type": "reply", "text": f"是{zh}。"}, {"type": "done"})])
+            return response
+
+    got = conversation(Chinese())
+    assert got["follow-up turn"].status == "PASS", got["follow-up turn"]
+    assert got["last text turn"].status == "PASS"
+
+
 def test_conversation_never_runs_without_a_check_session():
     http = ConversationHTTP(check=404)
     got = conversation(http)
