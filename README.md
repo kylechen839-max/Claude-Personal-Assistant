@@ -681,7 +681,8 @@ while the cloud is the active backend.
 
 1. Signed in with your token at the cloud's address, open ⚙ -> **Invite
    someone**, enter their
-   name and language (and their time zone, e.g. `Asia/Shanghai`), then
+   name and language (and their time zone, e.g. `Asia/Shanghai`), pick the
+   **Account** type (below; **Beta** is preselected), then
    **Create invite link**. The phone's share sheet opens (or the link is
    copied). Send it to them however you like. The link points at the
    server itself (`[webapp] public_origin`, else with failover the cloud's
@@ -695,9 +696,30 @@ while the cloud is the active backend.
    deletes their conversations (if a file can't be deleted right away, it
    is retried later).
 
+**Account types (tiers).** Each person is either **Family** or **Beta**
+(`tier` in `users.json`; the owner's list marks beta people "· Beta"):
+
+- **Family**: everything below, including their own Gmail (read, drafts).
+  People invited before tiers existed are Family automatically.
+- **Beta** (the default for a new invite): an invite-only public beta
+  tester. Same chat, voice, web search and history, but Google is
+  **Calendar only**: no Gmail tools, and their Google consent screen asks
+  only for `calendar.events` plus the optional read-only calendar list and
+  settings scopes, even with `[gmail] enabled`. Why: Gmail scopes are
+  "restricted" for Google, so a public app that asks for them needs a paid
+  third-party security assessment every year; Calendar scopes don't.
+  Beta testers sign in through a **separate OAuth client** in its own Google
+  Cloud project (`GOOGLE_PUBLIC_CLIENT_JSON` or `[family]
+  public_google_client`), whose consent screen lists nothing but Calendar.
+  Until it is set, beta testers can't connect Google (the app says "Google
+  isn't set up for beta accounts yet"); they never fall back to the family
+  client, whose consent screen lists Gmail.
+
 What they get: chat and voice with Claude, web search, their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
-synced to your Pi or PC), and everything in their language: replies, the
+synced to your Pi or PC; each person's is capped at `[family]
+max_history_mb`, 20 MB, oldest unpinned conversations first), and
+everything in their language: replies, the
 assistant's own sentences ("Please say yes or no", "I didn't catch that")
 and, for Chinese, speech recognition with the multilingual Whisper model
 (`zh_stt_model`, `small`) and the Mandarin Piper voice (`zh_piper_voice`).
@@ -728,12 +750,21 @@ or removing them deletes it. One-time setup for you:
 
 Without step 2 everything else works and their Connect button stays hidden.
 
+For **beta testers**, repeat steps 1-3 in a *new* Google Cloud project
+(e.g. "Hey Claude Beta") whose OAuth consent screen lists only the
+`calendar.events`, `calendar.calendarlist.readonly` and
+`calendar.calendars.readonly` scopes, and paste that client's JSON into
+`GOOGLE_PUBLIC_CLIENT_JSON` instead. Submit that project for Google's
+verification (sensitive scopes: a privacy policy and a demo video, no paid
+assessment); until then it works as an unverified app for up to 100 users.
+
 What they never get: your Notion, Pinecone memory and notes, your Google
 Calendar and Gmail, the dev team, the lecture recorder and tutor, your
 history, failover, or the invite menu. Their **Sign out everywhere** signs
 out only their own phones; yours signs out only yours. Settings: `[family]`
 in `config.toml` (`dir`, `max_users`, `invite_days`, `google`,
-`google_client`, `zh_stt_model`, `zh_piper_voice`).
+`google_client`, `public_google_client`, `max_history_mb`, `zh_stt_model`,
+`zh_piper_voice`).
 
 ## Run it in the cloud (Render)
 

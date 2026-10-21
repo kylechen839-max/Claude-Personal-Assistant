@@ -513,6 +513,25 @@ server (`[family] enabled`, on in the server profile).
   token included. Not done, on purpose: the token isn't revoked at Google
   on disconnect (deleting it from the server is what stops the assistant;
   they can also remove "Hey Claude" at myaccount.google.com/permissions).
+- **Tiers: beta testers are Calendar only** (public beta piece G1). Each
+  person's `tier` in `users.json` is "family" or "beta"; a new invite is
+  beta unless the owner picks family, a user listed before tiers loads as
+  family, and any other stored value counts as beta (the narrower one).
+  For a beta tester: no Gmail tools, even with `[gmail] enabled` and even
+  if their token somehow carries Gmail scopes (`_google_tools` checks the
+  tier); their consent URL asks only for `calendar.events` and the
+  read-only calendar extras (`GoogleConnect.gmail` → `Family.gmail_allowed`, used for both the
+  start and the code exchange); and they sign in only through the public
+  client (`GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client`,
+  its own Google Cloud project). Without it their Google is off with a
+  "not set up for beta accounts yet" note; there is no fallback to the
+  family client, whose consent screen lists Gmail. The tier is set only by
+  the owner (invite); a beta tester can't change it. Their status
+  (`gmail: false`) also drops every mention of email from their guide and
+  disconnect prompt. Both client JSONs (they hold a client secret) are in
+  `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
+  Each person's history is capped at `[family] max_history_mb` (20 MB), not
+  the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
 - **Speech and sentences in their language.** A Chinese-speaking member's
   recordings go to the Chinese Whisper model and replies to the Mandarin
   voice (`webapp.SpeechByLanguage`, loaded on first use, one per model),

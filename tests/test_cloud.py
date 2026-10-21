@@ -836,10 +836,11 @@ def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     assert not (tmp_path / "users").exists() or not any((tmp_path / "users").iterdir())
     # the rest still needs signing in
     assert client.get("/api/google/status", headers=via_proxy(PUBLIC)).status_code == 401
-    _, invite = fam.invite("Mom", "zh")
+    _, invite = fam.invite("Mom", "zh", tier="family")
     assert accept(client, invite).status_code == 200
     status = client.get("/api/google/status", headers=via_proxy(PUBLIC)).json()
-    assert status == {"enabled": True, "connected": False, "disconnect": True}
+    assert status == {"enabled": True, "connected": False, "disconnect": True,
+                      "gmail": True, "note": None}
     fam.close()
 
 

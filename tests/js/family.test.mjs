@@ -204,3 +204,28 @@ test('app.js hands its router-aware request() to family.js before anything else'
   assert.ok(configured > 0);
   assert.ok(configured < app.indexOf('family.acceptInvite(window)'));
 });
+
+test('an invite sends the chosen tier, beta by default; the list marks beta people', async () => {
+  const url = `https://x.example/#invite=${TOKEN}`;
+  const responses = {
+    '/api/invites': { status: 200, body: { url, expires_at: 1 } },
+    '/api/users': { status: 200, body: { users: [
+      { id: 'u_aaaaaaaa1', name: 'Tester', status: 'active', tier: 'beta' },
+      { id: 'u_bbbbbbbb1', name: 'Mom', status: 'invited', tier: 'family' }] } },
+  };
+  const plain = load({ responses });  // no tier select (an older page): beta
+  plain.api.onState({ owner: true, family: true }, plain.win, plain.win.document);
+  plain.els['invite-name'].value = 'Tester';
+  await plain.els['invite-form'].fire('submit');
+  assert.equal(JSON.parse(plain.fetches.find((f) => f.url === '/api/invites').opts.body).tier, 'beta');
+  const states = plain.els['family-list'].children.map((li) => li.children[2].textContent);
+  assert.deepEqual(states, ['Active · Beta', 'Invited']);
+
+  const t = load({ responses });
+  t.els['invite-tier'] = new El('invite-tier');
+  t.els['invite-tier'].value = 'family';
+  t.api.onState({ owner: true, family: true }, t.win, t.win.document);
+  t.els['invite-name'].value = 'Mom';
+  await t.els['invite-form'].fire('submit');
+  assert.equal(JSON.parse(t.fetches.find((f) => f.url === '/api/invites').opts.body).tier, 'family');
+});

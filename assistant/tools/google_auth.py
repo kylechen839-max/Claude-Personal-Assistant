@@ -54,6 +54,9 @@ CLIENT_ENV = "GOOGLE_CLIENT_JSON"
 # The "Web application" OAuth client family members sign in with from the
 # phone (family.py; Kyle's own GOOGLE_CLIENT_JSON is usually a Desktop one).
 WEB_CLIENT_ENV = "GOOGLE_WEB_CLIENT_JSON"
+# The public beta's Web client (family.py tier "beta"), in its own Google
+# Cloud project whose consent screen lists only the calendar scopes.
+PUBLIC_CLIENT_ENV = "GOOGLE_PUBLIC_CLIENT_JSON"
 SIGN_IN_COMMAND = "python -m assistant.tools.google_auth"
 HEADLESS_REDIRECT = "http://localhost:8765/"
 
@@ -139,10 +142,12 @@ def client_config(credentials_path="credentials.json", environ=os.environ) -> di
     return config
 
 
-def web_client_config(path: str | Path = "", environ=os.environ) -> dict | None:
-    """The family sign-in's Web application client: GOOGLE_WEB_CLIENT_JSON,
-    else the file at `path` ("" = none)."""
-    config = _json_env(WEB_CLIENT_ENV, environ)
+def web_client_config(path: str | Path = "", environ=os.environ,
+                      env: str = WEB_CLIENT_ENV) -> dict | None:
+    """The family sign-in's Web application client: GOOGLE_WEB_CLIENT_JSON
+    (or `env`, e.g. GOOGLE_PUBLIC_CLIENT_JSON), else the file at `path`
+    ("" = none)."""
+    config = _json_env(env, environ)
     if config is None and path and Path(path).is_file():
         config = json.loads(Path(path).read_text(encoding="utf-8"))
     return config

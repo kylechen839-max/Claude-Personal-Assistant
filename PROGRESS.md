@@ -3365,3 +3365,66 @@ Kyle: "build Haiku routing and caching right now."
   to the main model. Counts (Linux sandbox): 2352 passed, 57 skipped, plus
   the sandbox's 9 audio failures and 26 audio errors (eSpeak, PortAudio,
   wake model); JS 232 pass.
+
+## Public beta G1: account tiers and Calendar-only Google (2026-10-21)
+
+Kyle: get the app ready for an invite-only public beta (bring-your-own
+key, Calendar-only Google, no funding). This is piece G1 of that plan.
+- **Tiers.** Each person in `users.json` has `tier`: `"family"` or
+  `"beta"`. People listed before tiers load as family, without a rewrite
+  (the field is written on the next save). Any other stored value counts
+  as beta, the narrower tier. `POST /api/invites` takes `tier`; a new
+  invite is **beta** unless the owner picks family, and a bad value gets a
+  400. `public()` (the owner's list) shows the tier. The invite form has an
+  **Account** select (Beta preselected), and the list marks beta people
+  "· Beta", in English and Chinese. The INFO log line gives the id and the
+  tier, never the name.
+- **Beta testers never see or get Gmail.**
+  - `_google_tools` adds Gmail only for tier family, even with `[gmail]
+    enabled` and a token that has the scopes.
+  - The consent URL's scopes come from `GoogleConnect.gmail(uid)` → `Family.gmail_allowed(uid)`: for beta,
+    `calendar.events` plus the read-only calendar extras. The same scopes
+    are used for the code exchange.
+  - `/api/google/status` now also returns `gmail` (false for beta) and
+    `note`. With `gmail` false, i18n.js uses a Calendar-only guide step
+    and examples, and a disconnect question with no "email".
+- **A separate OAuth client.** Beta testers sign in only through
+  `GOOGLE_PUBLIC_CLIENT_JSON` / `[family] public_google_client` (its own
+  Google Cloud project). Without it they get no Connect button, the note
+  "Google isn't set up for beta accounts yet." (en/zh, `i18n
+  google_beta_off`), and a 503 with the same text from
+  `/api/google/connect`. They never fall back to the family client. The
+  page keeps `data-google` for them, so the note can show.
+  - `web_client_config` takes an `env` name.
+  - Both Web client JSON variables are now in `SECRET_ENV_VARS` (masked;
+    `watch.py` keeps them from child processes).
+  - render.yaml adds `GOOGLE_PUBLIC_CLIENT_JSON` (sync: false), and
+    conftest clears it.
+- **Gap (c).** `[family] max_history_mb` (20) replaces the global
+  `[history] max_mb` (500) for every person's HistoryStore. It is mirrored
+  in config.toml.
+- `sw.js` cache is now v22.
+- **Tests.**
+  - New, in test_family.py: invite defaults to beta / family on request /
+    bad tier 400; pre-tier users load as family and odd values as beta;
+    `max_history_mb` applied (20, then 7); tier logged without the name.
+  - New, in test_family_google.py:
+    - a beta consent URL has only calendar scopes and the public
+      client_id (start and exchange), while family keeps Gmail on the
+      family client;
+    - a beta registry has no Gmail tools with Gmail enabled and Gmail
+      scopes on the token, and no "Kyle" in schemas or the request;
+    - no public client means no Google, the note and a 503, even with
+      the family client set in both env and file; it then works from
+      `[family] public_google_client`.
+  - New JS: family.test.mjs (tier sent, beta by default; "· Beta" in the
+    list) and i18n.test.mjs (no mail wording for beta, en and zh; the
+    note; the zh labels).
+  - Existing family Google tests now invite with `tier="family"` (the
+    default changed), and four status-dict checks gained `gmail`/`note`.
+  - Revert check: 8 Python and 3 JS source reverts, each made alone with
+    `__pycache__` cleared, all fail their tests.
+  - The "no Kyle" check already held before this change; it guards beta
+    schemas and is not a fix.
+- **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
+  (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
