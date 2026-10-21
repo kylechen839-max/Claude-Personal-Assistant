@@ -4195,3 +4195,40 @@ Notion workspace and gets exactly two tools on their own token.
   branch: 2604 passed, 36 skipped; JS 247. Existing tests touched: the
   sw.js pin is v27, `/notion.js` joins test_webapp's public list, and
   test_docs knows the two tool names.
+
+### G6 Round 2 (review fixes, 2026-10-21)
+
+Merged `claude/account-self-service` (6f09947, with master 0005342: the
+ops PR, design skills and #9, which removed the PC hub and moved the
+dashboard); the only conflict was `ISOLATED_ENV_VARS` (both `SENTRY_DSN`
+and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
+- **Reconnect revokes the old grant.** `Family.replace_notion` reads the
+  stored record and saves the new one under the per-person Notion lock;
+  `NotionConnect.finish` then revokes the old access token (quietly) if it
+  differs from the new one.
+- **A disconnect can't be undone by a refresh in flight.**
+  `disconnect_notion` holds the per-person Notion lock around revoke +
+  delete, `revoke_notion` (used by "Delete my account") takes it too, and
+  the owner's Remove holds it around revoke + `Family.remove`; a refresh
+  in flight finishes first and its new token is the one revoked. Belt and
+  braces: `save_notion(expect=...)` saves a refreshed record only if the
+  file still holds the token the refresh started from.
+- **Rate limits are bounded.** `notion_web.api()` passes notion-client's
+  `RetryOptions(max_retries=1, max_retry_delay_ms=2000)` (3.1's default
+  honours `Retry-After` up to 60 s, twice: about 2.5 min of stall on a
+  voice turn, disconnect or delete). requirements.txt: `notion-client>=3.1`
+  (a 3.0 install, which has no retries, is left as it is).
+- **Tests**: `tests/test_notion_web.py` +7 (49): reconnect A -> B revokes
+  A only and B stays live; the same token again revokes nothing;
+  disconnect and revoke while a refresh is blocked inside `refresh_grant`
+  (file gone, status not connected, the refreshed token revoked); a
+  refresh never saves over a changed or deleted sign-in; the owner's
+  Remove runs `Family.remove` under the Notion lock; a 429 with
+  `retry-after: 60` sleeps once, at most 2 s (`time.sleep` patched), for
+  a search and a revoke.
+  - Revert check (`__pycache__` cleared each time): the finish revoke,
+    the disconnect/revoke lock, the `expect` check, the Remove lock and the
+    retry options, each reverted alone, fail their tests.
+- **Counts** (Linux sandbox, Python 3.13): 2616 passed, 35 skipped; JS
+  118 pass. Baseline (the merge, before these fixes): 2609 passed, 35
+  skipped; JS 118 (master's #9 removed the dashboard and hub tests).

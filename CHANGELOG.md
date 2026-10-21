@@ -9,7 +9,9 @@
   the conversation holds Notion text). The sign-in is stored encrypted on the
   server; Disconnect, Delete my account and the owner's Remove revoke it at
   Notion. Needs a public Notion integration (`NOTION_OAUTH_CLIENT_ID` /
-  `NOTION_OAUTH_CLIENT_SECRET`, `[family] notion`).
+  `NOTION_OAUTH_CLIENT_SECRET`, `[family] notion`). Reconnecting revokes the
+  previous grant; Notion rate limits delay a request by at most 2 s (one
+  retry). Requires notion-client 3.1 or later.
 - Invited people can download their data (a zip of their conversations and
   profile) and delete their account (revokes Google access, signs out
   everywhere, deletes everything) from Settings, in English and Chinese. New

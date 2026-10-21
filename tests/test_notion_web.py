@@ -661,6 +661,130 @@ def test_deleting_my_account_goes_ahead_when_revoke_fails(n):
     assert not (n.tmp / "users" / uid).exists()
 
 
+# --- round 2: reconnect, races, rate limits ------------------------------------------
+
+ACCESS_3 = "ntn_" + "C" * 46
+
+
+def test_reconnect_revokes_the_grant_it_replaces(n):
+    tess, uid = n.member()
+    connect(n, tess)                          # grant A
+    n.fake.answer = token_answer(access_token=ACCESS_3)
+    n.fake.valid.add(ACCESS_3)
+    connect(n, tess)                          # grant B replaces it
+    assert n.fam._notion_record(uid)["access_token"] == ACCESS_3
+    assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS}]
+    assert ACCESS not in n.fake.valid and ACCESS_3 in n.fake.valid
+    assert tess.get("/api/notion/status").json()["connected"] is True
+
+
+def test_reconnect_with_the_same_token_revokes_nothing(n):
+    tess, uid = n.member()
+    connect(n, tess)
+    connect(n, tess)  # Notion answered with the same access token again
+    assert n.fake.calls("/v1/oauth/revoke") == []
+    assert n.fam._notion_record(uid)["access_token"] == ACCESS
+
+
+def _blocked_refresh(n, monkeypatch, uid):
+    """A refresh of ACCESS that waits inside refresh_grant (the network)
+    until released: (its thread, entered, release, its result list)."""
+    entered, release, result = threading.Event(), threading.Event(), []
+    original = notion_web.refresh_grant
+
+    def slow(refresh_token):
+        entered.set()
+        assert release.wait(5)
+        return original(refresh_token)
+
+    monkeypatch.setattr(notion_web, "refresh_grant", slow)
+    t = threading.Thread(target=lambda: result.append(n.fam.refresh_notion(uid, ACCESS)))
+    t.start()
+    assert entered.wait(5)
+    return t, release, result
+
+
+@pytest.mark.parametrize("how", ["disconnect", "revoke"])
+def test_disconnect_during_a_refresh_stays_disconnected(n, monkeypatch, how):
+    tess, uid = n.member()
+    connect(n, tess)
+    refreshing, release, _ = _blocked_refresh(n, monkeypatch, uid)
+    if how == "disconnect":
+        other = threading.Thread(target=n.fam.disconnect_notion, args=(uid,))
+    else:  # "Delete my account" (account.py) revokes first
+        other = threading.Thread(target=n.fam.revoke_notion, args=(uid,))
+    other.start()
+    other.join(0.3)  # it waits for the refresh in flight
+    release.set()
+    refreshing.join(5)
+    other.join(5)
+    assert not refreshing.is_alive() and not other.is_alive()
+    # the token the refresh got is the one revoked: nothing live is left
+    assert ACCESS_2 not in n.fake.valid
+    assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS_2}]
+    if how == "disconnect":
+        assert not n.fam.notion_file(uid).exists()
+        assert tess.get("/api/notion/status").json()["connected"] is False
+        assert "list_assignments" not in tools_of(n, uid)
+
+
+def test_a_refresh_never_saves_over_a_changed_sign_in(n, caplog):
+    tess, uid = n.member()
+    connect(n, tess)
+    record = n.fam._notion_record(uid)
+    stale = {**record, "access_token": ACCESS_2}
+    # the refresh started from a token that is no longer the stored one
+    with caplog.at_level(logging.DEBUG):
+        assert n.fam.save_notion(uid, stale, tools=False, expect=ACCESS_3) is False
+    said = [r.getMessage() for r in caplog.records if "changed meanwhile" in r.getMessage()]
+    assert said == [f"Family: {uid}'s Notion sign-in changed meanwhile; not saving"]
+    assert all(t not in caplog.text for t in (ACCESS, ACCESS_2, ACCESS_3, REFRESH))
+    assert n.fam._notion_record(uid)["access_token"] == ACCESS
+    n.fam.disconnect_notion(uid)
+    assert n.fam.save_notion(uid, stale, tools=False, expect=ACCESS) is False
+    assert not n.fam.notion_file(uid).exists()
+
+
+def test_owner_removal_revokes_and_removes_under_the_notion_lock(n, monkeypatch):
+    tess, uid = n.member()
+    connect(n, tess)
+    held = []
+    original = n.fam.remove
+
+    def remove(who, *args, **kwargs):  # no refresh may start between the two
+        held.append(n.fam._notion_locks[who].locked())
+        return original(who, *args, **kwargs)
+
+    monkeypatch.setattr(n.fam, "remove", remove)
+    kyle = TestClient(n.app, base_url=BASE)
+    login(kyle)
+    assert kyle.post(f"/api/users/{uid}/remove", json={}).status_code == 200
+    assert held == [True]
+    assert [n.fake.body(r) for r in n.fake.calls("/v1/oauth/revoke")] == [{"token": ACCESS}]
+    assert not (n.tmp / "users" / uid).exists()
+
+
+def test_a_429_never_stalls_a_turn_or_a_delete(n, monkeypatch):
+    import notion_client.client as sdk
+
+    sleeps, hits = [], []
+
+    def limited(request):
+        hits.append(request.url.path)
+        return httpx.Response(429, headers={"retry-after": "60"}, json={
+            "object": "error", "status": 429, "code": "rate_limited",
+            "message": "You have been rate limited."})
+
+    monkeypatch.setattr(sdk.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(notion_web, "TRANSPORT", httpx.MockTransport(limited))
+    with pytest.raises(Exception) as e:
+        notion_web.api(ACCESS).search(filter={"property": "object", "value": "data_source"})
+    assert type(e.value).__name__ == "APIResponseError"
+    assert notion_web.revoke_quietly(ACCESS, "u1") is False  # a delete goes ahead
+    assert len(hits) == 4  # each tried twice: one retry
+    assert len(sleeps) == 2 and max(sleeps) <= 2, sleeps  # not 2 x 60 s
+
+
 # --- logs and config -----------------------------------------------------------------
 
 def test_no_token_code_email_or_title_in_the_log(n, caplog):

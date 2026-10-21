@@ -81,6 +81,11 @@ AUTHORIZE_URL = "https://api.notion.com/v1/oauth/authorize"
 CLIENT_ID_ENV = "NOTION_OAUTH_CLIENT_ID"
 CLIENT_SECRET_ENV = "NOTION_OAUTH_CLIENT_SECRET"
 TIMEOUT_MS = 10_000      # per request: a voice turn must not hang on Notion
+# The SDK's own 429/5xx retries (3.1's default: 2 retries, honouring a
+# Retry-After of up to 60 s) could hold a voice turn, a disconnect or a
+# "Delete my account" for minutes: one retry, at most 2 s apart.
+MAX_RETRIES = 1
+MAX_RETRY_DELAY_MS = 2_000
 SEARCH_PAGE = 100        # data sources looked at when connecting (one page)
 MAX_TITLE = 100          # characters of a database title kept for the status
 # Tests set an httpx.MockTransport here; None: the real network.
@@ -114,8 +119,16 @@ def api(token: str | None = None):
     from notion_client import Client
 
     http = httpx.Client(transport=TRANSPORT) if TRANSPORT is not None else None
+    extra = {}
+    try:  # 3.1+; 3.0 had no retries of its own
+        from notion_client import RetryOptions
+    except ImportError:
+        pass
+    else:
+        extra["retry"] = RetryOptions(max_retries=MAX_RETRIES,
+                                      max_retry_delay_ms=MAX_RETRY_DELAY_MS)
     return Client(client=http, auth=token or None, timeout_ms=TIMEOUT_MS,
-                  logger=_SDK_LOG, log_level=logging.ERROR)
+                  logger=_SDK_LOG, log_level=logging.ERROR, **extra)
 
 
 def _oauth():
@@ -317,14 +330,16 @@ class NotionConnect:
             found = None
         record.update(found or {"database_id": None, "data_source_id": None,
                                 "database_title": None})
-        try:
-            saved = self.family.save_notion(uid, record)
+        try:  # a reconnect: the grant it replaces is revoked below
+            saved, old = self.family.replace_notion(uid, record)
         except (userkeys.KeyProblem, OSError) as e:
             log.error("Notion: saving %s's sign-in failed (%s)", uid, type(e).__name__)
-            saved = False
+            saved, old = False, None
         if not saved:  # removed meanwhile, or not stored: don't leave a grant behind
             revoke_quietly(record["access_token"], uid)
             return False, uid
+        if old is not None:  # never left live at Notion once replaced
+            revoke_quietly(old, uid)
         log.info("Notion: %s connected workspace %s (%s)", uid, record["workspace_id"],
                  "Assignments database found" if found else "no single Assignments database")
         return True, uid

@@ -849,11 +849,16 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
 - **Refresh**: only after a 401, once, under a per-person lock (two turns
   never both refresh; the second uses the first's new token). A new refresh
   token is stored when Notion sends one, else the old one is kept. If the
-  refresh fails the tool says "reconnect Notion".
+  refresh fails the tool says "reconnect Notion". The refreshed record is
+  saved only if the file still holds the token the refresh started from.
 - **Revoked on the way out**: Disconnect, "Delete my account" and the
   owner's Remove call `POST /v1/oauth/revoke` (token in the JSON body)
   before the file goes. Best effort: a failure is logged by type and never
-  blocks the delete.
+  blocks the delete. They take the same per-person lock as a refresh
+  (Disconnect around revoke + delete, Remove around revoke + removal), so a
+  refresh in flight finishes first and its new token is the one revoked;
+  a disconnect never comes back. A reconnect revokes the grant it replaced
+  (read and saved under that lock) once the new one is stored.
 - **Logs**: ids, counts and error type names only. The SDK gets its own
   logger at ERROR, because its warnings quote Notion's error messages,
   which can echo a request body (a filter holding a title); Notion's error
@@ -862,8 +867,12 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   client secret, email, workspace name, database title or assignment title
   is logged at any level.
 - **Bounded**: pending sign-ins as above; one search (`page_size` 100, one
-  page) at connect; a 10 s timeout per request; the cached per-person
-  client and refresh lock exist only for listed people and go on removal.
+  page) at connect; a 10 s timeout per request, and notion-client's own
+  429/5xx retries bounded to one, at most 2 s later (its default honours a
+  `Retry-After` of up to 60 s twice, which could hold a voice turn, a
+  disconnect or a delete for minutes), so one call takes at most about
+  22 s; the cached per-person client and refresh lock exist only for
+  listed people and go on removal.
 - Not fixed (deliberate): no database picker. Exactly one shared data
   source with the Assignments schema is used (preferring the copy of the
   integration's template); otherwise the tools stay off and Settings says

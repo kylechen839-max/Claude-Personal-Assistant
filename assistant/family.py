@@ -565,10 +565,13 @@ class Family:
     def notion_connected(self, uid: str) -> bool:
         return self.notion_status(uid)["connected"]
 
-    def save_notion(self, uid: str, record: dict, tools: bool = True) -> bool:
+    def save_notion(self, uid: str, record: dict, tools: bool = True,
+                    expect: str | None = None) -> bool:
         """Store their sign-in (encrypted, privately, atomically) and give
         their open conversations the tools. False if they were removed
-        meanwhile (nothing written). KeyProblem 503 without USER_DATA_KEY."""
+        meanwhile, or (`expect`, a refresh) the stored access token is no
+        longer `expect` (disconnected or reconnected meanwhile): nothing
+        written. KeyProblem 503 without USER_DATA_KEY."""
         from assistant.tools.google_auth import write_private
         from assistant.userkeys import NOTION_LABEL, seal
 
@@ -577,6 +580,12 @@ class Family:
             user = self.users.get(uid)
             if user is None or user.get("status") != "active" or not valid_id(uid):
                 return False
+            if expect is not None:
+                stored = self._notion_record(uid)
+                if stored is None or stored["access_token"] != expect:
+                    log.info("Family: %s's Notion sign-in changed meanwhile; "
+                             "not saving", uid)
+                    return False
             text = seal(NOTION_LABEL, uid, record, self.keys.environ)
             path = self.notion_file(uid)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -587,10 +596,35 @@ class Family:
         log.info("Family: %s saved their Notion sign-in", uid)
         return True
 
+    def _notion_lock(self, uid: str) -> threading.Lock:
+        """Their Notion lock: a refresh, a (re)connect's save, and a
+        disconnect or revoke run one at a time, so none of them brings back
+        a sign-in another one just replaced or deleted. Kept for listed
+        people only (bounded); anyone else gets a lock of their own."""
+        with self.lock:
+            if uid not in self.users:
+                return threading.Lock()
+            return self._notion_locks.setdefault(uid, threading.Lock())
+
+    def replace_notion(self, uid: str, record: dict) -> tuple[bool, str | None]:
+        """save_notion() for a (re)connect: (saved, the access token it
+        replaced if that was another one, for the caller to revoke)."""
+        with self._notion_lock(uid):
+            before = self._notion_record(uid)
+            if not self.save_notion(uid, record):
+                return False, None
+        old = before["access_token"] if before is not None else None
+        return True, old if old != record["access_token"] else None
+
     def revoke_notion(self, uid: str) -> None:
         """Best effort: ask Notion to revoke their grant (disconnect, "Delete
-        my account", the owner removing them). Never raises: a failure never
-        blocks deleting."""
+        my account", the owner removing them). Waits for a refresh in
+        flight, so the token it revokes is the one stored. Never raises: a
+        failure never blocks deleting."""
+        with self._notion_lock(uid):
+            self._revoke_notion(uid)
+
+    def _revoke_notion(self, uid: str) -> None:
         try:
             record = self._notion_record(uid)
             if record is None:
@@ -603,16 +637,19 @@ class Family:
 
     def disconnect_notion(self, uid: str) -> bool:
         """Revoke (best effort), delete their sign-in, take the tools away.
+        Under their Notion lock: a refresh in flight finishes first (its
+        new token is the one revoked), and none can save in between.
         False if there was nothing to delete."""
         if uid not in self.users or not valid_id(uid):
             return False
-        self.revoke_notion(uid)  # the network, outside the lock
-        with self.lock:
-            path = self.notion_file(uid)
-            had = path.exists()
-            _unlink(path)
-            self._drop_notion_api(uid)
-            self._refresh_tools(uid)
+        with self._notion_lock(uid):
+            self._revoke_notion(uid)  # the network: outside self.lock
+            with self.lock:
+                path = self.notion_file(uid)
+                had = path.exists()
+                _unlink(path)
+                self._drop_notion_api(uid)
+                self._refresh_tools(uid)
         log.info("Family: %s disconnected their Notion", uid)
         return had
 
@@ -655,11 +692,9 @@ class Family:
         from assistant import notion_web
         from assistant.userkeys import KeyProblem
 
-        with self.lock:
-            if uid not in self.users:
-                return None
-            lock = self._notion_locks.setdefault(uid, threading.Lock())
-        with lock:
+        if uid not in self.users:
+            return None
+        with self._notion_lock(uid):
             record = self._notion_record(uid)
             if record is None:
                 return None
@@ -680,7 +715,7 @@ class Family:
                                        and answer["refresh_token"]
                                        else record["refresh_token"])}
             try:
-                if not self.save_notion(uid, fresh, tools=False):
+                if not self.save_notion(uid, fresh, tools=False, expect=failed):
                     return None
             except (KeyProblem, OSError) as e:
                 log.warning("Family: saving %s's refreshed Notion token failed (%s)",
@@ -1100,10 +1135,17 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
     async def remove_user(uid: str, session=Depends(webapp.require_owner)):
         if (e := off()) is not None:
             return e
-        # best effort, never blocks the removal (notion.enc goes with the folder)
-        await run_in_threadpool(family.revoke_notion, uid)
+
+        def revoke_and_remove(uid: str) -> bool:
+            # the revoke is best effort, never blocks the removal (notion.enc
+            # goes with the folder); under their Notion lock, so a refresh
+            # in flight finishes first and none saves in between
+            with family._notion_lock(uid):
+                family._revoke_notion(uid)
+                return family.remove(uid, sign_out)
+
         try:
-            removed = await run_in_threadpool(family.remove, uid, sign_out)
+            removed = await run_in_threadpool(revoke_and_remove, uid)
         except OSError:
             return error("couldn't remove them; try again", 500)
         if not removed:
