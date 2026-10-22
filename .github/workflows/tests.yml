@@ -36,7 +36,12 @@ jobs:
 
       - name: System audio/TTS libraries (Linux)
         if: runner.os == 'Linux'
+        timeout-minutes: 8
         run: |
+          # The runner image's Microsoft package repo started answering 403
+          # (2026-10-22), which fails or hangs apt-get update; nothing here
+          # comes from it, so drop it before updating.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           sudo apt-get update
           sudo apt-get install -y espeak-ng libespeak1 libportaudio2 ffmpeg shellcheck
 
@@ -129,7 +134,12 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: System libraries
+        timeout-minutes: 8
         run: |
+          # The runner image's Microsoft package repo started answering 403
+          # (2026-10-22), which fails or hangs apt-get update; nothing here
+          # comes from it, so drop it before updating.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           sudo apt-get update
           sudo apt-get install -y libportaudio2 ffmpeg
       - name: Install dependencies
