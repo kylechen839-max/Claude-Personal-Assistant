@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Session watcher (`tools/session-watch/`): a local, report-only tool for
+  Windows and macOS that notices when a Claude Code session on your computer
+  is waiting on you: an approval prompt, a question, an idle session, or a
+  session that stopped because a security check (the auto mode classifier,
+  the built-in safety check, a permission deny rule, an MCP tool deny or a
+  PreToolUse hook) refused a tool call. It uses an optional Notification hook
+  and the session transcripts (including subagents), shows one desktop
+  notification per block, and can have the Codex CLI (read-only sandbox,
+  scan output only) summarise which session to open first. It never answers
+  prompts or edits Claude Code settings, and never keeps transcript or
+  denial text.
+
 - Calendar: listing your own events no longer makes the next move or change
   ask for confirmation. Notes on events you organize, your contacts'
   birthdays, Google's holiday calendars and the calendar list now count as

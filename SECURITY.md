@@ -1361,6 +1361,91 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   backup's folder (over an hour old) is removed at startup and by the
   next backup. The log gets its size only. Tests: `tests/test_backup.py`.
 
+## Session watcher (`tools/session-watch/`)
+
+A local, stdlib-only tool that tells Kyle when a Claude Code session on his
+PC or Mac is waiting on him. It is not part of the assistant and has no
+network code of its own.
+
+- **Report only.** No code path answers, approves, denies or types into a
+  Claude Code prompt, and none writes Claude Code's settings: the hook and
+  the scanner write only `<claude dir>/session-watch/` (markers,
+  `notified.json`, `watch.log`; the launchers add `codex-summary.log`), and
+  a scan with `--no-notify` writes nothing. Tests check that the code has
+  no `settings` path and that a full run in a tmp Claude folder changes no
+  file outside that folder. The hook snippet is pasted into
+  `settings.json` by Kyle himself; there is no installer.
+- **Untrusted text.** Notification messages, project folder names and tool
+  names come from other sessions. Control and bidi characters are
+  replaced and the message is cut to 200 characters; session ids must match
+  `[A-Za-z0-9_-]{1,128}` before they name a file (`../` ids are dropped).
+  Desktop notifications use argument lists, never a shell: macOS passes
+  title and body as `osascript` `argv` items, Windows passes them in
+  environment variables read by a fixed PowerShell script, Linux uses
+  `notify-send --`. Codex is told (`AGENTS.md`) that these values are
+  data, runs in `--sandbox read-only`, and its prompt is a fixed string.
+- **Files.** Markers and `notified.json` are written with `mkstemp` in the
+  same folder and `os.replace` (retried on a Windows PermissionError).
+  On macOS/Linux each folder the tools create (`session-watch/`,
+  `blocked/`) is made 0700 one by one, `watch.log` is opened with mode
+  0600, and the `.sh` launcher runs under `umask 077`, so
+  `codex-summary.log` is 0600 too (a test checks the modes); on Windows
+  they get the user profile's permissions. Only the last 64 KB of a
+  transcript is read; `watch.log` and `codex-summary.log` rotate at 1 MB,
+  `notified.json` keeps at most 2000 entries for 7 days, a marker over
+  64 KB is skipped, and stale markers are deleted after 24 h (each bound
+  has a test). Log lines hold ids, project names, waits and sources; the
+  notification text is at DEBUG only and never in `watch.log`.
+- **Malformed input.** A transcript line or marker that can't be parsed
+  (bad JSON, deep nesting, a non-string id) is skipped; a file that still
+  raises is skipped with its error type at DEBUG, so one bad file can't
+  stop the scan, and `--interval` mode logs a failed scan and retries.
+- **What counts as a block.** The hook records only `permission_prompt`,
+  `idle_prompt` and `elicitation_dialog` notifications (or one without a
+  type); `auth_success` and other types are ignored. The snippet also
+  clears the marker on `PostToolUseFailure`, so an approved tool that
+  failed doesn't leave a stale block. Its hook command quotes the path.
+  The transcript check judges each transcript on its own last write (a
+  busy background agent can't hide a prompt in the main session; only an
+  open `Agent`/`Task` call counts its subagents as activity), and checks at
+  most the 8 newest subagent transcripts per session.
+- **Security-check stops.** A session that stopped after the auto mode
+  classifier, the built-in safety check, a permission deny rule (use, read
+  or edit), an MCP tool deny, or a PreToolUse hook (exit code 2, or a JSON
+  deny without its own reason) refused a tool call (an `is_error` tool
+  result that starts with one of Claude Code's fixed denial texts; a hook's
+  own free-text reason is not matched; Kyle's own rejection and a failing command's output,
+  which starts with "Exit code N", don't match), with nothing successful
+  since, is reported as `security_denied` from the transcript only (there
+  is no hook event for it). The `idle_prompt` marker the hook writes about
+  a minute after that turn ends doesn't hide it: a `security_denied` block
+  beats an `idle_prompt` marker, while an approval prompt or question
+  marker still beats the denial. Only the denied tool's name and a fixed reason are kept; the denial
+  text, which can hold the command, never reaches `--json`, `watch.log`
+  or the notification. The watcher and Codex only report it: AGENTS.md
+  tells Codex to send Kyle to the session to decide and never to suggest
+  a way around the check.
+- **Codex reads nothing but the scan output.** AGENTS.md tells it not to
+  open any file (transcripts, settings, or the watcher's own markers,
+  which hold the working folder and transcript path).
+- **A state folder that can't be written** (say `session-watch` is a
+  file) makes `--once` log one warning and exit 3 instead of a traceback.
+  `notified.json` is saved before any notification goes out, so such a
+  folder sends no notification at all rather than one on every scan.
+- **The hook never disturbs Claude Code.** It drains stdin (keeping 8 MB),
+  prints nothing, and exits 0 on any error, so a broken state folder can't
+  block a session.
+- **Not fixed, on purpose.** The transcript check can't tell an approval
+  prompt from a slow tool call, so a long build is reported once it passes
+  `--threshold`; the hook is the precise signal. Codex (OpenAI) receives the
+  scan output when summaries are on (session ids, project folder names,
+  waits, the reason, tool names, the notification type and the short
+  notification text; no transcripts and no working-folder path, which stays
+  in the local marker); without Codex nothing leaves the computer. The
+  subagent check relies on Claude Code's current
+  `<session id>/subagents/*.jsonl` layout; under another layout a long
+  subagent run looks like a prompt once it passes `--threshold`.
+
 ## Study briefings and phone notifications (`push.py`, `proactive.py`)
 
 - **Subscriptions are sealed per person.** A browser's push subscription
