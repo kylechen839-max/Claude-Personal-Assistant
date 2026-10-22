@@ -14,6 +14,12 @@ function Check($Name, $Condition) {
     Write-Output "PASS $Name"
 }
 
+$main = @(Get-TaskLocation 'main')
+Check 'main: ours first, then the old hand-made task' (($main.Count -eq 2) -and
+    ($main[0].Path -eq '\HeyClaude\') -and ($main[0].Name -eq 'Web') -and
+    ($main[1].Path -eq '\') -and ($main[1].Name -eq 'Hey Claude Web'))
+$mom = @(Get-TaskLocation 'mom')
+Check 'mom: only her family task' (($mom.Count -eq 1) -and ($mom[0].Name -eq 'Family-mom'))
 $py = 'C:\hc\.venv\Scripts\python.exe'
 Check 'main is the Web task' ((Get-TaskName 'main') -eq 'Web')
 Check 'mom is her family task' ((Get-TaskName 'mom') -eq 'Family-mom')
