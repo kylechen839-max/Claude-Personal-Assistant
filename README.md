@@ -685,7 +685,9 @@ One-time setup on the PC (PowerShell, in the project folder):
    other than `.env` never turns team chat on. School deadlines are off in
    such a copy too unless its config gives it its own `[student] dir`
    (otherwise it would share your deadlines file); `config.mom.toml` sets
-   `data/mom/student` and leaves them off.
+   `data/mom/student` and leaves them off. Notifications are off there too
+   unless it sets its own `[push] owner_dir` (otherwise its subscriptions
+   would replace yours); `config.mom.toml` sets `data/mom/student`.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766

@@ -434,6 +434,39 @@ def test_separate_instance_never_shares_the_owners_deadlines(tmp_path, monkeypat
     assert seen[-1]["student"]["enabled"] is True
 
 
+def test_separate_instance_never_shares_the_owners_push_folder(tmp_path, monkeypatch):
+    """P2 judge MED: a copy with its own env file (Kai's) and no [push]
+    owner_dir of its own would replace Kyle's sealed push.enc with its own
+    (his phones stop getting notifications) and share his VAPID key and
+    briefing state: push is off there. With its own folder it stays on;
+    Kyle's own instance is unchanged."""
+    from assistant import webapp
+
+    _no_inherited(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    (tmp_path / ".env.kai").write_text("WEB_TOKEN=" + "k" * 43 + "\n")
+    seen = []
+    monkeypatch.setattr(webapp, "serve", lambda config, **kw: seen.append(config) or 0)
+    said = []  # (setup_logging replaces the root handlers, so not caplog)
+    monkeypatch.setattr(cli.log, "info", lambda msg, *a: said.append(msg % a))
+    assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["push"]["enabled"] is False
+    assert any(s.startswith("Notifications off: a separate instance") for s in said)
+    (tmp_path / "kai.toml").write_text('[push]\nowner_dir = "data/kai/student"\n')
+    assert cli.main(["--mode", "web", "--config", "kai.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["push"]["enabled"] is True
+    for same in ("./data/student", "data/../data/student",
+                 str((tmp_path / "data" / "student").resolve())):
+        (tmp_path / "kai.toml").write_text(f'[push]\nowner_dir = "{same}"\n'.replace("\\", "/"))
+        assert cli.main(["--mode", "web", "--config", "kai.toml",
+                         "--env-file", ".env.kai"]) == 0
+        assert seen[-1]["push"]["enabled"] is False, same
+    monkeypatch.setenv("WEB_TOKEN", "o" * 43)
+    assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+    assert seen[-1]["push"]["enabled"] is True
+
+
 def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):
     """conftest's _logs_in_tmp: setup_logging as cli.main reaches it (the
     module attribute, default config, run from the repo) writes under

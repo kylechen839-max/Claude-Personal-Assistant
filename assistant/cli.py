@@ -1138,6 +1138,15 @@ def main(argv=None) -> int:
         config["student"]["enabled"] = False
         log.info("Student deadlines off: a separate instance (--env-file %s) "
                  "without its own [student] dir", args.env_file)
+    if separate and config["push"]["enabled"] \
+            and Path(config["push"]["owner_dir"]).resolve() \
+            == Path(DEFAULTS["push"]["owner_dir"]).resolve():
+        # the same for notifications: its sealed push.enc would replace the
+        # owner's subscriptions, and it would share his VAPID key and
+        # briefing state (push.py, proactive.py)
+        config["push"]["enabled"] = False
+        log.info("Notifications off: a separate instance (--env-file %s) "
+                 "without its own [push] owner_dir", args.env_file)
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"

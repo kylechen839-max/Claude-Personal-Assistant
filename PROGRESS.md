@@ -5058,3 +5058,11 @@ words it.
   across quiet hours). Both fail on the round-3 code.
 - `sw-push.test.mjs` pins v30.
 - **Counts** (Linux sandbox, Python 3.13, merged tree): 2982 passed, 44 skipped; JS 143 pass.
+- **Judge MED: a separate instance shared the owner's `[push] owner_dir`**
+  (Kai's config has no `[push]`): its sealed `push.enc` replaced Kyle's
+  subscriptions, and it shared his VAPID key and `proactive.json`.
+  `cli.main` now turns push off for a separate `--env-file` instance whose
+  `owner_dir` resolves to the default (same check as the `[student] dir`
+  guard), logged at INFO; `config.mom.toml` has its own folder. Test
+  `test_separate_instance_never_shares_the_owners_push_folder` (fails with
+  the guard disabled). Counts: 2983 passed, 44 skipped; JS 143 pass.
