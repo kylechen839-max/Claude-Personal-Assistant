@@ -685,7 +685,9 @@ One-time setup on the PC (PowerShell, in the project folder):
    other than `.env` never turns team chat on. School deadlines are off in
    such a copy too unless its config gives it its own `[student] dir`
    (otherwise it would share your deadlines file); `config.mom.toml` sets
-   `data/mom/student` and leaves them off.
+   `data/mom/student` and leaves them off. Notifications are off there too
+   unless it sets its own `[push] owner_dir` (otherwise its subscriptions
+   would replace yours); `config.mom.toml` sets `data/mom/student`.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
@@ -1372,6 +1374,45 @@ Your deadlines are in `[student] dir` (`data/student`; Render
 account. Limits: `[student] max_items` (2000) per person and
 `max_per_source` (500) per source. `[student] enabled = false` turns it
 all off.
+
+### Study briefings (notifications)
+The phone app can speak up first: a notification in the morning with
+what's due today and tomorrow, in the evening with what's due tomorrow, a
+look at the week on Sunday, exam reminders (14, 7, 3 and 1 day out, while
+no review is planned), new deadlines it captured, and a "how did class
+go?" after a class. Tapping one opens the brief in the app with a
+**Play** button (it never plays by itself).
+
+- **Turn it on:** Settings -> **Enable notifications**, then allow them.
+  On an iPhone this works only in the app added to the Home Screen
+  (iOS 16.4 or later); in Safari the menu says to add it first. Tap
+  **Turn off notifications** to stop (that phone only).
+- **Needs** `USER_DATA_KEY` on the server (subscriptions are stored
+  encrypted; without it the button says the server can't store them yet)
+  and deadlines to talk about: the student deadline store (Canvas sync,
+  screenshots); without one nothing is ever sent. The server makes its
+  own VAPID key once (`[push] owner_dir`, Render: `/data/student`), or set
+  `VAPID_PRIVATE_KEY` (a raw P-256 key in base64url) in `.env`. A new key
+  means tapping Enable again on every phone. For Apple, set `[push]
+  subject` to `mailto:you@example.com` unless `[webapp] public_origin` is
+  an https address.
+- **How much:** at most `[proactive] max_per_day` (2) a day, none in
+  quiet hours (`quiet_start` 22:00 to `quiet_end` 07:30, in each person's
+  own time zone), and rules due at the same time go as one notification.
+  The times are `morning`, `evening`, `weekly_day` and `weekly_time`;
+  `check_minutes` is how often it looks; `exam_days` and `class_minutes`
+  tune the exam and class rules.
+- **Claude** is asked only when a rule fires: one short message
+  (`[proactive] model`, default the fast model) from the course, title,
+  kind and due date only; no page or email text, no grades, no tools. A
+  beta tester without their own key, or a failed call, gets a plain
+  template instead. Opening the brief never calls Claude.
+- On a Pi/PC/cloud setup, each backend keeps the subscriptions made
+  through it and sends to them itself, whichever backend leads; a phone
+  saved on two backends still gets each briefing once (a claim in the
+  shared history log). If the backend a phone subscribed through is down
+  at briefing time, that phone misses it, so enable notifications from
+  the backend that is normally in use.
 
 ## Smart home (Home Assistant)
 
@@ -2133,6 +2174,8 @@ assistant/
   deadlines.py  each person's school deadlines (SQLite): sync upserts, conflicts, deletes
   canvas.py     Canvas calendar feed, REST API, school lookup, Claude date extraction
   student_web.py  the phone app's "School deadlines" card: connect Canvas, sync, list
+  push.py       phone notifications: VAPID key, sealed subscriptions, Web Push
+  proactive.py  study briefings: deadline rules, scheduler thread, /api/student/brief
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

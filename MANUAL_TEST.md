@@ -1191,6 +1191,33 @@ the PC (README "Spotify by voice").
     not show the button.
 
 
+## Study briefings and notifications (optional, ~15 min)
+Needs the cloud (or a server with `USER_DATA_KEY`), the app added to the
+iPhone's Home Screen (iOS 16.4+), and some deadlines in the student
+deadline store (README "Study briefings").
+- [ ] In Safari (not the Home Screen app), open the gear menu.
+  - Should: no "Enable notifications" button; a line says to add the app
+    to the Home Screen first.
+- [ ] In the Home Screen app, gear menu -> **Enable notifications**.
+  - Should: iOS asks to allow notifications right after the tap; after
+    "Allow" the button reads "Turn off notifications" and the menu says
+    they are on.
+- [ ] With a deadline due today or tomorrow, wait for 07:30 (or set
+      `[proactive] morning` a few minutes ahead and restart).
+  - Should: one notification from "Hey Claude", a short sentence naming the
+    course and title; none a second time that morning, also after a
+    restart.
+- [ ] With the app closed, tap the notification.
+  - Should: the app opens on the brief with the same text and a **Play**
+    button; nothing plays until you tap Play, then it is read aloud.
+- [ ] With the app open on the chat, tap a new notification.
+  - Should: the app comes forward and switches to the brief; Back returns
+    to the chat.
+- [ ] Set `[proactive] quiet_start` to a time just passed and restart.
+  - Should: no notification until `quiet_end`.
+- [ ] Gear menu -> **Turn off notifications**.
+  - Should: no more notifications on that phone.
+
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
 - [ ] In text mode (`python -m assistant --mode text`), ask "what time is

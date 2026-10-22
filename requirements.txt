@@ -27,8 +27,12 @@ requests>=2.0
 google-api-python-client>=2.199
 google-auth-oauthlib>=1.2
 # Encrypts people's own Anthropic keys (userkeys.py; already pulled in by
-# google-auth). abi3 wheels for Windows x64, Linux x86_64/aarch64 (Pi), Python 3.9+
-cryptography>=44
+# google-auth). abi3 wheels for Windows x64, Linux x86_64/aarch64 (Pi), Python 3.9+.
+# 47+ for pywebpush 2.5.
+cryptography>=47
+# Phone notifications (push.py): Web Push encryption (RFC 8291) and VAPID
+# signing; py-vapid and http-ece are pure Python (2.5 needs Python 3.10+)
+pywebpush>=2.5
 google-auth-httplib2>=0.2
 notion-client>=3.1
 pinecone>=7.0
