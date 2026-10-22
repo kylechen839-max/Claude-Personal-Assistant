@@ -76,6 +76,18 @@ else
 fi
 chmod 600 .env
 
+# ---- 4b. this Pi's Whisper size ----
+# config.toml's small.en suits a PC but is too slow on a Pi. This Pi's own
+# config.local.toml (gitignored, so it never blocks an update) picks base.en;
+# change it there to "tiny.en" on a Pi 4 (PI_MIGRATION.md).
+if [[ -f config.local.toml ]] && grep -q '^\[stt\]' config.local.toml; then
+    step "config.local.toml already has an [stt] section (left unchanged)"
+else
+    step "Using Whisper base.en on this Pi (config.local.toml)"
+    printf '\n[stt]\nmodel = "base.en"  # small.en (the PC default) is too slow on a Pi; "tiny.en" on a Pi 4\n' \
+        >> config.local.toml
+fi
+
 # ---- 5. models (optional; otherwise downloaded on first run) ----
 if [[ "${SKIP_MODELS:-0}" == "1" ]]; then
     step "Skipping model downloads (SKIP_MODELS=1)"

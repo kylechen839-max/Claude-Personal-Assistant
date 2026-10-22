@@ -783,6 +783,52 @@ server reads their replies with (`[tts] picker`, on by default).
 - Voice names from ElevenLabs are cut to one printable line of 60
   characters and shown with `textContent` only.
 
+## Speech-to-text (`stt.py`, optional cloud `stt_cloud.py`)
+
+- **Local by default.** `[stt] engine = "whisper"`: recordings are
+  transcribed on the machine and never leave it. The vocabulary prompt
+  and `[stt] hotwords` are config, not conversation; names belong in
+  `config.local.toml` (gitignored), not the committed `config.toml`.
+- **Cloud only when asked twice.** `engine = "openai"` or `"deepgram"`
+  *and* `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` set. Then every recording
+  transcribed by that server (the owner's, a spoken yes/no, and invited
+  people's on the cloud) is sent as a 16 kHz WAV over HTTPS to
+  `api.openai.com` or `api.deepgram.com`, with the prompt (OpenAI) or the
+  prompt's words and hotwords as keyterms (Deepgram, in the query string).
+  Recordings over five minutes, and Chinese family members' speech
+  (`family_speech` builds its own local Whisper), stay local. `config.mom.toml`
+  pins `engine = "whisper"`.
+- **Secrets.** Both keys are in `SECRET_ENV_VARS` (masked in logs; an
+  OpenAI `sk-...` key is also masked by pattern). The key goes only in the
+  `Authorization` header; `--check` says "set", never the value.
+- **Not isolated, on purpose.** They are not in `ISOLATED_ENV_VARS`:
+  OpenAI's quickstart puts `OPENAI_API_KEY` in the Windows user
+  environment, and that would stop Mom's and Kai's instances from
+  starting. It also guards nothing: a separate instance only sends audio
+  with its own `[stt] engine`, which `config.mom.toml` pins to "whisper".
+  A separate instance whose own config picks a cloud engine would use an
+  inherited key (the owner's bill); set the engine only in configs you
+  mean to.
+- **Logs.** INFO: engine, model, seconds of audio, transcript length and
+  time taken. The transcript only at DEBUG (local Whisper the same). A
+  failure logs the HTTP status or the exception's type name only, never
+  its message: a `requests` error quotes the URL, whose query holds the
+  keyterms. Response bodies are never logged.
+- **Bounded.** One request per recording, `cloud_timeout` (1-60 s,
+  default 10) on it; on any error, timeout or odd reply that recording
+  goes to local Whisper and the cloud is skipped for 60 s, so an outage
+  can't add a timeout to every turn. Invited people's recordings count
+  against `[family] stt_seconds_per_day` before either engine runs
+  (quotas.py), which bounds what they can spend.
+- **Prompt echo.** On near-silent audio Whisper (or the cloud) can return
+  its own prompt; a transcript that is the prompt, or a run of it spanning
+  two or more of its items, is treated as silence, so the vocabulary is
+  never sent to Claude as if Kyle had said it.
+- **Not fixed, on purpose:** the owner's own recordings have no daily
+  cloud cap (his account, his bill); a slow but steady cloud reply is
+  bounded by the `requests` read timeout between bytes, not a total
+  deadline (the reply is a few hundred bytes of JSON).
+
 ## PC hub: removed (2026-10-20)
 
 The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was

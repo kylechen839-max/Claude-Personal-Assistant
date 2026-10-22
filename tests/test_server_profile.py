@@ -7,6 +7,7 @@ here), is refreshed in memory and never written to disk.
 import json
 import logging
 import shutil
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -88,6 +89,22 @@ def test_profile_beats_config_toml_and_env_beats_profile(tmp_path, monkeypatch):
     assert cfg["web"]["browser"] is False
     assert cfg["stt"]["model"] == "tiny.en"
     assert cfg["assistant"]["timezone"] == "America/New_York"
+
+
+def test_server_keeps_base_en_with_beam_search(tmp_path, monkeypatch):
+    """The PC default is small.en; the cloud image bakes base.en (small.en's
+    RAM there is unmeasured), even under the shipped config.toml. Beam 5
+    and the vocabulary prompt apply on both; STT_ENGINE picks a cloud one."""
+    for var in ("WHISPER_MODEL", "STT_ENGINE"):
+        monkeypatch.delenv(var, raising=False)
+    assert DEFAULTS["stt"]["model"] == "small.en"
+    shipped = tmp_path / "config.toml"  # without this machine's config.local.toml
+    shipped.write_bytes((Path(__file__).resolve().parent.parent / "config.toml").read_bytes())
+    cfg = load_config(shipped, None, profile="server")
+    assert cfg["stt"]["model"] == "base.en" and cfg["stt"]["beam_size"] == 5
+    assert cfg["stt"]["initial_prompt"] == "auto" and cfg["stt"]["engine"] == "whisper"
+    monkeypatch.setenv("STT_ENGINE", "deepgram")
+    assert load_config(None, None, profile="server")["stt"]["engine"] == "deepgram"
 
 
 def test_no_profile_on_a_pc_and_unknown_profile_errors():

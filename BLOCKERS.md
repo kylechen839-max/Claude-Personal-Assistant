@@ -227,6 +227,24 @@ Only what is still open for Kyle. None of it blocks the code.
       synthetic voices only. Run MANUAL_TEST.md step 3 and set `[wake]
       sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what
       works for your voice and room.
+- [ ] **Speech accuracy on your own voice (~6 min, MANUAL_TEST.md 11b).**
+      The PC now uses Whisper `small.en` with beam search 5 and a
+      vocabulary prompt (first start downloads ~480 MB; the go-live
+      check's voice turn waits 180 s, so on a slow line fetch it first:
+      `.venv\Scripts\python -c "from faster_whisper.utils import
+      download_model; download_model('small.en')"`). Nothing was
+      measured on a real voice: say the ten phrases and five quick "yes"
+      answers on the phone (push-to-talk and hands-free) and on the PC.
+      If it is too slow on the PC, `[stt] model = "base.en"` in
+      `config.local.toml`.
+- [ ] **Optional: cloud speech-to-text (decision + key, ~5 min; only
+      Kyle).** For the best accuracy, especially on Render (which stays on
+      `base.en`): get an OpenAI or Deepgram API key, put
+      `OPENAI_API_KEY` or `DEEPGRAM_API_KEY` in `.env` (PC) or the Render
+      service's environment, and set `[stt] engine = "openai"` /
+      `"deepgram"` (on Render: `STT_ENGINE`). Paid per minute, and every
+      recording (invited people's too) then goes to that company; off by
+      default. README "Cloud speech-to-text".
 - [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
       barge-in (step 4b: whether `barge_in = "voice"` works on your
       speakers or needs headphones), spoken delete, Notion, memory, web, Piper, network down, latency).

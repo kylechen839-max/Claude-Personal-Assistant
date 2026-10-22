@@ -16,6 +16,7 @@ from assistant import audio, i18n, usage
 from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
+from assistant.stt import from_config as stt_from_config
 from assistant.tools import ToolRegistry
 from assistant.tts import ENGINES, make_tts
 
@@ -1179,9 +1180,8 @@ def main(argv=None) -> int:
         if callable(getattr(tts, "warm_up", None)):  # load the voice model now
             threading.Thread(target=tts.warm_up, name="tts-warm-up",
                              daemon=True).start()
-        transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
-                                  stt_cfg["compute_type"],
-                                  language=config["assistant"]["language"])
+        transcriber = stt_from_config(stt_cfg, config["assistant"]["language"],
+                                      make=Transcriber)
         if args.mode == "voice":
             mic = audio.resolve_mic_device(config["wake"]["mic_device"])
 

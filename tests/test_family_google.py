@@ -484,6 +484,11 @@ def test_family_speech_from_config():
     t = speech.transcriber("zh")
     assert (t.model_name, t.language) == (config["family"]["zh_stt_model"], "zh")
     assert speech.transcriber("en") is None
+    # [stt] beam_size applies; the owner's English vocabulary and names don't
+    config["stt"].update(beam_size=3, hotwords="Kyle")
+    t = webapp.family_speech(config).transcriber("zh")
+    assert t.beam_size == 3 and t.hotwords == ""
+    assert t.initial_prompt == "以下是普通话的句子。"
 
 
 # --- server sentences in each person's language --------------------------------------
