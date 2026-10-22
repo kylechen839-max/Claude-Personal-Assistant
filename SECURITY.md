@@ -971,6 +971,77 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   integration's template); otherwise the tools stay off and Settings says
   to share only that database and reconnect.
 
+## Student deadlines and Canvas (`deadlines.py`, `canvas.py`, `student_web.py`)
+
+Each person (the owner and every invited person) has their own deadlines,
+captured from their Canvas, Canvas's notification emails or said by hand.
+
+- **No school password, ever.** Canvas is reached with the calendar feed
+  link or a personal access token only; the connect route stores nothing
+  else (a password field is ignored and never stored, and a body with
+  neither a feed link nor a token is a 400 that writes nothing).
+- **The feed link is a secret.** `https://<school>/feeds/calendars/user_<secret>.ics`
+  reads the calendar without a sign-in, so it is handled like the token:
+  an invited person's link is sealed with `userkeys.seal` under its own
+  label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
+  Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
+  (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
+  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
+  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
+  the owner's connect route is a 409. Neither is ever returned (the status
+  says only the kind and the school's host), logged, or exported. The
+  redacting log formatter masks `/feeds/calendars/...` paths and Canvas
+  token shapes too, because httpx logs request URLs at INFO (kept at
+  WARNING by `setup_logging`).
+- **Server-side requests to an address someone typed.** Every feed link
+  and school address must be `https` on port 443, without `user:pass@`,
+  and resolve only to public addresses (`ipaddress.is_global`: never
+  loopback, the LAN, Tailscale's 100.64/10 or the 169.254.169.254
+  metadata address). Redirects are followed by hand (3 at most), each hop
+  checked; API calls follow none, and a `Link: rel="next"` page on another
+  host is never followed, so the token is only ever sent to the school's
+  own host. **Deliberate non-fix:** the check resolves the name, then
+  httpx resolves it again to connect, so a DNS answer that changes in
+  between (rebinding) could still reach a private address once; pinning
+  the address would need a custom transport, and the fetch is a GET whose
+  answer is only parsed as a calendar or Canvas JSON (nothing else of it
+  is shown or stored).
+- **Untrusted content.** Feed titles, planner items, module pages and
+  emails are written by other people: `list_deadlines` is
+  `untrusted_output` (and `private`), so once it ran, `add_deadline` and
+  `confirm_deadline` ask for a spoken yes; `delete_deadline` always asks.
+  Claude reads emails and pages only to pick out {title, course, kind,
+  due} (structured output, told the text is data), on the person's own
+  key when they have one; only those fields are stored, never the page or
+  email text or an event's description. The Gmail step uses the
+  read-only `GmailInbox.search` (metadata: subject and snippet) behind
+  the same NoSendGmail guard.
+- **Deleted means gone.** Deleting an item, a source or the Canvas link
+  removes it: SQLite `secure_delete=ON` and a `wal_checkpoint(TRUNCATE)`
+  after every delete (a test reads the file and its WAL for the title).
+  A deleted synced item leaves only a SHA-256 of its feed key so the next
+  sync doesn't bring it back. An invited person's `deadlines.sqlite` and
+  `canvas.enc` go with their folder on removal or "Delete my account";
+  their export holds the deadlines, never the link. Every connection is
+  closed after each call (nothing holds the file open on Windows), and a
+  write for someone just removed is refused under Family's lock, so a sync
+  that was running can't bring their folder back.
+- **Bounded.** A feed is read (streamed) up to 2 MB and 2000 events, the
+  whole fetch within 60 s; every API answer is streamed up to 2 MB, a
+  listing at most 10 pages and 1000 items; 3 rate-limit retries (1, 2,
+  4 s; a rate limit is a 429, or a 403 saying "Rate Limit Exceeded" or
+  with no quota left, since Canvas sends its quota header on every answer);
+  a whole sync stops after 180 s (the per-request timeout counts per read
+  only, so a host dripping bytes can't hold it); a module page or course
+  that can't be read is skipped, not the whole step; 20 module pages and 20
+  emails per sync, each text cut to 8000 characters; `[student] max_items`
+  per person and `max_per_source` per source; one sync at a time per
+  person, at most every `sync_minutes`; 10 school lookups a minute per
+  person; request bodies 8 KB. The throttle and lock maps hold at most 1024
+  people.
+- **Logs**: ids, counts, source names and error codes only (caplog tests
+  at DEBUG for the store, the tools, Canvas and the routes).
+
 ## Smart home (`tools/home_assistant.py`)
 
 Home Assistant controls physical things, including the front door, so its

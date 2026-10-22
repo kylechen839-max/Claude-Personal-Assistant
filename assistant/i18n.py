@@ -77,6 +77,11 @@ EN = {
     "google_beta_off": "Google isn't set up for beta accounts yet.",
     "note_delete": "Do you want me to delete the note: {text}?",
     "note_delete_any": "Do you want me to delete that note?",
+    # a student's deadlines (tools/deadlines.py)
+    "deadline_confirm": "Do you want me to mark {title} as due {when}?",
+    "deadline_add": "Do you want me to add {title}, due {when}, to your deadlines?",
+    "deadline_delete": "Do you want me to delete the deadline {title}, due {when}?",
+    "deadline_delete_any": "Do you want me to delete that deadline?",
     # Home Assistant (tools/home_assistant.py)
     "ha_ask_unlock": "Do you want me to unlock {name}?",
     "ha_ask_lock": "Do you want me to lock {name}?",
@@ -183,6 +188,10 @@ ZH = {
     "google_beta_off": "测试版账户暂时还不能连接 Google。",
     "note_delete": "要我删除这条记忆吗：{text}？",
     "note_delete_any": "要我删除这条记忆吗？",
+    "deadline_confirm": "要我把{title}的截止时间定为{when}吗？",
+    "deadline_add": "要我把{title}加到你的截止日期里吗？截止时间是{when}。",
+    "deadline_delete": "要我删除截止日期{title}吗？它的截止时间是{when}。",
+    "deadline_delete_any": "要我删除这个截止日期吗？",
     "ha_ask_unlock": "要我把{name}解锁吗？",
     "ha_ask_lock": "要我把{name}锁上吗？",
     "ha_ask_open": "要我打开{name}吗？",

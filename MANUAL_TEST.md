@@ -843,6 +843,30 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 - [ ] Choose a screenshot (PNG) from the gallery, then try a GIF or a PDF.
   - Should: the PNG works; the others are refused with a short message.
 
+## Student deadlines from Canvas (optional, ~10 min)
+Needs a real Canvas account. The **School deadlines** card is in the
+phone app's menu.
+- [ ] In Canvas (browser): **Calendar** -> **Calendar Feed**, copy the link.
+      Put it in `.env` as `CANVAS_ICS_URL=...` (Render: Environment), restart.
+- [ ] Phone app -> menu -> **School deadlines** -> **Sync now**.
+  - Should: "Found N new."; "What I captured" lists your real assignments
+    and exams with the right day and time in your time zone (check two
+    against Canvas). Tap **Sync now** again: "synced recently".
+- [ ] Ask "What's due this week?" by voice.
+  - Should: the same items, soonest first, with unchecked ones called out.
+- [ ] Tap **Looks right** on one; in Canvas, change that assignment's due
+      date (if you can, e.g. a test course), wait 15 minutes, **Sync now**.
+  - Should: your confirmed date stays; nothing is listed twice.
+- [ ] **Delete** one and sync again later.
+  - Should: it asks first, and the deleted item doesn't come back.
+- [ ] On an invited test account: paste the feed link in the card.
+  - Should: "Canvas connected (your school's address)"; the link is not
+    shown back anywhere; **Disconnect Canvas** asks, and "Also delete what
+    I captured" empties the list.
+- [ ] Open the log (`logs/assistant.log`, or Render's log) and search for
+      `user_` and an assignment title.
+  - Should: not found.
+
 ---
 
 ## Smart home (optional, ~10 min)

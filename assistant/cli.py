@@ -610,6 +610,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     register_home_assistant(registry, config, output_fn)
     register_teamchat(registry, config, output_fn)
     register_spotify(registry, config, output_fn)
+    register_student(registry, config)
     web = config["web"]
     if web["enabled"]:
         from assistant.tools import web as web_tools
@@ -768,29 +769,52 @@ def register_teamchat(registry: ToolRegistry, config: dict, output_fn=print,
 def register_gmail(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
     """Gmail tools, if the Google token has the Gmail scopes. A token from
     before Gmail support doesn't: say how to grant them and leave them off."""
+    inbox = owner_gmail(config, output_fn)
+    if inbox is None:
+        return False
+    registry.register(*inbox.tools())
+    return True
+
+
+def owner_gmail(config: dict, output_fn=print):
+    """The owner's GmailInbox (reads, drafts only), or None: Gmail off, no
+    Google sign-in, or the Gmail scopes not granted (said on output_fn).
+    Also read by student_web's sync (Canvas emails, read-only)."""
     from assistant.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
                                              load_token_info, missing_scopes)
 
     cal = config["calendar"]
     if not config["gmail"]["enabled"] or not cal["enabled"]:
-        return False
+        return None
     try:
         if load_token_info(cal["token"]) is None:
-            return False  # no Google sign-in at all (Calendar says so)
+            return None  # no Google sign-in at all (Calendar says so)
         lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
     except (OSError, ValueError) as e:
         output_fn(f"(Gmail tools off: Google token unreadable: {e})")
-        return False
+        return None
     if lacking:
         output_fn("(Gmail tools off: Gmail access not granted yet. Run "
                   f"{SIGN_IN_COMMAND} once to sign in again.)")
-        return False
+        return None
     from assistant.tools.gmail import GmailInbox
 
-    registry.register(*GmailInbox(
-        credentials_path=cal["credentials"], token_path=cal["token"],
-        timezone=config["assistant"]["timezone"] or None,
-        max_summary=config["gmail"]["max_summary"]).tools())
+    return GmailInbox(credentials_path=cal["credentials"], token_path=cal["token"],
+                      timezone=config["assistant"]["timezone"] or None,
+                      max_summary=config["gmail"]["max_summary"])
+
+
+def register_student(registry: ToolRegistry, config: dict) -> bool:
+    """The owner's deadline tools (list, confirm, add, delete) on
+    `[student] dir`/deadlines.sqlite; invited people get their own
+    (family.py). Filled from Canvas by student_web.py."""
+    if not config["student"]["enabled"]:
+        return False
+    from assistant.deadlines import open_store
+    from assistant.tools.deadlines import DeadlineTools
+
+    registry.register(*DeadlineTools(open_store(config), None,
+                                     config["assistant"]["timezone"] or None).tools())
     return True
 
 
@@ -1063,7 +1087,8 @@ def separate_instance(env_file: str) -> bool:
 
 
 def main(argv=None) -> int:
-    from assistant.config import inherited_env_conflicts, load_config, setup_logging
+    from assistant.config import (DEFAULTS, inherited_env_conflicts, load_config,
+                                  setup_logging)
 
     args = parse_args(argv)
     inherited = dict(os.environ)  # before load_dotenv adds the env file
@@ -1105,6 +1130,14 @@ def main(argv=None) -> int:
         # environment it inherits, and the chat tools are his alone
         config["teamchat"]["enabled"] = False
         log.info("Team chat off: a separate instance (--env-file %s)", args.env_file)
+    if separate and config["student"]["enabled"] \
+            and Path(config["student"]["dir"]).resolve() \
+            == Path(DEFAULTS["student"]["dir"]).resolve():  # as deadlines.open_store does
+        # a separate instance without a [student] dir of its own would read
+        # and write the owner's deadlines file (and file its Canvas mail there)
+        config["student"]["enabled"] = False
+        log.info("Student deadlines off: a separate instance (--env-file %s) "
+                 "without its own [student] dir", args.env_file)
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"

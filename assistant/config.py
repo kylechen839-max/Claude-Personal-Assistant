@@ -328,6 +328,24 @@ DEFAULTS: dict = {
         "zh_stt_model": "small",
         "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",
     },
+    "student": {                    # deadlines from Canvas, emails, by hand (README "Student deadlines")
+        "enabled": True,            # the deadline tools and the phone's "What I captured" card
+        "dir": "data/student",      # the owner's deadlines.sqlite (invited people: [family] dir/<id>/)
+        "sync_minutes": 15,         # "Sync now" at most this often per person
+        "gmail": True,              # also read Canvas's notification emails (read-only) when Gmail is connected
+        # reads emails and pages into deadlines; "" = [assistant] fast_model
+        "extract_model": "",
+        "max_items": 2000,          # deadlines kept per person
+        "max_per_source": 500,      # ... and per source (feed, API, emails, ...)
+    },
+    "canvas": {                     # where deadlines come from (canvas.py); never a school password
+        # the owner's school, for CANVAS_TOKEN (CANVAS_BASE_URL overrides),
+        # e.g. "https://canvas.school.edu"; invited people paste their own
+        "base_url": "",
+        "pages": False,             # also read module pages (one Claude call per sync for new pages)
+        "max_pages": 20,            # module pages read per sync, at most
+        "timeout": 15,              # seconds per Canvas request
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }
@@ -352,6 +370,7 @@ SERVER_PROFILE: dict = {
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
+    "student": {"dir": "/data/student"},  # on the disk
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
@@ -381,6 +400,7 @@ ENV_OVERRIDES = {
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
     "HA_URL": ("home_assistant", "url"),
+    "CANVAS_BASE_URL": ("canvas", "base_url"),
 }
 
 
@@ -394,7 +414,8 @@ ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "NOTION_TOKEN", "NOTION_ASSIGNMENTS_DB", "PINECONE_API_KEY",
                      "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "SENTRY_DSN",
                      "USER_DATA_KEY",
-                     "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET")
+                     "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+                     "CANVAS_TOKEN", "CANVAS_ICS_URL")
 # USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
 # so a separate instance sets its own (or none) and never borrows the
 # owner's from the shell.
@@ -478,6 +499,9 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "USER_DATA_KEY",
                    # the public Notion integration (notion_web.py)
                    "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+                   # the owner's Canvas (canvas.py): a token, and a feed URL
+                   # that is a secret itself
+                   "CANVAS_TOKEN", "CANVAS_ICS_URL",
                    # optional cloud speech-to-text (stt_cloud.py)
                    "OPENAI_API_KEY", "DEEPGRAM_API_KEY")
 _SECRET_PATTERNS = [
@@ -498,6 +522,8 @@ _SECRET_PATTERNS = [
     re.compile(r"\bxox[abpe]-[\w-]+"),           # Slack tokens
     re.compile(r"\b(?:github_pat_\w+|gh[pousr]_\w{30,})"),  # GitHub tokens
     re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
+    re.compile(r"\b\d{1,6}~[A-Za-z0-9]{32,}"),     # Canvas access tokens
+    re.compile(r"(/feeds/calendars/)[\w.-]+"),    # Canvas calendar feed links
 ]
 
 

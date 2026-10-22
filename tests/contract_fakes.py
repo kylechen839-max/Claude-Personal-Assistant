@@ -19,14 +19,18 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
   and `content` (a leaked "context" or "nudge" key is refused);
 - cache_control: at most 4 breakpoints in a request (tools, system and
   messages together), never on a thinking or server tool block, never on
-  an empty text block.
+  an empty text block;
+- output_config: a json_schema format whose objects all say
+  additionalProperties false, never with a forced tool_choice.
 
 Its answers are scripted from the request: a calendar question calls
 list_calendar_events when offered, a tool result gets a short summary,
 "what number did I ask you to remember" is answered from the number in an
 earlier user message actually sent (so lost history fails the check), and
 "get rid of ... on my calendar" lists the events, then deletes one with
-delete_calendar_event when offered.
+delete_calendar_event when offered, and a structured-output request (the
+student deadlines' extractor) gets one deadline per "<Title> is due
+<YYYY-MM-DD>" sentence in its <text> blocks.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import itertools
+import json
 import re
 import secrets
 import threading
@@ -94,6 +99,7 @@ class ContractClient:
         model = str(kwargs.get("model", ""))
         self.validate_system(kwargs.get("system"))
         self.validate_cache_control(kwargs)
+        self.validate_output_config(kwargs)
         if not msgs or msgs[0]["role"] != "user":
             raise bad_request("messages: the first message must use the user role")
         for i, m in enumerate(msgs):
@@ -158,6 +164,36 @@ class ContractClient:
             raise bad_request(f"A maximum of {MAX_CACHE_BREAKPOINTS} blocks with "
                               f"cache_control may be provided. Found {len(marked)}.")
 
+    @staticmethod
+    def validate_output_config(kwargs: dict) -> None:
+        """Structured outputs: a json_schema format whose every object has
+        additionalProperties false and lists only known properties as
+        required; no forced tool call alongside it."""
+        config = kwargs.get("output_config")
+        if config is None:
+            return
+        fmt = (config or {}).get("format") or {}
+        if fmt.get("type") != "json_schema" or not isinstance(fmt.get("schema"), dict):
+            raise bad_request("output_config.format: Input tag does not match 'json_schema'")
+        if (kwargs.get("tool_choice") or {}).get("type") in ("tool", "any"):
+            raise bad_request("tool_choice: forced tool use can't be combined with "
+                              "output_config.format")
+
+        def check(node, where):
+            if node.get("type") == "object":
+                if node.get("additionalProperties") is not False:
+                    raise bad_request(f"{where}: For 'object' type, 'additionalProperties' "
+                                      "must be explicitly set to false")
+                unknown = set(node.get("required") or []) - set(node.get("properties") or {})
+                if unknown:
+                    raise bad_request(f"{where}: required lists unknown properties")
+                for name, child in (node.get("properties") or {}).items():
+                    check(child, f"{where}.properties.{name}")
+            elif node.get("type") == "array":
+                check(node.get("items") or {}, f"{where}.items")
+
+        check(fmt["schema"], "output_config.format.schema")
+
     # --- the script ---
     def respond(self, kwargs: dict) -> Message:
         self.validate(kwargs)
@@ -189,6 +225,16 @@ class ContractClient:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
                             "name": "list_calendar_events", "input": {"day": "tomorrow"}})
             stop = "tool_use"
+        elif kwargs.get("output_config") is not None:
+            # structured output (student deadlines' extractor): one deadline
+            # per "<title> is due <YYYY-MM-DD>" sentence in each <text>
+            items = [{"text_index": int(i), "title": title, "course": "",
+                      "kind": "assignment", "due": due}
+                     for i, body in re.findall(r'<text index="(\d+)">\n(.*?)\n</text>',
+                                               asked, re.S)
+                     for title, due in re.findall(r"([A-Z][\w ]{1,40}?) is due "
+                                                  r"(\d{4}-\d{2}-\d{2})", body)]
+            content.append({"type": "text", "text": json.dumps({"items": items})})
         elif "what number" in asked.lower():
             numbers = [x for m in msgs if _is_user_turn(m) for x in _NUMBER.findall(_text_of(m))]
             content.append({"type": "text", "text": (f"The number is {numbers[0]}."

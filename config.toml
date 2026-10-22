@@ -281,6 +281,23 @@ export_max_mb = 50            # "Download my data": the zip's contents (before c
 zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
 zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
 
+[student]                     # school deadlines from Canvas, emails or said by hand (README "Student deadlines")
+enabled = true                # the deadline tools and the phone app's "What I captured" card
+dir = "data/student"          # your deadlines.sqlite (Render: /data/student); invited people's live in [family] dir/<id>/
+sync_minutes = 15             # "Sync now" at most this often per person
+gmail = true                  # also read Canvas's notification emails (read-only), once Gmail is connected
+extract_model = ""            # the model that reads emails and pages into deadlines; "" = [assistant] fast_model
+max_items = 2000              # deadlines kept per person
+max_per_source = 500          # ... and per source (calendar feed, Canvas API, emails, ...)
+
+[canvas]                      # where deadlines come from; a feed link or an access token, never a school password
+# Yours: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed) or CANVAS_TOKEN
+# (Account -> Settings -> New access token) in .env. Invited people paste theirs in the app.
+base_url = ""                 # your school's Canvas for CANVAS_TOKEN, e.g. "https://canvas.school.edu" (CANVAS_BASE_URL overrides)
+pages = false                 # also read module pages (Claude picks the dates out; one call per sync when pages changed)
+max_pages = 20                # module pages read per sync, at most
+timeout = 15                  # seconds per Canvas request
+
 [logging]
 file = "logs/assistant.log"
 level = "INFO"

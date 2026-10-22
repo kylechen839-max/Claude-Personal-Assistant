@@ -177,7 +177,9 @@ def _env_vars() -> tuple[str, ...]:
             # the secret that opens people's own Anthropic keys (userkeys.py)
             "USER_DATA_KEY",
             # the public Notion integration (notion_web.py)
-            "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET")
+            "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+            # the owner's Canvas (student_web.py)
+            "CANVAS_TOKEN", "CANVAS_ICS_URL")
 
 
 @pytest.fixture(autouse=True)

@@ -20,11 +20,15 @@ and Kyle's tools never read theirs. Once they tap "Connect Notion"
 (notion_web.py, either tier), their own Notion's Assignments database:
 `list_assignments` and `update_assignment_status` only, on their own token
 from `<dir>/<id>/notion.enc` (encrypted, userkeys.NOTION_LABEL), never
-NOTION_TOKEN (Kyle's). Nothing else: no Kyle's Notion, Pinecone memory or
-notes, Kyle's Google, dev team, lecture recorder or tutor, and no way to
-see anyone else's history. Removing someone signs them out and deletes
-their folder, Google token and Notion token included (the Google and
-Notion grants are revoked first, best effort).
+NOTION_TOKEN (Kyle's). Their own school deadlines ([student] on;
+deadlines.py): the deadline tools on `<dir>/<id>/deadlines.sqlite`, filled
+from their own Canvas link (`<dir>/<id>/canvas.enc`, encrypted,
+canvas.CANVAS_LABEL; student_web.py). Nothing else: no Kyle's Notion,
+Pinecone memory or notes, Kyle's Google, dev team, lecture recorder or
+tutor, and no way to see anyone else's history. Removing someone signs
+them out and deletes their folder, Google token, Notion token, deadlines
+and Canvas link included (the Google and Notion grants are revoked first,
+best effort).
 
 Each person has a tier (`tier` in users.json, chosen at invite): "family"
 (the above; people listed before tiers existed load as this) or "beta" (an
@@ -60,6 +64,7 @@ import secrets
 import shutil
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
@@ -232,8 +237,24 @@ class Family:
             # removed (or being deleted): nothing counted, so a turn in
             # flight can't bring back their counters after forget()
             is_listed=lambda uid: uid in self.users)
+        # their school deadlines (deadlines.py), in <dir>/<id>/deadlines.sqlite:
+        # the process's one store, which writes for a member only while
+        # they are still listed
+        self.deadlines = None
+        if config.get("student", {}).get("enabled"):
+            from assistant.deadlines import open_store
+
+            self.deadlines = open_store(config)
+            self.deadlines.member_guard = self.while_listed
         self._load()
         self._finish_deletes()
+
+    @contextmanager
+    def while_listed(self, uid: str):
+        """Holds the lock; yields whether `uid` is listed (and not being
+        deleted), so a write into their folder can't race their removal."""
+        with self.lock:
+            yield uid in self.users and uid not in self._deleting and valid_id(uid)
 
     # ---------- the file ----------
     def _load(self) -> None:
@@ -401,10 +422,12 @@ class Family:
             return ctx
 
     def _register_tools(self, user: dict, registry) -> None:
-        """Web search and fetch, and their own Google and Notion once
-        connected. No browser (it would open on the server), no Kyle's
-        Notion, memory, notes, history, Kyle's Google or dev team."""
-        registry.register(*self._google_tools(user), *self._notion_tools(user))
+        """Web search and fetch, their own deadlines ([student]), and their
+        own Google and Notion once connected. No browser (it would open on
+        the server), no Kyle's Notion, memory, notes, history, Kyle's Google
+        or dev team."""
+        registry.register(*self._google_tools(user), *self._notion_tools(user),
+                          *self._deadline_tools(user))
         web = self.config["web"]
         if not web["enabled"]:
             return
@@ -481,8 +504,7 @@ class Family:
         if info is None:
             return []
         from assistant.tools.calendar import GoogleCalendar
-        from assistant.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
-                                                 GMAIL_SCOPES, granted_scopes)
+        from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES, granted_scopes
 
         token, tz = self.google_token(user["id"]), user.get("timezone") or None
         # their labels and calendars only if their token allows it; never
@@ -492,17 +514,41 @@ class Family:
                                save_token=False, environ={}, in_app=True,
                                extras=set(CALENDAR_EXTRA_SCOPES) <= granted_scopes(info)
                                ).tools()
-        if self.config["gmail"]["enabled"] and tier_of(user) == "family" and \
-                set(GMAIL_SCOPES) <= granted_scopes(info):
-            from assistant.tools.gmail import GmailInbox
-
-            tools += GmailInbox(credentials_path="", token_path=token, timezone=tz,
-                                max_summary=self.config["gmail"]["max_summary"],
-                                save_token=False, environ={}, in_app=True).tools()
+        inbox = self.gmail_inbox(user, info)
+        if inbox is not None:
+            tools += inbox.tools()
         # the descriptions say "Kyle's calendar": make them about this person
         name = "the user" if user.get("language") == "zh" else user["name"]
         return [replace(t, description=t.description.replace("Kyle's", f"{name}'s")
                         .replace("Kyle", name)) for t in tools]
+
+    def gmail_inbox(self, user: dict, info: dict | None = None):
+        """Their own Gmail (read, drafts only; never Kyle's), or None: a
+        beta tester, Gmail off, not connected, or no Gmail scopes granted.
+        Also read by student_web's sync (Canvas emails, read-only)."""
+        from assistant.tools.google_auth import GMAIL_SCOPES, granted_scopes
+
+        if not (self.config["family"]["google"] and self.config["gmail"]["enabled"]
+                and tier_of(user) == "family" and valid_id(user.get("id"))):
+            return None
+        info = self._google_info(user["id"]) if info is None else info
+        if info is None or not set(GMAIL_SCOPES) <= granted_scopes(info):
+            return None
+        from assistant.tools.gmail import GmailInbox
+
+        return GmailInbox(credentials_path="", token_path=self.google_token(user["id"]),
+                          timezone=user.get("timezone") or None,
+                          max_summary=self.config["gmail"]["max_summary"],
+                          save_token=False, environ={}, in_app=True)
+
+    def _deadline_tools(self, user: dict) -> list:
+        """Their own deadlines (deadlines.py), in their own time zone."""
+        if self.deadlines is None or not valid_id(user.get("id")):
+            return []
+        from assistant.tools.deadlines import DeadlineTools
+
+        return DeadlineTools(self.deadlines, user["id"],
+                             user.get("timezone") or None).tools()
 
     def save_google(self, uid: str, token_text: str) -> bool:
         """Store their token (privately, atomically) and add their Google
