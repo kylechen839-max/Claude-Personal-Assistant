@@ -13,6 +13,10 @@
   scan output only) summarise which session to open first. It never answers
   prompts or edits Claude Code settings, and never keeps transcript or
   denial text.
+- Public beta launch: the cloud server now serves /welcome, /privacy,
+  /terms and the waitlist (`public_site` on in the server profile), with
+  the support address heyclaude.app@gmail.com and without the "Draft"
+  note.
 - **Renamed to Kwil** (said "quill"). The app, pages, notifications and the
   assistant's own name say Kwil; it still runs on Claude. The package is
   `kwil` (`python -m kwil`); `python -m assistant`, `-m assistant.host` /
