@@ -90,7 +90,7 @@ def test_all_good_and_no_secret_printed(tmp_path):
     assert f"{model} found" in out
     assert "[0] USB PnP Sound Device" in out
     assert "[1] bcm2835 Headphones" in out
-    assert "base.en cached at /cache/base.en" in out
+    assert "small.en cached at /cache/small.en, beam 5" in out
 
 
 def test_missing_things_reported(tmp_path):
@@ -102,7 +102,7 @@ def test_missing_things_reported(tmp_path):
     assert "[WARN] " in out and "credentials.json: missing" in out
     assert "--headless" in out
     assert "nope.onnx missing; would fall back to 'hey_jarvis'" in out
-    assert "[WARN] Whisper model: base.en not cached yet" in out
+    assert "[WARN] Whisper model: small.en not cached yet" in out
 
 
 def test_builtin_wake_word_when_no_model_set(tmp_path):

@@ -2187,7 +2187,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     from assistant.history import Recorder, open_store
     import anthropic
 
-    from assistant.stt import Transcriber
+    from assistant.stt import from_config as stt_from_config
     from assistant.tts import make_tts
 
     a = config["assistant"]
@@ -2225,8 +2225,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     stt = config["stt"]
     tts_cfg = config["tts"]
     assistant = WebAssistant(chat_factory,
-                             Transcriber(stt["model"], stt["device"], stt["compute_type"],
-                                         language=a["language"]),
+                             stt_from_config(stt, a["language"]),
                              make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                              tools=tools,
                              conversation_timeout=a["conversation_timeout"],
@@ -2256,7 +2255,10 @@ def family_speech(config: dict) -> SpeechByLanguage:
     stt, f = config["stt"], config["family"]
 
     def transcriber(model: str, language: str):
-        return Transcriber(model, stt["device"], stt["compute_type"], language=language)
+        # [stt] beam_size, with the language's own prompt: the owner's
+        # English vocabulary and hotwords don't belong in Chinese speech
+        return Transcriber(model, stt["device"], stt["compute_type"], language=language,
+                           beam_size=stt.get("beam_size"))
 
     def voice(path: str):
         return make_tts("piper", piper_voice=path, fallback="print")

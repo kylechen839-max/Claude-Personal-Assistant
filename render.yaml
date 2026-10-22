@@ -43,8 +43,21 @@ services:
       # The phone's sign-in token: Render makes a random one (256 bits).
       - key: WEB_TOKEN
         generateValue: true
-      - key: WHISPER_MODEL          # base.en (better) or tiny.en (smaller, faster)
+      # base.en (better) or tiny.en (smaller, faster); both are baked into the
+      # image. Not small.en (the PC's default): its RAM here is unmeasured.
+      # Beam search 5 and the vocabulary prompt come from config.toml.
+      - key: WHISPER_MODEL
         value: base.en
+      # Optional, paid, more accurate: "openai" or "deepgram" with that
+      # service's key below (README "Cloud speech-to-text"). Then the
+      # speech sent to this server is also sent to that service; on any
+      # error base.en transcribes it. Empty = local Whisper only.
+      - key: STT_ENGINE
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
       - key: DATA_DIR               # on the persistent disk
         value: /data
       - key: HISTORY_PATH
