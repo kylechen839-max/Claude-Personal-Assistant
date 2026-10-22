@@ -887,7 +887,8 @@ def _text(text, msg_id="m_end"):
 
 @pytest.mark.parametrize("content", [
     CLASSIFIER, RULE, HOOK, [{"type": "text", "text": CLASSIFIER}],
-    "permission to use WebFetch was DENIED", "Operation BLOCKED BY a PreToolUse hook"])
+    "\n  PERMISSION to use WebFetch has been DENIED.", "Hook PreToolUse:Bash denied this tool",
+    "Permission to use Bash with command " + "DENIED-COMMAND-TEXT " * 60 + "has been denied."])
 def test_a_session_stopped_by_a_security_check_is_reported(tmp_path, content):
     _transcript(tmp_path, [_entry("user", "clean up"), _tool_use("d1", "Bash", "m1"),
                            _error("d1", content), _text("I can't do that here.")], age=300)
@@ -942,6 +943,78 @@ def test_a_plain_error_or_matching_text_without_is_error_is_not_a_denial(tmp_pat
     assert session_watch.scan_transcripts(tmp_path, 120, NOW) == []
 
 
+@pytest.mark.parametrize("content", [
+    # Ordinary failing commands whose output only sounds like a denial.
+    "Exit code 1\nhusky > pre-commit (node v20)\ncommit blocked by pre-commit hook: lint errors",
+    "Exit code 128\nremote: Permission to user-tools/repo.git denied to bot.\n"
+    "fatal: unable to access",
+    "remote: Permission to user-tools/repo.git denied to bot.",
+    "You do not have permission to use model X. Request denied.",
+    "Exit code 1\nError: You do not have permission to use model gpt-x. Request denied.",
+    "Exit code 1\n" + CLASSIFIER, "Exit code 2\n" + HOOK,
+    "Permission to user-x has been denied.", "commit blocked by the hook"])
+def test_failing_command_output_that_mentions_a_denial_is_not_one(tmp_path, content):
+    _transcript(tmp_path, [_tool_use("d1", "Bash", "m1"), _error("d1", content),
+                           _text("The commit failed.")], age=300)
+    assert session_watch.scan_transcripts(tmp_path, 120, NOW) == []
+
+
+def test_denial_patterns_are_anchored_regexes_in_one_constant():
+    assert session_watch.DENIAL_PATTERNS and all(
+        callable(getattr(p, "match", None)) for p in session_watch.DENIAL_PATTERNS)
+    for text in ("  Permission for this action was denied by the Claude Code auto mode "
+                 "classifier.", "PreToolUse:Bash hook error: blocked"):
+        assert session_watch.is_denial({"is_error": True, "content": text})
+        assert not session_watch.is_denial({"is_error": True, "content": "x " + text})
+
+
+def _idle_marker(root, at):
+    assert _hook(root, {"session_id": SID, "hook_event_name": "Notification",
+                        "notification_type": "idle_prompt", "cwd": "/x/proj",
+                        "message": "Claude is waiting for your input"},
+                 datetime.fromtimestamp(at, timezone.utc)) == "set"
+
+
+def test_a_denial_beats_the_idle_marker_that_follows_it(tmp_path):
+    # The turn ends on the denial, Stop clears any marker, and a minute
+    # later Claude Code's idle_prompt writes one before --threshold passes.
+    _transcript(tmp_path, [_entry("user", "clean up"), _tool_use("d1", "Bash", "m1"),
+                           _error("d1", RULE), _text("I can't do that here.")], age=300)
+    _hook(tmp_path, {"session_id": SID, "hook_event_name": "Stop"})
+    _idle_marker(tmp_path, NOW - 240)
+    [block] = session_watch.scan(tmp_path, 120, notify=False, now=NOW)
+    assert block["source"] == "transcript" and block["notification_type"] == "security_denied"
+    assert block["tool"] == "Bash" and block["key"] == f"{SID}|denied|d1"
+    # The idle marker alone (no denial) still reports idle.
+    _transcript(tmp_path, [_entry("user", "hi"), _text("Hello.")], age=300)
+    [block] = session_watch.scan(tmp_path, 120, notify=False, now=NOW)
+    assert block["source"] == "hook" and block["notification_type"] == "idle_prompt"
+
+
+@pytest.mark.parametrize("kind", ["permission_prompt", "elicitation_dialog"])
+def test_an_approval_or_question_marker_still_beats_a_denial(tmp_path, kind):
+    _transcript(tmp_path, [_tool_use("d1", "Bash", "m1"), _error("d1", RULE),
+                           _text("Stopping.")], age=300)
+    assert _hook(tmp_path, {"session_id": SID, "hook_event_name": "Notification",
+                            "notification_type": kind, "cwd": "/x/proj"},
+                 datetime.fromtimestamp(NOW - 200, timezone.utc)) == "set"
+    [block] = session_watch.scan(tmp_path, 120, notify=False, now=NOW)
+    assert block["source"] == "hook" and block["notification_type"] == kind
+
+
+def test_merge_only_lets_a_denial_beat_an_idle_marker():
+    def b(sid, source, kind):
+        return {"session_id": sid, "source": source, "notification_type": kind,
+                "waiting_seconds": 1}
+    hook = [b("a", "hook", "idle_prompt"), b("b", "hook", "idle_prompt"),
+            b("c", "hook", None), b("d", "hook", "permission_prompt")]
+    heuristic = [b("a", "transcript", "security_denied"), b("b", "transcript", None),
+                 b("c", "transcript", "security_denied"),
+                 b("d", "transcript", "security_denied")]
+    got = {x["session_id"]: x["source"] for x in session_watch.merge(hook, heuristic)}
+    assert got == {"a": "transcript", "b": "hook", "c": "hook", "d": "hook"}
+
+
 def test_a_denial_inside_a_subagent_is_reported(tmp_path):
     _transcript(tmp_path, [_tool_use("ag", "Agent", "m1")], age=600)
     _subagent(tmp_path, [_entry("user", "do the task"), _tool_use("d1", "WebFetch", "ms"),
@@ -992,6 +1065,9 @@ def test_docs_describe_security_stops_and_exit_3():
     for doc in (readme, agents, security):
         assert "`security_denied`" in doc
     assert "only the transcript check sees it" in readme
+    assert "a `security_denied` block beats an `idle_prompt` marker" in readme
+    for doc in (readme, security):
+        assert "idle_prompt" in doc and "starts with" in doc
     assert "never suggest a way around the check" in agents
     assert "exits 3" in readme and "A scan exits 0; a file it can't read" not in readme
     assert "was denied by a security check" in manual

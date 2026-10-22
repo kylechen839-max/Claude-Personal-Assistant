@@ -1,6 +1,7 @@
 """Find local Claude Code sessions that are waiting on you, and tell you.
 
-Two sources, merged by session id (the hook wins):
+Two sources, merged by session id (the hook wins, except that a
+transcript `security_denied` block beats an `idle_prompt` marker):
 - hook markers that notify_hook.py writes on a Claude Code `Notification`
   (`<claude dir>/session-watch/blocked/<session_id>.json`);
 - a transcript check that needs no hook: the newest `tool_use` in a recent
@@ -30,6 +31,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -142,19 +144,27 @@ def _subagents(path: Path) -> list[tuple[float, Path]]:
     return sorted(found, reverse=True)
 
 
-# A tool_result with is_error that starts with one of these (every part of
-# a tuple present, case-insensitive) is a security check stopping a call:
-# the auto mode classifier, a permission deny rule, a PreToolUse hook.
-DENIAL_PATTERNS = (
-    ("denied by the claude code auto mode classifier",),
-    ("permission for this action was denied",),
-    ("permission to use", "denied"),
-    ("blocked by", "hook"),
-)
+# A tool_result with is_error whose text (leading whitespace stripped,
+# case-insensitive) starts with one of these is a security check stopping a
+# call. They are anchored to the start because Claude Code's own denial
+# texts start the content, while a failing command's output starts with
+# "Exit code N" and may quote anything (a git 403 "Permission to user-x
+# denied", a pre-commit hook "blocked by ... hook").
+DENIAL_PATTERNS = tuple(re.compile(p, re.DOTALL) for p in (
+    # the auto mode classifier
+    r"permission for this action (?:was|has been) denied\b",
+    # a permission deny rule: "Permission to use Bash with command ... has
+    # been denied." ("use" as a whole word, the exact "has been denied")
+    r"permission to use [\w.:-]+\b.*?\bhas been denied\b",
+    # a PreToolUse hook that blocked the call ("PreToolUse:Bash hook error:
+    # ..."; "Hook PreToolUse:Bash denied this tool")
+    r"(?:hook )?pretooluse:",
+))
 # Kyle saying no himself is his choice, not a security check.
 USER_REJECTIONS = ("the user doesn't want to proceed", "user rejected",
                    "the user doesn't want to take this action")
-DENIAL_HEAD = 500  # only the start of an error result is matched
+DENIAL_HEAD = 2000  # only the start of an error result is matched (a deny
+# rule quotes the whole command before "has been denied")
 SECURITY_DENIED = "security_denied"
 
 
@@ -176,7 +186,8 @@ def is_denial(block: dict) -> bool:
     text = _result_text(block).lower()
     if any(r in text for r in USER_REJECTIONS):
         return False
-    return any(all(part in text for part in parts) for parts in DENIAL_PATTERNS)
+    text = text.lstrip()
+    return any(p.match(text) for p in DENIAL_PATTERNS)
 
 
 def denied_tool(lines: list[bytes]) -> tuple[str, str] | None:
@@ -387,11 +398,24 @@ def _read_marker(path: Path, now: float, prune: bool) -> dict | None:
     }
 
 
+# Hook marker types a transcript security_denied block beats: after a
+# denial the turn ends, Stop clears the marker and about a minute later
+# Claude Code sends idle_prompt, before the transcript check (--threshold)
+# can report the denial. An approval prompt or a question still wins.
+DENIAL_BEATS = ("idle_prompt",)
+
+
 def merge(hook: list[dict], heuristic: list[dict]) -> list[dict]:
-    """One entry per session; a hook marker beats the transcript check.
+    """One entry per session; a hook marker beats the transcript check,
+    except that a security_denied block beats an idle_prompt marker.
     Longest wait first."""
     by_id = {b["session_id"]: b for b in heuristic}
-    by_id.update({b["session_id"]: b for b in hook})
+    for b in hook:
+        other = by_id.get(b["session_id"])
+        if (other is not None and other["notification_type"] == SECURITY_DENIED
+                and b["notification_type"] in DENIAL_BEATS):
+            continue
+        by_id[b["session_id"]] = b
     return sorted(by_id.values(), key=lambda b: (-b["waiting_seconds"], b["session_id"]))
 
 

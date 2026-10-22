@@ -1160,7 +1160,9 @@ On the PC and on the MacBook (`tools/session-watch/README.md`).
   - Should: one notification "<tool> was denied by a security check" and
     the session listed with "security check"; the denied command's text
     is in neither the notification nor `watch.log`. Saying "no" to a
-    prompt yourself is not listed this way.
+    prompt yourself is not listed this way. With the hook on, the session
+    still shows "security check", not "idle", after the idle notification
+    a minute later.
 - [ ] With the Codex CLI signed in, start `run-codex-watch.ps1` (PC) or
       `run-codex-watch.sh` (Mac) and leave a prompt open.
   - Should: within 5 minutes a notification, and a short summary in

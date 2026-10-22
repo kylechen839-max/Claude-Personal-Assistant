@@ -1411,10 +1411,14 @@ network code of its own.
   most the 8 newest subagent transcripts per session.
 - **Security-check stops.** A session that stopped after the auto mode
   classifier, a permission deny rule or a PreToolUse hook refused a tool
-  call (an `is_error` tool result matching fixed patterns; Kyle's own
-  rejection doesn't match), with nothing successful since, is reported as
-  `security_denied` from the transcript only (there is no hook event for
-  it). Only the denied tool's name and a fixed reason are kept; the denial
+  call (an `is_error` tool result that starts with one of Claude Code's
+  fixed denial texts; Kyle's own rejection and a failing command's output,
+  which starts with "Exit code N", don't match), with nothing successful
+  since, is reported as `security_denied` from the transcript only (there
+  is no hook event for it). The `idle_prompt` marker the hook writes about
+  a minute after that turn ends doesn't hide it: a `security_denied` block
+  beats an `idle_prompt` marker, while an approval prompt or question
+  marker still beats the denial. Only the denied tool's name and a fixed reason are kept; the denial
   text, which can hold the command, never reaches `--json`, `watch.log`
   or the notification. The watcher and Codex only report it: AGENTS.md
   tells Codex to send Kyle to the session to decide and never to suggest

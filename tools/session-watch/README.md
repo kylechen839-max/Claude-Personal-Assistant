@@ -16,7 +16,8 @@ same rules (`AGENTS.md`).
 
 ## What it looks at
 
-Two sources, merged per session (the hook wins when both see one):
+Two sources, merged per session (the hook wins when both see one, except
+that a `security_denied` block beats an `idle_prompt` marker):
 
 1. **Notification hook (best).** Claude Code runs `notify_hook.py` as a
    hook. On a `Notification` of type `permission_prompt` (an approval
@@ -42,15 +43,23 @@ Two sources, merged per session (the hook wins when both see one):
    on its own last write: a busy background agent never hides a prompt in
    the main session; only an open `Agent`/`Task` call in the main
    transcript counts its subagents' writes as activity.
-3. **Security-check stops (transcript check only).** When a tool result
-   says a security check refused the call (the auto mode classifier, a
-   permission deny rule, or a PreToolUse hook that blocked it) and the
+3. **Security-check stops (transcript check only).** When an error tool
+   result starts with Claude Code's own denial text (the auto mode
+   classifier's "Permission for this action was denied", a permission deny
+   rule's "Permission to use <tool> ... has been denied", or a PreToolUse
+   hook's "PreToolUse:<tool> ...") and the
    session has done nothing successful since (no later tool result that
    worked, no new message from you) and has been quiet for `--threshold`
    seconds, it is reported with `notification_type` `security_denied` and
    the denied tool's name: the session gave up or ended its turn and needs
-   you to decide. Your own "no" to a prompt doesn't count. There is no hook
-   event for this, so only the transcript check sees it. The denial text
+   you to decide. Your own "no" to a prompt doesn't count, and neither does
+   a failing command whose output merely mentions a denial (it starts with
+   "Exit code N", like a git 403 or a blocking pre-commit hook). There is
+   no hook event for this, so only the transcript check sees it. With the
+   hook installed, the turn that ended on the denial gets Claude Code's
+   `idle_prompt` marker about a minute later, before `--threshold` passes;
+   the denial still wins over that idle marker (an approval prompt or
+   question marker still wins over the denial). The denial text
    (which can hold the command) is never copied anywhere; each denied call
    is announced once.
 

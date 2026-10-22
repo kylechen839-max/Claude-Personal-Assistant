@@ -5048,8 +5048,35 @@ assistant package):
     the AGENTS.md test on the old AGENTS.md, the rejection test when the
     rejection exclusion is removed, the progress test when a later success
     no longer clears a denial; the docs test on the old docs).
+- **Round 4 (judge findings on round 3; Kyle approved one extra round).**
+  - With the hook installed a denial no longer shows as "idle": after the
+    denied turn ends, Stop clears the marker and Claude Code's
+    `idle_prompt` writes a new one about a minute later, before
+    `--threshold` passes. `merge` now lets a transcript `security_denied`
+    block beat an `idle_prompt` marker (`DENIAL_BEATS`); a
+    `permission_prompt` or `elicitation_dialog` marker still wins.
+  - `DENIAL_PATTERNS` are now anchored regexes matched at the start of the
+    error result (leading whitespace stripped), which is where Claude
+    Code's own denial texts sit; a failing command's output starts with
+    "Exit code N" and no longer counts. The deny-rule pattern needs
+    "permission to use <tool>" as whole words and the exact "has been
+    denied"; the hook pattern needs the `PreToolUse:` prefix. The matched
+    head grew from 500 to 2000 characters so a deny rule quoting a long
+    command still matches. The comment now says what the code does.
+  - Docs: the README's merge line and security-stop item, SECURITY.md and
+    MANUAL_TEST.md's denial check state the denial-vs-idle rule and the
+    anchoring.
+  - 15 new test cases (109 in the file): the three judge strings and six
+    more failing-output shapes as negatives, two realistic positives
+    replacing the loose ones (a leading-whitespace deny rule, "Hook
+    PreToolUse:Bash denied this tool") plus a long-command deny rule, the
+    anchoring, the probe's Stop-then-idle sequence, approval/question
+    markers still winning, and `merge` directly. On the round-3 code 13
+    of them fail; the long-command and approval-marker cases pin
+    behaviour that already held; the docs test fails on the round-3 docs.
 - **Counts** (Linux sandbox, Python 3.13, no eSpeak installed in this
-  sandbox): 2949 passed, 69 skipped, 9 failed, 26 errors, against the
+  sandbox): round 4 2964 passed, 69 skipped, 9 failed, 26 errors (the
+  same eSpeak-missing tests). Round 3: 2949 passed, 69 skipped, 9 failed, 26 errors, against the
   same tree without this change's 2855 passed, 69 skipped, 9 failed, 26
   errors; the failures and errors are the same eSpeak-missing tests on
   both. Round 2 was 2918 passed. No JS
