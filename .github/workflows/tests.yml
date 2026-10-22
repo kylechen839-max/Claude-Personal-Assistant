@@ -44,6 +44,8 @@ jobs:
           # Azure Ubuntu mirror is also slow that day: skip recommended extras.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           # Use the main Ubuntu archive instead of the slow Azure mirror.
+          # (the runner reads its mirror from /etc/apt/apt-mirrors.txt)
+          printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo sed -i 's|http://azure.archive.ubuntu.com|http://archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 espeak-ng libespeak1 libportaudio2 ffmpeg shellcheck
@@ -145,6 +147,8 @@ jobs:
           # Azure Ubuntu mirror is also slow that day: skip recommended extras.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           # Use the main Ubuntu archive instead of the slow Azure mirror.
+          # (the runner reads its mirror from /etc/apt/apt-mirrors.txt)
+          printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo sed -i 's|http://azure.archive.ubuntu.com|http://archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 libportaudio2 ffmpeg
