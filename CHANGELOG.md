@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Calendar: listing your own events no longer makes the next move or change
+  ask for confirmation. Notes on events you organize, your contacts'
+  birthdays, Google's holiday calendars and the calendar list now count as
+  your own data; invites from others, events Gmail made, events your guests
+  may edit and calendars shared with you still make changes ask. An event the
+  assistant wrote while outside text was in the conversation stays marked, so
+  it keeps asking.
+
 - Speech recognition is much more accurate on the PC: Whisper small.en with
   beam search and a vocabulary prompt (calendar, assignment, Notion, ...),
   plus `[stt] hotwords` for names. The Pi and the cloud server stay on

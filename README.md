@@ -1187,9 +1187,11 @@ Google Calendar app does:
   when you ask (Claude is told not to ask "are you sure?" itself). Deleting,
   inviting or removing guests and answering an invite always ask. After
   something written by someone else came into the conversation (a web
-  page, an email, an invite from someone else, notes on an event, a shared
-  calendar, an attached file), every change asks too, until the
-  conversation ends.
+  page, an email, an invite from someone else, an event Gmail made or one
+  your guests may edit, a calendar someone shared with you, an attached
+  file), every change asks too, until the conversation ends. Your own
+  events and their notes, holidays and birthdays don't count, so
+  "what's on tomorrow?" then "move the dentist to ten" just moves it.
 - **Invites.** "Accept the project sync invite", "Tell them maybe". This
   always asks first, and reads out any note it would send.
 - **Free time and search.** "When am I free for an hour tomorrow
