@@ -45,9 +45,12 @@ that a `security_denied` block beats an `idle_prompt` marker):
    transcript counts its subagents' writes as activity.
 3. **Security-check stops (transcript check only).** When an error tool
    result starts with Claude Code's own denial text (the auto mode
-   classifier's "Permission for this action was denied", a permission deny
-   rule's "Permission to use <tool> ... has been denied", or a PreToolUse
-   hook's "PreToolUse:<tool> ...") and the
+   classifier's "Permission for this action was denied", the built-in
+   safety check's "Permission for this command was denied", a permission
+   deny rule's "Permission to use/read/edit ... has been denied", an MCP
+   tool's "MCP tool ... has been denied", or a PreToolUse hook's
+   "PreToolUse:<tool> ..." when it blocks with exit code 2 or denies without
+   a reason) and the
    session has done nothing successful since (no later tool result that
    worked, no new message from you) and has been quiet for `--threshold`
    seconds, it is reported with `notification_type` `security_denied` and
@@ -55,7 +58,10 @@ that a `security_denied` block beats an `idle_prompt` marker):
    you to decide. Your own "no" to a prompt doesn't count, and neither does
    a failing command whose output merely mentions a denial (it starts with
    "Exit code N", like a git 403 or a blocking pre-commit hook). There is
-   no hook event for this, so only the transcript check sees it. With the
+   no hook event for this, so only the transcript check sees it. A
+   PreToolUse hook that denies through JSON with its own
+   `permissionDecisionReason` shows only that free text, so it is not
+   recognised: free text is never treated as a security stop. With the
    hook installed, the turn that ended on the denial gets Claude Code's
    `idle_prompt` marker about a minute later, before `--threshold` passes;
    the denial still wins over that idle marker (an approval prompt or

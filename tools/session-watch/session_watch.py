@@ -151,13 +151,24 @@ def _subagents(path: Path) -> list[tuple[float, Path]]:
 # "Exit code N" and may quote anything (a git 403 "Permission to user-x
 # denied", a pre-commit hook "blocked by ... hook").
 DENIAL_PATTERNS = tuple(re.compile(p, re.DOTALL) for p in (
-    # the auto mode classifier
-    r"permission for this action (?:was|has been) denied\b",
+    # the auto mode classifier ("Permission for this action was denied ..."),
+    # and the built-in safety check on dangerous commands ("Permission for
+    # this command was denied by a built-in Claude Code safety check ...")
+    r"permission for this (?:action|command) (?:was|has been) denied\b",
     # a permission deny rule: "Permission to use Bash with command ... has
-    # been denied." ("use" as a whole word, the exact "has been denied")
-    r"permission to use [\w.:-]+\b.*?\bhas been denied\b",
-    # a PreToolUse hook that blocked the call ("PreToolUse:Bash hook error:
-    # ..."; "Hook PreToolUse:Bash denied this tool")
+    # been denied.", "Permission to read <path> has been denied.",
+    # "Permission to edit <path> has been denied." The verb is a whole word
+    # followed by a space, so "\S+ " can end in only one place and the lazy
+    # scan for "has been denied" runs once: linear, not quadratic, on the
+    # DENIAL_HEAD characters.
+    r"permission to (?:use|read|edit) \S+ .*?\bhas been denied\b",
+    # an MCP tool turned off ("MCP tool <server>/<tool> has been denied")
+    r"mcp tool \S+ (?:was|has been) denied\b",
+    # a PreToolUse hook that blocked the call: exit code 2 ("PreToolUse:Bash
+    # hook error: ...") or a JSON deny without a reason ("Hook
+    # PreToolUse:Bash denied this tool"). A JSON deny WITH a
+    # permissionDecisionReason shows only the hook's own free text, which
+    # is deliberately not matched (see README "Security-check stops").
     r"(?:hook )?pretooluse:",
 ))
 # Kyle saying no himself is his choice, not a security check.

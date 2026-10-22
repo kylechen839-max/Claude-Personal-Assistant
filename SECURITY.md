@@ -1410,9 +1410,11 @@ network code of its own.
   open `Agent`/`Task` call counts its subagents as activity), and checks at
   most the 8 newest subagent transcripts per session.
 - **Security-check stops.** A session that stopped after the auto mode
-  classifier, a permission deny rule or a PreToolUse hook refused a tool
-  call (an `is_error` tool result that starts with one of Claude Code's
-  fixed denial texts; Kyle's own rejection and a failing command's output,
+  classifier, the built-in safety check, a permission deny rule (use, read
+  or edit), an MCP tool deny, or a PreToolUse hook (exit code 2, or a JSON
+  deny without its own reason) refused a tool call (an `is_error` tool
+  result that starts with one of Claude Code's fixed denial texts; a hook's
+  own free-text reason is not matched; Kyle's own rejection and a failing command's output,
   which starts with "Exit code N", don't match), with nothing successful
   since, is reported as `security_denied` from the transcript only (there
   is no hook event for it). The `idle_prompt` marker the hook writes about

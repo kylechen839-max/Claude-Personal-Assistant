@@ -888,7 +888,16 @@ def _text(text, msg_id="m_end"):
 @pytest.mark.parametrize("content", [
     CLASSIFIER, RULE, HOOK, [{"type": "text", "text": CLASSIFIER}],
     "\n  PERMISSION to use WebFetch has been DENIED.", "Hook PreToolUse:Bash denied this tool",
-    "Permission to use Bash with command " + "DENIED-COMMAND-TEXT " * 60 + "has been denied."])
+    "Permission to use Bash with command " + "DENIED-COMMAND-TEXT " * 60 + "has been denied.",
+    # Other texts Claude Code itself writes (2.1.308): Read/Edit deny rules,
+    # the built-in safety check on dangerous commands, an MCP tool turned off,
+    # and a deny rule naming only the tool.
+    "Permission to read /home/k/proj/.env has been denied.",
+    "Permission to edit /home/k/my proj/a.py has been denied.",
+    "Permission for this command was denied by a built-in Claude Code safety check, "
+    "not by the user.",
+    "MCP tool github/delete_repo has been denied",
+    "Permission to use PowerShell has been denied: running in don't ask mode."])
 def test_a_session_stopped_by_a_security_check_is_reported(tmp_path, content):
     _transcript(tmp_path, [_entry("user", "clean up"), _tool_use("d1", "Bash", "m1"),
                            _error("d1", content), _text("I can't do that here.")], age=300)
@@ -952,7 +961,11 @@ def test_a_plain_error_or_matching_text_without_is_error_is_not_a_denial(tmp_pat
     "You do not have permission to use model X. Request denied.",
     "Exit code 1\nError: You do not have permission to use model gpt-x. Request denied.",
     "Exit code 1\n" + CLASSIFIER, "Exit code 2\n" + HOOK,
-    "Permission to user-x has been denied.", "commit blocked by the hook"])
+    "Permission to user-x has been denied.", "commit blocked by the hook",
+    "Exit code 1\nPermission to read x has been denied.",
+    # Long dotted text with no "has been denied": rejected (the deny-rule
+    # pattern is linear, so this stays cheap on every scan).
+    "permission to use " + "a." * 1000])
 def test_failing_command_output_that_mentions_a_denial_is_not_one(tmp_path, content):
     _transcript(tmp_path, [_tool_use("d1", "Bash", "m1"), _error("d1", content),
                            _text("The commit failed.")], age=300)
@@ -1071,3 +1084,13 @@ def test_docs_describe_security_stops_and_exit_3():
     assert "never suggest a way around the check" in agents
     assert "exits 3" in readme and "A scan exits 0; a file it can't read" not in readme
     assert "was denied by a security check" in manual
+
+
+def test_a_hook_deny_with_its_own_reason_text_is_not_matched(tmp_path):
+    """A PreToolUse hook's JSON deny with permissionDecisionReason shows only
+    the hook author's free text; that is deliberately not matched (the
+    README says so), so free text can never look like a security stop."""
+    _transcript(tmp_path, [_tool_use("d1", "Bash", "m1"),
+                           _error("d1", "Blocked: rm -rf not allowed"), _text("Stopping.")],
+                age=300)
+    assert session_watch.scan_transcripts(tmp_path, 120, NOW) == []
