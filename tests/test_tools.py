@@ -8,12 +8,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from assistant.chat import ClaudeChat
-from assistant.cli import is_yes, voice_confirm
-from assistant.tools import Tool, ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.tools.notion import NotionAssignments
-from assistant.tools.timeutil import resolve_day
+from kwil.chat import ClaudeChat
+from kwil.cli import is_yes, voice_confirm
+from kwil.tools import Tool, ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.tools.notion import NotionAssignments
+from kwil.tools.timeutil import resolve_day
 from tests.conftest import (make_response, request_text, system_text, text_block,
                             tool_use_block)
 
@@ -53,7 +53,7 @@ def test_registry_confirmation_gate():
 def test_a_confirm_prompt_may_need_no_question_and_sees_the_taint():
     """confirm_prompt returning None runs the tool without asking (a light,
     not a lock); the prompt can read UNTRUSTED_CONTEXT like the handler."""
-    from assistant.tools import UNTRUSTED_CONTEXT
+    from kwil.tools import UNTRUSTED_CONTEXT
 
     seen = []
 
@@ -281,7 +281,7 @@ def test_resolve_day():
     ("2026-10-14", "on  Monday", "2026-10-19"),
 ])
 def test_resolve_day_weekdays(monkeypatch, today_iso, day, expected):
-    from assistant.tools import timeutil
+    from kwil.tools import timeutil
 
     fixed = datetime.fromisoformat(today_iso + "T09:00:00")
 
@@ -301,8 +301,8 @@ def test_tomorrow_is_read_once_per_turn_across_midnight(monkeypatch, fake_client
     before Claude's tool call runs. "Tomorrow" must be the day after the
     date the system prompt gave Claude (one reading of "now" per turn), not
     the day after that."""
-    from assistant import chat as chat_module
-    from assistant.tools import timeutil
+    from kwil import chat as chat_module
+    from kwil.tools import timeutil
 
     asked = datetime(2026, 10, 19, 23, 59, 59, tzinfo=ZoneInfo(TZ))  # a Monday
     seconds = itertools.count()
@@ -376,7 +376,7 @@ def test_notion_list_assignments_filters():
 def test_notion_today_is_the_turns_today():
     """Inside a chat turn "today" (and so overdue / due soon) comes from the
     turn's one reading of the clock, like the calendar's "tomorrow"."""
-    from assistant.tools import timeutil
+    from kwil.tools import timeutil
 
     client = make_notion([page("p1", "Homework 6", due="2026-10-19")])
     asked = datetime(2026, 10, 19, 23, 59, 59, tzinfo=ZoneInfo(TZ))
@@ -414,7 +414,7 @@ def test_notion_update_status_fuzzy_and_ambiguous():
 @pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("NOTION_TOKEN"), reason="NOTION_TOKEN not set")
 def test_live_notion_list_assignments():
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     db = load_config()["notion"]["database_id"]
     out = NotionAssignments(db).list_assignments(days_ahead=30)
@@ -435,7 +435,7 @@ def test_live_calendar_list_today():
 def test_headless_oauth_flow(tmp_path):
     from urllib.parse import parse_qs, urlparse
 
-    from assistant.tools import calendar as cal_mod
+    from kwil.tools import calendar as cal_mod
 
     creds = tmp_path / "credentials.json"
     creds.write_text(json.dumps({"installed": {

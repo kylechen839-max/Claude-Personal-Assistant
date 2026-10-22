@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from assistant import cli
-from assistant.config import DEFAULTS, load_config, setup_logging
+from kwil import cli
+from kwil.config import DEFAULTS, load_config, setup_logging
 from tests.conftest import make_response, text_block
 
 
@@ -24,7 +24,7 @@ def restore_logging():
 
 
 def test_load_config_defaults_file_and_env(tmp_path, monkeypatch):
-    from assistant.config import ENV_OVERRIDES
+    from kwil.config import ENV_OVERRIDES
 
     for var in ENV_OVERRIDES:  # whatever this machine has set
         monkeypatch.delenv(var, raising=False)
@@ -87,7 +87,7 @@ def test_main_text_mode_end_to_end(tmp_path, monkeypatch, fake_client, capsys):
     monkeypatch.setattr("builtins.input", lambda _="": next(inputs))
     assert cli.main(["--mode", "text"]) == 0
     out = capsys.readouterr().out
-    assert "Claude: Hello Kyle." in out
+    assert "Kwil: Hello Kyle." in out
     assert "Calendar tools off" in out and "Memory off" in out
     assert "Starting in text mode" in (tmp_path / "logs" / "assistant.log").read_text()
 
@@ -120,8 +120,8 @@ def test_build_tools_and_memory_respect_config(tmp_path, monkeypatch):
 
 
 def test_wake_loop_survives_errors(fake_client):
-    from assistant.chat import ClaudeChat
-    from assistant.tts import PrintTTS
+    from kwil.chat import ClaudeChat
+    from kwil.tts import PrintTTS
 
     events = iter([OSError("mic gone"), (True, np.ones(5)), (True, np.ones(5)),
                    (False, None)])
@@ -151,7 +151,7 @@ def test_wake_loop_survives_errors(fake_client):
 
 
 def test_wake_loop_gives_up_after_repeated_mic_failures():
-    from assistant.tts import PrintTTS
+    from kwil.tts import PrintTTS
 
     def listen(source):
         raise OSError("no mic")
@@ -169,7 +169,7 @@ def test_get_reply_error_messages(fake_client, exc, expected):
     import anthropic
     import httpx
 
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
 
     req = httpx.Request("POST", "https://api.anthropic.com")
     status = {"auth": 401, "rate": 429, "other": 400, "down": 500}[exc]
@@ -182,19 +182,19 @@ def test_get_reply_error_messages(fake_client, exc, expected):
 
 
 def test_text_mode_survives_unexpected_errors(fake_client):
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
 
     fake_client.messages.create.side_effect = [ValueError("weird"),
                                                make_response(text_block("Hi."))]
     inputs, out = iter(["hello", "again", "quit"]), []
     cli.run_text(ClaudeChat(client=fake_client), input_fn=lambda _: next(inputs),
                  output_fn=out.append)
-    assert "Claude: Sorry, something went wrong." in out
-    assert "Claude: Hi." in out
+    assert "Kwil: Sorry, something went wrong." in out
+    assert "Kwil: Hi." in out
 
 
 def test_config_local_toml_overrides_config_toml(tmp_path):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     (tmp_path / "config.toml").write_text('[update]\nenabled = false\n[wake]\nsensitivity = 0.4\n')
     assert load_config(tmp_path / "config.toml", None)["update"]["enabled"] is False
@@ -278,7 +278,7 @@ def test_other_instances_set_no_machine_wide_watch_setting(name):
     status file that doesn't exist."""
     from pathlib import Path
 
-    from assistant.config import tomllib
+    from kwil.config import tomllib
 
     path = Path(__file__).resolve().parent.parent / name
     watch = tomllib.loads(path.read_text(encoding="utf-8")).get("watch") or {}
@@ -305,25 +305,25 @@ def test_google_connect_without_a_token_never_signs_in_here(tmp_path, monkeypatc
 
 
 def test_env_file_flag(tmp_path, monkeypatch, capsys):
-    import assistant.config
+    import kwil.config
 
     assert cli.parse_args([]).env_file == ".env"
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    real, seen = assistant.config.load_config, []
+    real, seen = kwil.config.load_config, []
 
     def load(path, env_file=".env"):
         seen.append((path, env_file))
         return real(None, None)
-    monkeypatch.setattr(assistant.config, "load_config", load)
+    monkeypatch.setattr(kwil.config, "load_config", load)
     assert cli.main(["--mode", "text", "--config", "config.mom.toml",
                      "--env-file", ".env.mom"]) == 1  # no key in the test
     assert seen == [("config.mom.toml", ".env.mom")]
 
 
 def test_main_passes_env_file_and_language_to_the_web_app(tmp_path, monkeypatch):
-    from assistant import i18n, webapp
+    from kwil import i18n, webapp
 
     _no_inherited(monkeypatch)  # a separate instance refuses the caller's keys
     monkeypatch.chdir(tmp_path)
@@ -351,7 +351,7 @@ def test_separate_instance_refuses_the_owners_inherited_env(tmp_path, monkeypatc
     """--env-file .env.mom started from Kyle's shell: his token, history,
     Notion or Pinecone settings must not reach her instance (load_dotenv never
     overrides them). It refuses to start and names the variable, not its value."""
-    from assistant import webapp
+    from kwil import webapp
 
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -369,7 +369,7 @@ def test_separate_instance_refuses_the_owners_inherited_env(tmp_path, monkeypatc
 
 def test_google_connect_refuses_inherited_google_token_with_default_env(
         tmp_path, monkeypatch, capsys):
-    from assistant import webapp
+    from kwil import webapp
 
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -384,7 +384,7 @@ def test_google_connect_refuses_inherited_google_token_with_default_env(
 def test_separate_instance_starts_with_its_own_env_file(tmp_path, monkeypatch):
     """Values from .env.mom itself, or a clean shell, start normally; Kyle's
     own instance (default .env, no google_connect) is unchanged."""
-    from assistant import webapp
+    from kwil import webapp
 
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -406,7 +406,7 @@ def test_separate_instance_never_shares_the_owners_deadlines(tmp_path, monkeypat
     [student] dir of its own would read and write Kyle's deadlines file:
     deadlines are off there. With its own dir (config.mom.toml's), they stay
     on; Kyle's own instance is unchanged."""
-    from assistant import webapp
+    from kwil import webapp
 
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -440,7 +440,7 @@ def test_separate_instance_never_shares_the_owners_push_folder(tmp_path, monkeyp
     (his phones stop getting notifications) and share his VAPID key and
     briefing state: push is off there. With its own folder it stays on;
     Kyle's own instance is unchanged."""
-    from assistant import webapp
+    from kwil import webapp
 
     _no_inherited(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -472,7 +472,7 @@ def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):
     module attribute, default config, run from the repo) writes under
     tmp_path, so a test run can't put fake ERROR lines in the running
     app's logs/assistant.log."""
-    from assistant import config as config_mod
+    from kwil import config as config_mod
 
     path = config_mod.setup_logging(load_config(None, None))
     assert path is not None and tmp_path in path.parents

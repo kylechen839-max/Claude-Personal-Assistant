@@ -17,10 +17,10 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from assistant import cloud, doctor, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS, load_config  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import cloud, doctor, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS, load_config  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block  # noqa: E402
 from tests.test_webapp import TOKEN, Clock, FakeTranscriber, wav_bytes  # noqa: E402
 
@@ -301,7 +301,7 @@ def test_cross_site_requests_are_refused_even_when_signed_in(make_cloud):
 
 def test_errors_never_show_a_stack_trace(make_cloud, caplog):
     async def broken(scope, receive, send):
-        raise RuntimeError("secret internals at /app/assistant/x.py line 3")
+        raise RuntimeError("secret internals at /app/kwil/x.py line 3")
 
     _, client = make_cloud(app=broken)
     with caplog.at_level(logging.ERROR):
@@ -392,7 +392,7 @@ def test_build_app_uses_the_cloud_settings(make_cloud, fake_client):
 
 def test_cli_web_mode_on_a_server_runs_the_cloud_app(monkeypatch, tmp_path,
                                                      restore_root_logging):
-    from assistant import cli
+    from kwil import cli
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASSISTANT_PROFILE", "server")
@@ -408,8 +408,8 @@ def test_cli_web_mode_on_a_server_runs_the_cloud_app(monkeypatch, tmp_path,
 def test_web_mode_never_imports_sounddevice_or_the_wake_word():
     code = ("import sys; sys.modules['sounddevice'] = None\n"
             "import os; os.environ['ANTHROPIC_API_KEY'] = 'x'\n"
-            "from assistant import cli, cloud, webapp\n"
-            "from assistant.config import load_config\n"
+            "from kwil import cli, cloud, webapp\n"
+            "from kwil.config import load_config\n"
             "cfg = load_config(None, None, profile='server')\n"
             "cfg['tts']['engine'] = 'print'\n"
             "a = webapp.build_assistant(cfg, None, lambda m: None)\n"
@@ -651,7 +651,7 @@ def test_limiter_memory_stays_bounded():
 
 def test_first_requests_log_what_the_proxy_sends(make_cloud, caplog):
     _, client = make_cloud(guard_kwargs={"log_proxy_headers": 2})
-    with caplog.at_level(logging.INFO, logger="assistant.cloud"):
+    with caplog.at_level(logging.INFO, logger="kwil.cloud"):
         for _ in range(4):
             client.get("/", headers=via_proxy(PUBLIC))
     lines = [r.getMessage() for r in caplog.records if "Proxy check" in r.getMessage()]
@@ -757,13 +757,13 @@ def test_build_app_refuses_a_web_app_without_its_auth(monkeypatch, fake_client):
         cloud.build_app(cfg, assistant, TOKEN)
 
 
-# --- family invites (assistant/family.py) ------------------------------------------
+# --- family invites (kwil/family.py) ------------------------------------------
 
 @pytest.fixture
 def family_cloud(make_cloud, fake_client, tmp_path):
     """CloudGuard around a web app with [family] on; returns (guard, client,
     family)."""
-    from assistant.family import Family
+    from kwil.family import Family
 
     config = load_config(None, None)
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
@@ -816,7 +816,7 @@ def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     the guard lets it reach google_web.py, which refuses an unknown state
     (400, nothing written) instead of the guard's 401; and build_app wires
     family members' Google in on the server profile."""
-    from assistant.family import Family
+    from kwil.family import Family
 
     cfg = load_config(None, None, profile="server")
     cfg["webapp"].update(sessions_file="", public_origin="https://hey-claude.example.com")
@@ -852,8 +852,8 @@ def test_notion_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     API still needs signing in."""
     import httpx
 
-    from assistant import notion_web
-    from assistant.family import Family
+    from kwil import notion_web
+    from kwil.family import Family
 
     def no_network(request):
         raise AssertionError("a test tried to reach Notion")
@@ -901,8 +901,8 @@ def test_render_and_docker_are_ready_for_family():
     import re
     from pathlib import PurePosixPath
 
-    from assistant.config import ENV_OVERRIDES, SERVER_PROFILE
-    from assistant.tools.google_auth import WEB_CLIENT_ENV
+    from kwil.config import ENV_OVERRIDES, SERVER_PROFILE
+    from kwil.tools.google_auth import WEB_CLIENT_ENV
 
     render, docker = _render_yaml(), _dockerfile()
     # family accounts live on the persistent disk

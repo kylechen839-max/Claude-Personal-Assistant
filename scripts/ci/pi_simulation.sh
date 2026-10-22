@@ -6,8 +6,8 @@
 #       -v /tmp/out:/out debian:bookworm bash /src/scripts/ci/pi_simulation.sh
 #
 # As a normal user "pi" with sudo, like on the Pi, it copies the repo to
-# ~/hey-claude and runs scripts/install_pi.sh end to end, then the full
-# pytest suite, `python -m assistant --check`, scripts/install_service.sh
+# ~/kwil and runs scripts/install_pi.sh end to end, then the full
+# pytest suite, `python -m kwil --check`, scripts/install_service.sh
 # and scripts/preflight.sh. Only what a container can't have is stubbed:
 # systemd (systemctl/loginctl record their calls), the sound card (an ALSA
 # "null" device) and Claude (scripts/ci/fake_claude.py; no key in CI).
@@ -48,9 +48,9 @@ STUB
     chmod +x "/usr/local/bin/$tool"
 done
 
-cp -a "$SRC" /home/pi/hey-claude
-rm -rf /home/pi/hey-claude/.venv /home/pi/hey-claude/.env /home/pi/hey-claude/logs
-chown -R pi:pi /home/pi/hey-claude
+cp -a "$SRC" /home/pi/kwil
+rm -rf /home/pi/kwil/.venv /home/pi/kwil/.env /home/pi/kwil/logs
+chown -R pi:pi /home/pi/kwil
 
 # Network settings of the host (a proxy, its CA), if any, reach the pi user too.
 pass_env=()
@@ -62,7 +62,7 @@ sudo -u pi -H "${pass_env[@]}" \
     PIP_CACHE_DIR="$CACHE/pip" HF_HOME="$CACHE/hf" OUT="$OUT" CACHE="$CACHE" \
     bash -s <<'AS_PI'
 set -euo pipefail
-cd ~/hey-claude
+cd ~/kwil
 t0=$(date +%s)
 phase() { printf '\n==== %s (%ss) ====\n' "$*" "$(( $(date +%s) - t0 ))"; }
 fail() { echo "PI-SIM FAIL: $*" >&2; exit 1; }
@@ -93,13 +93,13 @@ grep -q ".env already exists" /tmp/second-run.log || fail "second run replaced .
 # a Pi stays on base.en (config.toml's small.en is the PC's), written once
 grep -q '^model = "base.en"' config.local.toml || fail "no base.en in config.local.toml"
 [[ "$(grep -c '^\[stt\]' config.local.toml)" == 1 ]] || fail "second run added [stt] again"
-"$PY" -c 'from assistant.config import load_config; m = load_config()["stt"]["model"]; assert m == "base.en", m'
+"$PY" -c 'from kwil.config import load_config; m = load_config()["stt"]["model"]; assert m == "base.en", m'
 
 phase "Piper voice (cached)"
 mkdir -p voices
 cp -n "$CACHE"/voices/* voices/ 2>/dev/null || true
 if [[ ! -f voices/en_US-lessac-medium.onnx ]]; then
-    "$PY" -m assistant.tts --download-voice en_US-lessac-medium
+    "$PY" -m kwil.tts --download-voice en_US-lessac-medium
     cp voices/* "$CACHE/voices/"
 fi
 
@@ -108,23 +108,29 @@ s=$(date +%s)
 "$PY" -m pytest -rs
 timing pytest "$s"
 
-phase "python -m assistant --check"
+phase "python -m kwil --check"
 # A placeholder key: --check only looks at whether it is set.
 sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=ci-placeholder-not-a-key/' .env
 # and a throwaway web token, so the preflight's web step runs
 echo "WEB_TOKEN=$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
-"$PY" -m assistant --check
+"$PY" -m kwil --check
 
 phase "install_service.sh (systemd stubbed)"
+# A Pi set up before the Kwil rebrand has hey-claude.service: it is replaced.
+mkdir -p ~/.config/systemd/user
+echo "# old unit" > ~/.config/systemd/user/hey-claude.service
 ./scripts/install_service.sh
-unit=~/.config/systemd/user/hey-claude.service
+[[ -f ~/.config/systemd/user/hey-claude.service ]] && fail "the pre-rebrand unit was left"
+grep -q -- "--user disable --now hey-claude.service" /var/lib/stub-systemd/calls.log \
+    || fail "the pre-rebrand unit was not disabled"
+unit=~/.config/systemd/user/kwil.service
 [[ -f "$unit" ]] || fail "unit not written"
 grep -q "@REPO_DIR@" "$unit" && fail "unit still has @REPO_DIR@"
-grep -q "ExecStart=$HOME/hey-claude/.venv/bin/python -m assistant.host wake" "$unit" \
+grep -q "ExecStart=$HOME/kwil/.venv/bin/python -m kwil.host wake" "$unit" \
     || fail "unexpected ExecStart in $unit"
 cat /var/lib/stub-systemd/calls.log
 grep -q "enable-linger pi" /var/lib/stub-systemd/calls.log || fail "linger not enabled"
-grep -q -- "--user enable hey-claude.service" /var/lib/stub-systemd/calls.log || fail "not enabled"
+grep -q -- "--user enable kwil.service" /var/lib/stub-systemd/calls.log || fail "not enabled"
 
 phase "preflight.sh (Claude faked, no keys)"
 "$PY" scripts/ci/fake_claude.py 8999 &

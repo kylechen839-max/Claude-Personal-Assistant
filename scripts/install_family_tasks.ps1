@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Start the family members' own copies of Hey Claude (Mom's, Kai's, ...)
+    Start the family members' own copies of Kwil (Mom's, Kai's, ...)
     automatically when you sign in to Windows.
 .DESCRIPTION
     Finds every separate instance in the project folder: a config.<name>.toml
     (config.mom.toml, config.kai.toml, ...; *.local.toml doesn't count) with
     its .env.<name> next to it. For each one it registers a Task Scheduler
-    task \HeyClaude\Family-<name> that runs, hidden, at sign-in:
+    task \Kwil\Family-<name> that runs, hidden, at sign-in:
 
-        python -m assistant --mode web --config config.<name>.toml --env-file .env.<name>
+        python -m kwil --mode web --config config.<name>.toml --env-file .env.<name>
 
     and restarts it a minute after a crash. Its log is the one its config
     names (e.g. logs\mom.log). Your own app is install_windows_service.ps1's
@@ -25,7 +25,7 @@
 
     -Restart restarts every app on this PC, your own included (not only
     the family copies), through the go-live check (python -m
-    assistant.deploy --no-pull --restart): the installed packages must
+    kwil.deploy --no-pull --restart): the installed packages must
     meet requirements.txt, and the code checked out now must first pass
     each app's test conversation on a side port; if not, nothing restarts
     and the old version keeps running. An app in the middle of a turn is
@@ -33,7 +33,7 @@
     restart each app is checked again live. Better still, update with
     .\scripts\deploy.ps1.
 
-    -Watch also installs \HeyClaude\Watch (scripts\install_watch_task.ps1),
+    -Watch also installs \Kwil\Watch (scripts\install_watch_task.ps1),
     which checks every app every 5 minutes and heals or reports problems.
 
     A task starts in your normal Windows environment. If you have set
@@ -55,7 +55,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoDir = Split-Path -Parent $PSScriptRoot
-$taskPath = '\HeyClaude\'
+$taskPath = '\Kwil\'
+$oldTaskPath = '\HeyClaude\'  # the folder before the Kwil rebrand
 $prefix = 'Family-'
 $pythonw = Join-Path $repoDir '.venv\Scripts\pythonw.exe'
 $python = Join-Path $repoDir '.venv\Scripts\python.exe'
@@ -80,14 +81,15 @@ function Get-FamilyInstance {
 
 function Get-InstanceArgument {
     param($Instance)
-    "-m assistant --mode web --config $($Instance.Config) --env-file $($Instance.EnvFile)"
+    "-m kwil --mode web --config $($Instance.Config) --env-file $($Instance.EnvFile)"
 }
 
 function Stop-InstanceProcess {
-    # Copies of this instance started by hand (python -m assistant ... --config config.<name>.toml).
+    # Copies of this instance started by hand (python -m kwil ... --config
+    # config.<name>.toml; `assistant` is its name from before the rebrand).
     [CmdletBinding(SupportsShouldProcess = $true)]
     param($Instance)
-    $pattern = '-m\s+assistant\b.*--config\s+"?' + [regex]::Escape($Instance.Config) + '\b'
+    $pattern = '-m\s+(kwil|assistant)\b.*--config\s+"?' + [regex]::Escape($Instance.Config) + '\b'
     $procs = @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
             Where-Object { $_.CommandLine -and $_.CommandLine -match $pattern })
     foreach ($p in $procs) {
@@ -99,13 +101,17 @@ function Stop-InstanceProcess {
 }
 
 function Unregister-FamilyTask {
-    Get-ScheduledTask -TaskPath $taskPath -ErrorAction SilentlyContinue |
-        Where-Object { $_.TaskName -like "$prefix*" } |
-        ForEach-Object {
-            Stop-ScheduledTask -TaskPath $taskPath -TaskName $_.TaskName -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskPath $taskPath -TaskName $_.TaskName -Confirm:$false
-            Write-Host "Removed task $taskPath$($_.TaskName)"
-        }
+    # In our folder and (by default) the one from before the Kwil rebrand.
+    param([string[]]$Paths = @($taskPath, $oldTaskPath))
+    foreach ($path in $Paths) {
+        Get-ScheduledTask -TaskPath $path -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskName -like "$prefix*" } |
+            ForEach-Object {
+                Stop-ScheduledTask -TaskPath $path -TaskName $_.TaskName -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskPath $path -TaskName $_.TaskName -Confirm:$false
+                Write-Host "Removed task $path$($_.TaskName)"
+            }
+    }
 }
 
 function Register-FamilyTask {
@@ -121,7 +127,7 @@ function Register-FamilyTask {
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskPath $taskPath -TaskName $name -Action $action -Trigger $trigger `
         -Settings $settings -Principal $principal -Force `
-        -Description "Hey Claude for $($Instance.Name): $($Instance.Config) + $($Instance.EnvFile)" | Out-Null
+        -Description "Kwil for $($Instance.Name): $($Instance.Config) + $($Instance.EnvFile)" | Out-Null
     Start-ScheduledTask -TaskPath $taskPath -TaskName $name
     Write-Host "Installed and started $taskPath$name ($($Instance.Config))"
 }
@@ -129,7 +135,7 @@ function Register-FamilyTask {
 if ($Uninstall) {
     Unregister-FamilyTask
     Write-Host 'The family copies no longer start at sign-in. Start one by hand with:'
-    Write-Host '  .\.venv\Scripts\python.exe -m assistant --mode web --config config.<name>.toml --env-file .env.<name>'
+    Write-Host '  .\.venv\Scripts\python.exe -m kwil --mode web --config config.<name>.toml --env-file .env.<name>'
     exit 0
 }
 
@@ -142,15 +148,16 @@ if ($instances.Count -eq 0) {
 if ($Restart) {
     foreach ($i in $instances) {
         $name = "$prefix$($i.Name)"
-        if (-not (Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue)) {
+        if (-not ((Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue) -or
+                (Get-ScheduledTask -TaskPath $oldTaskPath -TaskName $name -ErrorAction SilentlyContinue))) {
             Write-Warning "$taskPath$name isn't installed; run this script without -Restart first."
         }
     }
-    # The go-live check first, then the restart and a live check (assistant/deploy.py),
+    # The go-live check first, then the restart and a live check (kwil/deploy.py),
     # from the project folder (the module and its config are found from there).
     Push-Location $repoDir
     try {
-        & $python -m assistant.deploy --no-pull --restart
+        & $python -m kwil.deploy --no-pull --restart
         $code = $LASTEXITCODE
     }
     finally {
@@ -163,6 +170,8 @@ if (-not (Test-Path -LiteralPath $pythonw)) {
     Write-Error "No .venv found in $repoDir. Create it first (README.md, Quick start)."
     exit 2
 }
+# The tasks from before the Kwil rebrand (\HeyClaude\Family-<name>) are replaced.
+Unregister-FamilyTask -Paths @($oldTaskPath)
 foreach ($i in $instances) {
     $stopped = Stop-InstanceProcess $i
     if ($stopped) {
@@ -177,4 +186,4 @@ Write-Host ''
 Write-Host 'They start each time you sign in to Windows (about 30 s after) and restart'
 Write-Host 'a minute after a crash. After updating the code, restart them with:'
 Write-Host '  .\scripts\install_family_tasks.ps1 -Restart'
-Write-Host 'Status: Task Scheduler -> Task Scheduler Library -> HeyClaude.'
+Write-Host 'Status: Task Scheduler -> Task Scheduler Library -> Kwil.'

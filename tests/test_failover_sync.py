@@ -7,14 +7,14 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from assistant.failover.peers import Backend
-from assistant.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, covered_by,
+from kwil.failover.peers import Backend
+from kwil.failover.sync import (MAX_BATCH, MemoryEventLog, Syncer, covered_by,
                                      default_peers,
                                      fingerprint, handle_pull, handle_push,
                                      materialize, new_event, new_id,
                                      parse_event)
-from assistant.failover.tokens import TokenAuthority, bearer_of
-from assistant.failover.eventlog import SqliteEventLog
+from kwil.failover.tokens import TokenAuthority, bearer_of
+from kwil.failover.eventlog import SqliteEventLog
 
 make_store = MemoryEventLog
 

@@ -1,0 +1,374 @@
+// Family invites on the cloud server (kwil/family.py).
+// - Someone opening an invite link (https://<site>/#invite=hcinv....): the
+//   token is read from the #fragment (never sent to a server by the
+//   browser), cleared from the address bar, and POSTed once to
+//   /api/invite/accept, which signs this phone in as that person.
+// - The owner's menu: "Invite someone" (name, language) makes a one-time
+//   link and opens the share sheet (or copies it); the list shows who is
+//   invited or active, with "New link" and "Remove".
+// - A family member's own Settings: "Download my data" (GET /api/me/export,
+//   saved as a file) and "Delete my account" (typed confirmation, then
+//   POST /api/me/delete; it signs this phone out). account.py.
+// app.js calls configure({ request }) and acceptInvite() first thing, and
+// onState(state) on every /api/state. The owner's calls go through that
+// request() (with failover: the router, signed in with a bearer token, to
+// whichever backend is active); the invite link's address comes from the
+// server (its own public address), never this page's. Loaded before app.js.
+// - A family member's or beta tester's Settings: "Your Anthropic API key"
+//   (state.api_key "required" for beta, "optional" for family): save,
+//   replace or remove their own key (/api/me/anthropic-key,
+//   userkeys_web.py). Only the last four characters ever come back.
+"use strict";
+
+(function (root) {
+  const ACCOUNT_KEY = "account";
+  // app.js's request(url, options) -> Response; until configured, a plain
+  // same-origin fetch (cookie sign-in, no failover)
+  let request = null;
+
+  function configure(opts = {}) {
+    if (typeof opts.request === "function") request = opts.request;
+  }
+
+  // The invite token in a location's #fragment, or null.
+  function readInvite(loc) {
+    const m = String((loc && loc.hash) || "").match(/[#&]invite=([^&]+)/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch (e) { return null; }
+  }
+
+  function storage(win) {
+    try { return win.localStorage || null; } catch (e) { return null; }
+  }
+
+  // A family member's phone: no failover router (that is the owner's Pi/PC).
+  function isFamilyAccount(win) {
+    const s = storage(win);
+    try { return Boolean(s && s.getItem(ACCOUNT_KEY) === "family"); } catch (e) { return false; }
+  }
+
+  // True when an invite was accepted (the page is reloading); false when
+  // there was none, or it failed (the message is in #login-error).
+  async function acceptInvite(win) {
+    const token = readInvite(win.location);
+    if (!token) return false;
+    // out of the address bar (and history) before anything else
+    win.history.replaceState(null, "", win.location.pathname || "/");
+    let message = "This invite link has expired or was already used. Ask for a new one.";
+    try {
+      const res = await win.fetch("/api/invite/accept", {
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite: token }),
+      });
+      if (res.ok) {
+        const s = storage(win);
+        try { if (s) s.setItem(ACCOUNT_KEY, "family"); } catch (e) { /* private mode */ }
+        win.location.replace("/");  // the page again, in their language
+        return true;
+      }
+      if (res.status === 429) message = "too many attempts; try again later";
+    } catch (e) {
+      message = "Couldn't reach the server. Open the link again.";
+    }
+    const err = win.document && win.document.getElementById("login-error");
+    if (err) err.textContent = message;
+    return false;
+  }
+
+  // JSON from `url` through app.js's request (or a same-origin fetch);
+  // throws the server's error message.
+  async function callJSON(win, url, options = {}) {
+    const res = request ? await request(url, options)
+      : await win.fetch(url, { credentials: "same-origin", ...options });
+    let body = {};
+    try { body = await res.json(); } catch (e) { /* not JSON */ }
+    if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
+    return body;
+  }
+
+  // --- the owner's menu ---
+  function setupOwner(win, doc) {
+    const $ = (id) => doc.getElementById(id);
+    const box = $("family");
+    if (!box) return null;
+    const openBtn = $("invite-open"), form = $("invite-form"), nameIn = $("invite-name");
+    const langIn = $("invite-language"), tzIn = $("invite-tz"), status = $("invite-status");
+    const tierIn = $("invite-tier");  // "beta" (the default) or "family"
+    const linkIn = $("invite-link"), list = $("family-list");
+    let shown = false;
+
+    const call = (url, options) => callJSON(win, url, options);
+    const post = (url, data) => call(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data || {}) });
+
+    async function share(url) {
+      linkIn.value = url;
+      linkIn.hidden = false;
+      const nav = win.navigator || {};
+      if (typeof nav.share === "function") {
+        try { await nav.share({ url }); status.textContent = "Invite link ready."; return; }
+        catch (e) { if (e && e.name === "AbortError") { status.textContent = "Invite link ready."; return; } }
+      }
+      try {
+        await nav.clipboard.writeText(url);
+        status.textContent = "Invite link copied.";
+      } catch (e) {
+        status.textContent = "Copy the invite link below.";
+      }
+    }
+
+    function row(user) {
+      const li = doc.createElement("li");
+      const label = doc.createElement("span");
+      label.textContent = user.name;
+      const state = doc.createElement("span");
+      state.className = "hint";
+      state.textContent = (user.status === "active" ? "Active" : "Invited") +
+        (user.tier === "beta" ? " · Beta" : "");
+      const again = doc.createElement("button");
+      again.type = "button";
+      again.textContent = "New link";
+      again.addEventListener("click", async () => {
+        try { await share((await post(`/api/users/${encodeURIComponent(user.id)}/invite`)).url); }
+        catch (e) { status.textContent = e.message; }
+      });
+      const remove = doc.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", async () => {
+        if (!win.confirm(`Remove ${user.name}? This deletes their conversations.`)) return;
+        try {
+          // POST, not DELETE: with failover this goes cross-origin, and the
+          // backends' preflight allows only GET and POST
+          await post(`/api/users/${encodeURIComponent(user.id)}/remove`);
+          refresh();
+        } catch (e) { status.textContent = e.message; }
+      });
+      li.append(label, " ", state, " ", again, " ", remove);
+      return li;
+    }
+
+    async function refresh() {
+      if (!shown) return;
+      try {
+        const body = await call("/api/users");
+        list.textContent = "";
+        for (const u of body.users || []) list.appendChild(row(u));
+      } catch (e) { /* offline: keep the list */ }
+    }
+
+    openBtn.addEventListener("click", () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden && tzIn && !tzIn.value) {
+        try { tzIn.value = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* none */ }
+      }
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      status.textContent = "";
+      try {
+        const body = await post("/api/invites", {
+          name: nameIn.value.trim(), language: langIn.value, timezone: tzIn ? tzIn.value.trim() : "",
+          tier: tierIn && tierIn.value ? tierIn.value : "beta" });
+        nameIn.value = "";
+        form.hidden = true;
+        await share(body.url);
+        refresh();
+      } catch (err) { status.textContent = err.message; }
+    });
+    const menu = doc.querySelector("details.menu");
+    if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
+
+    return {
+      show(on) {
+        shown = Boolean(on);
+        box.hidden = !shown;
+        if (shown) refresh();
+      },
+      refresh,
+    };
+  }
+
+  // --- a family member's own account (kwil/account.py) ---
+  // Every message this section shows (i18n.js has each one in Chinese).
+  const ACCOUNT_TEXT = {
+    preparing: "Preparing your download…",
+    started: "Your download has started.",
+    busy: "A download is already being made. Wait for it.",
+    tooMany: "Too many downloads. Try again in an hour.",
+    tooLarge: "Your data is too large to download here. Ask the person who invited you for a copy.",
+    failed: "Couldn't download. Try again.",
+    typeIt: "Type DELETE (or your name) to confirm.",
+    ask: "Delete your account and everything in it? This can't be undone.",
+    deleting: "Deleting…",
+    notDeleted: "Couldn't delete your account. Try again.",
+  };
+
+  function setupAccount(win, doc) {
+    const $ = (id) => doc.getElementById(id);
+    const box = $("account-self");
+    if (!box) return null;
+    const exportBtn = $("account-export"), openBtn = $("account-delete-open");
+    const form = $("account-delete-form"), confirmIn = $("account-delete-confirm");
+    const status = $("account-status");
+    const say = (text) => { if (status) status.textContent = text; };
+    const send = (url, options = {}) => (request ? request(url, options)
+      : win.fetch(url, { credentials: "same-origin", cache: "no-store", ...options }));
+
+    exportBtn.addEventListener("click", async () => {
+      exportBtn.disabled = true;
+      say(ACCOUNT_TEXT.preparing);
+      try {
+        const res = await send("/api/me/export");
+        if (!res.ok) {
+          say(res.status === 409 ? ACCOUNT_TEXT.busy : res.status === 429 ? ACCOUNT_TEXT.tooMany
+            : res.status === 413 ? ACCOUNT_TEXT.tooLarge : ACCOUNT_TEXT.failed);
+          return;
+        }
+        // a file save, not a navigation: an error never replaces the page
+        const url = win.URL.createObjectURL(await res.blob());
+        const a = doc.createElement("a");
+        a.href = url;
+        a.download = "kwil-data.zip";
+        doc.body.appendChild(a);
+        a.click();
+        a.remove();
+        win.setTimeout(() => win.URL.revokeObjectURL(url), 60000);
+        say(ACCOUNT_TEXT.started);
+      } catch (e) {
+        say(ACCOUNT_TEXT.failed);
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+    openBtn.addEventListener("click", () => {
+      form.hidden = !form.hidden;
+      say("");
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const typed = String(confirmIn.value || "").trim();
+      if (!typed) { say(ACCOUNT_TEXT.typeIt); return; }
+      if (typeof win.confirm === "function" && !win.confirm(ACCOUNT_TEXT.ask)) return;
+      say(ACCOUNT_TEXT.deleting);
+      let res = null;
+      try {
+        res = await send("/api/me/delete", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: typed }) });
+      } catch (err) { /* shown below */ }
+      if (res && res.ok) {
+        const s = storage(win);
+        try { if (s) s.removeItem(ACCOUNT_KEY); } catch (err) { /* ignore */ }
+        win.location.replace("/");  // signed out: the sign-in page
+        return;
+      }
+      say(res && res.status === 400 ? ACCOUNT_TEXT.typeIt : ACCOUNT_TEXT.notDeleted);
+    });
+    return {
+      show(on) {
+        box.hidden = !on;
+        if (!on) form.hidden = true;
+      },
+    };
+  }
+
+  // --- a family member's own Anthropic key ---
+  const KEY_URL = "/api/me/anthropic-key";
+  function setupKey(win, doc) {
+    const $ = (id) => doc.getElementById(id);
+    const box = $("api-key");
+    if (!box) return null;
+    const form = $("api-key-form"), input = $("api-key-input"), save = $("api-key-save");
+    const remove = $("api-key-remove"), state = $("api-key-state"), cost = $("api-key-cost");
+    let mode = null;  // "required" (beta), "optional" (family) or null (hidden)
+
+    function render(st) {
+      const set = Boolean(st.set);
+      save.textContent = set ? "Replace key" : "Save key";
+      remove.hidden = !set;
+      if (set) state.textContent = `Your key ending in ${String(st.last4 || "")} is saved.`;
+      else if (st.available === false) state.textContent = "This server can't store keys yet.";
+      else if (st.unreadable) state.textContent = "Your saved key can't be read any more. Please enter it again.";
+      else state.textContent = mode === "required" ? "Add your key to start talking with Claude."
+        : "Optional: without one, the family's key is used.";
+      const usd = Number(st.month_usd);
+      cost.hidden = !(set && st.month_usd != null && Number.isFinite(usd));
+      cost.textContent = cost.hidden ? "" : `About $${usd.toFixed(2)} this month on your key.`;
+    }
+
+    async function refresh() {
+      if (!mode) return;
+      try { render(await callJSON(win, KEY_URL)); } catch (e) { /* offline: keep it */ }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const key = String(input.value || "").trim();
+      if (!key) return;
+      save.disabled = true;
+      state.textContent = "Checking the key with Anthropic…";
+      try {
+        await callJSON(win, KEY_URL, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }) });
+        input.value = "";  // never kept in the page once saved
+        await refresh();
+      } catch (err) {
+        state.textContent = err.message;
+      } finally {
+        save.disabled = false;
+      }
+    });
+    remove.addEventListener("click", async () => {
+      if (typeof win.confirm === "function" &&
+          !win.confirm("Remove your Anthropic API key from this app?")) return;
+      try {
+        await callJSON(win, KEY_URL, {
+          method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
+        await refresh();
+      } catch (err) { state.textContent = err.message; }
+    });
+    const menu = doc.querySelector("details.menu");
+    if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
+
+    return {
+      show(next) {
+        next = next === "required" || next === "optional" ? next : null;
+        const changed = next !== mode;
+        mode = next;
+        box.hidden = !mode;
+        if (changed) refresh();
+      },
+      refresh,
+    };
+  }
+
+  let owner = null;
+  let account = null;
+  let keys = null;
+  // From app.js after each /api/state: the owner's menu only for the owner
+  // with [family] on; a family member's page hides the owner-only tabs and
+  // shows their own key's settings and "Download my data" / "Delete my account".
+  function onState(state, win = root, doc = root.document) {
+    if (!doc) return;
+    const app = doc.getElementById("app");
+    if (app && app.dataset) app.dataset.account = state.owner === false ? "family" : "owner";
+    const s = storage(win);
+    if (state.owner) {
+      try { if (s) s.removeItem(ACCOUNT_KEY); } catch (e) { /* ignore */ }
+    }
+    if (!owner) owner = setupOwner(win, doc);
+    if (owner) owner.show(Boolean(state.owner && state.family));
+    if (!keys) keys = setupKey(win, doc);
+    if (keys) keys.show(state.owner === false ? state.api_key : null);
+    if (!account) account = setupAccount(win, doc);
+    if (account) account.show(state.owner === false);
+  }
+
+  root.KwilFamily = { readInvite, acceptInvite, isFamilyAccount, onState, setupOwner,
+                           setupKey, setupAccount, configure, ACCOUNT_TEXT };
+})(typeof window !== "undefined" ? window : globalThis);

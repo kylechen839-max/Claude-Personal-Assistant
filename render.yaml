@@ -1,10 +1,13 @@
 # Render Blueprint (render.com): Dashboard -> New -> Blueprint -> this repo.
-#  - hey-claude: the phone web app (python -m assistant --mode web) running
+#  - hey-claude: the Kwil phone web app (python -m kwil --mode web) running
 #    24/7 from the Dockerfile, so it works with Kyle's PC off. Setup steps:
 #    README "Run it in the cloud (Render)".
 #  - pinecone-mcp: the Pinecone MCP connector (pinecone-mcp/).
 services:
   - type: web
+    # Keeps its pre-rebrand name on purpose: the Blueprint matches services by
+    # this name, so renaming it would create a NEW service with an empty disk
+    # (and a new URL). The display name is changed in Render's dashboard.
     name: hey-claude
     runtime: docker
     dockerfilePath: ./Dockerfile
@@ -23,7 +26,7 @@ services:
     # profile). Snapshotted daily by Render; export too.
     # A service with a disk runs one instance and redeploys with a short gap.
     disk:
-      name: hey-claude-data
+      name: hey-claude-data   # never renamed either: a new name is a new, empty disk
       mountPath: /data
       sizeGB: 1
     envVars:

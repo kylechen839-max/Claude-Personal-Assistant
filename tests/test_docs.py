@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from assistant import cli, deploy, preflight, smoke, tts, tts_kokoro, watch
-from assistant.config import DEFAULTS
+from kwil import cli, deploy, preflight, smoke, tts, tts_kokoro, watch
+from kwil.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -61,7 +61,7 @@ def _parser_flags(monkeypatch, run) -> set[str]:
 @pytest.fixture
 def code_flags(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["calendar"])
-    monkeypatch.delitem(sys.modules, "assistant.tools.calendar", raising=False)
+    monkeypatch.delitem(sys.modules, "kwil.tools.calendar", raising=False)
     return (_parser_flags(monkeypatch, lambda: cli.parse_args([]))
             | _parser_flags(monkeypatch, lambda: tts.main([]))
             | _parser_flags(monkeypatch, lambda: preflight.parse_args([]))
@@ -69,7 +69,7 @@ def code_flags(monkeypatch):
             | _parser_flags(monkeypatch, lambda: watch.main([]))
             | _parser_flags(monkeypatch, lambda: deploy.main([]))
             | _parser_flags(monkeypatch, lambda: runpy.run_module(
-                "assistant.tools.calendar", run_name="__main__")))
+                "kwil.tools.calendar", run_name="__main__")))
 
 
 def _text(name: str) -> str:
@@ -113,7 +113,7 @@ def test_stt_section_is_mirrored_in_config_toml_and_readme():
     """Every [stt] setting has a line in config.toml with its default and a
     row in README's settings table; the keys the cloud engine reads are
     secrets (not isolated: see test_stt_cloud.py), and Mom's instance stays local with beam search."""
-    from assistant.config import ENV_OVERRIDES, ISOLATED_ENV_VARS, SECRET_ENV_VARS
+    from kwil.config import ENV_OVERRIDES, ISOLATED_ENV_VARS, SECRET_ENV_VARS
 
     with open(ROOT / "config.toml", "rb") as f:
         shipped = tomllib.load(f)["stt"]
@@ -167,6 +167,29 @@ def test_no_stale_names(doc):
     for stale in ("porcupine", "picovoice", "claude-sonnet-4"):
         assert stale not in text
     assert DEFAULTS["assistant"]["model"] in _text("config.toml")
+
+
+# The Kwil rebrand (2026-10-22): the old names only where a line says they
+# are the old ones (or "Hey Claude" is the wake word, in quotes, or said).
+PRE_REBRAND = [re.compile(p) for p in (
+    r"-m assistant\b",                        # the package is kwil
+    r"(?<![\w.-])assistant/\w",               # its folder
+    r"deploy/hey-claude|hey-claude(-watch)?\.(service|timer)",
+    r"(systemctl --user( \w+)*|journalctl --user -u) hey-claude\b",  # the Pi unit
+    r"\\HeyClaude\\|`HeyClaude`",             # the PC's task folder
+    r"(?<![\"'*])\bHey Claude\b(?![,\"'*]| Web\b| Beta\b)",  # the product name
+)]
+OLD_NAME_NOTE = re.compile(r"rebrand|before the|its name before|\bold\b|kept for one release|"
+                           r"until the tasks|was called Hey Claude|renamed from",
+                           re.IGNORECASE)
+
+
+@pytest.mark.parametrize("doc", DOCS + ["SECURITY.md", "FAILOVER.md", "PRIVACY.md",
+                                        "config.toml", ".env.example"])
+def test_no_pre_rebrand_names(doc):
+    stale = [line for line in _text(doc).splitlines()
+             if any(p.search(line) for p in PRE_REBRAND) and not OLD_NAME_NOTE.search(line)]
+    assert stale == [], doc
 
 
 @pytest.mark.parametrize("doc", DOCS)

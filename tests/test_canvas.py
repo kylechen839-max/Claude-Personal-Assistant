@@ -1,4 +1,4 @@
-"""Student piece P1: reading Canvas (assistant/canvas.py). Offline: the
+"""Student piece P1: reading Canvas (kwil/canvas.py). Offline: the
 calendar feed is a fixture in Canvas's own shape, the REST API an
 httpx.MockTransport answering with Canvas's JSON (Link rel="next" pages,
 the 403 rate limit), name resolution is faked, and Claude is a mock
@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from assistant import canvas
+from kwil import canvas
 from tests.conftest import make_response, make_usage, text_block
 
 FEED = Path(__file__).parent / "fixtures" / "canvas_feed.ics"
@@ -458,7 +458,7 @@ def test_logs_hold_counts_not_text(caplog):
                               "m", [("k", "Secret Exam text")], meter=MagicMock())
     # ours: (httpx logs request URLs at INFO; setup_logging keeps it at
     # WARNING, and the redacting formatter masks feed links and tokens)
-    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("assistant"))
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("kwil"))
     for plain in ("Problem Set", "MATH 241", "Secret Exam", TOKEN, "canvas.example.edu",
                   "user_"):
         assert plain not in ours
@@ -466,7 +466,7 @@ def test_logs_hold_counts_not_text(caplog):
 
 
 def test_feed_links_and_tokens_are_redacted_from_any_log_line(monkeypatch):
-    from assistant.config import redact
+    from kwil.config import redact
 
     for var in ("CANVAS_TOKEN", "CANVAS_ICS_URL"):
         monkeypatch.delenv(var, raising=False)
@@ -478,7 +478,7 @@ def test_feed_links_and_tokens_are_redacted_from_any_log_line(monkeypatch):
 # --- Gmail: read-only search ----------------------------------------------------------
 
 def test_gmail_search_is_read_only_metadata():
-    from assistant.tools.gmail import GmailInbox
+    from kwil.tools.gmail import GmailInbox
 
     service = MagicMock()
     msgs = service.users.return_value.messages.return_value
@@ -525,7 +525,7 @@ def test_extracted_email_deadlines_carry_gmails_arrival_time():
 
 
 def test_no_send_guard_still_covers_search():
-    from assistant.tools.gmail import GmailInbox, SendingBlocked
+    from kwil.tools.gmail import GmailInbox, SendingBlocked
 
     inbox = GmailInbox(service=MagicMock(), timezone="UTC")
     with pytest.raises(SendingBlocked):

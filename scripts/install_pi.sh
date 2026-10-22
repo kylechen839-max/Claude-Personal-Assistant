@@ -96,8 +96,8 @@ else
     "$PY" - <<'PYEOF' || echo "Model download failed; they will download on first run instead."
 import sys
 
-from assistant.config import load_config
-from assistant.wakeword import _ensure_feature_models
+from kwil.config import load_config
+from kwil.wakeword import _ensure_feature_models
 from faster_whisper.utils import download_model
 
 cfg = load_config()
@@ -117,12 +117,12 @@ cat <<EOM
 Done. Next steps:
   1. Put your keys in .env:          nano $REPO_DIR/.env
   2. Google Calendar: copy credentials.json and token.json from your PC into
-     $REPO_DIR (or sign in with: .venv/bin/python -m assistant.tools.calendar --headless)
+     $REPO_DIR (or sign in with: .venv/bin/python -m kwil.tools.calendar --headless)
   3. Optional, a much better voice (Piper, about 60 MB):
-       .venv/bin/python -m assistant --download-voice en_US-lessac-medium
+       .venv/bin/python -m kwil --download-voice en_US-lessac-medium
      (or copy voices/ from your PC); [tts] engine = "auto" then uses it.
      Kokoro is more natural but too slow for a Pi, so Piper is preferred here.
-  4. Check the setup:                .venv/bin/python -m assistant --check
-  5. Try it:                         .venv/bin/python -m assistant
+  4. Check the setup:                .venv/bin/python -m kwil --check
+  5. Try it:                         .venv/bin/python -m kwil
   6. Start it at boot:               ./scripts/install_service.sh
 EOM

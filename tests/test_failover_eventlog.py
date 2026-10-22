@@ -4,8 +4,8 @@ test_failover_sync.py): persistence and coexisting with other tables."""
 import sqlite3
 import threading
 
-from assistant.failover.eventlog import SqliteEventLog
-from assistant.failover.sync import new_event
+from kwil.failover.eventlog import SqliteEventLog
+from kwil.failover.sync import new_event
 
 
 def test_survives_a_restart(tmp_path):
@@ -61,7 +61,7 @@ def test_concurrent_appends(tmp_path):
 
 
 def test_secure_delete_is_on(tmp_path):
-    from assistant.failover.eventlog import SqliteEventLog
+    from kwil.failover.eventlog import SqliteEventLog
 
     log = SqliteEventLog(tmp_path / "events.sqlite")
     assert log._db.execute("PRAGMA secure_delete").fetchone()[0] == 1
@@ -69,7 +69,7 @@ def test_secure_delete_is_on(tmp_path):
 
 
 def test_deleted_text_leaves_no_trace_in_the_database_files(tmp_path):
-    from assistant.failover.sync import new_event as ev
+    from kwil.failover.sync import new_event as ev
 
     path = tmp_path / "h.db"
     log = SqliteEventLog(path)

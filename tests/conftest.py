@@ -95,7 +95,7 @@ def request_text(call) -> str:
     """Everything a recorded request told the model in text: the system
     prompt plus the last user turn's text blocks, which carry the turn's
     context (date and time, recalled notes, the review offer)."""
-    from assistant.chat import is_user_turn
+    from kwil.chat import is_user_turn
 
     parts = [system_text(call)]
     turn = next((m for m in reversed(call.get("messages", [])) if is_user_turn(m)),
@@ -159,14 +159,14 @@ def check_api_rules(kwargs):
             raise api_bad_request(problem)
 
 
-# Settings read from the environment (assistant.config.ENV_OVERRIDES, e.g.
+# Settings read from the environment (kwil.config.ENV_OVERRIDES, e.g.
 # PINECONE_INDEX, TRUSTED_PROXY, PORT) plus WEB_TOKEN. On a PC or server that
 # sets them (often through .env) they would leak into tests that check
 # defaults; tests that need one set it themselves.
 def _env_vars() -> tuple[str, ...]:
-    from assistant.config import ENV_OVERRIDES
+    from kwil.config import ENV_OVERRIDES
 
-    from assistant.tools.google_auth import (CLIENT_ENV, PUBLIC_CLIENT_ENV, TOKEN_ENV,
+    from kwil.tools.google_auth import (CLIENT_ENV, PUBLIC_CLIENT_ENV, TOKEN_ENV,
                                              WEB_CLIENT_ENV)
 
     # and Kyle's Google sign-in (the server's), which family tests must not see
@@ -192,7 +192,7 @@ def clear_settings_env(monkeypatch):
 def english_by_default(monkeypatch):
     """i18n.LANG is process-wide (cli.main and webapp.serve set it): every
     test starts in English and none leaks Chinese into the next."""
-    from assistant import i18n
+    from kwil import i18n
 
     monkeypatch.setattr(i18n, "LANG", "en")
 
@@ -250,7 +250,7 @@ def piper_voice():
 
     Skips only when the voice can't be fetched (e.g. huggingface.co blocked).
     """
-    from assistant.tts import DEFAULT_PIPER_VOICE, download_voice
+    from kwil.tts import DEFAULT_PIPER_VOICE, download_voice
 
     voices = Path(__file__).resolve().parent.parent / "voices"
     try:
@@ -263,7 +263,7 @@ def piper_voice():
 def kokoro_files():
     """The real Kokoro int8 model and voices in models/kokoro/, downloaded
     (checksum-verified) once; CI caches them. Skips when they can't be had."""
-    from assistant import tts_kokoro
+    from kwil import tts_kokoro
 
     try:
         import kokoro_onnx  # noqa: F401
@@ -299,7 +299,7 @@ def _logs_in_tmp(tmp_path, monkeypatch):
     """setup_logging() (e.g. through cli.main) writes into tmp_path, never
     the real logs/assistant.log: on Kyle's PC a test run once left fake
     ERROR lines ("boom ...") in the running app's log."""
-    from assistant import config as config_mod
+    from kwil import config as config_mod
 
     real = config_mod.setup_logging
 
@@ -314,10 +314,10 @@ def _logs_in_tmp(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _usage_in_tmp(tmp_path, monkeypatch):
-    """Each test gets its own in-memory usage meter (assistant/usage.py),
+    """Each test gets its own in-memory usage meter (kwil/usage.py),
     and a usage_file configured through cli.main lands in tmp_path, never
     the real data/usage.json."""
-    from assistant import usage
+    from kwil import usage
 
     real = usage.configure
     monkeypatch.setattr(usage, "METER", usage.UsageMeter())

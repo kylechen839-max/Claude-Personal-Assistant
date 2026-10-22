@@ -4,7 +4,7 @@ and Popen) and the Notion client, with the real API shapes."""
 import json
 from types import SimpleNamespace
 
-from assistant.devteam import INBOX_TITLE
+from kwil.devteam import INBOX_TITLE
 
 SID = "session_01DiUkqY2kzbUbDmW1w96rfi"
 

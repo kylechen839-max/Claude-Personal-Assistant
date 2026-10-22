@@ -5,7 +5,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const VC = require(path.join(__dirname, "..", "..", "assistant", "web", "voice-core.js"));
+const VC = require(path.join(__dirname, "..", "..", "kwil", "web", "voice-core.js"));
 
 function frame(level) {
   return new Float32Array(VC.FRAME_SAMPLES).fill(level);
@@ -209,7 +209,7 @@ test("endpointer: the app's own sound can't start an utterance", () => {
 
 test("voice.js holds the endpointer off while an earcon or the cue plays", () => {
   const fs = require("node:fs");
-  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "kwil", "web", "voice.js"), "utf8");
   const play = src.slice(src.indexOf("    play(name) {"), src.indexOf("    onState(prev, state)"));
   assert.match(play, /endpointer\.holdOff\(/);
   assert.match(src, /if \(open\) earcons\.play\("thinking"\)/); // the follow-up cue goes through it
@@ -632,7 +632,7 @@ test("stricter VAD whenever reply audio plays, even while the state says thinkin
   c.onPlaybackIdle();
   assert.equal(c.replyAudible, false);
   const fs = require("node:fs");
-  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "kwil", "web", "voice.js"), "utf8");
   assert.match(src, /endpointer\.process\(frame, prob, controller\.replyAudible\)/);
   assert.doesNotMatch(src, /endpointer\.strict/);
 });
@@ -728,7 +728,7 @@ test("real speech in a pause between sentences is still asked after the reply", 
 
 test("voice.js holds the mic off for the echo tail when playback stops", () => {
   const fs = require("node:fs");
-  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "kwil", "web", "voice.js"), "utf8");
   assert.match(src, /echoTail: \(\) => \{ if \(endpointer\) endpointer\.holdOff\(CUE_TAIL_MS\); \}/);
 });
 
@@ -766,7 +766,7 @@ test("endpointer: a short yes to an open question isn't a misfire", () => {
   assert.equal(types.at(-1), "speechEnd");
   // voice.js tells the endpointer whether a question is open, frame by frame
   const fs = require("node:fs");
-  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "kwil", "web", "voice.js"), "utf8");
   assert.match(src, /endpointer\.answerPending = controller\.answerWindow;/);
 });
 

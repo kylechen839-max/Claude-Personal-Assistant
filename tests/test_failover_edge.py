@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from assistant.failover import API_VERSION
-from assistant.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZED,
+from kwil.failover import API_VERSION
+from kwil.failover.edge import (WS_CLOSE_AUTH_TIMEOUT, WS_CLOSE_UNAUTHORIZED,
                                      EdgeMiddleware, connect_src)
-from assistant.failover.peers import parse_backends
-from assistant.failover.tokens import LEEWAY, TokenAuthority, bearer_of
-from assistant.failover.sync import MemoryEventLog, make_sync_app, new_event
+from kwil.failover.peers import parse_backends
+from kwil.failover.tokens import LEEWAY, TokenAuthority, bearer_of
+from kwil.failover.sync import MemoryEventLog, make_sync_app, new_event
 from tests.asgi_harness import request, websocket
 
 SECRET = "s" * 43
@@ -51,7 +51,7 @@ async def inner(scope, receive, send):
 def setup():
     clock = Clock()
     authority = TokenAuthority(SECRET, clock=clock)
-    from assistant.webapp import LoginLimiter
+    from kwil.webapp import LoginLimiter
 
     limiter = LoginLimiter(per_ip=5, window=900, lockout=900, clock=clock)
     app = EdgeMiddleware(inner, authority=authority, role="pi", app_origins=[APP],
@@ -155,7 +155,7 @@ def test_preflight_allows_family_remove_from_app_origin(setup):
     import re
     from pathlib import Path
 
-    js = (Path(__file__).resolve().parent.parent / "assistant" / "web" / "family.js").read_text(
+    js = (Path(__file__).resolve().parent.parent / "kwil" / "web" / "family.js").read_text(
         encoding="utf-8")
     handler = js[js.index("remove.addEventListener"):js.index("li.append")]
     call = re.search(r"(post|call)\(`(/api/users/[^`]*)`", handler)
@@ -294,7 +294,7 @@ def test_refresh_keeps_sid(setup):
 
 
 def test_refresh_stops_at_the_session_limit(setup):
-    from assistant.failover.tokens import MAX_SESSION
+    from kwil.failover.tokens import MAX_SESSION
 
     app, authority, token, clock = setup
     signed_in = authority.verify(token).signed_in

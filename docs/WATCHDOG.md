@@ -30,7 +30,8 @@ session without the repo stalled on the ArtifactData permission prompt
 `.claude/settings.json` allows `ArtifactData`.
 
 1. **Session:** `create_session` with source_url
-   `https://github.com/kylechen839-max/Claude-Personal-Assistant` (branch
+   `https://github.com/kylechen839-max/Kwil` (the repo's name since the
+   Kwil rebrand; the old Claude-Personal-Assistant URL redirects) (branch
    master), title "Agent dashboard watchdog", and a short idle prompt such
    as "You are the agent dashboard watchdog. Wait for the hourly check."
 2. **Trigger:** `create_trigger` bound to that session with

@@ -1,4 +1,4 @@
-"""Per-person limits for invited people (assistant/quotas.py): turns per
+"""Per-person limits for invited people (kwil/quotas.py): turns per
 minute and per day, speech seconds per day, never the owner; enforced on
 push-to-talk / typed turns (WebAssistant.start_turn) and the hands-free
 voice view (VoiceConversation._turn_body), with a friendly sentence in the
@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from assistant import i18n
-from assistant.config import DEFAULTS
-from assistant.quotas import UserQuotas
+from kwil import i18n
+from kwil.config import DEFAULTS
+from kwil.quotas import UserQuotas
 
 pytest.importorskip("fastapi")
 from tests.conftest import make_response, text_block  # noqa: E402
@@ -237,7 +237,7 @@ def test_every_transcription_for_a_person_counts(env, owner):
 
 
 def test_a_spoken_answer_counts_toward_their_speech(env, owner):
-    from assistant.webapp import PendingConfirm
+    from kwil.webapp import PendingConfirm
 
     ann, uid = member(env, owner)
     env.fake_client.queue.append(make_response(text_block("Hi.")))
@@ -252,7 +252,7 @@ def test_a_spoken_answer_counts_toward_their_speech(env, owner):
 
 def asked(env, uid, ann):
     """A question pending in their push-to-talk session (as _confirm sets)."""
-    from assistant.webapp import PendingConfirm
+    from kwil.webapp import PendingConfirm
 
     env.fake_client.queue.append(make_response(text_block("Hi.")))
     ann.post("/api/turn", json={"text": "hi"})

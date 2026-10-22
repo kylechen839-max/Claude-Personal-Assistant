@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kwil">
+<title>Kwil</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/voice.css">
+<link rel="stylesheet" href="/static/katex/katex.min.css">
+<link rel="stylesheet" href="/static/features.css">
+<script src="/i18n.js" defer></script>
+<script src="/family.js" defer></script>
+<script src="/attachments.js" defer></script>
+<script src="/memory.js" defer></script>
+<script src="/spotify.js" defer></script>
+<script src="/notion.js" defer></script>
+<script src="/student.js" defer></script>
+<script src="/voice-picker.js" defer></script>
+<script src="/brief.js" defer></script>
+<script src="/ui.js" defer></script>
+<script src="/app.js" defer></script>
+<script src="/voice-core.js" defer></script>
+<script src="/voice.js" defer></script>
+<script src="/update-watch.js" defer></script>
+<script src="/history.js" defer></script>
+<script src="/static/katex/katex.min.js" defer></script>
+<script src="/static/features.js" defer></script>
+</head>
+<body>
+<main id="login" class="login" hidden>
+  <img class="login-icon" src="/icon.svg" alt="">
+  <h1>Kwil</h1>
+  <p id="login-text">Enter your access token (<code>WEB_TOKEN</code> in the PC's <code>.env</code>).
+     You only need to do this once on this phone.</p>
+  <form id="login-form" autocomplete="off">
+    <input id="token" type="password" placeholder="Access token" autocomplete="current-password"
+           autocapitalize="off" spellcheck="false" required>
+    <button type="submit">Sign in</button>
+  </form>
+  <p id="login-error" class="error" role="alert"></p>
+  <p class="login-more"><a href="/welcome">What is Kwil?</a></p>
+</main>
+
+<main id="app" class="app" hidden>
+  <header>
+    <h1>Kwil <span id="incognito-badge" class="badge" hidden>Incognito</span></h1>
+    <span id="badge" class="backend-badge" title="Backend in use" hidden></span>
+    <button id="open-history" class="icon-btn" type="button" aria-label="Conversation history" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
+    </button>
+    <details class="menu">
+      <summary aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </summary>
+      <div class="menu-body">
+        <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
+        <label><input id="mute" type="checkbox"> Don't speak replies</label>
+        <section id="voice-picker" class="voice-picker" hidden>
+          <label>Reply voice
+            <select id="voice-select"></select>
+          </label>
+          <div class="voice-picker-row">
+            <span id="voice-paid" class="tag" hidden>paid</span>
+            <button id="voice-preview" type="button">Preview</button>
+          </div>
+          <div id="voice-custom-row" class="voice-picker-row" hidden>
+            <input id="voice-custom" type="text" maxlength="64" autocapitalize="off"
+                   spellcheck="false" placeholder="ElevenLabs voice ID" aria-label="ElevenLabs voice ID">
+            <button id="voice-custom-use" type="button">Use this voice</button>
+          </div>
+          <p id="voice-status" class="hint" role="status"></p>
+        </section>
+        <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
+        <fieldset id="backends" class="backends" hidden>
+          <legend>Backends</legend>
+          <label>Use
+            <select id="backend-mode">
+              <option value="auto">Auto: Pi, then PC, then cloud</option>
+              <option value="pi">Pi only</option>
+              <option value="pc">PC only</option>
+              <option value="cloud">Cloud only</option>
+            </select>
+          </label>
+          <label>Pi (tailnet) <input id="url-pi" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://pi.your-tailnet.ts.net"></label>
+          <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
+          <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
+                 spellcheck="false" placeholder="this app's address"></label>
+          <p class="hint">Empty = the address the server suggests.</p>
+          <button id="backends-save" type="button">Save and check</button>
+          <ul id="backend-status" class="backend-status"></ul>
+        </fieldset>
+        <button id="memory-open" type="button" hidden>Memory</button>
+        <button id="google-connect" type="button" hidden>Connect Google account</button>
+        <button id="google-disconnect" type="button" hidden>Disconnect Google account</button>
+        <p id="google-status" class="hint" hidden></p>
+        <button id="notion-connect" type="button" hidden>Connect Notion</button>
+        <button id="notion-disconnect" type="button" hidden>Disconnect Notion</button>
+        <p id="notion-status" class="hint" hidden></p>
+        <p id="notion-detail" class="hint" hidden></p>
+        <button id="push-toggle" type="button" hidden>Enable notifications</button>
+        <p id="push-status" class="hint" role="status" hidden></p>
+        <button id="spotify-connect" type="button" hidden>Connect Spotify</button>
+        <p id="spotify-status" class="hint" hidden></p>
+        <section id="api-key" class="api-key" hidden>
+          <p class="api-key-title">Your Anthropic API key</p>
+          <p id="api-key-state" class="hint" role="status"></p>
+          <p id="api-key-cost" class="hint" hidden></p>
+          <form id="api-key-form" class="api-key-form" autocomplete="off">
+            <input id="api-key-input" type="password" autocomplete="off" autocapitalize="off"
+                   spellcheck="false" maxlength="256" placeholder="sk-ant-…" aria-label="Anthropic API key">
+            <div class="api-key-row">
+              <button id="api-key-save" type="submit">Save key</button>
+              <button id="api-key-remove" type="button" class="danger" hidden>Remove key</button>
+            </div>
+          </form>
+          <p class="hint">You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, open API Keys, tap Create Key, and paste it here.</p>
+          <p class="hint api-key-link">console.anthropic.com/settings/keys</p>
+        </section>
+        <section id="family" class="family" hidden>
+          <button id="invite-open" type="button">Invite someone</button>
+          <form id="invite-form" class="invite-form" autocomplete="off" hidden>
+            <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
+            <label>Language
+              <select id="invite-language">
+                <option value="en">English</option>
+                <option value="zh">中文 (Chinese)</option>
+              </select>
+            </label>
+            <label>Account
+              <select id="invite-tier">
+                <option value="beta" selected>Beta (Calendar only)</option>
+                <option value="family">Family (Calendar and Gmail)</option>
+              </select>
+            </label>
+            <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
+                   spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
+            <button type="submit">Create invite link</button>
+          </form>
+          <p id="invite-status" class="hint" role="status"></p>
+          <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
+          <ul id="family-list" class="family-list"></ul>
+        </section>
+        <section id="account-self" class="family account-self" hidden>
+          <button id="account-export" type="button">Download my data</button>
+          <button id="account-delete-open" type="button" class="danger">Delete my account</button>
+          <form id="account-delete-form" class="invite-form" autocomplete="off" hidden>
+            <p class="hint">This deletes your account, your conversations and your connected Google account from this app. It can't be undone.</p>
+            <label>Type DELETE (or your name) to confirm
+              <input id="account-delete-confirm" type="text" maxlength="60" autocapitalize="off"
+                     spellcheck="false" required></label>
+            <button type="submit" class="danger">Delete everything</button>
+          </form>
+          <p id="account-status" class="hint" role="status"></p>
+        </section>
+        <button id="logout" type="button">Sign out</button>
+        <button id="logout-all" type="button">Sign out everywhere</button>
+      </div>
+    </details>
+  </header>
+  <p id="health" class="health-banner" role="status" hidden></p>
+  <section id="guide" class="guide" hidden>
+    <p id="guide-text" class="guide-text"></p>
+    <button id="guide-done" type="button">Got it</button>
+  </section>
+
+  <section id="log" class="log" aria-live="polite"></section>
+  <p id="status" class="status" aria-live="polite"></p>
+
+  <section id="confirm" class="confirm" hidden>
+    <p id="confirm-question"></p>
+    <div class="confirm-buttons">
+      <button id="yes" type="button" class="yes">Yes</button>
+      <button id="no" type="button" class="no">No</button>
+    </div>
+    <p class="hint">Or hold the mic and say "yes".</p>
+  </section>
+
+  <footer>
+    <div id="attach-chips" class="attach-chips" hidden aria-label="Attachments"></div>
+    <form id="text-form" autocomplete="off">
+      <button id="attach" class="attach-btn" type="button" aria-label="Add photos or files" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
+      <button type="submit" aria-label="Send">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </form>
+    <button id="mic" class="mic" type="button" aria-label="Hold to talk, or tap to start and stop">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
+    </button>
+    <div id="mic-meter" class="mic-meter" hidden aria-hidden="true"><span></span></div>
+    <p class="hint" id="mic-hint">Hold to talk, or tap to start and stop</p>
+    <button id="voice-open" class="voice-open-btn" type="button">Voice conversation</button>
+    <input id="attach-camera" type="file" accept="image/*" capture="environment" hidden>
+    <input id="attach-library" type="file" accept="image/*" multiple hidden>
+    <input id="attach-file" type="file" multiple hidden
+           accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown,.pdf,.txt,.md">
+  </footer>
+</main>
+
+<dialog id="attach-sheet" class="sheet" aria-labelledby="attach-title">
+  <form method="dialog">
+    <h2 id="attach-title">Add to your message</h2>
+    <button type="button" data-pick="camera">Take photo</button>
+    <button type="button" data-pick="library">Photo library</button>
+    <button type="button" data-pick="file">Choose file</button>
+    <button type="button" class="cancel">Cancel</button>
+  </form>
+</dialog>
+
+<section id="voice" class="voice" hidden aria-label="Voice conversation" data-state="connecting">
+  <p id="voice-state" class="voice-state" aria-live="polite">Connecting…</p>
+  <div id="voice-meter" class="mic-meter voice-meter" aria-hidden="true"><span></span></div>
+  <div class="voice-orb-wrap">
+    <button id="voice-orb" class="voice-orb" type="button" aria-label="Voice orb (tap to resume when paused)"></button>
+  </div>
+  <button id="voice-resume" class="voice-resume" type="button" hidden>Tap to continue</button>
+  <div id="voice-captions" class="voice-captions" aria-live="polite">
+    <p id="voice-user" class="voice-user"></p>
+    <p id="voice-reply" class="voice-reply"></p>
+  </div>
+  <pre id="voice-debug" class="voice-debug" hidden></pre>
+  <div class="voice-controls">
+    <button id="voice-mute" type="button" aria-pressed="false">Mute</button>
+    <button id="voice-end" class="voice-end" type="button">End</button>
+    <button id="voice-cc" type="button" aria-pressed="true" aria-label="Captions">CC</button>
+    <button id="voice-timings" type="button" aria-pressed="false" aria-label="Latency timings">&#9201;</button>
+  </div>
+</section>
+
+<main id="history-view" class="history" hidden aria-labelledby="history-title">
+  <header class="bar">
+    <button id="history-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="history-title" tabindex="-1">History</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <div class="search">
+    <input id="history-search" type="search" placeholder="Search conversations" aria-label="Search conversations"
+           autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <div id="history-filters" class="chips" role="radiogroup" aria-label="Filter">
+      <button type="button" role="radio" aria-checked="true" data-filter="">All</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="pinned">Pinned</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="web">Phone</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="voice">Voice</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="wake">PC</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="text">Typed</button>
+      <button type="button" role="radio" aria-checked="false" data-filter="archived">Archived</button>
+    </div>
+  </div>
+  <section id="history-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
+  <p id="history-status" class="status center" role="status"></p>
+  <button id="history-more" class="more-btn" type="button" hidden>Load more</button>
+</main>
+
+<main id="transcript-view" class="transcript" hidden aria-labelledby="transcript-title">
+  <header class="bar">
+    <button id="transcript-back" class="icon-btn" type="button" aria-label="Back to history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="transcript-title" tabindex="-1"></h1>
+    <button id="transcript-actions" class="icon-btn" type="button" aria-label="More actions">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+    </button>
+  </header>
+  <p id="transcript-meta" class="meta"></p>
+  <p id="transcript-summary" class="summary"></p>
+  <section id="transcript-log" class="log"></section>
+  <footer class="transcript-footer">
+    <button id="continue" class="primary" type="button">Continue this conversation</button>
+    <p id="continue-hint" class="hint"></p>
+  </footer>
+</main>
+
+<main id="memory-view" class="history memory" hidden aria-labelledby="memory-title">
+  <header class="bar">
+    <button id="memory-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="memory-title" tabindex="-1">Memory</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
+  <p id="memory-status" class="status center" role="status"></p>
+</main>
+
+<main id="brief-view" class="history brief" hidden aria-labelledby="brief-title">
+  <header class="bar">
+    <button id="brief-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="brief-title" tabindex="-1">Brief</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <p id="brief-when" class="meta"></p>
+  <p id="brief-text" class="summary" aria-live="polite"></p>
+  <button id="brief-play" class="primary" type="button" hidden>Play</button>
+  <p id="brief-status" class="status center" role="status"></p>
+</main>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <form method="dialog">
+    <h2 id="sheet-title"></h2>
+    <button value="open">Open</button>
+    <button value="pin" id="sheet-pin">Pin</button>
+    <button value="rename">Rename</button>
+    <button value="archive" id="sheet-archive">Archive</button>
+    <button value="export">Export as Markdown</button>
+    <button value="delete" class="danger">Delete…</button>
+    <button value="cancel" class="cancel">Cancel</button>
+  </form>
+</dialog>
+
+<dialog id="rename-dialog" class="sheet" aria-labelledby="rename-title">
+  <form method="dialog">
+    <h2 id="rename-title">Rename</h2>
+    <input id="rename-input" type="text" maxlength="120" required aria-labelledby="rename-title">
+    <div class="row">
+      <button value="cancel" class="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" class="sheet" aria-labelledby="delete-title" aria-describedby="delete-text">
+  <form method="dialog">
+    <h2 id="delete-title">Delete conversation?</h2>
+    <p id="delete-text"></p>
+    <div class="row">
+      <button value="cancel" class="cancel">Cancel</button>
+      <button value="delete" class="danger">Delete</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

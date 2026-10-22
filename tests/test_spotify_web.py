@@ -1,4 +1,4 @@
-"""The phone app's "Connect Spotify" (assistant/spotify_web.py), owner only.
+"""The phone app's "Connect Spotify" (kwil/spotify_web.py), owner only.
 Offline: Spotify's token endpoint is a fake (tests/test_spotify.py)."""
 
 import json
@@ -11,11 +11,11 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, spotify_web, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import load_config  # noqa: E402
-from assistant.tools import spotify as sp  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import family as family_mod, spotify_web, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import load_config  # noqa: E402
+from kwil.tools import spotify as sp  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_spotify import CID, FakeHTTP, Resp  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
 
@@ -115,7 +115,7 @@ def test_callback_saves_the_token_privately_and_adds_the_tools(setup, caplog):
                    follow_redirects=False)
     assert r.status_code == 400 and len(http.calls) == 1  # replay: nothing
     info = [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.INFO and r.name.startswith("assistant")]
+            if r.levelno >= logging.INFO and r.name.startswith("kwil")]
     assert any("Spotify connected" in m for m in info)
     for secret in ("AQD-secret-code", state, "BQ-access", "AQ-refresh", verifier):
         assert not any(secret in m for m in info), secret
@@ -193,6 +193,6 @@ def test_page_has_the_button_and_script(fake_client):
     assert client.get("/spotify.js").status_code == 200
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
     assert '"/spotify.js"' in sw
-    from assistant import cloud
+    from kwil import cloud
 
     assert "/spotify.js" in cloud.PUBLIC_GET

@@ -3,6 +3,47 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Kwil rebrand: the steps only Kyle can do (2026-10-22).** The code
+      and docs say Kwil and run under both names; these are UI clicks.
+      1. **Rename the GitHub repo** to `Kwil` (Settings -> General ->
+         Repository name). GitHub redirects the old URL, and the updater
+         accepts either name as `origin` for this release
+         (`updater.REPO_ALIASES`). Afterwards, on the PC (and a Pi):
+         `git remote set-url origin https://github.com/kylechen839-max/Kwil.git`.
+         Re-point anything that names the repo by hand (the dashboard
+         repo's links, Render's connected repo if it doesn't follow).
+      2. **Render display name:** Dashboard -> `hey-claude` -> Settings ->
+         Name -> "Kwil". Leave `render.yaml`'s `name: hey-claude` and the
+         disk `hey-claude-data` alone: a renamed Blueprint service is a
+         new service with an empty disk. The URL stays
+         `hey-claude.onrender.com` (a custom domain is the way to change it,
+         see the launch item below).
+      3. **Optional: re-register the PC tasks** so they are under `\Kwil\`
+         and run `python -m kwil`: `.\scripts\install_windows_service.ps1`,
+         then `.\scripts\install_family_tasks.ps1` and
+         `.\scripts\install_watch_task.ps1`. Each removes its old
+         `\HeyClaude\` task first. Not urgent: until then the old tasks run
+         `python -m assistant` (an alias of `kwil`) and `deploy.ps1` and the
+         watchdog still find and restart them. Do it before the release
+         that drops the `assistant/` alias.
+      4. **The names other services show:** Google Cloud -> OAuth consent
+         screen -> App name "Kwil" (both projects), and Notion ->
+         my-integrations -> the integration's name "Kwil" (people see it in
+         Settings -> Connections). Leave the Notion database "Hey Claude
+         coordinator inbox" as it is: the code finds it by that title.
+      5. **Train the "Hey Kwil" wake word** (item below).
+      6. **Trademark check** for "Kwil" (USPTO TESS / EUIPO search, and the
+         App Store name) before the public launch.
+- [ ] **"Hey Kwil" wake-word model.** Until it exists the wake word stays
+      "Hey Claude" (`keywords/hey_claude.onnx`, `[wake] keyword_path`).
+      huggingface.co is blocked in the cloud sandbox, so training needs
+      Kyle: run the openWakeWord "automatic model training" Colab with the
+      phrase "hey kwil" (also try "hey quill" as a spelling for the TTS),
+      download the `.onnx`, commit it as `keywords/hey_kwil.onnx`, record
+      four real "Hey Kwil" clips (like `tests/fixtures/hey_claude_sapi_*.wav`)
+      for its test, and point `[wake] keyword_path` at it. Alternative: a
+      manual GitHub Actions job (`workflow_dispatch`) running the same
+      training script on a GitHub runner, which can reach huggingface.co.
 - [ ] **Public beta launch (in this order; each step points to its own
       item below rather than repeating it).** Nothing in code is missing;
       these are Render, Google, Notion and wording steps only Kyle can do.
@@ -14,11 +55,11 @@ Only what is still open for Kyle. None of it blocks the code.
          later changes the Google and Notion redirect URIs and the cookies
          (everyone signs in again).
       2. **Done (2026-10-22): Kyle approved the wording; support email
-         heyclaude.app@gmail.com.** **Approve the legal pages.** Read `assistant/web/privacy.html`
+         heyclaude.app@gmail.com.** **Approve the legal pages.** Read `kwil/web/privacy.html`
          and `terms.html` (MANUAL_TEST "Public site and waitlist"), fix any
          wording, and pick a support email address.
       3. **Done (2026-10-22, the launch PR).** **The launch PR** (one small PR, after step 2): `"public_site":
-         True` in `SERVER_PROFILE` `"webapp"` (`assistant/config.py`), plus
+         True` in `SERVER_PROFILE` `"webapp"` (`kwil/config.py`), plus
          `support_email = "<address>"` and `legal_draft = false` in
          `config.toml` `[webapp]`. After Render redeploys, open `/welcome`,
          `/privacy` and `/terms` signed out (a private tab). Until this PR
@@ -57,7 +98,7 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
       project folder: `.\scripts\install_watch_task.ps1` (or
       `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden
-      `\HeyClaude\Watch` task (every 5 minutes) that checks your app and
+      `\Kwil\Watch` task (every 5 minutes) that checks your app and
       Mom's and Kai's, heals them, and shows a banner in your phone app when
       one is down (README "Health checks and safe updates"). The PC
       session's permission check has blocked scheduled-task installs
@@ -151,7 +192,7 @@ Only what is still open for Kyle. None of it blocks the code.
       `ANTHROPIC_API_KEY`; (3) put the address in `config.mom.local.toml`
       (`[webapp] public_origin`); (4) `tailscale serve --bg --https=8443
       http://127.0.0.1:8766` and share the PC with her in the Tailscale
-      admin console; (5) `python -m assistant --download-voice
+      admin console; (5) `python -m kwil --download-voice
       zh_CN-huayan-medium`. Then MANUAL_TEST.md "Chinese instance for Mom".
 - [ ] **Google sign-in again for Gmail (one time, ~1 min).** The current
       `token.json` only allows Calendar, so the email tools stay off until
@@ -161,7 +202,7 @@ Only what is still open for Kyle. None of it blocks the code.
       2. (OAuth consent screen -> Data access: adding the scopes
          `gmail.readonly` and `gmail.compose` is optional while the app is in
          Testing; Google still asks for them at sign-in.)
-      3. On the PC: `python -m assistant.tools.google_auth` and accept
+      3. On the PC: `python -m kwil.tools.google_auth` and accept
          Calendar, "Read your email" and "Manage drafts and send emails".
          Google words the drafts permission that way (there is no
          drafts-only one); the assistant blocks sending in code. This
@@ -171,7 +212,7 @@ Only what is still open for Kyle. None of it blocks the code.
          `[gmail]` off is not enough; revoke it in your Google account).
       4. Copy the new `token.json` to the Pi, or paste its contents into
          `GOOGLE_TOKEN_JSON` on the cloud host.
-      `python -m assistant --check` shows "Gmail access: granted" afterwards.
+      `python -m kwil --check` shows "Gmail access: granted" afterwards.
 - [ ] **Google sign-in again for calendar labels and other calendars (one
       time, ~2 min).** The fuller calendar tools (colors, repeats, guests,
       invites, free time) work with the current `token.json`; Google's
@@ -180,7 +221,7 @@ Only what is still open for Kyle. None of it blocks the code.
       1. On the PC and the Pi: `pip install -r requirements.txt` (needs
          `google-api-python-client` 2.199+ for labels; the automatic
          updater skips updates that change requirements).
-      2. On the PC: `python -m assistant.tools.google_auth` and accept the
+      2. On the PC: `python -m kwil.tools.google_auth` and accept the
          new "See the list of Google calendars you're subscribed to" and
          "See the title, description, default time zone ... of your
          calendars" boxes (read-only). (OAuth consent screen -> Data access:
@@ -189,7 +230,7 @@ Only what is still open for Kyle. None of it blocks the code.
          Testing.)
       3. Copy the new `token.json` to the Pi, or paste its contents into
          `GOOGLE_TOKEN_JSON` on the cloud host.
-      `python -m assistant --check` shows "Calendar labels access: granted"
+      `python -m kwil --check` shows "Calendar labels access: granted"
       afterwards. Family members get the new boxes the next time they
       press "Connect Google account".
 - [ ] **Lecture Notes database (only if the first lecture job fails with
@@ -275,7 +316,7 @@ Only what is still open for Kyle. None of it blocks the code.
       button; your `[webapp] public_origin` + `/spotify/callback`), add
       your account under User Management, put its Client ID in `.env` as
       `SPOTIFY_CLIENT_ID`, set `[spotify] enabled = true` in
-      `config.local.toml`, and run `python -m assistant.tools.spotify` once
+      `config.local.toml`, and run `python -m kwil.tools.spotify` once
       (README "Spotify by voice"). Until then the Spotify tools stay off.
 - [ ] **Cloud uptime alerts and error tracking (optional, free, ~10 min).**
       Only you can sign up: an UptimeRobot monitor on

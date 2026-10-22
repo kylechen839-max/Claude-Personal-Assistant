@@ -6,7 +6,7 @@
 # answers "API key isn't working" because the key is a dummy), then measures
 # peak memory for base.en and tiny.en. Prints no secrets.
 set -euo pipefail
-IMAGE=${1:-hey-claude:ci}
+IMAGE=${1:-kwil:ci}
 PORT=10000
 URL=http://localhost:$PORT
 WORK=$(mktemp -d)
@@ -46,7 +46,9 @@ docker exec hc test -s /data/web_sessions.json        # sign-ins kept on the dis
 echo "user and /data checks passed"
 docker exec -u 10001 hc python scripts/ws_smoke.py      # the voice WebSocket
 
-docker exec -u 10001 hc python -m assistant --check
+docker exec -u 10001 hc python -m kwil --check
+# the old name (a start command from before the Kwil rebrand) still runs it
+docker exec -u 10001 hc python -m assistant --help >/dev/null
 [ "${SMOKE_ONLY:-}" = 1 ] && exit 0
 
 # One spoken turn through the real server: upload a 5 s Piper clip.

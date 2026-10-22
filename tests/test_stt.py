@@ -3,10 +3,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from assistant import audio, stt
-from assistant.config import DEFAULTS
-from assistant.stt import EN_PROMPT, Transcriber, rough_match
-from assistant.tts import PiperTTS, Pyttsx3TTS
+from kwil import audio, stt
+from kwil.config import DEFAULTS
+from kwil.stt import EN_PROMPT, Transcriber, rough_match
+from kwil.tts import PiperTTS, Pyttsx3TTS
 
 PHRASE = "What is on my calendar tomorrow"
 
@@ -85,7 +85,7 @@ def test_transcriber_language():
 
 
 def test_degenerate_text():
-    from assistant.stt import is_degenerate
+    from kwil.stt import is_degenerate
 
     for bad in ("!!!!", " !!!!!!!!!!!! ", "! ! !"):
         assert is_degenerate(bad), bad
@@ -221,7 +221,7 @@ def test_transcript_logged_at_debug_only(caplog):
     with caplog.at_level("INFO"):
         t.transcribe(np.zeros(16000))
     assert "dentist" not in caplog.text
-    with caplog.at_level("DEBUG", logger="assistant.stt"):
+    with caplog.at_level("DEBUG", logger="kwil.stt"):
         t.transcribe(np.zeros(16000))
     assert any("dentist" in r.getMessage() and r.levelname == "DEBUG"
                for r in caplog.records)

@@ -1,6 +1,6 @@
 // node --test tests/js/sw-push.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the service worker (assistant/web/sw.js) in node:vm with a fake
+// Runs the service worker (kwil/web/sw.js) in node:vm with a fake
 // `self`: a push shows a notification from push.py's {title, body, url}
 // (with defaults for an empty or broken payload, and always one: iOS
 // requires it), a tap focuses an open app and tells it to open the brief,
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/sw.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/sw.js', import.meta.url), 'utf8');
 const ORIGIN = 'https://hey-claude.example.com';
 
 function load({ windows = [] } = {}) {
@@ -57,13 +57,13 @@ const json = (value) => ({ json: () => value });
 
 test('a push shows the notification push.py sent', async () => {
   const sw = load();
-  await push(sw, json({ title: 'Hey Claude', body: 'Essay 2 is due tomorrow.', url: '/#brief' }));
+  await push(sw, json({ title: 'Kwil', body: 'Essay 2 is due tomorrow.', url: '/#brief' }));
   assert.equal(sw.shown.length, 1);
   const [{ title, options }] = sw.shown;
-  assert.equal(title, 'Hey Claude');
+  assert.equal(title, 'Kwil');
   assert.equal(options.body, 'Essay 2 is due tomorrow.');
   assert.equal(options.data.url, '/#brief');
-  assert.equal(options.tag, 'hey-claude-brief');
+  assert.equal(options.tag, 'kwil-brief');
   assert.equal(options.icon, '/icon-192.png');
 });
 
@@ -74,7 +74,7 @@ test('an empty or broken payload still shows a notification', async () => {
   await push(sw, json('just a string'));
   assert.equal(sw.shown.length, 3);
   for (const { title, options } of sw.shown) {
-    assert.equal(title, 'Hey Claude');
+    assert.equal(title, 'Kwil');  // the app's name when the payload has none
     assert.equal(options.body, '');
     assert.equal(options.data.url, '/#brief');
   }
@@ -127,7 +127,7 @@ test('a tap with an off-site url still opens only this site', async () => {
 });
 
 test('the shell caches brief.js under a new cache version', () => {
-  assert.match(SCRIPT, /const CACHE = "hey-claude-shell-v30";/);
+  assert.match(SCRIPT, /const CACHE = "kwil-shell-v1";/);
   const sw = load();
   assert.ok(vm.runInContext('SHELL', sw.ctx).includes('/brief.js'));
 });

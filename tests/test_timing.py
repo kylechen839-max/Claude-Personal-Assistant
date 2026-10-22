@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from assistant import cli, tts
-from assistant.chat import ClaudeChat
-from assistant.timing import TurnTimer
+from kwil import cli, tts
+from kwil.chat import ClaudeChat
+from kwil.timing import TurnTimer
 from tests.conftest import make_response, text_block
 
 
@@ -25,7 +25,7 @@ class FakeClock:
 def test_turn_timer_steps_and_summary(caplog):
     clock = FakeClock()
     timer = TurnTimer(clock, "wake")
-    with caplog.at_level(logging.INFO, logger="assistant.timing"):
+    with caplog.at_level(logging.INFO, logger="kwil.timing"):
         for stage, dt in [("speech_end", 2.0), ("transcript", 0.5),
                           ("reply", 1.25), ("audio", 0.3)]:
             clock.advance(dt)
@@ -120,7 +120,7 @@ def test_timings_flag_prints_summary(fake_client):
 
 def test_turn_timings_reach_the_log_file(fake_client, tmp_path,
                                          restore_root_logging):
-    from assistant.config import load_config, setup_logging
+    from kwil.config import load_config, setup_logging
 
     cfg = load_config(None, None)
     cfg["logging"]["file"] = str(tmp_path / "assistant.log")

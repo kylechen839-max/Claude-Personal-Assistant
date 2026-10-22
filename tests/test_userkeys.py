@@ -1,4 +1,4 @@
-"""Bring your own Anthropic key (public beta piece G2): assistant/userkeys.py,
+"""Bring your own Anthropic key (public beta piece G2): kwil/userkeys.py,
 userkeys_web.py, and family.Family's per-person client.
 
 All offline. Each person's own client is a mocked Anthropic client made per
@@ -18,13 +18,13 @@ pytest.importorskip("fastapi")
 pytest.importorskip("cryptography")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, i18n, usage, userkeys, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.cli import friendly_error, get_reply  # noqa: E402
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
-from assistant.history import TITLE_PROMPT, HistoryStore, Recorder  # noqa: E402
-from assistant.tools import ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import family as family_mod, i18n, usage, userkeys, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.cli import friendly_error, get_reply  # noqa: E402
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
+from kwil.history import TITLE_PROMPT, HistoryStore, Recorder  # noqa: E402
+from kwil.tools import ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, make_usage, text_block  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, events, login  # noqa: E402
 
@@ -550,7 +550,7 @@ def test_the_new_sentences_exist_in_both_languages():
 def test_the_voice_path_says_no_key():
     import numpy as np
 
-    from assistant.voice_session import ChatBackend, VoiceConversation
+    from kwil.voice_session import ChatBackend, VoiceConversation
     from tests.voice_fakes import Events, FakeSynth, FakeTranscriber as Heard
 
     class NoKeyBackend(ChatBackend):

@@ -10,12 +10,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli, doctor
-from assistant.chat import ClaudeChat, has_untrusted_content
-from assistant.config import load_config
-from assistant.tools import ToolRegistry
-from assistant.tools import google_auth
-from assistant.tools.gmail import GmailInbox, plain_text
+from kwil import cli, doctor
+from kwil.chat import ClaudeChat, has_untrusted_content
+from kwil.config import load_config
+from kwil.tools import ToolRegistry
+from kwil.tools import google_auth
+from kwil.tools.gmail import GmailInbox, plain_text
 from tests.conftest import make_response, text_block, tool_use_block
 from tests.test_security import registry as all_tools
 from tests.test_webapp import make_app  # noqa: F401  (fixture)
@@ -310,7 +310,7 @@ def test_old_calendar_token_lacks_gmail_scopes(tmp_path):
         google_auth.GMAIL_SCOPES
     assert google_auth.missing_scopes(google_auth.CALENDAR_SCOPES, token, {}) == []
     with pytest.raises(google_auth.MissingScopes,
-                       match="python -m assistant.tools.google_auth"):
+                       match="python -m kwil.tools.google_auth"):
         google_auth.get_credentials("c.json", token, scopes=google_auth.GMAIL_SCOPES,
                                     environ={})
     # A token with no recorded scopes is the original Calendar-only one.
@@ -359,7 +359,7 @@ def test_build_tools_leaves_gmail_off_and_says_how_to_fix(tmp_path, monkeypatch)
     said = []
     reg = cli.build_tools(cfg, output_fn=said.append)
     assert not reg.has("email_summary") and reg.has("list_calendar_events")
-    assert any("python -m assistant.tools.google_auth" in s for s in said)
+    assert any("python -m kwil.tools.google_auth" in s for s in said)
     check = doctor.check_gmail_scopes(cfg)[0]
     assert not check.ok and "google_auth" in check.detail
 
@@ -370,7 +370,7 @@ def test_build_tools_leaves_gmail_off_and_says_how_to_fix(tmp_path, monkeypatch)
 
 
 def test_google_auth_cli_flags(monkeypatch, tmp_path):
-    """python -m assistant.tools.google_auth has the calendar sign-in flags."""
+    """python -m kwil.tools.google_auth has the calendar sign-in flags."""
     called = []
     monkeypatch.setattr(google_auth, "sign_in",
                         lambda *a, **k: called.append((a, k["scopes"])))
@@ -464,7 +464,7 @@ def test_headless_sign_in_keeps_the_requested_scopes(tmp_path):
     ("messages", "trash"), ("messages", "modify"), ("messages", "insert"),
     ("drafts", "update"), ("threads", "trash")])
 def test_send_and_mail_changes_raise(resource, method):
-    from assistant.tools.gmail import SendingBlocked
+    from kwil.tools.gmail import SendingBlocked
 
     gmail, msgs, drafts = inbox()
     res = getattr(gmail.service.users(), resource)()
@@ -474,7 +474,7 @@ def test_send_and_mail_changes_raise(resource, method):
 
 
 def test_settings_and_forwarding_are_unavailable():
-    from assistant.tools.gmail import SendingBlocked
+    from kwil.tools.gmail import SendingBlocked
 
     gmail, _, _ = inbox()
     with pytest.raises(SendingBlocked):
@@ -495,7 +495,7 @@ def test_no_send_call_anywhere_in_the_code():
     import re
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent / "assistant"
+    root = Path(__file__).resolve().parent.parent / "kwil"
     for path in root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         if "gmail" in text.lower():  # code that can reach the Gmail service
@@ -631,7 +631,7 @@ def test_external_calendar_invite_makes_changes_ask(fake_client):
               "start": {"dateTime": "2026-10-18T10:00:00-04:00"},
               "end": {"dateTime": "2026-10-18T11:00:00-04:00"}}
     service, _ = make_service(items=[invite])
-    from assistant.tools.calendar import GoogleCalendar
+    from kwil.tools.calendar import GoogleCalendar
     reg.register(*[t for t in GoogleCalendar(service=service, timezone=TZ).tools()
                    if t.name == "list_calendar_events"])
     fake_client.queue = [
@@ -651,7 +651,7 @@ def test_external_calendar_invite_makes_changes_ask(fake_client):
 
 def test_own_calendar_events_stay_trusted(fake_client):
     from tests.test_tools import make_service
-    from assistant.tools.calendar import GoogleCalendar
+    from kwil.tools.calendar import GoogleCalendar
 
     own = {"id": "ev3", "summary": "Gym", "organizer": {"self": True},
            "start": {"dateTime": "2026-10-18T10:00:00-04:00"},
@@ -670,7 +670,7 @@ def test_own_calendar_events_stay_trusted(fake_client):
     ({"organizer": {"self": True}, "eventType": "focusTime"}, False),
 ])
 def test_which_events_count_as_others_text(event, flagged):
-    from assistant.tools.calendar import is_from_others
+    from kwil.tools.calendar import is_from_others
     assert is_from_others(event) is flagged
 
 
@@ -678,7 +678,7 @@ def test_which_events_count_as_others_text(event, flagged):
 def test_notes_saved_with_email_in_context_are_marked_and_recalled_as_untrusted(
         fake_client):
     from tests.test_notes import FakeIndex, toy_embed
-    from assistant.tools.notes import QuickNotes
+    from kwil.tools.notes import QuickNotes
 
     memory = MagicMock(namespace="voice-assistant")
     memory.index = FakeIndex()
@@ -714,7 +714,7 @@ def test_notes_saved_with_email_in_context_are_marked_and_recalled_as_untrusted(
 
 def test_kyles_own_notes_are_not_marked(fake_client):
     from tests.test_notes import FakeIndex, toy_embed
-    from assistant.tools.notes import QuickNotes
+    from kwil.tools.notes import QuickNotes
 
     memory = MagicMock(namespace="voice-assistant")
     memory.index = FakeIndex()
@@ -729,7 +729,7 @@ def test_kyles_own_notes_are_not_marked(fake_client):
 
 
 def test_plain_memory_tools_mark_and_stay_private(fake_client, caplog):
-    from assistant.tools.memory_tools import memory_tools
+    from kwil.tools.memory_tools import memory_tools
     from tests.test_memory import make_memory
 
     mem, _, index = make_memory()
@@ -815,7 +815,7 @@ def test_summary_after_a_recalled_untrusted_note_is_stored_untrusted(fake_client
 
 
 def _history_chat(tmp_path, fake_client, reg, mem):
-    from assistant.history import HistoryStore, Recorder
+    from kwil.history import HistoryStore, Recorder
 
     store = HistoryStore(tmp_path / "h.sqlite")
     old = store.create("web")

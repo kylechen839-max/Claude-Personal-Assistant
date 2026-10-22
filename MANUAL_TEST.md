@@ -18,7 +18,7 @@ Open PowerShell in the project folder with the venv active
 Assignments database open in a browser to compare.
 
 ## 1. Setup (2 min)
-- [ ] `python -m assistant --check`
+- [ ] `python -m kwil --check`
   - Should: every line `[OK  ]` (a `[WARN]` for the voice is fine before
     step 9), your mic under "Input devices", your speakers under "Output devices", no key values
     printed, and "All required checks passed."
@@ -30,14 +30,14 @@ Assignments database open in a browser to compare.
     default)"). Index 0 is a real device too.
 
 ## 2. Speaker and mic (3 min)
-- [ ] **Speaker:** `python -m assistant --mode speak`, type "say a short
+- [ ] **Speaker:** `python -m kwil --mode speak`, type "say a short
       sentence", then a second question.
   - Should: both replies are spoken clearly at a comfortable speed (the
     second one too: pyttsx3 sometimes went silent after the first reply).
   - If not: speed is `[tts] rate` (default 185); a different Windows voice is
     `[tts] voice = "Zira"` (part of the name). If the second reply is silent,
     use Kokoro or Piper (step 9) and note it in BLOCKERS.md. Type `quit`.
-- [ ] **Mic level:** `python -m assistant --mode voice`, press Enter, say
+- [ ] **Mic level:** `python -m kwil --mode voice`, press Enter, say
       "What time is it?" at normal volume, press Enter.
   - Should: the printed `You:` line matches what you said.
   - If not: empty or wrong text usually means the wrong mic or a low level.
@@ -46,7 +46,7 @@ Assignments database open in a browser to compare.
     `[wake] mic_device`. Say "goodbye" to exit.
 
 ## 3. Wake word (8 min)
-Run `python -m assistant` for steps 3-8 and leave it running.
+Run `python -m kwil` for steps 3-8 and leave it running.
 - [ ] **Banner:** it prints `Listening for 'hey claude'...`
   - If it says "hey jarvis": `keywords/hey_claude.onnx` wasn't found; check
     `[wake] keyword_path`.
@@ -131,7 +131,7 @@ Run `python -m assistant` for steps 3-8 and leave it running.
 
 ### 5b. Calendar colors, repeats, guests and invites (8 min)
 First run `pip install -r requirements.txt` and the Google sign-in once more
-(`python -m assistant.tools.google_auth`), and allow the two new read-only
+(`python -m kwil.tools.google_auth`), and allow the two new read-only
 calendar permissions. Use test events only; delete them afterwards.
 - [ ] "Hey Claude, add Color Test tomorrow at 3 and make it Tomato."
   - Should: the event shows red in Google Calendar (web and phone).
@@ -189,7 +189,7 @@ calendar permissions. Use test events only; delete them afterwards.
 - [ ] "Hey Claude, remember that my favorite study spot is the library
       basement." Then say "goodbye".
   - Should: the console prints `(Saved to memory: ...)`.
-- [ ] Ctrl+C, run `python -m assistant` again. "Hey Claude, where do I like
+- [ ] Ctrl+C, run `python -m kwil` again. "Hey Claude, where do I like
       to study?"
   - Should: "the library basement".
   - If not: check the console for "(Memory off: ...)"; `[memory] min_score`
@@ -205,12 +205,12 @@ calendar permissions. Use test events only; delete them afterwards.
 Ctrl+C to stop.
 
 ## 9. Voices: Kokoro, Piper, pyttsx3 (5 min)
-- [ ] `python -m assistant --download-voice kokoro`
+- [ ] `python -m kwil --download-voice kokoro`
   - Should: two downloads (about 120 MB) and "checksums ok". Running it
     again downloads nothing.
-- [ ] `python -m assistant --check`
+- [ ] `python -m kwil --check`
   - Should: the TTS line says "Kokoro, voice af_heart".
-- [ ] **Listen check:** `python -m assistant --mode speak`, ask "What's a
+- [ ] **Listen check:** `python -m kwil --mode speak`, ask "What's a
       good way to start the morning?" and then a question with numbers and
       a time ("What's 15% of 80, and what time is it?").
   - Should: a calm, warm, natural voice, close to the feel of a Claude app
@@ -221,13 +221,13 @@ Ctrl+C to stop.
   - If the pace feels quick: `[tts] speed = 0.9`. Try other voices with
     `[tts] kokoro_voice = "af_bella"`, `"bf_emma"` or `"am_michael"`; keep
     the one you like and note it in BLOCKERS.md if none feels right.
-- [ ] Compare with Piper: `python -m assistant --download-voice
-      en_US-lessac-medium`, then `python -m assistant --mode speak --tts
+- [ ] Compare with Piper: `python -m kwil --download-voice
+      en_US-lessac-medium`, then `python -m kwil --mode speak --tts
       piper` and ask the same question.
   - Should: Piper starts a little sooner but sounds flatter. `--tts
     pyttsx3` is the Windows voice for comparison.
 - [ ] Fallback: rename `models\kokoro` to `models\kokoro-off`, run
-      `python -m assistant --mode speak`, ask anything, then rename it back.
+      `python -m kwil --mode speak`, ask anything, then rename it back.
   - Should: it answers in the Piper voice, and `logs/assistant.log` has one
     "TTS: Piper" line explaining that Kokoro was not found.
 - [ ] Optional, only if you have an ElevenLabs account (paid): add
@@ -238,7 +238,7 @@ Ctrl+C to stop.
     `logs/assistant.log`). Set `engine = "auto"` back afterwards.
 
 ## 10. Network down (2 min)
-- [ ] Run `python -m assistant`, turn Wi-Fi off (or unplug the cable), then
+- [ ] Run `python -m kwil`, turn Wi-Fi off (or unplug the cable), then
       "Hey Claude, what time is it?"
   - Should: within ~30 s it **says** it can't reach the internet, and it
     keeps listening.
@@ -248,7 +248,7 @@ Ctrl+C to stop.
   - Should: a normal answer without restarting.
 
 ## 11. Latency (1 min)
-- [ ] `python -m assistant --timings`, ask "Hey Claude, what's on my
+- [ ] `python -m kwil --timings`, ask "Hey Claude, what's on my
       calendar tomorrow?" twice.
   - Should: after each answer a `(Turn timings from wake: ...)` line. Write
     down the last figure, "end of speech to first audio" (the wait you
@@ -279,7 +279,7 @@ short, quick "yes" (or "yeah").
 - [ ] **Phone, hands-free** (voice conversation): ___/10 right, and
       ___/5 quick "yes" answers were taken as yes (none ignored as a
       misfire, none needed repeating).
-- [ ] **PC, wake word** (`python -m assistant`): ___/10 right; ___/5 "yes".
+- [ ] **PC, wake word** (`python -m kwil`): ___/10 right; ___/5 "yes".
   - Should: at least 9/10 on each and 5/5 "yes". Names it gets wrong: add
     them as `hotwords = "..."` in `config.local.toml`, under its `[stt]`
     line (add that line only if the file has none), and try again.
@@ -289,9 +289,9 @@ short, quick "yes" (or "yeah").
     ...)" lines with lengths only, never your words.
 
 ## 12. Conversation history (4 min)
-- [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
+- [ ] `python -m kwil`, then "Hey Claude, how do I add error bars to a
       lab report graph?" Let the follow-up window close. Wait ~10 s, then
-      `python -m assistant --history list` in a second PowerShell window.
+      `python -m kwil --history list` in a second PowerShell window.
   - Should: a line with a short title like "Lab report error bars", source
     `wake`, and today's time.
 - [ ] "Hey Claude, continue our conversation about the lab report."
@@ -301,19 +301,19 @@ short, quick "yes" (or "yeah").
     `--history show ID` shows both parts in one conversation.
 - [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
   - Should: a one or two sentence answer naming the topics.
-- [ ] `python -m assistant --history search error bars`
+- [ ] `python -m kwil --history search error bars`
   - Should: the conversation, with "error" and "bars" highlighted.
-- [ ] Ctrl+C, run `python -m assistant --mode text --incognito`, type
+- [ ] Ctrl+C, run `python -m kwil --mode text --incognito`, type
       "this is a secret test", then `quit`. Run `--history search secret`.
   - Should: "No conversations match." (and no "Saved to memory" line).
-- [ ] `python -m assistant --history delete ID` with the lab report id,
+- [ ] `python -m kwil --history delete ID` with the lab report id,
       answer `yes`, then `--history list`.
   - Should: it's gone. If Pinecone is set up, its memory summary is
     deleted too (the `voice-assistant` namespace in the Pinecone console
     has one vector fewer).
 
 ## 13. History on the phone (4 min)
-Needs the phone app (`python -m assistant --mode web`, section on the phone
+Needs the phone app (`python -m kwil --mode web`, section on the phone
 app above).
 - [ ] Tap the clock button. Type "lab" in the search bar.
   - Should: within a second, the lab report conversation from step 12 (if
@@ -339,7 +339,7 @@ Note anything that failed or any setting you changed in BLOCKERS.md.
 
 ## Phone web app (optional, ~10 min)
 Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
-- [ ] `python -m assistant --mode web --show-token`, then in another window
+- [ ] `python -m kwil --mode web --show-token`, then in another window
       `tailscale serve --bg --https=443 http://127.0.0.1:8765`.
   - Should: `.env` now has a `WEB_TOKEN` line; `logs/assistant.log` does not
     contain the token.
@@ -438,7 +438,7 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 ## Chinese instance for Mom (optional, ~20 min)
 Setup is in README.md ("A Chinese instance for someone else"). Use her
 phone (or yours signed in as her test user).
-- [ ] `python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token`
+- [ ] `python -m kwil --mode web --config config.mom.toml --env-file .env.mom --show-token`
       while your own instance keeps running.
   - Should: it listens on port 8766; your instance on 8765 still works;
     `.env.mom` (not `.env`) got the new `WEB_TOKEN`; the log is `logs/mom.log`.
@@ -580,12 +580,12 @@ for all of this except the Google sign-in.
     models loaded" and no tracebacks.
 - [ ] Google Cloud console -> OAuth consent screen -> **Publish app**. Then
       sign in again on the PC (delete `token.json`, run
-      `python -m assistant.tools.calendar`; the "unverified app" screen is
-      expected: Advanced -> Go to Hey Claude) and paste the new `token.json`
+      `python -m kwil.tools.calendar`; the "unverified app" screen is
+      expected: Advanced -> Go to Kwil) and paste the new `token.json`
       into `GOOGLE_TOKEN_JSON` in Render.
   - Should: a week later the calendar still works (in Testing mode it would
     stop after 7 days).
-- [ ] Render Shell: `python -m assistant --check`.
+- [ ] Render Shell: `python -m kwil --check`.
   - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
     time zone, Whisper model and Piper voice OK.
 - [ ] In Safari on the iPhone (Wi-Fi off), open
@@ -604,7 +604,7 @@ for all of this except the Google sign-in.
   - Should: `{"error":"not signed in"}`. And `/healthz` shows only `ok` and a version.
 - [ ] **Backup.** Signed in as yourself in Safari, open
       `https://hey-claude.onrender.com/api/backup`; open the zip on a computer.
-  - Should: a `hey-claude-backup-<date>.zip` with `history.sqlite`,
+  - Should: a `kwil-backup-<date>.zip` with `history.sqlite`,
     `users/users.json`, a `users/<id>/history.sqlite` per family member and
     `MANIFEST.json`; no `google_token.json` and no `.enc` file. The
     history opens in an SQLite viewer (e.g. DB Browser for SQLite) with
@@ -668,7 +668,7 @@ for all of this except the Google sign-in.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
     folder; check Render -> Shell `ls /data/users` if you like.) At
-    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    myaccount.google.com/permissions (their Google account) "Kwil"/"Hey Claude"
     is gone too: Remove revokes their Google grant first.
 - [ ] **Beta tester (Calendar only).** Invite someone with the Account left
       on **Beta (Calendar only)** and open the link on another phone,
@@ -686,7 +686,7 @@ for all of this except the Google sign-in.
 - [ ] **Download my data** (a test invite, signed in on a second phone or
       a private Safari window, after a short chat): ⚙ -> **Download my
       data**.
-  - Should: iOS offers to save `hey-claude-data.zip`; opened in Files it
+  - Should: iOS offers to save `kwil-data.zip`; opened in Files it
     holds `profile.json` (name, language, time zone, tier, created) and a
     `conversations/` file per chat, and nothing else. A fourth download
     within the hour says "Too many downloads". On your own (owner) phone
@@ -695,7 +695,7 @@ for all of this except the Google sign-in.
       account**, type `DELETE`, tap **Delete everything**, answer OK.
   - Should: the phone goes back to the sign-in page. Your list no longer
     shows them, their other phone is signed out too, and at
-    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    myaccount.google.com/permissions (their Google account) "Kwil"/"Hey Claude"
     is gone if they had connected Google (and from their Notion's Settings
     -> Connections if they had connected Notion). In Chinese the section reads
     下载我的数据 / 删除我的账户.
@@ -735,10 +735,10 @@ for all of this except the Google sign-in.
       Assignments database: Connect Notion again, pick the second
       workspace, share its database, Allow, then ask for assignments.
   - Should: it reads the second workspace's rows; in the first
-    workspace's Settings -> **Connections** "Hey Claude" is gone.
+    workspace's Settings -> **Connections** "Kwil"/"Hey Claude" is gone.
 - [ ] ⚙ -> **Disconnect Notion**, OK. Then in that Notion account open
       Settings -> **Connections**.
-  - Should: "Hey Claude" is no longer listed; asking about assignments
+  - Should: "Kwil"/"Hey Claude" is no longer listed; asking about assignments
     again says it can't see them. Reconnecting while sharing no database
     (or two) shows "couldn't find exactly one Assignments database".
 - [ ] **Their limits.** On an invited person's phone, type seven short
@@ -760,7 +760,7 @@ sign-in page has no link to it.
     in light and in dark mode (Settings -> Display); the privacy and
     terms pages show the yellow "Draft: Kyle to review" note.
 - [ ] Read both pages as the person responsible for them. Fix any wording
-      in `assistant/web/privacy.html` / `terms.html`, set `support_email`,
+      in `kwil/web/privacy.html` / `terms.html`, set `support_email`,
       and `legal_draft = false` once you're happy.
   - Should: after a redeploy the draft note is gone and the contact line
     shows your support address as a link.
@@ -772,15 +772,15 @@ sign-in page has no link to it.
 - [ ] Signed in at the cloud's address, open `https://<cloud>/waitlist`.
   - Should: your entry with its note and date; Remove takes it off the list.
 - [ ] The signed-out sign-in page at `https://<cloud>/`.
-  - Should: a "What is Hey Claude?" link under the form opens `/welcome`.
+  - Should: a "What is Kwil?" link under the form opens `/welcome`.
 
 ---
 
 ## Email, notes, lectures, tutor (optional, ~20 min)
 Do BLOCKERS.md "Google sign-in again for Gmail" first.
-- [ ] `python -m assistant --check`.
+- [ ] `python -m kwil --check`.
   - Should: "Gmail access: granted (read + drafts)".
-- [ ] Text mode (`python -m assistant --mode text`): "Anything important in
+- [ ] Text mode (`python -m kwil --mode text`): "Anything important in
       my email from today?"
   - Should: a short spoken-style summary (sender and what it's about) of a
     few unread/important emails, matching your Gmail inbox.
@@ -923,12 +923,12 @@ Setup is in README.md ("Raspberry Pi").
 - [ ] `./scripts/install_pi.sh` finishes without errors; running it again
       changes nothing.
 - [ ] Copy `.env`, `credentials.json`, `token.json` (and `voices/` if you use
-      Piper) from the PC, then `.venv/bin/python -m assistant --check`.
+      Piper) from the PC, then `.venv/bin/python -m kwil --check`.
   - Should: all required checks pass, with your USB mic and speaker listed.
   - If the mic isn't the default: `[wake] mic_device = "<index>"`. Speaker:
     `sudo raspi-config` -> System Options -> Audio, test with
     `speaker-test -t wav -c 2`.
-- [ ] `.venv/bin/python -m assistant --timings`: repeat steps 3 (1 m normal
+- [ ] `.venv/bin/python -m kwil --timings`: repeat steps 3 (1 m normal
       only), 4 and 11.
   - Should: `--check` shows "Whisper model: base.en cached" (the
     installer's `config.local.toml`), not `small.en`.
@@ -936,16 +936,16 @@ Setup is in README.md ("Raspberry Pi").
     `config.local.toml` to `"tiny.en"` (don't add a second `[stt]`) and
     `[tts] engine = "piper"` (with
     "auto" the Pi already prefers Piper over Kokoro).
-- [ ] Optional, Kokoro on the Pi: `.venv/bin/python -m assistant
+- [ ] Optional, Kokoro on the Pi: `.venv/bin/python -m kwil
       --download-voice kokoro`, set `[tts] engine = "kokoro"`, run with
       `--timings` and ask two questions; note the "first audio" times in
       PROGRESS.md, then set `engine = "auto"` back.
 - [ ] `./scripts/install_service.sh`, reboot without logging in, wait a
       minute, then "Hey Claude, what time is it?"
-  - Should: it answers. `journalctl --user -u hey-claude -n 20` shows the
+  - Should: it answers. `journalctl --user -u kwil -n 20` shows the
     startup lines.
-- [ ] `pkill -f "python -m assistant"`: within ~10 s
-      `systemctl --user status hey-claude` shows it running again.
+- [ ] `pkill -f "python -m kwil"`: within ~10 s
+      `systemctl --user status kwil` shows it running again.
 
 ---
 
@@ -1113,7 +1113,7 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
     verified before); a failure is said in one plain sentence.
 - [ ] Unplug the network (or turn off Wi-Fi), send a message and wait for
       `[devteam] timeout` (60 s by default).
-  - Should: Hey Claude says Claude Code didn't answer in time, and no
+  - Should: Kwil says Claude Code didn't answer in time, and no
     `node.exe` for Claude Code is left in Task Manager.
 - [ ] On the PC, after updating, open http://127.0.0.1:8765/devteam and
       check the web app's startup lines.
@@ -1175,11 +1175,11 @@ On the PC and on the MacBook (`tools/session-watch/README.md`).
 ## Health checks and safe updates (~15 min)
 Needs the PC's apps installed as tasks (yours and the family copies).
 - [ ] `.\scripts\install_watch_task.ps1`, then wait a minute and run
-      `.\.venv\Scripts\python.exe -m assistant.watch --status`.
+      `.\.venv\Scripts\python.exe -m kwil.watch --status`.
   - Should: one OK line per app (yours, Mom's, Kai's), with the version.
-    Task Scheduler shows `\HeyClaude\Watch` with "every 5 minutes", and
+    Task Scheduler shows `\Kwil\Watch` with "every 5 minutes", and
     no window ever flashes up.
-- [ ] Stop Mom's app (Task Scheduler -> HeyClaude -> Family-mom -> End)
+- [ ] Stop Mom's app (Task Scheduler -> Kwil -> Family-mom -> End; HeyClaude until the tasks are re-registered)
       and wait up to 15 minutes (5 minutes' grace in case it is starting,
       then the next run restarts it).
   - Should: it is running again (the watchdog restarted it), with no
@@ -1207,7 +1207,7 @@ Needs the PC's apps installed as tasks (yours and the family copies).
   - Should: `logs/host-wake.log` says the go-live check passed and the
     wake listener restarted on the new version; `git log -1` still shows
     the pulled commit (it was not undone).
-- [ ] Unplug the network for a functional check (`python -m assistant.watch
+- [ ] Unplug the network for a functional check (`python -m kwil.watch
       --functional`), then type a question in the phone app.
   - Should: the reply says "Claude is unreachable right now..." or "can't
     reach the internet", and the watchdog reports it without rolling back.
@@ -1215,7 +1215,7 @@ Needs the PC's apps installed as tasks (yours and the family copies).
 ## Spotify (optional, ~10 min)
 Needs Spotify Premium, BLOCKERS.md "Spotify app" done, and Spotify open on
 the PC (README "Spotify by voice").
-- [ ] Run `python -m assistant.tools.spotify`, allow access, paste the
+- [ ] Run `python -m kwil.tools.spotify`, allow access, paste the
       address back.
   - Should: "Spotify connected"; the consent page lists only reading what
     you're playing on your devices, "control Spotify on your devices" and
@@ -1255,7 +1255,7 @@ deadline store (README "Study briefings").
     they are on.
 - [ ] With a deadline due today or tomorrow, wait for 07:30 (or set
       `[proactive] morning` a few minutes ahead and restart).
-  - Should: one notification from "Hey Claude", a short sentence naming the
+  - Should: one notification from "Kwil", a short sentence naming the
     course and title; none a second time that morning, also after a
     restart.
 - [ ] With the app closed, tap the notification.
@@ -1271,7 +1271,7 @@ deadline store (README "Study briefings").
 
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
-- [ ] In text mode (`python -m assistant --mode text`), ask "what time is
+- [ ] In text mode (`python -m kwil --mode text`), ask "what time is
       it", then "what's tomorrow look like on my calendar" a minute later.
   - Should: `logs/assistant.log` has `Route: claude-haiku-5-5 (simple)` for
     the first and an `API usage claude-...: input=... cache_read=...` line
@@ -1296,3 +1296,37 @@ Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
   - Should: it has `month_usd`, a small number that grows with use; a
     family member's state does not have it. `data/usage.json` holds the
     month's totals per model.
+
+## Kwil rebrand (~10 min)
+
+Only what a person can see or click; the old names are covered by tests.
+
+- [ ] iPhone: open the app from the home screen, close it in the app
+      switcher, and open it again (the new page loads on the second open).
+  - Should: the header says "Kwil" and you are still signed in (no new
+    sign-in needed). Re-adding it to the home screen
+    shows "Kwil" under the icon (an existing icon keeps its old label
+    until you re-add it).
+- [ ] The cloud app's page title and `/welcome` (if the public site is on).
+  - Should: "Kwil" everywhere, "built on Claude" / "the Claude API" where
+    it names the model.
+- [ ] Ask "what's your name?" (text or voice).
+  - Should: it says Kwil.
+- [ ] Phone voice mode: "Hey Kwil, what time is it?"
+  - Should: the transcript shows what you said, and the answer is about the
+    time (the "Hey Kwil" in front is ignored).
+- [ ] PC: the first `.\scripts\deploy.ps1` that brings in the rename (it is
+      still the old script and the old deploy code doing the work; don't
+      re-register anything first).
+  - Should: it finishes without a Python traceback and says the go-live
+    check passed and the apps restarted; Task Scheduler -> HeyClaude shows
+    Web (and each Family-<name>, and Watch) running; the phone app answers
+    and its header says Kwil. If it stops halfway, run `git log -1` and
+    tell the dev team before deploying again.
+- [ ] PC: `.\scripts\install_windows_service.ps1`, then
+      `.\scripts\install_family_tasks.ps1 -Watch`.
+  - Should: Task Scheduler shows the tasks under **Kwil**; the
+    **HeyClaude** folder has no tasks left; the wake word and the phone app
+    work as before.
+- [ ] Say "Hey Claude" to the PC.
+  - Should: it still wakes (the "Hey Kwil" model isn't trained yet).

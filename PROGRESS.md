@@ -70,23 +70,23 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
-- `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
+- `kwil/chat.py`: `ClaudeChat` keeps the conversation history, sends a
   short spoken-style system prompt with the current local date/time, and
   calls the Messages API. Model from `CLAUDE_MODEL` / `[assistant] model`,
   default `claude-sonnet-5-5`. A failed request is rolled back so history
   stays valid; long histories are trimmed to start with a plain user turn.
-- `python -m assistant --mode text`: typed chat.
+- `python -m kwil --mode text`: typed chat.
 - Tests: mocked Anthropic client (history, system prompt, rollback,
   trimming, exit words, the text loop).
 
 ## Stage 2 - Text to speech ✅
-- `assistant/tts.py`: a `TTS` interface (`speak`, `save_to_file`) with
+- `kwil/tts.py`: a `TTS` interface (`speak`, `save_to_file`) with
   `Pyttsx3TTS` (offline OS voice: SAPI5 on Windows, eSpeak on the Pi),
   `PiperTTS` (offline neural voice, `piper-tts` 1.8.0, wheels for Windows
   x64 and Linux x86_64/aarch64) and `PrintTTS`. `make_tts()` picks one from
   `[tts] engine`; if the Piper voice or package is missing it warns and
   falls back to pyttsx3.
-- `python -m assistant.tts --download-voice en_US-lessac-medium` downloads a
+- `python -m kwil.tts --download-voice en_US-lessac-medium` downloads a
   voice into `voices/` (gitignored); `--say TEXT` tries it out loud.
 - On Windows, files are rendered through SAPI directly (pyttsx3 2.99 writes
   header-only .wav files there) and a fresh pyttsx3 engine is used per reply.
@@ -94,15 +94,15 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   not silent), engine selection and fallbacks, the download helper (mocked).
 
 ## Stage 3 - Speech to text ✅
-- `assistant/stt.py`: `Transcriber` lazily loads faster-whisper (`base.en`,
+- `kwil/stt.py`: `Transcriber` lazily loads faster-whisper (`base.en`,
   CPU, int8); `record_push_to_talk()` records between two Enter presses.
-- `python -m assistant --mode voice`: push-to-talk with spoken replies.
+- `python -m kwil --mode voice`: push-to-talk with spoken replies.
 - Tests: TTS renders "What is on my calendar tomorrow", real Whisper
   transcribes it, and the transcript must roughly match (pyttsx3 and Piper
   speech); mocked-model tests always run.
 
 ## Stage 4 - Wake word ✅
-- `assistant/wakeword.py`: openWakeWord with the custom model
+- `kwil/wakeword.py`: openWakeWord with the custom model
   `keywords/hey_claude.onnx` (trained in the openWakeWord Colab notebook;
   same file on Windows and the Pi). If it's missing, it falls back to
   `[wake] builtin_keyword` (`hey_jarvis`). After the wake word a chime
@@ -120,7 +120,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   self-hearing (with a control run that does hear the reply), timings.
 
 ## Stage 5 - Tools ✅
-- `assistant/tools/`: a `ToolRegistry` (API schemas, dispatch, errors
+- `kwil/tools/`: a `ToolRegistry` (API schemas, dispatch, errors
   reported back to Claude, a confirmation gate that defaults to "no").
 - Google Calendar (`calendar.py`): list events for today/tomorrow/a
   weekday/a date, create (timed or all-day), move (keeps the duration,
@@ -139,14 +139,14 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   are present.
 
 ## Stage 6 - Long-term memory ✅
-- `assistant/memory.py`: `PineconeMemory` on the existing `project-context`
+- `kwil/memory.py`: `PineconeMemory` on the existing `project-context`
   index with Pinecone's hosted `llama-text-embed-v2` embeddings (the model
   the index was built with). Before each reply, up to 4 notes scoring at
   least 0.4 are added to the system prompt; after each conversation Claude
   writes a 1-3 sentence summary into the `voice-assistant` namespace (small
   talk is skipped). Other namespaces are only read. A memory failure is
   logged and the reply goes ahead without it.
-- Memory tools (`assistant/tools/memory_tools.py`, all modes): `search_memory`
+- Memory tools (`kwil/tools/memory_tools.py`, all modes): `search_memory`
   lets Claude look notes up when asked ("what do my notes say about...");
   `remember` saves a note to the `voice-assistant` namespace when asked
   ("remember that..."), with a confirmation if web/email content is in the
@@ -156,7 +156,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   `PINECONE_API_KEY` is set.
 
 ## Stage 7 - Polish ✅
-- `config.toml` over built-in defaults (`assistant/config.py`); secrets in
+- `config.toml` over built-in defaults (`kwil/config.py`); secrets in
   `.env`; `CLAUDE_MODEL` and a few others override from the environment.
 - Logging to `logs/assistant.log` (rotating, 1 MB x 3) with API keys and
   OAuth tokens masked; the console shows warnings only.
@@ -164,10 +164,10 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   each give a short spoken sentence; a failing command never stops wake
   mode; mic errors are retried 5 times; startup problems print one line and
   exit 1.
-- Single entry point `python -m assistant` (`claude_assistant.py` is a shim).
-- `--check` (`assistant/doctor.py`): keys set (never values), Google files,
+- Single entry point `python -m kwil` (`claude_assistant.py` is a shim).
+- `--check` (`kwil/doctor.py`): keys set (never values), Google files,
   wake model, audio devices with indexes, Whisper cache, TTS dependencies.
-- `--timings` (`assistant/timing.py`): one latency line per turn (wake ->
+- `--timings` (`kwil/timing.py`): one latency line per turn (wake ->
   end of speech -> transcript -> Claude reply -> first audio), always in the
   log, on the console with the flag.
 - Raspberry Pi: `scripts/install_pi.sh` (re-runnable setup) and
@@ -183,8 +183,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
   MANUAL_TEST.md exists in the code; no stale names (Porcupine, old models).
 
 ## Phone web app ✅
-- `python -m assistant --mode web` (`assistant/webapp.py`, page in
-  `assistant/web/`): FastAPI + uvicorn serving one mobile-first PWA page
+- `python -m kwil --mode web` (`kwil/webapp.py`, page in
+  `kwil/web/`): FastAPI + uvicorn serving one mobile-first PWA page
   (manifest, SVG/PNG icons generated in code, apple-mobile-web-app tags, a
   no-cache service worker) and a small JSON API. Reuses `ClaudeChat` (tools,
   Pinecone recall and summaries), `Transcriber` and the configured TTS engine.
@@ -275,7 +275,7 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
   mic/speaker/wake-word checks; `WEB_TOKEN` required; time zone,
   `GOOGLE_TOKEN_JSON` contents, Whisper cache, Piper and espeak-ng checked.
   New env overrides: `ASSISTANT_TIMEZONE`, `WHISPER_MODEL`.
-- **`assistant/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
+- **`kwil/cloud.py`** (`CloudGuard`, an outer ASGI layer; the web module
   itself is unchanged): `/healthz` -> `{"ok": true, "version": ...}` (no `busy`); every other route needs the
   cookie or Bearer token except the login page, its static files, login, the
   manifest and icons (unknown paths 401 too); sign-in limits through the web
@@ -356,10 +356,10 @@ Runs the phone web app 24/7 on Render so it works with the PC off.
 Hands-free, turn-by-turn conversation in the phone page, like voice mode in
 the Claude apps. Tap "Voice conversation" once; End, "goodbye" or 2 minutes
 of quiet ends it.
-- Files: `assistant/voice_ws.py` (WebSocket route, limits, static files),
-  `assistant/voice_session.py` (turn pipeline), `assistant/sentences.py`,
+- Files: `kwil/voice_ws.py` (WebSocket route, limits, static files),
+  `kwil/voice_session.py` (turn pipeline), `kwil/sentences.py`,
   `ClaudeChat.abort / mark_interrupted` in `chat.py`;
-  `assistant/web/voice.js` (mic, playback, socket, UI),
+  `kwil/web/voice.js` (mic, playback, socket, UI),
   `voice-core.js` (DOM-free: endpointer, energy VAD, turn state machine,
   framing), `voice-worklet.js` (16 kHz capture), `voice.css`, and the
   vendored `web/vad/` (onnxruntime-web 1.22.0 + Silero v5, see its NOTICE).
@@ -521,7 +521,7 @@ Tested:
 ## Email, notes, lectures and homework tutor ✅
 Four features on top of the seven stages (branch `claude/features`).
 
-- **Gmail** (`assistant/tools/gmail.py`, `google_auth.py`): `email_summary`
+- **Gmail** (`kwil/tools/gmail.py`, `google_auth.py`): `email_summary`
   (unread/important in the last N hours, capped, sender/subject/one-line
   gist), `read_email` (plain text, quoted thread and HTML stripped,
   trimmed), `draft_reply` (a draft in the same thread, after a yes). No send
@@ -532,13 +532,13 @@ Four features on top of the seven stages (branch `claude/features`).
   (summaries of such conversations use Kyle's words only). Sign-in moved to `google_auth.py` (one token for
   Calendar + Gmail; `GOOGLE_TOKEN_JSON` for the cloud). An old token keeps
   Calendar working; Gmail stays off with a message naming
-  `python -m assistant.tools.google_auth`, also in `--check`. Email results
+  `python -m kwil.tools.google_auth`, also in `--check`. Email results
   count as untrusted content (`Tool.untrusted_output`,
   `chat.has_untrusted_content`), so changes ask first; `Tool.private`
   keeps email text and replies out of the log.
   Tested: mocked Gmail service, prompt-injection emails x 5 actions x 2
   readers, scope detection, cloud token, log check.
-- **Quick notes** (`assistant/tools/notes.py`): `remember_note`,
+- **Quick notes** (`kwil/tools/notes.py`): `remember_note`,
   `recall_notes`, `list_recent_notes`, `delete_note` in Pinecone
   (`voice-assistant`, `kind=note`, `created_at`, tags). When notes are on
   they replace the plain `remember` memory tool; `search_memory` stays.
@@ -546,7 +546,7 @@ Four features on top of the seven stages (branch `claude/features`).
   only touch `note-` ids. `QuickNotes.on_saved` is the hook for showing
   notes in conversation history once that lands (via the history module's
   public functions, not its store). Tested with an in-memory fake index.
-- **Lecture recorder** (`assistant/lecture.py`, `webfeatures.py`, Lecture
+- **Lecture recorder** (`kwil/lecture.py`, `webfeatures.py`, Lecture
   tab): offset-based resumable uploads (gap -> 409 with the server's
   offset, repeats ignored, size caps), a background job (one at a time,
   resumes after restart) that decodes with PyAV in 10-minute windows
@@ -561,7 +561,7 @@ Four features on top of the seven stages (branch `claude/features`).
   without re-transcribing, DB find/create/refused paths, real WebM/Opus and
   MP4/AAC decoding, and (CI) real Whisper on a generated WebM lecture.
   The page was also driven in headless Chromium with a fake microphone.
-- **Homework tutor** (`assistant/tutor.py`, `mathspeech.py`, Tutor tab):
+- **Homework tutor** (`kwil/tutor.py`, `mathspeech.py`, Tutor tab):
   client-side resize to 1600 px, server allowlist (JPEG/PNG/WebP by
   content), size and pixel caps, EXIF stripped by re-encoding, Socratic
   prompt with full solutions only on request, KaTeX vendored under
@@ -594,7 +594,7 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   openWakeWord `--no-deps`, models), then again (must be a no-op), checks
   the aarch64 wheels import (onnxruntime, ctranslate2, piper, openwakeword,
   sounddevice), downloads the Piper voice, runs the **full pytest suite**,
-  `python -m assistant --check`, `install_service.sh` (systemctl/loginctl
+  `python -m kwil --check`, `install_service.sh` (systemctl/loginctl
   stubbed and their calls checked) and `preflight.sh`, which runs the real
   wake word -> VAD -> Whisper -> reply on the committed fixture, both TTS
   engines, and `--mode web` with a text and an audio turn. Stubbed only:
@@ -603,7 +603,7 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   master, on pushes that touch the Pi files, and by hand (with a QEMU
   option). First green run: about 1.5 minutes in total (install 42 s,
   pytest 17 s, preflight 8 s) with downloads cached.
-- **Preflight** (`assistant/preflight.py`, `scripts/preflight.ps1` for
+- **Preflight** (`kwil/preflight.py`, `scripts/preflight.ps1` for
   Windows PowerShell 5.1+, `scripts/preflight.sh`): git, .env, `--check`,
   pytest offline and live (live skips are a FAIL), the wake-word end to end
   on `tests/fixtures/hey_claude_calendar_tomorrow.wav` (asserts a wake, a
@@ -613,7 +613,7 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   turn), pyttsx3 and Piper renders, and with `--hardware` the audio device
   list and a 3 s mic level. Table + `logs/preflight-<timestamp>.txt`.
   Every `.env` value is masked in the console and the report.
-- **Smoke check** (`assistant/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
+- **Smoke check** (`kwil/smoke.py`, `scripts/cloud_smoke.ps1`/`.sh`):
   the same web checks against any base URL (Render, or the Pi), plus a
   hands-free turn over the voice WebSocket where the server has it.
 - **The PC as the always-on host** (`scripts/install_windows_service.ps1`,
@@ -624,10 +624,10 @@ machine, with a go/no-go (`PI_MIGRATION.md`).
   assistant's exit codes), `-Uninstall`; a power check that, after a typed
   `y`, sets never-sleep/never-hibernate on AC and turns off USB selective
   suspend. The preflight's `power` row WARNs on Windows when sleep is on.
-  The supervisor is `assistant/host.py` (`python -m assistant.host`), also
+  The supervisor is `kwil/host.py` (`python -m kwil.host`), also
   used by the Pi's systemd unit.
-- **Automatic updates** (`assistant/updater.py`, `assistant/host.py`,
-  `assistant/version.py`, `assistant/web/update-watch.js`): opt-in `[update]
+- **Automatic updates** (`kwil/updater.py`, `kwil/host.py`,
+  `kwil/version.py`, `kwil/web/update-watch.js`): opt-in `[update]
   enabled`, follows the `stable` branch (fast-forwarded only after master's
   CI is green on all jobs). Fast-forward only; skips with local changes to
   tracked files (config.toml excepted), local commits or a commit that
@@ -679,7 +679,7 @@ Kyle asked for replies and voice-mode sounds that feel like the Claude
 app's voice conversations. The app's voices and sounds are proprietary
 (no API, not extracted or imitated), so this uses the closest open
 equivalent and original sounds.
-- **Kokoro-82M** (`assistant/tts_kokoro.py`, `kokoro-onnx`, Apache-2.0):
+- **Kokoro-82M** (`kwil/tts_kokoro.py`, `kokoro-onnx`, Apache-2.0):
   `KokoroTTS.synthesize(text) -> (float32, 24000)`, so the web app's
   `fast_wav`/`render_wav` render it in memory with no change to the voice
   pipeline. Model: **int8** (`kokoro-v1.0.int8.onnx`, 88 MB, + 28 MB voice
@@ -698,7 +698,7 @@ equivalent and original sounds.
   quality grades and descriptions plus intelligibility (Whisper transcribes
   af_heart's render correctly in CI); I could not listen in the sandbox, so
   MANUAL_TEST.md step 9 has a listen check with the alternatives to try.
-- **Setup-time download**: `python -m assistant --download-voice kokoro`
+- **Setup-time download**: `python -m kwil --download-voice kokoro`
   (or `kokoro-fp16`; a Piper voice name works too) fetches the files from
   the kokoro-onnx GitHub release into `models/kokoro/` (gitignored). Each
   file's SHA-256 is pinned in `tts_kokoro.FILES`: data goes to `.part`
@@ -717,7 +717,7 @@ equivalent and original sounds.
   starts (logged with its time), and the desktop modes warm up in a
   background thread, so the first reply doesn't pay the model load
   (0.8-2 s here). Piper got a `warm_up()` too.
-- **ElevenLabs** (`assistant/tts_elevenlabs.py`, optional, paid): only with
+- **ElevenLabs** (`kwil/tts_elevenlabs.py`, optional, paid): only with
   `engine = "elevenlabs"` *and* `ELEVENLABS_API_KEY`; streams raw 24 kHz
   PCM per sentence from `/v1/text-to-speech/{voice}/stream`
   (`eleven_flash_v2_5`), 8 s timeout. On any error that sentence is spoken
@@ -725,12 +725,12 @@ equivalent and original sounds.
   for 60 s. The key is sent only in the `xi-api-key` header; log lines give
   only the error type and message (and the key was already redacted from
   logs).
-- **Earcons** (`assistant/earcons.py`): original sounds from sine waves
+- **Earcons** (`kwil/earcons.py`): original sounds from sine waves
   (a little octave overtone, 12 ms attack, exponential decay, 20 ms fade to
   zero, so no clicks): *listening* rises a fifth (D5 -> A5, 0.35 s, peak
   0.25), *thinking* is one quiet G4 (0.16 s, peak 0.08), *ended* falls a
   fifth (0.41 s, peak 0.2). The WAVs are committed in
-  `assistant/web/earcons/` (8-20 KB) and served by the web app at
+  `kwil/web/earcons/` (8-20 KB) and served by the web app at
   `/earcons/<name>.wav` (whitelisted names, same origin, so the self-only
   CSP is untouched). `voice.js` fetches and decodes them when the view
   opens and plays them on state changes: listening when the mic first opens
@@ -814,7 +814,7 @@ transcribing Kokoro's "What is on my calendar tomorrow" correctly
 (`test_stt.py`). The real-model tests run in a child process (see Known
 issues).
 ## Conversation history ✅
-- `assistant/history.py`: `HistoryStore` on stdlib SQLite (WAL,
+- `kwil/history.py`: `HistoryStore` on stdlib SQLite (WAL,
   `synchronous=FULL`, versioned migrations in `MIGRATIONS` via
   `PRAGMA user_version`). Tables `conversations` (random 16-char id, owner,
   source wake/text/web/voice, timestamps, title, summary, pinned, archived),
@@ -876,7 +876,7 @@ issues).
   and `history.record_event(conversation_id, kind, text)` add a note (e.g. a
   lecture summary or quick capture) to a conversation, shown in its
   transcript and search and passed to Claude when it's continued.
-- Phone app: `assistant/history_web.py` adds `GET /api/conversations`
+- Phone app: `kwil/history_web.py` adds `GET /api/conversations`
   (paginated, `q`, source/pinned/archived/date filters, highlight parts),
   `GET /api/conversations/{id}`, `POST .../continue`, `PATCH` (rename, pin,
   archive), `DELETE` (with the Pinecone cascade; also clears the
@@ -884,7 +884,7 @@ issues).
   `GET/POST /api/incognito`, all behind the web sign-in. Push-to-talk turns
   are saved as `web`, voice-mode turns (`chat_stream`) as `voice`, and a
   barge-in keeps only the spoken part, flagged interrupted.
-  `assistant/web/history.js`: History screen (debounced search, day groups,
+  `kwil/web/history.js`: History screen (debounced search, day groups,
   filter chips, swipe and long-press actions, transcript, Continue),
   rename/delete dialogs, incognito switch and badge, light theme.
 - Tests: `test_history_web.py` (401 on every route, cross-site 403, id
@@ -1355,24 +1355,24 @@ still the default.
 
 ## Failover: Pi -> PC -> cloud (phase A) ✅
 The phone app's backend failover, documented in FAILOVER.md.
-- `assistant/web/backend-router.js`: the client router as a standalone ES
+- `kwil/web/backend-router.js`: the client router as a standalone ES
   module: parallel `/healthz` probes (1.5 s tailnet, 3 s cloud), highest
   priority healthy backend with a 300 ms grace for a slower better one, API
   version check, one retry of idempotent requests on the next backend,
   writes never replayed (`NeedsUserRetry`), 60 s background re-probe with
   fail-back after 2 good probes, no switch mid-turn, Auto / forced override,
   IndexedDB token store.
-- `assistant/failover/edge.py` + `tokens.py`: ASGI middleware for every
+- `kwil/failover/edge.py` + `tokens.py`: ASGI middleware for every
   backend: `/healthz` (ok, api, role only), CORS for the app origin only (no
   credentials), derived bearer tokens (`POST /api/auth/token`, refresh,
   scopes app/sync, 90-day session limit), WebSocket first-message auth
   (4401 / 4408), per-backend lockout.
-- `assistant/failover/sync.py`: history as an append-only, id-addressed
+- `kwil/failover/sync.py`: history as an append-only, id-addressed
   event log; `materialize()` is order-independent and idempotent (LWW
   renames/pins on (ts, id), permanent tombstones); push/pull endpoints and
   client with cursors and peer-reset detection; `MemoryEventLog` reference
   store (the SQLite store from claude/history implements the same API).
-- `assistant/failover/leader.py`: leader check (probe higher-priority peers
+- `kwil/failover/leader.py`: leader check (probe higher-priority peers
   right before firing) and a run-once job runner with a per-job dedupe key
   in the shared log.
 - `--role pi|pc|cloud`, `[failover]` settings (`ASSISTANT_ROLE`,
@@ -1426,7 +1426,7 @@ synced history list; Pinecone memory still works).
 
 ## Voice style (Kyle's VOICE_STYLE_PROMPT.md)
 
-- `assistant/chat.py` `SYSTEM_PROMPT` now carries the "VOICE STYLE" section
+- `kwil/chat.py` `SYSTEM_PROMPT` now carries the "VOICE STYLE" section
   of Kyle's guide: one or two short sentences, answer first, contractions and
   at most one natural reaction, follow-up questions only when useful, no
   unspeakable formatting, lists over three items summarized, natural numbers,
@@ -1437,7 +1437,7 @@ synced history list; Pinecone memory still works).
   specifics (J2312, MAST) could leak into real answers.
 - Pipeline tips: (1) natural TTS and (2) sentence-by-sentence streaming were
   already done (Kokoro, voice mode). (3) The speech filter
-  (`assistant/sentences.py` `_clean`) now also drops URLs, emoji and list
+  (`kwil/sentences.py` `_clean`) now also drops URLs, emoji and list
   markers, besides markdown. (4) max_tokens stays 1500: it is a ceiling that
   must leave room for extended thinking and web search, and a 200 cap would
   cut off tool calls; replies stay short through the prompt. (5) VAD and
@@ -1453,7 +1453,7 @@ A visual pass over the phone web app; behaviour, the WebSocket/API protocol,
 sign-in, confirmations and security logic are unchanged, and every element
 id and data attribute the JS and tests use is kept.
 
-- **Palette and type** (`assistant/web/app.css`): warm neutral tokens on
+- **Palette and type** (`kwil/web/app.css`): warm neutral tokens on
   `:root` (ivory / near-black), one clay accent, separate light and dark sets
   through `prefers-color-scheme`; the system font (`-apple-system`) with a
   clear scale (20 px bold header, 17 px body, 13-15 px secondary).
@@ -1506,7 +1506,7 @@ screens are staged by setting the same attributes the JS sets (no mic).
 
 ## Dev team coordinator link (voice -> /build-feature coordinator)
 
-- `assistant/devteam.py`: Hey Claude talks to the same coordinator session
+- `kwil/devteam.py`: Hey Claude talks to the same coordinator session
   the agent dashboard shows. `message_dev_team` sends Kyle's words with the
   Claude Code CLI (`claude -p --cloud <id> --output-format json`, message on
   stdin, so it never appears in a process list); `check_dev_team` reads the
@@ -1524,7 +1524,7 @@ screens are staged by setting the same attributes the JS sets (no mic).
 
 ## PC hub, desktop-only dashboard, hide windows, Get desktop app
 
-- **PC hub** (`assistant/devhub.py`, `assistant/web/devteam.{html,js,css}`):
+- **PC hub** (`kwil/devhub.py`, `kwil/web/devteam.{html,js,css}`):
   a desktop-only page at `http://127.0.0.1:8765/devteam` on the PC's web
   app for chatting with the `/build-feature` coordinator(s). One window
   per `[devteam] hub_sessions` entry (at most 8), auto-tiled, maximize/Esc,
@@ -1539,7 +1539,7 @@ screens are staged by setting the same attributes the JS sets (no mic).
   request is from the PC itself (no proxy headers, no trusted proxy); the
   `/api` routes need the normal sign-in. Markdown renderer ported from
   the dashboard, with a parity test.
-- `assistant/devteam.py`: `send(source=, session=)`, `replies(max_chars=)`,
+- `kwil/devteam.py`: `send(source=, session=)`, `replies(max_chars=)`,
   `presence()`/`presences()`, the `idle` status option, `link_from_config`
   (now used by `cli.register_devteam` too), and private atomic state
   writes through `google_auth.write_private`. Voice behaviour unchanged.
@@ -1604,14 +1604,14 @@ screens are staged by setting the same attributes the JS sets (no mic).
 
 ## Chinese MVP for a second user (`config.mom.toml`)
 
-- **A separate instance**: `python -m assistant --mode web --config
+- **A separate instance**: `python -m kwil --mode web --config
   config.mom.toml --env-file .env.mom`. New `--env-file` flag (secrets and
   the generated `WEB_TOKEN` go to that file); `config.mom.toml` turns off
   Notion, memory, notes, lecture, tutor, dev team, failover, updates and the
   PC browser tool, and keeps its own history, sessions, Google files
   (`data/mom/`), port 8766 and `logs/mom.log`. `*.local.toml` and `.env.*`
   are gitignored.
-- **Language** (`[assistant] language = "zh"`, new `assistant/i18n.py`):
+- **Language** (`[assistant] language = "zh"`, new `kwil/i18n.py`):
   a Chinese system prompt in the same voice style (`chat.SYSTEM_PROMPT_ZH`;
   the English tool prompts say "the user" instead of Kyle, plus "always
   reply in Simplified Chinese"); Whisper with `language="zh"` and a Mandarin
@@ -1628,7 +1628,7 @@ screens are staged by setting the same attributes the JS sets (no mic).
   them (MutationObserver), exact matches only. History screens stay
   English. `sw.js` cache `hey-claude-shell-v5`, `/i18n.js` in the shell.
 - **Google from the phone** (`[webapp] google_connect`, `public_origin`,
-  new `assistant/google_web.py`): a menu button runs the OAuth web flow
+  new `kwil/google_web.py`): a menu button runs the OAuth web flow
   (PKCE, offline access) in the phone's browser; the callback is
   authenticated by a single-use, in-memory state (max 4, 10 min) because
   the session cookie is SameSite=Strict; the token is written with
@@ -1757,7 +1757,7 @@ screens are staged by setting the same attributes the JS sets (no mic).
 
 ## Mom's app guides her first steps
 
-- `assistant/web/i18n.js` (only on pages with the "Connect Google" button,
+- `kwil/web/i18n.js` (only on pages with the "Connect Google" button,
   i.e. a family member's instance): the sign-in text asks for "the sign-in
   code you were sent", and after sign-in a card lists only the steps still
   to do: add to the home screen (hidden once opened from it) and connect
@@ -1775,7 +1775,7 @@ the new person, with their own history and reply language and nothing of
 Kyle's. Piece B (their own Google, per-session speech language,
 Render/Docker changes) comes separately.
 
-- `assistant/family.py` (new): `Family` keeps `<dir>/users.json` (written
+- `kwil/family.py` (new): `Family` keeps `<dir>/users.json` (written
   with `google_auth.write_private`) with each person's id, name, language,
   time zone, status (invited/active), and only the SHA-256 of their invite
   token. Invite, new link, redeem (under the lock, with the session made
@@ -1856,7 +1856,7 @@ Render/Docker changes) comes separately.
     `test_host_update.py`).
   - With failover the owner's page signs in with a bearer token, so the
     invite menu's same-origin `fetch` got 401. `family.js` now takes app.js's
-    router-aware `request()` (`HeyClaudeFamily.configure`). The link is built
+    router-aware `request()` (`KwilFamily.configure`). The link is built
     from this server's own address: `[webapp] public_origin`, else (with a
     failover role) this backend's URL, the cloud's defaulting to
     `APP_ORIGIN`, else the request's host; never the page's `Origin`.
@@ -1908,7 +1908,7 @@ Render/Docker changes) comes separately.
   46 skipped. JS: family 9, backend-router 33, all 204 node tests passing (190 .mjs + 14 voice-core.test.js).
 ## Chinese page: every screen translated
 
-- `assistant/web/i18n.js`: the Chat / Lecture / Tutor tabs, the settings
+- `kwil/web/i18n.js`: the Chat / Lecture / Tutor tabs, the settings
   menu (backends, captions), the History screen (filters, groups, actions,
   counts) and the lecture and tutor screens now have Chinese strings, plus
   patterns for the dynamic ones ("12 messages", "Actions for …",
@@ -1917,7 +1917,7 @@ Render/Docker changes) comes separately.
 
 ## Mom's app tells her what it can do
 
-- The first-run card (`assistant/web/i18n.js`) now also lists example
+- The first-run card (`kwil/web/i18n.js`) now also lists example
   questions in Chinese (weather, a recipe, translating, a birthday message;
   plus calendar and email ones once Google is connected), shown without
   her asking until she taps 知道了 once.
@@ -1936,12 +1936,12 @@ Render/Docker changes) comes separately.
   kylechen839-max/agent-dashboard repo (`dashboard/`). The watchdog prompt
   moved to `docs/WATCHDOG.md`, since the watchdog runs in a session on this
   repo; SKILL.md points at both.
-- Kyle scrapped the PC hub: `assistant/devhub.py`, `web/devteam.*`, its
+- Kyle scrapped the PC hub: `kwil/devhub.py`, `web/devteam.*`, its
   `create_app(hub=)` hook and startup lines, the `[devteam] hub`,
   `hub_sessions`, `poll_seconds` and `hub_state_file` settings, the hub
   sections of README, MANUAL_TEST, SECURITY, PRIVACY and
   docs/COORDINATOR_LINK.md, and the skill's hub and presence-row steps are
-  gone. `assistant/devteam.py` keeps only the voice link
+  gone. `kwil/devteam.py` keeps only the voice link
   (`message_dev_team` / `check_dev_team`): the hub's message source, window
   sessions, 12000-character replies and presence reads were dropped; the
   private atomic state file, the state lock and the whole-tree kill on a
@@ -2038,7 +2038,7 @@ Render/Docker changes) comes separately.
 
 ## Phone page: menu closes on an outside tap; swipe down hides the keyboard
 
-- New `assistant/web/ui.js` (all pages): the settings menu closes on a tap
+- New `kwil/web/ui.js` (all pages): the settings menu closes on a tap
   anywhere outside it, or Escape, like other apps; a downward swipe of
   40 px or more while typing blurs the field so iOS closes the keyboard.
   Served at `/ui.js` (public on the cloud, like the other page files),
@@ -2053,7 +2053,7 @@ Render/Docker changes) comes separately.
   with the next typed message or push-to-talk recording as `attachment`
   parts of `/api/turn`'s form. Photo-only messages work too. Hands-free
   voice mode is unchanged (out of scope).
-- **Server:** new `assistant/attachments.py` sniffs the type from the first
+- **Server:** new `kwil/attachments.py` sniffs the type from the first
   bytes (JPEG, PNG, WebP, GIF, PDF, UTF-8 text without control bytes),
   caps the count (4) and sizes (photos `[tutor] max_image_mb`, PDF/text new
   `[webapp] max_attachment_mb` = 10, both under `max_upload_mb`; text 200k
@@ -2073,7 +2073,7 @@ Render/Docker changes) comes separately.
   `/api/state`'s turn count), and older attachments become a text marker
   once the conversation's base64 passes 20 MB (the API caps requests at
   32 MB). INFO logs: count, kinds and sizes only.
-- **Page:** `assistant/web/attachments.js` (public like `family.js`, also
+- **Page:** `kwil/web/attachments.js` (public like `family.js`, also
   in CloudGuard's `PUBLIC_GET` so it loads before sign-in) holds the tray
   and the 1600 px JPEG `shrinkImage()`, which the tutor's `features.js`
   now uses instead of its own copy. Thumbnails are `data:` URLs (the CSP
@@ -2179,7 +2179,7 @@ Render/Docker changes) comes separately.
 
 ## Memory review: see and delete what it remembers
 
-- `assistant/memory_review.py` (`MemoryReview`): lists the assistant's own
+- `kwil/memory_review.py` (`MemoryReview`): lists the assistant's own
   vectors in its Pinecone namespace by id prefix (`index.list` with
   `voice-` and `note-`, then `index.fetch` in batches of 100, at most
   1000), sorts newest first by `created_at` (both writers already store
@@ -2241,7 +2241,7 @@ Render/Docker changes) comes separately.
 
 ## Smart home through Home Assistant (off by default)
 
-- New `assistant/tools/home_assistant.py`: `ha_list` (devices by area or
+- New `kwil/tools/home_assistant.py`: `ha_list` (devices by area or
   domain, with state; the list is cached for `[home_assistant]
   cache_seconds`), `ha_state` (one device; numeric attributes only) and
   `ha_control` (on/off/toggle, brightness, colour temperature, thermostat
@@ -2316,7 +2316,7 @@ Render/Docker changes) comes separately.
 
 - "Play my study playlist", "play some lo-fi", "pause", "skip", "go back",
   "what's playing?", "turn it up", "play it on my phone". New
-  `assistant/tools/spotify.py` drives the Spotify Web API player (Premium
+  `kwil/tools/spotify.py` drives the Spotify Web API player (Premium
   only) with nine tools: spotify_play (Kyle's own playlists first, then
   the catalog; a mood or genre plays a playlist, a song name plays that
   song), spotify_pause, spotify_resume, spotify_next, spotify_previous,
@@ -2327,9 +2327,9 @@ Render/Docker changes) comes separately.
   untrusted.
 - Sign-in: Authorization Code with PKCE, no client secret
   (`SPOTIFY_CLIENT_ID` in `.env`), minimum scopes. Once with
-  `python -m assistant.tools.spotify` (paste back the 127.0.0.1 address)
-  or the phone's owner-only "Connect Spotify" (`assistant/spotify_web.py`,
-  `assistant/web/spotify.js`, modelled on `google_web.py`: single-use
+  `python -m kwil.tools.spotify` (paste back the 127.0.0.1 address)
+  or the phone's owner-only "Connect Spotify" (`kwil/spotify_web.py`,
+  `kwil/web/spotify.js`, modelled on `google_web.py`: single-use
   state map, bounded, 10-minute expiry). Token written with
   `write_private`; refreshed a minute before expiry, re-read from the
   file first (the wake-word process and the web app share it). If a
@@ -2377,7 +2377,7 @@ Render/Docker changes) comes separately.
 
 ## Phone app: each person picks their reply voice
 
-- New `assistant/voice_picker.py` and `assistant/web/voice-picker.js`: the
+- New `kwil/voice_picker.py` and `kwil/web/voice-picker.js`: the
   settings menu has **Reply voice**, with the voices this server really has
   in the person's language (Piper files in `[tts] voices_dir` with their
   language from the file name, Kokoro if set up and never with the server
@@ -2560,7 +2560,7 @@ their language, on the same shared cloud server as Kyle.
 
 ## Interrupt by talking (barge-in) and follow-ups, PC and phone (2026-10-20)
 
-- **PC wake-word loop** (`assistant/wakeword.py` `BargeInSpeaker`,
+- **PC wake-word loop** (`kwil/wakeword.py` `BargeInSpeaker`,
   `EchoGate`): while a reply plays, a helper thread reads the mic. `[wake]
   barge_in = "wake_word"` (default): "Hey Claude" over a reply stops it at
   once, chimes and records the new request. `"voice"`: plain talking does
@@ -2673,7 +2673,7 @@ failed with an API 400 (thinking-block signatures) that no mocked test
 saw; hands-free barge-in misfired (fixed on its own branch; voice-core.js
 is untouched here).
 
-- **Watchdog** (`assistant/watch.py`, `python -m assistant.watch`; the
+- **Watchdog** (`kwil/watch.py`, `python -m kwil.watch`; the
   `\HeyClaude\Watch` task every 5 minutes via
   `scripts/install_watch_task.ps1` or `install_family_tasks.ps1 -Watch`,
   `deploy/hey-claude-watch.{service,timer}` via `scripts/install_watch.sh`
@@ -2715,7 +2715,7 @@ is untouched here).
   (inside its lock, after the import/`--check` smoke), by the host
   supervisor for a pull by hand (the web host checks; the wake host waits
   for its verdict), by the watchdog when an app runs an older version than
-  HEAD, and by `scripts/deploy.ps1` / `deploy.sh` (`assistant/deploy.py`:
+  HEAD, and by `scripts/deploy.ps1` / `deploy.sh` (`kwil/deploy.py`:
   pull, gate, switch or refuse, then a live check). A failing commit is
   undone and rejected; one that fails only for outside reasons is neither.
   `install_family_tasks.ps1 -Restart` now goes through it. After the host
@@ -3158,7 +3158,7 @@ team chat or an engineering chat" and summarize the ideas and files. This
 is phase A (read and file a digest) plus phase B (registration, config,
 i18n, docs).
 
-- New `assistant/tools/teamchat.py`: `TeamChat` over one provider per
+- New `kwil/tools/teamchat.py`: `TeamChat` over one provider per
   service, with `chat_channels`, `chat_read` (a channel or one thread;
   the last 24 hours, `hours`, or a `day` from `timeutil.resolve_day` on
   the turn's clock), `chat_search`, `chat_files`, `chat_read_file` and
@@ -3293,7 +3293,7 @@ i18n, docs).
 - Counts (Linux sandbox, Python 3.13): 2137 passed, 48 skipped (master
   f1eb136: 2124 passed, 48 skipped).
 - Deploy: this update changes `requirements.txt` (anthropic>=0.77), so the
-  auto-updater skips it. Stop the assistant and run `python -m assistant
+  auto-updater skips it. Stop the assistant and run `python -m kwil
   --update`, or `.\.venv\Scripts\python.exe -m pip install -r
   requirements.txt`, then restart.
 
@@ -3319,7 +3319,7 @@ Kyle: "build Haiku routing and caching right now."
   `mark_interrupted`, an old attachment turned into a marker, a model
   switch (caches are per model), and (round 2) the request after a weekly
   review offer and after a `delete_note`.
-- **Routing** (`assistant/router.py`): one model per user turn, picked in
+- **Routing** (`kwil/router.py`): one model per user turn, picked in
   `ask()` before the request and kept for its whole tool loop. The main
   model when the router is off, there's no separate fast model, the turn
   or the history has an attachment, the conversation is tainted, it was
@@ -3332,7 +3332,7 @@ Kyle: "build Haiku routing and caching right now."
   (`web_search_20250305` / `web_fetch_20250910`). Conversation summaries
   use the fast model. Confirmations don't change: the same tools and
   questions on either model.
-- **Usage** (`assistant/usage.py`): every Messages API call of the chat
+- **Usage** (`kwil/usage.py`): every Messages API call of the chat
   (and its summaries) logs its model and token counts (input, output,
   cache read, cache write, web searches) at INFO, no text. Monthly totals
   per model, with a rough $ estimate from the list prices (Sonnet 5.5
@@ -3506,7 +3506,7 @@ reverted (`__pycache__` cleared). Master b96e6ed measured here first:
   `packaging` when present, else that line is skipped; `==` and unpinned
   names left to pip) against `importlib.metadata`. `gate_check` returns
   None ("can't tell yet", never a rejection for good) and deploy refuses
-  with "stop the apps, then run `python -m assistant --update` or
+  with "stop the apps, then run `python -m kwil --update` or
   `pip install -r requirements.txt`". Tests: the parser
   (`test_requirements_problem_reads_the_minimums`), the gate
   (`test_the_gate_waits_for_requirements_to_be_installed`), deploy
@@ -3573,7 +3573,7 @@ reverted (`__pycache__` cleared). Master b96e6ed measured here first:
 ## Public beta G5: public pages and waitlist (2026-10-21)
 
 What it does:
-- New `assistant/public_site.py` with static `web/landing.html`,
+- New `kwil/public_site.py` with static `web/landing.html`,
   `privacy.html`, `terms.html`, `waitlist.html` and `site.css`. The pages
   are `/welcome`, `/privacy` and `/terms`, public in CloudGuard
   (`cloud.PUBLIC_GET`). They have no JavaScript, no inline CSS, no CDN
@@ -3765,7 +3765,7 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
 
 ## Public beta G4: account self-service (2026-10-21)
 Kyle: let invited people manage their own account. New module
-`assistant/account.py`; small additive hooks in `family.py`
+`kwil/account.py`; small additive hooks in `family.py`
 (`app.state.family_sign_out`) and `webapp.py` (`account.register`, and a
 shared `clear_session_cookie` that sign-out now uses too).
 - **`POST /api/me/delete`** (a family member's own cookie session; the
@@ -3906,7 +3906,7 @@ shared `clear_session_cookie` that sign-out now uses too).
 
 ## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
 
-- **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
+- **Error tracking** (`kwil/errortracking.py`): Sentry, optional. On
   only with `SENTRY_DSN` set (`render.yaml` offers it); `sentry-sdk` is in
   requirements.txt since round 2 (round 1 had it optional behind a Docker
   build argument). Without the package: one warning, the app runs. Started from `cli.main` (every mode,
@@ -3919,7 +3919,7 @@ shared `clear_session_cookie` that sign-out now uses too).
   runs every string through `config.redact` and masks email-shaped text;
   an event it can't clean is dropped. `SENTRY_DSN` joins
   `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`.
-- **Backup download** (`assistant/backup.py`, `GET /api/backup`, owner
+- **Backup download** (`kwil/backup.py`, `GET /api/backup`, owner
   only via `owner_of`): a zip of `history.sqlite`, `users/users.json`
   (each entry `family.public`, round 2), each listed member's
   `users/<id>/history.sqlite`, `waitlist.json` if present and a
@@ -3977,7 +3977,7 @@ shared `clear_session_cookie` that sign-out now uses too).
    leaves remote entries out of its failing count (one condition). Test:
    `test_deploy_passes_while_the_cloud_is_down`.
 3. **`logentry.message` isn't always a format string.** It is kept only
-   for the app's own `assistant.*` loggers; for others (asyncio's "Task
+   for the app's own `kwil.*` loggers; for others (asyncio's "Task
    exception was never retrieved", libraries' `log.error(exc)`) only the
    logger name goes. Tests: the asyncio event shape, and the real SDK with
    an unretrieved task exception.
@@ -4016,7 +4016,7 @@ shared `clear_session_cookie` that sign-out now uses too).
 Kyle has no funding, so public beta testers pay for their own Claude use.
 Gap (a) of the beta brief: every family member's chat and history titles
 ran on the owner's `anthropic.Anthropic()`.
-- **`assistant/userkeys.py`.** Each person's key is kept in
+- **`kwil/userkeys.py`.** Each person's key is kept in
   `<[family] dir>/<id>/anthropic_key.enc` (`write_private`) as a Fernet
   token (`cryptography>=44`, already a google-auth dependency; abi3 wheels
   for win_amd64, manylinux x86_64/aarch64, Python 3.9+). The Fernet key is
@@ -4029,7 +4029,7 @@ ran on the owner's `anthropic.Anthropic()`.
   `models.list(limit=1)` call (timeout 10, one retry): 401/403/other 4xx ->
   400, 408/409/429/5xx and connection errors -> 503, SDK exceptions not
   chained.
-- **Routes (`assistant/userkeys_web.py`, one additive line in
+- **Routes (`kwil/userkeys_web.py`, one additive line in
   `create_app`).** `GET/PUT/DELETE /api/me/anthropic-key`, each about the
   signed-in person only. PUT checks the shape (`sk-ant-`, at most 256
   characters), then `USER_DATA_KEY` (503 before any call), then the live
@@ -4115,7 +4115,7 @@ ran on the owner's `anthropic.Anthropic()`.
 Built on `claude/account-self-service` (G4, PR #41), which revokes on
 self-delete. Any invited person (beta or family) can connect their own
 Notion workspace and gets exactly two tools on their own token.
-- **`assistant/notion_web.py`** (new), mirroring `google_web.GoogleConnect`:
+- **`kwil/notion_web.py`** (new), mirroring `google_web.GoogleConnect`:
   `GET /api/notion/status` (`{enabled, connected, workspace, database}`),
   `POST /api/notion/connect` (`{url}` of
   `api.notion.com/v1/oauth/authorize?owner=user`), `POST
@@ -4134,7 +4134,7 @@ Notion workspace and gets exactly two tools on their own token.
   The SDK gets its own logger at ERROR (its default adds a console handler
   per client, and its warnings quote Notion's messages, which can echo a
   title); a 10 s timeout per request.
-- **`assistant/userkeys.py`**: generic `seal(label, uid, payload)` /
+- **`kwil/userkeys.py`**: generic `seal(label, uid, payload)` /
   `unseal(...)` (Fernet/HKDF under a label, the uid inside the ciphertext);
   `KeyStore` now uses them (same behaviour and messages); `NOTION_LABEL =
   hey-claude/notion-token/v1`. `<dir>/<id>/notion.enc` holds `{uid,
@@ -4142,7 +4142,7 @@ Notion workspace and gets exactly two tools on their own token.
   database_id, data_source_id, database_title}`; never Notion's `owner`
   (their email). Without a usable `USER_DATA_KEY` connect answers 503 and
   the callback never exchanges the code.
-- **`assistant/family.py`**: `notion_enabled/notion_status/save_notion/
+- **`kwil/family.py`**: `notion_enabled/notion_status/save_notion/
   disconnect_notion/revoke_notion/refresh_notion` and `_notion_tools`
   (registered next to Google's; `_refresh_tools` swaps them in place).
   The tools are `NotionAssignments.tools()` re-bound: a client built on
@@ -4166,7 +4166,7 @@ Notion workspace and gets exactly two tools on their own token.
   `NOTION_OAUTH_CLIENT_SECRET` in `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`,
   render.yaml (`sync: false`) and conftest's cleared variables. No redirect
   setting: it is `own_origin + /notion/callback`.
-- **UI**: `assistant/web/notion.js` (new): Connect / Reconnect / Disconnect
+- **UI**: `kwil/web/notion.js` (new): Connect / Reconnect / Disconnect
   Notion beside Google's, shown only for an invited person's session, the
   workspace and database names as text only, a confirm before disconnect,
   and only Notion's authorize URL is followed. en and zh strings in
@@ -4286,7 +4286,7 @@ and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
 Gap (d) of the beta brief: nothing stopped one invited account from running
 turns or Whisper without end (CPU on the shared server; cost on the owner's
 key for family members without their own).
-- **`assistant/quotas.py`** (`UserQuotas`, shaped like
+- **`kwil/quotas.py`** (`UserQuotas`, shaped like
   `cloud.RateLimiter`): per person (user id, across all their browsers and
   the voice view) a sliding 60-second window of turns, turns per day and
   seconds of speech transcribed per day. New `[family]` keys
@@ -4698,7 +4698,7 @@ The data foundation of the student assistant: each person's deadlines
 notification emails or said by hand, with conflict handling, for the owner
 and every invited person. P2 (scheduler and push) and P3 (planner, quiz,
 screenshot import) read it through `DeadlineStore.list(uid)`.
-- **`assistant/deadlines.py`** (new): `DeadlineStore`, one SQLite per
+- **`kwil/deadlines.py`** (new): `DeadlineStore`, one SQLite per
   person (the owner's `[student] dir`/deadlines.sqlite, an invited
   person's `<[family] dir>/<id>/deadlines.sqlite`), `secure_delete=ON`, WAL
   with a TRUNCATE checkpoint after every delete, one short connection per
@@ -4717,7 +4717,7 @@ screenshot import) read it through `DeadlineStore.list(uid)`.
   process one store per config (owner tools, Family, routes share it);
   Family sets `member_guard` so a write for someone just removed is
   refused under Family's lock.
-- **`assistant/canvas.py`** (new): a bounded RFC 5545 reader (unfolding,
+- **`kwil/canvas.py`** (new): a bounded RFC 5545 reader (unfolding,
   VEVENT/VTODO, VALARM skipped, DTSTART/DUE with `VALUE=DATE`, `Z`, `TZID`
   or floating, SUMMARY's `[course]`, UID kinds; 2 MB, 2000 events, no new
   dependency); `public_url` (https, port 443, no userinfo, every resolved
@@ -4729,7 +4729,7 @@ screenshot import) read it through `DeadlineStore.list(uid)`.
   `extract_from_pages` (structured output like `lecture.summarize`, never a
   forced tool call; only {title, course, kind, due} kept, keyed by text so
   a re-read doesn't duplicate; usage on the person's meter).
-- **`assistant/student_web.py`** (new): `StudentSync` (credentials, sync,
+- **`kwil/student_web.py`** (new): `StudentSync` (credentials, sync,
   throttle) and the routes: `GET /api/student/items`, `POST
   /api/student/canvas` ({ics_url} or {base_url, token}; invited people
   only, sealed under `canvas.CANVAS_LABEL` in `<id>/canvas.enc`, 503
@@ -4743,7 +4743,7 @@ screenshot import) read it through `DeadlineStore.list(uid)`.
   the Canvas emails of the last 14 days (`GmailInbox.search`, read-only,
   each email once), on the person's own key when they have one
   (`family.UserApi`); errors come back as codes only.
-- **`assistant/tools/deadlines.py`** (new): `list_deadlines`
+- **`kwil/tools/deadlines.py`** (new): `list_deadlines`
   (`untrusted_output`, `private`), `confirm_deadline` and `add_deadline`
   (`confirm_if_untrusted`), `delete_deadline` (`confirm_prompt` always);
   questions in English and Chinese (i18n `deadline_*`).
@@ -4759,7 +4759,7 @@ screenshot import) read it through `DeadlineStore.list(uid)`.
   `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`, render.yaml, .env.example and
   conftest's cleared variables; redaction patterns for feed links and
   Canvas tokens.
-- **UI**: `assistant/web/student.js` (new, self-contained: builds its
+- **UI**: `kwil/web/student.js` (new, self-contained: builds its
   own "School deadlines" card in `#student` or before the API key section,
   text only). Not yet on the page: `/student.js` still needs the static
   route, `sw.js` SHELL (cache bump), `cloud.py` `PUBLIC_GET` and a script
@@ -4872,7 +4872,7 @@ events, and whenever a calendar he doesn't own was read (with
 tainted whenever a shared calendar existed. Kyle decided his own data must
 not trigger confirmations.
 
-- **What changed** (`assistant/tools/calendar.py`): one rule,
+- **What changed** (`kwil/tools/calendar.py`): one rule,
   `GoogleCalendar._outside`, now decides taint for listings, moves and
   updates. An event is someone else's text when it is on a calendar Kyle
   doesn't own or `is_from_others` (no `organizer.self is True`, an
@@ -5087,7 +5087,7 @@ Branch `claude/student-proactive` from master 3b7ae54. The app speaks up
 first: rules over the student deadline store (P1's `DeadlineStore`, built
 in parallel) decide when a notification is worth sending; Claude only
 words it.
-- **`assistant/push.py`** (new): Web Push. The VAPID key comes from
+- **`kwil/push.py`** (new): Web Push. The VAPID key comes from
   `VAPID_PRIVATE_KEY` or is generated once into `[push] owner_dir`
   (`write_private`); `GET /api/push/key` serves the public key. Each
   person's subscriptions (at most 5, oldest dropped, same endpoint
@@ -5098,7 +5098,7 @@ words it.
   subscription can't aim the server at an internal address. `send()` uses
   pywebpush (aes128gcm, VAPID `sub` = `[push] subject` or the public
   https origin); a 404/410 forgets that device.
-- **`assistant/proactive.py`** (new): `evaluate()` is pure Python over
+- **`kwil/proactive.py`** (new): `evaluate()` is pure Python over
   the store's rows: morning (07:30, due today/tomorrow and exams this
   week), evening (20:30, due tomorrow), weekly (Sunday 18:00, the week),
   exam (14/7/3/1 days out while no review blocks are planned; P3's
@@ -5119,7 +5119,7 @@ words it.
   template summary of the week, plus an `/api/audio/<id>` link (the reply
   audio route, bound to the session).
 - **Wiring**: `build_assistant` attaches `assistant.push` and
-  `assistant.proactive` (none on a `--candidate` copy); `create_app`'s
+  `kwil.proactive` (none on a `--candidate` copy); `create_app`'s
   lifespan starts and stops the scheduler, taking `assistant.deadlines`
   (P1) as its store, and registers the four routes. `brief.js` is in the
   static routes, `sw.js` SHELL (cache v28) and CloudGuard `PUBLIC_GET`.
@@ -5132,7 +5132,7 @@ words it.
   profile: `owner_dir = /data/student`; `config.mom.toml` its own
   folder); `VAPID_PRIVATE_KEY` in `SECRET_ENV_VARS` and
   `ISOLATED_ENV_VARS`; requirements `pywebpush>=2.5`, `cryptography>=47`.
-- **UI** (`assistant/web/brief.js`, new): the permission is asked first
+- **UI** (`kwil/web/brief.js`, new): the permission is asked first
   thing in the tap (iOS asks only from a gesture), then
   `pushManager.subscribe` with the VAPID key and `POST
   /api/push/subscribe`; "Turn off notifications" unsubscribes at the
@@ -5286,3 +5286,129 @@ words it.
   guard), logged at INFO; `config.mom.toml` has its own folder. Test
   `test_separate_instance_never_shares_the_owners_push_folder` (fails with
   the guard disabled). Counts: 2983 passed, 44 skipped; JS 143 pass.
+
+## Kwil rebrand (2026-10-22)
+
+Kyle renamed the product before the public launch: **Kwil** (said
+"quill"), wake phrase "Hey Kwil". "Claude" stays only where it names the
+model or Anthropic ("powered by Claude", `CLAUDE_MODEL`, the Claude API).
+
+- **What people see.** The manifest (`name`/`short_name` "Kwil"), every
+  page title and brand line (`index`, `landing`, `privacy`, `terms`,
+  `waitlist`), the "What is Kwil?" link (`public_site.py`, i18n.js, Chinese
+  "Kwil 是什么？" with the name untranslated), push titles
+  (`proactive.TITLE`, `sw.js` fallback), the iPhone home-screen label
+  (`apple-mobile-web-app-title`), the console's reply prefix (`Kwil: ...`;
+  the preflight parses `Claude: ...` too), the speaker in exported
+  transcripts (`**Kwil:**`), the preflight report header, the account
+  export (`kwil-data.zip`) and the backup (`kwil-backup-<day>.zip`).
+  The system prompt says "Kyle's personal voice assistant, Kwil (said like
+  "quill")", and the Chinese one "私人语音助手 Kwil（读作 quill）".
+- **The package is `kwil/`** (`git mv assistant kwil`; every import,
+  `-m` command, path, logger name and caplog filter, script, unit, workflow
+  and doc). `assistant/` is now an alias kept for at least one stable
+  release, in two layers:
+  - `assistant/_alias.py`, a `sys.meta_path` finder (installed by
+    `assistant/__init__.py`): `import assistant.X` returns the `kwil.X`
+    module object itself (its `__spec__` stays `kwil.X`; only names that
+    exist under `kwil` resolve), and its loader hands runpy the real
+    code (`get_code`, `get_source`, `is_package`, `get_filename`), so
+    `python -m assistant.host` / `assistant.watch` / `assistant.deploy` /
+    `assistant.tools.google_auth` run as before. `assistant/__main__.py`
+    runs `kwil.cli.main` for `python -m assistant`.
+  - A one-line file shim for each of 610017b's 81 modules
+    (`assistant/X.py`, `assistant/tools/*.py`, `assistant/failover/*.py`:
+    `shim(__name__)`), which installs the finder and puts `kwil.X` in
+    `sys.modules`. Judge round 1 (HIGH) found that a process started on
+    the old code, such as the old `deploy.ps1` running the old
+    `assistant.deploy`, has the old package (no finder) in memory when
+    `git pull` swaps the tree; its lazy `from assistant.host import ...`,
+    `from assistant import smoke`, `assistant.tools.google_auth`,
+    `assistant.devteam` would have crashed the deploy halfway. Now they
+    find these files and get the same module objects as `kwil.X`.
+  So the PC's `\HeyClaude\` tasks, a Pi's old units, any start command
+  that runs `python -m assistant`, and old processes mid-update keep
+  working, and `monkeypatch`/`mock.patch` through either name hit the same
+  object.
+- **Running across the rename.** The host supervisor, the go-live
+  check and the updater's smoke run `python -m <package()>`
+  (`version.package`): `kwil` when `kwil/cli.py` exists, else `assistant`
+  in a checkout from before the rename (judge MED: not the `kwil/` folder,
+  which a rollback leaves behind holding `__pycache__`), so a rollback past
+  it doesn't crash-loop a supervisor started on the new code.
+  `requirements.txt` is byte-identical to 610017b (judge MED: any change
+  makes the old deploy and the updater demand `--requirements`, which would
+  stop the automatic update that carries the rename). `restart_instance.ps1` looks for `\Kwil\<task>`,
+  then `\HeyClaude\<task>`, then the hand-made `\Hey Claude Web`, and its
+  process match (like `install_windows_service.ps1`'s and
+  `install_family_tasks.ps1`'s) accepts `-m kwil` and `-m assistant`, so
+  the next `deploy.ps1` on Kyle's PC restarts the old tasks. The install
+  scripts register under `\Kwil\` and remove the matching `\HeyClaude\`
+  tasks first; `install_service.sh` / `install_watch.sh` install
+  `kwil.service` / `kwil-watch.timer` and disable and delete the
+  `hey-claude*` units (the pi-arm64 simulation plants an old unit and
+  checks it is replaced).
+- **Env vars:** `KWIL_VERSION` first, `HEY_CLAUDE_VERSION` still read.
+  `CLAUDE_MODEL`, `CLAUDE_FAST_MODEL`, `CLAUDE_ROUTER` unchanged.
+- **Phone:** `HeyClaude*` page globals are `Kwil*` (`kwilFailover`,
+  `KwilI18n`, ...). The service-worker cache is `kwil-shell-v1`, so every
+  phone reloads its assets once. Nothing branded lived in localStorage
+  (its keys are `failover`, `backendSettings`, ...), so there was nothing
+  to migrate; the failover token's IndexedDB keeps its name `hey-claude`
+  (`backend-router.js` `TOKEN_DB`), like the `hc_session` cookie, so nobody
+  is signed out. A JS test opens a database written before the rebrand.
+- **GitHub rename:** `[update] repo` defaults to
+  `github.com/kylechen839-max/Kwil`, and the origin check accepts the old
+  `Claude-Personal-Assistant` name too (`updater.REPO_ALIASES`, one pair
+  only). `allowed_signers` moves to `%APPDATA%\Kwil\` /
+  `~/.config/kwil/`; the old folder is read while the new one has none.
+- **Kept on purpose** (SECURITY.md "Kwil rebrand"): HKDF labels
+  `hey-claude/...` (a new label can't open stored secrets), `render.yaml`
+  `name: hey-claude` and disk `hey-claude-data` (a renamed Blueprint
+  service is a new one with an empty disk; commented), `data/` and DB
+  names, `logs/assistant.log`, the `[assistant]` config section, the
+  Notion "Hey Claude coordinator inbox" and its message headers (found by
+  title; docs/COORDINATOR_LINK.md), and `.claude/settings.json` (agents
+  don't edit permissions; `python -m assistant --check` still works).
+- **Wake word:** `keywords/hey_claude.onnx` stays until a "Hey Kwil" model
+  is trained (BLOCKERS.md). Follow-up transcripts drop a leading "Hey Kwil",
+  "Hey Quill" (Whisper's usual spelling) or "Hey Claude"
+  (`cli.BRAND_WAKE_PHRASES`); the phone's voice mode defaults to
+  "Hey Kwil".
+- **Docker:** the image copies `kwil/` and the `assistant/` alias, runs
+  `python -m kwil`, is tagged `kwil` (CI `kwil:ci`), and the container
+  smoke also runs `python -m assistant --help`.
+- **Tests.** New `tests/test_rebrand.py`: the alias is the same module
+  object (and keeps the real `__spec__`), monkeypatching either name,
+  `python -m kwil --help` and `python -m assistant --help` in a subprocess,
+  `python -m assistant.host|watch|deploy|tools.google_auth --help` (same
+  output as the `kwil.` names), a file shim for every 610017b module, a
+  file shim and the finder giving the same object, an old process (old
+  package in memory, no finder) whose tree is swapped and whose lazy
+  imports then resolve to the `kwil` modules, `package()` with a leftover
+  `kwil/__pycache__`, requirements.txt unchanged since 610017b (skips
+  where the clone lacks that commit), `KWIL_VERSION`/`HEY_CLAUDE_VERSION`, both repo names accepted (and
+  others refused) through `Updater.origin_problem`, the old signers
+  folder, `version.package`, no user-facing "Hey Claude" in the pages,
+  manifest, i18n, system prompts and page globals (allowlist: the
+  wake-phrase note), the kept labels/cookie/Render names, the wake-phrase
+  stripping, the units and install scripts, the Dockerfile and the backup
+  sweep of old temp folders. `tests/test_docs.py::test_no_pre_rebrand_names`
+  fails on an old package path, unit, task folder or an unquoted "Hey
+  Claude" in README, MANUAL_TEST, PI_MIGRATION, SECURITY, FAILOVER,
+  PRIVACY, config.toml or .env.example unless the line says it is the old
+  name. `backend-router.test.mjs` checks the pre-rebrand token database.
+  The PowerShell scenario tests gained the `\HeyClaude\` and
+  `-m assistant` cases (restart_instance 11 checks, install_windows_service
+  9); PowerShell isn't available in the sandbox, so those run on CI's
+  Windows job only. Every new Python test was checked to fail with its
+  source change reverted (one at a time).
+- **Counts** (Linux sandbox, Python 3.13, shellcheck installed): 3066
+  passed, 37 skipped (baseline 610017b on the same machine: 2998 passed,
+  37 skipped; without shellcheck its 7 lint tests skip: 2991/44). JS
+  (`node --test tests/js/*.test.mjs`, CI's command) 144 pass (143 before). The PowerShell scenario tests skip here (no
+  PowerShell); CI's Windows job runs them.
+- **Lesson** (TEAM_MEMORY): the first text rewrite of `assistant.` also
+  renamed attributes of variables called `assistant` (`assistant.tools`,
+  `assistant.backup`); they were restored and the rename redone by import
+  shape.

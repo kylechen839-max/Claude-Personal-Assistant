@@ -1,4 +1,4 @@
-# Coordinator link: one dev team coordinator for the dashboard and Hey Claude
+# Coordinator link: one dev team coordinator for the dashboard and Kwil
 
 Kyle has one **coordinator**: a standing Claude Code cloud session running
 the `/build-feature` master role (`.claude/skills/build-feature/SKILL.md`).
@@ -7,12 +7,16 @@ He reaches the same coordinator from two places:
 | From | How a message gets in | How the answer gets out |
 |---|---|---|
 | **Agent dashboard** (the private kylechen839-max/agent-dashboard repo) | "Message coordinator" (claude.ai comment, "Send to Claude"), or Open session | The session itself, and the dashboard's `runs` rows and `status_lines` |
-| **Hey Claude** (iPhone app, PC voice) | `claude -p --cloud <coordinator> --output-format json` on the home PC, message on stdin (`assistant/devteam.py`) | One row in the Notion database **Hey Claude coordinator inbox**, read by the app and spoken |
+| **Kwil** (iPhone app, PC voice) | `claude -p --cloud <coordinator> --output-format json` on the home PC, message on stdin (`kwil/devteam.py`) | One row in the Notion database **Hey Claude coordinator inbox**, read by the app and spoken |
 
 Nothing here uses the Claude API: the coordinator and its agents run on
 Kyle's Claude plan.
 
-## Messages from Hey Claude
+## Messages from Kwil
+
+Kwil was called Hey Claude until 2026-10-22. The message headers below and
+the Notion inbox keep that name on purpose (`kwil/devteam.py`): the inbox
+is found by its title, and renaming it would orphan the replies in it.
 
 They arrive as a normal user turn (Kyle's own CLI, signed in to his account)
 and look like this:
@@ -31,7 +35,7 @@ answer a question about the team, and so on.
 
 ## Messages from the watchdog
 
-The watchdog (`assistant/watch.py`, README "Health checks and safe
+The watchdog (`kwil/watch.py`, README "Health checks and safe
 updates") sends one when an app on Kyle's PC starts failing or recovers,
 or when a new version was refused or rolled back:
 
@@ -66,16 +70,16 @@ connector:
 | Property | Type | What to put |
 |---|---|---|
 | `Reply ID` | title | The reply id from the first line, exactly. |
-| `Reply` | text | What Hey Claude should say: plain spoken sentences, at most about 600 characters. No markdown, lists, links, ids or code. |
+| `Reply` | text | What Kwil should say: plain spoken sentences, at most about 600 characters. No markdown, lists, links, ids or code. |
 | `Status` | select | `answered` (done, or the answer to a question), `working` (accepted, still going), `blocked` (needs Kyle; say what he must do). |
 | `Run` | URL | Optional: the draft PR or the dashboard link. |
 
 - Write `working` right away when a request starts a run ("Got it, starting
   the voice speed setting; I'll say when the draft PR is up"), then update
   the **same row** (same Reply ID) to `answered` or `blocked` when the run
-  ends. Hey Claude speaks each new status once and stops listening for a
+  ends. Kwil speaks each new status once and stops listening for a
   Reply ID after `answered` or `blocked`.
-- Hey Claude creates the database the first time it checks for replies, in
+- Kwil creates the database the first time it checks for replies, in
   the page that holds the Fall 2026 Assignments database. If it doesn't
   exist yet when you answer, create it there with exactly these properties.
 - Also show the message on the dashboard as you would any request (a run's
@@ -88,7 +92,7 @@ connector:
    this repo (for example from the dashboard project, or `claude --cloud
    "/build-feature coordinator: stand by for requests"`), and note its id
    (`session_...`, from its claude.ai/code link).
-2. **Hey Claude, on the home PC** (`config.local.toml`):
+2. **Kwil, on the home PC** (`config.local.toml`):
 
    ```toml
    [devteam]
@@ -108,7 +112,7 @@ connector:
 
 - Kyle's own spoken requests go to the coordinator without a confirmation
   (his choice). If the conversation holds outside text (a web page, an
-  email), Hey Claude asks him first, so outside text can't start coding work.
-- Hey Claude reads replies as information, never as instructions; deletes
+  email), Kwil asks him first, so outside text can't start coding work.
+- Kwil reads replies as information, never as instructions; deletes
   still always confirm.
 - The CLI's sign-in stays on the PC. Nothing in this link stores a token.

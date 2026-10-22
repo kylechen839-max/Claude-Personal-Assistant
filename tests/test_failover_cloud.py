@@ -10,13 +10,13 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from assistant import cloud, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS  # noqa: E402
-from assistant.failover.sync import new_event  # noqa: E402
-from assistant.failover.tokens import TokenAuthority  # noqa: E402
-from assistant.history import HistoryStore  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import cloud, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS  # noqa: E402
+from kwil.failover.sync import new_event  # noqa: E402
+from kwil.failover.tokens import TokenAuthority  # noqa: E402
+from kwil.history import HistoryStore  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_cloud import PROXY, PUBLIC, at, via_proxy  # noqa: E402
 from tests.test_webapp import TOKEN, FakeTranscriber  # noqa: E402
 
@@ -156,8 +156,8 @@ def test_without_a_role_the_guard_is_unchanged(cloud_app):
 def test_pi_history_syncs_to_the_cloud_over_https(cloud_app, tmp_path):
     """A real Pi HistoryStore pushes through CloudGuard and the failover
     layer into the cloud's HistoryStore, and pulls the cloud's back."""
-    from assistant.failover.peers import Backend
-    from assistant.failover.sync import Syncer
+    from kwil.failover.peers import Backend
+    from kwil.failover.sync import Syncer
 
     _, client, cloud_history = cloud_app()
     pi = HistoryStore(tmp_path / "pi.sqlite", origin="pi")
@@ -182,8 +182,8 @@ def test_pi_history_syncs_to_the_cloud_over_https(cloud_app, tmp_path):
 def test_history_sync_thread_starts_on_the_pi_not_the_cloud(tmp_path, monkeypatch):
     import threading
 
-    from assistant.failover import sync
-    from assistant.failover.peers import settings_from_config
+    from kwil.failover import sync
+    from kwil.failover.peers import settings_from_config
 
     ran = threading.Event()
     monkeypatch.setattr(sync.Syncer, "run_forever",
@@ -227,7 +227,7 @@ def test_unauthenticated_voice_sockets_are_capped_until_their_first_message(clou
 # --- final review: sign out everywhere, voice over tokens, cookies on the cloud ---
 
 def test_sign_out_everywhere_cuts_off_access_tokens_on_every_backend(cloud_app, tmp_path):
-    from assistant.failover.sync import REVOKE_CONV
+    from kwil.failover.sync import REVOKE_CONV
 
     _, client, history = cloud_app()
     token = sign_in(client)
@@ -241,8 +241,8 @@ def test_sign_out_everywhere_cuts_off_access_tokens_on_every_backend(cloud_app, 
     pi_history = HistoryStore(tmp_path / "pi.sqlite", origin="pi")
     pi_history.sync_log.append(revoke)
     authority = TokenAuthority(TOKEN)
-    from assistant.failover.edge import EdgeMiddleware
-    from assistant.failover.sync import revoked_before
+    from kwil.failover.edge import EdgeMiddleware
+    from kwil.failover.sync import revoked_before
 
     edge = EdgeMiddleware(lambda *a: None, authority=authority, role="pi",
                           not_before=lambda: revoked_before(pi_history.sync_log))

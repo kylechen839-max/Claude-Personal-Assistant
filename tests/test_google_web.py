@@ -1,4 +1,4 @@
-"""The phone app's "connect Google" sign-in (assistant/google_web.py).
+"""The phone app's "connect Google" sign-in (kwil/google_web.py).
 Offline: Google's token endpoint is mocked (Flow.fetch_token), as in
 tests/test_tools.py's headless sign-in test."""
 
@@ -12,10 +12,10 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import google_web, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import load_config  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import google_web, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import load_config  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
 
 ORIGIN = "https://pc.example.ts.net:8443"
@@ -140,12 +140,12 @@ def test_callback_saves_the_token_and_adds_the_tools(setup, caplog):
     assert r.status_code == 400
     again.assert_not_called()
     info = [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.INFO and r.name.startswith("assistant")]
+            if r.levelno >= logging.INFO and r.name.startswith("kwil")]
     assert any("Google account connected" in m for m in info)
     for secret in ("4/secret-code", state, "ya29", "refresh-secret", q["code_challenge"][0]):
         assert not any(secret in m for m in info), secret
     # a server access log line of the callback has its code masked in the file
-    from assistant.config import redact
+    from kwil.config import redact
     assert "secret-code" not in redact(f"GET /google/callback?state={state}&code=4/secret-code")
 
 

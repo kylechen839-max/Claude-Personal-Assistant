@@ -1,6 +1,6 @@
 // node --test tests/js/app-send.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/app.js in node:vm with a small fake
+// Runs the phone page's kwil/web/app.js in node:vm with a small fake
 // DOM, fetch() and a fake attachments tray (attachments.js), and checks the
 // text box's submit path: picked files go with a new message as /api/turn
 // "attachment" parts, the chips are cleared only once the server took the
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/app.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/app.js', import.meta.url), 'utf8');
 
 class El {
   constructor(id = '') {
@@ -64,7 +64,7 @@ function load() {
     navigator: {},
     location: { hash: '', pathname: '/', origin: 'https://pc.example' },
     history: { replaceState() {} },
-    HeyClaudeAttach: { tray },
+    KwilAttach: { tray },
     FormData, Blob, TextDecoder, setTimeout, clearTimeout, console,
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });

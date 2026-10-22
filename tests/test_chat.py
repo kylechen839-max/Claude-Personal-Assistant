@@ -1,7 +1,7 @@
 import pytest
 
-from assistant.chat import DEFAULT_MODEL, ClaudeChat, default_model
-from assistant.cli import is_exit, run_text
+from kwil.chat import DEFAULT_MODEL, ClaudeChat, default_model
+from kwil.cli import is_exit, run_text
 from tests.conftest import make_response, request_text, system_text, text_block
 
 
@@ -54,12 +54,12 @@ def test_run_text_loop(fake_client):
     inputs = iter(["", "what is 2+2", "quit"])
     out = []
     run_text(chat, input_fn=lambda _: next(inputs), output_fn=out.append)
-    assert "Claude: Four." in out
+    assert "Kwil: Four." in out
     assert out[-1] == "Bye!"
 
 
 def test_run_speak_mode_speaks_reply(fake_client):
-    from assistant.tts import PrintTTS
+    from kwil.tts import PrintTTS
 
     fake_client.queue = [make_response(text_block("Hello."))]
     said = []
@@ -74,8 +74,8 @@ def test_run_voice_loop(fake_client):
 
     import numpy as np
 
-    from assistant.cli import run_voice
-    from assistant.tts import PrintTTS
+    from kwil.cli import run_voice
+    from kwil.tts import PrintTTS
 
     fake_client.queue = [make_response(text_block("It's sunny."))]
     recordings = iter([None, np.ones(10), np.ones(10)])
@@ -89,7 +89,7 @@ def test_run_voice_loop(fake_client):
 
 
 def test_cut_off_tool_call_is_dropped_from_history(fake_client):
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
 
     tools = ToolRegistry()
@@ -109,7 +109,7 @@ def test_cut_off_tool_call_is_dropped_from_history(fake_client):
 
 
 def test_chinese_system_prompt(fake_client):
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.tools import Tool, ToolRegistry
 
     tools = ToolRegistry()
     tools.register(Tool("email_summary", "Summarize Kyle's inbox.",
@@ -126,8 +126,8 @@ def test_chinese_system_prompt(fake_client):
 
 
 def test_build_chat_passes_the_language(monkeypatch):
-    from assistant import cli
-    from assistant.config import load_config
+    from kwil import cli
+    from kwil.config import load_config
 
     monkeypatch.setattr(cli.anthropic, "Anthropic", lambda **kw: None)
     cfg = load_config(None, None)
@@ -138,8 +138,8 @@ def test_build_chat_passes_the_language(monkeypatch):
 
 def test_chinese_prompt_says_what_it_can_do(fake_client):
     """"你能帮我做什么？" gets an answer that matches what this instance has."""
-    from assistant.chat import ZH_HELP_CONNECT, ZH_HELP_EMAIL
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.chat import ZH_HELP_CONNECT, ZH_HELP_EMAIL
+    from kwil.tools import Tool, ToolRegistry
 
     bare = ClaudeChat(client=fake_client, tools=ToolRegistry(), language="zh").build_system()
     assert "你能帮我做什么" in bare and ZH_HELP_CONNECT in bare and ZH_HELP_EMAIL not in bare
@@ -159,7 +159,7 @@ def test_earlier_thinking_blocks_are_not_sent_back():
     sharing the phone's conversation, a continued history) made every later
     request fail: 400 "Invalid `signature` in `thinking` block". Earlier
     turns go without them; the current turn's tool loop keeps its own."""
-    from assistant.chat import request_messages
+    from kwil.chat import request_messages
 
     own = {"type": "thinking", "thinking": "plan", "signature": "this-turn"}
     history = [
@@ -182,7 +182,7 @@ def test_earlier_thinking_blocks_are_not_sent_back():
 
 
 def test_a_conversation_with_a_foreign_thinking_block_keeps_working(fake_client):
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
     from tests.conftest import make_response, text_block
 
     chat = ClaudeChat(client=fake_client, model="m")

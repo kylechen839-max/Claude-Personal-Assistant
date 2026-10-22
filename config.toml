@@ -1,5 +1,5 @@
-# Hey Claude settings. Secrets (API keys) go in .env, not here.
-# Any value left out uses the built-in default (see assistant/config.py).
+# Kwil settings. Secrets (API keys) go in .env, not here.
+# Any value left out uses the built-in default (see kwil/config.py).
 
 [assistant]
 model = "claude-sonnet-5-5"   # CLAUDE_MODEL in the environment overrides this
@@ -8,7 +8,7 @@ conversation_timeout = 300    # seconds of quiet before a new conversation start
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)
 # Simple, short questions go to the cheaper fast model; changes, lookups and
-# reasoning stay on `model` (assistant/router.py). "off" (or CLAUDE_ROUTER=off)
+# reasoning stay on `model` (kwil/router.py). "off" (or CLAUDE_ROUTER=off)
 # sends everything to `model`. CLAUDE_FAST_MODEL overrides fast_model.
 # fast_model = "claude-haiku-5-5"
 # router = "auto"
@@ -21,13 +21,13 @@ language = "en"               # "zh": Mandarin replies, speech and phone page (c
 # "pyttsx3" (OS voice), "elevenlabs" (optional, paid cloud voice), "print".
 # A missing voice falls back down that list, with one log line saying why.
 engine = "auto"
-# Kokoro: get it with  python -m assistant --download-voice kokoro
+# Kokoro: get it with  python -m kwil --download-voice kokoro
 kokoro_voice = "af_heart"     # warm and calm; also af_bella, bf_emma, am_michael (README)
 speed = 1.0                   # Kokoro 0.5-2.0, ElevenLabs 0.7-1.2
 kokoro_model = "models/kokoro/kokoro-v1.0.int8.onnx"
 kokoro_voices = "models/kokoro/voices-v1.0.bin"
 # Piper voice (.onnx, with its .onnx.json next to it).
-# Get one with: python -m assistant --download-voice en_US-lessac-medium
+# Get one with: python -m kwil --download-voice en_US-lessac-medium
 piper_voice = "voices/en_US-lessac-medium.onnx"
 rate = 185                    # pyttsx3 only
 voice = ""                    # pyttsx3 only: part of a voice name, e.g. "Zira" on Windows
@@ -67,7 +67,7 @@ max_seconds = 15
 no_speech_timeout = 5
 follow_up_seconds = 5         # after a reply, keep listening this long without the wake word; 0 = off
 follow_up_chime = true        # soft blip when that window opens (only if chime = true)
-barge_in = "wake_word"        # stop a reply by talking over it: "wake_word" (say "Hey Claude";
+barge_in = "wake_word"        # stop a reply by talking over it: "wake_word" (say the wake word;
                               # works with speakers), "voice" (just talk; best with headphones
                               # or an echo-cancelling speakerphone) or "off" (or false)
 barge_in_ms = 400             # "voice": talk this long over a reply to stop it
@@ -86,7 +86,7 @@ color_labels = {}
 # e.g. color_labels = { School = "Basil", Work = "Blueberry", Gym = "Tangerine" }
 
 [gmail]
-enabled = true                # needs the Gmail scopes: python -m assistant.tools.google_auth
+enabled = true                # needs the Gmail scopes: python -m kwil.tools.google_auth
 max_summary = 15              # most emails in one spoken summary
 
 [notion]
@@ -118,7 +118,7 @@ text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) 
 weekly_review = false         # true: once a week, the first conversation offers to review this week's notes
 review_state_file = "data/memory_review.json"  # when the last weekly review offer was made
 
-[webapp]                      # python -m assistant --mode web (phone page)
+[webapp]                      # python -m kwil --mode web (phone page)
 host = "127.0.0.1"            # keep this: reach it through `tailscale serve`
 port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
@@ -161,7 +161,7 @@ enabled = false               # set true in config.local.toml, after signing is 
 channel = "stable"
 check_minutes = 15
 
-[watch]                       # health checks: python -m assistant.watch (README "Health checks")
+[watch]                       # health checks: python -m kwil.watch (README "Health checks")
 enabled = true                # false = don't check this instance (also per config.<name>.toml)
 label = ""                    # its name in alerts and the banner; "" = "Your app" / "Mom's app"
 public_url = "auto"           # the phone's address: "auto" = public_origin or `tailscale serve`; "" = none
@@ -182,7 +182,7 @@ cloud_url = ""                # e.g. "https://hey-claude.onrender.com": also che
 
 [history]
 # Every conversation (wake word, text, phone) is saved here and can be
-# searched and continued: python -m assistant --history list
+# searched and continued: python -m kwil --history list
 enabled = true
 path = "data/history.sqlite"  # HISTORY_PATH in the environment overrides (Render: /data/history.sqlite)
 retention_days = 0            # delete unpinned conversations older than this many days; 0 = keep forever
@@ -242,7 +242,7 @@ slack = false                 # SLACK_USER_TOKEN (a user token, xoxp-)
 discord = false               # DISCORD_BOT_TOKEN (a bot with Message Content Intent)
 github = false                # GITHUB_TOKEN (a fine-grained, read-only token)
 channels = []                 # Slack/Discord channels it may read, e.g. ["#eng", "general"]; [] = all the token sees
-github_repos = []             # repos it may read, e.g. ["kylechen839-max/Claude-Personal-Assistant"]; [] = all the token sees
+github_repos = []             # repos it may read, e.g. ["kylechen839-max/Kwil"]; [] = all the token sees
 max_messages = 100            # messages per read or search (at most 100)
 timeout = 15                  # seconds per request
 digest_database_id = ""       # Notion database for chat digests; "" = find or create "Chat Digests" beside Assignments
@@ -250,7 +250,7 @@ digest_state_file = "data/teamchat_digests.json"  # remembers that database's id
 
 [spotify]                     # "play my study playlist", "pause", "skip" (Spotify Premium; README "Spotify")
 enabled = false               # needs SPOTIFY_CLIENT_ID in .env and a one-time sign-in:
-                              # python -m assistant.tools.spotify (or "Connect Spotify" in the phone app)
+                              # python -m kwil.tools.spotify (or "Connect Spotify" in the phone app)
 token = "data/spotify_token.json"  # the sign-in (private file); delete it to disconnect
 redirect_uri = "http://127.0.0.1:8888/callback"  # for the sign-in command; list it in your Spotify app
 pause_while_listening = true  # pause Spotify on this computer at the wake word, resume afterwards
@@ -304,7 +304,7 @@ export_max_mb = 50            # "Download my data": the zip's contents (before c
 # encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret
 # USER_DATA_KEY (no config setting; Render generates it; without it keys aren't stored).
 zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
-zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
+zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m kwil --download-voice zh_CN-huayan-medium)
 
 [student]                     # school deadlines from Canvas, emails or said by hand (README "Student deadlines")
 enabled = true                # the deadline tools and the phone app's "What I captured" card

@@ -1,4 +1,4 @@
-# Moving Hey Claude to a Raspberry Pi
+# Moving Kwil to a Raspberry Pi
 
 Step by step, with a go/no-go check before and after. The PC setup is not
 touched, so you can go back to it at any time (see [Rollback](#8-rollback)).
@@ -26,9 +26,9 @@ and what has to stay on.
 **Choosing the PC, coming from a hand-made task:** if Task Scheduler
 already has a "Hey Claude Web" task that runs `--mode web` on
 127.0.0.1:8765, run `.\scripts\install_windows_service.ps1`; it asks before
-replacing that task with `\HeyClaude\Web` on the same port, so `tailscale
-serve` keeps working, and it adds `\HeyClaude\Wake` for the wake word. To
-go back, `-Uninstall` removes only the `HeyClaude` tasks (tailscale serve
+replacing that task with `\Kwil\Web` on the same port, so `tailscale
+serve` keeps working, and it adds `\Kwil\Wake` for the wake word. To
+go back, `-Uninstall` removes only the `Kwil` tasks (tailscale serve
 is untouched); re-create your old task by hand if you want it back.
 
 **Rule of thumb:** if the PC is already on most of the day in the room where
@@ -128,8 +128,8 @@ On the Pi (over ssh):
 
 ```bash
 sudo apt install -y git
-git clone https://github.com/kylechen839-max/Claude-Personal-Assistant.git hey-claude
-cd hey-claude
+git clone https://github.com/kylechen839-max/Kwil.git kwil
+cd kwil
 ./scripts/install_pi.sh
 ```
 
@@ -149,13 +149,13 @@ them **over the local network with scp** (encrypted), from the project folder
 on the PC:
 
 ```powershell
-scp .env token.json credentials.json pi@raspberrypi.local:~/hey-claude/
+scp .env token.json credentials.json pi@raspberrypi.local:~/kwil/
 ```
 
 Then on the Pi, make them readable only by you:
 
 ```bash
-cd ~/hey-claude && chmod 600 .env token.json credentials.json
+cd ~/kwil && chmod 600 .env token.json credentials.json
 ```
 
 - Don't email them, put them in a cloud drive, or paste them in a chat.
@@ -164,7 +164,7 @@ cd ~/hey-claude && chmod 600 .env token.json credentials.json
   USB stick skip the Recycle Bin, but check). Better: don't use one.
 - `token.json` lets anyone read and change your calendar; treat it like a
   password. If it's ever exposed: Google Account -> Security -> Third-party
-  access -> remove "Hey Claude", then sign in again.
+  access -> remove "Kwil" (or "Hey Claude", its name before the rename), then sign in again.
 - **Google sign-in expiry:** while the Google Cloud consent screen is in
   "Testing" mode, Google expires the sign-in (`token.json`) after 7 days, and
   the calendar stops working until you sign in again. For a device that runs
@@ -176,8 +176,8 @@ cd ~/hey-claude && chmod 600 .env token.json credentials.json
 ## 5. Piper voice, preflight with hardware, and the service
 
 ```bash
-cd ~/hey-claude
-.venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium
+cd ~/kwil
+.venv/bin/python -m kwil.tts --download-voice en_US-lessac-medium
 nano config.toml        # [tts] engine = "piper"
 nano config.local.toml  # on a Pi 4: under its existing `[stt]` line, model = "tiny.en"
 ./scripts/preflight.sh --hardware
@@ -204,9 +204,9 @@ Then start it at boot:
 ./scripts/install_service.sh
 ```
 
-The service runs `python -m assistant.host wake`, which can also keep the
+The service runs `python -m kwil.host wake`, which can also keep the
 Pi up to date: put `[update] enabled = true` in `config.local.toml` and the
-signing key's line in `~/.config/hey-claude/allowed_signers` (README,
+signing key's line in `~/.config/kwil/allowed_signers` (README,
 "Automatic updates"). It follows the tested, signed `stable` branch,
 restarts on the new version and rolls back if it doesn't come up. Pi and
 PC can both have it on; each updates its own checkout.
@@ -225,7 +225,7 @@ Once the cloud host exists there are three places the assistant can run:
 |---|---|---|
 | **Pi (in the room)** | Always-listening wake word, spoken replies | `--mode wake` (the systemd service) |
 | **Cloud host (Render)** | Phone app and hands-free voice conversation | `--mode web` |
-| **PC** | Development, and the fallback (or the home host instead of a Pi, see [Do I need a Pi?](#do-i-need-a-pi)) | any, by hand; or the HeyClaude tasks |
+| **PC** | Development, and the fallback (or the home host instead of a Pi, see [Do I need a Pi?](#do-i-need-a-pi)) | any, by hand; or the Kwil tasks |
 
 All of them share the same Pinecone memory (same index; summaries go to the
 `voice-assistant` namespace), the same Google Calendar and the same Notion
@@ -236,7 +236,7 @@ database, so a note saved from the phone is recalled by the Pi.
 - *Two wake-word loops in one room.* If the PC and the Pi both run `--mode
   wake` within earshot, both answer, and a "delete" could be confirmed twice.
   Rule: **only one machine runs the wake word.** With a Pi, on the PC
-  don't start `python -m assistant` (wake mode) and remove the HeyClaude
+  don't start `python -m kwil` (wake mode) and remove the Kwil
   tasks (`.\scripts\install_windows_service.ps1 -Uninstall`); use
   `--mode text`/`--mode web` for development.
 - *Duplicate memories.* Each conversation is summarized once, by the instance
@@ -262,11 +262,11 @@ The PC setup keeps working as-is: nothing in the move changes it, and the
 same keys work on both. To go back:
 
 ```bash
-systemctl --user disable --now hey-claude   # on the Pi
+systemctl --user disable --now kwil   # on the Pi
 ```
 
-then run `python -m assistant` on the PC as before. To retire the Pi for
-good, also delete the secrets from it: `rm ~/hey-claude/{.env,token.json,credentials.json}`.
+then run `python -m kwil` on the PC as before. To retire the Pi for
+good, also delete the secrets from it: `rm ~/kwil/{.env,token.json,credentials.json}`.
 
 ## 9. Go/no-go summary
 

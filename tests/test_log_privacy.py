@@ -4,9 +4,9 @@ not tool inputs (event titles, queries, URLs). PRIVACY.md promises this."""
 import logging
 from unittest.mock import MagicMock
 
-from assistant import cli
-from assistant.chat import ClaudeChat
-from assistant.tools import Tool, ToolRegistry
+from kwil import cli
+from kwil.chat import ClaudeChat
+from kwil.tools import Tool, ToolRegistry
 from tests.conftest import make_response, text_block, tool_use_block
 
 SECRET_WORDS = "dentist appointment with Dr Zhivago"

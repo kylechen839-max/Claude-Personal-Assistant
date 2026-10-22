@@ -10,12 +10,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from assistant import cli, i18n
-from assistant.chat import ClaudeChat
-from assistant.cli import classify_answer, is_yes, text_confirm, voice_confirm
-from assistant.tools import ToolRegistry
-from assistant.tools.calendar import JUST_DO_IT, GoogleCalendar
-from assistant.voice_session import ChatBackend, VoiceConversation
+from kwil import cli, i18n
+from kwil.chat import ClaudeChat
+from kwil.cli import classify_answer, is_yes, text_confirm, voice_confirm
+from kwil.tools import ToolRegistry
+from kwil.tools.calendar import JUST_DO_IT, GoogleCalendar
+from kwil.voice_session import ChatBackend, VoiceConversation
 from tests.conftest import make_response, text_block, tool_use_block
 from tests.test_calendar_features import INVITE
 from tests.test_tools import DENTIST, TZ, make_service
@@ -344,10 +344,10 @@ def test_pc_voice_confirm_asks_once_more_then_accepts_a_yes(monkeypatch):
 def test_pc_voice_confirm_cancels_after_two_unclear_answers(monkeypatch, caplog):
     monkeypatch.setattr(cli, "interruption_of", lambda tts: tts.interruption)
     confirm, spoken, out = pc_voice("the dentist", "what about Friday")
-    with caplog.at_level(logging.DEBUG, logger="assistant.cli"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.cli"):
         assert confirm("Delete Dentist?") is False
     assert len(spoken) == 2
-    assert out[-1] == "Claude: I still didn't catch that, so I left it."
+    assert out[-1] == "Kwil: I still didn't catch that, so I left it."
     # the log has lengths and verdicts, never what was said
     lines = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert "Voice confirmation (11 chars) -> unclear" in lines
@@ -386,7 +386,7 @@ def delete_conv(*heard, events=None):
 
 def test_voice_unclear_answer_asks_once_more_then_a_yes_confirms(caplog):
     conv, events, deleted, first = delete_conv("the dentist", "yep")
-    with caplog.at_level(logging.DEBUG, logger="assistant.voice_session"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.voice_session"):
         conv.utterance(2, SPEECH)
         again = events.wait_for("confirm", again=True)
         assert again == {"type": "confirm", "turn": 1, "again": True,

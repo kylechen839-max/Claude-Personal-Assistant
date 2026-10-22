@@ -15,13 +15,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli, history
-from assistant.chat import ClaudeChat
-from assistant.config import load_config
-from assistant.history import (MARK_END, MARK_START, HistoryError, HistoryStore,
+from kwil import cli, history
+from kwil.chat import ClaudeChat
+from kwil.config import load_config
+from kwil.history import (MARK_END, MARK_START, HistoryError, HistoryStore,
                                Recorder, rebuild_history)
-from assistant.tools import Tool, ToolRegistry
-from assistant.tools.history import history_tools
+from kwil.tools import Tool, ToolRegistry
+from kwil.tools.history import history_tools
 from tests.conftest import make_response, text_block, tool_use_block
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -253,7 +253,7 @@ def test_fts_index_is_built_for_a_database_made_without_it(tmp_path):
 CRASH_SCRIPT = """
 import os, sys
 sys.path.insert(0, sys.argv[2])
-from assistant.history import HistoryStore
+from kwil.history import HistoryStore
 s = HistoryStore(sys.argv[1])
 cid = s.create("wake")
 s.append(cid, "user", "remember the dentist on friday")
@@ -1022,7 +1022,7 @@ def test_delete_cascades_to_pinecone(store):
 
 
 def test_pinecone_memory_search_and_delete():
-    from assistant.memory import PineconeMemory
+    from kwil.memory import PineconeMemory
 
     index, pc = MagicMock(), MagicMock()
     pc.inference.embed.return_value = SimpleNamespace(data=[{"values": [0.1] * 4}])
@@ -1052,6 +1052,7 @@ def test_export_markdown_and_json_without_secrets(store, monkeypatch):
     conv = store.get(cid)
     md = history.export(conv, "md")
     assert md.startswith("# Friday plans") and "**Kyle:** what's on friday" in md
+    assert "**Kwil:** Dentist at 3." in md  # the assistant's name since the rebrand
     assert "_(interrupted)_" in md and "> Dentist on Friday." in md
     data = json.loads(history.export(conv, "json"))
     assert data["title"] == "Friday plans" and len(data["messages"]) == 2

@@ -1,6 +1,6 @@
 // node --test tests/js/i18n.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/i18n.js in node:vm with a minimal fake
+// Runs the phone page's kwil/web/i18n.js in node:vm with a minimal fake
 // DOM, MutationObserver, confirm() and fetch(), and checks: nothing changes
 // with lang="en"; with lang="zh-CN" known strings (text, placeholder,
 // aria-label, title) are translated at load and when app.js changes them
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 
 class Text {
   constructor(value) { this.nodeType = 3; this.nodeValue = value; }
@@ -147,7 +147,7 @@ test('Chinese page: later changes, patterns, and replies left alone', () => {
   t.nodeValue = 'Here is your answer: the meeting is at three.';
   p.mutate([{ type: 'characterData', target: t }]);
   assert.equal(t.nodeValue, 'Here is your answer: the meeting is at three.');
-  const api = p.win.HeyClaudeI18n;
+  const api = p.win.KwilI18n;
   assert.equal(api.translate('  Sign out  '), '  退出登录  ');  // whitespace kept
   assert.equal(api.translate('明天下午三点'), '明天下午三点');
   assert.equal(api.translate('constructor'), 'constructor');  // not Object.prototype
@@ -247,7 +247,7 @@ test('first-run guide: not signed in yet shows nothing; no data-google never sho
 
 test('Chinese page: tabs, settings, history and tutor labels are all translated', () => {
   const { win } = page('zh-CN');
-  const t = (s) => win.HeyClaudeI18n.translate(s);
+  const t = (s) => win.KwilI18n.translate(s);
   for (const [en, zh] of [['Chat', '聊天'], ['Lecture', '讲座'], ['Tutor', '作业辅导'],
     ['Backends', '服务器'], ['Save and check', '保存并检查'], ['Pinned', '已置顶'],
     ['Rename', '重命名'], ['Today', '今天'], ['Take photo', '拍照'], ['CC', '字幕'],
@@ -257,7 +257,7 @@ test('Chinese page: tabs, settings, history and tutor labels are all translated'
   assert.equal(t('12 messages'), '12 条消息');
   assert.equal(t('Actions for Dentist'), 'Dentist 的操作');
   assert.equal(t('Transcribing 40%'), '正在转写 40%');
-  assert.equal(t('Hey Claude'), 'Hey Claude');  // the app name stays
+  assert.equal(t('Kwil'), 'Kwil');  // the app name stays untranslated
 });
 
 test('Disconnect: shown only to a family member who is connected; asks, then posts', async () => {
@@ -308,7 +308,7 @@ test('first-run guide: the Google step is about their own account', async () => 
 
 test('Chinese page: attachment markers are shown in Chinese, other text is not', () => {
   const p = page('zh-CN');
-  const t = (s) => p.win.HeyClaudeI18n.translate(s);
+  const t = (s) => p.win.KwilI18n.translate(s);
   // the "me" bubble: typed text, then the marker line (attachments.js summary())
   assert.equal(t('what is this?\n[photo] [file: plan.pdf]'), 'what is this?\n[照片] [文件：plan.pdf]');
   assert.equal(t('[photo]'), '[照片]');
@@ -324,7 +324,7 @@ test('Chinese page: attachment markers are shown in Chinese, other text is not',
 });
 
 test('Chinese page: the new attachment errors are translated', () => {
-  const t = (s) => page('zh-CN').win.HeyClaudeI18n.translate(s);
+  const t = (s) => page('zh-CN').win.KwilI18n.translate(s);
   assert.equal(t('bad request'), '请求有误。');
   assert.equal(t('A PDF is over 100 pages'), '有一个 PDF 超过 100 页。');
   assert.equal(t('That file is too long for Claude (PDFs up to 100 pages).'),
@@ -371,7 +371,7 @@ test('a beta tester without the public client sees why Google is off', async () 
 
 test('the invite form\'s tier labels are translated', () => {
   const { win } = page('zh-CN');
-  const t = (s) => win.HeyClaudeI18n.translate(s);
+  const t = (s) => win.KwilI18n.translate(s);
   assert.equal(t('Account'), '账户类型');
   assert.equal(t('Beta (Calendar only)'), '测试版（只有日历）');
   assert.equal(t('Family (Calendar and Gmail)'), '家人（日历和 Gmail）');
@@ -380,16 +380,16 @@ test('the invite form\'s tier labels are translated', () => {
 
 test('the account section (Download my data, Delete my account) is all in Chinese', () => {
   const { win } = page('zh-CN');
-  const t = (s) => win.HeyClaudeI18n.translate(s);
+  const t = (s) => win.KwilI18n.translate(s);
   // every message family.js shows there...
   const famWin = {};
   famWin.window = famWin;
   vm.createContext(famWin);
-  vm.runInContext(readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8'), famWin);
-  const messages = Object.values(famWin.HeyClaudeFamily.ACCOUNT_TEXT);
+  vm.runInContext(readFileSync(new URL('../../kwil/web/family.js', import.meta.url), 'utf8'), famWin);
+  const messages = Object.values(famWin.KwilFamily.ACCOUNT_TEXT);
   assert.ok(messages.length >= 10);
   // ...and every text in its markup
-  const html = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
   const section = html.match(/<section id="account-self"[\s\S]*?<\/section>/)[0];
   const texts = [...section.matchAll(/>([^<>]+)</g)].map((m) => m[1].replace(/\s+/g, ' ').trim()).filter(Boolean);
   assert.ok(texts.includes('Download my data') && texts.includes('Delete my account'));
@@ -402,9 +402,9 @@ test('the account section (Download my data, Delete my account) is all in Chines
 
 test('every string of the "Your Anthropic API key" settings is translated', () => {
   const { win } = page('zh-CN');
-  const t = (s) => win.HeyClaudeI18n.translate(s);
+  const t = (s) => win.KwilI18n.translate(s);
   // the section's own text in index.html (text nodes and the aria-label)
-  const html = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
   const section = html.match(/<section id="api-key"[\s\S]*?<\/section>/)[0];
   const texts = [...section.matchAll(/>([^<>]+)</g)].map((m) => m[1].replace(/\s+/g, ' ').trim())
     .filter((x) => x && !x.startsWith('console.anthropic.com'));  // the address stays
@@ -412,7 +412,7 @@ test('every string of the "Your Anthropic API key" settings is translated', () =
   assert.ok(texts.length >= 5, texts.join('|'));
   for (const en of texts) assert.notEqual(t(en), en, en);
   // what family.js and the server (userkeys_web.py, userkeys.py) say there
-  const family = readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8');
+  const family = readFileSync(new URL('../../kwil/web/family.js', import.meta.url), 'utf8');
   const keyPart = family.slice(family.indexOf('function setupKey'), family.indexOf('let owner = null'));
   const said = [...keyPart.matchAll(/"([A-Z][^"]* [^"]{4,})"/g)].map((m) => m[1]);  // sentences
   said.push('Save key', 'Replace key');

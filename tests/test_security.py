@@ -5,12 +5,12 @@ import logging
 
 import pytest
 
-from assistant.chat import ClaudeChat, has_web_content
-from assistant.config import load_config, redact, setup_logging
-from assistant.tools import ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.tools.notion import NotionAssignments
-from assistant.tools.web import browser_tools, check_url, open_in_browser
+from kwil.chat import ClaudeChat, has_web_content
+from kwil.config import load_config, redact, setup_logging
+from kwil.tools import ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.tools.notion import NotionAssignments
+from kwil.tools.web import browser_tools, check_url, open_in_browser
 from tests.conftest import make_response, text_block, tool_use_block
 from tests.test_tools import DENTIST, TZ, make_notion, make_service, page
 from tests.test_web import Block, server_search
@@ -217,7 +217,7 @@ def test_good_addresses_open(url, expected):
 
 
 def test_lookalike_domain_is_spoken_as_punycode():
-    from assistant.tools.web import describe_for_open
+    from kwil.tools.web import describe_for_open
     question = describe_for_open({"url": "https://\u0430pple.com/login"})
     assert "xn--pple-43d.com" in question
 

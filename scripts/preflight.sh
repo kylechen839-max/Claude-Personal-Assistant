@@ -17,4 +17,4 @@ if [[ ! -x "$PY" ]]; then
     echo "No .venv found in $REPO_DIR; run ./scripts/install_pi.sh first." >&2
     exit 2
 fi
-exec "$PY" -m assistant.preflight "$@"
+exec "$PY" -m kwil.preflight "$@"

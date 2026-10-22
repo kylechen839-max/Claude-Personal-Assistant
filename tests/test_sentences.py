@@ -2,7 +2,7 @@
 
 import pytest
 
-from assistant.sentences import SentenceSplitter, split_sentences
+from kwil.sentences import SentenceSplitter, split_sentences
 
 
 @pytest.mark.parametrize("text, expected", [

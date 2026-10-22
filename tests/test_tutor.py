@@ -7,8 +7,8 @@ import io
 import pytest
 from PIL import Image
 
-from assistant.mathspeech import speak_latex, speakable
-from assistant.tutor import (ImageRejected, TUTOR_PROMPT, TutorSession,
+from kwil.mathspeech import speak_latex, speakable
+from kwil.tutor import (ImageRejected, TUTOR_PROMPT, TutorSession,
                              prepare_image)
 from tests.conftest import make_response, text_block
 
@@ -77,7 +77,7 @@ def test_size_cap():
 
 
 def test_pixel_bomb_is_rejected(monkeypatch):
-    monkeypatch.setattr("assistant.tutor.MAX_PIXELS", 100)
+    monkeypatch.setattr("kwil.tutor.MAX_PIXELS", 100)
     with pytest.raises(ImageRejected, match="too many pixels"):
         prepare_image(photo(size=(20, 20), exif=False), "image/jpeg")
 

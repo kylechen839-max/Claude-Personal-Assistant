@@ -12,9 +12,9 @@ pytest.importorskip("fastapi")
 
 from PIL import Image  # noqa: E402
 
-from assistant import webapp, webfeatures  # noqa: E402
-from assistant.config import load_config  # noqa: E402
-from assistant.lecture import ChunkedUploads, LectureNotesDB, LecturePipeline  # noqa: E402
+from kwil import webapp, webfeatures  # noqa: E402
+from kwil.config import load_config  # noqa: E402
+from kwil.lecture import ChunkedUploads, LectureNotesDB, LecturePipeline  # noqa: E402
 from tests.conftest import make_response, text_block  # noqa: E402
 from tests.test_lecture import (NOTES, FakeWhisper, assignments_mock,  # noqa: E402
                                 fake_windows, notes_reply)
@@ -227,7 +227,7 @@ def test_katex_is_vendored_and_served_without_a_cdn(features_app):
 
 
 def test_feature_page_code_has_no_cdn_or_inner_html():
-    js = (ROOT / "assistant/web/static/features.js").read_text()
+    js = (ROOT / "kwil/web/static/features.js").read_text()
     assert "innerHTML" not in js and "http://" not in js
     assert "katex.render(" in js and "renderToString" not in js  # CSP-safe
     assert "wakeLock" in js and "Ask your professor" in js
@@ -235,14 +235,14 @@ def test_feature_page_code_has_no_cdn_or_inner_html():
 
 
 def test_static_files_exist_for_every_katex_font():
-    css = (ROOT / "assistant/web/static/katex/katex.min.css").read_text()
+    css = (ROOT / "kwil/web/static/katex/katex.min.css").read_text()
     for font in set(re.findall(r"url\((fonts/[^)]+)\)", css)):
-        assert (ROOT / "assistant/web/static/katex" / font).exists(), font
+        assert (ROOT / "kwil/web/static/katex" / font).exists(), font
 
 
 
 def test_busy_server_answers_429_not_500(features_app):
-    from assistant.lecture import UploadBusy
+    from kwil.lecture import UploadBusy
 
     client, feats, _ = features_app()
     login(client)

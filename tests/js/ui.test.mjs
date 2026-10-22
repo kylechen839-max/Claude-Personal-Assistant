@@ -1,5 +1,5 @@
 // node --test tests/js/ui.test.mjs
-// assistant/web/ui.js in node:vm with a minimal fake document: the settings
+// kwil/web/ui.js in node:vm with a minimal fake document: the settings
 // menu closes on a tap outside it (not inside) and on Escape; a downward
 // swipe while typing blurs the field (hides the keyboard), a short one or a
 // swipe when not typing does nothing. The owner's health banner: its
@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/ui.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/ui.js', import.meta.url), 'utf8');
 
 function setup() {
   const inside = { id: 'inside' };
@@ -69,7 +69,7 @@ test('keyboard: swiping up, or when nothing is focused, does nothing', () => {
   assert.equal(t.input.blurred, 0);
 });
 
-// The owner's health banner (state.health from /api/state, assistant/watch.py).
+// The owner's health banner (state.health from /api/state, kwil/watch.py).
 const at = (iso) => (iso ? iso.slice(11, 16) : '');
 
 test('health banner: lines and the element', () => {
@@ -79,7 +79,7 @@ test('health banner: lines and the element', () => {
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  const ui = win.HeyClaudeUI;
+  const ui = win.KwilUI;
   const health = {
     issues: [{ label: "Mom's app", since: '2026-10-20T06:13:00+00:00', what: 'healthz: HTTP 502' },
              { label: 'Your app', since: '2026-10-20T07:00:00+00:00', what: 'follow-up turn: HTTP 500' }],

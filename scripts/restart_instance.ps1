@@ -1,19 +1,21 @@
 <#
 .SYNOPSIS
-    Restart one Hey Claude web app through its Task Scheduler task.
+    Restart one Kwil web app through its Task Scheduler task.
 .DESCRIPTION
-    Used by the watchdog (python -m assistant.watch) to heal an app that is
-    down, and by python -m assistant.deploy to switch an app to new code:
+    Used by the watchdog (python -m kwil.watch) to heal an app that is
+    down, and by python -m kwil.deploy to switch an app to new code:
 
-        .\scripts\restart_instance.ps1 -Name main   # \HeyClaude\Web (your own app)
-        .\scripts\restart_instance.ps1 -Name mom    # \HeyClaude\Family-mom
+        .\scripts\restart_instance.ps1 -Name main   # \Kwil\Web (your own app)
+        .\scripts\restart_instance.ps1 -Name mom    # \Kwil\Family-mom
 
     Stops the task, stops any copy of that app still running (a hung one, or
     one started by hand, so the new one gets the port), then starts the task.
     Never touches the go-live check's side-port copies (--candidate).
-    Your own app may still run from an older hand-made task, "\Hey Claude Web"
-    (install_windows_service.ps1 offers to replace it); without \HeyClaude\Web
-    that task is restarted instead, so a deploy doesn't leave it on old code.
+    Tasks registered before the Kwil rebrand live in \HeyClaude\ (\HeyClaude\Web,
+    \HeyClaude\Family-mom) until the install scripts are run again, and your
+    own app may still run from an older hand-made task, "\Hey Claude Web"
+    (install_windows_service.ps1 offers to replace it). Without \Kwil\Web
+    those are restarted instead, so a deploy doesn't leave them on old code.
     Exit codes: 0 restarted, 3 the task isn't installed. No administrator
     rights needed. Windows PowerShell 5.1 and 7.
 #>
@@ -25,7 +27,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$taskPath = '\HeyClaude\'
+$taskPath = '\Kwil\'
 
 function Get-TaskName {
     param([string]$Instance)
@@ -34,24 +36,27 @@ function Get-TaskName {
 }
 
 function Get-TaskLocation {
-    # Where the instance's task may live, in order: ours first, then (for
-    # your own app only) the older hand-made "\Hey Claude Web" task.
+    # Where the instance's task may live, in order: ours first, then the
+    # folder from before the Kwil rebrand, then (for your own app only) the
+    # older hand-made "\Hey Claude Web" task.
     param([string]$Instance)
-    $list = @(@{ Path = '\HeyClaude\'; Name = (Get-TaskName $Instance) })
+    $list = @(@{ Path = '\Kwil\'; Name = (Get-TaskName $Instance) },
+        @{ Path = '\HeyClaude\'; Name = (Get-TaskName $Instance) })
     if ($Instance -eq 'main') { $list += @{ Path = '\'; Name = 'Hey Claude Web' } }
     return $list
 }
 
 function Test-InstanceCommandLine {
-    # Is this a running copy of that instance's web app (not a side-port candidate)?
+    # Is this a running copy of that instance's web app (not a side-port
+    # candidate)? `python -m assistant` is its name from before the rebrand.
     param([string]$Instance, [string]$CommandLine)
     if (-not $CommandLine -or $CommandLine -match '--candidate') { return $false }
     if ($Instance -eq 'main') {
-        $web = ($CommandLine -match '-m\s+assistant\.host\s+web\b') -or
-            ($CommandLine -match '-m\s+assistant\b.*--mode\s+web\b')
+        $web = ($CommandLine -match '-m\s+(kwil|assistant)\.host\s+web\b') -or
+            ($CommandLine -match '-m\s+(kwil|assistant)\b.*--mode\s+web\b')
         return $web -and ($CommandLine -notmatch '--config\s+"?config\.[A-Za-z0-9_-]+\.toml')
     }
-    return $CommandLine -match ('-m\s+assistant\b.*--config\s+"?' + [regex]::Escape("config.$Instance.toml") + '(\s|"|$)')
+    return $CommandLine -match ('-m\s+(kwil|assistant)\b.*--config\s+"?' + [regex]::Escape("config.$Instance.toml") + '(\s|"|$)')
 }
 
 $found = Get-TaskLocation $Name | Where-Object {

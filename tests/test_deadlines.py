@@ -1,5 +1,5 @@
-"""Student piece P1: the deadline store (assistant/deadlines.py) and the
-deadline tools (assistant/tools/deadlines.py). Offline; the clock is pinned."""
+"""Student piece P1: the deadline store (kwil/deadlines.py) and the
+deadline tools (kwil/tools/deadlines.py). Offline; the clock is pinned."""
 
 import logging
 import sqlite3
@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from assistant import deadlines
-from assistant.canvas import parse_ics
-from assistant.deadlines import DeadlineError, DeadlineStore, normalize_due, same_due
-from assistant.tools import ToolRegistry
-from assistant.tools.deadlines import DeadlineTools
+from kwil import deadlines
+from kwil.canvas import parse_ics
+from kwil.deadlines import DeadlineError, DeadlineStore, normalize_due, same_due
+from kwil.tools import ToolRegistry
+from kwil.tools.deadlines import DeadlineTools
 
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc).timestamp()
 FEED = Path(__file__).parent / "fixtures" / "canvas_feed.ics"
@@ -305,7 +305,7 @@ def test_a_removed_person_is_never_written_for(store):
 
 
 def test_open_store_is_shared_and_bounded(tmp_path):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     config = load_config(None, None)
     config["student"]["dir"] = str(tmp_path / "s")
@@ -376,7 +376,7 @@ def test_export_lists_every_row_with_confirmed_values(store):
 
 @pytest.fixture
 def tools(store, monkeypatch):
-    from assistant.tools import timeutil
+    from kwil.tools import timeutil
 
     token = timeutil.TURN_NOW.set(datetime.fromtimestamp(NOW, timezone.utc))
     yield DeadlineTools(store, None, "America/Chicago")

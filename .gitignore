@@ -16,9 +16,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Downloaded Piper voices (python -m assistant.tts --download-voice ...)
+# Downloaded Piper voices (python -m kwil.tts --download-voice ...)
 voices/
-# Kokoro model (python -m assistant --download-voice kokoro)
+# Kokoro model (python -m kwil --download-voice kokoro)
 models/
 
 # Runtime output
@@ -30,9 +30,9 @@ data/
 *.sqlite-shm
 *.wav
 !tests/fixtures/*.wav
-!assistant/web/earcons/*.wav
+!kwil/web/earcons/*.wav
 
-# Web app sign-in sessions (python -m assistant --mode web)
+# Web app sign-in sessions (python -m kwil --mode web)
 data/
 
 # LLM Council reports (.claude/skills/llm-council)

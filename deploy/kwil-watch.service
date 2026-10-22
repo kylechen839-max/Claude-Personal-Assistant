@@ -1,0 +1,17 @@
+# systemd *user* unit: one run of the Kwil watchdog (kwil/watch.py).
+# Started every 5 minutes by kwil-watch.timer; installed with
+# scripts/install_watch.sh, which fills in @REPO_DIR@.
+
+[Unit]
+Description=Kwil watchdog (health and test conversation checks)
+Documentation=file://@REPO_DIR@/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_DIR@
+ExecStart=@REPO_DIR@/.venv/bin/python -m kwil.watch
+# a go-live check (each instance's side-port copy and test conversation,
+# twice if it fails once) can take most of an hour; the run lock outlives it
+TimeoutStartSec=2h
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=kwil-watch

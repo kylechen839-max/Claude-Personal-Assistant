@@ -1,9 +1,29 @@
-# Hey Claude
+# Kwil
 
-An Echo-style voice assistant on the Anthropic API. Say **"Hey Claude"**, ask
-something, and it answers out loud. It can read and change your Google
-Calendar, check and update your Notion assignments, and remembers past
-conversations in Pinecone.
+Kwil (say it like "quill") is an Echo-style voice assistant powered by
+Claude, on the Anthropic API. Say the wake word, ask something, and it
+answers out loud. It can read and change your Google Calendar, check and
+update your Notion assignments, and remembers past conversations in
+Pinecone.
+
+**Wake word:** say **"Hey Claude"** for now. Kwil was called Hey Claude
+until 2026-10-22, and the trained wake-word model (`keywords/hey_claude.onnx`)
+is still the "Hey Claude" one; a "Hey Kwil" model ships once it is trained
+(BLOCKERS.md). The phone app's voice mode needs no wake word; a "Hey Kwil"
+(or "Hey Claude") at the start of what you say is left out of the request.
+
+**Renamed from Hey Claude.** The package is `kwil` (`python -m kwil`). For
+at least one stable release the old names keep working: `python -m
+assistant`, `python -m assistant.host` / `.watch` / `.deploy` (what the old
+tasks and units run) and `import assistant.X` give the same modules as
+`kwil`, and a process still running the old code when the update lands (an
+old `deploy.ps1`, web app or watchdog) finds the modules it imports later in
+`assistant/` (one-line files pointing at `kwil`). Re-register the tasks when convenient (`install_windows_service.ps1`,
+`install_family_tasks.ps1`, `install_watch_task.ps1` on the PC; `install_service.sh`
+and `install_watch.sh` on a Pi): the new tasks live in `\Kwil\`, the new
+units are `kwil.service` and `kwil-watch.timer`, and the old ones are
+removed. Sign-ins, history, saved keys and the Render service and disk keep
+their names, so nothing is lost and nobody is signed out.
 
 Version 1.0.0: see CHANGELOG.md for what's included and PRIVACY.md for what
 is stored and sent where. On your phone, it runs as a home-screen web app
@@ -36,13 +56,13 @@ mic -> openWakeWord wake word -> chime -> record until silence (VAD)
    | Pinecone API key | app.pinecone.io | `.env` `PINECONE_API_KEY` |
    | Notion integration secret | notion.so/profile/integrations; share the Fall 2026 Assignments database with it | `.env` `NOTION_TOKEN` |
    | Google OAuth Desktop client | console.cloud.google.com: enable the Calendar API, add yourself as a test user, create a Desktop OAuth client | `credentials.json` |
-4. Sign in to Google once: `python -m assistant.tools.calendar` (saves `token.json`).
-5. Check the setup: `python -m assistant --check` (one line per key, file,
+4. Sign in to Google once: `python -m kwil.tools.calendar` (saves `token.json`).
+5. Check the setup: `python -m kwil --check` (one line per key, file,
    audio device and model; never prints key values).
 6. Run it:
    ```powershell
-   python -m assistant              # always listening (wake word)
-   python -m assistant --mode text  # type instead of talking
+   python -m kwil              # always listening (wake word)
+   python -m kwil --mode text  # type instead of talking
    ```
 7. Optional: `pytest`. The live tests (real Notion, Google, Pinecone calls)
    read keys from the environment, not `.env`, so load it first:
@@ -58,7 +78,7 @@ which), so you can start with only the Anthropic key in text mode.
 
 | Command | What it does |
 |---|---|
-| `python -m assistant` | Wake-word mode (default): "Hey Claude", chime, speak, hear the reply |
+| `python -m kwil` | Wake-word mode (default): "Hey Claude", chime, speak, hear the reply |
 | `--mode text` | Type, read replies |
 | `--mode speak` | Type, replies spoken |
 | `--mode voice` | Push-to-talk (Enter to start/stop) |
@@ -185,13 +205,13 @@ setting and works as a home-screen app on iOS.
 
 | Command | What it does |
 |---|---|
-| `python -m assistant --history list` | Newest 50 conversations (id, date, source, title); add `--source wake`, `--since 2026-10-01`, `--until 2026-10-14`, `--pinned` |
-| `python -m assistant --history search lab report` | Ranked keyword search with the matching words highlighted (same filters) |
-| `python -m assistant --history show ID` | The whole transcript |
-| `python -m assistant --history export ID --format json` | Export as Markdown (`--format md`, default) or JSON, to the console; redirect with `> file.md` |
-| `python -m assistant --history delete ID` | Delete (asks first; `--yes` skips the question) |
-| `python -m assistant --mode text --continue ID` | Continue a conversation in text mode (`--continue last` for the most recent) |
-| `python -m assistant --incognito` | Save nothing this session: no history and no memory summary |
+| `python -m kwil --history list` | Newest 50 conversations (id, date, source, title); add `--source wake`, `--since 2026-10-01`, `--until 2026-10-14`, `--pinned` |
+| `python -m kwil --history search lab report` | Ranked keyword search with the matching words highlighted (same filters) |
+| `python -m kwil --history show ID` | The whole transcript |
+| `python -m kwil --history export ID --format json` | Export as Markdown (`--format md`, default) or JSON, to the console; redirect with `> file.md` |
+| `python -m kwil --history delete ID` | Delete (asks first; `--yes` skips the question) |
+| `python -m kwil --mode text --continue ID` | Continue a conversation in text mode (`--continue last` for the most recent) |
+| `python -m kwil --incognito` | Save nothing this session: no history and no memory summary |
 
 **What is saved:** what you said and what Claude replied, as text, turn by
 turn as it happens (a crash or power cut loses at most the turn in
@@ -241,7 +261,7 @@ so they also apply on every backend.
 ## Settings
 
 `config.toml` holds all non-secret settings; anything left out uses the
-default in `assistant/config.py`. `CLAUDE_MODEL` in the environment
+default in `kwil/config.py`. `CLAUDE_MODEL` in the environment
 overrides `[assistant] model` (default `claude-sonnet-5-5`). Logs go to
 `logs/assistant.log` (rotating); the console only shows warnings. The ones
 you are most likely to tune:
@@ -275,7 +295,7 @@ you are most likely to tune:
 | `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
 
 **Cost: model routing and prompt caching.** Each turn picks its model
-before the request, with no extra API call (`assistant/router.py`): a short,
+before the request, with no extra API call (`kwil/router.py`): a short,
 simple question ("what time is it") goes to `fast_model` (Claude Haiku).
 Words that usually mean a change (add, move, book, set, turn off, lock,
 pause, forget, save, ...), a web lookup or reasoning, a long request, an
@@ -303,7 +323,7 @@ without any text.
 Every way of talking to it (wake word, push-to-talk, the phone app's
 microphone button and hands-free voice) goes through the same Whisper
 settings in `[stt]`. On a PC the default is `small.en` (int8, about 480 MB,
-downloaded on first run; `python -m assistant --check` says whether it is
+downloaded on first run; `python -m kwil --check` says whether it is
 cached) with beam search 5 and a short prompt of the words the app hears
 most (calendar, assignment, Notion, reschedule, remind me, Canvas, exam,
 quiz...). Before, it was `base.en` with greedy decoding and no prompt
@@ -350,9 +370,9 @@ Download them once, at setup (never while answering). Each Kokoro file's
 SHA-256 is checked, and a bad download is deleted:
 
 ```powershell
-python -m assistant --download-voice kokoro                # into models/kokoro/
-python -m assistant --download-voice en_US-lessac-medium   # Piper, into voices/
-python -m assistant.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
+python -m kwil --download-voice kokoro                # into models/kokoro/
+python -m kwil --download-voice en_US-lessac-medium   # Piper, into voices/
+python -m kwil.tts --voice-file voices/en_US-lessac-medium.onnx --say "Hello Kyle"
 ```
 
 `models/` and `voices/` are not committed. On a Raspberry Pi, "auto"
@@ -403,7 +423,7 @@ on the cloud server, which has too little memory for it), the system voice
 (pyttsx3, or espeak-ng on a server) and, only with `ELEVENLABS_API_KEY`
 set, your ElevenLabs voices (listed from your account, refreshed hourly,
 tagged **paid**; you can also type a voice ID). Chinese speakers see the
-Chinese voices (e.g. `zh_CN-huayan-medium`: `python -m assistant
+Chinese voices (e.g. `zh_CN-huayan-medium`: `python -m kwil
 --download-voice zh_CN-huayan-medium`). The choice is per person: yours is
 saved on that server in `[tts] voice_file` (`data/voice_choice.json`;
 `/data/` on the cloud, `data/mom/` for `config.mom.toml`), each family
@@ -421,12 +441,12 @@ false` turns the picker off.
 rise when it starts listening, a very quiet low note when your turn has
 been heard ("thinking"), and a falling pair when the conversation ends. The
 desktop wake chime uses the same listening sound. They are original
-sine-wave sounds generated by `assistant/earcons.py` (`python -m
-assistant.earcons` rewrites `assistant/web/earcons/*.wav`).
+sine-wave sounds generated by `kwil/earcons.py` (`python -m
+kwil.earcons` rewrites `kwil/web/earcons/*.wav`).
 
 ## Phone web app
 
-`python -m assistant --mode web` runs the same assistant (Calendar, Notion,
+`python -m kwil --mode web` runs the same assistant (Calendar, Notion,
 memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
 asks Claude, and sends back the reply as text and audio (in the voice from
@@ -453,7 +473,7 @@ HTTPS address that only your own devices can open:
    MagicDNS and HTTPS certificates are enabled.
 2. On the PC, start the web app and print the token once:
    ```powershell
-   python -m assistant --mode web --show-token
+   python -m kwil --mode web --show-token
    ```
 3. In a second PowerShell window, publish it to your tailnet (not the
    internet; that would be `tailscale funnel`, don't use it):
@@ -531,7 +551,7 @@ but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
 trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
 also takes the proxy's address instead, e.g. `TRUSTED_PROXY=127.0.0.1` for
 `tailscale serve` on the same PC: the headers then count only from there), and
-run `python -m assistant --mode web --host 0.0.0.0` (it reads `PORT` from the
+run `python -m kwil --mode web --host 0.0.0.0` (it reads `PORT` from the
 environment). With a trusted proxy, plain-http requests are redirected to
 https and HSTS is sent. Five wrong tokens from one address lock that address
 out of further guesses for 15 minutes; past 20 wrong tokens from everyone
@@ -586,7 +606,7 @@ never sent to Claude as a new request.
   (it is waiting for your answer) or after you interrupted a reply.
 - Voice detection runs on the phone: the Silero VAD neural model in
   WebAssembly (onnxruntime-web, served by the app itself from
-  `assistant/web/vad/`, about 14 MB, cached after the first load). If it
+  `kwil/web/vad/`, about 14 MB, cached after the first load). If it
   can't load, or with `vad = "energy"`, a simpler loudness-based detector is
   used. The latency panel says which one is active.
 - Backgrounding the app, a phone call or Siri pauses the conversation (the
@@ -662,7 +682,7 @@ One-time setup on the PC (PowerShell, in the project folder):
 2. **Secrets**: create `.env.mom` with `ANTHROPIC_API_KEY=...` (your key is
    fine; `.env.mom` is gitignored). Her `WEB_TOKEN` is added to it on the
    first start.
-3. **Voice**: `python -m assistant --download-voice zh_CN-huayan-medium`
+3. **Voice**: `python -m kwil --download-voice zh_CN-huayan-medium`
    (Piper, into `voices/`). Without it the phone's own Chinese voice reads
    the replies. The Whisper `small` model downloads on the first request.
 4. **Address**: create `config.mom.local.toml` (gitignored):
@@ -689,7 +709,7 @@ One-time setup on the PC (PowerShell, in the project folder):
    unless it sets its own `[push] owner_dir` (otherwise its subscriptions
    would replace yours); `config.mom.toml` sets `data/mom/student`.
    ```powershell
-   python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
+   python -m kwil --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
    ```
    Share the PC with her (Tailscale admin console -> Machines -> the PC ->
@@ -713,7 +733,7 @@ with its `.env.<name>`, e.g. Mom's and Kai's) can start by itself when you
 sign in to Windows and restart after a crash:
 
 ```powershell
-.\scripts\install_family_tasks.ps1            # once: installs \HeyClaude\Family-<name> tasks
+.\scripts\install_family_tasks.ps1            # once: installs \Kwil\Family-<name> tasks
 .\scripts\install_family_tasks.ps1 -Restart   # after updating the code
 .\scripts\install_family_tasks.ps1 -Uninstall
 ```
@@ -721,7 +741,7 @@ sign in to Windows and restart after a crash:
 A copy already running in a window is stopped first (you can then close the
 window). Installing the tasks leaves your own app alone (that's
 `install_windows_service.ps1`'s job), but `-Restart` covers **every** app
-here, yours included (it runs `python -m assistant.deploy --no-pull
+here, yours included (it runs `python -m kwil.deploy --no-pull
 --restart`: the go-live check, then each app restarts once it is idle; one
 still in the middle of a turn after 2 minutes is skipped and named; your
 own app under its host supervisor is restarted by the supervisor).
@@ -932,11 +952,11 @@ and Notion sign-in. Those are all built; turn it on once the legal pages
 are approved, and before setting up the beta Google project and the Notion
 integration (their forms need the live /privacy and /terms), then set their
 Render variables before inviting anyone (BLOCKERS.md, "Public beta launch";
-the comment at the top of `assistant/web/landing.html` and `privacy.html`
+the comment at the top of `kwil/web/landing.html` and `privacy.html`
 lists the deploy checks). Then turn it on for the server with a
 one-line change, through a PR like any other: `"public_site": True` in the
 server profile's `"webapp"` settings (`SERVER_PROFILE` in
-`assistant/config.py`). On a PC, the same in `config.local.toml`:
+`kwil/config.py`). On a PC, the same in `config.local.toml`:
 
 ```toml
 [webapp]
@@ -945,14 +965,14 @@ public_site = true
 
 With it on:
 
-- `https://<cloud>/welcome`: what Hey Claude does, "invite-only beta",
+- `https://<cloud>/welcome`: what Kwil does, "invite-only beta",
   "bring your own Anthropic API key", and the waitlist form (email and an
   optional "what would you use it for", at most 300 characters).
 - `https://<cloud>/privacy` and `https://<cloud>/terms`: the beta's privacy
   notice and plain-language terms.
 
 `/` stays the app: signed out, it is still the sign-in page, with a
-**What is Hey Claude?** link to `/welcome` (only while the site is on). Invited people and your own
+**What is Kwil?** link to `/welcome` (only while the site is on). Invited people and your own
 phone keep the address they already have, and the PWA's home-screen icon
 keeps opening the app, not a marketing page. Share `/welcome` publicly.
 
@@ -961,7 +981,7 @@ Settings (`[webapp]` in `config.toml`):
 - `support_email`: the contact shown on the privacy and terms pages
   (empty = "the person who runs this server").
 - `legal_draft = true` shows a "Draft: Kyle to review" note on both pages.
-  Read them, change the wording in `assistant/web/privacy.html` and
+  Read them, change the wording in `kwil/web/privacy.html` and
   `terms.html` if needed, then set it to `false`.
 - `waitlist_file`: where entries are kept (`/data/waitlist.json` on Render,
   on the disk; empty = waitlist closed, the default on a PC).
@@ -998,7 +1018,9 @@ The phone web app can also run 24/7 on a small paid server at
 [Render](https://render.com), so it works from your iPhone with the PC off.
 The repo has everything: a `Dockerfile` (Whisper and the Piper voice are
 baked into the image, so a restart downloads nothing) and a `render.yaml`
-Blueprint with a `hey-claude` service. In the cloud it runs with
+Blueprint with a `hey-claude` service (it keeps that name after the rename
+to Kwil: a renamed Blueprint service would be a new one with an empty disk;
+change only its display name in Render's dashboard). In the cloud it runs with
 `ASSISTANT_PROFILE=server`: no mic, speakers or wake word, Piper voice (or
 espeak-ng if the voice is missing), no "open in browser" tool, and logs go
 to Render's log viewer. Secrets live only in Render's settings, never in the
@@ -1072,12 +1094,12 @@ one instance and a deploy has a short gap of downtime.
    app**. In "Testing" mode Google expires refresh tokens after 7 days, which
    would break the calendar every week. Google then shows an "unverified
    app" warning when you sign in: that is expected for a personal app (click
-   Advanced -> Go to Hey Claude). After publishing, sign in once more on the
+   Advanced -> Go to Kwil). After publishing, sign in once more on the
    PC so the token is a long-lived one: delete `token.json`, run
-   `python -m assistant.tools.calendar`, and paste the new `token.json` into
+   `python -m kwil.tools.calendar`, and paste the new `token.json` into
    `GOOGLE_TOKEN_JSON` in Render (Environment -> Save; it restarts).
 4. **Check it.** In Render -> hey-claude -> Shell, run
-   `python -m assistant --check` (no mic or speaker checks on a server).
+   `python -m kwil --check` (no mic or speaker checks on a server).
    The Logs tab should show "Speech models loaded".
 5. **On the iPhone.** Render -> hey-claude -> Environment -> `WEB_TOKEN` ->
    reveal and copy it (e.g. AirDrop or a note to yourself). Open
@@ -1097,8 +1119,8 @@ measured yet. Beam search 5 and the vocabulary prompt apply here too. For
 better accuracy on the cloud, set `STT_ENGINE` to `openai` or `deepgram`
 and add that service's key (`OPENAI_API_KEY` or `DEEPGRAM_API_KEY`): see
 [Cloud speech-to-text](#cloud-speech-to-text-optional-paid). Run the same image anywhere with Docker:
-`docker build -t hey-claude .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
--e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front, and
+`docker build -t kwil .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
+-e ANTHROPIC_API_KEY=... kwil` (it expects a TLS proxy in front, and
 trusts forwarded headers only from 10.x addresses, Render's; set
 `CLOUD_TRUSTED_PROXIES` to your proxy's network, e.g. `172.18.0.0/16`, or to
 nothing). After the first Render deploy, the log's first five "Proxy check"
@@ -1207,7 +1229,7 @@ working without them; to add them, sign in once more (the startup line and
 `--check` remind you):
 
 ```powershell
-python -m assistant.tools.google_auth            # or add --headless without a browser
+python -m kwil.tools.google_auth            # or add --headless without a browser
 ```
 
 This needs `google-api-python-client` 2.199 or newer (event labels); the
@@ -1238,7 +1260,7 @@ more so Google can ask for the new ones (Calendar keeps working until you
 do; the startup line and `--check` remind you):
 
 ```powershell
-python -m assistant.tools.google_auth            # or add --headless without a browser
+python -m kwil.tools.google_auth            # or add --headless without a browser
 ```
 
 In the Google Cloud console the Gmail API must be enabled for the
@@ -1523,7 +1545,7 @@ slack = true
 discord = false
 github = true
 channels = ["#eng", "general"]
-github_repos = ["kylechen839-max/Claude-Personal-Assistant"]
+github_repos = ["kylechen839-max/Kwil"]
 ```
 
 Restart; the startup line names any turned-on service whose token is
@@ -1604,7 +1626,7 @@ Setup, once (about 5 minutes):
 4. Sign in, either on the PC or Pi:
 
    ```powershell
-   python -m assistant.tools.spotify
+   python -m kwil.tools.spotify
    ```
 
    It prints a link (and opens it); after you allow access the browser
@@ -1624,7 +1646,7 @@ The code is the same as on Windows; two scripts do the Pi-specific setup.
 ### 1. Install
 
 ```bash
-git clone <this repo> hey-claude && cd hey-claude
+git clone <this repo> kwil && cd kwil
 ./scripts/install_pi.sh
 ```
 
@@ -1643,8 +1665,8 @@ From the project folder on your PC (PowerShell; replace `raspberrypi` with
 the Pi's host name or IP):
 
 ```powershell
-scp .env credentials.json token.json pi@raspberrypi:~/hey-claude/
-scp -r voices pi@raspberrypi:~/hey-claude/   # the Piper voice, if you have it
+scp .env credentials.json token.json pi@raspberrypi:~/kwil/
+scp -r voices pi@raspberrypi:~/kwil/   # the Piper voice, if you have it
 ```
 
 Or type the keys into `nano .env` on the Pi. The "Hey Claude" wake-word
@@ -1653,7 +1675,7 @@ model (`keywords/hey_claude.onnx`) is in the repo and works on both
 for it.
 
 **Google sign-in without a browser:** if you don't copy `token.json`, run
-`.venv/bin/python -m assistant.tools.calendar --headless` on the Pi. Open the
+`.venv/bin/python -m kwil.tools.calendar --headless` on the Pi. Open the
 printed link on your phone or PC, sign in, then paste back the
 `localhost:8765/...` address the browser ends up on (the page itself will
 fail to load; that's expected). This needs `credentials.json` on the Pi.
@@ -1661,8 +1683,8 @@ fail to load; that's expected). This needs `credentials.json` on the Pi.
 ### 3. Check, try, and run at boot
 
 ```bash
-.venv/bin/python -m assistant --check   # keys set?, files, mic/speaker, models
-.venv/bin/python -m assistant           # try it; Ctrl+C to stop
+.venv/bin/python -m kwil --check   # keys set?, files, mic/speaker, models
+.venv/bin/python -m kwil           # try it; Ctrl+C to stop
 ./scripts/install_service.sh            # start at boot (systemd)
 ```
 
@@ -1672,16 +1694,16 @@ devices with their index numbers, whether the Whisper model is cached, and,
 which voice will speak (Kokoro, Piper or pyttsx3).
 It exits with 1 if something required is missing.
 
-`install_service.sh` installs `deploy/hey-claude.service` as a systemd
+`install_service.sh` installs `deploy/kwil.service` as a systemd
 **user** service (the Pi's sound server runs in your user session, which a
 system service can't reach) and turns on "lingering" so it starts at boot
 without logging in. It waits for the network, restarts on failure, and logs
 to the journal as well as `logs/assistant.log`:
 
 ```bash
-systemctl --user status hey-claude
-journalctl --user -u hey-claude -f
-systemctl --user restart hey-claude     # after changing .env or config.toml
+systemctl --user status kwil
+journalctl --user -u kwil -f
+systemctl --user restart kwil     # after changing .env or config.toml
 ./scripts/install_service.sh --uninstall
 ```
 
@@ -1691,7 +1713,7 @@ wake word, set `[watch] enabled = false` in `config.local.toml` there.
 
 **Voice:** Piper sounds much better than eSpeak and runs well on a Pi 4/5
 (the `piper-tts` wheel for 64-bit ARM ships its own espeak-ng data). Run
-`.venv/bin/python -m assistant --download-voice en_US-lessac-medium` on
+`.venv/bin/python -m kwil --download-voice en_US-lessac-medium` on
 the Pi (or copy `voices/` from your PC); `[tts] engine = "auto"` then uses
 it (see [Voices](#voices)). Kokoro also installs on a Pi but takes well over
 a second per sentence there, so "auto" keeps Piper on ARM. Without a voice
@@ -1725,10 +1747,10 @@ invalid TOML). On a Pi with no screen, set `[web] browser = false`.
   holds the device (`fuser -v /dev/snd/*`).
 - **`PortAudio library not found`:** `sudo apt install libportaudio2`.
 - **No voice from pyttsx3:** `sudo apt install espeak-ng libespeak1`.
-- **Service keeps restarting / stopped:** `journalctl --user -u hey-claude -n 50`
+- **Service keeps restarting / stopped:** `journalctl --user -u kwil -n 50`
   shows why (most often a missing `ANTHROPIC_API_KEY` in `.env`). After 5
   failures in 5 minutes it stops; fix the cause, then
-  `systemctl --user restart hey-claude`.
+  `systemctl --user restart kwil`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
 
@@ -1778,24 +1800,24 @@ project folder:
 .\scripts\install_windows_service.ps1 -Uninstall  # stop and remove
 ```
 
-It registers two Task Scheduler tasks under `HeyClaude` (no admin rights
+It registers two Task Scheduler tasks under `Kwil` (no admin rights
 needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on
 127.0.0.1:8765, the address `tailscale serve` points at; `-Port` changes it).
 They start 20 s after you sign in, run hidden, and are kept running by
-`python -m assistant.host`, which waits for the network, restarts the
+`python -m kwil.host`, which waits for the network, restarts the
 assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
 logs to `logs/host-wake.log` / `logs/host-web.log` (the assistant's own log
 is still `logs/assistant.log`). After a reboot they start when you sign in;
 for no sign-in at all, turn on automatic sign-in for your account.
 
 **Already have a hand-made task for the web app** (e.g. "Hey Claude Web" in
-the Task Scheduler Library, running `python -m assistant --mode web --host
+the Task Scheduler Library, running `python -m kwil --mode web --host
 127.0.0.1 --port 8765`)? The script finds it, shows its command and asks
-before replacing it with `\HeyClaude\Web` (type `y`), so two servers never
+before replacing it with `\Kwil\Web` (type `y`), so two servers never
 fight over port 8765. Your `tailscale serve` setup keeps working unchanged
 because the port is the same. If you answer no, only the wake-word task is
 installed. If something else holds the port, it says what and skips the web
-task. `-Uninstall` removes only the `HeyClaude` tasks and leaves `tailscale
+task. `-Uninstall` removes only the `Kwil` tasks and leaves `tailscale
 serve` and the power settings as they are.
 
 Then it shows the power plan and offers, after you type `y`, to set **never
@@ -1817,8 +1839,8 @@ unchanged and never blocks an update):
 enabled = true
 ```
 
-What it does: the host supervisor (`python -m assistant.host`, which the
-`HeyClaude` tasks and the Pi's `hey-claude` service run) checks every
+What it does: the host supervisor (`python -m kwil.host`, which the
+`Kwil` tasks and the Pi's `kwil` service run) checks every
 `check_minutes` (15) for a new commit on the `stable` branch. Only the
 **promote-stable** workflow moves `stable`, and only to a master commit on
 which both `tests` and `pi-arm64` passed. Before any new code runs here:
@@ -1827,8 +1849,10 @@ which both `tests` and `pi-arm64` passed. Before any new code runs here:
 - the new commit, or a `stable-<sha>` tag on it, must carry a valid SSH
   signature from a key in your **allowed_signers** file, which lives outside
   the checkout so an update can't change whom you trust:
-  `%APPDATA%\HeyClaude\allowed_signers` on Windows,
-  `~/.config/hey-claude/allowed_signers` on Linux/the Pi. No file, no
+  `%APPDATA%\Kwil\allowed_signers` on Windows,
+  `~/.config/kwil/allowed_signers` on Linux/the Pi (a file set up before
+  the rename, in `HeyClaude\` or `~/.config/hey-claude/`, is still read
+  while the new folder has none). No file, no
   valid signature: no update, and `logs/host-<mode>.log` says why;
 - HEAD must be on `master` with no local commits (fast-forward only), and no
   local edits to tracked files. Nothing local is ever reset or discarded;
@@ -1842,7 +1866,7 @@ goes back with `git reset --keep`, restarts the old version and never
 retries that commit. An update that **changes requirements.txt is never
 applied automatically** (pip would install new, unpinned dependency ranges
 into the venv the assistant is running from): stop the assistant, then run
-`python -m assistant --update`. Everything is logged to
+`python -m kwil --update`. Everything is logged to
 `logs/host-<mode>.log` (failures start with `!!!`), with the exact range
 (`old -> new`); `logs/update-state.json` has the last result. With
 `[watch] gate` on (the default) an update also has to pass the go-live
@@ -1851,9 +1875,9 @@ updates"). Moving HEAD yourself (`git checkout`, `git pull`) restarts the
 assistant once the go-live check passed, without the `/healthz` rollback;
 use `.\scripts\deploy.ps1` instead of `git pull`. The supervisor itself keeps running its starting version until
 the task or service restarts (next sign-in or reboot, or `systemctl --user
-restart hey-claude` on the Pi).
+restart kwil` on the Pi).
 
-`python -m assistant --update` updates right away (same checks, also with
+`python -m kwil --update` updates right away (same checks, also with
 `enabled = false`). The phone page notices the new version through
 `/healthz` and reloads itself once, never in the middle of a turn, a
 recording or the voice conversation.
@@ -1864,18 +1888,18 @@ CI; nothing installs until you sign that commit.
 
 1. Make the key and let git sign with it (choose a passphrase):
    ```powershell
-   ssh-keygen -t ed25519 -C "kyle hey-claude approvals" -f "$env:USERPROFILE\.ssh\hey_claude_approve"
+   ssh-keygen -t ed25519 -C "kyle kwil approvals" -f "$env:USERPROFILE\.ssh\kwil_approve"
    git config gpg.format ssh
-   git config user.signingkey "$env:USERPROFILE\.ssh\hey_claude_approve"
+   git config user.signingkey "$env:USERPROFILE\.ssh\kwil_approve"
    ```
 2. Trust its public half on each machine that updates:
    ```powershell
-   $dir = "$env:APPDATA\HeyClaude"; New-Item -ItemType Directory -Force $dir | Out-Null
-   $pub = Get-Content "$env:USERPROFILE\.ssh\hey_claude_approve.pub"
+   $dir = "$env:APPDATA\Kwil"; New-Item -ItemType Directory -Force $dir | Out-Null
+   $pub = Get-Content "$env:USERPROFILE\.ssh\kwil_approve.pub"
    [IO.File]::WriteAllText("$dir\allowed_signers", "kylechen839@gmail.com namespaces=`"git`" $pub`n")
    ```
-   On the Pi: `mkdir -p ~/.config/hey-claude` and put the same line in
-   `~/.config/hey-claude/allowed_signers` (only the public key goes there).
+   On the Pi: `mkdir -p ~/.config/kwil` and put the same line in
+   `~/.config/kwil/allowed_signers` (only the public key goes there).
 3. Each update you approve: look at what changed, then sign and push a tag:
    ```powershell
    git fetch origin stable
@@ -1897,7 +1921,7 @@ own code):
    `stable-signing`: Deployment branches and tags -> Selected -> `master`
    only; Required reviewers -> you.
 2. Make a key without a passphrase (`ssh-keygen -t ed25519 -N '""' -C
-   "hey-claude stable" -f "$env:TEMP\stable_signing"`), add the private
+   "kwil stable" -f "$env:TEMP\stable_signing"`), add the private
    key as the environment secret `STABLE_SIGNING_KEY` of `stable-signing`,
    add the `.pub` line to allowed_signers as in step 2 above (with
    `stable-promotion@users.noreply.github.com`), then delete both files.
@@ -1936,11 +1960,11 @@ Get-Content config.local.toml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_windows_service.ps1
 
 # 4. Check: both tasks Running, the web app answers with its version
-Get-ScheduledTask -TaskPath '\HeyClaude\' | Format-Table TaskName, State
+Get-ScheduledTask -TaskPath '\Kwil\' | Format-Table TaskName, State
 Start-Sleep -Seconds 40
 Invoke-RestMethod http://127.0.0.1:8765/healthz        # ok: True, version: <sha>
 Get-Content logs\host-web.log -Tail 5
-.\.venv\Scripts\python.exe -m assistant --update       # up-to-date, or why it skipped
+.\.venv\Scripts\python.exe -m kwil --update       # up-to-date, or why it skipped
 ```
 
 The phone keeps working throughout, apart from a few seconds while the web
@@ -1957,13 +1981,13 @@ goes live after it has passed a real conversation.
 **Install (once).** On the PC, in PowerShell in the project folder:
 
 ```powershell
-.\scripts\install_watch_task.ps1             # \HeyClaude\Watch: every 5 minutes, hidden
+.\scripts\install_watch_task.ps1             # \Kwil\Watch: every 5 minutes, hidden
 .\scripts\install_family_tasks.ps1 -Watch    # or together with the family copies' tasks
 ```
 
 On the Pi: `./scripts/install_watch.sh` (a systemd user timer,
-`hey-claude-watch.timer`). `python -m assistant.watch --status` prints the
-last results; `python -m assistant.watch --functional` runs everything now.
+`kwil-watch.timer`). `python -m kwil.watch --status` prints the
+last results; `python -m kwil.watch --functional` runs everything now.
 
 **What it checks.** Every 5 minutes, for each instance (`config.toml` with
 `.env`, and every `config.<name>.toml` with its `.env.<name>`, the same rule
@@ -1999,7 +2023,7 @@ per check).
 loading its models); nothing is done while an update or deploy holds the
 update lock, or while someone's turn is running. Then it is restarted once
 (its Task Scheduler task; on Linux `[watch] restart_command`, e.g.
-`["systemctl", "--user", "restart", "hey-claude-web"]`) and given the grace
+`["systemctl", "--user", "restart", "kwil-web"]`) and given the grace
 period again. If that restart ran and it still fails on code newer than the
 **last known good** version (the last one whose test conversation passed
 here), the checkout goes back to that version (`git reset --keep`, as the
@@ -2038,7 +2062,7 @@ and the old version keeps running. **Update with one command** instead of
 anything switches, the installed packages must meet every `>=` minimum in
 `requirements.txt`; after a pull by hand that raised one, the gate and
 deploy refuse with what's missing until you stop the apps and run
-`pip install -r requirements.txt` (or `python -m assistant --update`).
+`pip install -r requirements.txt` (or `python -m kwil --update`).
 A `>=` line with no environment marker that a machine can't or won't
 install (no wheel for it there, say) makes every go-live check on that
 machine "can't tell yet", and the alert after 3 tries names the package:
@@ -2060,7 +2084,7 @@ back), never repeatedly:
   HTTP 502)", or that the checks stopped running) on your own instance only;
   family members never see it;
 - the dev team coordinator gets a message through the voice link
-  (`assistant/devteam.py`, `[devteam]`, when set up; `[watch] coordinator =
+  (`kwil/devteam.py`, `[devteam]`, when set up; `[watch] coordinator =
   false` turns it off), so it can find the cause and open a PR;
 - `logs/watch.log` has every result, and `data/watch_status.json` the
   current state.
@@ -2089,7 +2113,7 @@ everywhere, in the console and the report.
 |---|---|
 | `git` | on `master`, no uncommitted changes (`config.toml` may differ per machine) |
 | `env` | `.env` exists and has `ANTHROPIC_API_KEY` (names only, never values) |
-| `check` | `python -m assistant --check` passes |
+| `check` | `python -m kwil --check` passes |
 | `pytest`, `pytest-live` | the full suite, then the live read-only Pinecone/Notion/Google tests, which must not skip |
 | `wake-e2e` | `--mode wake --audio-file tests/fixtures/hey_claude_calendar_tomorrow.wav --timings`: a wake, the transcript and a real reply |
 | `text-tools` | text mode answers a calendar and a Notion question, and the log shows both tools were called |
@@ -2124,10 +2148,10 @@ Debian Bookworm arm64 with Python 3.11, i.e. a simulated Pi.
 ## Project layout
 
 ```
-assistant/
-  cli.py        modes, main loop, error handling   (python -m assistant)
+kwil/
+  cli.py        modes, main loop, error handling   (python -m kwil)
   config.py     config.toml + .env loading, logging
-  doctor.py     setup check                       (python -m assistant --check)
+  doctor.py     setup check                       (python -m kwil --check)
   chat.py       Claude conversation, tool loop, memory hooks
   router.py     per-turn model choice: Haiku for simple turns, else the main model
   usage.py      API token counts per call, monthly totals and cost estimate
@@ -2141,7 +2165,7 @@ assistant/
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   history.py    conversation history: SQLite store, search, resume
-  history_cli.py  python -m assistant --history ...
+  history_cli.py  python -m kwil --history ...
   audio.py      wav I/O, resampling, chimes
   timing.py     per-turn latency               (--timings)
   webapp.py     private phone web app (FastAPI)  (--mode web)
@@ -2155,9 +2179,9 @@ assistant/
                 earcons/ (generated by earcons.py)
   preflight.py  one-pass readiness check        (scripts/preflight.ps1 / .sh)
   smoke.py      web app smoke check             (scripts/cloud_smoke.ps1 / .sh)
-  host.py       home host supervisor: restarts, updates (python -m assistant.host)
+  host.py       home host supervisor: restarts, updates (python -m kwil.host)
   updater.py    safe update from the stable branch  (--update)
-  watch.py      health checks, test conversation, go-live gate (python -m assistant.watch)
+  watch.py      health checks, test conversation, go-live gate (python -m kwil.watch)
   deploy.py     pull, go-live check, switch or refuse (scripts/deploy.ps1 / .sh)
   version.py    git short SHA for /healthz
   webfeatures.py lecture recorder + tutor routes for the phone app
@@ -2183,8 +2207,10 @@ scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_watch_task.ps1, install_watch.sh, restart_instance.ps1,
                 deploy.ps1/.sh                            (health checks, safe updates)
 Dockerfile      the cloud image; render.yaml deploys it on Render
-deploy/         hey-claude.service                 (systemd user unit)
-                hey-claude-watch.service/.timer    (the watchdog every 5 minutes)
+deploy/         kwil.service                       (systemd user unit)
+                kwil-watch.service/.timer          (the watchdog every 5 minutes)
+assistant/      the package's name before the Kwil rebrand: an alias of kwil/
+                (python -m assistant, import assistant.X), kept for one release
 tests/          pytest suite (offline; live tests skip without keys)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows),
                               the Docker image, the Pinecone MCP connector,

@@ -1,5 +1,5 @@
-"""Auto-update (assistant/updater.py) against real git repos with a bare
-"remote", and the host supervisor (assistant/host.py) with fakes."""
+"""Auto-update (kwil/updater.py) against real git repos with a bare
+"remote", and the host supervisor (kwil/host.py) with fakes."""
 
 import io
 import subprocess
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from assistant import host, updater
+from kwil import host, updater
 from tests.test_webapp import make_app  # noqa: F401 (fixture)
-from assistant.updater import (FAILED, LOCKED, ROLLED_BACK, SKIPPED, UP_TO_DATE,
+from kwil.updater import (FAILED, LOCKED, ROLLED_BACK, SKIPPED, UP_TO_DATE,
                                UPDATED, Updater)
 
 
@@ -124,7 +124,7 @@ def test_fast_forward_and_smoke(repos):
     r = up.update()
     assert r.status == UPDATED and git(home, "rev-parse", "HEAD") == new
     assert (home / "app.py").read_text() == "v = 2\n"
-    assert ["-m", "assistant", "--check"] in rec.python_calls  # smoke ran
+    assert ["-m", "kwil", "--check"] in rec.python_calls  # smoke ran
     assert pips(rec) == 0  # no requirements change
     assert said and said[0].startswith("update updated")
     assert up.applied() == new and not up.lock_file.exists()
@@ -185,10 +185,12 @@ def test_signatures_can_be_turned_off_explicitly(repos, tmp_path):
     assert up.update().status == UPDATED and git(home, "rev-parse", "HEAD") == new
 
 
-def test_wrong_origin_is_refused(repos):
+@pytest.mark.parametrize("repo", ["github.com/kylechen839-max/Claude-Personal-Assistant",
+                                  "github.com/kylechen839-max/Kwil"])  # its name since the rebrand
+def test_wrong_origin_is_refused(repos, repo):
     dev, home, _ = repos
     publish(dev)
-    up, _ = make(repos, repo="github.com/kylechen839-max/Claude-Personal-Assistant")
+    up, _ = make(repos, repo=repo)
     r = up.update()
     assert r.status == SKIPPED and "not github.com/kylechen839-max" in r.detail
 
@@ -389,7 +391,7 @@ def test_rollback_locked_only_for_its_own_update(repos):
 
 
 def test_cli_update_flag(monkeypatch):
-    from assistant import cli
+    from kwil import cli
 
     called = []
     monkeypatch.setattr(updater, "main", lambda: called.append(1) or 0)
@@ -464,7 +466,7 @@ def make_host(mode="web", heads=("a" * 40,), children=None, health=None,
         started.append(cmd)
         return children.pop(0)
 
-    h = host.Host(mode, ["py", "-m", "assistant", "--mode", mode], io.StringIO(),
+    h = host.Host(mode, ["py", "-m", "kwil", "--mode", mode], io.StringIO(),
                   updater=FakeUpdater(heads), popen=popen,
                   health=health or (lambda port: {"ok": True, "version": "a" * 7}),
                   settings=settings or (lambda: {"enabled": True, "check_minutes": 15}),
@@ -572,13 +574,13 @@ def test_host_command_line(tmp_path):
     assert host.parse(["web", "9000"]) == ("web", "9000")
     assert host.parse(["wake", "8765"]) is None and host.parse(["web", "x"]) is None
     assert host.main(["nope"]) == 2
-    assert host.build_command("web")[1:] == ["-m", "assistant", "--mode", "web",
+    assert host.build_command("web")[1:] == ["-m", "kwil", "--mode", "web",
                                              "--host", "127.0.0.1", "--port", "8765"]
-    assert host.build_command("wake")[1:] == ["-m", "assistant", "--mode", "wake"]
+    assert host.build_command("wake")[1:] == ["-m", "kwil", "--mode", "wake"]
 
 
 def test_version_from_env_or_git(monkeypatch):
-    from assistant import version as v
+    from kwil import version as v
 
     v.version.cache_clear()
     monkeypatch.setenv("RENDER_GIT_COMMIT", "0123456789abcdef")
@@ -586,6 +588,7 @@ def test_version_from_env_or_git(monkeypatch):
     v.version.cache_clear()
     monkeypatch.delenv("RENDER_GIT_COMMIT")
     monkeypatch.delenv("HEY_CLAUDE_VERSION", raising=False)
+    monkeypatch.delenv("KWIL_VERSION", raising=False)
     got = v.version()
     assert got == "unknown" or len(got) == 7
     v.version.cache_clear()
@@ -598,7 +601,7 @@ def test_healthz_version_and_local_busy(make_app):
 
     from starlette.testclient import TestClient
 
-    from assistant.version import version
+    from kwil.version import version
     from tests.test_webapp import BASE
 
     assistant, remote = make_app()
@@ -638,7 +641,7 @@ def test_page_reloads_once_and_only_when_quiet(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("node not on PATH")
-    script = Path(host.ROOT / "assistant" / "web" / "update-watch.js").read_text()
+    script = Path(host.ROOT / "kwil" / "web" / "update-watch.js").read_text()
     harness = tmp_path / "harness.js"
     harness.write_text(r"""
 const vm = require("vm");

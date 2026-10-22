@@ -9,11 +9,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant import devteam
-from assistant.config import DEFAULTS
-from assistant.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
+from kwil import devteam
+from kwil.config import DEFAULTS
+from kwil.devteam import (INBOX_TITLE, CoordinatorLink, DevTeamError,
                                session_id)
-from assistant.tools import ToolRegistry
+from kwil.tools import ToolRegistry
 from tests.devteam_fakes import SID, FakeNotion, FakeRun, ok_run, row
 
 
@@ -148,7 +148,7 @@ def test_tool_reports_notion_failure(tmp_path):
 
 
 def test_registration(monkeypatch, tmp_path):
-    from assistant import cli
+    from kwil import cli
 
     config = json.loads(json.dumps(DEFAULTS))
     registry = ToolRegistry()
@@ -165,7 +165,7 @@ def test_registration(monkeypatch, tmp_path):
 
 
 def test_prompt_mentions_dev_team(tmp_path):
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
 
     registry = ToolRegistry()
     registry.register(*link(tmp_path).tools())
@@ -240,7 +240,7 @@ def tree_popen(monkeypatch):
 def test_windows_timeout_kills_the_whole_cli_tree(tmp_path, monkeypatch, tree_popen):
     """npm claude.cmd: a timeout must taskkill /T the tree, or the read
     after it blocks on node.exe and the send never returns."""
-    from assistant import devteam
+    from kwil import devteam
 
     monkeypatch.setattr(devteam, "_WINDOWS", True)
     team = CoordinatorLink(SID, which=lambda c: f"/usr/bin/{c}", timeout=0.01,
@@ -255,7 +255,7 @@ def test_windows_timeout_kills_the_whole_cli_tree(tmp_path, monkeypatch, tree_po
 
 
 def test_timeout_elsewhere_kills_the_process(tmp_path, monkeypatch):
-    from assistant import devteam
+    from kwil import devteam
 
     class Hung:
         killed = False
@@ -305,9 +305,10 @@ def test_pc_hub_is_gone():
     import importlib.util
     import inspect
 
-    from assistant import webapp
+    from kwil import webapp
 
-    assert importlib.util.find_spec("assistant.devhub") is None
+    assert importlib.util.find_spec("kwil.devhub") is None
+    assert importlib.util.find_spec("assistant.devhub") is None  # nor by its old name
     assert "hub" not in inspect.signature(webapp.create_app).parameters
     assert not hasattr(webapp, "HUB_PROXY_WARNING")
     assert set(DEFAULTS["devteam"]) == {"enabled", "coordinator_session", "claude_command",
@@ -316,7 +317,7 @@ def test_pc_hub_is_gone():
 
 def test_old_hub_settings_still_load(tmp_path):
     """A PC whose config.local.toml still has the hub keys starts as before."""
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     (tmp_path / "config.toml").write_text("")
     (tmp_path / "config.local.toml").write_text(

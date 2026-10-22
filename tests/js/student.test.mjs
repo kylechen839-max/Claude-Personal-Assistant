@@ -1,6 +1,6 @@
 // node --test tests/js/student.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/student.js in node:vm with a minimal
+// Runs the phone page's kwil/web/student.js in node:vm with a minimal
 // fake DOM: the card stays hidden when the routes are off or signed out;
 // the owner is told to use the environment (no link form); an invited
 // person's link is POSTed once and cleared from the page; captured titles
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/student.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/student.js', import.meta.url), 'utf8');
 
 class El {
   constructor(tag) {
@@ -155,13 +155,13 @@ test('a throttled sync says why', async () => {
   assert.ok(card.all().some((e) => e.textContent === 'synced recently; try again in 14 minute(s)'));
 });
 
-const I18N = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
+const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 
 test('every fixed string it shows or asks has Chinese in i18n.js', async () => {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(I18N, ctx);
-  const { translate } = ctx.HeyClaudeI18n;
+  const { translate } = ctx.KwilI18n;
   const seen = new Set();
   const scenarios = [
     load(),

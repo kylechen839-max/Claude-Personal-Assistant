@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from assistant import audio
-from assistant.tts import (PiperTTS, PrintTTS, Pyttsx3TTS, download_voice, make_tts,
+from kwil import audio
+from kwil.tts import (PiperTTS, PrintTTS, Pyttsx3TTS, download_voice, make_tts,
                            voice_urls)
-from assistant.tts import main as tts_main
+from kwil.tts import main as tts_main
 
 
 def test_make_tts_factory():
@@ -73,7 +73,7 @@ def test_make_tts_piper_falls_back_to_pyttsx3(problem, fake_voice_files, fake_pi
         fake_voice_files.with_name(fake_voice_files.name + ".json").unlink()
     else:
         monkeypatch.setitem(sys.modules, "piper", None)  # import piper -> ImportError
-    with caplog.at_level(logging.WARNING, logger="assistant.tts"):
+    with caplog.at_level(logging.WARNING, logger="kwil.tts"):
         tts = make_tts("piper", piper_voice=voice, rate=150)
     assert isinstance(tts, Pyttsx3TTS) and tts.rate == 150
     assert "using pyttsx3 instead" in caplog.text
@@ -81,7 +81,7 @@ def test_make_tts_piper_falls_back_to_pyttsx3(problem, fake_voice_files, fake_pi
 
 
 def test_engine_selection_from_config(tmp_path, fake_voice_files, fake_piper):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     cfg = load_config(tmp_path / "none.toml", env_file=None)
     assert cfg["tts"]["engine"] == "auto"
@@ -121,7 +121,7 @@ def test_piper_save_and_speak(tmp_path, fake_voice_files, fake_piper, monkeypatc
     assert abs(samples.max() - 0.25) < 0.01
 
     played = []
-    monkeypatch.setattr("assistant.tts.audio.play", lambda s, sr: played.append((s, sr)))
+    monkeypatch.setattr("kwil.tts.audio.play", lambda s, sr: played.append((s, sr)))
     tts.speak("Hi there")
     assert len(played) == 1 and played[0][1] == 22050 and len(played[0][0]) == 2205
     assert fake_piper == [fake_voice_files]  # loaded once, then reused

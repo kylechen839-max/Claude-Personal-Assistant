@@ -15,11 +15,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from assistant import audio, cli, earcons, tts, tts_elevenlabs, tts_kokoro
-from assistant.config import DEFAULTS, load_config
-from assistant.tts import PiperTTS, PrintTTS, Pyttsx3TTS, make_tts
-from assistant.tts_elevenlabs import ElevenLabsTTS
-from assistant.tts_kokoro import KokoroTTS
+from kwil import audio, cli, earcons, tts, tts_elevenlabs, tts_kokoro
+from kwil.config import DEFAULTS, load_config
+from kwil.tts import PiperTTS, PrintTTS, Pyttsx3TTS, make_tts
+from kwil.tts_elevenlabs import ElevenLabsTTS
+from kwil.tts_kokoro import KokoroTTS
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -81,7 +81,7 @@ def no_kokoro(tmp_path):
 
 
 def tts_logs(caplog):
-    return [r for r in caplog.records if r.name.startswith("assistant.tts")]
+    return [r for r in caplog.records if r.name.startswith("kwil.tts")]
 
 
 # --- selection and fallback ------------------------------------------------------
@@ -225,7 +225,7 @@ def test_kokoro_speak_reraises_render_errors(fake_kokoro, kokoro_paths, monkeypa
 
 
 def test_web_renders_kokoro_in_memory_and_warms_up(fake_kokoro, kokoro_paths):
-    from assistant.webapp import WebAssistant, render_wav
+    from kwil.webapp import WebAssistant, render_wav
 
     k = KokoroTTS(kokoro_paths["kokoro_model"], kokoro_paths["kokoro_voices"])
     data = render_wav(k, "Hi there.")
@@ -368,7 +368,7 @@ def test_download_voice_command(monkeypatch, tmp_path, restore_root_logging):
         ValueError("checksum mismatch for x")))
     assert cli.download_voice_command("kokoro", out.append) == 1
     assert "checksum mismatch" in out[-1]
-    # wired to `python -m assistant --download-voice kokoro`, no API key needed
+    # wired to `python -m kwil --download-voice kokoro`, no API key needed
     monkeypatch.setattr(cli, "download_voice_command", lambda name: calls.append(name) or 0)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert cli.main(["--download-voice", "kokoro", "--config", str(toml)]) == 0 and calls[-1] == "kokoro"
@@ -447,7 +447,7 @@ def test_elevenlabs_needs_the_key(monkeypatch, no_kokoro, caplog):
     engine = make_tts("elevenlabs", **no_kokoro, piper_voice="", elevenlabs_voice="v1")
     assert isinstance(engine, ElevenLabsTTS) and isinstance(engine.fallback, Pyttsx3TTS)
     assert engine.voice_id == "v1"
-    assert "ELEVENLABS_API_KEY" in __import__("assistant.config").config.SECRET_ENV_VARS
+    assert "ELEVENLABS_API_KEY" in __import__("kwil.config").config.SECRET_ENV_VARS
 
 
 def test_elevenlabs_fallback_through_a_file(monkeypatch, tmp_path):
@@ -467,7 +467,7 @@ def test_earcon_files_are_short_soft_and_match_the_code(name):
     peak = np.abs(samples).max()
     assert 0.03 < peak <= 0.3  # gentle, not a beep
     assert abs(samples[0]) < 0.01 and abs(samples[-1]) < 0.01  # no clicks
-    # the committed file is what assistant/earcons.py makes
+    # the committed file is what kwil/earcons.py makes
     expected = earcons.EARCONS[name]()
     assert len(expected) == len(samples) and np.abs(expected - samples).max() < 3 / 32768
 
@@ -479,12 +479,12 @@ def test_earcon_loudness_order_and_desktop_chime():
 
 
 def test_earcons_are_served_locally_and_wired_into_the_voice_view():
-    js = (ROOT / "assistant" / "web" / "voice.js").read_text()
+    js = (ROOT / "kwil" / "web" / "voice.js").read_text()
     for name in earcons.EARCONS:
         assert f'"{name}"' in js
     assert "/earcons/${name}.wav" in js and 'play("ended")' in js
     assert not re.search(r"https?://", js)  # nothing from a CDN
-    from assistant.webapp import EARCONS
+    from kwil.webapp import EARCONS
 
     assert set(EARCONS) == set(earcons.EARCONS)
 
@@ -505,7 +505,7 @@ def run_kokoro(code: str, *args) -> str:
 
 RENDER = """
 import sys
-from assistant.tts_kokoro import KokoroTTS
+from kwil.tts_kokoro import KokoroTTS
 KokoroTTS(sys.argv[1], sys.argv[2], voice=sys.argv[4]).save_to_file(sys.argv[5], sys.argv[3])
 """
 
@@ -527,11 +527,11 @@ def test_kokoro_renders_wav(tmp_path, kokoro_files):
 
 BENCH = """
 import statistics, sys, time
-from assistant.tts import PiperTTS
-from assistant.tts_kokoro import KokoroTTS
-from assistant.webapp import render_wav
+from kwil.tts import PiperTTS
+from kwil.tts_kokoro import KokoroTTS
+from kwil.webapp import render_wav
 
-from assistant.sentences import SentenceSplitter
+from kwil.sentences import SentenceSplitter
 
 first = "Tomorrow you have the dentist at three thirty."
 long_first = ("Tomorrow you have the dentist at three thirty, and after that you "
@@ -583,7 +583,7 @@ def test_time_to_first_audio_kokoro_vs_piper(kokoro_files, request):
 
 
 def test_check_reports_the_voice(fake_kokoro, kokoro_paths, piper_paths, no_kokoro):
-    from assistant import doctor
+    from kwil import doctor
 
     def cfg(**tts_cfg):
         return {"tts": {**DEFAULTS["tts"], **tts_cfg}}

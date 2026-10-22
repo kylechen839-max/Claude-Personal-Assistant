@@ -11,10 +11,10 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import history, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.history import HistoryStore, Recorder  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import history, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.history import HistoryStore, Recorder  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
 

@@ -1,4 +1,4 @@
-"""Study briefings (assistant/proactive.py): the rules in plain Python on a
+"""Study briefings (kwil/proactive.py): the rules in plain Python on a
 pinned clock, at most one push per rule per day (also across a restart),
 the daily cap, quiet hours in each person's own time zone, no Claude call
 unless a rule fires (and then only extracted fields go to it), JobRunner
@@ -19,15 +19,15 @@ pytest.importorskip("pywebpush")
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, proactive, push as push_mod, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import load_config  # noqa: E402
-from assistant.failover import API_VERSION  # noqa: E402
-from assistant.failover.leader import JobRunner, LeaderCheck  # noqa: E402
-from assistant.failover.peers import Backend, Health  # noqa: E402
-from assistant.failover.sync import MemoryEventLog  # noqa: E402
-from assistant.tools import ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import family as family_mod, proactive, push as push_mod, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import load_config  # noqa: E402
+from kwil.failover import API_VERSION  # noqa: E402
+from kwil.failover.leader import JobRunner, LeaderCheck  # noqa: E402
+from kwil.failover.peers import Backend, Health  # noqa: E402
+from kwil.failover.sync import MemoryEventLog  # noqa: E402
+from kwil.tools import ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.contract_fakes import ContractClient  # noqa: E402
 from tests.test_push import SECRET, Sent, sub  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
@@ -364,7 +364,7 @@ def test_a_permanent_push_error_is_not_retried_all_day(env, status, caplog):
     assert len(env.sent.calls) == 1 and len(env.client.requests) == 1
     assert env.push.has_devices(None)  # not "gone": kept
     warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-              and r.name == "assistant.push"]
+              and r.name == "kwil.push"]
     assert warned and all(str(status) in m and "Okay" not in m for m in warned)
 
 
@@ -388,7 +388,7 @@ def test_from_config_gives_the_owner_jobs_no_leader_gate(env, tmp_path):
     """Judge round 2, finding 2: the production wiring. [failover] role pc
     with a Pi peer: the Pi leading must not stop the PC sending to the
     phone it holds."""
-    from assistant.history import HistoryStore
+    from kwil.history import HistoryStore
 
     env.config["failover"].update(role="pc", app_origin="https://hc.onrender.com",
                                   backends=[{"role": "pi", "url": "https://pi.t.ts.net"},
@@ -472,7 +472,7 @@ def test_the_real_deadline_store_drives_a_morning_push(env, tmp_path, monkeypatc
     """End to end: build_assistant opens P1's DeadlineStore, create_app's
     lifespan hands it to the scheduler, and an item it holds fires the
     morning push."""
-    from assistant.deadlines import DeadlineStore
+    from kwil.deadlines import DeadlineStore
 
     for var in ("PINECONE_API_KEY", "PINECONE_INDEX", "NOTION_TOKEN", "GOOGLE_TOKEN_JSON",
                 "GOOGLE_CLIENT_JSON", "HISTORY_PATH", "HA_URL", "HA_TOKEN", "CANVAS_TOKEN",
@@ -561,11 +561,11 @@ def test_logs_have_rule_names_and_counts_but_no_titles(env, caplog):
                                   course="PSYCH 999")]
     env.scheduler().tick()
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO
-            and r.name.startswith("assistant.")]
+            and r.name.startswith("kwil.")]
     assert any("morning" in m for m in info)
     assert not any("Secret Essay" in m or "PSYCH" in m or "Okay, noted" in m for m in info)
     debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG
-             and r.name.startswith("assistant.proactive")]
+             and r.name.startswith("kwil.proactive")]
     assert any("Okay, noted" in m for m in debug)
 
 
@@ -685,10 +685,10 @@ def test_the_owners_claims_sync_with_the_history_syncer(tmp_path, monkeypatch, e
     import copy
     import threading
 
-    from assistant.config import DEFAULTS
-    from assistant.failover import sync
-    from assistant.failover.peers import settings_from_config
-    from assistant.history import HistoryStore
+    from kwil.config import DEFAULTS
+    from kwil.failover import sync
+    from kwil.failover.peers import settings_from_config
+    from kwil.history import HistoryStore
 
     ran = threading.Event()
     monkeypatch.setattr(sync.Syncer, "run_forever", lambda self, stop, interval: ran.set())

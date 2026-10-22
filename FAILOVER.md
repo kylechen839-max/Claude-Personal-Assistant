@@ -18,11 +18,11 @@ back to it, but never in the middle of a reply or a voice turn.
 
 | Piece | File |
 |---|---|
-| Client router (selection, failover, fail-back, override) | `assistant/web/backend-router.js` (+ `tests/js/backend-router.test.mjs`) |
-| Server: `/healthz`, CORS, bearer tokens, WebSocket auth | `assistant/failover/edge.py`, `tokens.py` |
-| Backend list, roles, probes, `[failover]` settings | `assistant/failover/peers.py` |
-| History sync protocol (events, merge, endpoints, client) | `assistant/failover/sync.py` |
-| Leader check for scheduled jobs | `assistant/failover/leader.py` |
+| Client router (selection, failover, fail-back, override) | `kwil/web/backend-router.js` (+ `tests/js/backend-router.test.mjs`) |
+| Server: `/healthz`, CORS, bearer tokens, WebSocket auth | `kwil/failover/edge.py`, `tokens.py` |
+| Backend list, roles, probes, `[failover]` settings | `kwil/failover/peers.py` |
+| History sync protocol (events, merge, endpoints, client) | `kwil/failover/sync.py` |
+| Leader check for scheduled jobs | `kwil/failover/leader.py` |
 | Tests (offline) | `tests/test_failover_*.py` |
 
 ## 1. Setting it up
@@ -56,7 +56,7 @@ app on). The cloud is public.
 `FAILOVER_BACKENDS=pi=https://<pi>.<tailnet>.ts.net,pc=https://<pc>.<tailnet>.ts.net`
 (the environment replaces `backends` there), and copy the service's
 `WEB_TOKEN` into the Pi's and PC's `.env`. Leave `ASSISTANT_ROLE` empty
-and nothing changes. There, `CloudGuard` (assistant/cloud.py) sits in front
+and nothing changes. There, `CloudGuard` (kwil/cloud.py) sits in front
 of the failover layer: it accepts the derived `hc1.` tokens (bad ones are
 401 and never count toward its lockout), keeps `POST /api/auth/token`
 public like `/api/login` (it checks the WEB_TOKEN in the body itself, so
@@ -175,7 +175,7 @@ Pi that boots with a stale clock until NTP catches up. `X-Forwarded-Host`
 counts as "our own host" in the origin check only from a trusted proxy
 (the web app's `trusted_proxy`), like the rest of the web app.
 
-**API version:** `assistant/failover/__init__.py` `API_VERSION` (now 1) is
+**API version:** `kwil/failover/__init__.py` `API_VERSION` (now 1) is
 bumped on any breaking change to the client API. The app accepts the range
 in `SUPPORTED_API`; a backend outside it is skipped (an old Pi that hasn't
 been updated yet won't be used by a newer app, and Settings says "update
@@ -238,7 +238,7 @@ Already shared: all backends read and write the same index.
 ### Conversation history
 Each backend keeps its own SQLite history (the history store from
 `claude/history`); they sync as an **append-only, id-addressed event log**
-(`assistant/failover/sync.py`).
+(`kwil/failover/sync.py`).
 
 Every change to history is an event:
 
@@ -295,7 +295,7 @@ answers. Pushed events are validated (`parse_event`: id format, known
 kind, size ≤ 64 KB, timestamp at most a day ahead) and a batch is accepted
 all or nothing.
 
-**Storage:** `assistant/failover/eventlog.py` `SqliteEventLog` is the
+**Storage:** `kwil/failover/eventlog.py` `SqliteEventLog` is the
 persistent log: its own `sync_events` / `sync_meta` tables, so it can share
 the history database file without touching the history store's tables
 (seq is AUTOINCREMENT, never reused; ids 32-hex; ts in ms; redaction on
@@ -312,7 +312,7 @@ redactions above, see `covered_by` and `redacted`), `since(seq, limit)`,
 this module owns the protocol.
 
 ### Scheduled jobs (reminders, briefings: none exist yet)
-`assistant/failover/leader.py` decides who runs a job:
+`kwil/failover/leader.py` decides who runs a job:
 
 1. If the shared log already has a fire for the job's dedupe key
    (e.g. `brief-2026-10-19`), skip.

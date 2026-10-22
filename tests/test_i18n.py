@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli, i18n
-from assistant.voice_session import decline_message, is_explicit_yes, question_suffix
+from kwil import cli, i18n
+from kwil.voice_session import decline_message, is_explicit_yes, question_suffix
 from tests.test_voice import SPEECH, delete_tool, make_conv, user_texts
 from tests.voice_fakes import stream_client, streamed
 from tests.conftest import tool_use_block
@@ -99,7 +99,7 @@ def test_spoken_datetime():
 
 
 def test_calendar_questions_in_chinese(zh):
-    from assistant.tools.calendar import GoogleCalendar
+    from kwil.tools.calendar import GoogleCalendar
 
     service = MagicMock()
     service.events.return_value.get.return_value.execute.return_value = {
@@ -117,7 +117,7 @@ def test_calendar_questions_in_chinese(zh):
 
 
 def test_new_calendar_questions_in_chinese(zh):
-    from assistant.tools.calendar import GoogleCalendar
+    from kwil.tools.calendar import GoogleCalendar
     from tests.test_calendar_features import BY_ID, INVITE, OCCURRENCE
     from tests.test_tools import make_service
 
@@ -168,7 +168,7 @@ def test_voice_confirmation_in_chinese(zh):
 
 
 def test_chinese_no_answer_status_clears_the_question(zh):
-    from assistant.voice_session import PendingConfirm
+    from kwil.voice_session import PendingConfirm
 
     conv, _, events = make_conv(stream_client())
     conv.pending = PendingConfirm(1, "要我删除吗？")

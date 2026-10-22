@@ -42,7 +42,7 @@ jobs:
           fi
           files=$(git diff --name-only "$BEFORE" HEAD)
           echo "$files"
-          if echo "$files" | grep -qE '^(scripts/|deploy/|requirements\.txt|\.github/workflows/pi-arm64\.yml|assistant/(preflight|smoke|doctor)\.py)'; then
+          if echo "$files" | grep -qE '^(scripts/|deploy/|requirements\.txt|\.github/workflows/pi-arm64\.yml|(assistant|kwil)/(preflight|smoke|doctor)\.py)'; then
             echo "pi=true" >> "$GITHUB_OUTPUT"
           else
             echo "pi=false" >> "$GITHUB_OUTPUT"

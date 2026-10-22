@@ -1,12 +1,12 @@
-"""python -m assistant --check: everything mocked, no secrets printed."""
+"""python -m kwil --check: everything mocked, no secrets printed."""
 
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli, doctor
-from assistant.config import load_config
+from kwil import cli, doctor
+from kwil.config import load_config
 
 SECRET = "sk-ant-very-secret-value"
 
@@ -139,7 +139,7 @@ def test_calendar_labels_scope_check(tmp_path, monkeypatch):
     one with the read-only list/labels scopes passes. Never required."""
     import json
 
-    from assistant.tools import google_auth
+    from kwil.tools import google_auth
 
     monkeypatch.delenv(google_auth.TOKEN_ENV, raising=False)
     cfg = config(tmp_path)
@@ -208,7 +208,7 @@ def test_cli_check_runs_without_api_key(monkeypatch, tmp_path):
     ("", None), (None, None), ("   ", None), (0, 0), ("0", 0), (" 3 ", 3), (2, 2),
     ("USB PnP", "USB PnP"), (" USB ", "USB")])
 def test_resolve_mic_device(value, want):
-    from assistant.audio import resolve_mic_device
+    from kwil.audio import resolve_mic_device
 
     assert resolve_mic_device(value) == want
 
@@ -245,7 +245,7 @@ def test_wake_mode_opens_device_zero(monkeypatch):
     """The bug: `device or None` turned index 0 into the default mic."""
     from types import SimpleNamespace
 
-    from assistant import cli, wakeword
+    from kwil import cli, wakeword
 
     opened = {}
     monkeypatch.setattr(wakeword, "make_detector", lambda **_: SimpleNamespace(
@@ -264,7 +264,7 @@ def test_push_to_talk_uses_the_configured_mic(monkeypatch):
     import sys
     from types import SimpleNamespace
 
-    from assistant import stt
+    from kwil import stt
 
     seen = {}
 

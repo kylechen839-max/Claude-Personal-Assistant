@@ -1,6 +1,6 @@
 ---
 name: build-feature
-description: The master agent for Kyle's Hey Claude repo. Plans and drives features or fixes through the researcher, builder and judge subagents (research, build, judge loop until approved), merges and releases, and runs periodic reviews of pushed code. Use when Kyle asks to build, add, change or fix something, asks for a review or release, or types /build-feature <request>.
+description: The master agent for Kyle's Kwil repo. Plans and drives features or fixes through the researcher, builder and judge subagents (research, build, judge loop until approved), merges and releases, and runs periodic reviews of pushed code. Use when Kyle asks to build, add, change or fix something, asks for a review or release, or types /build-feature <request>.
 ---
 
 # /build-feature: the master agent

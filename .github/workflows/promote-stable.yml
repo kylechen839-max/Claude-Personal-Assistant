@@ -1,10 +1,10 @@
 name: promote-stable
 
-# Moves the `stable` branch, which home hosts update from (assistant/updater.py),
+# Moves the `stable` branch, which home hosts update from (kwil/updater.py),
 # to a master commit once BOTH `tests` and `pi-arm64` passed on that exact
 # commit. Fast-forward only. Nobody pushes `stable` by hand.
 #
-# Hosts only install a stable commit that is signed (assistant/updater.py).
+# Hosts only install a stable commit that is signed (kwil/updater.py).
 # The recommended way: Kyle signs a `stable-<sha7>` tag himself with a key
 # that lives only on his PC (README, Automatic updates). Optional and weaker:
 # the `sign` job below signs it, with STABLE_SIGNING_KEY stored ONLY in the

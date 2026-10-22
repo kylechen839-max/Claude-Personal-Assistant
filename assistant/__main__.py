@@ -1,5 +1,7 @@
+"""`python -m assistant` (the old name) runs Kwil, the same as `python -m kwil`."""
+
 import sys
 
-from assistant.cli import main
+from kwil.cli import main
 
 sys.exit(main())

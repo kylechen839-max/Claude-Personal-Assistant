@@ -1,6 +1,6 @@
 // node --test tests/js/voice-picker.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the settings menu's assistant/web/voice-picker.js in node:vm with a
+// Runs the settings menu's kwil/web/voice-picker.js in node:vm with a
 // minimal fake page: the "Reply voice" box shows only when the server offers
 // the picker, lists the voices with a "paid" tag on ElevenLabs ones, saves a
 // choice with POST /api/voices (and goes back to the server's choice when
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/voice-picker.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/voice-picker.js', import.meta.url), 'utf8');
 
 class El {
   constructor(id, hidden = false) {
@@ -76,7 +76,7 @@ function load({ responses = {}, withPlayer = true } = {}) {
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  const api = win.HeyClaudeVoicePicker;
+  const api = win.KwilVoicePicker;
   if (withPlayer) api.configure({ player });
   return { win, els, menu, fetches, played, player, api };
 }

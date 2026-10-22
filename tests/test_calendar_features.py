@@ -1,6 +1,6 @@
 """The fuller Google Calendar tools: colors and event labels, repeats and
 series edits, reminders, guests, Meet, RSVP, free time, search and other
-calendars (assistant/tools/calendar.py).
+calendars (kwil/tools/calendar.py).
 
 Offline: the API client is a MagicMock answering with the real response
 shapes (organizer.self omitted on invites, occurrences carrying
@@ -14,9 +14,9 @@ from datetime import timedelta, timezone
 
 import pytest
 
-from assistant.tools import UNTRUSTED_MARK, ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.tools.google_auth import MissingScopes
+from kwil.tools import UNTRUSTED_MARK, ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.tools.google_auth import MissingScopes
 from tests.test_tools import DENTIST, OWN, TZ, make_service
 
 SCHOOL = "8f14e45f-ceea-467f-a0e6-1d2b3c4d5e6f"
@@ -70,7 +70,7 @@ def turn_clock():
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from assistant.tools import timeutil
+    from kwil.tools import timeutil
 
     token = timeutil.TURN_NOW.set(datetime(2026, 10, 1, 8, 0, tzinfo=ZoneInfo(TZ)))
     yield timeutil.TURN_NOW
@@ -718,7 +718,7 @@ def test_series_move_with_skipped_dates_is_refused_and_daily_follows():
 
 
 def test_invite_and_remove_questions_name_every_address():
-    from assistant import i18n
+    from kwil import i18n
 
     guests = [f"guest{i}@uni.edu" for i in range(1, 6)] + ["x@evil.example"]
     service, _ = make_service(event=DENTIST)
@@ -741,7 +741,7 @@ def test_invite_and_remove_questions_name_every_address():
 
 
 def test_rsvp_question_reads_out_the_note():
-    from assistant import i18n
+    from kwil import i18n
 
     service, _ = make_service(event=INVITE)
     cal = calendar(service)
@@ -824,7 +824,7 @@ def test_a_google_public_calendar_id_without_the_extras_does_not_taint():
 def test_text_written_in_a_tainted_conversation_is_marked_for_good():
     """Notes the assistant writes while untrusted text is in the conversation
     get a private marker; a later clean change never clears it."""
-    from assistant.tools import UNTRUSTED_CONTEXT
+    from kwil.tools import UNTRUSTED_CONTEXT
     flagged = {**DENTIST, "extendedProperties": {
         "private": {"hc_untrusted": "1", "source": "app"}}}
     service, events = make_service(event=flagged)

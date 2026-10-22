@@ -16,10 +16,10 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import audio, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.tools import Tool, ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS, Pyttsx3TTS  # noqa: E402
+from kwil import audio, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.tools import Tool, ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS, Pyttsx3TTS  # noqa: E402
 from tests.conftest import (make_response, own_blocks, text_block,  # noqa: E402
                             tool_use_block, without_context)
 
@@ -309,7 +309,7 @@ def test_short_token_is_refused(tmp_path):
 
 
 def test_token_is_redacted_from_logs(monkeypatch):
-    from assistant.config import redact
+    from kwil.config import redact
 
     monkeypatch.setenv("WEB_TOKEN", TOKEN)
     assert TOKEN not in redact(f"login with {TOKEN}")
@@ -571,7 +571,7 @@ def test_decode_wav_upload():
 
 @pytest.mark.slow
 def test_real_whisper_transcribes_an_uploaded_recording(make_app, fake_client):
-    from assistant.stt import Transcriber, rough_match
+    from kwil.stt import Transcriber, rough_match
 
     whisper = Transcriber()
     try:
@@ -617,7 +617,7 @@ def test_loopback_detection():
 
 
 def test_cli_web_mode_starts_the_server(monkeypatch, tmp_path, restore_root_logging):
-    from assistant import cli
+    from kwil import cli
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -647,7 +647,7 @@ def test_cli_web_mode_starts_the_server(monkeypatch, tmp_path, restore_root_logg
 
 
 def test_open_in_browser_is_not_offered(monkeypatch):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.delenv("PINECONE_API_KEY", raising=False)
@@ -660,7 +660,7 @@ def test_open_in_browser_is_not_offered(monkeypatch):
 
 
 def test_doctor_reports_web_token():
-    from assistant import doctor
+    from kwil import doctor
 
     checks = {c.name: c for c in doctor.check_web({"WEB_TOKEN": TOKEN})}
     assert checks["WEB_TOKEN"].ok and checks["WEB_TOKEN"].detail == "set"
@@ -704,7 +704,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           # voice conversation page files and the vendored VAD (voice_ws.py)
           "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
           "/static/vad/silero_vad_v5.onnx",
-          # the voice view's earcons (assistant/earcons.py)
+          # the voice view's earcons (kwil/earcons.py)
           "/earcons/listening.wav", "/earcons/thinking.wav", "/earcons/ended.wav",
           "/update-watch.js",  # reloads the page after an update (host.py)
           "/attachments.js",  # the chat's "+" (attachments.py checks the files)
@@ -829,7 +829,7 @@ def test_post_without_length_is_refused(make_app):
 
 
 def test_public_host_needs_a_token_from_the_environment(monkeypatch, tmp_path):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     monkeypatch.delenv("WEB_TOKEN", raising=False)
     cfg = load_config(None, None)
@@ -839,7 +839,7 @@ def test_public_host_needs_a_token_from_the_environment(monkeypatch, tmp_path):
 
 
 def test_port_and_trusted_proxy_from_environment(monkeypatch):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     monkeypatch.setenv("PORT", "10000")
     monkeypatch.setenv("TRUSTED_PROXY", "true")
@@ -849,7 +849,7 @@ def test_port_and_trusted_proxy_from_environment(monkeypatch):
 
 
 def test_serve_behind_a_proxy(monkeypatch, tmp_path):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     monkeypatch.setenv("WEB_TOKEN", TOKEN)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -881,7 +881,7 @@ def test_web_mode_does_not_load_audio_devices():
         "import sys, os\n"
         "os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-test'\n"
         "for k in ('PINECONE_API_KEY', 'NOTION_TOKEN'): os.environ.pop(k, None)\n"
-        "from assistant import cli, webapp\n"
+        "from kwil import cli, webapp\n"
         "from assistant.config import load_config\n"
         "cfg = load_config(None, None)\n"
         "cfg['calendar']['enabled'] = False\n"
@@ -1032,7 +1032,7 @@ def test_redirect_only_from_the_trusted_address(make_app):
 
 
 def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
-    from assistant.config import load_config
+    from kwil.config import load_config
 
     monkeypatch.setenv("WEB_TOKEN", TOKEN)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -1369,6 +1369,6 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "hey-claude-shell-v30" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v1" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw

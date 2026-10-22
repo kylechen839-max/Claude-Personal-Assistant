@@ -1,6 +1,6 @@
-# Hey Claude, cloud edition: the phone web app (python -m assistant --mode web)
-# on a headless server. Build: docker build -t hey-claude .
-# Run:   docker run -p 10000:10000 -e PORT=10000 --env-file .env hey-claude
+# Kwil, cloud edition: the phone web app (python -m kwil --mode web)
+# on a headless server. Build: docker build -t kwil .
+# Run:   docker run -p 10000:10000 -e PORT=10000 --env-file .env kwil
 # Secrets come from the environment only (see README "Run it in the cloud").
 FROM python:3.11-slim
 
@@ -55,6 +55,9 @@ RUN if [ "$FETCH_MODELS" = "1" ]; then \
     && mkdir -p /opt/models /app/voices && chmod -R a+rX /opt/models /app/voices
 
 COPY config.toml ./
+COPY kwil ./kwil
+# the package's name before the Kwil rebrand: a start command that still runs
+# `python -m assistant` keeps working (assistant/__init__.py)
 COPY assistant ./assistant
 COPY scripts/measure_memory.py scripts/ws_smoke.py ./scripts/
 
@@ -75,4 +78,4 @@ ENV ASSISTANT_PROFILE=server \
     PORT=10000
 EXPOSE 10000
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["python", "-m", "assistant", "--mode", "web"]
+CMD ["python", "-m", "kwil", "--mode", "web"]

@@ -1,6 +1,6 @@
 // node --test tests/js/notion.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/notion.js in node:vm with a minimal
+// Runs the phone page's kwil/web/notion.js in node:vm with a minimal
 // fake window: "Connect Notion" shows only for an invited person (never the
 // owner, whose page never even asks) and only when the server says it is
 // set up; their workspace and database names are shown as text only; a tap
@@ -12,8 +12,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/notion.js', import.meta.url), 'utf8');
-const I18N = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/notion.js', import.meta.url), 'utf8');
+const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 const NOTION_URL = 'https://api.notion.com/v1/oauth/authorize?client_id=c&state=s';
 
 class El {
@@ -52,7 +52,7 @@ function load({ status = { status: 200, body: { enabled: true, connected: false,
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  return { win, els, menu, fetches, asked, api: win.HeyClaudeNotion };
+  return { win, els, menu, fetches, asked, api: win.KwilNotion };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -157,7 +157,7 @@ test('every string it shows has Chinese in i18n.js', () => {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(I18N, ctx);
-  const { ZH } = ctx.HeyClaudeI18n;
+  const { ZH } = ctx.KwilI18n;
   const strings = ['Connect Notion', 'Reconnect Notion', 'Disconnect Notion', 'Notion connected.',
                    'Opening Notion…', "Couldn't start the Notion sign-in.", 'Notion disconnected.',
                    "Disconnect Notion? I won't see your assignments any more.",

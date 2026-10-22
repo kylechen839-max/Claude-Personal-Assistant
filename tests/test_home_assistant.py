@@ -1,4 +1,4 @@
-"""Home Assistant tools (assistant/tools/home_assistant.py), with the REST
+"""Home Assistant tools (kwil/tools/home_assistant.py), with the REST
 API mocked: no real Home Assistant is ever called."""
 
 import json
@@ -7,10 +7,10 @@ import logging
 import pytest
 import requests
 
-from assistant import cli, i18n
-from assistant.config import DEFAULTS, load_config, redact
-from assistant.tools import UNTRUSTED_CONTEXT, ToolRegistry
-from assistant.tools.home_assistant import HomeAssistant, plain_http_off_lan
+from kwil import cli, i18n
+from kwil.config import DEFAULTS, load_config, redact
+from kwil.tools import UNTRUSTED_CONTEXT, ToolRegistry
+from kwil.tools.home_assistant import HomeAssistant, plain_http_off_lan
 
 URL = "http://homeassistant.local:8123"
 TOKEN = "eyJhbGciOiJIUzI1NiJ9.test-long-lived-token"
@@ -595,12 +595,12 @@ def test_the_mom_instance_keeps_it_off():
 
 
 def test_ha_settings_isolated_from_other_instances():
-    from assistant.config import ISOLATED_ENV_VARS
+    from kwil.config import ISOLATED_ENV_VARS
     assert {"HA_URL", "HA_TOKEN"} <= set(ISOLATED_ENV_VARS)
 
 
 def test_family_members_never_get_home_assistant(monkeypatch, tmp_path, fake_client):
-    from assistant import family as family_mod
+    from kwil import family as family_mod
 
     monkeypatch.setenv("HA_URL", URL)
     monkeypatch.setenv("HA_TOKEN", TOKEN)
@@ -623,7 +623,7 @@ def test_a_notification_read_earlier_blocks_unlocking_later(ha, fake, fake_clien
     """End to end through ClaudeChat: a free-text sensor read in turn one
     taints the conversation; "unlock the front door" in turn two is refused
     without a question, and nothing is sent to Home Assistant."""
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
     from tests.conftest import make_response, text_block, tool_use_block
 
     reg, asked = registry(ha, answers=[True])

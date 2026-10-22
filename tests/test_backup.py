@@ -1,4 +1,4 @@
-"""The owner's backup download (assistant/backup.py, GET /api/backup): a
+"""The owner's backup download (kwil/backup.py, GET /api/backup): a
 consistent copy of every history database, the family list and the
 waitlist; never a token, key or .enc file; size-capped; owner only; its
 temp files removed. All offline: real SQLite in tmp_path."""
@@ -18,11 +18,11 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import backup as backup_mod, family as family_mod, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS, load_config  # noqa: E402
-from assistant.history import HistoryStore  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import backup as backup_mod, family as family_mod, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS, load_config  # noqa: E402
+from kwil.history import HistoryStore  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_cloud import make_cloud, slept  # noqa: E402,F401 (fixtures)
 from tests.test_family import Env  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
@@ -170,7 +170,7 @@ def test_the_size_cap_holds(env, owner, caplog, monkeypatch):
     def never(src, dst):
         raise AssertionError("refused before copying anything")
     monkeypatch.setattr(backup_mod, "copy_database", never)
-    with caplog.at_level(logging.INFO, logger="assistant.backup"):
+    with caplog.at_level(logging.INFO, logger="kwil.backup"):
         r = owner.get("/api/backup")
     monkeypatch.undo()
     assert r.status_code == 413 and "backup_max_mb" in r.json()["error"]
@@ -186,7 +186,7 @@ def test_the_size_cap_holds(env, owner, caplog, monkeypatch):
 
 
 def test_temp_files_are_removed_and_size_only_is_logged(env, owner, caplog):
-    with caplog.at_level(logging.DEBUG, logger="assistant.backup"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.backup"):
         zf = open_zip(owner.get("/api/backup"))
     assert "history.sqlite" in zf.namelist()
     assert env.temp.exists() and list(env.temp.iterdir()) == []
@@ -263,7 +263,7 @@ def test_startup_sweeps_a_crashed_backups_plaintext(tmp_path, monkeypatch):
     anyone asks for a backup."""
     import tempfile
 
-    from assistant import webapp as webapp_mod
+    from kwil import webapp as webapp_mod
 
     temp = tmp_path / "tmp"
     old = temp / (backup_mod.TEMP_PREFIX + "crashed")

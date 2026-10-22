@@ -1,5 +1,5 @@
 """Files and photos attached to a chat message (the phone app's "+"):
-type sniffing and limits (assistant/attachments.py), the content blocks
+type sniffing and limits (kwil/attachments.py), the content blocks
 Claude gets through /api/turn, history markers instead of bytes, taint,
 logs, family sessions and the cloud guard's body cap.
 
@@ -16,11 +16,11 @@ import pytest
 pytest.importorskip("fastapi")
 from PIL import Image  # noqa: E402
 
-from assistant import attachments, chat as chat_mod, webapp  # noqa: E402
-from assistant.attachments import AttachmentRejected, prepare, prepare_all  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.history import HistoryStore, Recorder  # noqa: E402
-from assistant.tools import Tool, ToolRegistry  # noqa: E402
+from kwil import attachments, chat as chat_mod, webapp  # noqa: E402
+from kwil.attachments import AttachmentRejected, prepare, prepare_all  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.history import HistoryStore, Recorder  # noqa: E402
+from kwil.tools import Tool, ToolRegistry  # noqa: E402
 from tests.conftest import (make_response, own_blocks, text_block,  # noqa: E402
                             tool_use_block)
 from tests.test_cloud import PUBLIC, login as cloud_login, make_cloud, slept, via_proxy  # noqa: E402,F401
@@ -214,7 +214,7 @@ def test_page_counting_stays_linear_on_runs_of_digits_and_spaces():
 
 
 def test_limits_from_config_stay_under_the_request_cap():
-    from assistant.config import DEFAULTS, load_config
+    from kwil.config import DEFAULTS, load_config
 
     assert DEFAULTS["webapp"]["max_attachment_mb"] == 10
     assert attachments.limits(load_config(None, None)) == {
@@ -346,7 +346,7 @@ def refuse(**kwargs):
     ("zh", "这个文件太长了，Claude 处理不了（PDF 最多 100 页）。")])
 def test_a_file_claude_refuses_gets_its_own_sentence(make_app, fake_client, caplog,
                                                      monkeypatch, lang, sentence):
-    from assistant import i18n
+    from kwil import i18n
 
     monkeypatch.setattr(i18n, "LANG", lang)
     assistant, client = make_app()
@@ -382,7 +382,7 @@ def test_a_file_claude_refuses_gets_its_own_sentence(make_app, fake_client, capl
     ("messages.0.content.0.pdf: A maximum of 100 PDF pages may be provided.",
      "file_too_long")])
 def test_only_a_length_400_says_too_long(make_app, fake_client, reason, key):
-    from assistant import i18n
+    from kwil import i18n
 
     _, client = make_app()
     login(client)
@@ -445,7 +445,7 @@ def test_history_keeps_a_marker_never_the_bytes(recorded_app, fake_client, tmp_p
     assert base64.b64encode(PDF)[:40] not in raw
     assert client.get("/api/state").json()["turns"] == 1  # an attachment turn counts
     # resuming it gives plain text (no blocks), valid for the API
-    from assistant.history import rebuild_history
+    from kwil.history import rebuild_history
 
     history = rebuild_history(store.get(s.chat.conversation_id))
     assert history[0] == {"role": "user", "content": user[0]}
@@ -638,7 +638,7 @@ def test_every_file_the_login_page_loads_is_public_on_the_cloud(make_cloud):
     Chinese family member) until a reload after signing in."""
     import re
 
-    from assistant import cloud
+    from kwil import cloud
 
     page = (webapp.STATIC / "index.html").read_text(encoding="utf-8")
     paths = sorted(set(re.findall(r'(?:src|href)="(/[^"#?]*)"', page)))
@@ -670,7 +670,7 @@ def test_page_has_the_plus_button_and_its_script(make_app):
     assert "<script>" not in page  # CSP: no inline script
     # the tutor reuses the same photo shrinking instead of its own copy
     features = (webapp.STATIC / "static" / "features.js").read_text(encoding="utf-8")
-    assert "HeyClaudeAttach.shrinkImage" in features and "createImageBitmap" not in features
+    assert "KwilAttach.shrinkImage" in features and "createImageBitmap" not in features
 
 
 def test_every_new_label_has_chinese():

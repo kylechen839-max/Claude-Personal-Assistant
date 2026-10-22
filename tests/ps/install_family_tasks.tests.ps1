@@ -32,7 +32,7 @@ try {
     Check 'skips a config without its env file, with a warning' ($script:warnings -match 'config.orphan.toml')
     $mom = $found | Where-Object Name -eq 'mom'
     Check 'runs the instance with its own config and env file' (
-        (Get-InstanceArgument $mom) -eq '-m assistant --mode web --config config.mom.toml --env-file .env.mom')
+        (Get-InstanceArgument $mom) -eq '-m kwil --mode web --config config.mom.toml --env-file .env.mom')
 }
 finally {
     Remove-Item -Recurse -Force $dir

@@ -1,5 +1,5 @@
 """Public beta piece G6: an invited person's own Notion through public OAuth
-(assistant/notion_web.py, family.Family's notion_* methods, userkeys.seal).
+(kwil/notion_web.py, family.Family's notion_* methods, userkeys.seal).
 
 All offline: every Notion call goes through notion_client's real SDK over
 an httpx.MockTransport (FakeNotion below) answering with Notion's real
@@ -21,11 +21,11 @@ pytest.importorskip("cryptography")
 pytest.importorskip("notion_client")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, i18n, notion_web, userkeys, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
-from assistant.tools import ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import family as family_mod, i18n, notion_web, userkeys, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
+from kwil.tools import ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, events, login  # noqa: E402
 
@@ -886,10 +886,10 @@ def test_no_token_code_email_or_title_in_the_log(n, caplog):
                    WORKSPACE, DB_TITLE, TASK, KYLES):
         assert secret not in text, secret
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO
-            and r.name.startswith("assistant")]
+            and r.name.startswith("kwil")]
     assert any(uid in m and "w0rk-1d" in m for m in info)  # ids are logged
     # uvicorn's access log line for the callback: the code is masked
-    from assistant.config import redact
+    from kwil.config import redact
 
     assert CODE not in redact(f'"GET /notion/callback?state={state}&code={CODE} HTTP/1.1"')
 
@@ -897,7 +897,7 @@ def test_no_token_code_email_or_title_in_the_log(n, caplog):
 def test_config_docs_and_deploy_know_the_new_settings():
     from pathlib import Path
 
-    from assistant import cloud
+    from kwil import cloud
 
     root = Path(__file__).resolve().parent.parent
     for var in ("NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET"):
@@ -905,13 +905,13 @@ def test_config_docs_and_deploy_know_the_new_settings():
         assert f"key: {var}\n        sync: false" in (root / "render.yaml").read_text(
             encoding="utf-8")
     assert {"/notion/callback", "/notion.js"} <= cloud.PUBLIC_GET
-    web = root / "assistant" / "web"
+    web = root / "kwil" / "web"
     page = (web / "index.html").read_text(encoding="utf-8")
     assert 'id="notion-connect"' in page and 'id="notion-disconnect"' in page
     assert page.index('id="google-connect"') < page.index('id="notion-connect"')
     assert page.index("/notion.js") < page.index("/app.js")
     assert '"/notion.js"' in (web / "sw.js").read_text(encoding="utf-8")
-    assert "HeyClaudeNotion.onState" in (web / "app.js").read_text(encoding="utf-8")
+    assert "KwilNotion.onState" in (web / "app.js").read_text(encoding="utf-8")
     for table in (i18n.EN, i18n.ZH):
         assert table["notion_failed"] and table["notion_reconnect"]
 
@@ -919,7 +919,7 @@ def test_config_docs_and_deploy_know_the_new_settings():
 def test_the_page_code_is_served(n):
     c = TestClient(n.app, base_url=BASE)
     r = c.get("/notion.js")
-    assert r.status_code == 200 and "HeyClaudeNotion" in r.text
+    assert r.status_code == 200 and "KwilNotion" in r.text
 
 
 def test_seal_and_unseal_bind_the_id(tmp_path):

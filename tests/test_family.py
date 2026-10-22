@@ -1,4 +1,4 @@
-"""Family accounts on the cloud server (assistant/family.py): the owner
+"""Family accounts on the cloud server (kwil/family.py): the owner
 invites someone, they accept a one-time link and get their own history and
 language, and never anything of Kyle's (Notion, memory, notes, history,
 dev team, lecture/tutor, Google, other people's audio).
@@ -17,12 +17,12 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, webapp, webfeatures  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS, load_config, redact  # noqa: E402
-from assistant.history import HistoryStore, Recorder  # noqa: E402
-from assistant.tools import Tool, ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import family as family_mod, webapp, webfeatures  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS, load_config, redact  # noqa: E402
+from kwil.history import HistoryStore, Recorder  # noqa: E402
+from kwil.tools import Tool, ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import (make_response, request_text, sent_text,  # noqa: E402
                             text_block)
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
@@ -300,7 +300,7 @@ def test_family_never_gets_the_owners_google(fake_client, tmp_path):
     (test_family_google.py), never his connected token."""
     from fastapi.testclient import TestClient as TC
 
-    from assistant import google_web
+    from kwil import google_web
 
     config = load_config(None, None)
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
@@ -339,7 +339,7 @@ def test_family_never_gets_the_owners_google(fake_client, tmp_path):
 def test_only_the_owner_sees_the_api_cost(env, owner):
     """usage.py: the monthly estimate is the owner's business; a family
     member's /api/state never has it, even after their own turns."""
-    from assistant import usage
+    from kwil import usage
     from tests.conftest import make_usage
 
     mom, _ = env.member(owner, language="en", tier="family")  # on the owner's key
@@ -480,7 +480,7 @@ def test_invite_tokens_and_links_are_redacted():
 
 
 def test_family_defaults():
-    from assistant.config import SERVER_PROFILE
+    from kwil.config import SERVER_PROFILE
 
     assert DEFAULTS["family"]["enabled"] is False
     assert DEFAULTS["family"]["invite_days"] == 30
@@ -585,7 +585,7 @@ def test_owner_sign_out_everywhere_keeps_family_voice_calls(env, owner):
 
 
 def failing_saves(monkeypatch):
-    from assistant.tools import google_auth
+    from kwil.tools import google_auth
 
     def fail(path, text):
         raise OSError("disk full")
@@ -723,7 +723,7 @@ def test_each_members_history_uses_max_history_mb(env, owner):
 
 
 def test_the_tier_is_logged_never_the_name(env, owner, caplog):
-    with caplog.at_level(logging.INFO, logger="assistant.family"):
+    with caplog.at_level(logging.INFO, logger="kwil.family"):
         link = env.invite(owner, name="Zebediah")
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert link["user"]["id"] in text and "beta" in text

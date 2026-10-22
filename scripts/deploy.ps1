@@ -3,7 +3,7 @@
     Put new code live safely: pull, check it on a side port, then switch over or refuse.
 .DESCRIPTION
     Use this instead of "git pull" and restarting by hand. It runs
-    python -m assistant.deploy (see assistant/deploy.py):
+    python -m kwil.deploy (see kwil/deploy.py):
 
       1. git pull (fast-forward only);
       2. each app (yours and every family copy) is started on the new code on
@@ -34,7 +34,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     Write-Error "No .venv found in $repoDir. Create it first (README.md, Quick start)."
     exit 2
 }
-$arguments = @('-m', 'assistant.deploy')
+$arguments = @('-m', 'kwil.deploy')
 if ($NoPull) { $arguments += '--no-pull' }
 if ($Restart) { $arguments += '--restart' }
 if ($Requirements) { $arguments += '--requirements' }

@@ -1,7 +1,7 @@
 # A second, separate instance in Mandarin Chinese, for a family member to
 # try on her phone (README: "A Chinese instance for someone else").
 #
-#   python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
+#   python -m kwil --mode web --config config.mom.toml --env-file .env.mom --show-token
 #
 # None of Kyle's connections are used: no Notion, no Pinecone memory or notes,
 # no dev team, its own history, sessions and log, and its own Google sign-in
@@ -26,7 +26,7 @@ hotwords = ""                 # names she says often, if Whisper mishears them
 engine = "whisper"            # local only: her speech never leaves this computer
 
 [tts]
-engine = "piper"              # python -m assistant --download-voice zh_CN-huayan-medium
+engine = "piper"              # python -m kwil --download-voice zh_CN-huayan-medium
 piper_voice = "voices/zh_CN-huayan-medium.onnx"
 fallback = "print"            # no voice yet: the phone's own (Chinese) voice reads replies
 voice_file = "data/mom/voice_choice.json"  # her pick in the menu's voice picker
