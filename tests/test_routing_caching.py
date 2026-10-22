@@ -8,10 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from assistant import chat as chat_mod, router, usage
-from assistant.chat import ClaudeChat, request_messages
-from assistant.tools import Tool, ToolRegistry
-from assistant.tools.web import server_tools
+from kwil import chat as chat_mod, router, usage
+from kwil.chat import ClaudeChat, request_messages
+from kwil.tools import Tool, ToolRegistry
+from kwil.tools.web import server_tools
 from tests.conftest import (first_text, make_response, make_usage, request_text,
                             system_text, text_block, tool_use_block)
 
@@ -115,7 +115,7 @@ def test_request_messages_marks_a_copy_and_walks_back_past_server_blocks():
 def test_notes_ride_in_the_turn_and_never_reach_the_summary_or_recorder(fake_client):
     from unittest.mock import MagicMock
 
-    from assistant.memory import transcript
+    from kwil.memory import transcript
 
     memory = MagicMock()
     memory.retrieve.return_value = ["SECRET NOTE"]
@@ -215,9 +215,9 @@ def test_a_haiku_turn_sends_the_web_tool_versions_haiku_supports(fake_client):
 def test_the_route_log_has_no_words(fake_client, caplog):
     fake_client.queue = [make_response(text_block("It's noon."))]
     chat = routed(fake_client)
-    with caplog.at_level(logging.DEBUG, logger="assistant.router"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.router"):
         chat.ask("what time is it SECRETWORD")
-    lines = [r.getMessage() for r in caplog.records if r.name == "assistant.router"]
+    lines = [r.getMessage() for r in caplog.records if r.name == "kwil.router"]
     assert lines == [f"Route: {FAST} (simple)"]
 
 
@@ -239,11 +239,11 @@ def test_usage_is_logged_as_numbers_only(fake_client, caplog):
     fake_client.queue = [make_response(
         text_block("REPLYWORDS"), usage=make_usage(1200, 40, 300, 900, 2))]
     chat = ClaudeChat(client=fake_client, model=MAIN)
-    with caplog.at_level(logging.DEBUG, logger="assistant.usage"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.usage"):
         chat.ask("SECRETWORD please")
-    lines = [r.getMessage() for r in caplog.records if r.name == "assistant.usage"]
+    lines = [r.getMessage() for r in caplog.records if r.name == "kwil.usage"]
     assert len(lines) == 1 and all(r.levelno == logging.INFO for r in caplog.records
-                                   if r.name == "assistant.usage")
+                                   if r.name == "kwil.usage")
     assert ("input=1200 output=40 cache_read=900 cache_write=300 web_searches=2"
             in lines[0]) and MAIN in lines[0]
     assert "SECRETWORD" not in caplog.text and "REPLYWORDS" not in caplog.text
@@ -298,8 +298,8 @@ def test_every_api_call_is_counted_with_its_model(fake_client):
 
 
 def test_build_chat_and_factories_wire_the_router(monkeypatch):
-    from assistant import cli
-    from assistant.config import load_config
+    from kwil import cli
+    from kwil.config import load_config
 
     monkeypatch.setattr(cli.anthropic, "Anthropic", lambda **kw: None)
     chat = cli.build_chat(load_config(None, None))
@@ -613,9 +613,9 @@ def test_a_lock_being_deleted_on_windows_is_waited_for(tmp_path, monkeypatch):
 
 
 def test_titles_tutor_and_lecture_calls_are_metered(fake_client):
-    from assistant.history import ask_title
-    from assistant.lecture import summarize
-    from assistant.tutor import TutorSession
+    from kwil.history import ask_title
+    from kwil.lecture import summarize
+    from kwil.tutor import TutorSession
     from tests.test_lecture import NOTES
 
     fake_client.queue = [
@@ -639,9 +639,9 @@ def test_a_web_session_types_its_server_tools_for_the_routed_model():
     """The web app's per-session registry (SessionTools) takes the model too,
     in a health check's session as well, so a Haiku turn never gets Sonnet's
     web tool versions."""
-    from assistant.tools import ToolRegistry
-    from assistant.tools.web import tool_versions
-    from assistant.webapp import SessionTools
+    from kwil.tools import ToolRegistry
+    from kwil.tools.web import tool_versions
+    from kwil.webapp import SessionTools
 
     shared = ToolRegistry()
     shared.server_tools = [{"type": "web_search_20260209", "name": "web_search"}]
@@ -656,7 +656,7 @@ def test_a_web_session_types_its_server_tools_for_the_routed_model():
 def test_a_cut_off_lecture_summary_is_still_metered(fake_client):
     """The tokens of a refused or cut-off summary are billed too, so they
     are recorded before summarize() raises."""
-    from assistant.lecture import summarize
+    from kwil.lecture import summarize
 
     fake_client.queue = [make_response(text_block('{"key_'), stop_reason="max_tokens",
                                        usage=make_usage(400, 40))]

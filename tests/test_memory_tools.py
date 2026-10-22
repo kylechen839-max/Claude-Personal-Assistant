@@ -3,8 +3,8 @@
 import json
 from unittest.mock import MagicMock
 
-from assistant.cli import add_memory_tools
-from assistant.tools import ToolRegistry
+from kwil.cli import add_memory_tools
+from kwil.tools import ToolRegistry
 
 
 def registry(confirm=lambda q: False):
@@ -62,7 +62,7 @@ def test_remember_rejects_empty_note():
 
 
 def test_system_prompt_mentions_memory_only_when_on():
-    from assistant.chat import MEMORY_PROMPT, ClaudeChat
+    from kwil.chat import MEMORY_PROMPT, ClaudeChat
 
     assert MEMORY_PROMPT in ClaudeChat(client=MagicMock(), memory=MagicMock()).build_system()
     assert MEMORY_PROMPT not in ClaudeChat(client=MagicMock()).build_system()

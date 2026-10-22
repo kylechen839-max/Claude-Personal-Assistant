@@ -13,12 +13,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from assistant import audio, cli
-from assistant.audio import SAMPLE_RATE
-from assistant.chat import ClaudeChat
-from assistant.tools import ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.wakeword import FRAME_LENGTH, FileSource, WakeListener
+from kwil import audio, cli
+from kwil.audio import SAMPLE_RATE
+from kwil.chat import ClaudeChat
+from kwil.tools import ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.wakeword import FRAME_LENGTH, FileSource, WakeListener
 from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_tools import DENTIST, make_service
 from tests.test_wakeword import ScriptedDetector, tts_clip
@@ -106,7 +106,7 @@ def memory_chat(fake_client):
 
 def user_texts(fake_client):
     """The plain-text user turns Claude was sent (not summaries)."""
-    from assistant.chat import is_user_turn
+    from kwil.chat import is_user_turn
 
     return [[first_text(m["content"]) for m in c["messages"] if is_user_turn(m)]
             for c in fake_client.calls if "tools" in c or c["max_tokens"] != 200]
@@ -274,7 +274,7 @@ def test_follow_up_turn_is_timed(tmp_path, clips, fake_client, caplog):
                                "And what about Friday?"])
     fake_client.queue = [make_response(text_block("The dentist at three.")),
                          make_response(text_block("Nothing on Friday."))]
-    with caplog.at_level(logging.INFO, logger="assistant.cli"):
+    with caplog.at_level(logging.INFO, logger="kwil.cli"):
         p.run(ClaudeChat(client=fake_client))
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("Turn timings")]
@@ -293,7 +293,7 @@ def test_strip_wake_phrase():
 
 def test_only_the_wake_phrase_keeps_the_window_open(fake_client):
     said = []
-    from assistant.tts import PrintTTS
+    from kwil.tts import PrintTTS
 
     keep = cli.handle_command(ClaudeChat(client=fake_client), PrintTTS(said.append),
                               SimpleNamespace(transcribe=lambda r: "Hey Claude."),
@@ -302,7 +302,7 @@ def test_only_the_wake_phrase_keeps_the_window_open(fake_client):
 
 
 def test_mic_drain_discards_buffered_audio():
-    from assistant.wakeword import MicSource
+    from kwil.wakeword import MicSource
 
     mic = MicSource()
     mic._stream = MagicMock(read_available=1234)
@@ -311,8 +311,8 @@ def test_mic_drain_discards_buffered_audio():
 
 
 def test_follow_up_config_and_soft_chime(monkeypatch):
-    from assistant import wakeword
-    from assistant.config import DEFAULTS, load_config
+    from kwil import wakeword
+    from kwil.config import DEFAULTS, load_config
 
     assert DEFAULTS["wake"]["follow_up_seconds"] == 5
     assert load_config("config.toml", None)["wake"]["follow_up_seconds"] == 5

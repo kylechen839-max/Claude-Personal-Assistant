@@ -1,4 +1,4 @@
-"""Account self-service (assistant/account.py): a family member downloads
+"""Account self-service (kwil/account.py): a family member downloads
 their data (GET /api/me/export) or deletes their account (POST
 /api/me/delete), only ever their own, never the owner's.
 
@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from assistant import account as account_mod, webapp  # noqa: E402
+from kwil import account as account_mod, webapp  # noqa: E402
 from tests.test_family import env, owner  # noqa: E402,F401 (fixtures)
 from tests.test_webapp import TOKEN  # noqa: E402
 
@@ -258,7 +258,7 @@ def test_off_without_family(tmp_path):
 
     from fastapi.testclient import TestClient
 
-    from assistant.tts import PrintTTS
+    from kwil.tts import PrintTTS
     from tests.test_webapp import BASE, FakeTranscriber, login
 
     assistant = webapp.WebAssistant(lambda reg: MagicMock(), FakeTranscriber(), PrintTTS())
@@ -280,7 +280,7 @@ def test_export_has_their_conversations_and_profile(env, owner, acct):
     r = mom.get("/api/me/export")
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == "application/zip"
-    assert 'attachment; filename="hey-claude-data.zip"' == r.headers["content-disposition"]
+    assert 'attachment; filename="kwil-data.zip"' == r.headers["content-disposition"]
     files = unzip(r)
     prof = json.loads(files["profile.json"])
     assert prof == {"id": uid, "name": "Mom", "language": "zh",
@@ -505,7 +505,7 @@ def test_startup_sweeps_old_export_folders(env, owner, acct):
 
 
 def test_exports_live_privately_in_the_family_dir(env, owner, acct):
-    from assistant import family as family_mod
+    from kwil import family as family_mod
 
     assert not family_mod.valid_id(account_mod.EXPORTS_DIR)  # never someone's folder
     mom, link = env.member(owner)
@@ -653,7 +653,7 @@ def test_logs_carry_ids_only(env, owner, acct, caplog):
                    *KEY_FILES.values()):
         assert leaked not in text, leaked
     info = [r.getMessage() for r in caplog.records
-            if r.name == "assistant.account" and r.levelno >= logging.INFO]
+            if r.name == "kwil.account" and r.levelno >= logging.INFO]
     assert any(uid in m and "exported" in m for m in info)
     assert any(uid in m and "deleted their account" in m for m in info)
     assert any(uid in m and "revoked" in m for m in info)

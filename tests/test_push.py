@@ -1,4 +1,4 @@
-"""Web Push (assistant/push.py): subscriptions sealed at rest per person,
+"""Web Push (kwil/push.py): subscriptions sealed at rest per person,
 the VAPID key made once, sending through pywebpush (patched: no network),
 a push service's 410 forgets the device, and endpoints only at real push
 services. Logs never carry a notification's text at INFO."""
@@ -15,8 +15,8 @@ pywebpush = pytest.importorskip("pywebpush")
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
 
-from assistant import family as family_mod, push as push_mod  # noqa: E402
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
+from kwil import family as family_mod, push as push_mod  # noqa: E402
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
 
 SECRET = "p" * 48  # USER_DATA_KEY
 APPLE = "https://web.push.apple.com/QGuQyavXutnMcmwhxyz-abc_DEF"
@@ -266,7 +266,7 @@ def test_each_person_has_their_own_sealed_file(config, sent, tmp_path):
 
 
 def test_logs_never_carry_the_notification_text_or_endpoint(push, sent, caplog):
-    caplog.set_level(logging.DEBUG, logger="assistant.push")
+    caplog.set_level(logging.DEBUG, logger="kwil.push")
     push.subscribe(None, sub(APPLE))
     sent.fail[APPLE] = 410
     push.subscribe(None, sub(FCM))

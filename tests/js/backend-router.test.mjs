@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
   BackendRouter, NeedsUserRetry, NoBackend, mergeBackends, normalizeUrl, tokenStore,
-} from '../../assistant/web/backend-router.js';
+} from '../../kwil/web/backend-router.js';
 
 const URLS = {
   pi: 'https://pi.tail1234.ts.net',
@@ -478,4 +478,49 @@ test('tokenStore falls back to memory without IndexedDB', async () => {
   assert.equal(await store.get('token'), 'abc');
   await store.delete('token');
   assert.equal(await store.get('token'), null);
+});
+
+// A minimal IndexedDB: named databases of one 'kv' store, answering async.
+function fakeIndexedDB(databases = {}) {
+  const later = (fn) => setTimeout(fn, 0);
+  return {
+    opened: [],
+    open(name) {
+      this.opened.push(name);
+      const req = {};
+      later(() => {
+        const isNew = !databases[name];
+        const data = databases[name] || (databases[name] = new Map());
+        req.result = {
+          createObjectStore() {},
+          close() {},
+          transaction() {
+            const tx = {};
+            const done = (r) => { later(() => tx.oncomplete()); return r; };
+            const store = {
+              get: (k) => done({ result: data.get(k) }),
+              put: (v, k) => { data.set(k, v); return done({}); },
+              delete: (k) => { data.delete(k); return done({}); },
+            };
+            tx.objectStore = () => store;
+            return tx;
+          },
+        };
+        if (isNew && req.onupgradeneeded) req.onupgradeneeded();
+        req.onsuccess();
+      });
+      return req;
+    },
+  };
+}
+
+test('a failover token saved before the Kwil rebrand is still found', async () => {
+  // The database keeps its old name (like the hc_session cookie): a phone
+  // signed in before the rebrand stays signed in after it.
+  const idb = fakeIndexedDB({ 'hey-claude': new Map([['token', { access_token: 'old-token' }]]) });
+  const store = tokenStore(idb);
+  assert.deepEqual(await store.get('token'), { access_token: 'old-token' });
+  assert.deepEqual(idb.opened, ['hey-claude']);
+  await store.set('token', { access_token: 'new-token' });
+  assert.deepEqual(await tokenStore(idb).get('token'), { access_token: 'new-token' });
 });

@@ -10,11 +10,11 @@ from fastapi import Depends, WebSocket  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from assistant import webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS  # noqa: E402
-from assistant.failover.peers import settings_from_config  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS  # noqa: E402
+from kwil.failover.peers import settings_from_config  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block  # noqa: E402
 
 TOKEN = "t" * 20 + "-test-token-0123456789abcdef"
@@ -110,7 +110,7 @@ def test_session_follows_the_token_sid(make):
     token = sign_in(client)
     client.get("/api/state", headers=bearer(token, **CROSS))
     sid = next(iter(assistant.sessions))
-    from assistant.failover.tokens import TokenAuthority
+    from kwil.failover.tokens import TokenAuthority
 
     assert TokenAuthority(TOKEN).verify(token).sid == sid
 

@@ -194,8 +194,8 @@ jobs:
         with:
           context: .
           load: true
-          tags: hey-claude:ci
+          tags: kwil:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Smoke test and memory
-        run: scripts/container_smoke.sh hey-claude:ci
+        run: scripts/container_smoke.sh kwil:ci

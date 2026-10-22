@@ -13,13 +13,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli
-from assistant.chat import ClaudeChat
-from assistant.config import DEFAULTS, load_config
-from assistant.memory import PineconeMemory
-from assistant.memory_review import MemoryReview
-from assistant.tools import ToolRegistry
-from assistant.tools.notes import QuickNotes
+from kwil import cli
+from kwil.chat import ClaudeChat
+from kwil.config import DEFAULTS, load_config
+from kwil.memory import PineconeMemory
+from kwil.memory_review import MemoryReview
+from kwil.tools import ToolRegistry
+from kwil.tools.notes import QuickNotes
 from tests.conftest import (make_response, request_text, sent_text, text_block,
                             tool_use_block)
 from tests.test_notes import FakeIndex
@@ -116,7 +116,7 @@ def test_entries_have_kind_date_and_untrusted_badge(review):
 def test_long_lists_are_cut_newest_first(memory, monkeypatch):
     """The cap keeps the newest by save time across both prefixes: a quick
     note newer than some summaries survives, an undated id goes first."""
-    monkeypatch.setattr("assistant.memory_review.MAX_NOTES", 3)
+    monkeypatch.setattr("kwil.memory_review.MAX_NOTES", 3)
     data = MemoryReview(memory, timezone=TZ, clock=Clock()).weeks()
     assert data["truncated"] is True and data["count"] == 3
     kept = [n["id"] for g in data["weeks"] for n in g["notes"]]
@@ -146,7 +146,7 @@ def test_lists_through_the_real_sdk_list_pages():
 
 
 def test_fetches_in_batches(memory, monkeypatch):
-    monkeypatch.setattr("assistant.memory_review.FETCH_BATCH", 2)
+    monkeypatch.setattr("kwil.memory_review.FETCH_BATCH", 2)
     calls = []
     fetch = memory.index.fetch
     memory.index.fetch = lambda ids, namespace: calls.append(list(ids)) or fetch(ids, namespace)
@@ -344,8 +344,8 @@ def test_no_note_text_at_info(review, memory, tmp_path, caplog):
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import webapp  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import webapp  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_family import env, owner  # noqa: E402,F401  (fixtures)
 from tests.test_webapp import BASE, TOKEN, FakeTranscriber, login  # noqa: E402
 from tests.test_webapp import Clock as WebClock  # noqa: E402

@@ -1,6 +1,6 @@
 // node --test tests/js/attachments.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/attachments.js in node:vm: which
+// Runs the phone page's kwil/web/attachments.js in node:vm: which
 // picked files are allowed, the 4-file limit, chips with a remove button,
 // "+" disabled at the limit, photos sent as their shrunk JPEG, and the
 // FormData parts /api/turn gets.
@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/attachments.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/attachments.js', import.meta.url), 'utf8');
 
 class El {
   constructor(tag = 'div', id = '') {
@@ -62,7 +62,7 @@ function load({ withDocument = false, imageFails = false } = {}) {
   vm.createContext(ctx);
   ctx.window = ctx;
   vm.runInContext(SCRIPT, ctx);
-  return { api: ctx.HeyClaudeAttach, els, notes, doc };
+  return { api: ctx.KwilAttach, els, notes, doc };
 }
 
 const file = (name, type, size = 10) => ({ name, type, size });

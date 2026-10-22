@@ -1,9 +1,13 @@
 # Privacy
 
-Hey Claude is a personal assistant that runs on hardware you control: your
+Kwil is a personal assistant that runs on hardware you control: your
 PC, a Raspberry Pi, and optionally a Render server you pay for. There is no
-Hey Claude company or shared service behind it, and nothing is sent anywhere
+Kwil company or shared service behind it, and nothing is sent anywhere
 except to the services listed below, using your own keys.
+
+Kwil was called Hey Claude until 2026-10-22. The rename changes no data,
+storage location or recipient; what is stored and where stays as described
+here.
 
 ## What leaves your machine, and where it goes
 
@@ -41,7 +45,7 @@ Settings. Download my data gives a zip of their conversations and profile
 (name, language, time zone, account type, date joined); it never includes
 Google sign-in tokens or API keys. The zip is built on the server only for
 the download and removed when it ends, or when the account is deleted.
-Delete my account takes effect at once in the app: it asks Google to revoke Hey Claude's access, signs them out on every
+Delete my account takes effect at once in the app: it asks Google to revoke Kwil's access, signs them out on every
 device and permanently deletes their conversations, Google connection and any
 key they added. Render's automatic disk snapshots may keep a copy until they
 expire; they are not used to restore individual accounts. A backup the
@@ -86,7 +90,7 @@ address is not stored. Your assignment titles, due dates and statuses are read
 from Notion when you ask and sent to Anthropic as part of the conversation;
 status changes you ask for are written back to Notion. Disconnecting, deleting
 your account, or being removed asks Notion to revoke the token and deletes it;
-you can also remove Hey Claude in Notion under Settings, Connections.
+you can also remove Kwil in Notion under Settings, Connections.
 Reconnecting to a different workspace also revokes the previous connection at
 Notion; reconnecting to the same workspace keeps only the new sign-in.
 To keep the shared server fair, the app counts how many messages each invited
@@ -119,7 +123,7 @@ All paths are relative to the project folder unless noted. On Render the
 
 | Data | Location | Notes |
 |---|---|---|
-| Conversation history (text, titles, summaries) | `data/history.sqlite` | Search, continue, rename, pin, archive, export, delete from the phone app's History screen or `python -m assistant --history`. Deleting a conversation or message overwrites its text in the file (`secure_delete`) and syncs the deletion to your other backends. `[history] retention_days` and `max_mb` prune automatically; `incognito = true` saves nothing |
+| Conversation history (text, titles, summaries) | `data/history.sqlite` | Search, continue, rename, pin, archive, export, delete from the phone app's History screen or `python -m kwil --history`. Deleting a conversation or message overwrites its text in the file (`secure_delete`) and syncs the deletion to your other backends. `[history] retention_days` and `max_mb` prune automatically; `incognito = true` saves nothing |
 | Long-term memory | Your Pinecone index (`project-context`, namespace `voice-assistant` for what the assistant writes) | Delete notes in the Pinecone console |
 | Signed-in browsers | `data/web_sessions.json` | Session ids and last-used times only, never the sign-in code. "Sign out everywhere" clears it |
 | Google sign-in | `token.json` (+ `credentials.json`, which you download yourself) | The assistant writes `token.json` readable only by you on Linux and the Pi (0600). On Windows it doesn't set permissions itself: the file is as private as the project folder, so keep that folder inside your own user profile. Once Gmail is on, a stolen `token.json` could read and send mail. Revoke at myaccount.google.com/permissions |
@@ -169,7 +173,7 @@ key, and their web searches send only their time zone as location. Their
 data is never synced to your Pi or PC, never put in Pinecone or Notion, and
 not visible to your account in the app, except in the owner's backup
 download, which holds every account's conversations. Removing someone first
-asks Google and Notion to revoke Hey Claude's access (best effort), then signs
+asks Google and Notion to revoke Kwil's access (best effort), then signs
 them out and deletes their folder and entry; if a file can't be deleted right away, the
 server retries at the next start, the next removal, or when you open the
 family list.

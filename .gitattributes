@@ -1,8 +1,8 @@
 # Vendored VAD files: keep byte-exact (their SHA-256 is checked in tests)
-assistant/web/vad/*.js -text
-assistant/web/vad/*.mjs -text
-assistant/web/vad/*.wasm binary
-assistant/web/vad/*.onnx binary
+kwil/web/vad/*.js -text
+kwil/web/vad/*.mjs -text
+kwil/web/vad/*.wasm binary
+kwil/web/vad/*.onnx binary
 
 # Windows batch files must keep CRLF line endings
 *.cmd text eol=crlf

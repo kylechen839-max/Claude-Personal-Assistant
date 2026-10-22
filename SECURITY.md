@@ -48,7 +48,7 @@ level nothing secret was found being logged.
 
 The phone app is installed from the cloud host but also talks to the Pi and
 the PC on other origins (FAILOVER.md). That adds a cross-origin surface on
-all three, which `assistant/failover/edge.py` closes the same way on each:
+all three, which `kwil/failover/edge.py` closes the same way on each:
 
 - **CORS for the app origin only.** `[failover] app_origin` is the only
   foreign origin that gets CORS headers, for `GET`/`POST` with the
@@ -160,8 +160,8 @@ state file are written owner-only (0600 on Linux/Pi) via a unique temp file
 and rename; never share them, and use `GOOGLE_TOKEN_JSON` as a secret on a
 host. **Turning `[gmail] enabled` off does not take the permission back:**
 revoke it at myaccount.google.com -> Security -> Third-party connections
-("Hey Claude" -> Delete all connections), then sign in again with
-`python -m assistant.tools.google_auth` (Calendar only). The draft question names the real reply address
+("Kwil", or "Hey Claude" before the rename -> Delete all connections), then sign in again with
+`python -m kwil.tools.google_auth` (Calendar only). The draft question names the real reply address
 ("Prof. Smith at smith@uni.edu") and warns when Reply-To differs from the
 sender, since a display name can say anything.
 
@@ -193,7 +193,7 @@ changes. The block is kept apart from the message text
 (`message["context"]`, rendered only when the request is built), so it
 never reaches the conversation history recorder or the memory summary
 (`memory.transcript()`), and a note can't be re-stored as if Kyle had said
-it. The model router (`assistant/router.py`) sends every turn of a
+it. The model router (`kwil/router.py`) sends every turn of a
 conversation with untrusted content or an attachment to the main model,
 and confirmations are the same on either model. When the fast model asks
 for a tool that isn't read-only, nothing of its turn is kept: that
@@ -351,7 +351,7 @@ to that session's own conversation.
 `render.yaml` runs the phone web app 24/7 at `https://<name>.onrender.com`
 with no Tailscale in front, so anyone can reach it. Behind it are Kyle's
 calendar, Notion, Pinecone notes and Anthropic bill. What protects it
-(`assistant/cloud.py`, wrapped around the same web app as on the PC; tests
+(`kwil/cloud.py`, wrapped around the same web app as on the PC; tests
 in `tests/test_cloud.py`):
 
 - **One secret to get in.** Every route needs the session cookie except
@@ -583,7 +583,7 @@ server (`[family] enabled`, on in the server profile).
   deletes the file and the tools; removing them deletes their folder,
   token included. Not done, on purpose: the token isn't revoked at Google
   on disconnect (deleting it from the server is what stops the assistant;
-  they can also remove "Hey Claude" at myaccount.google.com/permissions).
+  they can also remove "Kwil" (or "Hey Claude") at myaccount.google.com/permissions).
 - **Tiers: beta testers are Calendar only** (public beta piece G1). Each
   person's `tier` in `users.json` is "family" or "beta"; a new invite is
   beta unless the owner picks family, a user listed before tiers loads as
@@ -837,7 +837,7 @@ server reads their replies with (`[tts] picker`, on by default).
 
 ## PC hub: removed (2026-10-20)
 
-The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was
+The PC hub (`/devteam` on the PC's web app, `kwil/devhub.py`) was
 removed: no route, module or `[devteam] hub*` setting is left
 (`tests/test_devteam.py::test_pc_hub_is_gone`). Kyle reaches the
 coordinator by voice (`message_dev_team`, under the same `confirm_if_untrusted`
@@ -890,7 +890,7 @@ a PKCE challenge, `access_type=offline` and the redirect
   `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` before any file, so her
   instance started from Kyle's shell would use his Google token, history,
   web token, Notion or Pinecone. With `--env-file` other than `.env`, or
-  with `google_connect` on, `python -m assistant` refuses to start if any
+  with `google_connect` on, `python -m kwil` refuses to start if any
   of `config.ISOLATED_ENV_VARS` was set before the env file was loaded with
   a different value; it names the variables, never their values.
 - Without a saved token the Google tools stay off: Calendar would otherwise
@@ -1336,7 +1336,7 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   module (never the exception message, which can quote a turn, an email or
   a tool input; never `abs_path`, which names the user's home folder); a
   log record's format string without its arguments, and only from the
-  app's own `assistant.*` loggers (asyncio's "Task exception was never
+  app's own `kwil.*` loggers (asyncio's "Task exception was never
   retrieved" and libraries' `log.error(exc)` put exception text there; for
   them only the logger's name is sent); the request's method
   and path (no host, query string, headers, cookies, body, user or IP); no
@@ -1445,6 +1445,37 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   The cloud can't reach the Pi or PC, so it only sees their claims after
   they sync with it; two backends holding the same device at the same
   minute could, across a partition, both send it.
+
+## Kwil rebrand: old names kept on purpose (2026-10-22)
+
+- **Secret labels keep their names.** The HKDF labels that seal stored
+  secrets (`hey-claude/anthropic-api-key/v1`, `hey-claude/notion-token/v1`,
+  `hey-claude/push-subscriptions/v1`, `hey-claude/canvas/v1`) are unchanged:
+  a new label would derive a different key and make every stored key, token,
+  subscription and Canvas link unreadable. They are labels, not secrets.
+- **Sign-ins survive.** The `hc_session` cookie and the phone's failover
+  token database (IndexedDB `hey-claude`, `backend-router.js`
+  `TOKEN_DB`) keep their names, so nobody is signed out and no token is
+  orphaned in the browser. The service-worker cache is renamed
+  (`kwil-shell-v1`): it holds only the public app shell.
+- **The update origin accepts two names for one release.**
+  `[update] repo` and the origin check (`updater.same_repo`) treat
+  `github.com/kylechen839-max/Claude-Personal-Assistant` and
+  `github.com/kylechen839-max/Kwil` as the same repository, because a clone
+  keeps its old URL after the GitHub rename. Only that one pair is aliased
+  (`updater.REPO_ALIASES`): any other owner or name is still refused, and
+  every update still needs a valid SSH signature.
+- **allowed_signers from before the rebrand is still read.** With no
+  `Kwil\allowed_signers` (`~/.config/kwil/...` on Linux), the old
+  `HeyClaude\` / `~/.config/hey-claude/` file is used. Both are in the same
+  user's own profile folder, so this trusts no new location.
+- **`assistant/` is an alias, not a copy.** `import assistant.X` returns the
+  `kwil.X` module object itself (a `sys.meta_path` finder that only maps
+  names that exist under `kwil`; `_alias.py` in the old package folder),
+  so there is one copy of every guard and no second module state to drift. The one-line
+  files `assistant/X.py` (for processes still running the old code during
+  an update) put that same `kwil.X` object in `sys.modules`; they hold no
+  code of their own. It goes away in a later release.
 
 ## Not fixed, on purpose
 
@@ -1653,7 +1684,7 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
 ## Conversation history
 
 Every conversation is saved to a SQLite file so it can be searched and
-continued (`assistant/history.py`). What that means for privacy:
+continued (`kwil/history.py`). What that means for privacy:
 
 - **Events.** Every change is an event in the history sync log (failover's
   `sync_events` table in the same file); the searchable tables are built

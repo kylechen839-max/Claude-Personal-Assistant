@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Renamed to Kwil** (said "quill"). The app, pages, notifications and the
+  assistant's own name say Kwil; it still runs on Claude. The package is
+  `kwil` (`python -m kwil`); `python -m assistant`, `-m assistant.host` /
+  `.watch` / `.deploy` and `import assistant` keep working for at least one
+  release (an alias plus file shims, so even an app mid-update finds its
+  modules), so existing PC tasks, Pi services and the Render service keep
+  running, and nobody is signed out. New Task Scheduler folder `\Kwil\` and
+  systemd units `kwil.service` / `kwil-watch.timer`; the install scripts
+  replace the old ones. `KWIL_VERSION` replaces `HEY_CLAUDE_VERSION` (still
+  read). Updates accept the repo under its old or new name. The PC wake word
+  is still "Hey Claude" until a "Hey Kwil" model is trained; the phone's
+  voice mode already understands "Hey Kwil".
+
 - Calendar: listing your own events no longer makes the next move or change
   ask for confirmation. Notes on events you organize, your contacts'
   birthdays, Google's holiday calendars and the calendar list now count as

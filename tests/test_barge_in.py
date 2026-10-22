@@ -13,12 +13,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from assistant import audio, cli
-from assistant.audio import SAMPLE_RATE
-from assistant.chat import ClaudeChat
-from assistant.tools import ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.wakeword import (FRAME_LENGTH, BargeInSpeaker, EchoGate,
+from kwil import audio, cli
+from kwil.audio import SAMPLE_RATE
+from kwil.chat import ClaudeChat
+from kwil.tools import ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.wakeword import (FRAME_LENGTH, BargeInSpeaker, EchoGate,
                                 EnergyVAD, FileSource, Interruption, WakeListener, heard_part)
 from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_follow_up import build, memory_chat, user_texts
@@ -188,7 +188,7 @@ def test_gate_allows_an_echo_later_than_reported():
 
 
 def test_echo_delay_comes_from_the_streams(monkeypatch):
-    from assistant import wakeword
+    from kwil import wakeword
 
     speaker = BargeInSpeaker(SimpleNamespace(speak=print), SimpleNamespace(),
                              SimpleNamespace(latency=0.12), mode="voice")
@@ -196,7 +196,7 @@ def test_echo_delay_comes_from_the_streams(monkeypatch):
     assert speaker._echo_delay() == pytest.approx(0.32)
     monkeypatch.setattr(wakeword.audio, "output_latency", lambda: None)
     assert speaker._echo_delay() == wakeword.DEFAULT_ECHO_DELAY
-    from assistant.wakeword import MicSource
+    from kwil.wakeword import MicSource
 
     mic = MicSource()
     assert mic.latency is None
@@ -343,7 +343,7 @@ def test_a_reply_saying_the_wake_word_cannot_wake_itself(tmp_path, clips, fake_c
 
 
 def test_says_wake_word():
-    from assistant.wakeword import says_wake_word
+    from kwil.wakeword import says_wake_word
 
     assert says_wake_word("Hey Claude, delete it.", "hey claude")
     assert says_wake_word("I'm CLAUDE.", "hey claude")
@@ -448,7 +448,7 @@ def test_play_stops_when_told(speaker):
 
 def test_pyttsx3_stops_from_its_own_word_callback(monkeypatch):
     """On Windows (SAPI) from the started-word callback."""
-    from assistant import tts
+    from kwil import tts
 
     monkeypatch.setattr(tts.sys, "platform", "win32")
 
@@ -492,7 +492,7 @@ def test_pyttsx3_stops_from_its_own_word_callback(monkeypatch):
 
 
 def test_kokoro_stops_without_rendering_the_rest(monkeypatch, tmp_path):
-    from assistant import tts_kokoro
+    from kwil import tts_kokoro
 
     rendered, played = [], []
     voice = tts_kokoro.KokoroTTS(tmp_path / "m.onnx", tmp_path / "v.bin")
@@ -534,8 +534,8 @@ def test_unknown_mode_is_refused():
 
 
 def test_config_and_wiring(monkeypatch, tmp_path):
-    from assistant import wakeword
-    from assistant.config import DEFAULTS, load_config
+    from kwil import wakeword
+    from kwil.config import DEFAULTS, load_config
 
     wake = load_config("config.toml", None)["wake"]
     assert wake["barge_in"] == DEFAULTS["wake"]["barge_in"] == "wake_word"
@@ -574,7 +574,7 @@ def test_paced_file_comes_in_real_time(tmp_path):
 def test_a_request_said_over_goodbye_is_not_replayed_later():
     """'Goodbye' -> 'Bye!' with 'Hey Claude, delete my 3 pm' said over it;
     the next bare 'Hey Claude' must not send that old recording to Claude."""
-    from assistant import i18n
+    from kwil import i18n
 
     class TTS:
         def __init__(self):
@@ -617,7 +617,7 @@ def test_a_request_said_over_goodbye_is_not_replayed_later():
 
 
 def test_goodbye_drops_what_was_said_over_it(fake_client):
-    from assistant import i18n
+    from kwil import i18n
 
     class TTS:
         interruption = None
@@ -664,8 +664,8 @@ def test_no_request_message_names_what_interrupted(fake_client):
                                          ("wake-word", "wake_word"), (True, "wake_word"),
                                          ("off", "off")])
 def test_barge_in_setting_is_normalised(value, mode, monkeypatch, tmp_path):
-    from assistant import wakeword
-    from assistant.config import DEFAULTS
+    from kwil import wakeword
+    from kwil.config import DEFAULTS
 
     assert wakeword.barge_in_mode(value) == mode
     fake = SimpleNamespace(frame_length=FRAME_LENGTH, phrase="hey claude",
@@ -683,7 +683,7 @@ def test_barge_in_setting_is_normalised(value, mode, monkeypatch, tmp_path):
 
 
 def test_bad_barge_in_setting_is_a_clear_error():
-    from assistant.wakeword import barge_in_mode
+    from kwil.wakeword import barge_in_mode
 
     for bad in ("always", 3):
         with pytest.raises(ValueError, match=r"\[wake\] barge_in must be one of"):
@@ -694,7 +694,7 @@ def test_pyttsx3_off_windows_renders_then_plays_so_it_can_be_stopped(monkeypatch
     """eSpeak's driver plays through a blocking aplay that engine.stop()
     can't cut short: with barge-in on (not Windows) a reply is rendered to a
     file and played through audio.play, which stop_playback() stops."""
-    from assistant import tts
+    from kwil import tts
 
     monkeypatch.setattr(tts.sys, "platform", "linux")
     played, said = [], []
@@ -733,7 +733,7 @@ def test_pyttsx3_off_windows_renders_then_plays_so_it_can_be_stopped(monkeypatch
 def test_pyttsx3_rendering_prints_nothing(monkeypatch, capsys):
     """eSpeak's driver prints "Audio saved to ..." on every save_to_file:
     that must not reach the console on every reply."""
-    from assistant import tts
+    from kwil import tts
 
     monkeypatch.setattr(tts.sys, "platform", "linux")
 

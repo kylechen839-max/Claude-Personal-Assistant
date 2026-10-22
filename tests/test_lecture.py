@@ -12,12 +12,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant.lecture import (AUDIO_FILE, ChunkedUploads, LectureNotesDB,
+from kwil.lecture import (AUDIO_FILE, ChunkedUploads, LectureNotesDB,
                                LecturePipeline, NotionBlocked, UploadGap,
                                UploadNotFound, UploadTooLarge,
                                assignment_candidates, notes_blocks, rich_text,
                                summarize)
-from assistant.tools.notion import NotionAssignments
+from kwil.tools.notion import NotionAssignments
 from tests.conftest import make_response, text_block, tool_use_block
 
 TRANSCRIPT_WORDS = ["Today", "we", "cover", "kinetic", "energy", "SECRET-LECTURE"]
@@ -159,7 +159,7 @@ def test_summarize_works_on_models_that_reject_forced_tool_choice(fake_client, m
 
 def test_default_lecture_model_summarizes(tmp_path, fake_client):
     """The whole pipeline on the default model, as the web app builds it."""
-    from assistant.config import DEFAULTS
+    from kwil.config import DEFAULTS
 
     fake_client.queue = [notes_reply(NOTES)]
     p, _, uid, _, _, _ = pipeline(tmp_path, fake_client)
@@ -203,7 +203,7 @@ def test_unparsable_summary_fails_the_job_and_a_retry_resumes(tmp_path, fake_cli
 
 def test_notes_schema_is_accepted_by_structured_outputs():
     """Every object in the schema sets additionalProperties: false."""
-    from assistant.lecture import NOTES_SCHEMA
+    from kwil.lecture import NOTES_SCHEMA
     from tests.conftest import _strict_schema_problem
 
     assert _strict_schema_problem(NOTES_SCHEMA) is None
@@ -455,10 +455,10 @@ def test_keep_audio_setting(tmp_path, fake_client):
 def test_progress_is_reported(tmp_path, fake_client):
     seen = []
     p, up, uid, _, whisper, _ = pipeline(tmp_path, fake_client)
-    from assistant.lecture import LectureJob
+    from kwil.lecture import LectureJob
     p._save(LectureJob(id=uid))
     p._save = lambda job: seen.append((job.status, round(job.progress, 2)))
-    import assistant.lecture as lecture
+    import kwil.lecture as lecture
     real = lecture.time.monotonic
     ticks = iter(range(0, 1000, 3))
     lecture.time.monotonic = lambda: next(ticks)  # every segment saves
@@ -509,7 +509,7 @@ def test_unfinished_upload_cant_be_submitted(tmp_path, fake_client):
 def test_resume_pending_after_restart(tmp_path, fake_client):
     fake_client.queue = [notes_reply(NOTES)]
     p, up, uid, _, _, assignments = pipeline(tmp_path, fake_client)
-    from assistant.lecture import LectureJob
+    from kwil.lecture import LectureJob
     p._save(LectureJob(id=uid, course="PHYS 141",
                        started_at="2026-10-16T09:00:00-04:00",
                        status="transcribing", progress=0.4))
@@ -566,7 +566,7 @@ class DegenerateWhisper(FakeWhisper):
 
 def transcribe_job(tmp_path, fake_client, whisper):
     p, up, uid, _, _, _ = pipeline(tmp_path, fake_client, whisper=whisper)
-    from assistant.lecture import LectureJob
+    from kwil.lecture import LectureJob
     p._save(LectureJob(id=uid))
     job, d = p.job(uid), up.directory(uid)
     p._transcribe(job, d, d / "transcript.txt")
@@ -590,7 +590,7 @@ def test_degenerate_window_is_decoded_again_and_never_filed(tmp_path, fake_clien
     assert len(whisper.calls) == 9  # 8 windows + one retry
     assert text.split() == TRANSCRIPT_WORDS  # the garbage window adds nothing
     assert job.progress == 1.0
-    logged = [r for r in caplog.records if r.name == "assistant.stt"]
+    logged = [r for r in caplog.records if r.name == "kwil.stt"]
     assert any("decoding again" in r.getMessage() for r in logged)
     assert any("dropped" in r.getMessage() for r in logged) is always
     assert all("!" not in r.getMessage() and "Today" not in r.getMessage()
@@ -619,8 +619,8 @@ def encode(src, dst, fmt, codec):
                                        (None, None)])
 def test_audio_windows_decodes_phone_formats(tmp_path, fmt, codec):
     import numpy as np
-    from assistant.audio import load_audio
-    from assistant.lecture import audio_windows
+    from kwil.audio import load_audio
+    from kwil.lecture import audio_windows
 
     path = tmp_path / AUDIO_FILE  # no extension, as stored
     if fmt is None:
@@ -647,8 +647,8 @@ def test_audio_windows_decodes_phone_formats(tmp_path, fmt, codec):
 @pytest.mark.slow
 def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client, caplog):
     """Generated speech -> WebM/Opus -> the real Whisper model."""
-    from assistant.stt import Transcriber, rough_match
-    from assistant.tts import Pyttsx3TTS
+    from kwil.stt import Transcriber, rough_match
+    from kwil.tts import Pyttsx3TTS
 
     phrase = "Today we cover kinetic energy and the work energy theorem"
     wav = tmp_path / "lecture.wav"
@@ -670,7 +670,7 @@ def test_pipeline_transcribes_a_real_webm(tmp_path, fake_client, caplog):
     assignments, _ = assignments_mock()
     p = LecturePipeline(up, fake_client, LectureNotesDB(assignments),
                         whisper_model="base.en")  # the product's own int8 model
-    from assistant.lecture import LectureJob
+    from kwil.lecture import LectureJob
     p._save(LectureJob(id=uid))
     job = p.job(uid)
     d = up.directory(uid)
@@ -737,7 +737,7 @@ def test_old_database_gets_the_key_property_added(tmp_path):
 
 # ---------- upload limits and cleanup ----------
 def test_active_upload_cap_and_disk_check(tmp_path):
-    from assistant.lecture import UploadBusy
+    from kwil.lecture import UploadBusy
 
     up = ChunkedUploads(tmp_path / "u", max_bytes=1000, max_active=2,
                         disk_usage=lambda p: SimpleNamespace(free=10**12))
@@ -767,7 +767,7 @@ def test_stale_uploads_and_old_failed_jobs_are_purged(tmp_path, fake_client):
     assert up.purge_stale(max_age_hours=48) == 1
     ids = {d.name for d in up.root.iterdir()}
     assert ids == {fresh, done}
-    from assistant.lecture import LectureJob
+    from kwil.lecture import LectureJob
     assignments, _ = assignments_mock()
     p = LecturePipeline(up, fake_client, LectureNotesDB(assignments))
     p._save(LectureJob(id=done, status="failed"))

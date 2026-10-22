@@ -1,6 +1,6 @@
 // node --test tests/js/brief.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/brief.js in node:vm with a fake DOM,
+// Runs the phone page's kwil/web/brief.js in node:vm with a fake DOM,
 // fetch(), service worker, PushManager and Notification: "Enable
 // notifications" asks for permission first thing in the tap, subscribes
 // with the server's VAPID key and saves the subscription; a refusal saves
@@ -15,9 +15,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/brief.js', import.meta.url), 'utf8');
-const I18N = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
-const HTML = readFileSync(new URL('../../assistant/web/index.html', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/brief.js', import.meta.url), 'utf8');
+const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
 // a real P-256 point, base64url (65 bytes, 0x04 first)
 const KEY = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
 
@@ -84,9 +84,9 @@ function load({ hash = '', permission = 'default', answer = 'granted', responses
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  win.HeyClaudeBrief.configure({ show: (v) => shown.push(v), player });
-  const state = () => win.HeyClaudeBrief.onState({}, win, win.document);
-  return { win, els, menu, log, fetches, shown, player, state, swListeners, api: win.HeyClaudeBrief };
+  win.KwilBrief.configure({ show: (v) => shown.push(v), player });
+  const state = () => win.KwilBrief.onState({}, win, win.document);
+  return { win, els, menu, log, fetches, shown, player, state, swListeners, api: win.KwilBrief };
 }
 
 const posts = (t) => t.fetches.filter((f) => f.opts.method === 'POST')
@@ -198,7 +198,7 @@ test('every fixed string of notifications and the brief has Chinese', () => {
   const ctx = { console };
   vm.createContext(ctx);
   vm.runInContext(I18N, ctx);
-  const tr = ctx.HeyClaudeI18n.translate;
+  const tr = ctx.KwilI18n.translate;
   const t = load();
   const strings = [...Object.values(t.api.TEXT), 'Brief', 'Play', 'Back to chat'];
   for (const s of strings) {

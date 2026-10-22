@@ -26,10 +26,10 @@ if (-not (Test-Path -LiteralPath $python)) {
 Push-Location -LiteralPath $repoDir
 try {
     if ($Rest) {
-        & $python -m assistant.smoke $BaseUrl @Rest
+        & $python -m kwil.smoke $BaseUrl @Rest
     }
     else {
-        & $python -m assistant.smoke $BaseUrl
+        & $python -m kwil.smoke $BaseUrl
     }
     $code = $LASTEXITCODE
 }

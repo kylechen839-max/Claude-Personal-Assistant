@@ -1,4 +1,4 @@
-"""The preflight (python -m assistant.preflight) and the web smoke check:
+"""The preflight (python -m kwil.preflight) and the web smoke check:
 result parsing, verdicts, and that no .env value ever reaches the output."""
 
 import re
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from assistant import preflight, smoke
-from assistant.preflight import (FAIL, PASS, SKIP, WARN, Context, Redactor, Result,
+from kwil import preflight, smoke
+from kwil.preflight import (FAIL, PASS, SKIP, WARN, Context, Redactor, Result,
                                  judge_level, parse_junit, parse_text_replies,
                                  parse_wake_output, run_preflight)
 
@@ -208,7 +208,7 @@ def test_pytest_step_reports_failures(tmp_path):
 
 WAKE_OUT = """Listening for 'hey claude'... (Ctrl+C to quit)
 You: Hey Claude, what's on my calendar tomorrow?
-Claude: Tomorrow you have Physics lab at 2 PM.
+Kwil: Tomorrow you have Physics lab at 2 PM.
 [speaking] Tomorrow you have Physics lab at 2 PM.
 (Turn timings from wake: end of speech +1.20 s, transcript +0.90 s, Claude reply +1.50 s, first audio +0.00 s; wake to first audio 3.60 s (end of speech to first audio 2.40 s))
 Bye!
@@ -258,12 +258,14 @@ def test_wake_step_skips_without_key(tmp_path):
 
 
 def test_wake_fixture_is_committed():
-    from assistant import audio
+    from kwil import audio
 
     clip = audio.load_audio(preflight.FIXTURE)
     assert 4 < len(clip) / audio.SAMPLE_RATE < 10
 
 
+# Text mode's output as printed before the Kwil rebrand ("Claude: ..."), still
+# parsed; WAKE_OUT above has the new "Kwil: ..." lines.
 TEXT_OUT = ("Claude assistant (text mode). Type 'quit' to exit.\n\n"
             "You: Claude: Tomorrow you have Physics lab at 2 PM.\n\n"
             "You: Claude: Your essay is due Thursday.\n\nYou: Bye!\n")
@@ -615,7 +617,7 @@ def test_error_replies_match_the_cli():
     """The canned failure sentences the checks look for are the ones the
     assistant actually says."""
     # the English sentences live in i18n.py (beside their Chinese)
-    source = "".join((ROOT / "assistant" / name).read_text(encoding="utf-8")
+    source = "".join((ROOT / "kwil" / name).read_text(encoding="utf-8")
                      for name in ("cli.py", "chat.py", "i18n.py"))
     for reply in smoke.ERROR_REPLIES:
         assert reply in source, reply
@@ -669,7 +671,7 @@ def test_powershell_scripts_parse(script):
 def test_wake_fixture_fires_the_real_model_once():
     """The preflight's fixture through the real "Hey Claude" model and VAD:
     one wake, then a command recording of the phrase, then nothing."""
-    from assistant.wakeword import EnergyVAD, FileSource, WakeListener, make_detector
+    from kwil.wakeword import EnergyVAD, FileSource, WakeListener, make_detector
 
     detector = make_detector(keyword_path=str(ROOT / "keywords" / "hey_claude.onnx"),
                              builtin_keyword="hey_jarvis", sensitivity=0.5)
@@ -739,7 +741,7 @@ def test_a_warning_is_still_go(tmp_path, monkeypatch):
 
 def test_windows_service_script_registers_both_tasks():
     text = (ROOT / "scripts" / "install_windows_service.ps1").read_text(encoding="utf-8")
-    assert "-m assistant.host" in text and "-AtLogOn" in text
+    assert "-m kwil.host" in text and "-AtLogOn" in text
     for needle in ("standby-timeout-ac 0", "hibernate-timeout-ac 0",
                    preflight.USB_SUSPEND[1], "Read-Host", "-Uninstall",
                    "'Hey Claude Web'", "$Port = 8765", "Get-NetTCPConnection"):
@@ -796,7 +798,7 @@ def test_windows_service_legacy_task_scenarios():
                         "-Script", str(ROOT / "scripts" / "install_windows_service.ps1")],
                        capture_output=True, text=True, timeout=180)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.count("PASS ") == 8, p.stdout
+    assert p.stdout.count("PASS ") == 9, p.stdout
 
 
 @pytest.mark.parametrize("url,unsafe", [
@@ -859,7 +861,9 @@ def test_restart_instance_matches_only_that_apps_processes():
     of the app it restarts: never another instance, never a side-port
     candidate. Your own app falls back to the older hand-made "\\Hey Claude
     Web" task: the PC deploy of 515ca4e left Kyle's app on old code because
-    only \\HeyClaude\\Web was looked for."""
+    only \\HeyClaude\\Web was looked for. After the Kwil rebrand the tasks
+    still in \\HeyClaude\\ (and their `python -m assistant` processes) are
+    found as well, so the first deploy restarts them."""
     import shutil
 
     shell = shutil.which("powershell") or shutil.which("pwsh")
@@ -870,4 +874,4 @@ def test_restart_instance_matches_only_that_apps_processes():
                         "-Script", str(ROOT / "scripts" / "restart_instance.ps1")],
                        capture_output=True, text=True, timeout=180, check=False)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.count("PASS ") == 9, p.stdout
+    assert p.stdout.count("PASS ") == 11, p.stdout

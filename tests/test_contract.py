@@ -20,9 +20,9 @@ import os
 
 import pytest
 
-from assistant import smoke, webapp
-from assistant.chat import DEFAULT_MODEL, ClaudeChat
-from assistant.tools import Tool, ToolRegistry
+from kwil import smoke, webapp
+from kwil.chat import DEFAULT_MODEL, ClaudeChat
+from kwil.tools import Tool, ToolRegistry
 from tests.contract_fakes import ContractClient
 
 pytest.importorskip("fastapi")
@@ -129,8 +129,8 @@ def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
     client through a per-call lookup of their key, never the owner's. A
     multi-turn conversation with a tool round must work through it, and
     their one client is reused for every request (thinking signatures)."""
-    from assistant import family as family_mod
-    from assistant.config import load_config
+    from kwil import family as family_mod
+    from kwil.config import load_config
 
     make, model = api
     monkeypatch.setenv("USER_DATA_KEY", "s" * 48)
@@ -316,7 +316,7 @@ def test_a_study_briefing_is_one_plain_request_the_api_accepts(api):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from assistant import proactive
+    from kwil import proactive
 
     make, model = api
     client = make()
@@ -345,7 +345,7 @@ def test_realistic_web_conversation_saves_and_writes_nothing(web_api, tmp_path, 
     question goes to the fast model (the check session routes as usual)."""
     from unittest.mock import MagicMock
 
-    from assistant.history import HistoryStore, Recorder
+    from kwil.history import HistoryStore, Recorder
     from tests.voice_fakes import FakeSynth
 
     make, model, fast = web_api
@@ -411,7 +411,7 @@ def test_deadline_extraction_request(api):
     from datetime import date
     from zoneinfo import ZoneInfo
 
-    from assistant import canvas
+    from kwil import canvas
 
     make, model = api
     client = make()

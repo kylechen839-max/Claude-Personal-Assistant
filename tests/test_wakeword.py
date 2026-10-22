@@ -3,10 +3,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from assistant import audio
-from assistant.audio import SAMPLE_RATE
-from assistant.tts import Pyttsx3TTS
-from assistant.wakeword import (FRAME_LENGTH, EnergyVAD, FileSource,
+from kwil import audio
+from kwil.audio import SAMPLE_RATE
+from kwil.tts import Pyttsx3TTS
+from kwil.wakeword import (FRAME_LENGTH, EnergyVAD, FileSource,
                                 WakeListener, make_detector,
                                 phrase_from_model, record_until_silence)
 
@@ -104,7 +104,7 @@ def test_pipeline_on_audio_file(session_file):
 
 @pytest.mark.slow
 def test_pipeline_transcribes_command(session_file):
-    from assistant.stt import Transcriber, rough_match
+    from kwil.stt import Transcriber, rough_match
 
     t = Transcriber()
     try:
@@ -175,9 +175,9 @@ def test_cli_wake_mode_with_audio_file(session_file, fake_client):
     """End to end: file -> wake -> VAD -> (mock) STT -> (mock) Claude -> TTS."""
     from types import SimpleNamespace
 
-    from assistant.chat import ClaudeChat
-    from assistant.cli import parse_args, run_wake
-    from assistant.tts import PrintTTS
+    from kwil.chat import ClaudeChat
+    from kwil.cli import parse_args, run_wake
+    from kwil.tts import PrintTTS
     from tests.conftest import make_response, text_block
 
     args = parse_args(["--mode", "wake", "--audio-file", str(session_file[0])])
@@ -205,8 +205,8 @@ def test_get_reply_handles_network_error(fake_client):
     import anthropic
     import httpx
 
-    from assistant.chat import ClaudeChat
-    from assistant.cli import get_reply
+    from kwil.chat import ClaudeChat
+    from kwil.cli import get_reply
 
     fake_client.messages.create.side_effect = anthropic.APIConnectionError(
         request=httpx.Request("POST", "https://api.anthropic.com"))
@@ -217,8 +217,8 @@ def test_get_reply_handles_network_error(fake_client):
 def test_audio_file_uses_detector_frame_length(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    from assistant import cli, wakeword
-    from assistant.config import DEFAULTS
+    from kwil import cli, wakeword
+    from kwil.config import DEFAULTS
 
     path = tmp_path / "in.wav"
     audio.write_wav(path, audio.silence(1.0))

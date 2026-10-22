@@ -18,9 +18,9 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from assistant import voice_ws, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import voice_ws, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import first_text, make_response, text_block  # noqa: E402
 from tests.voice_fakes import stream_client, streamed  # noqa: E402
 
@@ -224,7 +224,7 @@ def test_voice_mode_speaks_in_the_persons_own_voice(make_voice):
 def test_first_audio_latency(make_voice, capsys):
     """Server side, utterance in -> first sentence's audio out, with fake
     Whisper/Claude and the real TTS route (eSpeak) when it is installed."""
-    from assistant.tts import Pyttsx3TTS
+    from kwil.tts import Pyttsx3TTS
 
     real = webapp.render_wav
     tts = Pyttsx3TTS() if shutil.which("espeak-ng") else PrintTTS()
@@ -359,9 +359,9 @@ def test_first_audio_latency_with_real_whisper(make_voice, capsys, tmp_path,
     """The definition-of-done question as a voice-mode utterance, through
     real Whisper (base.en, CPU) and the real TTS route; Claude is mocked.
     Runs in CI, where the model is downloaded."""
-    from assistant import audio
-    from assistant.stt import Transcriber, rough_match
-    from assistant.tts import Pyttsx3TTS
+    from kwil import audio
+    from kwil.stt import Transcriber, rough_match
+    from kwil.tts import Pyttsx3TTS
 
     whisper = Transcriber()
     try:
@@ -425,7 +425,7 @@ def test_barge_in_over_the_socket(make_voice):
     ("yes", ["Dentist"], False), ("no", [], False),
     ("Nope, cancel that.", [], False), ("yes", [], True)])
 def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted, barge_in):
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
 
     done = []
@@ -474,7 +474,7 @@ def test_unclear_answer_is_asked_again_over_the_socket(make_voice):
     """The re-ask (cli.classify_answer "unclear") through the real socket:
     a second "confirm" of the same turn, its own question audio, and only
     its own "played" opens it."""
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
 
     done = []
@@ -675,7 +675,7 @@ def test_max_session_length_ends_it(make_voice):
 
 def test_vendored_vad_files_are_served_and_match_notice(make_voice):
     _, http = make_voice()
-    notice = (ROOT / "assistant" / "web" / "vad" / "NOTICE.md").read_text()
+    notice = (ROOT / "kwil" / "web" / "vad" / "NOTICE.md").read_text()
     hashes = dict((name, h) for h, name in re.findall(r"([0-9a-f]{64})  (\S+)", notice))
     assert set(hashes) == set(voice_ws.VAD_FILES)
     for name, media in voice_ws.VAD_FILES.items():

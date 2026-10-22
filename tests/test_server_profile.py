@@ -12,10 +12,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from assistant import doctor
-from assistant.config import DEFAULTS, active_profile, load_config, setup_logging
-from assistant.tools import calendar as cal
-from assistant.tts import EspeakTTS, PrintTTS, make_tts
+from kwil import doctor
+from kwil.config import DEFAULTS, active_profile, load_config, setup_logging
+from kwil.tools import calendar as cal
+from kwil.tts import EspeakTTS, PrintTTS, make_tts
 
 FAKE_CLIENT = {"installed": {"client_id": "fake-id.apps.googleusercontent.com",
                              "client_secret": "fake-client-secret-123",
@@ -139,7 +139,7 @@ def test_no_espeak_either_keeps_the_server_up_text_only(monkeypatch):
 
 
 def test_default_fallback_is_still_pyttsx3():
-    from assistant.tts import Pyttsx3TTS
+    from kwil.tts import Pyttsx3TTS
 
     assert isinstance(make_tts("piper", piper_voice="nope.onnx"), Pyttsx3TTS)
 
@@ -147,7 +147,7 @@ def test_default_fallback_is_still_pyttsx3():
 @pytest.mark.skipif(not (shutil.which("espeak-ng") or shutil.which("espeak")),
                     reason="espeak-ng not installed")
 def test_espeak_renders_a_wav(tmp_path):
-    from assistant import audio
+    from kwil import audio
 
     path = tmp_path / "reply.wav"
     EspeakTTS().save_to_file("-- You have two events tomorrow.", path)
@@ -255,7 +255,7 @@ def test_no_interactive_sign_in_on_a_server(tmp_path, monkeypatch):
 
 
 def test_build_tools_registers_calendar_from_env_alone(tmp_path, monkeypatch):
-    from assistant.cli import build_tools
+    from kwil.cli import build_tools
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", json.dumps(fake_token()))
@@ -269,7 +269,7 @@ def test_build_tools_registers_calendar_from_env_alone(tmp_path, monkeypatch):
 
 
 def test_google_secrets_are_redacted_from_logs(monkeypatch):
-    from assistant.config import redact
+    from kwil.config import redact
 
     value = json.dumps(fake_token())
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", value)

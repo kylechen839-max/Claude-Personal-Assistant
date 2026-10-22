@@ -16,9 +16,9 @@ import httpx
 import numpy as np
 import pytest
 
-from assistant.chat import ClaudeChat, has_web_content
-from assistant.tools import Tool, ToolRegistry
-from assistant.voice_session import (ChatBackend, VoiceConversation, fast_wav,
+from kwil.chat import ClaudeChat, has_web_content
+from kwil.tools import Tool, ToolRegistry
+from kwil.voice_session import (ChatBackend, VoiceConversation, fast_wav,
                                      fix_stream_wav, wav_duration)
 from tests.conftest import (first_text, make_response, text_block, tool_use_block,
                             without_context)
@@ -50,7 +50,7 @@ def delete_tool(deleted):
 
 
 def user_texts(client):
-    from assistant.chat import is_user_turn
+    from kwil.chat import is_user_turn
 
     return [first_text(m["content"]) for call in client.stream_calls
             for m in call["messages"] if is_user_turn(m)]
@@ -213,7 +213,7 @@ def test_cancel_before_any_audio_leaves_valid_history(caplog):
     conv, chat, events = make_conv(client, "what's on tomorrow", "and Friday?")
     conv.utterance(1, SPEECH)
     assert s1.held.wait(2)
-    with caplog.at_level("INFO", logger="assistant.voice_session"):
+    with caplog.at_level("INFO", logger="kwil.voice_session"):
         conv.interrupt(1, 0, 0.0)
         done = events.wait_for("turn_done", turn=1)
     assert done["interrupted"] is True and done["chunks"] == 0
@@ -238,7 +238,7 @@ def test_cancel_before_any_audio_leaves_valid_history(caplog):
 def test_a_stream_that_ends_early_is_not_kept():
     """Not cancelled, but the stream stopped before its end (connection
     dropped): the fragment must not become the reply in history."""
-    from assistant.cli import get_reply
+    from kwil.cli import get_reply
     from tests.voice_fakes import FakeStream
     cut = FakeStream([], make_response(thinking_block(), stop_reason=None))
     chat = ClaudeChat(client=stream_client(cut), model="m")
@@ -483,24 +483,24 @@ def test_fix_stream_wav_and_duration():
 @pytest.mark.skipif(sys.platform == "win32" or not shutil.which("espeak-ng"),
                     reason="needs the espeak-ng program (Linux)")
 def test_real_espeak_sentence():
-    from assistant.tts import Pyttsx3TTS
+    from kwil.tts import Pyttsx3TTS
 
     data = fast_wav(Pyttsx3TTS(), "Your dentist is tomorrow at three thirty.")
     assert data[:4] == b"RIFF"
     assert 1.0 < wav_duration(data) < 6.0
     assert fast_wav(Pyttsx3TTS(), "--help")[:4] == b"RIFF"  # text, not an option
-    from assistant.webapp import render_wav
+    from kwil.webapp import render_wav
     assert render_wav(Pyttsx3TTS(), "Hello.")[:4] == b"RIFF"  # the web app uses it
 
 
 def test_timings_flag_prints_voice_turn_lines():
     import logging
 
-    from assistant import cli
+    from kwil import cli
 
     out = []
     handler = cli.show_voice_timings(out.append)
-    log = logging.getLogger("assistant.voice_session")
+    log = logging.getLogger("kwil.voice_session")
     try:
         log.info("Voice heard: %r", "hi")
         log.info("Turn timings from utterance received: transcript +0.40 s")
@@ -537,8 +537,8 @@ def test_no_tool_runs_after_a_barge_in_before_the_tool_call():
 
 
 def test_web_chat_stream_sends_turn_events_to_its_caller_only():
-    from assistant import webapp
-    from assistant.tools import Tool as T
+    from kwil import webapp
+    from kwil.tools import Tool as T
 
     reg = ToolRegistry()
     reg.register(T(name="list_events", description="List.",
@@ -566,7 +566,7 @@ def test_no_conversation_text_in_info_logs(caplog):
     client = stream_client(streamed("Your secret exam is Friday."))
     client.create_queue.append(make_response(text_block("Kyle's secret exam is Friday.")))
     conv, chat, events = make_conv(client, "when is my secret exam", memory=memory)
-    with caplog.at_level(logging.INFO, logger="assistant"):
+    with caplog.at_level(logging.INFO, logger="kwil"):
         conv.utterance(1, SPEECH)
         events.wait_for("turn_done")
         conv.end("user")
@@ -589,7 +589,7 @@ def test_tool_inputs_and_memory_queries_stay_out_of_info_logs(caplog):
                  stop_reason="tool_use"),
         streamed("Got it."))
     chat = ClaudeChat(client=client, model="m", tools=reg)
-    with caplog.at_level(logging.INFO, logger="assistant"):
+    with caplog.at_level(logging.INFO, logger="kwil"):
         chat.ask("remember my locker code is 4512", on_text=lambda d: None)
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert any(m.startswith("Claude called remember") for m in info)  # preflight reads this
@@ -602,7 +602,7 @@ def test_memory_retrieve_logs_no_query_text(caplog):
     from tests.test_memory import make_memory, match
 
     memory, _, _ = make_memory([match(0.9, "Kyle likes tea")])
-    with caplog.at_level(logging.INFO, logger="assistant"):
+    with caplog.at_level(logging.INFO, logger="kwil"):
         memory.retrieve("what is my locker code 4512")
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert any("Memory:" in m for m in info)
@@ -614,7 +614,7 @@ def test_wake_and_voice_loop_log_no_words_at_info(caplog):
     log lengths at INFO, never what was said or answered."""
     import logging
 
-    from assistant import cli
+    from kwil import cli
     from tests.conftest import make_response as mr, text_block as tb
 
     class Words:
@@ -624,7 +624,7 @@ def test_wake_and_voice_loop_log_no_words_at_info(caplog):
     client = MagicMock()
     client.messages.create.return_value = mr(tb("Noted, 4512 is your code."))
     chat = ClaudeChat(client=client, model="m")
-    with caplog.at_level(logging.INFO, logger="assistant"):
+    with caplog.at_level(logging.INFO, logger="kwil"):
         cli.handle_command(chat, MagicMock(), Words(), SPEECH, output_fn=lambda m: None,
                            wake_phrase="Hey Claude")
         broken = MagicMock()

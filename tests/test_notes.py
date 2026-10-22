@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant import cli
-from assistant.chat import ClaudeChat
-from assistant.config import load_config
-from assistant.tools import ToolRegistry
-from assistant.tools.notes import QuickNotes
+from kwil import cli
+from kwil.chat import ClaudeChat
+from kwil.config import load_config
+from kwil.tools import ToolRegistry
+from kwil.tools.notes import QuickNotes
 from tests.conftest import make_response, text_block, tool_use_block
 from tests.test_memory import make_memory
 
@@ -101,7 +101,7 @@ def test_recall_only_returns_notes_not_summaries(notes):
 def test_list_recent_newest_first_and_delete(notes, monkeypatch):
     ids = []
     for i, text in enumerate(["first", "second", "third"]):
-        monkeypatch.setattr("assistant.tools.notes.uuid.uuid4",
+        monkeypatch.setattr("kwil.tools.notes.uuid.uuid4",
                             lambda i=i: SimpleNamespace(hex=f"{i:06d}"))
         ids.append(notes.remember_note(text)["note"]["id"])
     recent = notes.list_recent_notes(limit=2)
@@ -149,7 +149,7 @@ def test_delete_note_also_forgets_a_conversation_summary(notes):
 
 
 def test_delete_question_in_chinese(notes):
-    from assistant import i18n
+    from kwil import i18n
 
     note_id = notes.remember_note("实验报告要加误差线")["note"]["id"]
     i18n.set_language("zh")
@@ -186,7 +186,7 @@ def real_index(pages: dict, metadata: dict):
 
 
 def test_page_ids_reads_every_sdk_shape():
-    from assistant.memory import page_ids
+    from kwil.memory import page_ids
 
     assert page_ids(["note-1", "note-2"]) == ["note-1", "note-2"]  # older SDKs
     assert page_ids(SimpleNamespace(vectors=[SimpleNamespace(id="note-1")])) == ["note-1"]

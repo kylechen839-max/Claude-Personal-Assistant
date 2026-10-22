@@ -21,7 +21,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 Push-Location -LiteralPath $repoDir
 try {
-    & $python -m assistant.preflight @args
+    & $python -m kwil.preflight @args
     $code = $LASTEXITCODE
 }
 finally {

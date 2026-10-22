@@ -1,4 +1,4 @@
-"""Spotify by voice (assistant/tools/spotify.py, assistant/spotify_web.py).
+"""Spotify by voice (kwil/tools/spotify.py, kwil/spotify_web.py).
 
 Offline: the HTTP layer is a fake that answers like accounts.spotify.com
 and api.spotify.com (their real JSON shapes, including the error object
@@ -14,10 +14,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from assistant import cli, i18n
-from assistant.config import load_config, redact
-from assistant.tools import ToolRegistry
-from assistant.tools import spotify as sp
+from kwil import cli, i18n
+from kwil.config import load_config, redact
+from kwil.tools import ToolRegistry
+from kwil.tools import spotify as sp
 
 CID = "0123456789abcdef0123456789abcdef"
 ORIGIN = "https://pc.example.ts.net"
@@ -598,7 +598,7 @@ class OneWake:
 
 
 def test_run_wake_resumes_when_back_to_waiting(fake_client, token_file):
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
     from tests.conftest import make_response, text_block
 
     events = []
@@ -813,7 +813,7 @@ class Wakes:
 
 
 def wake_loop(fake_client, script, follow_up, on_idle):
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
     from tests.conftest import make_response, text_block
 
     events = []
@@ -854,7 +854,7 @@ def test_a_failing_idle_hook_never_stops_listening(fake_client, caplog):
 
 
 def test_wake_components_pause_music_before_the_chime(monkeypatch):
-    from assistant import wakeword
+    from kwil import wakeword
 
     calls = []
     detector = SimpleNamespace(frame_length=1280, phrase="Hey Claude")

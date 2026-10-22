@@ -3,12 +3,12 @@ with only the external services (Whisper model, Claude, Google) mocked."""
 
 from types import SimpleNamespace
 
-from assistant.chat import ClaudeChat
-from assistant.cli import run_wake
-from assistant.tools import ToolRegistry
-from assistant.tools.calendar import GoogleCalendar
-from assistant.tts import PrintTTS
-from assistant.wakeword import FileSource, WakeListener
+from kwil.chat import ClaudeChat
+from kwil.cli import run_wake
+from kwil.tools import ToolRegistry
+from kwil.tools.calendar import GoogleCalendar
+from kwil.tts import PrintTTS
+from kwil.wakeword import FileSource, WakeListener
 from tests.conftest import first_text, make_response, text_block, tool_use_block
 from tests.test_tools import DENTIST, make_service
 from tests.test_wakeword import COMMAND, ScriptedDetector, session_file  # noqa: F401
@@ -46,7 +46,7 @@ def test_hey_claude_whats_on_my_calendar_tomorrow(session_file, fake_client):
     assert said == ["[speaking] Tomorrow you have the dentist at 3 PM."]
 
 
-# ---------- the definition-of-done phrase, through `python -m assistant` ----------
+# ---------- the definition-of-done phrase, through `python -m kwil` ----------
 import json  # noqa: E402
 from datetime import datetime, timedelta  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
@@ -54,10 +54,10 @@ from zoneinfo import ZoneInfo  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from assistant import audio, cli  # noqa: E402
-from assistant import chat as chat_module  # noqa: E402
-from assistant.config import DEFAULTS  # noqa: E402
-from assistant.stt import Transcriber, rough_match  # noqa: E402
+from kwil import audio, cli  # noqa: E402
+from kwil import chat as chat_module  # noqa: E402
+from kwil.config import DEFAULTS  # noqa: E402
+from kwil.stt import Transcriber, rough_match  # noqa: E402
 from tests.test_wakeword import HERE, HEY_CLAUDE_MODEL, tts_clip  # noqa: E402
 
 TZ = "America/New_York"
@@ -99,7 +99,7 @@ def _dod_config(tmp_path):
 def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
                                    fake_client, restore_root_logging):
     """'Hey Claude, what's on my calendar tomorrow?' as a .wav, through
-    `python -m assistant --mode wake --audio-file`: real openWakeWord with the
+    `python -m kwil --mode wake --audio-file`: real openWakeWord with the
     trained model, real VAD, real Whisper (the "whisper" case; "mocked-stt"
     replaces only Whisper with the known transcript), the real tool loop and
     calendar code. Only Claude and the Google API are mocked."""
@@ -139,7 +139,7 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
     service, events = make_service(items=[event])
     import googleapiclient.discovery
 
-    from assistant.tools import calendar
+    from kwil.tools import calendar
 
     monkeypatch.setattr(calendar, "get_credentials", lambda *a, **k: None)
     monkeypatch.setattr(googleapiclient.discovery, "build", lambda *a, **k: service)

@@ -1,4 +1,4 @@
-"""Student piece P1: the deadline routes (assistant/student_web.py) for the
+"""Student piece P1: the deadline routes (kwil/student_web.py) for the
 owner and invited people, the sealed Canvas link, sync, export and delete.
 
 Offline: Canvas is an httpx.MockTransport (canvas.TRANSPORT) serving the
@@ -20,12 +20,12 @@ pytest.importorskip("fastapi")
 pytest.importorskip("cryptography")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import canvas, cli, deadlines, family as family_mod, student_web  # noqa: E402
-from assistant import userkeys, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
-from assistant.tools import ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import canvas, cli, deadlines, family as family_mod, student_web  # noqa: E402
+from kwil import userkeys, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config  # noqa: E402
+from kwil.tools import ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block  # noqa: E402
 from tests.test_canvas import fake_resolve  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
@@ -274,7 +274,7 @@ def test_a_failed_feed_is_reported_by_code_only(s, caplog):
     s.host.feed = b"<html>Your session has expired " + FEED_SECRET.encode() + b"</html>"
     out = tess.post("/api/student/sync").json()
     assert out == {"sources": {}, "errors": {"ics": "not_a_calendar"}}
-    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("assistant"))
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("kwil"))
     assert FEED_SECRET not in ours and "session has expired" not in ours
 
 
@@ -497,7 +497,7 @@ def test_logs_hold_no_link_token_or_title(s, monkeypatch, caplog):
     tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
                                            "token": CANVAS_TOKEN})
     tess.post("/api/student/disconnect", json={"delete_items": True})
-    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("assistant"))
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("kwil"))
     for plain in (FEED_SECRET, FEED_URL, CANVAS_TOKEN, "Problem Set", "MATH 241",
                   "Midterm", "canvas.example.edu"):
         assert plain not in ours
@@ -506,16 +506,16 @@ def test_logs_hold_no_link_token_or_title(s, monkeypatch, caplog):
 
 def test_the_card_is_on_the_page(s):
     """Judge round 2, LOW 7: student.js was written but never loaded."""
-    from assistant import cloud
+    from kwil import cloud
 
-    web = Path(__file__).parent.parent / "assistant" / "web"
+    web = Path(__file__).parent.parent / "kwil" / "web"
     page = (web / "index.html").read_text(encoding="utf-8")
     assert '<script src="/student.js" defer></script>' in page
     assert page.index("/i18n.js") < page.index("/student.js")
     assert '"/student.js"' in (web / "sw.js").read_text(encoding="utf-8")
     assert "/student.js" in cloud.PUBLIC_GET
     r = TestClient(s.app, base_url=BASE).get("/student.js")
-    assert r.status_code == 200 and "HeyClaudeStudent" in r.text
+    assert r.status_code == 200 and "KwilStudent" in r.text
     assert r.headers["content-type"].startswith("text/javascript")
 
 

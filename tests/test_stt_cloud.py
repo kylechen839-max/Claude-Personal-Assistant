@@ -7,10 +7,10 @@ import numpy as np
 import pytest
 import requests
 
-from assistant import doctor, stt
-from assistant.config import DEFAULTS, ISOLATED_ENV_VARS, SECRET_ENV_VARS, redact
-from assistant.stt import EN_PROMPT, Transcriber
-from assistant.stt_cloud import DEEPGRAM_URL, OPENAI_URL, CloudTranscriber
+from kwil import doctor, stt
+from kwil.config import DEFAULTS, ISOLATED_ENV_VARS, SECRET_ENV_VARS, redact
+from kwil.stt import EN_PROMPT, Transcriber
+from kwil.stt_cloud import DEEPGRAM_URL, OPENAI_URL, CloudTranscriber
 
 KEY = "sk-proj-test-not-a-real-key-0123456789"
 SAID = "Move my dentist appointment to Friday."
@@ -156,7 +156,7 @@ def test_nothing_private_at_info(caplog):
     assert "1.0 s of audio -> 38 chars" in caplog.text
     caplog.clear()
     t, _, _ = cloud("openai", Response(200, {"text": SAID}))
-    with caplog.at_level("DEBUG", logger="assistant.stt_cloud"):
+    with caplog.at_level("DEBUG", logger="kwil.stt_cloud"):
         t.transcribe(SPEECH)
     assert any("dentist" in r.getMessage() and r.levelname == "DEBUG"
                for r in caplog.records)
@@ -182,7 +182,7 @@ def test_keys_are_secret_but_never_stop_a_separate_instance():
     """Masked in logs, but not ISOLATED_ENV_VARS: OpenAI's quickstart puts
     OPENAI_API_KEY in the Windows user environment, and Mom's or Kai's
     instance must still start (theirs pins [stt] engine = "whisper")."""
-    from assistant.config import inherited_env_conflicts
+    from kwil.config import inherited_env_conflicts
 
     for var in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY"):
         assert var in SECRET_ENV_VARS and var not in ISOLATED_ENV_VARS

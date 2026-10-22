@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from assistant import audio
-from assistant.voice_session import wav_bytes
+from kwil import audio
+from kwil.voice_session import wav_bytes
 from tests.conftest import make_response, text_block
 
 

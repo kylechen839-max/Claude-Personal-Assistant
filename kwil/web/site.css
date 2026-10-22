@@ -1,0 +1,105 @@
+/* Kwil public pages (/welcome, /privacy, /terms, the owner's /waitlist).
+   The app's palette and the system font; light by default, dark when the
+   device is (prefers-color-scheme). No web fonts, nothing from another site. */
+:root {
+  --bg: #faf9f5; --surface: #ffffff; --surface-2: #f0eee6;
+  --text: #1f1e1d; --text-2: #4d4c48; --muted: #6b6a63; --line: #1f1e1d1f;
+  --accent: #c96442; --accent-strong: #b4532f; --accent-ink: #a8492b; --on-accent: #fff;
+  --ok-soft: #3f7d4f1f; --bad-soft: #b3382c17; --warn: #f7ecdc; --warn-ink: #6b4a1f;
+  --warn-line: #e7d2b2;
+  --r-md: 14px; --r-lg: 20px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262624; --surface: #30302e; --surface-2: #383835;
+    --text: #f5f4ee; --text-2: #d3d1c7; --muted: #a9a79e; --line: #ffffff1f;
+    --accent: #d97757; --accent-strong: #c96442; --accent-ink: #eb9a7c;
+    --ok-soft: #6fbf8626; --bad-soft: #e5675a26; --warn: #3b3124; --warn-ink: #f1d9b3;
+    --warn-line: #574630;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 17px/1.55 var(--font); letter-spacing: -.01em; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent-ink); text-underline-offset: .15em; }
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.site-header, main, .site-footer { max-width: 44rem; margin: 0 auto;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right)); }
+main.wide { max-width: 60rem; }
+.site-header { display: flex; align-items: center; justify-content: space-between;
+  padding-top: 1rem; padding-bottom: 1rem; }
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--text);
+  font-weight: 650; text-decoration: none; }
+.brand img { border-radius: 8px; }
+.sign-in { font-weight: 550; }
+
+h1 { font-size: clamp(1.9rem, 6vw, 2.6rem); line-height: 1.15; letter-spacing: -.03em;
+  margin: 1.5rem 0 .75rem; }
+.doc h1 { font-size: 2rem; }
+h2 { font-size: 1.3rem; letter-spacing: -.02em; margin: 2.25rem 0 .6rem; }
+.lead { font-size: 1.125rem; color: var(--text-2); }
+.badge { display: inline-block; margin: .25rem 0; padding: .2rem .75rem; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-2); font-size: .9rem; font-weight: 600; }
+
+.button { display: inline-block; min-height: 48px; padding: .7rem 1.4rem; border: 0;
+  border-radius: var(--r-md); background: var(--accent); color: var(--on-accent);
+  font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.button:hover, .button:active { background: var(--accent-strong); }
+
+.features { padding-left: 1.2rem; }
+.features li { margin: .5rem 0; }
+.facts dt { font-weight: 650; margin-top: 1rem; }
+.facts dd { margin: .2rem 0 0; color: var(--text-2); }
+
+.card { margin: 2.5rem 0; padding: 1.25rem; border: 1px solid var(--line);
+  border-radius: var(--r-lg); background: var(--surface); }
+.card h2 { margin-top: 0; }
+.waitlist { display: grid; gap: .5rem; }
+.waitlist label { font-weight: 600; margin-top: .5rem; }
+.optional { color: var(--muted); font-weight: 400; }
+.waitlist input, .waitlist textarea { width: 100%; padding: .75rem .9rem; font: inherit;
+  color: inherit; background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-md); }
+.waitlist textarea { resize: vertical; }
+.waitlist .button { margin-top: .75rem; justify-self: start; }
+/* the honeypot: off-screen for people, still in the form for bots */
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.fine { color: var(--muted); font-size: .9rem; margin: .25rem 0 0; }
+
+.notice { padding: .75rem 1rem; border-radius: var(--r-md); background: var(--ok-soft); }
+.notice-invalid, .notice-busy, .notice-full, .notice-closed, .notice-error {
+  background: var(--bad-soft); }
+.draft { padding: .75rem 1rem; border: 1px solid var(--warn-line); border-radius: var(--r-md);
+  background: var(--warn); color: var(--warn-ink); }
+
+table { width: 100%; border-collapse: collapse; font-size: .95rem; margin: 1rem 0; }
+caption { text-align: left; color: var(--muted); padding-bottom: .4rem; }
+th, td { text-align: left; vertical-align: top; padding: .55rem .5rem;
+  border-bottom: 1px solid var(--line); }
+td form { margin: 0; }
+td button { padding: .35rem .8rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
+
+.site-footer { padding-top: 1.5rem; padding-bottom: max(2rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line); margin-top: 3rem; color: var(--muted); font-size: .9rem; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+
+/* phone width: tables become stacked rows */
+@media (max-width: 34rem) {
+  body { font-size: 16px; }
+  table, thead, tbody, tr, th, td { display: block; }
+  thead { position: absolute; left: -10000px; }
+  tr { padding: .5rem 0; border-bottom: 1px solid var(--line); }
+  th, td { border: 0; padding: .2rem 0; }
+  tbody th { font-weight: 650; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }

@@ -1,4 +1,4 @@
-"""The public site (assistant/public_site.py): /welcome, /privacy, /terms and
+"""The public site (kwil/public_site.py): /welcome, /privacy, /terms and
 the waitlist, behind CloudGuard as on Render. Offline: the web app runs on
 the mocked Anthropic client and the waitlist file is in tmp_path."""
 
@@ -12,10 +12,10 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from assistant import cloud, public_site, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS, load_config  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import cloud, public_site, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS, load_config  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.test_cloud import (PUBLIC, TRUSTED, make_cloud, slept,  # noqa: E402,F401
                               via_proxy)
 from tests.test_webapp import TOKEN, Clock, FakeTranscriber  # noqa: E402
@@ -31,7 +31,7 @@ def site_env(make_cloud, fake_client, tmp_path):
     Returns a namespace with guard, client, site, family, clock, file."""
     from types import SimpleNamespace
 
-    from assistant.family import Family
+    from kwil.family import Family
 
     def build(**webapp_settings):
         config = load_config(None, None)
@@ -157,7 +157,7 @@ def test_login_page_links_to_the_landing_page(site_env):
     page = env.client.get("/", headers=via_proxy(PUBLIC))
     assert page.status_code == 200 and 'href="/welcome"' in page.text
     js = (webapp.STATIC / "i18n.js").read_text(encoding="utf-8")
-    assert '"What is Hey Claude?"' in js
+    assert '"What is Kwil?"' in js
 
 
 def test_privacy_page_shows_the_support_email(site_env):
@@ -327,7 +327,7 @@ def test_waitlist_never_logs_emails_or_notes(site_env, caplog):
                    "not an address", "secret plans", "flood@example.com", "flood note"):
         assert secret not in text, secret
     assert "waitlist: 1 entries" in text  # the count, at INFO
-    infos = [r for r in caplog.records if r.name == "assistant.public_site"]
+    infos = [r for r in caplog.records if r.name == "kwil.public_site"]
     assert infos and all(r.levelno >= logging.INFO for r in infos)
 
 
@@ -460,7 +460,7 @@ def test_build_app_without_the_public_site(fake_client, tmp_path):
     assert client.post("/api/waitlist", json={"email": "a@example.com"}).status_code == 404
     assert not (tmp_path / "w.json").exists()
     page = client.get("/")
-    assert page.status_code == 200 and "Hey Claude" in page.text
+    assert page.status_code == 200 and "Kwil" in page.text
     assert "/welcome" not in page.text and "login-more" not in page.text
 
 

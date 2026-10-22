@@ -12,13 +12,13 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import cloud, history, webapp, webfeatures  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS  # noqa: E402
-from assistant.history import HistoryStore, Recorder  # noqa: E402
-from assistant.lecture import ChunkedUploads, LectureNotesDB, LecturePipeline  # noqa: E402
-from assistant.tools import ToolRegistry  # noqa: E402
-from assistant.tts import PrintTTS  # noqa: E402
+from kwil import cloud, history, webapp, webfeatures  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS  # noqa: E402
+from kwil.history import HistoryStore, Recorder  # noqa: E402
+from kwil.lecture import ChunkedUploads, LectureNotesDB, LecturePipeline  # noqa: E402
+from kwil.tools import ToolRegistry  # noqa: E402
+from kwil.tts import PrintTTS  # noqa: E402
 from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
 from tests.test_cloud import PROXY, PUBLIC, at, via_proxy  # noqa: E402
 from tests.test_failover_webapp import APP, CROSS, PI, settings  # noqa: E402
@@ -168,8 +168,8 @@ def test_saved_note_shows_in_the_conversation(store, fake_client):
     from tests.test_notes import FakeIndex, toy_embed
     from unittest.mock import MagicMock
 
-    from assistant import cli
-    from assistant.config import load_config
+    from kwil import cli
+    from kwil.config import load_config
 
     memory = MagicMock(namespace="voice-assistant")
     memory.index = FakeIndex()

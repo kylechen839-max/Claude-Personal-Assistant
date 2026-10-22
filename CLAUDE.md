@@ -1,4 +1,4 @@
-# Project: "Hey Claude" Personal Voice Assistant
+# Project: "Kwil" (formerly "Hey Claude") Personal Voice Assistant
 
 ## Goal
 Build an Echo-style voice assistant in Python on top of the Anthropic API.

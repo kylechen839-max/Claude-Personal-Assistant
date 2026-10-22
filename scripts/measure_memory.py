@@ -2,7 +2,7 @@
 
 Run inside the Docker image (CI does this on every push):
 
-    docker run --rm hey-claude python scripts/measure_memory.py --model base.en
+    docker run --rm kwil python scripts/measure_memory.py --model base.en
 
 In one fresh process it imports everything the web server loads, renders a
 5 s clip of speech with Piper, transcribes it with Whisper, and renders a
@@ -64,9 +64,9 @@ def main(argv=None) -> int:
     import pinecone  # noqa: F401
     import uvicorn  # noqa: F401
 
-    from assistant import audio, cloud, webapp  # noqa: F401
-    from assistant.stt import Transcriber
-    from assistant.tts import EspeakTTS, PiperTTS, piper_voice_problem
+    from kwil import audio, cloud, webapp  # noqa: F401
+    from kwil.stt import Transcriber
+    from kwil.tts import EspeakTTS, PiperTTS, piper_voice_problem
     report("server imports", t)
 
     t = time.monotonic()

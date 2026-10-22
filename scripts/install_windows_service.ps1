@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-    Run Hey Claude around the clock on this Windows PC (the PC as the home host).
+    Run Kwil around the clock on this Windows PC (the PC as the home host).
 .DESCRIPTION
-    Registers Task Scheduler tasks (folder \HeyClaude\) that start when you
+    Registers Task Scheduler tasks (folder \Kwil\) that start when you
     sign in, run hidden, restart after a crash and log to logs\:
 
-      Wake  python -m assistant --mode wake   always listening for "Hey Claude"
-      Web   python -m assistant --mode web    phone app on 127.0.0.1:8765 (skip: -NoWeb)
+      Wake  python -m kwil --mode wake   always listening for the wake word
+                                         ("Hey Claude" until a "Hey Kwil" model ships)
+      Web   python -m kwil --mode web    phone app on 127.0.0.1:8765 (skip: -NoWeb)
 
-    `python -m assistant.host` keeps each one running (restart after 10 s;
+    `python -m kwil.host` keeps each one running (restart after 10 s;
     after 5 crashes in 5 minutes it waits 5 minutes), writes
     logs\host-<mode>.log and, with [update] enabled = true in config.toml,
     keeps it on the tested `stable` branch (restarting when idle, rolling
@@ -17,9 +18,10 @@
     An older hand-made task that runs the web app (e.g. "Hey Claude Web" in
     the Task Scheduler Library root) is detected; it offers to replace it,
     so two servers never fight over the port. The port stays 8765 (-Port),
-    so an existing `tailscale serve` keeps working. -Uninstall removes only
-    the HeyClaude tasks: tailscale serve and the power settings are left as
-    they are.
+    so an existing `tailscale serve` keeps working. The Wake and Web tasks
+    from before the Kwil rebrand (\HeyClaude\) are replaced by the \Kwil\
+    ones. -Uninstall removes only these tasks (either folder): tailscale
+    serve and the power settings are left as they are.
 
     Then it checks the power settings that would stop the assistant (sleep
     and hibernate on AC power, USB selective suspend for the mic) and offers
@@ -49,7 +51,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoDir = Split-Path -Parent $PSScriptRoot
-$taskPath = '\HeyClaude\'
+$taskPath = '\Kwil\'
+$oldTaskPath = '\HeyClaude\'  # the folder before the Kwil rebrand
 $pythonw = Join-Path $repoDir '.venv\Scripts\pythonw.exe'
 $python = Join-Path $repoDir '.venv\Scripts\python.exe'
 $user = "$env:USERDOMAIN\$env:USERNAME"
@@ -136,14 +139,15 @@ function Test-InRepo {
 }
 
 function Get-LegacyWebTask {
-    # Tasks outside \HeyClaude\ that start THIS repo's web app (made by hand).
+    # Tasks outside \Kwil\ (and the old \HeyClaude\) that start THIS repo's
+    # web app (made by hand).
     Get-ScheduledTask -ErrorAction SilentlyContinue |
-        Where-Object { $_.TaskPath -ne $taskPath } |
+        Where-Object { $_.TaskPath -ne $taskPath -and $_.TaskPath -ne $oldTaskPath } |
         Where-Object {
             $task = $_
             @($task.Actions | Where-Object {
                     (Test-InRepo $_) -and ($task.TaskName -eq 'Hey Claude Web' -or
-                        "$($_.Execute) $($_.Arguments)" -match '-m\s+assistant\b.*--mode\s+web')
+                        "$($_.Execute) $($_.Arguments)" -match '-m\s+(kwil|assistant)\b.*--mode\s+web')
                 }).Count -gt 0
         }
 }
@@ -156,10 +160,11 @@ function Get-PortOwner {
 }
 
 function Test-AssistantWeb {
-    # Is this process a `python -m assistant --mode web` (any folder)?
+    # Is this process a `python -m kwil --mode web` (any folder; `assistant`
+    # is its name from before the rebrand)?
     param($Process)
     return $Process -and $Process.Name -like 'python*' -and
-        $Process.CommandLine -match '-m\s+assistant\b.*--mode\s+web'
+        $Process.CommandLine -match '-m\s+(kwil|assistant)\b.*--mode\s+web'
 }
 
 function Wait-PortFree {
@@ -176,7 +181,7 @@ function Wait-PortFree {
 }
 
 function Resolve-LegacyWebTask {
-    # $true when the port is free for \HeyClaude\Web; the old task is removed
+    # $true when the port is free for \Kwil\Web; the old task is removed
     # only after its server is stopped and the port is really free.
     $legacy = @(Get-LegacyWebTask)
     if ($legacy.Count -eq 0) { return $true }
@@ -185,12 +190,12 @@ function Resolve-LegacyWebTask {
         $cmd = ($t.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join '; '
         Write-Host "  $($t.TaskPath)$($t.TaskName) [$($t.State)]: $cmd"
     }
-    Write-Host "  It would fight the new \HeyClaude\Web task over port $Port."
-    Write-Host "  Replacing it: it is stopped and removed, and \HeyClaude\Web serves the"
+    Write-Host "  It would fight the new \Kwil\Web task over port $Port."
+    Write-Host "  Replacing it: it is stopped and removed, and \Kwil\Web serves the"
     Write-Host "  same 127.0.0.1:$Port, so your tailscale serve setup keeps working."
-    $answer = Read-Host '  Replace it with \HeyClaude\Web? [y/N]'
+    $answer = Read-Host '  Replace it with \Kwil\Web? [y/N]'
     if ($answer -notmatch '^(y|yes)$') {
-        Write-Host '  Kept it; \HeyClaude\Web is not installed (only the wake word).'
+        Write-Host '  Kept it; \Kwil\Web is not installed (only the wake word).'
         return $false
     }
     foreach ($t in $legacy) {
@@ -199,7 +204,7 @@ function Resolve-LegacyWebTask {
     if (-not (Wait-PortFree)) {
         $owner = Get-PortOwner
         Write-Warning ("Port $Port is still held by $($owner.Name) (PID $($owner.ProcessId)). " +
-            'Kept the old task and started it again; \HeyClaude\Web is not installed.')
+            'Kept the old task and started it again; \Kwil\Web is not installed.')
         foreach ($t in $legacy) {
             Start-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
         }
@@ -216,7 +221,7 @@ function Test-PortFree {
     $owner = Get-PortOwner
     if ($owner) {
         Write-Warning ("Port $Port is already in use by $($owner.Name) (PID $($owner.ProcessId)); " +
-            '\HeyClaude\Web not installed. Stop that program and run this again.')
+            '\Kwil\Web not installed. Stop that program and run this again.')
         return $false
     }
     return $true
@@ -225,12 +230,12 @@ function Test-PortFree {
 function Stop-HostProcess {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param()
-    # Our supervisors (python -m assistant.host, run with this repo's venv)
-    # and the assistant each one started.
+    # Our supervisors (python -m kwil.host, or assistant.host from before
+    # the rebrand, run with this repo's venv) and the assistant each one started.
     $procs = @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
             Where-Object { $_.CommandLine })
     $supervisors = @($procs | Where-Object {
-            $_.CommandLine.Contains($repoDir) -and $_.CommandLine -match '-m\s+assistant\.host\b' } |
+            $_.CommandLine.Contains($repoDir) -and $_.CommandLine -match '-m\s+(kwil|assistant)\.host\b' } |
             ForEach-Object { $_.ProcessId })
     $targets = $procs | Where-Object {
         $supervisors -contains $_.ProcessId -or $supervisors -contains $_.ParentProcessId
@@ -243,12 +248,15 @@ function Stop-HostProcess {
 }
 
 function Unregister-HostTask {
-    foreach ($name in 'Wake', 'Web') {
-        $task = Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue
-        if ($task) {
-            Stop-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskPath $taskPath -TaskName $name -Confirm:$false
-            Write-Host "Removed task $taskPath$name"
+    # Ours, and the same tasks from before the Kwil rebrand (\HeyClaude\).
+    foreach ($path in $taskPath, $oldTaskPath) {
+        foreach ($name in 'Wake', 'Web') {
+            $task = Get-ScheduledTask -TaskPath $path -TaskName $name -ErrorAction SilentlyContinue
+            if ($task) {
+                Stop-ScheduledTask -TaskPath $path -TaskName $name -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskPath $path -TaskName $name -Confirm:$false
+                Write-Host "Removed task $path$name"
+            }
         }
     }
     Stop-HostProcess
@@ -256,7 +264,7 @@ function Unregister-HostTask {
 
 function Register-HostTask {
     param([string]$Name, [string]$Mode, [string]$Description, [string]$Extra = '')
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m assistant.host $Mode $Extra".Trim() `
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m kwil.host $Mode $Extra".Trim() `
         -WorkingDirectory $repoDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
     $trigger.Delay = 'PT20S'  # let audio devices and the network come up
@@ -272,7 +280,7 @@ function Register-HostTask {
 
 if ($Uninstall) {
     Unregister-HostTask
-    Write-Host 'Hey Claude no longer starts at sign-in.'
+    Write-Host 'Kwil no longer starts at sign-in.'
     Write-Host 'Left as they are: tailscale serve (check with: tailscale serve status) and the power settings.'
     exit 0
 }
@@ -285,32 +293,32 @@ if (-not $PowerOnly) {
     if (-not (Test-Path -LiteralPath (Join-Path $repoDir '.env'))) {
         Write-Warning '.env is missing; the assistant will fail until you add your keys.'
     }
-    $help = & $python -m assistant --help 2>&1 | Out-String
+    $help = & $python -m kwil --help 2>&1 | Out-String
     $helpOk = $LASTEXITCODE -eq 0
     $hasWeb = $helpOk -and $help -match '--mode \{[^}]*\bweb\b'
     if (-not $helpOk) {
-        Write-Warning ("'python -m assistant --help' failed, so the venv looks broken " +
-            '(run: .venv\Scripts\python.exe -m assistant --check). Nothing was changed.')
+        Write-Warning ("'python -m kwil --help' failed, so the venv looks broken " +
+            '(run: .venv\Scripts\python.exe -m kwil --check). Nothing was changed.')
         exit 1
     }
 
     Write-Host '== Stopping any running copy started by this script =='
     Unregister-HostTask
     if (-not $NoWake) {
-        Register-HostTask -Name 'Wake' -Mode 'wake' -Description 'Hey Claude: always-listening wake word (python -m assistant --mode wake)'
+        Register-HostTask -Name 'Wake' -Mode 'wake' -Description 'Kwil: always-listening wake word (python -m kwil --mode wake)'
     }
     if ($hasWeb -and -not $NoWeb) {
         if ((Resolve-LegacyWebTask) -and (Test-PortFree)) {
             Register-HostTask -Name 'Web' -Mode 'web' -Extra "$Port" `
-                -Description "Hey Claude: phone web app on 127.0.0.1:$Port (python -m assistant --mode web)"
+                -Description "Kwil: phone web app on 127.0.0.1:$Port (python -m kwil --mode web)"
         }
     }
     Write-Host ''
     Write-Host 'They start each time you sign in to Windows. After a reboot nothing runs'
     Write-Host 'until someone signs in; to start without signing in, set up automatic'
     Write-Host 'sign-in for this account (Windows Settings -> Accounts -> Sign-in options).'
-    Write-Host 'Status: Task Scheduler -> Task Scheduler Library -> HeyClaude.'
-    Write-Host 'Only one place should listen for "Hey Claude": stop the Pi service if you have one.'
+    Write-Host 'Status: Task Scheduler -> Task Scheduler Library -> Kwil.'
+    Write-Host 'Only one place should listen for the wake word: stop the Pi service if you have one.'
 }
 
 if (-not $SkipPower) {

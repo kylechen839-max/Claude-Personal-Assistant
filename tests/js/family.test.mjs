@@ -1,6 +1,6 @@
 // node --test tests/js/family.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/family.js in node:vm with a minimal
+// Runs the phone page's kwil/web/family.js in node:vm with a minimal
 // fake window: an "#invite=" link is read, cleared from the address bar
 // before anything is sent, POSTed once as {invite}, and remembered as a
 // family account (so app.js skips the failover router); a failed invite
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/family.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/family.js', import.meta.url), 'utf8');
 
 class El {
   constructor(id, hidden = false) {
@@ -70,7 +70,7 @@ function load({ hash = '', responses = {}, share, clipboard = true, store = {} }
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  return { win, els, fetches, events, local, copied, shared, api: win.HeyClaudeFamily };
+  return { win, els, fetches, events, local, copied, shared, api: win.KwilFamily };
 }
 
 const TOKEN = 'hcinv.' + 'Ab-_9'.repeat(8);
@@ -151,7 +151,7 @@ test('a new invite is shared, or copied without a share sheet', async () => {
 });
 
 test('with failover the owner\'s calls go through the router with the bearer token', async () => {
-  const { BackendRouter } = await import('../../assistant/web/backend-router.js');
+  const { BackendRouter } = await import('../../kwil/web/backend-router.js');
   const cloud = 'https://cloud.example.com';
   const url = `${cloud}/#invite=${TOKEN}`;  // built by the server from its own address
   const sent = [];
@@ -199,7 +199,7 @@ test('remove uses POST .../remove (a cross-origin DELETE fails the failover pref
 });
 
 test('app.js hands its router-aware request() to family.js before anything else', () => {
-  const app = readFileSync(new URL('../../assistant/web/app.js', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../../kwil/web/app.js', import.meta.url), 'utf8');
   const configured = app.indexOf('family.configure({ request })');
   assert.ok(configured > 0);
   assert.ok(configured < app.indexOf('family.acceptInvite(window)'));
@@ -271,7 +271,7 @@ function loadAccount({ responses = {}, answer = true, store = { account: 'family
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  return { win, els, fetches, events, clicked, asked, local, api: win.HeyClaudeFamily };
+  return { win, els, fetches, events, clicked, asked, local, api: win.KwilFamily };
 }
 
 test('the account section shows only on a family member\'s page', () => {
@@ -289,7 +289,7 @@ test('Download my data saves the zip as a file', async () => {
   assert.equal(t.fetches.length, 1);
   assert.equal(t.fetches[0].url, '/api/me/export');
   assert.equal(t.fetches[0].opts.method, undefined);  // a GET
-  assert.deepEqual(t.clicked, [{ href: 'blob:x', download: 'hey-claude-data.zip' }]);
+  assert.deepEqual(t.clicked, [{ href: 'blob:x', download: 'kwil-data.zip' }]);
   assert.equal(t.els['account-status'].textContent, t.api.ACCOUNT_TEXT.started);
   assert.equal(t.events.length, 0);  // never navigates
 });
@@ -384,7 +384,7 @@ function loadKey({ status = { set: false, last4: null, unreadable: false, requir
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
   const flush = () => new Promise((r) => setTimeout(r, 0));
-  return { win, els, fetches, asked, flush, api: win.HeyClaudeFamily };
+  return { win, els, fetches, asked, flush, api: win.KwilFamily };
 }
 
 test('the key settings show only for a family member or beta tester, never the owner', async () => {

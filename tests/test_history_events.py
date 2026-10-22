@@ -7,10 +7,10 @@ import sqlite3
 
 import pytest
 
-eventlog_mod = pytest.importorskip("assistant.failover.eventlog")
-sync = pytest.importorskip("assistant.failover.sync")
+eventlog_mod = pytest.importorskip("kwil.failover.eventlog")
+sync = pytest.importorskip("kwil.failover.sync")
 
-from assistant.history import HistoryStore  # noqa: E402
+from kwil.history import HistoryStore  # noqa: E402
 
 NOW = 1_792_000_000.0
 

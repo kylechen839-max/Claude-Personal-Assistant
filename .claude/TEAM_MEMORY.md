@@ -1,4 +1,4 @@
-# Team memory: the Hey Claude dev team
+# Team memory: the Kwil dev team
 
 Shared context for the master (`/build-feature`), `researcher`, `builder`
 and `judge`. Distilled on 2026-10-19 from Kyle's Claude Code cloud sessions
@@ -228,12 +228,12 @@ as the work. Never put secrets, tokens or personal data in this file.
     "Get desktop app" saves the same text (as a one-file zip: downloads
     refuses .cmd/.command), checked against the files by pytest.
   - **The dashboard is desktop-only** (2026-10-20: the
-    dashboard's phone layout was removed). "Phone-first" is about the Hey
-    Claude app; on the phone Kyle reaches the coordinator by voice
+    dashboard's phone layout was removed). "Phone-first" is about the Kwil
+    app; on the phone Kyle reaches the coordinator by voice
     (`message_dev_team`).
   - **The PC hub was removed** (2026-10-20, Kyle scrapped it): no
     `/devteam` page, `devhub.py` or `[devteam] hub*` settings. Don't
-    rebuild it without his ask; `assistant/devteam.py` is only the voice
+    rebuild it without his ask; `kwil/devteam.py` is only the voice
     link now (`hc-` reply ids, spoken replies).
   - Lesson (2026-10-19): the first Grid and chat were built on a "Claude
     Code Remote" connector that doesn't exist on Kyle's account, so they
@@ -257,8 +257,50 @@ as the work. Never put secrets, tokens or personal data in this file.
     `.add(` in the page, Map and Set included; keep page state in arrays
     or plain objects.
 
+## Names after the Kwil rebrand (2026-10-22)
+- The product is **Kwil** (said "quill"); it was Hey Claude. "Claude" stays
+  only where it names the model or Anthropic ("powered by Claude",
+  `CLAUDE_MODEL`, `CLAUDE_FAST_MODEL`, `CLAUDE_ROUTER`).
+- Package `kwil/`, run as `python -m kwil`. `assistant/` is an alias kept
+  for at least one stable release: a `sys.meta_path` finder makes
+  `import assistant.X` return the `kwil.X` module itself (and runs
+  `python -m assistant.X`), `python -m assistant` runs `kwil.cli.main`,
+  and each of 610017b's modules has a one-line file shim
+  (`assistant/X.py`: `shim(__name__)`) for processes that still have the
+  old package in memory when an update swaps the tree. New modules need no
+  shim. New code and tests use `kwil`; logger names are `kwil.*` (caplog
+  filters too).
+- Lesson (judge round 1): a rename must survive the *old* code doing the
+  update. The old deploy/watch/host import lazily after `git pull`, and
+  runpy needs `get_code` from an alias loader. Also leave requirements.txt
+  byte-identical in such a change: any edit makes the old updater demand
+  `--requirements`.
+- Env vars `KWIL_*` first, `HEY_CLAUDE_*` read as a fallback (only
+  `KWIL_VERSION` so far).
+- Kept on purpose (renaming loses data or signs people out): the HKDF
+  labels `hey-claude/...`, the `hc_session` cookie, the `hc-` reply ids,
+  IndexedDB `hey-claude`, `data/` and DB file names, `logs/assistant.log`,
+  the `[assistant]` config section, `render.yaml` `name: hey-claude` and
+  disk `hey-claude-data` (and so `hey-claude.onrender.com`), the Notion
+  "Hey Claude coordinator inbox" and its `[Hey Claude voice | ...]`
+  headers, and the wake model `keywords/hey_claude.onnx` until a "Hey Kwil"
+  model is trained (BLOCKERS.md).
+- PC tasks live in `\Kwil\` (Web, Wake, Family-<name>, Watch). Until Kyle
+  re-registers them they are still `\HeyClaude\...` running `python -m
+  assistant`; `restart_instance.ps1` looks in `\Kwil\`, then `\HeyClaude\`,
+  then the hand-made `\Hey Claude Web`, and process matches accept both
+  names. Pi units: `kwil.service`, `kwil-watch.timer` (the install scripts
+  remove the `hey-claude*` ones).
+- The repo is being renamed to `kylechen839-max/Kwil`; the updater accepts
+  either name for one release (`updater.REPO_ALIASES`).
+- Lesson: a blind `assistant.` -> `kwil.` rewrite also hit attributes of
+  variables named `assistant` (a WebAssistant: `assistant.tools`,
+  `assistant.backup`, `assistant.push`). Rename modules by import shape,
+  not by text.
+
 ## Repo map (where things live)
-- `assistant/` package, entry point `python -m assistant`.
+- `kwil/` package, entry point `python -m kwil` (see "Names after the Kwil
+  rebrand" for the `assistant/` alias).
 - **Config:** `config.py` `DEFAULTS` is mirrored in `config.toml`; every
   key needs a default.
 - **Chat and tools:**

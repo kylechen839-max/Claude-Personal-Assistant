@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Put new code live safely: pull, check it on a side port, then switch over
-# or refuse (python -m assistant.deploy; see assistant/deploy.py).
+# or refuse (python -m kwil.deploy; see kwil/deploy.py).
 #
 #   ./scripts/deploy.sh                  pull, check, switch
 #   ./scripts/deploy.sh --no-pull        check and switch what is checked out now
@@ -18,4 +18,4 @@ if [[ ! -x "$REPO_DIR/.venv/bin/python" ]]; then
     exit 2
 fi
 cd "$REPO_DIR"
-exec "$REPO_DIR/.venv/bin/python" -m assistant.deploy "$@"
+exec "$REPO_DIR/.venv/bin/python" -m kwil.deploy "$@"

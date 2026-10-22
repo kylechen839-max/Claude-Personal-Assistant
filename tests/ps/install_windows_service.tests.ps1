@@ -12,7 +12,8 @@ $functions = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Langu
 foreach ($f in $functions) { . ([scriptblock]::Create($f.Extent.Text)) }
 
 $repoDir = 'C:\Users\kylec\Claude-Personal-Assistant'
-$taskPath = '\HeyClaude\'
+$taskPath = '\Kwil\'
+$oldTaskPath = '\HeyClaude\'
 $Port = 8765
 
 function New-Action($Execute, $Arguments, $WorkingDirectory) {
@@ -44,9 +45,9 @@ function Assert($Name, $Condition) {
 }
 
 $kyles = New-Task '\' 'Hey Claude Web' (New-Action '.venv\Scripts\python.exe' `
-        '-m assistant --mode web --host 127.0.0.1 --port 8765' $repoDir)
+        '-m kwil --mode web --host 127.0.0.1 --port 8765' $repoDir)
 $server = [pscustomobject]@{ ProcessId = 4242; Name = 'python.exe'
-    CommandLine = '.venv\Scripts\python.exe -m assistant --mode web --host 127.0.0.1 --port 8765' }
+    CommandLine = '.venv\Scripts\python.exe -m kwil --mode web --host 127.0.0.1 --port 8765' }
 
 # 1. Kyle's task, answer y: stopping the task frees the port -> removed
 $script:tasks = @($kyles); $script:answer = 'y'; $script:log = @()
@@ -77,23 +78,30 @@ Assert 'no keeps everything' ((-not $ok) -and $script:log.Count -eq 0)
 # 5. another project's task with the same command or name is not ours
 $script:answer = 'y'; $script:log = @()
 $script:tasks = @(
-    (New-Task '\' 'Hey Claude Web' (New-Action 'python.exe' '-m assistant --mode web' 'D:\other\project')),
-    (New-Task '\' 'Other' (New-Action 'C:\elsewhere\.venv\Scripts\python.exe' '-m assistant --mode web' 'C:\elsewhere')))
+    (New-Task '\' 'Hey Claude Web' (New-Action 'python.exe' '-m kwil --mode web' 'D:\other\project')),
+    (New-Task '\' 'Other' (New-Action 'C:\elsewhere\.venv\Scripts\python.exe' '-m kwil --mode web' 'C:\elsewhere')))
 Assert 'other folders are ignored' (@(Get-LegacyWebTask).Count -eq 0)
 
-# 6. our own \HeyClaude\Web is never "legacy"; repo found case-insensitively
+# 6. our own \Kwil\Web (and the pre-rebrand \HeyClaude\Web, which
+#    Unregister-HostTask replaces) is never "legacy"; repo found case-insensitively
 $script:tasks = @(
+    (New-Task '\Kwil\' 'Web' (New-Action "$repoDir\.venv\Scripts\pythonw.exe" "-m kwil.host web 8765" $repoDir)),
     (New-Task '\HeyClaude\' 'Web' (New-Action "$repoDir\.venv\Scripts\pythonw.exe" "-m assistant.host web 8765" $repoDir)),
-    (New-Task '\' 'Phone app' (New-Action 'C:\USERS\KYLEC\Claude-Personal-Assistant\.venv\Scripts\python.exe' '-m assistant --mode web' '')))
+    (New-Task '\' 'Phone app' (New-Action 'C:\USERS\KYLEC\Claude-Personal-Assistant\.venv\Scripts\python.exe' '-m kwil --mode web' '')))
 $found = @(Get-LegacyWebTask)
 Assert 'only the hand-made one in this repo' ($found.Count -eq 1 -and $found[0].TaskName -eq 'Phone app')
 
 # 7. a sibling folder whose name starts with the repo's is not the repo
 $script:tasks = @((New-Task '\' 'Hey Claude Web' (New-Action "$repoDir-old\.venv\Scripts\python.exe" `
-                '-m assistant --mode web' "$repoDir-old")))
+                '-m kwil --mode web' "$repoDir-old")))
 Assert 'C:\x\Claude-old is not C:\x\Claude' (@(Get-LegacyWebTask).Count -eq 0)
 
-# 8. no legacy task: nothing asked
+# 8. a hand-made task from before the rebrand (python -m assistant) is found
+$script:tasks = @((New-Task '\' 'Phone app' (New-Action "$repoDir\.venv\Scripts\python.exe" `
+                '-m assistant --mode web' $repoDir)))
+Assert 'a pre-rebrand hand-made task is found' (@(Get-LegacyWebTask).Count -eq 1)
+
+# 9. no legacy task: nothing asked
 $script:tasks = @(); $script:answer = 'should not be asked'; $script:log = @()
 Assert 'no legacy task' ((Resolve-LegacyWebTask) -and $script:log.Count -eq 0)
 exit 0

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from assistant.chat import ClaudeChat
-from assistant.memory import PineconeMemory, transcript
+from kwil.chat import ClaudeChat
+from kwil.memory import PineconeMemory, transcript
 from tests.conftest import make_response, request_text, text_block, tool_use_block
 
 
@@ -113,8 +113,8 @@ def test_transcript_skips_tool_data():
 
 
 def test_wake_mode_idle_timeout_ends_conversation(fake_client):
-    from assistant.cli import run_wake
-    from assistant.tts import PrintTTS
+    from kwil.cli import run_wake
+    from kwil.tts import PrintTTS
 
     mem = MagicMock()
     fake_client.queue = [make_response(text_block("A.")),

@@ -20,9 +20,9 @@ pytest.importorskip("fastapi")
 pytest.importorskip("google_auth_oauthlib")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import family as family_mod, google_web, i18n, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import load_config  # noqa: E402
+from kwil import family as family_mod, google_web, i18n, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import load_config  # noqa: E402
 from tests.conftest import make_response, text_block, tool_use_block  # noqa: E402
 from tests.test_family import OWNER_TOOLS, owner_registry  # noqa: E402
 from tests.test_webapp import BASE, TOKEN, Clock, login, wav_bytes  # noqa: E402
@@ -292,7 +292,7 @@ def test_tools_only_after_connecting(g):
 
 
 def test_gmail_is_drafts_only_and_deletes_ask_for_family(g):
-    from assistant.tools.gmail import SendingBlocked
+    from kwil.tools.gmail import SendingBlocked
 
     mom, mom_id = g.member("Mom")
     connected(g, mom, mom_id, "mom")
@@ -319,7 +319,7 @@ def test_family_calendar_tools_flags_and_extra_scope_gate(g):
     """The new calendar tools reach a family member with the same
     confirmations; list_calendars only on a token with the read-only extra
     scopes; Kyle's color names never reach her."""
-    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES
+    from kwil.tools.google_auth import CALENDAR_EXTRA_SCOPES
 
     g.fam.config["calendar"]["color_labels"] = {"KylesAlias": "Basil"}
     mom, mom_id = g.member("Mom", "en")
@@ -363,7 +363,7 @@ def test_disconnect_removes_the_token_and_the_tools(g):
 
 
 def test_removing_a_member_deletes_their_token(g, monkeypatch):
-    from assistant import account
+    from kwil import account
 
     mom, mom_id = g.member("Mom")
     dad, dad_id = g.member("Dad", "en")
@@ -389,7 +389,7 @@ def test_no_secrets_or_names_at_info(g, caplog):
     assert r.status_code == 303
     mom.post("/api/google/disconnect", json={})
     info = [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.INFO and r.name.startswith("assistant")]
+            if r.levelno >= logging.INFO and r.name.startswith("kwil")]
     assert any(mom_id in m and "connected their Google" in m for m in info)
     for secret in ("4/secret-code", state, "ya29", "refresh-secret", "Mom",
                    mom.cookies.get(google_web.BIND_COOKIE) or "no-cookie"):
@@ -543,7 +543,7 @@ def test_a_calendar_question_is_asked_in_her_language(g):
 
 
 def test_voice_conversation_says_its_own_sentences_in_its_language():
-    from assistant.voice_session import decline_message, question_suffix
+    from kwil.voice_session import decline_message, question_suffix
 
     assert question_suffix("zh") == i18n.ZH["say_yes_no"]
     assert question_suffix() == i18n.EN["say_yes_no"]
@@ -571,7 +571,7 @@ def test_the_web_app_gets_family_speech_only_with_family_on(monkeypatch, tmp_pat
 def test_busy_voice_turn_says_so_in_her_language():
     from types import SimpleNamespace
 
-    from assistant.voice_session import WebBackend
+    from kwil.voice_session import WebBackend
 
     def busy(*a, **k):
         raise RuntimeError("a turn is already running in this session")
@@ -586,7 +586,7 @@ def test_a_family_token_without_client_fields_never_reads_a_client_file(tmp_path
                                                                         monkeypatch):
     """Family tools pass credentials_path="" (their token carries its client):
     "" must mean no file, not the current folder."""
-    from assistant.tools import google_auth
+    from kwil.tools import google_auth
 
     monkeypatch.chdir(tmp_path)
     assert google_auth.client_config("", environ={}) is None
@@ -632,7 +632,7 @@ def test_an_expired_family_token_says_reconnect_in_the_app(g, monkeypatch, caplo
 
 
 def test_family_scope_and_missing_token_errors_say_reconnect_in_the_app(tmp_path):
-    from assistant.tools import google_auth
+    from kwil.tools import google_auth
 
     token = tmp_path / "t.json"
     token.write_text(json.dumps({**token_of("mom"), "scopes": SCOPES[:1]}))  # calendar only
@@ -710,7 +710,7 @@ def test_a_calendar_question_by_voice_is_asked_in_her_language(g):
 def test_voice_worker_runs_in_the_conversations_language():
     """VoiceConversation._work's `using`: a backend that answers in the
     worker thread (ChatBackend) asks its tool's question in Chinese."""
-    from assistant.tools import Tool, ToolRegistry
+    from kwil.tools import Tool, ToolRegistry
     from tests.test_voice import SPEECH, make_conv
     from tests.voice_fakes import stream_client, streamed
 
@@ -764,7 +764,7 @@ def consent(client) -> dict:
 
 
 def test_a_beta_consent_screen_asks_for_calendar_only_on_the_public_client(g, monkeypatch):
-    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES, CALENDAR_SCOPE
+    from kwil.tools.google_auth import CALENDAR_EXTRA_SCOPES, CALENDAR_SCOPE
 
     monkeypatch.setenv("GOOGLE_PUBLIC_CLIENT_JSON", json.dumps(PUBLIC_CLIENT))
     assert g.config["gmail"]["enabled"]  # Gmail on for the family, still none for beta
@@ -799,7 +799,7 @@ def test_a_beta_consent_screen_asks_for_calendar_only_on_the_public_client(g, mo
 
 
 def test_a_beta_registry_never_has_gmail_tools_or_kyle(g, monkeypatch):
-    from assistant.tools.google_auth import CALENDAR_EXTRA_SCOPES
+    from kwil.tools.google_auth import CALENDAR_EXTRA_SCOPES
 
     monkeypatch.setenv("GOOGLE_PUBLIC_CLIENT_JSON", json.dumps(PUBLIC_CLIENT))
     assert g.config["gmail"]["enabled"]
@@ -874,7 +874,7 @@ def test_a_picked_voice_wins_over_the_language_voice():
     language's voice; the owner keeps the server's."""
     from types import SimpleNamespace
 
-    from assistant.webapp import WebAssistant
+    from kwil.webapp import WebAssistant
 
     default, mandarin, picked = object(), object(), object()
     wa = object.__new__(WebAssistant)

@@ -31,7 +31,7 @@ Results are kept short (each hit is cut to 1,500 characters), so they work in vo
 
 Claude connects to the server from Anthropic's cloud, so it has to be reachable on a public HTTPS URL.
 
-**Render (easiest):** this folder lives in the `Claude-Personal-Assistant` repo, and the repo root has a `render.yaml` pointing at it. In Render choose New → Blueprint, pick `kylechen839-max/Claude-Personal-Assistant`, and enter `PINECONE_API_KEY` when asked (`DEFAULT_INDEX` is preset to `project-context`, the index the voice assistant uses). Render generates `MCP_SECRET`; copy it from the service's Environment tab. The Blueprint uses Render's free plan, which sleeps after about 15 minutes idle, so the first call after a pause takes about a minute; switch the service to a paid plan if that is too slow.
+**Render (easiest):** this folder lives in the `Kwil` repo (called `Claude-Personal-Assistant` before the rebrand), and the repo root has a `render.yaml` pointing at it. In Render choose New → Blueprint, pick `kylechen839-max/Claude-Personal-Assistant`, and enter `PINECONE_API_KEY` when asked (`DEFAULT_INDEX` is preset to `project-context`, the index the voice assistant uses). Render generates `MCP_SECRET`; copy it from the service's Environment tab. The Blueprint uses Render's free plan, which sleeps after about 15 minutes idle, so the first call after a pause takes about a minute; switch the service to a paid plan if that is too slow.
 
 **Any Docker host** (Fly.io, Railway, Cloud Run, a VPS): `docker build -t pinecone-mcp .` and run it with the environment variables above.
 

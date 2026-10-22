@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant.chat import ClaudeChat
-from assistant.config import load_config
-from assistant.tools import ToolRegistry
-from assistant.tools.web import (browser_tools, open_in_browser, server_tools,
+from kwil.chat import ClaudeChat
+from kwil.config import load_config
+from kwil.tools import ToolRegistry
+from kwil.tools.web import (browser_tools, open_in_browser, server_tools,
                                  tool_versions)
 from tests.conftest import make_response, system_text, text_block, tool_use_block
 
@@ -87,7 +87,7 @@ def test_open_in_browser():
 def test_browser_tool_dispatch(monkeypatch):
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
-    import assistant.tools.web as web
+    import kwil.tools.web as web
     monkeypatch.setattr(web, "open_in_browser",
                         lambda url=None, search=None: open_in_browser(
                             url, search, opener=lambda u: opened.append(u) or True))
@@ -156,7 +156,7 @@ def test_web_search_mixed_with_client_tool(fake_client):
     """Search, then open the result in the browser, then answer."""
     opened = []
     reg = web_registry()
-    from assistant.tools import Tool
+    from kwil.tools import Tool
     reg.register(Tool("open_in_browser", "x", {"type": "object"},
                       lambda url=None, search=None: opened.append(url) or
                       {"status": "opened", "url": url}))
@@ -182,7 +182,7 @@ def test_refusal_gets_a_spoken_fallback(fake_client):
 
 # ---------- CLI wiring ----------
 def test_build_tools_registers_web(tmp_path, monkeypatch):
-    from assistant import cli
+    from kwil import cli
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("NOTION_TOKEN", raising=False)

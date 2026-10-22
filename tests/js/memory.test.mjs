@@ -1,6 +1,6 @@
 // node --test tests/js/memory.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/memory.js in node:vm with a minimal
+// Runs the phone page's kwil/web/memory.js in node:vm with a minimal
 // fake DOM: "Memory" shows in the menu only for the owner with memory on;
 // opening it loads /api/memory and shows the weeks (This week / Last week /
 // Week of ... / Date unknown) with each note's date, kind and an
@@ -13,8 +13,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/memory.js', import.meta.url), 'utf8');
-const I18N = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/memory.js', import.meta.url), 'utf8');
+const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 
 class El {
   constructor(tag, id, hidden = false) {
@@ -86,8 +86,8 @@ function load({ answer = true, responses = {} } = {}) {
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  win.HeyClaudeMemory.configure({ show: (v) => shown.push(v) });
-  return { win, els, menu, fetches, asked, shown, api: win.HeyClaudeMemory };
+  win.KwilMemory.configure({ show: (v) => shown.push(v) });
+  return { win, els, menu, fetches, asked, shown, api: win.KwilMemory };
 }
 
 async function open(t) {
@@ -191,7 +191,7 @@ test('every fixed string on the Memory screen has Chinese', async () => {
   const ctx = { console };
   vm.createContext(ctx);
   vm.runInContext(I18N, ctx);
-  const tr = ctx.HeyClaudeI18n.translate;
+  const tr = ctx.KwilI18n.translate;
   const t = load();
   const q = (week, n) => t.api.deleteWeekQuestion(week, DATA, n);
   const strings = ['Memory', 'Back to chat', 'Summary', 'Note', 'Untrusted', 'Date unknown',

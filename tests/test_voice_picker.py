@@ -1,4 +1,4 @@
-"""The phone app's reply-voice picker (assistant/voice_picker.py): listing the
+"""The phone app's reply-voice picker (kwil/voice_picker.py): listing the
 voices this server has (Piper files, Kokoro, the OS voice, ElevenLabs with a
 mocked API), saving each person's choice (the owner and each family member
 apart), the preview clip, falling back on a voice that is gone, engines
@@ -22,13 +22,13 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from assistant import audio, cloud, family as family_mod, tts_kokoro, voice_picker, webapp  # noqa: E402
-from assistant.chat import ClaudeChat  # noqa: E402
-from assistant.config import DEFAULTS, SERVER_PROFILE, load_config  # noqa: E402
-from assistant.tts import PiperTTS, PrintTTS  # noqa: E402
-from assistant.tts_elevenlabs import ElevenLabsTTS  # noqa: E402
-from assistant.tts_kokoro import KokoroTTS  # noqa: E402
-from assistant.voice_picker import Catalog, VoicePicker, VoicePrefs  # noqa: E402
+from kwil import audio, cloud, family as family_mod, tts_kokoro, voice_picker, webapp  # noqa: E402
+from kwil.chat import ClaudeChat  # noqa: E402
+from kwil.config import DEFAULTS, SERVER_PROFILE, load_config  # noqa: E402
+from kwil.tts import PiperTTS, PrintTTS  # noqa: E402
+from kwil.tts_elevenlabs import ElevenLabsTTS  # noqa: E402
+from kwil.tts_kokoro import KokoroTTS  # noqa: E402
+from kwil.voice_picker import Catalog, VoicePicker, VoicePrefs  # noqa: E402
 from tests.test_voices import fake_kokoro  # noqa: E402,F401  (a fixture)
 from tests.test_webapp import BASE, TOKEN, Clock, FakeTranscriber, login  # noqa: E402
 
@@ -447,7 +447,7 @@ def test_a_paid_server_default_is_never_a_beta_testers_voice(env, owner, monkeyp
     """[tts] engine = "elevenlabs" on a server with family on: the owner and
     a family member allowed paid voices hear it; a beta tester, or family
     without family_paid_voices, hears its local fallback (no owner bill)."""
-    from assistant.tts_elevenlabs import ElevenLabsTTS
+    from kwil.tts_elevenlabs import ElevenLabsTTS
 
     paid = ElevenLabsTTS(env.default)
     env.assistant.tts = paid
@@ -515,7 +515,7 @@ def test_an_unknown_or_removed_voice_falls_back_with_one_log_line(env, owner, ca
     owner.post("/api/voices", json={"voice": "piper:en_GB-alan-low"})
     s = next(iter(env.assistant.sessions.values()))
     (env.tmp / "voices" / "en_GB-alan-low.onnx").unlink()  # the voice is removed
-    with caplog.at_level(logging.INFO, logger="assistant.voice_picker"):
+    with caplog.at_level(logging.INFO, logger="kwil.voice_picker"):
         for _ in range(3):
             assert env.assistant.tts_for(s) is env.default
     lines = [r for r in caplog.records if "isn't available" in r.getMessage()]
@@ -534,7 +534,7 @@ def test_choosing_logs_ids_only(env, owner, caplog):
     with caplog.at_level(logging.DEBUG):
         owner.post("/api/voices", json={"voice": "piper:en_US-lessac-medium"})
     infos = [r.getMessage() for r in caplog.records
-             if r.name == "assistant.voice_picker" and r.levelno == logging.INFO]
+             if r.name == "kwil.voice_picker" and r.levelno == logging.INFO]
     assert infos == ["Voice for the owner set to piper:en_US-lessac-medium"]
 
 
@@ -600,7 +600,7 @@ def test_without_the_picker_there_are_no_voice_routes(fake_client):
 
 
 def test_build_assistant_adds_the_picker_unless_turned_off(config, monkeypatch):
-    import assistant.stt as stt
+    import kwil.stt as stt
 
     monkeypatch.setattr(stt, "Transcriber", lambda *a, **k: FakeTranscriber())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")

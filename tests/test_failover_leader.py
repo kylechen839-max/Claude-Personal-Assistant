@@ -5,12 +5,12 @@ import random
 
 import pytest
 
-from assistant.failover.leader import (FIRED, FIRE_TOLERANCE_MS, SKIPPED_DONE,
+from kwil.failover.leader import (FIRED, FIRE_TOLERANCE_MS, SKIPPED_DONE,
                                        SKIPPED_NOT_LEADER, SUPPRESSED, JobRunner,
                                        LeaderCheck, claims, fires, store_heard_from, winner)
-from assistant.failover.peers import Backend, Health, parse_health
-from assistant.failover.sync import MemoryEventLog
-from assistant.failover import API_VERSION
+from kwil.failover.peers import Backend, Health, parse_health
+from kwil.failover.sync import MemoryEventLog
+from kwil.failover import API_VERSION
 
 PI = Backend("pi", "https://pi.t.ts.net")
 PC = Backend("pc", "https://pc.t.ts.net")
@@ -193,8 +193,8 @@ def test_cloud_stands_down_when_a_peer_synced_recently():
 def test_sync_endpoint_records_who_called():
     import asyncio
 
-    from assistant.failover.sync import make_sync_app
-    from assistant.failover.tokens import Claims
+    from kwil.failover.sync import make_sync_app
+    from kwil.failover.tokens import Claims
 
     store = MemoryEventLog()
     app = make_sync_app(store)
@@ -287,7 +287,7 @@ def test_real_topology_reminder_goes_out_once(seed):
 
 
 def fire(origin, ts, id_, **extra):
-    from assistant.failover.sync import parse_event
+    from kwil.failover.sync import parse_event
 
     return parse_event({"id": id_ * 32, "ts": ts, "origin": origin, "kind": "job",
                         "conv": "job:k", "data": {"key": "k", **extra}})

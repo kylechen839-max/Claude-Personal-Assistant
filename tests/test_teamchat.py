@@ -10,16 +10,16 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from assistant import cli, i18n
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config, redact
-from assistant.tools import Tool, ToolRegistry
-from assistant.tools.notion import NotionAssignments
-from assistant.tools.teamchat import (MAX_FILE_BYTES, MAX_RESULT, MAX_TEXT, ChatDigestsDB,
+from kwil import cli, i18n
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config, redact
+from kwil.tools import Tool, ToolRegistry
+from kwil.tools.notion import NotionAssignments
+from kwil.tools.teamchat import (MAX_FILE_BYTES, MAX_RESULT, MAX_TEXT, ChatDigestsDB,
                                       TeamChat, teamchat_from_config)
-from assistant.tools.teamchat_discord import DiscordChat
-from assistant.tools.teamchat_github import GitHubChat
-from assistant.tools.teamchat_slack import SlackChat
-from assistant.tools.timeutil import TURN_NOW
+from kwil.tools.teamchat_discord import DiscordChat
+from kwil.tools.teamchat_github import GitHubChat
+from kwil.tools.teamchat_slack import SlackChat
+from kwil.tools.timeutil import TURN_NOW
 
 SLACK_TOKEN = "xox" "p-1111111111-2222222222-3333333333-abcdefabcdefabcdefabcdefabcdef12"
 DISCORD_TOKEN = ("MTA5ODc2NTQzMjEwOTg3NjU0Mw" "." "GaBcDe" "." "abcdefghijklmnopqrstuvwxyz0123456789AB")
@@ -295,7 +295,7 @@ def run(reg, name, untrusted=False, **tool_input):
 def test_chat_read_marks_conversation_untrusted(fake_client):
     """End to end: a Slack read in turn one taints the conversation, so a
     state-changing tool in turn two asks first."""
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
     from tests.conftest import make_response, text_block, tool_use_block
 
     chat_tools, _ = make_chat("slack")
@@ -347,7 +347,7 @@ def test_every_read_tool_is_untrusted_and_private(service):
 def test_read_results_are_marked_untrusted(service, tool, args):
     """The untrusted_content mark taints even after a resume, where the
     tool name may no longer be registered."""
-    from assistant.chat import has_marked_results
+    from kwil.chat import has_marked_results
 
     chat, _ = make_chat(service)
     reg, _ = registry(chat)
@@ -904,7 +904,7 @@ def test_teamchat_from_config_reads_the_settings():
 
 
 def test_family_members_never_get_team_chat(monkeypatch, tmp_path, fake_client):
-    from assistant import family as family_mod
+    from kwil import family as family_mod
 
     monkeypatch.setenv("SLACK_USER_TOKEN", SLACK_TOKEN)
     config = config_with(slack=True)
@@ -963,7 +963,7 @@ def _family_files(tmp_path, monkeypatch):
 
 def test_a_family_instance_with_kyles_github_token_starts_without_team_chat(
         tmp_path, monkeypatch, restore_root_logging):
-    from assistant import webapp
+    from kwil import webapp
 
     _family_files(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_TOKEN", GITHUB_TOKEN)
@@ -980,7 +980,7 @@ def test_a_family_instance_with_kyles_github_token_starts_without_team_chat(
 
 
 def test_kyles_own_instance_keeps_team_chat(tmp_path, monkeypatch, restore_root_logging):
-    from assistant import webapp
+    from kwil import webapp
 
     _family_files(tmp_path, monkeypatch)
     served = []
@@ -997,7 +997,7 @@ def test_kyles_own_instance_keeps_team_chat(tmp_path, monkeypatch, restore_root_
 def test_the_refusal_is_written_to_the_instance_log(tmp_path, monkeypatch,
                                                     restore_root_logging):
     """A family task runs under pythonw: the refusal must reach its log."""
-    from assistant import webapp
+    from kwil import webapp
 
     _family_files(tmp_path, monkeypatch)
     monkeypatch.setenv("WEB_TOKEN", "kyles-value-123456789012345678901234567890")

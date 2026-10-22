@@ -1,4 +1,4 @@
-"""Optional error tracking (assistant/errortracking.py): off without
+"""Optional error tracking (kwil/errortracking.py): off without
 SENTRY_DSN, the privacy options when on, before_send keeping nothing
 personal, and a missing sentry-sdk never stopping the app. A fake
 sentry_sdk module stands in for the real one, except in the tests that run
@@ -13,8 +13,8 @@ import types
 
 import pytest
 
-from assistant import errortracking
-from assistant.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config
+from kwil import errortracking
+from kwil.config import ISOLATED_ENV_VARS, SECRET_ENV_VARS, load_config
 
 DSN = "https://0123456789abcdef0123456789abcdef@o0.ingest.example.invalid/1"
 KEY = "sk-ant-api03-errortracking-test-key-0123456789"
@@ -42,7 +42,7 @@ def sentry(monkeypatch):
 
 
 def test_off_without_a_dsn(sentry, caplog):
-    with caplog.at_level(logging.DEBUG, logger="assistant.errortracking"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.errortracking"):
         assert errortracking.init(load_config(None, None)) is False
         assert errortracking.init(None, environ={errortracking.DSN_ENV: "  "}) is False
     assert sentry.calls == [] and caplog.records == []
@@ -50,7 +50,7 @@ def test_off_without_a_dsn(sentry, caplog):
 
 def test_with_a_dsn_init_gets_the_privacy_options(sentry, monkeypatch, caplog):
     monkeypatch.setenv(errortracking.DSN_ENV, DSN)
-    with caplog.at_level(logging.DEBUG, logger="assistant.errortracking"):
+    with caplog.at_level(logging.DEBUG, logger="kwil.errortracking"):
         assert errortracking.init({"profile": "server"}) is True
         assert errortracking.init({"profile": "server"}) is True  # cli + serve: once
     assert len(sentry.calls) == 1
@@ -75,10 +75,10 @@ def test_with_a_dsn_init_gets_the_privacy_options(sentry, monkeypatch, caplog):
 def test_a_missing_sentry_sdk_leaves_the_app_working(monkeypatch, caplog):
     monkeypatch.setitem(sys.modules, "sentry_sdk", None)  # import raises ImportError
     monkeypatch.setenv(errortracking.DSN_ENV, DSN)
-    with caplog.at_level(logging.WARNING, logger="assistant.errortracking"):
+    with caplog.at_level(logging.WARNING, logger="kwil.errortracking"):
         assert errortracking.init({}) is False
         assert errortracking.init({}) is False
-    warnings = [r for r in caplog.records if r.name == "assistant.errortracking"]
+    warnings = [r for r in caplog.records if r.name == "kwil.errortracking"]
     assert len(warnings) == 1 and "sentry-sdk" in warnings[0].getMessage()
     assert DSN not in caplog.text
 
@@ -88,7 +88,7 @@ def sentry_event() -> dict:
     route (with everything the integrations can add)."""
     return {
         "event_id": "a" * 32, "level": "error", "platform": "python",
-        "timestamp": "2026-10-21T12:00:00Z", "logger": "assistant.webapp",
+        "timestamp": "2026-10-21T12:00:00Z", "logger": "kwil.webapp",
         "server_name": "KYLE-PC", "release": "hey-claude-1.0.2",
         "environment": "server", "transaction": "/api/turn",
         "exception": {"values": [{
@@ -97,9 +97,9 @@ def sentry_event() -> dict:
             "mechanism": {"type": "starlette", "handled": False,
                           "data": {"note": SAID}},
             "stacktrace": {"frames": [{
-                "filename": "assistant/chat.py", "function": "ask", "lineno": 120,
-                "module": "assistant.chat", "in_app": True,
-                "abs_path": "/home/kyle/Claude-Personal-Assistant/assistant/chat.py",
+                "filename": "kwil/chat.py", "function": "ask", "lineno": 120,
+                "module": "kwil.chat", "in_app": True,
+                "abs_path": "/home/kyle/Claude-Personal-Assistant/kwil/chat.py",
                 "pre_context": ["    text = user_text"],
                 "context_line": "    raise ValueError(text)",
                 "post_context": [""], "vars": {"text": SAID, "key": KEY}}]},
@@ -136,8 +136,8 @@ def test_before_send_keeps_nothing_personal():
     assert exc["type"] == "ValueError" and "value" not in exc
     assert exc["mechanism"] == {"type": "starlette", "handled": False}
     assert exc["stacktrace"]["frames"] == [{
-        "filename": "assistant/chat.py", "function": "ask", "lineno": 120,
-        "module": "assistant.chat", "in_app": True}]
+        "filename": "kwil/chat.py", "function": "ask", "lineno": 120,
+        "module": "kwil.chat", "in_app": True}]
     # the format string is kept, its secrets masked
     assert out["logentry"] == {"message": "Turn failed (key [REDACTED], mail [EMAIL])"}
     assert out["contexts"] == {"runtime": {"name": "CPython", "version": "3.11.9"},
@@ -163,7 +163,7 @@ def test_only_this_apps_loggers_keep_their_message():
     assert SAID not in json.dumps(out) and "Dr. Lee" not in json.dumps(out)
     assert "logentry" not in out and out["logger"] == "asyncio"
     assert out["exception"]["values"][0]["type"] == "ValueError"
-    ours = {**asyncio_event(), "logger": "assistant.webapp",
+    ours = {**asyncio_event(), "logger": "kwil.webapp",
             "logentry": {"message": "Turn %s failed", "params": [SAID]}}
     assert errortracking.before_send(ours)["logentry"] == {"message": "Turn %s failed"}
     for name in ("assistantx", "Assistant.chat", None, 7):
@@ -173,7 +173,7 @@ def test_only_this_apps_loggers_keep_their_message():
 def test_before_send_drops_an_event_it_cannot_clean(monkeypatch):
     def broken(text):
         raise RuntimeError("redaction failed")
-    monkeypatch.setattr("assistant.config.redact", broken)
+    monkeypatch.setattr("kwil.config.redact", broken)
     assert errortracking.before_send(sentry_event()) is None  # never sent as it is
 
 
@@ -193,14 +193,14 @@ def test_serve_and_cli_start_it(sentry, monkeypatch, tmp_path):
     """webapp.serve (and cli.main for every mode) turn it on with a DSN."""
     import uvicorn
 
-    from assistant import cli, webapp
+    from kwil import cli, webapp
 
     monkeypatch.setenv(errortracking.DSN_ENV, DSN)
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
     monkeypatch.setattr(webapp, "build_assistant", lambda *a, **k: object())
     monkeypatch.setattr(webapp, "create_app", lambda *a, **kw: object())
-    monkeypatch.setattr("assistant.webfeatures.Features.__init__", lambda *a, **k: None)
-    monkeypatch.setattr("assistant.webfeatures.Features.resume_jobs", lambda self: None)
+    monkeypatch.setattr("kwil.webfeatures.Features.__init__", lambda *a, **k: None)
+    monkeypatch.setattr("kwil.webfeatures.Features.resume_jobs", lambda self: None)
     monkeypatch.setenv(webapp.TOKEN_ENV, "x" * 40)
     cfg = load_config(None, None)
     cfg["devteam"]["hub"] = False
@@ -210,7 +210,7 @@ def test_serve_and_cli_start_it(sentry, monkeypatch, tmp_path):
     assert len(sentry.calls) == 1
 
     monkeypatch.setattr(errortracking, "_started", False)
-    monkeypatch.setattr("assistant.config.setup_logging", lambda config: None)
+    monkeypatch.setattr("kwil.config.setup_logging", lambda config: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # main stops right after
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.toml").write_text("")
@@ -245,7 +245,7 @@ url = f"http://127.0.0.1:{srv.server_port}/v1/messages"
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from assistant import errortracking
+from kwil import errortracking
 
 app = FastAPI()
 @app.get("/api/ask/{thing}")

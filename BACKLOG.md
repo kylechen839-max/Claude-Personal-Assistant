@@ -17,7 +17,7 @@ costs less) without depending on a single one.
 - Check each provider's data-use terms, and name every provider in
   PRIVACY.md.
 
-Haiku routing (`[assistant] router`, `assistant/router.py`) is the first
+Haiku routing (`[assistant] router`, `kwil/router.py`) is the first
 step: simple turns already go to Claude Haiku, and every tool call that
 changes Kyle's things is made by the main Claude model (a Haiku answer that
 tries one is dropped before it runs).

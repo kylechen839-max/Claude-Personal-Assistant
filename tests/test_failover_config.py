@@ -4,9 +4,9 @@ import copy
 
 import pytest
 
-from assistant import cli
-from assistant.config import DEFAULTS, load_config
-from assistant.failover.peers import settings_from_config
+from kwil import cli
+from kwil.config import DEFAULTS, load_config
+from kwil.failover.peers import settings_from_config
 
 
 def cfg(**failover):
@@ -57,15 +57,15 @@ def test_main_applies_role(monkeypatch, tmp_path):
         seen["role"] = config["failover"]["role"]
         raise SystemExit(0)
 
-    monkeypatch.setattr("assistant.config.setup_logging", fake_setup_logging)
+    monkeypatch.setattr("kwil.config.setup_logging", fake_setup_logging)
     with pytest.raises(SystemExit):
         cli.main(["--role", "cloud", "--config", str(tmp_path / "none.toml")])
     assert seen["role"] == "cloud"
 
 
 def test_failover_tokens_are_redacted_in_logs(monkeypatch):
-    from assistant.config import redact
-    from assistant.failover.tokens import TokenAuthority
+    from kwil.config import redact
+    from kwil.failover.tokens import TokenAuthority
 
     secret = "w" * 43
     monkeypatch.setenv("WEB_TOKEN", secret)

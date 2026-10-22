@@ -1,6 +1,6 @@
 // node --test tests/js/spotify.test.mjs  (Node 18+; no packages needed)
 //
-// Runs the phone page's assistant/web/spotify.js in node:vm with a minimal
+// Runs the phone page's kwil/web/spotify.js in node:vm with a minimal
 // fake window: "Connect Spotify" shows only for the owner and only when the
 // server says it is set up; a family member's page never even asks; a tap
 // POSTs once and goes only to Spotify's own consent page; and i18n.js has
@@ -11,8 +11,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const SCRIPT = readFileSync(new URL('../../assistant/web/spotify.js', import.meta.url), 'utf8');
-const I18N = readFileSync(new URL('../../assistant/web/i18n.js', import.meta.url), 'utf8');
+const SCRIPT = readFileSync(new URL('../../kwil/web/spotify.js', import.meta.url), 'utf8');
+const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 
 class El {
   constructor(id, hidden = false) {
@@ -45,7 +45,7 @@ function load({ status = { status: 200, body: { enabled: true, connected: false 
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
-  return { win, els, menu, fetches, api: win.HeyClaudeSpotify };
+  return { win, els, menu, fetches, api: win.KwilSpotify };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -114,7 +114,7 @@ test('every string it shows has Chinese in i18n.js', () => {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(I18N, ctx);
-  const { ZH } = ctx.HeyClaudeI18n;
+  const { ZH } = ctx.KwilI18n;
   for (const s of ['Connect Spotify', 'Reconnect Spotify', 'Spotify connected.',
                    'Opening Spotify…', "Couldn't start the Spotify sign-in."]) {
     assert.ok(ZH[s], s);

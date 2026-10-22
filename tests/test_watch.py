@@ -1,4 +1,4 @@
-"""The watchdog (assistant/watch.py), the go-live gate (updater, host,
+"""The watchdog (kwil/watch.py), the go-live gate (updater, host,
 deploy) and the check session it talks to: all offline, with a fake git,
 fake apps and a fake smoke run."""
 
@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant import deploy, host, smoke, watch
-from assistant.config import DEFAULTS, load_config
-from assistant.updater import Updater
+from kwil import deploy, host, smoke, watch
+from kwil.config import DEFAULTS, load_config
+from kwil.updater import Updater
 
 OLD, NEW, GOOD = "a" * 40, "b" * 40, "c" * 40
 TOKEN = "w" * 24 + "-watch-test-token-01234"
@@ -692,7 +692,7 @@ def test_coordinator_gets_the_alert_through_the_link(world, monkeypatch):
         def send(self, text, source="voice"):
             sent.append((text, source))
 
-    monkeypatch.setattr("assistant.devteam.link_from_config", lambda cfg, state: Link())
+    monkeypatch.setattr("kwil.devteam.link_from_config", lambda cfg, state: Link())
     cfg = load_config(None, None)
     cfg["devteam"].update(enabled=True, coordinator_session="session_abc123")
     send = watch.coordinator_sender(world.root, cfg)
@@ -724,9 +724,9 @@ def test_check_session_saves_nothing_and_runs_only_read_only_tools(tmp_path, cap
 
     from fastapi.testclient import TestClient
 
-    from assistant import webapp
-    from assistant.chat import ClaudeChat
-    from assistant.history import HistoryStore, Recorder
+    from kwil import webapp
+    from kwil.chat import ClaudeChat
+    from kwil.history import HistoryStore, Recorder
     from tests.test_contract import calendar_tools
 
     calls = []
@@ -771,7 +771,7 @@ def test_family_member_never_sees_the_health_banner(tmp_path):
 
     from fastapi.testclient import TestClient
 
-    from assistant import webapp
+    from kwil import webapp
 
     a = webapp.WebAssistant(lambda registry: MagicMock(history=[], incognito=False,
                                                        conversation_id=None,
@@ -862,7 +862,7 @@ def test_conversation_starts_with_a_turn_the_fast_model_answers():
     """Judge B3: every turn said "remember" or was long, so neither the gate
     nor the watchdog ever sent a request to Haiku. The first turn is now a
     short one with no main-model word, and it must answer."""
-    from assistant import router
+    from kwil import router
 
     http = ConversationHTTP()
     got = conversation(http)
@@ -925,7 +925,7 @@ def test_claude_down_says_so_clearly(caplog):
     import anthropic
     import httpx
 
-    from assistant.cli import friendly_error
+    from kwil.cli import friendly_error
 
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     for status, cls in ((529, anthropic.OverloadedError), (503, anthropic.ServiceUnavailableError),
@@ -942,7 +942,7 @@ def test_claude_down_says_so_clearly(caplog):
 
 def test_host_starts_the_watchdog_after_a_restart_on_new_code():
     """host.py's post-update health check passing triggers the test
-    conversation right away (python -m assistant.watch --functional)."""
+    conversation right away (python -m kwil.watch --functional)."""
     watched = []
     h = host.Host("web", ["python"], SimpleNamespace(write=lambda s: None, flush=lambda: None),
                   popen=lambda cmd: SimpleNamespace(poll=lambda: None, terminate=lambda: None,
@@ -1305,7 +1305,7 @@ def test_requirements_problem_reads_the_minimums(tmp_path):
     """Judge LOW 4: a requirements bump the venv never got."""
     from importlib.metadata import PackageNotFoundError
 
-    from assistant.updater import requirements_problem
+    from kwil.updater import requirements_problem
 
     assert requirements_problem(tmp_path) is None  # no requirements.txt
     (tmp_path / "requirements.txt").write_text(
@@ -1326,7 +1326,7 @@ def test_requirements_problem_reads_the_minimums(tmp_path):
     assert problem.startswith("requirements.txt isn't installed: anthropic 0.75.0 "
                               "(needs >=0.77), pytest not installed (needs >=8.0)")
     assert "pip install -r requirements.txt" in problem
-    assert "python -m assistant --update" in problem
+    assert "python -m kwil --update" in problem
 
 
 def test_the_gate_waits_for_requirements_to_be_installed(tmp_path):
@@ -1385,7 +1385,7 @@ def subprocess_dead_pid() -> int:
 
 def test_a_killed_runs_lock_is_stale_at_once(tmp_path):
     """watch.lock / update.lock hold a PID; a dead one doesn't block for hours."""
-    from assistant.updater import pid_alive
+    from kwil.updater import pid_alive
 
     dead = subprocess_dead_pid()
     assert not pid_alive(dead)
@@ -1408,7 +1408,7 @@ def test_the_watch_task_outlives_the_worst_gate():
     from tests.test_docs import ROOT
 
     task = (ROOT / "scripts" / "install_watch_task.ps1").read_text()
-    unit = (ROOT / "deploy" / "hey-claude-watch.service").read_text()
+    unit = (ROOT / "deploy" / "kwil-watch.service").read_text()
     assert "-ExecutionTimeLimit (New-TimeSpan -Hours 2)" in task
     assert "TimeoutStartSec=2h" in unit
     assert watch.LOCK_STALE_SECONDS > 2 * 3600
@@ -1457,14 +1457,14 @@ def test_family_restart_runs_deploy_from_the_project_folder():
 
     text = (ROOT / "scripts" / "install_family_tasks.ps1").read_text()
     block = text[text.index("if ($Restart) {"):]
-    assert block.index("Push-Location $repoDir") < block.index("-m assistant.deploy")
+    assert block.index("Push-Location $repoDir") < block.index("-m kwil.deploy")
     assert "Pop-Location" in block
 
 
 def test_check_session_never_queries_memory():
     from unittest.mock import MagicMock
 
-    from assistant.chat import ClaudeChat
+    from kwil.chat import ClaudeChat
 
     memory = MagicMock()
     chat = ClaudeChat(client=MagicMock(), memory=memory)
@@ -1618,7 +1618,7 @@ def test_hung_update_doesnt_hide_a_down_app_forever(world):
 def test_a_fresh_lock_survives_a_late_stale_clear(tmp_path):
     """Two processes found the same dead lock stale; the first already took
     the lock. The second's clear must not remove the first's fresh lock."""
-    from assistant.updater import clear_stale, take_lock
+    from kwil.updater import clear_stale, take_lock
 
     lock = tmp_path / "update.lock"
     dead = str(subprocess_dead_pid())
@@ -1649,7 +1649,7 @@ def test_watchdog_backs_off_an_inconclusive_gate_like_the_hosts(world):
 
 
 def test_gate_backoff_is_one_table_for_hosts_and_watchdog(world):
-    from assistant import updater
+    from kwil import updater
 
     assert [updater.gate_backoff(n) for n in (0, 1, 2, 3, 4, 9)] == [
         60, 60, 300, 900, 3600, 3600]
