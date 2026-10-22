@@ -36,14 +36,15 @@ jobs:
 
       - name: System audio/TTS libraries (Linux)
         if: runner.os == 'Linux'
-        timeout-minutes: 8
+        timeout-minutes: 20
         run: |
           # The runner image's Microsoft package repo started answering 403
           # (2026-10-22), which fails or hangs apt-get update; nothing here
-          # comes from it, so drop it before updating.
+          # comes from it, so drop it before updating. The
+          # Azure Ubuntu mirror is also slow that day: skip recommended extras.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           sudo apt-get update
-          sudo apt-get install -y espeak-ng libespeak1 libportaudio2 ffmpeg shellcheck
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 espeak-ng libespeak1 libportaudio2 ffmpeg shellcheck
 
       - name: Lint shell scripts (Linux)
         if: runner.os == 'Linux'
@@ -134,14 +135,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: System libraries
-        timeout-minutes: 8
+        timeout-minutes: 20
         run: |
           # The runner image's Microsoft package repo started answering 403
           # (2026-10-22), which fails or hangs apt-get update; nothing here
-          # comes from it, so drop it before updating.
+          # comes from it, so drop it before updating. The
+          # Azure Ubuntu mirror is also slow that day: skip recommended extras.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 ffmpeg
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 libportaudio2 ffmpeg
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
