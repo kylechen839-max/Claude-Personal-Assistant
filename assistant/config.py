@@ -55,7 +55,19 @@ DEFAULTS: dict = {
         "voice_file": "data/voice_choice.json",  # the owner's pick ("" = not kept)
         "family_paid_voices": False,     # family-tier members (never beta) may pick ElevenLabs
     },
-    "stt": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
+    "stt": {
+        "model": "small.en",  # faster-whisper; base.en/tiny.en are faster (Pi, server)
+        "device": "cpu", "compute_type": "int8",
+        "beam_size": 5,  # 1 = greedy (faster, mishears more); 0 = the default
+        # "auto" = the built-in vocabulary prompt for the language; "" = none
+        "initial_prompt": "auto",
+        "hotwords": "",  # extra words to favor, e.g. names: "Kyle, Kai"
+        # "whisper" (local), or "openai" / "deepgram" (paid, needs
+        # OPENAI_API_KEY / DEEPGRAM_API_KEY; local Whisper on any error)
+        "engine": "whisper",
+        "cloud_model": "",  # "" = gpt-4o-transcribe / nova-3
+        "cloud_timeout": 10,  # seconds; then local Whisper
+    },
     "wake": {
         "keyword_path": "",  # your "Hey Claude" .onnx (openWakeWord)
         "builtin_keyword": "hey_jarvis",  # used if keyword_path is missing
@@ -342,6 +354,24 @@ DEFAULTS: dict = {
         "zh_stt_model": "small",
         "zh_piper_voice": "voices/zh_CN-huayan-medium.onnx",
     },
+    "student": {                    # deadlines from Canvas, emails, by hand (README "Student deadlines")
+        "enabled": True,            # the deadline tools and the phone's "What I captured" card
+        "dir": "data/student",      # the owner's deadlines.sqlite (invited people: [family] dir/<id>/)
+        "sync_minutes": 15,         # "Sync now" at most this often per person
+        "gmail": True,              # also read Canvas's notification emails (read-only) when Gmail is connected
+        # reads emails and pages into deadlines; "" = [assistant] fast_model
+        "extract_model": "",
+        "max_items": 2000,          # deadlines kept per person
+        "max_per_source": 500,      # ... and per source (feed, API, emails, ...)
+    },
+    "canvas": {                     # where deadlines come from (canvas.py); never a school password
+        # the owner's school, for CANVAS_TOKEN (CANVAS_BASE_URL overrides),
+        # e.g. "https://canvas.school.edu"; invited people paste their own
+        "base_url": "",
+        "pages": False,             # also read module pages (one Claude call per sync for new pages)
+        "max_pages": 20,            # module pages read per sync, at most
+        "timeout": 15,              # seconds per Canvas request
+    },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
 }
@@ -353,6 +383,8 @@ DEFAULTS: dict = {
 SERVER_PROFILE: dict = {
     "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
             "fallback": "espeak", "voice_file": "/data/voice_choice.json"},
+    # baked into the image; small.en's RAM on Render is unmeasured
+    "stt": {"model": "base.en"},
     "wake": {"chime": False, "follow_up_seconds": 0},
     "calendar": {"save_token": False},
     "web": {"browser": False},
@@ -364,6 +396,7 @@ SERVER_PROFILE: dict = {
     # (check the "Proxy check" lines in the log after the first deploy).
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
+    "student": {"dir": "/data/student"},  # on the disk
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
@@ -386,6 +419,7 @@ ENV_OVERRIDES = {
     "HISTORY_PATH": ("history", "path"),
     "ASSISTANT_TIMEZONE": ("assistant", "timezone"),
     "WHISPER_MODEL": ("stt", "model"),
+    "STT_ENGINE": ("stt", "engine"),  # "openai" / "deepgram" on a server
     "ZH_WHISPER_MODEL": ("family", "zh_stt_model"),
     "PUBLIC_ORIGIN": ("webapp", "public_origin"),  # e.g. https://hey-claude.onrender.com
     "CLOUD_TRUSTED_PROXIES": ("cloud", "trusted_proxies"),  # comma-separated
@@ -393,6 +427,7 @@ ENV_OVERRIDES = {
     "PORT": ("webapp", "port"),                # set by hosts such as Render
     "TRUSTED_PROXY": ("webapp", "trusted_proxy"),
     "HA_URL": ("home_assistant", "url"),
+    "CANVAS_BASE_URL": ("canvas", "base_url"),
 }
 
 
@@ -407,10 +442,15 @@ ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "SENTRY_DSN",
                      "USER_DATA_KEY",
                      "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+                     "CANVAS_TOKEN", "CANVAS_ICS_URL",
                      "VAPID_PRIVATE_KEY")
 # USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
 # so a separate instance sets its own (or none) and never borrows the
 # owner's from the shell.
+# (Not the cloud speech-to-text keys either, OPENAI_API_KEY and
+# DEEPGRAM_API_KEY: OpenAI's quickstart puts its key in the Windows user
+# environment, and a separate instance only uses one with its own [stt]
+# engine, which config.mom.toml pins to "whisper".)
 # (Not the team chat tokens: a separate instance never registers the chat
 # tools (cli.main), so an inherited GITHUB_TOKEN, common in a developer's
 # environment, must not stop a family member's app from starting.)
@@ -487,10 +527,16 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    "USER_DATA_KEY",
                    # the public Notion integration (notion_web.py)
                    "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+                   # the owner's Canvas (canvas.py): a token, and a feed URL
+                   # that is a secret itself
+                   "CANVAS_TOKEN", "CANVAS_ICS_URL",
+                   # optional cloud speech-to-text (stt_cloud.py)
+                   "OPENAI_API_KEY", "DEEPGRAM_API_KEY",
                    # signs this server's phone notifications (push.py)
                    "VAPID_PRIVATE_KEY")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
+    re.compile(r"\bsk-(?:proj-)?[\w-]{20,}"),   # OpenAI keys (cloud STT)
     re.compile(r"\b(?:ntn|secret)_\w{20,}"),    # Notion tokens
     re.compile(r"\bya29\.[\w.-]+"),             # Google access tokens
     re.compile(r"\b1//[\w-]{20,}"),             # Google refresh tokens
@@ -506,6 +552,8 @@ _SECRET_PATTERNS = [
     re.compile(r"\bxox[abpe]-[\w-]+"),           # Slack tokens
     re.compile(r"\b(?:github_pat_\w+|gh[pousr]_\w{30,})"),  # GitHub tokens
     re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
+    re.compile(r"\b\d{1,6}~[A-Za-z0-9]{32,}"),     # Canvas access tokens
+    re.compile(r"(/feeds/calendars/)[\w.-]+"),    # Canvas calendar feed links
 ]
 
 

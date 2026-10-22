@@ -459,7 +459,7 @@ def test_chinese_messages_and_device_words(token_file):
 
 def spotify_config(tmp_path, token_file=None, enabled=True):
     config = load_config(None, None)
-    for section in ("calendar", "notion", "web", "devteam"):
+    for section in ("calendar", "notion", "web", "devteam", "student"):
         config[section]["enabled"] = False
     config["spotify"].update(enabled=enabled,
                              token=str(token_file or tmp_path / "none.json"))

@@ -605,6 +605,8 @@ class PendingConfirm:
     # a spoken answer being transcribed (/api/confirm): one at a time, so
     # a burst of recordings can't each run Whisper (claim/release)
     answering: bool = False
+    # an unclear answer got one "sorry, I didn't catch that" (ask_again)
+    asked_again: bool = False
     _claim: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def claim(self) -> bool:
@@ -1089,6 +1091,21 @@ class WebAssistant:
             log.info("No answer to a confirmation; treating it as no")
             s.emit({"type": "status", "text": i18n.t("no_answer", s.language)})
         return answered and pending.answer
+
+    def ask_again(self, s: Session, pending: PendingConfirm) -> bool:
+        """An unclear answer to the page's question: ask it once more, as
+        the same confirmation (same id). False if it was already asked
+        again or is no longer the open one; the caller then answers no."""
+        if s.pending is not pending or pending.answered.is_set() or \
+                pending.asked_again:
+            return False
+        pending.asked_again = True
+        pending.release()  # the next recording may answer it
+        again = i18n.t("confirm_again", s.language)
+        log.info("Web confirmation unclear: asking once more")
+        s.emit({"type": "confirm", "question": again, "id": pending.id,
+                "again": True, "audio": f"/api/audio/{self.remember(again, s)}"})
+        return True
 
     def answer(self, s: Session, yes: bool, confirm_id: str | None = None) -> bool:
         """Answer the pending question; False if there is none, or it isn't
@@ -1739,6 +1756,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("memory.js", "text/javascript"),
                         ("spotify.js", "text/javascript"),
                         ("notion.js", "text/javascript"),
+                        ("student.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript"),
                         ("brief.js", "text/javascript")):
@@ -1954,8 +1972,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     @app.post("/api/confirm")
     async def confirm(request: Request):
-        """Answer a pending question: {"answer": "yes"} or a recording."""
-        from assistant.cli import is_yes
+        """Answer a pending question: {"answer": "yes"} or a recording. An
+        unclear answer is asked once more, then counts as no."""
+        from assistant.cli import classify_answer
 
         s = session_of(request)
         if s is None:
@@ -1990,10 +2009,14 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 # this transcript must not show up in the turn it continued
                 return error("nothing to confirm", 409)
             s.events.put({"type": "transcript", "text": answer})
-        yes = is_yes(answer)
-        log.info("Web confirmation -> %s", "yes" if yes else "no")
+        verdict = classify_answer(answer)
+        log.info("Web confirmation -> %s", verdict)
         log.debug("Confirmation answer: %r", answer)
-        if not assistant.answer(s, yes, confirm_id=pending.id):
+        if verdict == "unclear" and assistant.ask_again(s, pending):
+            return stream(s)
+        if verdict == "unclear" and s.pending is pending:
+            s.emit({"type": "status", "text": i18n.t("confirm_unclear", s.language)})
+        if not assistant.answer(s, verdict == "yes", confirm_id=pending.id):
             return error("nothing to confirm", 409)
         return stream(s)
 
@@ -2064,6 +2087,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from assistant import notion_web
 
     notion_web.register(app, family, web, error)  # a person's own Notion
+    from assistant import student_web
+
+    student_web.register(app, family, web, error)  # each person's own deadlines
     # each person's own notifications and study brief
     proactive_mod.register(app, assistant, push, briefings, error)
     if public is not None:
@@ -2186,7 +2212,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     from assistant.history import Recorder, open_store
     import anthropic
 
-    from assistant.stt import Transcriber
+    from assistant.stt import from_config as stt_from_config
     from assistant.tts import make_tts
 
     a = config["assistant"]
@@ -2224,8 +2250,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     stt = config["stt"]
     tts_cfg = config["tts"]
     assistant = WebAssistant(chat_factory,
-                             Transcriber(stt["model"], stt["device"], stt["compute_type"],
-                                         language=a["language"]),
+                             stt_from_config(stt, a["language"]),
                              make_tts(tts_name or tts_cfg["engine"], **tts_cfg),
                              tools=tools,
                              conversation_timeout=a["conversation_timeout"],
@@ -2243,8 +2268,16 @@ def build_assistant(config: dict, tts_name: str | None = None,
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     from assistant import proactive
 
+    # each person's school deadlines (deadlines.py; the store the owner's
+    # tools, Family and student_web share), read by the study briefings
+    assistant.deadlines = None
+    if config["student"]["enabled"]:
+        from assistant.deadlines import open_store
+
+        assistant.deadlines = open_store(config)
     # phone notifications and the study briefings' scheduler (create_app starts it)
-    assistant.push, assistant.proactive = proactive.from_config(config, client, family, store)
+    assistant.push, assistant.proactive = proactive.from_config(
+        config, client, family, store, deadlines=assistant.deadlines)
     return assistant
 
 
@@ -2259,7 +2292,10 @@ def family_speech(config: dict) -> SpeechByLanguage:
     stt, f = config["stt"], config["family"]
 
     def transcriber(model: str, language: str):
-        return Transcriber(model, stt["device"], stt["compute_type"], language=language)
+        # [stt] beam_size, with the language's own prompt: the owner's
+        # English vocabulary and hotwords don't belong in Chinese speech
+        return Transcriber(model, stt["device"], stt["compute_type"], language=language,
+                           beam_size=stt.get("beam_size"))
 
     def voice(path: str):
         return make_tts("piper", piper_voice=path, fallback="print")

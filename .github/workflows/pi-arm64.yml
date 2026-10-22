@@ -68,7 +68,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pi-sim
-          key: pi-sim-${{ hashFiles('requirements.txt') }}
+          key: pi-sim-small.en-${{ hashFiles('requirements.txt') }}
           restore-keys: pi-sim-
 
       - name: Run the Pi simulation

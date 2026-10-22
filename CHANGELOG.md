@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Speech recognition is much more accurate on the PC: Whisper small.en with
+  beam search and a vocabulary prompt (calendar, assignment, Notion, ...),
+  plus `[stt] hotwords` for names. The Pi and the cloud server stay on
+  base.en, now with beam search. Whisper "hearing" its prompt back on silence
+  is ignored.
+- Optional paid cloud speech-to-text (OpenAI gpt-4o-transcribe or Deepgram
+  nova-3), off by default, with local Whisper as the fallback.
+- Hands-free: a quick "yes" to a confirmation is no longer dropped as a
+  misfire, and a short sound while the question is still playing no longer
+  cuts it off.
+
+- Confirmations: a misheard yes ("ya", "yep", "okay", "sure", "right",
+  没错, 好, 可以, 对对对) now counts; an unclear answer is asked once more
+  ("Sorry, I didn't catch that"), then cancelled, never a third time. Numbers
+  and questions back ("Yes, 11", "Right?") are asked again, not taken as a
+  yes. Claude no longer asks "are you sure?" itself before adding, moving or
+  changing a calendar event; deletes, guest changes, invite answers and
+  changes after untrusted content still ask.
+- Student deadlines: connect Canvas (calendar feed link or access token,
+  never a password) and Hey Claude keeps track of exams, assignments and
+  quizzes, plus Canvas notification emails (newest email by Gmail's arrival
+  time wins). A "School deadlines" card lists what was captured, to confirm,
+  fix conflicting dates or delete. Re-syncs never duplicate, and confirmed
+  dates are never overwritten. New voice tools: list, confirm, add and delete
+  deadlines. New settings: `[student]`, `[canvas]`; `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` / `CANVAS_BASE_URL`. A separate family instance without its
+  own `[student] dir` has deadlines turned off.
+
 - Dev team: every coordinator mirrors all its replies (comment-thread replies
   too), its in-between updates and step lines to the dashboard chat, and
   keeps the live status on the current step, like the Claude app.

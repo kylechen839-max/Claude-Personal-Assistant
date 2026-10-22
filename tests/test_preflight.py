@@ -857,7 +857,9 @@ def test_family_tasks_leave_the_owners_app_alone():
 def test_restart_instance_matches_only_that_apps_processes():
     """restart_instance.ps1 (the watchdog's self-heal) stops only the copy
     of the app it restarts: never another instance, never a side-port
-    candidate."""
+    candidate. Your own app falls back to the older hand-made "\\Hey Claude
+    Web" task: the PC deploy of 515ca4e left Kyle's app on old code because
+    only \\HeyClaude\\Web was looked for."""
     import shutil
 
     shell = shutil.which("powershell") or shutil.which("pwsh")
@@ -868,4 +870,4 @@ def test_restart_instance_matches_only_that_apps_processes():
                         "-Script", str(ROOT / "scripts" / "restart_instance.ps1")],
                        capture_output=True, text=True, timeout=180, check=False)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.count("PASS ") == 7, p.stdout
+    assert p.stdout.count("PASS ") == 9, p.stdout

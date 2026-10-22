@@ -88,6 +88,12 @@ A Pi 5 (Cortex-A76, 2.4 GHz) is about 2-3x faster than a Pi 4 (Cortex-A72,
   You'd likely switch to `[stt] model = "tiny.en"` and accept more
   mis-heard words.
 
+These are estimates for greedy decoding; beam search (`[stt] beam_size`,
+5 by default since 2026-10, for accuracy) adds to them, so on a slow Pi
+try `beam_size = 1` before a smaller model: add it under the existing
+`[stt]` line in `config.local.toml` (the installer wrote that section; a
+second `[stt]` header makes the file invalid TOML). The PC's
+default `small.en` is not for a Pi; the installer keeps the Pi on `base.en`.
 These are estimates; step 6 measures the real numbers with `--timings`.
 Memory is not the limit: Whisper, openWakeWord and Piper together use well
 under 1 GB, so 4 GB is enough; 8 GB only matters if the Pi does other work.
@@ -129,7 +135,9 @@ cd hey-claude
 
 This is the same script the arm64 CI job runs. It installs the system
 packages, creates `.venv`, installs the Python packages (openWakeWord with
-`--no-deps`), creates an empty `.env`, and downloads the Whisper and
+`--no-deps`), creates an empty `.env`, writes `[stt] model = "base.en"` to
+`config.local.toml` (the PC's default, `small.en`, is too slow on a Pi; an
+existing `[stt]` section there is left alone), and downloads the Whisper and
 wake-word models. The first run takes 10-20 minutes on a Pi; running it again
 changes nothing.
 
@@ -170,7 +178,8 @@ cd ~/hey-claude && chmod 600 .env token.json credentials.json
 ```bash
 cd ~/hey-claude
 .venv/bin/python -m assistant.tts --download-voice en_US-lessac-medium
-nano config.toml        # [tts] engine = "piper" ; and on a Pi 4: [stt] model = "tiny.en"
+nano config.toml        # [tts] engine = "piper"
+nano config.local.toml  # on a Pi 4: under its existing `[stt]` line, model = "tiny.en"
 ./scripts/preflight.sh --hardware
 ```
 

@@ -336,7 +336,8 @@ class Scheduler:
         self.reviews = reviews
         self.lock = threading.Lock()
         self.briefs: OrderedDict[str, dict] = OrderedDict()  # tag -> last message
-        # tag -> (fire keys, words) of a push that failed: its retry reuses them
+        # tag -> (fire keys, item ids, words) of a push that failed: its
+        # retry reuses them while those items are still in the store
         self._retry_text: dict = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -396,6 +397,7 @@ class Scheduler:
         """Run the rules for one person; returns the rules sent."""
         tag = uid or "owner"
         s = self.settings
+        self._prune_retry(uid)
         if self.push is None or self.deadlines is None or not self.push.has_devices(uid):
             return []
         now = now or datetime.fromtimestamp(self.clock(), zone(tz_name))
@@ -420,6 +422,7 @@ class Scheduler:
             fires = [f for f in evaluate(now, items, None if first else seen, s, tag, reviews)
                      if f.key not in state["fired"]]
             if not fires:
+                self._retry_text.pop(tag, None)  # nothing to retry any more
                 if first:
                     self._save(uid, state)
                 return []
@@ -436,13 +439,16 @@ class Scheduler:
         rules = [f.rule for f in fires]
         words = {}
         keys = tuple(sorted(f.key for f in fires))
+        ids = {i for f in fires for i in f.ids}
 
         def text() -> str:  # Claude at most once, and only if something goes out
             if "text" not in words:
                 with self.lock:
-                    held = self._retry_text.get(tag)
-                if held is not None and held[0] == keys:  # a retry: same message
-                    words["text"] = held[1]
+                    held = self._retry_text.pop(tag, None)
+                # a retry reuses its words only while every item they name is
+                # still there: a digest key ("morning") doesn't name items
+                if held is not None and held[0] == keys and held[1] <= ids:
+                    words["text"] = held[2]
                 else:
                     words["text"] = self.compose(uid, fires, now)
             return words["text"]
@@ -463,7 +469,7 @@ class Scheduler:
             self._take_back(uid, fires, today, fresh)
             if "text" in words:  # the retry sends these words, no new Claude call
                 with self.lock:
-                    self._retry_text[tag] = (keys, words["text"])
+                    self._retry_text[tag] = (keys, frozenset(ids), words["text"])
                     while len(self._retry_text) > MAX_BRIEFS:
                         self._retry_text.pop(next(iter(self._retry_text)))
             log.info("Proactive: %s: %s not delivered; trying again at the next check",
@@ -474,6 +480,28 @@ class Scheduler:
         log.info("Proactive: %s: %s (%d characters, %d device(s))", tag, ",".join(rules),
                  len(words.get("text", "")), result["delivered"])
         return rules
+
+    def _prune_retry(self, uid: str | None) -> None:
+        """Drop words held for a retry once an item they name is no longer
+        in the person's store (deleted means gone), or nothing can send."""
+        tag = uid or "owner"
+        with self.lock:
+            held = self._retry_text.get(tag)
+        if held is None:
+            return
+        keep = False
+        if self.push is not None and self.deadlines is not None \
+                and self.push.has_devices(uid):
+            try:
+                have = {item_id(i) for i in self.deadlines.list(uid) or []
+                        if isinstance(i, dict)}
+                keep = held[1] <= have
+            except Exception as e:  # noqa: BLE001 - unknown: don't keep their text
+                log.warning("Proactive: reading %s's deadlines failed (%s)", tag,
+                            type(e).__name__)
+        if not keep:
+            with self.lock:
+                self._retry_text.pop(tag, None)
 
     def _take_back(self, uid: str | None, fires: list[Fire], today: str,
                    fresh: list[str]) -> None:
@@ -682,7 +710,7 @@ def owner_jobs(role: str, sync_log, sync: Callable[[], object] = lambda: None,
                      clock_ms=clock_ms)
 
 
-def from_config(config: dict, client=None, family=None, history=None):
+def from_config(config: dict, client=None, family=None, history=None, deadlines=None):
     """(push.Push or None, Scheduler or None) for webapp.build_assistant.
     No scheduler on a side-port check copy (cli --candidate) or with
     [proactive] enabled off."""
@@ -701,9 +729,9 @@ def from_config(config: dict, client=None, family=None, history=None):
     sync_log = getattr(history, "sync_log", None)
     if failover is not None and failover.role and sync_log is not None:
         jobs = owner_jobs(failover.role, sync_log)
-    return push, Scheduler(Settings.from_config(config), push, client=client,
-                           family=family, owner_timezone=config["assistant"]["timezone"],
-                           jobs=jobs)
+    return push, Scheduler(Settings.from_config(config), push, deadlines=deadlines,
+                           client=client, family=family,
+                           owner_timezone=config["assistant"]["timezone"], jobs=jobs)
 
 
 def register(app, assistant, push, scheduler, error) -> None:

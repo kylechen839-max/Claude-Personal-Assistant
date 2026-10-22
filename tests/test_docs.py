@@ -35,6 +35,8 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "chat_channels", "chat_read", "chat_search", "chat_files",
                      "chat_read_file", "chat_save_digest",
                      "list_assignments", "update_assignment_status",
+                     "list_deadlines", "confirm_deadline", "add_deadline",
+                     "delete_deadline",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 
@@ -105,6 +107,50 @@ def test_family_section_is_mirrored_in_config_toml():
         shipped = tomllib.load(f)["family"]
     assert shipped == DEFAULTS["family"]
     assert shipped["invite_days"] == 30
+
+
+def test_stt_section_is_mirrored_in_config_toml_and_readme():
+    """Every [stt] setting has a line in config.toml with its default and a
+    row in README's settings table; the keys the cloud engine reads are
+    secrets (not isolated: see test_stt_cloud.py), and Mom's instance stays local with beam search."""
+    from assistant.config import ENV_OVERRIDES, ISOLATED_ENV_VARS, SECRET_ENV_VARS
+
+    with open(ROOT / "config.toml", "rb") as f:
+        shipped = tomllib.load(f)["stt"]
+    assert shipped == DEFAULTS["stt"]
+    assert shipped["model"] == "small.en" and shipped["beam_size"] == 5
+    readme = _text("README.md")
+    for key in DEFAULTS["stt"]:
+        if key not in ("device", "compute_type"):
+            assert f"| `[stt] {key}` |" in readme, key
+    for var in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY"):
+        assert var in SECRET_ENV_VARS and var not in ISOLATED_ENV_VARS
+        assert var in _text(".env.example") and var in _text("render.yaml")
+    assert ENV_OVERRIDES["STT_ENGINE"] == ("stt", "engine")
+    assert "STT_ENGINE" in _text("render.yaml")
+    with open(ROOT / "config.mom.toml", "rb") as f:
+        mom = tomllib.load(f)["stt"]
+    assert mom["model"] == "small" and mom["beam_size"] == 5 and mom["engine"] == "whisper"
+
+
+def test_pi_stt_advice_keeps_config_local_toml_valid():
+    """install_pi.sh writes an [stt] table to config.local.toml; the docs
+    must say to add settings under it, since a second [stt] header is
+    invalid TOML. CI caches small.en for the Pi simulation too."""
+    script = _text("scripts/install_pi.sh")
+    written = re.search(r"printf '(\\n\[stt\]\\n[^']*)'", script).group(1)
+    written = written.replace("\\n", "\n")
+    assert tomllib.loads(written)["stt"]["model"] == "base.en"
+    assert tomllib.loads(written + "beam_size = 1\n")["stt"]["beam_size"] == 1
+    with pytest.raises(tomllib.TOMLDecodeError):
+        tomllib.loads(written + "[stt]\nbeam_size = 1\n")
+    pi = " ".join(_text("PI_MIGRATION.md").split())
+    assert "add it under the existing `[stt]` line in `config.local.toml`" in pi
+    assert "under its existing `[stt]` line, model" in pi  # the nano line
+    assert "`beam_size = 1` in `config.local.toml`" not in pi
+    workflow = _text(".github/workflows/pi-arm64.yml")
+    assert re.search(r"key: pi-sim-[\w.-]*small\.en", workflow)
+    assert re.search(r"faster-whisper>=1\.0\.2\b", _text("requirements.txt"))  # hotwords
 
 
 @pytest.mark.parametrize("name", ["config.toml", "config.mom.toml"])

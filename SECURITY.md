@@ -120,8 +120,11 @@ browser and at most 4 server-wide; the rate limits are kept per session, so
 reconnecting doesn't reset them. Transcripts are not logged at INFO. Closing the socket aborts the Claude stream and pending TTS and
 answers a pending confirmation with "no". A spoken confirmation counts only once the
 page reports the question finished playing, and only as a short explicit
-yes ("yes", "yeah, delete it"); talking over the question, answering before
-it was heard, or any other reply is a no, and it says so. Turns never run
+yes ("yes", "yeah, delete it"; `cli.classify_answer`); a negation ("no",
+"cancel", "stop"), talking over the question or answering before it was
+heard is a no, and it says so. Any other reply (unclear, a number, a
+question back) is asked once more ("Sorry, I didn't catch that"), under the
+same rules, and a second unclear reply cancels. Turns never run
 two at a time, and a confirmation stays with the turn that asked it. The VAD runs from files the app serves
 itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
 compilation), still no inline script, eval or third-party hosts. Tests:
@@ -780,6 +783,52 @@ server reads their replies with (`[tts] picker`, on by default).
 - Voice names from ElevenLabs are cut to one printable line of 60
   characters and shown with `textContent` only.
 
+## Speech-to-text (`stt.py`, optional cloud `stt_cloud.py`)
+
+- **Local by default.** `[stt] engine = "whisper"`: recordings are
+  transcribed on the machine and never leave it. The vocabulary prompt
+  and `[stt] hotwords` are config, not conversation; names belong in
+  `config.local.toml` (gitignored), not the committed `config.toml`.
+- **Cloud only when asked twice.** `engine = "openai"` or `"deepgram"`
+  *and* `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` set. Then every recording
+  transcribed by that server (the owner's, a spoken yes/no, and invited
+  people's on the cloud) is sent as a 16 kHz WAV over HTTPS to
+  `api.openai.com` or `api.deepgram.com`, with the prompt (OpenAI) or the
+  prompt's words and hotwords as keyterms (Deepgram, in the query string).
+  Recordings over five minutes, and Chinese family members' speech
+  (`family_speech` builds its own local Whisper), stay local. `config.mom.toml`
+  pins `engine = "whisper"`.
+- **Secrets.** Both keys are in `SECRET_ENV_VARS` (masked in logs; an
+  OpenAI `sk-...` key is also masked by pattern). The key goes only in the
+  `Authorization` header; `--check` says "set", never the value.
+- **Not isolated, on purpose.** They are not in `ISOLATED_ENV_VARS`:
+  OpenAI's quickstart puts `OPENAI_API_KEY` in the Windows user
+  environment, and that would stop Mom's and Kai's instances from
+  starting. It also guards nothing: a separate instance only sends audio
+  with its own `[stt] engine`, which `config.mom.toml` pins to "whisper".
+  A separate instance whose own config picks a cloud engine would use an
+  inherited key (the owner's bill); set the engine only in configs you
+  mean to.
+- **Logs.** INFO: engine, model, seconds of audio, transcript length and
+  time taken. The transcript only at DEBUG (local Whisper the same). A
+  failure logs the HTTP status or the exception's type name only, never
+  its message: a `requests` error quotes the URL, whose query holds the
+  keyterms. Response bodies are never logged.
+- **Bounded.** One request per recording, `cloud_timeout` (1-60 s,
+  default 10) on it; on any error, timeout or odd reply that recording
+  goes to local Whisper and the cloud is skipped for 60 s, so an outage
+  can't add a timeout to every turn. Invited people's recordings count
+  against `[family] stt_seconds_per_day` before either engine runs
+  (quotas.py), which bounds what they can spend.
+- **Prompt echo.** On near-silent audio Whisper (or the cloud) can return
+  its own prompt; a transcript that is the prompt, or a run of it spanning
+  two or more of its items, is treated as silence, so the vocabulary is
+  never sent to Claude as if Kyle had said it.
+- **Not fixed, on purpose:** the owner's own recordings have no daily
+  cloud cap (his account, his bill); a slow but steady cloud reply is
+  bounded by the `requests` read timeout between bytes, not a total
+  deadline (the reply is a few hundred bytes of JSON).
+
 ## PC hub: removed (2026-10-20)
 
 The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was
@@ -825,9 +874,11 @@ a PKCE challenge, `access_type=offline` and the redirect
   `gmail.compose` scope also allows sending; sending is blocked in code, as
   for Kyle). Deletes still ask. In Chinese a yes is the whole answer from
   a short allowlist (是的, 好的, 没问题, 删吧, ...; each part between
-  punctuation, after a leading 嗯/哦/啊/呃): a sentence that only contains a
-  yes character (还是明天吧, 是谁, 好，等一下, 对了还有一个) is a no, as is
-  anything not on the list.
+  punctuation, after a leading 嗯/哦/啊/呃, or one of them repeated: 是的是的,
+  对对对): a sentence that only contains a yes character (还是明天吧, 是谁,
+  对了还有一个) is never a yes. One with a negation (不/别/取消/算了/等/错:
+  不对, 好，等一下) is a no; anything else is unclear, asked once more and
+  then cancelled.
 - **Separate instance, separate data.** `load_dotenv` never overrides a
   variable already set in the shell, and `google_auth` reads
   `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` before any file, so her
@@ -919,6 +970,77 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   source with the Assignments schema is used (preferring the copy of the
   integration's template); otherwise the tools stay off and Settings says
   to share only that database and reconnect.
+
+## Student deadlines and Canvas (`deadlines.py`, `canvas.py`, `student_web.py`)
+
+Each person (the owner and every invited person) has their own deadlines,
+captured from their Canvas, Canvas's notification emails or said by hand.
+
+- **No school password, ever.** Canvas is reached with the calendar feed
+  link or a personal access token only; the connect route stores nothing
+  else (a password field is ignored and never stored, and a body with
+  neither a feed link nor a token is a 400 that writes nothing).
+- **The feed link is a secret.** `https://<school>/feeds/calendars/user_<secret>.ics`
+  reads the calendar without a sign-in, so it is handled like the token:
+  an invited person's link is sealed with `userkeys.seal` under its own
+  label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
+  Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
+  (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
+  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
+  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
+  the owner's connect route is a 409. Neither is ever returned (the status
+  says only the kind and the school's host), logged, or exported. The
+  redacting log formatter masks `/feeds/calendars/...` paths and Canvas
+  token shapes too, because httpx logs request URLs at INFO (kept at
+  WARNING by `setup_logging`).
+- **Server-side requests to an address someone typed.** Every feed link
+  and school address must be `https` on port 443, without `user:pass@`,
+  and resolve only to public addresses (`ipaddress.is_global`: never
+  loopback, the LAN, Tailscale's 100.64/10 or the 169.254.169.254
+  metadata address). Redirects are followed by hand (3 at most), each hop
+  checked; API calls follow none, and a `Link: rel="next"` page on another
+  host is never followed, so the token is only ever sent to the school's
+  own host. **Deliberate non-fix:** the check resolves the name, then
+  httpx resolves it again to connect, so a DNS answer that changes in
+  between (rebinding) could still reach a private address once; pinning
+  the address would need a custom transport, and the fetch is a GET whose
+  answer is only parsed as a calendar or Canvas JSON (nothing else of it
+  is shown or stored).
+- **Untrusted content.** Feed titles, planner items, module pages and
+  emails are written by other people: `list_deadlines` is
+  `untrusted_output` (and `private`), so once it ran, `add_deadline` and
+  `confirm_deadline` ask for a spoken yes; `delete_deadline` always asks.
+  Claude reads emails and pages only to pick out {title, course, kind,
+  due} (structured output, told the text is data), on the person's own
+  key when they have one; only those fields are stored, never the page or
+  email text or an event's description. The Gmail step uses the
+  read-only `GmailInbox.search` (metadata: subject and snippet) behind
+  the same NoSendGmail guard.
+- **Deleted means gone.** Deleting an item, a source or the Canvas link
+  removes it: SQLite `secure_delete=ON` and a `wal_checkpoint(TRUNCATE)`
+  after every delete (a test reads the file and its WAL for the title).
+  A deleted synced item leaves only a SHA-256 of its feed key so the next
+  sync doesn't bring it back. An invited person's `deadlines.sqlite` and
+  `canvas.enc` go with their folder on removal or "Delete my account";
+  their export holds the deadlines, never the link. Every connection is
+  closed after each call (nothing holds the file open on Windows), and a
+  write for someone just removed is refused under Family's lock, so a sync
+  that was running can't bring their folder back.
+- **Bounded.** A feed is read (streamed) up to 2 MB and 2000 events, the
+  whole fetch within 60 s; every API answer is streamed up to 2 MB, a
+  listing at most 10 pages and 1000 items; 3 rate-limit retries (1, 2,
+  4 s; a rate limit is a 429, or a 403 saying "Rate Limit Exceeded" or
+  with no quota left, since Canvas sends its quota header on every answer);
+  a whole sync stops after 180 s (the per-request timeout counts per read
+  only, so a host dripping bytes can't hold it); a module page or course
+  that can't be read is skipped, not the whole step; 20 module pages and 20
+  emails per sync, each text cut to 8000 characters; `[student] max_items`
+  per person and `max_per_source` per source; one sync at a time per
+  person, at most every `sync_minutes`; 10 school lookups a minute per
+  person; request bodies 8 KB. The throttle and lock maps hold at most 1024
+  people.
+- **Logs**: ids, counts, source names and error codes only (caplog tests
+  at DEBUG for the store, the tools, Canvas and the routes).
 
 ## Smart home (`tools/home_assistant.py`)
 
@@ -1289,7 +1411,9 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   device took it and none was gone, and the error can pass (a network
   error, 429, a 5xx), the keys, the day's slot and the "seen" ids are
   taken back and the next check sends the same words again (no new Claude
-  call). Any other 4xx (a changed VAPID key, a refused JWT) is not
+  call), but only while every item those words name is still in the
+  store and still fires: a deleted deadline drops the held words (checked
+  on every check, quiet hours included) and the message is written again. Any other 4xx (a changed VAPID key, a refused JWT) is not
   retried: logged at WARNING with its status only, so a broken setup
   costs one try and one Claude call a day, not one per check. The state file holds item ids and dates, never
   titles.
@@ -1342,6 +1466,27 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **A wider "yes" and one more try (2026-10-21).** Kyle was asked up to
+  three times because speech-to-text misheard his "yes". One shared
+  classifier (`cli.classify_answer`, used by the PC loop, the phone's
+  buttons/typed/recorded answer and the hands-free voice view) now also
+  takes near-misses and short affirmatives ("ya", "yep", "okay", "sure",
+  "please", "right", "do it", 好/可以/行), ignoring case and punctuation.
+  What still holds: a yes must be a short answer (at most 8 words) made only
+  of yes words and filler, with no number ("Yes, 11" to "...at 10?") and no
+  question mark ("Right?"); any negation ("no", "cancel", "stop", "wait",
+  "don't", 不/别/取消/算了) is a no; talking over a question, or answering
+  before it was heard to the end, is a no; the answer stays bound to its own
+  turn and confirmation id. An unclear answer is asked once more ("Sorry, I
+  didn't catch that"), under the same rules, and a second unclear one
+  cancels. The cost: a stray "okay" or "right" said just after a question
+  now confirms it, where before only "yes"-type words did.
+- **Calendar create, move and update don't ask without untrusted text.**
+  Their tool descriptions tell Claude not to ask "are you sure?" itself;
+  the app's own question still comes whenever `confirm_if_untrusted`
+  applies (see the calendar entry above: invites from others, event notes,
+  shared calendars, web, email, attachments), and guest changes, invite
+  answers and deletes always ask.
 - **Spotify playback control never asks, even with untrusted content in
   the conversation.** A web page or email could make Claude play
   something, skip, or set the volume. That is an annoyance at worst, easy

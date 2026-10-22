@@ -90,6 +90,7 @@ def g(fake_client, tmp_path, monkeypatch):
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
     config["webapp"]["public_origin"] = ORIGIN
     config["calendar"]["token"] = str(tmp_path / "kyle_token.json")
+    config["student"]["enabled"] = False  # their deadlines: tests/test_student_web.py
     monkeypatch.setenv("GOOGLE_WEB_CLIENT_JSON", json.dumps(WEB_CLIENT))
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", json.dumps(KYLE))  # Kyle's, on the server
     # a person's own Anthropic key (userkeys.py) gets the same mocked client
@@ -484,6 +485,11 @@ def test_family_speech_from_config():
     t = speech.transcriber("zh")
     assert (t.model_name, t.language) == (config["family"]["zh_stt_model"], "zh")
     assert speech.transcriber("en") is None
+    # [stt] beam_size applies; the owner's English vocabulary and names don't
+    config["stt"].update(beam_size=3, hotwords="Kyle")
+    t = webapp.family_speech(config).transcriber("zh")
+    assert t.beam_size == 3 and t.hotwords == ""
+    assert t.initial_prompt == "以下是普通话的句子。"
 
 
 # --- server sentences in each person's language --------------------------------------

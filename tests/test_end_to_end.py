@@ -56,6 +56,7 @@ import pytest  # noqa: E402
 
 from assistant import audio, cli  # noqa: E402
 from assistant import chat as chat_module  # noqa: E402
+from assistant.config import DEFAULTS  # noqa: E402
 from assistant.stt import Transcriber, rough_match  # noqa: E402
 from tests.test_wakeword import HERE, HEY_CLAUDE_MODEL, tts_clip  # noqa: E402
 
@@ -103,10 +104,10 @@ def test_definition_of_done_phrase(stt, dod_wav, tmp_path, monkeypatch, capsys,
     replaces only Whisper with the known transcript), the real tool loop and
     calendar code. Only Claude and the Google API are mocked."""
     if stt == "whisper":
-        try:
-            Transcriber().model
+        try:  # the shipped model (config.toml's is the default)
+            Transcriber(DEFAULTS["stt"]["model"]).model
         except Exception as e:  # huggingface.co blocked / offline
-            pytest.skip(f"Whisper base.en can't be downloaded here "
+            pytest.skip(f"Whisper {DEFAULTS['stt']['model']} can't be downloaded here "
                         f"({type(e).__name__}); the mocked-stt case covers the "
                         f"rest of the pipeline")
     else:

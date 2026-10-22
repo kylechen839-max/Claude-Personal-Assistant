@@ -127,7 +127,7 @@ test('a tap with an off-site url still opens only this site', async () => {
 });
 
 test('the shell caches brief.js under a new cache version', () => {
-  assert.match(SCRIPT, /const CACHE = "hey-claude-shell-v28";/);
+  assert.match(SCRIPT, /const CACHE = "hey-claude-shell-v30";/);
   const sw = load();
   assert.ok(vm.runInContext('SHELL', sw.ctx).includes('/brief.js'));
 });

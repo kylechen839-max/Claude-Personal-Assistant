@@ -259,7 +259,13 @@ you are most likely to tune:
 | `[tts] kokoro_voice` | "af_heart" | Kokoro voice (see "Voices") |
 | `[tts] speed` | 1.0 | Speaking speed for Kokoro and ElevenLabs |
 | `[tts] picker` | true | Phone app: everyone picks their own reply voice (see "Voices") |
-| `[stt] model` | "base.en" | faster-whisper model; "tiny.en" is faster |
+| `[stt] model` | "small.en" | faster-whisper model (about 480 MB, downloaded on first run); "base.en" or "tiny.en" are faster and mishear more. A Pi gets "base.en" (`install_pi.sh` writes it to `config.local.toml`), the cloud server too |
+| `[stt] beam_size` | 5 | Beam search width; 1 = greedy (faster, mishears more); 0 = the default |
+| `[stt] initial_prompt` | "auto" | Words Whisper should expect: "auto" = the app's vocabulary (calendar, assignment, Notion, reschedule, ...; the Mandarin prompt in Chinese), "" = none, or your own text |
+| `[stt] hotwords` | "" | Extra words to favor, such as names: "Kyle, Kai" |
+| `[stt] engine` | "whisper" | "whisper" (local), or paid cloud: "openai" or "deepgram" (see [Cloud speech-to-text](#cloud-speech-to-text-optional-paid)) |
+| `[stt] cloud_model` | "" | "" = gpt-4o-transcribe (openai) or nova-3 (deepgram) |
+| `[stt] cloud_timeout` | 10 | Seconds before local Whisper takes over (1-60) |
 | `[assistant] timezone` | "" | IANA name, e.g. "America/New_York"; "" = system |
 | `[update] enabled` | false | Home host (PC tasks, Pi service): follow the tested, signed `stable` branch; set it in `config.local.toml`, see [Automatic updates](#automatic-updates) |
 | `[assistant] api_timeout` | 30 | Seconds before a Claude request gives up |
@@ -291,6 +297,39 @@ offer with the first one only. Each Claude API call's token counts (chat,
 summaries, history titles, tutor, lecture notes: input, output, cache
 read/write, web searches) are logged at INFO in `logs/assistant.log`,
 without any text.
+
+### Speech recognition
+
+Every way of talking to it (wake word, push-to-talk, the phone app's
+microphone button and hands-free voice) goes through the same Whisper
+settings in `[stt]`. On a PC the default is `small.en` (int8, about 480 MB,
+downloaded on first run; `python -m assistant --check` says whether it is
+cached) with beam search 5 and a short prompt of the words the app hears
+most (calendar, assignment, Notion, reschedule, remind me, Canvas, exam,
+quiz...). Before, it was `base.en` with greedy decoding and no prompt
+(a bigger model and beam search are Whisper's two main accuracy levers;
+the gain on your own voice isn't measured yet, see MANUAL_TEST.md). It
+costs time: about two to three times `base.en`'s per utterance on a CPU
+(an estimate), so a slow PC can go back with `model = "base.en"`. If it
+still gets a name wrong, add it to `[stt] hotwords`
+(e.g. `hotwords = "Kyle, Kai"`, best in `config.local.toml`, under its
+`[stt]` line if it has one: a table may appear only once). On near-silent
+audio Whisper sometimes "hears" its own prompt back; that is treated as
+nothing said. Your words are written to the log only at DEBUG.
+
+#### Cloud speech-to-text (optional, paid)
+
+For the best accuracy you can let OpenAI (`gpt-4o-transcribe`) or Deepgram
+(`nova-3`) transcribe instead: put `OPENAI_API_KEY=...` or
+`DEEPGRAM_API_KEY=...` in `.env` and set `[stt] engine = "openai"` or
+`"deepgram"` (on Render: the `STT_ENGINE` setting and the key). Every
+recording is then sent to that company's servers (with the vocabulary and
+hotwords, as their prompt or keyterms) and costs money per minute; invited
+people's speech too, within their `stt_seconds_per_day`. Each request has a
+timeout (`cloud_timeout`, 10 s); if it fails (network, quota, a bad key) that
+recording is transcribed by local Whisper, and the cloud is skipped for a
+minute. Recordings over five minutes stay local. Without the key local
+Whisper is used. The key, the audio and the replies are never logged.
 
 ### Voices
 
@@ -521,9 +560,13 @@ either. The app's own sounds can't start or stop a turn. The conversation keeps 
 turn after turn until you tap **End**, say "goodbye", or stay quiet for
 `idle_timeout` (2 minutes); then it is summarized to memory like the voice
 loop. Deletes still ask out loud. Let the question finish, then say
-"yes" (or "yeah, delete it", "go ahead"); anything else, or talking over the
-question, means no ("OK, I won't delete it"). The answer is never sent to
-Claude as a new request.
+"yes" (or "yeah", "yep", "ya", "sure", "okay", "do it", "go ahead",
+"please", "right", "好", "可以"...; case and punctuation don't matter). "No",
+"cancel", "stop" or talking over the question means no ("OK, I won't delete
+it"). Anything else (it misheard you, or you said something unrelated) gets
+one "Sorry, I didn't catch that. Please say yes or no."; a second unclear
+answer cancels ("I still didn't catch that, so I left it"). The answer is
+never sent to Claude as a new request.
 
 - Buttons: **End**, **Mute** (stops listening; the reply still plays),
   **CC** (captions of what it heard and what it is saying, remembered on
@@ -593,9 +636,11 @@ Whisper listen for Mandarin (the multilingual `small` model; `.en` models
 can't hear Chinese), yes/no work in Chinese, and the page show in Chinese.
 A Chinese yes is the whole answer, from a short list (是 / 是的 / 对 / 对的 /
 好 / 好的 / 好啊 / 好吧 / 行 / 可以 / 确定 / 确认 / 没问题 / 删吧 / 删除吧 /
-加吧, optionally after 嗯 / 哦 / 啊 / 呃, e.g. "嗯，好的" or "好，删吧"); any
-other answer is a no, including sentences that merely contain 是 or 好
-(还是明天吧, 是谁, 好，等一下), a lone 嗯, 不好 and questions such as 可以吗？. History screens stay in English.
+加吧 / 没错, optionally after 嗯 / 哦 / 啊 / 呃 or said twice, e.g. "嗯，好的",
+"好，删吧" or "对对对"). A negation (不好, 不对, 别, 取消, 算了, 好，等一下) is
+a no. Anything else, including sentences that merely contain 是 or 好
+(还是明天吧, 是谁), a lone 嗯 and questions such as 可以吗？, is asked once
+more ("不好意思，我没听清。") and then cancelled; it is never a yes. History screens stay in English.
 
 Her app guides her itself: the sign-in screen asks for "the sign-in code you
 were sent", and after signing in a card lists only the steps still left for
@@ -637,7 +682,10 @@ One-time setup on the PC (PowerShell, in the project folder):
    to her log (`logs/mom.log`), since the sign-in task runs hidden. The
    same check runs whenever `[webapp] google_connect` is on. Your team chat
    tokens don't matter here: an instance started with an `--env-file`
-   other than `.env` never turns team chat on.
+   other than `.env` never turns team chat on. School deadlines are off in
+   such a copy too unless its config gives it its own `[student] dir`
+   (otherwise it would share your deadlines file); `config.mom.toml` sets
+   `data/mom/student` and leaves them off.
    ```powershell
    python -m assistant --mode web --config config.mom.toml --env-file .env.mom --show-token
    tailscale serve --bg --https=8443 http://127.0.0.1:8766
@@ -1042,7 +1090,11 @@ be refreshed"), sign in again on the PC as in step 3 and paste the new
 `token.json`. To sign every phone out, change `WEB_TOKEN` in Render (any 32+
 random characters) and save. `WHISPER_MODEL` picks the speech model:
 `base.en` (default, more accurate) or `tiny.en` (smaller, faster, more
-mistakes). Run the same image anywhere with Docker:
+mistakes); not the PC's `small.en`, whose memory use on Render isn't
+measured yet. Beam search 5 and the vocabulary prompt apply here too. For
+better accuracy on the cloud, set `STT_ENGINE` to `openai` or `deepgram`
+and add that service's key (`OPENAI_API_KEY` or `DEEPGRAM_API_KEY`): see
+[Cloud speech-to-text](#cloud-speech-to-text-optional-paid). Run the same image anywhere with Docker:
 `docker build -t hey-claude .` then `docker run -p 10000:10000 -e WEB_TOKEN=...
 -e ANTHROPIC_API_KEY=... hey-claude` (it expects a TLS proxy in front, and
 trusts forwarded headers only from 10.x addresses, Render's; set
@@ -1131,6 +1183,13 @@ Google Calendar app does:
   emails an invite, so adding or removing guests always asks first and
   names every address. Moving or deleting an event doesn't ask Google to
   email its guests; tell them yourself, or do it in Google Calendar.
+- **What asks first.** Adding, moving or changing an event just happens
+  when you ask (Claude is told not to ask "are you sure?" itself). Deleting,
+  inviting or removing guests and answering an invite always ask. After
+  something written by someone else came into the conversation (a web
+  page, an email, an invite from someone else, notes on an event, a shared
+  calendar, an attached file), every change asks too, until the
+  conversation ends.
 - **Invites.** "Accept the project sync invite", "Tell them maybe". This
   always asks first, and reads out any note it would send.
 - **Free time and search.** "When am I free for an hour tomorrow
@@ -1265,6 +1324,52 @@ reply is spoken with the maths read naturally ("x squared over 2"). The
 phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
+
+### Student deadlines (Canvas)
+"What's due this week?", "when is my physics midterm?", "add my lab report,
+due Friday at 5". Deadlines (exams, assignments, quizzes, classes) are kept
+per person, captured from Canvas, from Canvas's notification emails, or
+said by hand, and the phone menu's **School deadlines** card shows "What I
+captured" with **Looks right**, **This date is right** / **Not this one**
+(when two sources disagree on a date) and **Delete**. Four tools:
+`list_deadlines`, `confirm_deadline`, `add_deadline` and `delete_deadline`
+(delete always asks first; adding or confirming asks too once the
+conversation holds captured text, which is written by other people).
+
+Connecting Canvas never uses a school password. Either:
+
+- **Calendar feed link** (simplest): in Canvas open **Calendar** ->
+  **Calendar Feed** and copy the link
+  (`https://<school>/feeds/calendars/user_….ics`). The link itself is the
+  secret (anyone with it can read your Canvas calendar): treat it like a
+  password.
+- **Access token**: Canvas -> **Account** -> **Settings** -> **New access
+  token**, plus your school's Canvas address. It reads the planner
+  (assignments, quizzes, discussions, calendar events) and, with `[canvas]
+  pages` on, the pages in your courses' modules, where Claude picks out the
+  dates.
+
+You (the owner) put `CANVAS_ICS_URL`, or `CANVAS_TOKEN` with `[canvas]
+base_url` (or `CANVAS_BASE_URL`), in `.env` (on Render: Environment).
+Invited people paste theirs in the card; it is stored encrypted with
+`USER_DATA_KEY` (without it the server says it can't store sign-ins) and
+deleted on **Disconnect Canvas** (which can also delete what came from
+Canvas) and with their account. **Sync now** fetches everything at most
+every `[student] sync_minutes` (15) per person. With `[student] gmail` on
+and Gmail connected, Canvas's notification emails from the last two weeks
+are read too (read-only; each email once), with `[student] extract_model`
+(default: the fast model). Each person's own Claude key is used for that
+when they have one.
+
+Re-syncing never duplicates anything. A date you confirmed is never
+changed by a sync (the card still shows what Canvas says now), a deleted
+item doesn't come back, and items more than 60 days past are dropped.
+Your deadlines are in `[student] dir` (`data/student`; Render
+`/data/student`); an invited person's are in their own folder under
+`[family] dir`, in their "Download my data" zip, and deleted with their
+account. Limits: `[student] max_items` (2000) per person and
+`max_per_source` (500) per source. `[student] enabled = false` turns it
+all off.
 
 ### Study briefings (notifications)
 The phone app can speak up first: a notification in the morning with
@@ -1588,8 +1693,11 @@ it (see [Voices](#voices)). Kokoro also installs on a Pi but takes well over
 a second per sentence there, so "auto" keeps Piper on ARM. Without a voice
 file the assistant falls back to eSpeak.
 
-**Speed:** set `[stt] model = "tiny.en"` in `config.toml` if `base.en` feels
-slow. On a Pi with no screen, set `[web] browser = false`.
+**Speed:** `install_pi.sh` puts `[stt] model = "base.en"` in
+`config.local.toml` (the PC's `small.en` is too slow on a Pi); change it
+there to `"tiny.en"` if `base.en` feels slow (a Pi 4), and put any other
+`[stt]` setting under that same `[stt]` line (a second `[stt]` header is
+invalid TOML). On a Pi with no screen, set `[web] browser = false`.
 
 ### Troubleshooting
 
@@ -2024,7 +2132,8 @@ assistant/
   tts_elevenlabs.py  optional ElevenLabs cloud voice
   voice_picker.py  each person's reply voice in the phone app (/api/voices)
   earcons.py    soft listening / thinking / ended sounds
-  stt.py        push-to-talk recording, faster-whisper
+  stt.py        push-to-talk recording, faster-whisper (beam search, vocabulary prompt)
+  stt_cloud.py  optional OpenAI / Deepgram speech-to-text, local Whisper fallback
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory.py     Pinecone recall + conversation summaries
   history.py    conversation history: SQLite store, search, resume
@@ -2055,8 +2164,12 @@ assistant/
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
-                notion.py, notes.py, web.py, history.py, spotify.py, tool registry
+                notion.py, notes.py, web.py, history.py, spotify.py, deadlines.py,
+                tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)
+  deadlines.py  each person's school deadlines (SQLite): sync upserts, conflicts, deletes
+  canvas.py     Canvas calendar feed, REST API, school lookup, Claude date extraction
+  student_web.py  the phone app's "School deadlines" card: connect Canvas, sync, list
   push.py       phone notifications: VAPID key, sealed subscriptions, Web Push
   proactive.py  study briefings: deadline rules, scheduler thread, /api/student/brief
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)

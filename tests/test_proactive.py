@@ -408,6 +408,103 @@ def test_from_config_gives_the_owner_jobs_no_leader_gate(env, tmp_path):
     assert len(env.sent.calls) == 1
 
 
+class Echo:
+    """A client whose message names every title it was given (so a test can
+    see which items' words went out); the SDK's response shape."""
+
+    def __init__(self):
+        self.calls = 0
+        self.messages = self
+
+    def create(self, **kw):
+        from types import SimpleNamespace
+
+        self.calls += 1
+        facts = json.loads(kw["messages"][0]["content"])
+        titles = [i["title"] for r in facts["reasons"] for i in r["items"]]
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=", ".join(titles))],
+                               usage=None)
+
+
+def test_a_retry_never_sends_a_deadline_deleted_meanwhile(env):
+    """Judge round 3: the morning push gets a 503, the person deletes a1,
+    a2 still fires: the retry must not reuse words naming a1, and the
+    brief must not show it."""
+    env.store.items[None] = [item("a1", "Deleted essay", "2026-10-21"),
+                             item("a2", "Lab report", "2026-10-21")]
+    endpoint = env.push.subscriptions(None)[0]["endpoint"]
+    env.sent.fail[endpoint] = 503
+    s = env.scheduler(client=Echo())
+    assert s.tick() == {}
+    assert "Deleted essay" in env.bodies()[0]  # the failed try named it
+    env.store.items[None] = [item("a2", "Lab report", "2026-10-21")]  # a1 deleted
+    env.sent.fail = {}
+    env.clock.now = at(2026, 10, 21, 8, 35)
+    assert s.tick() == {"owner": ["morning"]}
+    assert "Deleted essay" not in env.bodies()[1] and "Lab report" in env.bodies()[1]
+    assert "Deleted essay" not in s.brief(None)["text"]
+    assert s._retry_text == {}
+
+
+def test_held_words_go_when_every_item_is_deleted(env):
+    env.store.items[None] = [item("a1", "Deleted essay", "2026-10-21")]
+    endpoint = env.push.subscriptions(None)[0]["endpoint"]
+    env.sent.fail[endpoint] = 503
+    s = env.scheduler(client=Echo())
+    assert s.tick() == {}
+    assert s._retry_text  # held for the retry
+    env.store.items[None] = []  # all deleted
+    env.clock.now = at(2026, 10, 21, 8, 35)
+    assert s.tick() == {}
+    assert s._retry_text == {}
+    assert "Deleted essay" not in s.brief(None)["text"]
+    # also in quiet hours, when the rules don't run at all
+    env.store.items[None] = [item("a3", "Another", "2026-10-21")]
+    env.clock.now = at(2026, 10, 21, 9, 35)
+    s.tick()
+    env.store.items[None] = []
+    env.clock.now = at(2026, 10, 21, 23, 0)
+    s.tick()
+    assert s._retry_text == {}
+
+
+def test_the_real_deadline_store_drives_a_morning_push(env, tmp_path, monkeypatch):
+    """End to end: build_assistant opens P1's DeadlineStore, create_app's
+    lifespan hands it to the scheduler, and an item it holds fires the
+    morning push."""
+    from assistant.deadlines import DeadlineStore
+
+    for var in ("PINECONE_API_KEY", "PINECONE_INDEX", "NOTION_TOKEN", "GOOGLE_TOKEN_JSON",
+                "GOOGLE_CLIENT_JSON", "HISTORY_PATH", "HA_URL", "HA_TOKEN", "CANVAS_TOKEN",
+                "CANVAS_ICS_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-key")
+    monkeypatch.chdir(tmp_path)
+    cfg = env.config
+    cfg["history"]["path"] = str(tmp_path / "history.sqlite")
+    cfg["student"]["dir"] = str(tmp_path / "student")
+    cfg["failover"]["role"] = ""
+    a = webapp.build_assistant(cfg, "print", lambda m: None)
+    try:
+        assert isinstance(a.deadlines, DeadlineStore)
+        assert a.proactive.deadlines is a.deadlines
+        a.push.send_fn = env.sent
+        a.push.subscribe(None, sub())
+        a.deadlines.add(None, "Lab report 3", "2026-10-21", course="CHEM 110")
+        a.deadlines.add(None, "Far away", "2026-12-20", course="HIST 1")
+        s = a.proactive
+        s.client, s.clock = env.client, env.clock
+        with TestClient(webapp.create_app(a, TOKEN, reap_interval=3600,
+                                          sessions_file=tmp_path / "s.json"), base_url=BASE):
+            assert s.deadlines is a.deadlines
+            assert s.tick() == {"owner": ["morning"]}
+        sent = json.dumps(env.client.requests[0]["messages"])
+        assert "Lab report 3" in sent and "Far away" not in sent
+        assert len(env.sent.calls) == 1
+    finally:
+        a.history.close()
+
+
 def test_a_gone_device_is_not_retried(env):
     env.store.items[None] = [item("a1", "Essay 2", "2026-10-21")]
     endpoint = env.push.subscriptions(None)[0]["endpoint"]

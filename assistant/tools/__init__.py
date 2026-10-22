@@ -121,9 +121,15 @@ class ToolRegistry:
                 question = ask(tool_input) if ask is not None else None
                 if question is not None and not self.confirm(question):
                     log.info("User declined %s", name)
+                    # one short sentence back, and no asking again: a
+                    # retried call would put the same question to him again
                     return json.dumps({"status": "cancelled",
-                                       "message": "The user said no, so nothing "
-                                                  "was changed."}), False
+                                       "message": "The user said no (or gave no "
+                                                  "clear yes), so nothing was "
+                                                  "changed. Say so in one short "
+                                                  "sentence. Don't call the "
+                                                  "tool again or ask again "
+                                                  "unless the user asks."}), False
                 result = tool.handler(**tool_input)
             finally:
                 UNTRUSTED_CONTEXT.reset(token)
