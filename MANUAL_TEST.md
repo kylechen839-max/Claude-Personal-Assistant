@@ -1121,6 +1121,55 @@ Needs `claude auth login` on the PC, NOTION_TOKEN in `.env`, and
     removed). If `data/devhub.json` is still there (the old hub's saved
     chat), delete it; nothing reads it any more.
 
+## Session watcher for Claude Code (optional, ~15 min)
+On the PC and on the MacBook (`tools/session-watch/README.md`).
+- [ ] Paste `tools/session-watch/hooks-snippet.json` into your own
+      `~/.claude/settings.json` (fix the path; `python` on Windows), start
+      a Claude Code session and ask it to do something that needs approval.
+      Leave the prompt open and run `session_watch.py` from
+      `tools/session-watch`.
+  - Should: one desktop notification (a toast on Windows, a banner on
+    macOS; allow Script Editor notifications if macOS asks) naming the
+    project, and a line in `~/.claude/session-watch/watch.log`. Running it
+    again gives no second notification.
+- [ ] Approve the prompt and run it again.
+  - Should: the session is no longer listed.
+- [ ] Ask a session to run a subagent (Agent/Task) that works for more than
+      3 minutes, and run `session_watch.py` while it works.
+  - Should: the session is not listed. If the subagent itself asks for
+    approval, it is listed after 2 minutes as "... in a subagent". If a
+    long subagent run is listed while it is still working, check
+    `~/.claude/projects/<project>/<session id>/subagents/` exists (the
+    layout the check expects).
+- [ ] With the hook on, let a finished session sit idle for a minute or
+      two, then run `session_watch.py`.
+  - Should: listed with "idle" in brackets (the approval prompt above
+    showed "approval").
+- [ ] Without the hook (remove it again), leave an approval prompt open for
+      3 minutes, then run it.
+  - Should: the session is listed as "waiting (probably an approval
+    prompt)" from the transcript.
+- [ ] Without the hook, start a background subagent (ask for one "in the
+      background") and, while it works, have the main session ask for
+      approval of a command. Leave the prompt open 3 minutes, then run it.
+  - Should: the main session is listed with the command's tool (Bash),
+    even though the subagent is still busy.
+- [ ] In a session in auto mode (or with a deny rule or a blocking
+      PreToolUse hook), ask for something the check refuses, let the
+      session stop, wait 3 minutes and run `session_watch.py`.
+  - Should: one notification "<tool> was denied by a security check" and
+    the session listed with "security check"; the denied command's text
+    is in neither the notification nor `watch.log`. Saying "no" to a
+    prompt yourself is not listed this way.
+- [ ] With the Codex CLI signed in, start `run-codex-watch.ps1` (PC) or
+      `run-codex-watch.sh` (Mac) and leave a prompt open.
+  - Should: within 5 minutes a notification, and a short summary in
+    `~/.claude/session-watch/codex-summary.log` that names the project and
+    approves nothing (the prompt is still open in Claude Code).
+- [ ] Set up the Task Scheduler / launchd entry from the README and sign
+      out and in.
+  - Should: the watcher runs without a window and still notifies.
+
 ## Health checks and safe updates (~15 min)
 Needs the PC's apps installed as tasks (yours and the family copies).
 - [ ] `.\scripts\install_watch_task.ps1`, then wait a minute and run

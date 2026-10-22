@@ -2149,6 +2149,9 @@ tests/          pytest suite (offline; live tests skip without keys)
 
 docs/WATCHDOG.md  the dev-team dashboard's hourly watchdog prompt (the dashboard
                   page itself is in the private kylechen839-max/agent-dashboard repo)
+tools/session-watch/  Session watcher: a local notice when one of your Claude Code
+                  sessions on this PC or Mac waits on you (approval prompt), with an
+                  optional Codex summary; it only reports (see its README.md)
 tests/          pytest suite (offline; live tests skip without keys);
                 tests/js/ node:test unit tests (run by pytest if node is installed)
 .github/workflows/tests.yml   CI: pytest on every push + weekly (Ubuntu, Windows)

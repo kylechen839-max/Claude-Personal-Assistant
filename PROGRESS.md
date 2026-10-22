@@ -4934,3 +4934,122 @@ not trigger confirmations.
     if the suffix check also accepts `@group.calendar.google.com`.
 - **Counts** (Linux sandbox, Python 3.13): 2917 passed, 42 skipped (+8
   over master 6ea4081's 2909 passed, 42 skipped). No JS touched.
+
+## Session watcher for local Claude Code sessions (2026-10-22)
+
+Kyle: a Codex-driven watcher on his own computer (Windows 11 PC, MacBook)
+that notices when a Claude Code session is blocked on him. New folder
+`tools/session-watch/` (stdlib-only Python 3.10+, not part of the
+assistant package):
+
+- **What it does.** `notify_hook.py` is a Claude Code hook: a
+  `Notification` writes `<claude dir>/session-watch/blocked/<id>.json`
+  (atomic, sanitised message, safe ids only); `PostToolUse`,
+  `UserPromptSubmit`, `Stop` and `SessionEnd` delete it. It prints nothing
+  and always exits 0. `session_watch.py` merges those markers (24 h) with a
+  transcript check (newest tool call in the last 64 KB of a recent
+  `projects/*/*.jsonl` has no result and the file is quiet for
+  `--threshold`, 120 s), notifies each new block once (osascript /
+  PowerShell toast / notify-send, argument lists only), logs one line per
+  block to `watch.log` and prints text or `--json`. `--no-notify` writes
+  nothing. `run-codex-watch.ps1`/`.sh` loop every N minutes and, on a new
+  block with `codex` installed, run `codex exec --sandbox read-only` with
+  `AGENTS.md` (report only, never approve) into `codex-summary.log`.
+  `hooks-snippet.json` is pasted by Kyle; nothing edits `settings.json`.
+  Cloud sessions are out of scope (docs/WATCHDOG.md covers those).
+- **Tests** (`tests/test_session_watch.py`, 41 in round 1, all offline in tmp
+  folders): transcript blocked / answered / parallel calls / too recent or
+  old / malformed lines / tail only / unsafe names; hook set and clear for
+  every event, bad ids (`../../settings`, slashes, too long), message
+  sanitising, the real hook command via stdin (oversized and junk input,
+  exit 0, empty stdout), exit 0 when the write fails, Windows replace
+  retry; merge with the hook winning; no re-notify on a second scan and a
+  new prompt notifying again; 7-day pruning; `--no-notify` writes nothing;
+  caplog keeps the notification text out of INFO and `watch.log`; the
+  notifier on darwin/win32/linux is an argument list without `shell=True`
+  and the untrusted body never inside a script; a missing notifier is
+  logged and the scan continues; stable `--json`; `CLAUDE_CONFIG_DIR`;
+  no `settings` string in the code or launchers and a full run touching
+  nothing outside `session-watch/`; the `.sh` launcher LF and 100755 in
+  git; the launchers' Codex command; the hook snippet's events; AGENTS.md's
+  never-approve rule.
+  - Mutation checks: interpolating the body into the Windows script,
+    dropping the notified-state check, the message sanitising, the id
+    check, writing state under `--no-notify`, or the hook's catch-all each
+    fail their test.
+- Not checked here (no Windows, macOS or Codex in the sandbox): the toast,
+  the osascript banner, a real Claude Code hook run and the Codex summary;
+  they are in MANUAL_TEST.md. PowerShell syntax was not run (no pwsh).
+- **Round 2 (judge findings).**
+  - Subagents: current Claude Code writes them to
+    `projects/<proj>/<sid>/subagents/agent-*.jsonl` (checked in this
+    sandbox's own `~/.claude`), and the main transcript sits on an
+    unanswered `Agent` call meanwhile. The newest subagent write now counts
+    as the session's activity, and up to 8 subagent transcripts written
+    since the main one last moved are checked for an unanswered call
+    (reported "... in a subagent").
+  - Parallel calls are grouped by `message.id` (the real shape is one
+    content block per entry); only string `tool_use_id`s are kept; deep
+    JSON is skipped; any error is caught per transcript and per marker
+    (type name at DEBUG); `--interval` logs a failed scan and retries.
+  - The hook keeps only `permission_prompt`, `idle_prompt`,
+    `elicitation_dialog` (or no type), clears on `PostToolUseFailure`, and
+    the snippet adds that matcher and quotes the path (README and
+    `schtasks` example too). `notification_type` is in `--json` and the
+    notification text; `cwd` is no longer in `--json` (the project name is),
+    so Codex never sees the working-folder path.
+  - Folders are created 0700 one by one, `watch.log` is opened 0600, the
+    `.sh` launcher runs under `umask 077`.
+  - 22 new tests (63 now): the real subagent layout (busy, prompt inside,
+    background agent, dead subagent ignored), the real parallel shape,
+    unhashable ids, deep nesting in a transcript and a marker, DEBUG-only
+    error logging, `--interval` surviving a failed scan, exit 2 on bad
+    options, POSIX modes, `auth_success`/unknown types ignored, the type in
+    `--json` and the notification, the snippet's quoting and matcher, one
+    test per bound (`MAX_NOTIFIED`, `MAX_MARKER_BYTES`, `MAX_STDIN`,
+    `watch.log` rotation) and the `.sh` launcher run with fake
+    `python3`/`codex`/`sleep` (summary rotation and 0600), and the docs
+    naming exactly the `--json` keys. 16 of them (and 3 updated ones) fail
+    on the round-1 code; the dead-subagent and exit-2 tests pin behaviour;
+    the bound tests (which guard round-1 code) each fail when their bound
+    is removed.
+- **Round 3 (judge findings, plus Kyle's security-check request).**
+  - A busy background agent no longer hides a main-session prompt: each
+    transcript is judged on its own mtime, and only an open `Agent`/`Task`
+    call in the main transcript counts its subagents' writes as activity.
+    A quiet subagent prompt is reported even while a sibling still works.
+  - AGENTS.md now tells Codex to read no file at all (only the command's
+    output); the markers hold `cwd` and `transcript_path`.
+  - `MAX_SUBAGENTS` (8, newest first) has a test counting tail reads.
+  - A state folder that can't be written: `notified.json` is saved before
+    any notification, the scan raises `StateError`, `--once` prints the
+    result, logs one warning (exception type only) and exits 3; no
+    traceback and no notification storm. A `watch.log` failure after the
+    save notifies once and exits 3. README documents it.
+  - New block kind `security_denied` (transcript check only, main and
+    subagent transcripts): an `is_error` tool result matching
+    `DENIAL_PATTERNS` (auto mode classifier, permission deny rule,
+    PreToolUse hook), not Kyle's own rejection, with no later successful
+    tool result and no new message from Kyle, quiet for `--threshold`.
+    Only the tool name and a fixed reason are kept (the denial text can hold
+    the command); keyed per denied tool_use id so it is announced once.
+    AGENTS.md has Codex list it and send Kyle to decide, never suggesting
+    a way around the check.
+  - 31 new tests (94 now): the probe's background-agent shape, a stuck
+    subagent beside a busy one, the subagent cap, AGENTS.md's no-files
+    rule, exit 3 in-process and from the real command line (one stderr
+    line, no traceback), the save-before-notify order, security stops for
+    each pattern and content shape, progress or Kyle's reply clearing it, a
+    later failure or meta entry not clearing it, Kyle's rejection (also one
+    quoting check-like words) and plain errors not counting, a denial in a
+    subagent, the denial text absent from `--json`, `watch.log`, logs and
+    the notification, malformed shapes, and the docs. On the round-2 code
+    14 of them fail (the rest: the cap test fails when the cap is removed,
+    the AGENTS.md test on the old AGENTS.md, the rejection test when the
+    rejection exclusion is removed, the progress test when a later success
+    no longer clears a denial; the docs test on the old docs).
+- **Counts** (Linux sandbox, Python 3.13, no eSpeak installed in this
+  sandbox): 2949 passed, 69 skipped, 9 failed, 26 errors, against the
+  same tree without this change's 2855 passed, 69 skipped, 9 failed, 26 errors; the failures and errors are the
+  same eSpeak-missing tests on both. Round 2 was 2918 passed. No JS
+  touched.

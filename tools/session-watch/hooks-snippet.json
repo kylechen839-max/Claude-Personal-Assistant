@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "Notification": [
+      {"matcher": "permission_prompt|idle_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ],
+    "PostToolUseFailure": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "python3 \"/ABSOLUTE/PATH/TO/tools/session-watch/notify_hook.py\"", "timeout": 10}]}
+    ]
+  }
+}
