@@ -149,6 +149,22 @@
     "Couldn't save that. Try again.": "没能保存，请再试一次。",
     "Delete this deadline?": "要删除这个截止日期吗？",
     "Couldn't delete it. Try again.": "没能删除，请再试一次。",
+    // notifications and the study brief (brief.js, push.py, proactive.py)
+    "Enable notifications": "开启通知",
+    "Turn off notifications": "关闭通知",
+    "Notifications are on for this phone.": "这部手机的通知已开启。",
+    "Notifications are off.": "通知已关闭。",
+    "Notifications are blocked for this app. Turn them on in the phone's Settings, then try again.":
+      "这个应用的通知被关闭了。请在手机的“设置”里打开，然后再试一次。",
+    "To get notifications on an iPhone, add this app to your Home Screen (Share, then Add to Home Screen) and open it from there.":
+      "要在 iPhone 上收到通知，请先把这个应用加到主屏幕（点“分享”，再点“添加到主屏幕”），然后从主屏幕打开。",
+    "This server can't store notification settings yet.": "这个服务器暂时还不能保存通知设置。",
+    "Couldn't turn on notifications. Try again.": "没能开启通知，请再试一次。",
+    "Couldn't play the brief.": "无法播放简报。",
+    "Latest brief": "最新简报",
+    "Your week": "你的这一周",
+    "Brief": "简报",
+    "Play": "播放",
     "Disconnect Google account": "断开 Google 账户",
     "Disconnect your Google account? I won't see your calendar or email any more.":
       "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
