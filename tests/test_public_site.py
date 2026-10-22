@@ -161,7 +161,7 @@ def test_login_page_links_to_the_landing_page(site_env):
 
 
 def test_privacy_page_shows_the_support_email(site_env):
-    page = site_env(support_email=" Help@Example.org ").client.get(
+    page = site_env(support_email=" Help@Example.org ", legal_draft=True).client.get(
         "/privacy", headers=via_proxy(PUBLIC)).text
     assert '<a href="mailto:help@example.org">help@example.org</a>' in page
     assert "Draft: Kyle to review" in page
@@ -409,7 +409,8 @@ def test_new_settings_have_defaults_and_config_toml_lines():
     from pathlib import Path
 
     web = DEFAULTS["webapp"]
-    assert web["support_email"] == "" and web["legal_draft"] is True
+    # Kyle approved the wording and picked the address at launch (2026-10-22)
+    assert web["support_email"] == "heyclaude.app@gmail.com" and web["legal_draft"] is False
     # off by default, and no public write endpoint on a PC (judge round 1)
     assert web["public_site"] is False and web["waitlist_file"] == ""
     with open(Path(__file__).resolve().parent.parent / "config.toml", "rb") as f:
@@ -418,7 +419,7 @@ def test_new_settings_have_defaults_and_config_toml_lines():
         assert shipped[key] == web[key], key
     server = load_config(None, None, profile="server")["webapp"]
     assert server["waitlist_file"] == "/data/waitlist.json"  # on the disk
-    assert server["public_site"] is False  # turned on at the beta's launch
+    assert server["public_site"] is True  # on since the public beta launch
 
 
 def test_build_app_serves_the_public_site(monkeypatch, fake_client, tmp_path):
@@ -441,13 +442,14 @@ def test_build_app_serves_the_public_site(monkeypatch, fake_client, tmp_path):
 
 
 def test_build_app_without_the_public_site(fake_client, tmp_path):
-    """Judge round 1: master auto-deploys, and the pages promise pieces
-    still to come, so the server profile leaves the site off: no pages,
-    no waitlist, no link on the sign-in page."""
+    """With the site turned off (as before the public beta launched, or
+    with [webapp] public_site = false): no pages, no waitlist, no link on
+    the sign-in page."""
     from fastapi.testclient import TestClient
 
     cfg = load_config(None, None, profile="server")
-    cfg["webapp"].update(sessions_file="", waitlist_file=str(tmp_path / "w.json"))
+    cfg["webapp"].update(sessions_file="", waitlist_file=str(tmp_path / "w.json"),
+                         public_site=False)
     cfg["family"]["dir"] = str(tmp_path / "users")
     assert public_site.from_config(cfg) is None
     assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,

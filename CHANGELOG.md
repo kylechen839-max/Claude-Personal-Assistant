@@ -13,6 +13,10 @@
   scan output only) summarise which session to open first. It never answers
   prompts or edits Claude Code settings, and never keeps transcript or
   denial text.
+- Public beta launch: the cloud server now serves /welcome, /privacy,
+  /terms and the waitlist (`public_site` on in the server profile), with
+  the support address heyclaude.app@gmail.com and without the "Draft"
+  note.
 
 - Calendar: listing your own events no longer makes the next move or change
   ask for confirmation. Notes on events you organize, your contacts'

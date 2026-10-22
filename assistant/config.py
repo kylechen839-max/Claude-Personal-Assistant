@@ -153,12 +153,12 @@ DEFAULTS: dict = {
                                     # returns to <public_origin>/google/callback
         "backup_max_mb": 200,       # GET /api/backup (owner): refused above this
         # The public pages (/welcome, /privacy, /terms, the waitlist;
-        # public_site.py). Off until the public beta launches: the pages
-        # describe beta tiers, BYOK and Notion sign-in.
+        # public_site.py). Off by default on a PC; the cloud server's
+        # profile turns it on (public beta, launched 2026-10-22).
         "public_site": False,
-        "support_email": "",        # contact on the privacy and terms pages
+        "support_email": "heyclaude.app@gmail.com",  # contact on the privacy and terms pages
                                     # ("" = "contact the owner")
-        "legal_draft": True,        # a visible "Draft" note on privacy and terms
+        "legal_draft": False,       # True: a visible "Draft" note on privacy and terms
         "waitlist_file": "",        # POST /api/waitlist entries, a private
                                     # file ("" = waitlist closed; the server
                                     # profile keeps it on the disk)
@@ -390,7 +390,7 @@ SERVER_PROFILE: dict = {
     "web": {"browser": False},
     "webapp": {"host": "0.0.0.0", "max_upload_mb": 4,
                "sessions_file": "/data/web_sessions.json",  # on the disk
-               "public_site": False,  # turned on at the public beta's launch
+               "public_site": True,   # on since the public beta launch (Kyle, 2026-10-22)
                "waitlist_file": "/data/waitlist.json"},  # on the disk
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
