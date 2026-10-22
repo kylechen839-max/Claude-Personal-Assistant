@@ -3,6 +3,56 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Public beta launch (in this order; each step points to its own
+      item below rather than repeating it).** Nothing in code is missing;
+      these are Render, Google, Notion and wording steps only Kyle can do.
+      1. **Render environment.** `USER_DATA_KEY` exists (item
+         "`USER_DATA_KEY` on Render") and is never changed again: a new
+         value makes every tester's stored key and Notion token unreadable.
+         `PUBLIC_ORIGIN` is the exact https origin people open (no
+         trailing slash). Decide on a custom domain *now*: changing it
+         later changes the Google and Notion redirect URIs and the cookies
+         (everyone signs in again).
+      2. **Approve the legal pages.** Read `assistant/web/privacy.html`
+         and `terms.html` (MANUAL_TEST "Public site and waitlist"), fix any
+         wording, and pick a support email address.
+      3. **The launch PR** (one small PR, after step 2): `"public_site":
+         True` in `SERVER_PROFILE` `"webapp"` (`assistant/config.py`), plus
+         `support_email = "<address>"` and `legal_draft = false` in
+         `config.toml` `[webapp]`. After Render redeploys, open `/welcome`,
+         `/privacy` and `/terms` signed out (a private tab). Until this PR
+         `/privacy` and `/terms` answer 404, and Google's consent screen
+         and Notion's integration form both need those URLs, so it must be
+         live before steps 4 and 6.
+      4. **Google for beta testers:** item "Beta testers' Google" below: a
+         *new* GCP project, consent screen with only `calendar.events`,
+         `calendar.calendarlist.readonly` and `calendar.calendars.readonly`,
+         published "In production" unverified (100-user cap), a Web
+         client with redirect `<PUBLIC_ORIGIN>/google/callback`, then its
+         JSON in `GOOGLE_PUBLIC_CLIENT_JSON`.
+      5. **Optional: Google verification.** Verify the domain in Search
+         Console (Google's review wants a domain you own, so this goes
+         with a custom domain), then submit the project for
+         verification with a demo video (consent, then a calendar
+         question). Lifts the warning screen and the 100-user cap.
+      6. **Notion:** item "Testers' Notion" below: the public integration,
+         then `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET`.
+      7. **Optional:** item "Cloud uptime alerts and error tracking"
+         (UptimeRobot on `/healthz`, Sentry's `SENTRY_DSN`).
+      8. **`[tts] family_paid_voices`:** leave it off unless you want
+         family-tier members on your ElevenLabs bill. Since this release it
+         never reaches beta testers (they are refused in the list, when
+         choosing and at reply time), so turning it on is safe for them.
+      9. **Dry run on a second phone** with a test invite of each tier:
+         MANUAL_TEST "Cloud server on Render" (invite, Beta tester, own
+         Anthropic key, own Notion, Download my data, Delete my account,
+         limits) and "Public site and waitlist". Watch Render's disk graph
+         (README "Persistent disk").
+      10. **Invite** the first testers from `/waitlist` (README "Inviting
+          someone from the waitlist").
+      11. **Tag 1.1.0** in the GitHub UI after the judge's final GO on
+          that exact SHA (the version bump and CHANGELOG date land in the
+          release PR first).
 - [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
       project folder: `.\scripts\install_watch_task.ps1` (or
       `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden
@@ -68,6 +118,22 @@ Only what is still open for Kyle. None of it blocks the code.
       enter their key again). Until it is set, beta testers can't save a key
       (the app says why) and so can't talk to Claude; family members keep
       using your key.
+- [ ] **Testers' Notion: a public Notion integration (~10 min; README
+      "Invite family" -> "Notion for beta testers").** Only you can: (1) at
+      notion.so/profile/integrations create a **Public** integration ("Any
+      workspace"), capabilities Read content + Update content, no user
+      information with email; (2) fill in the company name, website, privacy
+      policy `https://hey-claude.onrender.com/privacy`, terms
+      `https://hey-claude.onrender.com/terms` and a support email, and the
+      redirect URI `https://hey-claude.onrender.com/notion/callback`;
+      (3) paste its OAuth client ID and secret (shown once) into
+      `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET` in Render ->
+      Environment. Optional: publish an "Assignments" template page and set
+      it as the integration's template. No Marketplace listing is needed
+      (Notion's review is for listings; unverified from the sandbox, where
+      developers.notion.com is blocked). Needs `PUBLIC_ORIGIN` and
+      `USER_DATA_KEY` (above). Until (3) the "Connect Notion" button stays
+      hidden.
 - [ ] **Measure Render memory with a Chinese-speaking family member.** The
       +0.5-0.7 GB for Whisper `small` and the Mandarin voice is an
       estimate, not measured (Hugging Face is blocked in the build
@@ -161,6 +227,24 @@ Only what is still open for Kyle. None of it blocks the code.
       synthetic voices only. Run MANUAL_TEST.md step 3 and set `[wake]
       sensitivity` (and if needed `vad_min_threshold`, `silence_ms`) to what
       works for your voice and room.
+- [ ] **Speech accuracy on your own voice (~6 min, MANUAL_TEST.md 11b).**
+      The PC now uses Whisper `small.en` with beam search 5 and a
+      vocabulary prompt (first start downloads ~480 MB; the go-live
+      check's voice turn waits 180 s, so on a slow line fetch it first:
+      `.venv\Scripts\python -c "from faster_whisper.utils import
+      download_model; download_model('small.en')"`). Nothing was
+      measured on a real voice: say the ten phrases and five quick "yes"
+      answers on the phone (push-to-talk and hands-free) and on the PC.
+      If it is too slow on the PC, `[stt] model = "base.en"` in
+      `config.local.toml`.
+- [ ] **Optional: cloud speech-to-text (decision + key, ~5 min; only
+      Kyle).** For the best accuracy, especially on Render (which stays on
+      `base.en`): get an OpenAI or Deepgram API key, put
+      `OPENAI_API_KEY` or `DEEPGRAM_API_KEY` in `.env` (PC) or the Render
+      service's environment, and set `[stt] engine = "openai"` /
+      `"deepgram"` (on Render: `STT_ENGINE`). Paid per minute, and every
+      recording (invited people's too) then goes to that company; off by
+      default. README "Cloud speech-to-text".
 - [ ] **The rest of MANUAL_TEST.md** (mic, speaker, chime, follow-ups,
       barge-in (step 4b: whether `barge_in = "voice"` works on your
       speakers or needs headphones), spoken delete, Notion, memory, web, Piper, network down, latency).

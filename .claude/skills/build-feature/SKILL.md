@@ -90,6 +90,15 @@ and §2:
 
 **Chat mirror.** Kyle talks to you from the chat box in your
 coordinator window on the dashboard's Grid. Mirror each message you give Kyle to the chat, in the same turn.
+- What counts as a message: every reply you post in a comment thread,
+  every report, AND the short in-between updates you write while working
+  (what you found, what you'll do next: `kind: "update"`). The chat is
+  Kyle's view of you, like the Claude app: if he would see it in the
+  session, it goes to the chat too. A reply posted only in a comment
+  thread never reaches the chat (2026-10-21: Kyle's answers went missing
+  for hours this way).
+- Before ending a turn, check that every reply you posted this turn has
+  its mirrored copy; write any that are missing.
 - Write with ArtifactData to the collection
   `data/users/me/chat-<sessionTail>/msgs` (`me` resolves to Kyle;
   `<sessionTail>` is your session id after `session_`): `set` one new
@@ -114,7 +123,7 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
 - After EVERY publish of the dashboard, and at the start of every turn after the container restarted, call `ArtifactComments action:"watch"` with the dashboard url, even if the listing already shows it: after a restart the listing says "restored... not re-verified", and a restored watch may not deliver wakes. Never stop the dashboard watch with `on:false`: on 2026-10-21 a watch stopped and re-made was dropped at the next container restart, while watches never stopped were restored. Kyle asked on 2026-10-20 that dashboard messages always reach the coordinator.
 - At the end of EVERY turn, read the dashboard comment threads (ArtifactComments read), answer any comment sent to you that is still awaiting a reply, then set `status` idle. Comment wakes that arrive mid-turn can be lost.
   The page shows Kyle "In task" or "Idle" from this status at any time.
-- Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, merges; not every tool call.
+- Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, merges, a batch of reads or commands ("Read the scroll code · ran 5 commands"); not every tool call. Keep `status.text` on the step you are on, so the live status line under the chat reads like the Claude app's.
   One short line, at most 200 characters, plain text.
 - Take every `at` from `date -u +%Y-%m-%dT%H:%M:%SZ` at write time; never estimate.
 - When Kyle used the box this run, ask him as kind `"question"` instead of AskUserQuestion, and wait for his answer in the thread.

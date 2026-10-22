@@ -731,3 +731,75 @@ test("voice.js holds the mic off for the echo tail when playback stops", () => {
   const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
   assert.match(src, /echoTail: \(\) => \{ if \(endpointer\) endpointer\.holdOff\(CUE_TAIL_MS\); \}/);
 });
+
+test("endpointer: a short yes to an open question isn't a misfire", () => {
+  // the server's default min_utterance_ms (300); ~190 ms of speech
+  const ep = new VC.Endpointer({ silenceMs: 320, minUtteranceMs: 300 });
+  const say = (speechFrames) => {
+    const types = [];
+    const probs = [...Array(speechFrames).fill(0.9), ...Array(12).fill(0.05)];
+    for (const p of probs) types.push(...ep.process(frame(0.1), p).map((e) => e.type));
+    return types.at(-1);
+  };
+  assert.ok(6 * ep.frameMs < 300 && 6 * ep.frameMs >= 150);
+  assert.equal(say(6), "misfire");  // no question open: a click, a cough
+  ep.answerPending = true;          // "Should I delete it?" is open
+  assert.equal(ep.answerMinUtteranceMs, 150);
+  assert.equal(say(6), "speechEnd");
+  assert.equal(say(3), "misfire");  // under 150 ms: still a misfire
+  ep.answerPending = false;
+  assert.equal(say(6), "misfire");
+  // the window closed mid-utterance (the question is asked again): full minimum
+  const types2 = [];
+  [...Array(6).fill(0.9), ...Array(12).fill(0.05)].forEach((p, i) => {
+    ep.answerPending = i < 3;
+    types2.push(...ep.process(frame(0.1), p).map((e) => e.type));
+  });
+  assert.equal(types2.at(-1), "misfire");
+  // a lower min_utterance_ms setting is never raised by it
+  const low = new VC.Endpointer({ minUtteranceMs: 64, silenceMs: 320 });
+  low.answerPending = true;
+  const types = [];
+  for (const p of [0.9, 0.9, 0.9, ...Array(12).fill(0.05)]) {
+    types.push(...low.process(frame(0.1), p).map((e) => e.type));
+  }
+  assert.equal(types.at(-1), "speechEnd");
+  // voice.js tells the endpointer whether a question is open, frame by frame
+  const fs = require("node:fs");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "assistant", "web", "voice.js"), "utf8");
+  assert.match(src, /endpointer\.answerPending = controller\.answerWindow;/);
+});
+
+test("a short blip while the question plays doesn't cut it off; a quick yes after it counts", () => {
+  // wired as voice.js does: the endpointer's answer window is the controller's
+  const { c, log } = harness();
+  const ep = new VC.Endpointer({ silenceMs: 320, minUtteranceMs: 300 });
+  const say = (speechFrames, quietFrames = 12) => {
+    const probs = [...Array(speechFrames).fill(0.9), ...Array(quietFrames).fill(0.05)];
+    for (const p of probs) {
+      ep.answerPending = c.answerWindow;
+      for (const ev of ep.process(frame(0.1), p, c.replyAudible)) c.onVad(ev);
+    }
+  };
+  c.start();
+  c.onVad({ type: "speechStart" });
+  c.onVad(speechEnd());                                   // turn 1: "delete my exam"
+  c.onServer({ type: "confirm", turn: 1, question: "Delete the exam?" });
+  assert.equal(c.onServer({ type: "audio", turn: 1, question: true }), true);
+  assert.equal(c.answerWindow, false);                    // the question is playing
+  say(6);                                                 // ~190 ms blip over it
+  assert.equal(log.sent.filter((m) => m.type === "interrupt").length, 0, JSON.stringify(log.sent));
+  assert.equal(c.questionCut, false);
+  assert.equal(log.utterances.length, 1);
+  // speech that began over the question and ended after it: still the full minimum
+  say(4, 0);
+  c.onPlaybackIdle();
+  assert.equal(c.answerWindow, true);
+  say(2);
+  assert.equal(log.utterances.length, 1);
+  assert.equal(log.sent.filter((m) => m.type === "interrupt").length, 0);
+  // the question has played: a quick ~190 ms "yes" is sent as the answer
+  say(6);
+  assert.equal(log.utterances.length, 2, JSON.stringify(log.sent));
+  assert.equal(log.sent.filter((m) => m.type === "interrupt").length, 0);
+});

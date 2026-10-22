@@ -10,8 +10,11 @@ are removed.
 
 The Fernet key is derived with HKDF-SHA256 from the server secret
 USER_DATA_KEY (env only; Render generates it) and a per-purpose label, so
-the same secret can later encrypt other things (e.g. Notion tokens) under
-another label without one ciphertext ever opening as the other.
+the same secret also encrypts other things under another label (a person's
+Notion sign-in, NOTION_LABEL, in `<id>/notion.enc`; notion_web.py) without
+one ciphertext ever opening as the other. seal()/unseal() put the person's
+id inside the ciphertext, so a file copied into someone else's folder
+doesn't open as theirs.
 
 Fails closed: without USER_DATA_KEY (or with one too short to be a real
 secret), nothing is stored and save() says why. If USER_DATA_KEY changes,
@@ -36,6 +39,7 @@ ENV = "USER_DATA_KEY"
 MIN_SECRET = 32                      # characters; Render's generated values are longer
 ANTHROPIC_FILE = "anthropic_key.enc"  # in <dir>/<id>/
 ANTHROPIC_LABEL = b"hey-claude/anthropic-api-key/v1"  # the HKDF info for these keys
+NOTION_LABEL = b"hey-claude/notion-token/v1"          # a person's Notion sign-in
 KEY_PREFIX = "sk-ant-"
 MAX_KEY = 256
 _KEY = re.compile(r"^sk-ant-[A-Za-z0-9_-]{16,249}$")
@@ -83,6 +87,38 @@ def fernet(label: bytes, environ=None):
     raw = HKDF(algorithm=hashes.SHA256(), length=32, salt=None,
                info=label).derive(secret.encode("utf-8"))
     return Fernet(base64.urlsafe_b64encode(raw))
+
+
+def seal(label: bytes, uid: str, payload: dict, environ=None) -> str:
+    """`payload` (JSON) encrypted under `label`, with `uid` inside it.
+    KeyProblem 503 without a usable USER_DATA_KEY (nothing to write)."""
+    box = fernet(label, environ)
+    if box is None:
+        raise KeyProblem(secret_problem(environ) or "secrets can't be stored", 503)
+    return box.encrypt(json.dumps({**payload, "uid": uid}).encode("utf-8")).decode("ascii")
+
+
+def unseal(label: bytes, uid: str, token: bytes | str, environ=None,
+           what: str = "key", redo: str = "enter it again") -> dict | None:
+    """The payload seal() made for `uid`, or None (logged by id and error
+    type only): no usable USER_DATA_KEY, a file that doesn't open (a new
+    USER_DATA_KEY, another label, tampering), or someone else's."""
+    box = fernet(label, environ)
+    if box is None:
+        log.warning("User keys: %s has a saved %s but %s isn't usable", uid, what, ENV)
+        return None
+    if isinstance(token, str):
+        token = token.encode("ascii", "replace")
+    try:
+        data = json.loads(box.decrypt(token.strip()))
+    except Exception as e:  # InvalidToken (a new USER_DATA_KEY), bad JSON
+        log.warning("User keys: %s's saved %s doesn't open (%s); they need to %s",
+                    uid, what, type(e).__name__, redo)
+        return None
+    if not isinstance(data, dict) or data.get("uid") != uid:
+        log.warning("User keys: %s's %s file isn't theirs; ignored", uid, what)
+        return None
+    return data
 
 
 def clean_key(key) -> str:
@@ -149,15 +185,12 @@ class KeyStore:
         usable USER_DATA_KEY: nothing is written."""
         from assistant.tools.google_auth import write_private
 
-        box = fernet(ANTHROPIC_LABEL, self.environ)
-        if box is None:
-            raise KeyProblem(self.problem() or "keys can't be stored", 503)
         # the owner's id inside the ciphertext: a file copied into someone
         # else's folder doesn't open as theirs
-        token = box.encrypt(json.dumps({"uid": uid, "key": key}).encode("utf-8"))
+        token = seal(ANTHROPIC_LABEL, uid, {"key": key}, self.environ)  # 503: no secret
         path = self.path(uid)
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_private(path, token.decode("ascii"))
+        write_private(path, token)
         log.info("User keys: saved an Anthropic key for %s", uid)
 
     def load(self, uid: str) -> str | None:
@@ -171,19 +204,11 @@ class KeyStore:
         except OSError as e:
             log.warning("User keys: %s's key file is unreadable (%s)", uid, type(e).__name__)
             return None
-        box = fernet(ANTHROPIC_LABEL, self.environ)
-        if box is None:
-            log.warning("User keys: %s has a key but %s isn't usable", uid, ENV)
-            return None
-        try:
-            data = json.loads(box.decrypt(token.strip()))
-        except Exception as e:  # InvalidToken (a new USER_DATA_KEY), bad JSON
-            log.warning("User keys: %s's saved key doesn't open (%s); they need to "
-                        "enter it again", uid, type(e).__name__)
-            return None
-        key = data.get("key") if isinstance(data, dict) else None
-        if not isinstance(key, str) or data.get("uid") != uid:
-            log.warning("User keys: %s's key file isn't theirs; ignored", uid)
+        data = unseal(ANTHROPIC_LABEL, uid, token, self.environ)
+        key = data.get("key") if data is not None else None
+        if not isinstance(key, str):
+            if data is not None:
+                log.warning("User keys: %s's key file isn't theirs; ignored", uid)
             return None
         return key
 

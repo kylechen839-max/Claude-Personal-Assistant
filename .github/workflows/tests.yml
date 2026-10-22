@@ -66,11 +66,14 @@ jobs:
             "PSScriptAnalyzer not installed on this image; parse check only"
           }
 
-      - name: Cache Whisper model
+      # base.en (most real-Whisper tests, the Pi's and the server's model)
+      # and small.en (the PC default: tests/test_stt.py's short answers and
+      # the end-to-end test). A cold cache downloads both, ~550 MB.
+      - name: Cache Whisper models
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: whisper-base.en-${{ runner.os }}
+          key: whisper-base.en-small.en-${{ runner.os }}
 
       # The real Piper tests download this voice into voices/ when it's missing.
       - name: Cache Piper voice
@@ -98,6 +101,11 @@ jobs:
       - name: Install openWakeWord (Linux)
         if: runner.os == 'Linux'
         run: pip install --no-deps "openwakeword>=0.6"
+
+      # Fetched here (or found in the cache above) so a download hiccup
+      # fails visibly instead of the real-Whisper tests skipping themselves.
+      - name: Download Whisper models
+        run: python -c "from faster_whisper.utils import download_model; [print(m, '->', download_model(m)) for m in ('base.en', 'small.en')]"
 
       - name: Run tests
         run: python -m pytest -rs

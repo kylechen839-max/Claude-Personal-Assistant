@@ -10,3 +10,6 @@ assistant/web/vad/*.onnx binary
 # Shell scripts must keep LF (bash reads a CRLF shebang as "bash\r")
 *.sh text eol=lf
 *.command text eol=lf
+
+# Canvas calendar feed fixtures: keep the CRLF line endings and folds byte-exact
+tests/fixtures/*.ics -text

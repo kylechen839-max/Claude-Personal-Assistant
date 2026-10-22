@@ -8,9 +8,9 @@ server reads their replies with, from the voices this server really has:
                    profile: it needs more memory than the cloud box has)
   system           the OS voice (pyttsx3) or espeak-ng: [tts] fallback
   elevenlabs:<id>  an ElevenLabs voice, only with ELEVENLABS_API_KEY set
-                   (paid: family members get them only with
-                   [tts] family_paid_voices); listed from the API (cached),
-                   or any voice ID typed in
+                   (paid: family-tier members get them only with
+                   [tts] family_paid_voices, beta testers never); listed
+                   from the API (cached), or any voice ID typed in
   ""               the configured default ([tts] engine)
 
 Only voices in the person's language are offered (zh_CN Piper voices to a
@@ -112,7 +112,7 @@ class Catalog:
     """The voices this server can speak with."""
 
     def __init__(self, config: dict, environ=os.environ, session=None,
-                 clock=time.monotonic):
+                 clock=time.monotonic, family=None):
         from assistant import tts_kokoro
 
         t = config["tts"]
@@ -120,6 +120,7 @@ class Catalog:
         self.server = config.get("profile") == "server"
         self.voices_dir = Path(t.get("voices_dir") or "voices")
         self.family_paid = bool(t.get("family_paid_voices"))
+        self.family = family  # Family: whose tier may spend on ElevenLabs
         self.kokoro_model = Path(t.get("kokoro_model") or (
             tts_kokoro.DEFAULT_DIR / tts_kokoro.VARIANTS["int8"]))
         self.kokoro_voices = Path(t.get("kokoro_voices") or (
@@ -201,8 +202,16 @@ class Catalog:
         return (self.environ.get(tts_elevenlabs.KEY_ENV) or "").strip()
 
     def paid_ok(self, user) -> bool:
-        """May this person use (and spend money on) ElevenLabs voices?"""
-        return bool(self.elevenlabs_key()) and (user is None or self.family_paid)
+        """May this person use (and spend money on) ElevenLabs voices? The
+        owner always; an invited person only with [tts] family_paid_voices
+        and only in the family tier (Family.tier: someone unknown or not
+        listed counts as beta), never a beta tester on the owner's bill."""
+        if not self.elevenlabs_key():
+            return False
+        if user is None:
+            return True
+        return (self.family_paid and self.family is not None
+                and self.family.tier(user) == "family")
 
     @property
     def session(self):
@@ -499,7 +508,7 @@ class VoicePicker:
 
     def __init__(self, config: dict, default_tts, family=None, environ=os.environ,
                  session=None, clock=time.monotonic):
-        self.catalog = Catalog(config, environ, session, clock)
+        self.catalog = Catalog(config, environ, session, clock, family)
         self.prefs = VoicePrefs(config["tts"].get("voice_file"), family)
         self.engines = VoiceEngines(config, default_tts)
         self.default_tts = default_tts

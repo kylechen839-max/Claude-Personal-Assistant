@@ -92,7 +92,8 @@ def test_skill_mirrors_the_chat():
     assert "that start-of-turn write is the pickup write above: one write that carries `seen_ref`" in flat
     assert flat.count("At the end of EVERY turn") == 1
     assert ('Mirror each meaningful step as `kind: "activity"`: agent start and finish, tests run, pushes, '
-            'merges; not every tool call.') in flat
+            'merges, a batch of reads or commands') in flat
+    assert "not every tool call." in flat
     assert ("At the start of EVERY turn, set `status` working with a step text, and check "
             "`ArtifactComments action:\"watch\"` lists the dashboard; re-arm it if it's missing. "
             "Watches can silently disappear.") in flat
@@ -163,3 +164,23 @@ def test_skill_merges_its_own_prs_on_green():
     assert "merge commit" in rule and "enable_pr_auto_merge" in rule
     assert "Never merge a red, conflicted or unapproved PR" in rule
     assert "Merging** is Kyle's job" not in skill
+
+
+def test_dashboard_url_is_the_current_artifact():
+    """The dashboard moved on 2026-10-21: the old artifact stopped waking
+    the coordinator. Nothing here may point at it any more."""
+    new, old = "BWYCUWxJxBvG6MJvnsaqvn", "CpPTyJkkHZ7CK8jsPYZq4G"
+    for path in (WATCHDOG, ROOT / ".claude" / "TEAM_MEMORY.md", ROOT / "MANUAL_TEST.md"):
+        text = path.read_text(encoding="utf-8")
+        assert new in text and old not in text, path
+
+
+def test_skill_mirrors_thread_replies_and_in_between_updates():
+    """Kyle, 2026-10-21: replies posted only in comment threads never
+    reached the dashboard chat, and he wants the in-between updates, step
+    lines and live status there too, for every coordinator."""
+    skill = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "every reply you post in a comment thread" in skill
+    assert "in-between updates" in skill
+    assert "check that every reply you posted this turn has its mirrored copy" in skill
+    assert "Keep `status.text` on the step you are on" in skill

@@ -9,15 +9,17 @@ except to the services listed below, using your own keys.
 
 | Service | What is sent | When |
 |---|---|---|
-| **Anthropic** (Claude API) | What you say (as text, after local speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events with their colors, labels, guest counts and the first 300 characters of their notes, your calendars' names, guest addresses you ask to invite; assignments, email you asked about, web pages) | Every turn |
+| **Anthropic** (Claude API) | What you say (as text, after speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events with their colors, labels, guest counts and the first 300 characters of their notes, your calendars' names, guest addresses you ask to invite; assignments, email you asked about, web pages) | Every turn |
 | **Pinecone** (your index) | Short conversation summaries and notes you ask it to remember; search queries built from what you say | Before each reply (search) and after each conversation (summary) |
-| **Google Calendar** | Event reads and the changes you ask for. After your spoken yes, Google emails the guests you invite or remove, and the organizer (with your note, if any) when you answer an invite; for other changes, moves and deletes the assistant asks Google not to email anyone (Google says it may still send some notices) | When you ask about or change your calendar |
+| **Google Calendar** | Event reads and the changes you ask for. After your spoken yes, Google emails the guests you invite or remove, and the organizer (with your note, if any) when you answer an invite; for other changes, moves and deletes the assistant asks Google not to email anyone (Google says it may still send some notices). Events the assistant creates or edits while outside text is in the conversation carry a private `hc_untrusted` marker, visible only to your account through the API, so they keep asking before changes | When you ask about or change your calendar |
 | **Gmail** (only if `[gmail]` is enabled) | Searches and reads you ask for; **drafts** you approve. Nothing is ever sent: the code blocks every send call | When you ask about email |
 | **Notion** | Assignment reads and status changes; lecture notes pages and assignments you add from them, if the lecture recorder is on | When you ask |
 | **Slack / Discord / GitHub** (only if `[teamchat]` is on) | Reads and searches you ask for, with your token; the message, issue or file text goes to Anthropic so Claude can sum it up, as with email. Nothing is ever posted. Slack direct messages are never passed to Claude or logged. A digest you approve is saved in your Notion. Logs hold only counts and service names. A family member's instance never uses team chat | When you ask about team chat |
 | **Web search / fetch** (Anthropic-run tools) | The search query or URL | When Claude decides to look something up |
 | **ElevenLabs** (only if `ELEVENLABS_API_KEY` is set) | The reply text to be spoken | Each reply |
 | **Sentry** (only if `SENTRY_DSN` is set) | Error reports: the error's type and code location, the request's method and path, the app version and Python version. Never what you said, the error's message, cookies, IP or request contents | When something fails |
+| **OpenAI** (optional, off by default) | Speech-to-text, only with `[stt] engine = "openai"` and `OPENAI_API_KEY`: every recording that machine transcribes, plus the vocabulary prompt | Each recording |
+| **Deepgram** (optional, off by default) | Speech-to-text, only with `[stt] engine = "deepgram"` and `DEEPGRAM_API_KEY`: every recording that machine transcribes, plus the vocabulary as keyterms | Each recording |
 | **Hugging Face / GitHub releases** | Nothing about you: model downloads. Kokoro is checksum-verified at setup; Piper voices download at setup, and the Whisper and openWakeWord models on first use, without a checksum check | Once per model |
 
 Some requests are answered by Claude Haiku instead of Claude Sonnet; both are
@@ -33,6 +35,17 @@ calendar list and settings; it never asks for or reads Gmail. Their Google
 sign-in token is kept only in their own folder on the server and is deleted
 when they disconnect or are removed. Their conversation history is kept on
 the server, at most 20 MB per person (oldest conversations removed first).
+
+Invited people can download or delete their own account at any time from
+Settings. Download my data gives a zip of their conversations and profile
+(name, language, time zone, account type, date joined); it never includes
+Google sign-in tokens or API keys. The zip is built on the server only for
+the download and removed when it ends, or when the account is deleted.
+Delete my account takes effect at once in the app: it asks Google to revoke Hey Claude's access, signs them out on every
+device and permanently deletes their conversations, Google connection and any
+key they added. Render's automatic disk snapshots may keep a copy until they
+expire; they are not used to restore individual accounts. A backup the
+owner downloaded earlier also keeps its copy until the owner deletes it.
 
 If the owner turns on error reports (`SENTRY_DSN`), a crash or an error the
 app logs sends Sentry the error's type, where in the code it happened (file,
@@ -65,10 +78,39 @@ account under Anthropic's terms. Removing the key in Settings, or deleting your
 account, deletes it. We also keep a monthly token and cost estimate for your
 key in your folder, shown only to you.
 
+If you connect Notion, the server stores, encrypted with a server secret and
+readable only for your own requests: a Notion access token and refresh token
+for the pages you chose to share, your workspace's id and name, and the id and
+name of the Assignments database it found. Notion's record of your email
+address is not stored. Your assignment titles, due dates and statuses are read
+from Notion when you ask and sent to Anthropic as part of the conversation;
+status changes you ask for are written back to Notion. Disconnecting, deleting
+your account, or being removed asks Notion to revoke the token and deletes it;
+you can also remove Hey Claude in Notion under Settings, Connections.
+Reconnecting to a different workspace also revokes the previous connection at
+Notion; reconnecting to the same workspace keeps only the new sign-in.
+To keep the shared server fair, the app counts how many messages each invited
+person sends and how many seconds of their speech it transcribes, per minute
+and per day. Only the counts, and the times of the messages sent in the last
+minute, are kept, with their account id, in the server's memory. They are never written to disk, they reset when the server restarts,
+and they are deleted when the account is removed. No text or audio is kept for
+this.
+
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
-voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
-the machine that recorded it, except your phone's recording going to your own
-backend (PC, Pi or your Render server) over HTTPS.
+voices (Kokoro, Piper, pyttsx3) all run **locally**. By default, raw audio never
+leaves the machine that recorded it, except your phone's recording going to
+your own backend (PC, Pi or your Render server) over HTTPS.
+
+Cloud speech-to-text is off by default. Only if `[stt] engine` is set to
+`"openai"` or `"deepgram"` (on the cloud server, `STT_ENGINE`) and that
+service's API key is added, each recording that machine transcribes, including
+invited people's recordings on the cloud server and spoken yes/no answers, is
+sent over HTTPS as a WAV file, with a short word list (the app's vocabulary and
+any names in `[stt] hotwords`), to OpenAI (`api.openai.com`, gpt-4o-transcribe)
+or Deepgram (`api.deepgram.com`, nova-3) under their API terms. Recordings over
+five minutes, and Chinese-speaking family members' speech, always stay local;
+if the service fails, that recording is transcribed locally instead.
+Transcripts are written to the log only at DEBUG level.
 
 ## What is stored, and where
 
@@ -93,6 +135,7 @@ All paths are relative to the project folder unless noted. On Render the
 | Family member's Google (cloud) | `/data/users/<id>/google_token.json` on the server | A family member's own Google sign-in, used only for their own Calendar and Gmail (read and drafts, never send), never combined with Kyle's. Disconnect or removal deletes it; revoke at myaccount.google.com/permissions too. A Chinese-speaking member's speech is transcribed on the server with a Chinese Whisper model, like everyone else's |
 | Barge-in audio (PC) | Not stored | With `[wake] barge_in` on, the PC's mic also stays open while a reply plays so it can hear you interrupt. That audio is checked in memory for the wake word or speech louder than the reply, never saved or sent unless it becomes your next request (transcribed locally). `barge_in = "off"` keeps the mic closed while it speaks |
 | Health checks (watchdog) | `data/watch_status.json` (private file), `logs/watch.log` | Each app's check results: names, versions, times and fixed reasons such as "healthz: HTTP 502", never what anyone said. Its test conversations (a made-up question about your calendar, a number to remember) go to Anthropic like any turn, read your calendar or assignments (read-only), never search or save memory, and are never saved to history. When the dev team coordinator is set up, a change (an app down or recovered, a version refused) is sent to your own Claude Code session with the same fixed wording |
+| School deadlines (Canvas) | `[student] dir` (`data/student/deadlines.sqlite`); a family member's in `<family dir>/<id>/deadlines.sqlite`; their Canvas link sealed in their folder | If you connect Canvas, the calendar feed link or access token is stored (encrypted for family members; in `.env` for the owner), never your school password. From it only each deadline's title, course, type and date are kept. If Gmail is connected, the subject and preview of Canvas notification emails from the last two weeks are read (read-only) and Claude extracts only those fields; the email text is not kept. Searching for your school sends the name you type to Instructure (Canvas). Disconnect removes the link and can delete what was captured; deletes overwrite the text (`secure_delete`). Download my data includes your deadlines, never the link |
 | Logs | `logs/assistant.log` (rotating, ~4 MB max); on Render, the same lines also go to Render's log service (its dashboard and retention) | INFO level records lengths, yes/no answers and tool names, **not** what you said, replies, email text or memory summaries. Those appear only at DEBUG, which is off by default |
 | Downloaded models | `models/`, `voices/` | No personal data |
 | Dev team dashboard chat | The dashboard artifact's db on claude.ai (the page now lives in the private kylechen839-max/agent-dashboard repo; this repo's `/build-feature` master writes the chat), under your private `data/users/<your id>/chat-<session>/msgs` subtree (readable only by you) | Your messages to a `/build-feature` coordinator and its replies, written by the coordinator; the page only reads them. Messages you send from the chat box are also posted as comments on the artifact (claude.ai asks for consent once). Chats older than 30 days are pruned. Files you paste or drop into the chat box are stored in the dashboard artifact's asset store, which only you (its owner and editor) can open, and kept until you delete them or the artifact. The page's browser storage holds only the view, window layout (including which windows you hid), filter, the coordinator you picked (one claude.ai session link) and whether auto-close is on; it never leaves your browser |
@@ -124,8 +167,9 @@ server's admin, can read). Their messages go to Anthropic under your API
 key, and their web searches send only their time zone as location. Their
 data is never synced to your Pi or PC, never put in Pinecone or Notion, and
 not visible to your account in the app, except in the owner's backup
-download, which holds every account's conversations. Removing someone signs them out and
-deletes their folder and entry; if a file can't be deleted right away, the
+download, which holds every account's conversations. Removing someone first
+asks Google and Notion to revoke Hey Claude's access (best effort), then signs
+them out and deletes their folder and entry; if a file can't be deleted right away, the
 server retries at the next start, the next removal, or when you open the
 family list.
 

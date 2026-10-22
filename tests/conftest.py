@@ -175,7 +175,11 @@ def _env_vars() -> tuple[str, ...]:
             # team chat tokens (GITHUB_TOKEN is often set in a dev shell or CI)
             "SLACK_USER_TOKEN", "DISCORD_BOT_TOKEN", "GITHUB_TOKEN",
             # the secret that opens people's own Anthropic keys (userkeys.py)
-            "USER_DATA_KEY")
+            "USER_DATA_KEY",
+            # the public Notion integration (notion_web.py)
+            "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
+            # the owner's Canvas (student_web.py)
+            "CANVAS_TOKEN", "CANVAS_ICS_URL")
 
 
 @pytest.fixture(autouse=True)

@@ -22,7 +22,8 @@
       "Bash(git push -u origin claude/*)",
       "Bash(git push origin claude/*)",
       "ArtifactData",
-      "ArtifactComments"
+      "ArtifactComments",
+      "mcp__claude-code-remote__create_session"
     ],
     "ask": [
       "Bash(git push origin master*)",

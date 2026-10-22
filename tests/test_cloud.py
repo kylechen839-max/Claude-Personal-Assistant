@@ -844,6 +844,47 @@ def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     fam.close()
 
 
+def test_notion_callback_passes_the_guard_without_a_session(fake_client, tmp_path,
+                                                            monkeypatch):
+    """Notion's redirect back carries no session cookie either: the guard
+    lets it reach notion_web.py, which refuses a made-up state (400,
+    nothing written, never a call to Notion); its page code is public, its
+    API still needs signing in."""
+    import httpx
+
+    from assistant import notion_web
+    from assistant.family import Family
+
+    def no_network(request):
+        raise AssertionError("a test tried to reach Notion")
+
+    monkeypatch.setattr(notion_web, "TRANSPORT", httpx.MockTransport(no_network))
+    monkeypatch.setenv("NOTION_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("NOTION_OAUTH_CLIENT_SECRET", "secret_" + "c" * 43)
+    monkeypatch.setenv("USER_DATA_KEY", "k" * 48)
+    cfg = load_config(None, None, profile="server")
+    cfg["webapp"].update(sessions_file="", public_origin="https://hey-claude.example.com")
+    cfg["family"]["dir"] = str(tmp_path / "users")
+    fam = Family(cfg, client=fake_client)
+    assistant = webapp.WebAssistant(lambda reg: ClaudeChat(client=fake_client,
+                                                           model="m", tools=reg),
+                                    FakeTranscriber(), PrintTTS(), family=fam)
+    guard = cloud.build_app(cfg, assistant, TOKEN)
+    client = TestClient(at(PROXY, guard), base_url="https://testserver")
+    r = client.get("/notion/callback", params={"state": "made-up", "code": "c"},
+                   headers=via_proxy(PUBLIC), follow_redirects=False)
+    assert r.status_code == 400 and "Notion" in r.text
+    assert not (tmp_path / "users").exists() or not any((tmp_path / "users").iterdir())
+    assert client.get("/notion.js", headers=via_proxy(PUBLIC)).status_code == 200
+    assert client.get("/api/notion/status", headers=via_proxy(PUBLIC)).status_code == 401
+    _, invite = fam.invite("Tess", "en", tier="beta")
+    assert accept(client, invite).status_code == 200
+    status = client.get("/api/notion/status", headers=via_proxy(PUBLIC)).json()
+    assert status == {"enabled": True, "connected": False, "workspace": None,
+                      "database": None}
+    fam.close()
+
+
 def _render_yaml() -> str:
     from pathlib import Path
 

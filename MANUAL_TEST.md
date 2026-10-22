@@ -253,9 +253,40 @@ Ctrl+C to stop.
   - Should: after each answer a `(Turn timings from wake: ...)` line. Write
     down the last figure, "end of speech to first audio" (the wait you
     feel): ____ s. Under ~3 s is good.
-  - If slow: the `transcript` step is Whisper (try `[stt] model =
-    "tiny.en"`); `Claude reply` is the API; `end of speech` includes the
-    `silence_ms` pause.
+  - If slow: the `transcript` step is Whisper (`small.en` with beam 5 by
+    default; try `[stt] model = "base.en"`, or `beam_size = 1`, and
+    redo section 11b to see what accuracy that costs); `Claude reply` is
+    the API; `end of speech` includes the `silence_ms` pause.
+
+## 11b. Does it hear you? (6 min)
+Before this change it was `base.en` with greedy decoding; now `small.en`,
+beam 5 and a vocabulary prompt. Nothing here was measured on a real voice
+or mic; this is that measurement. For each of the three ways below, say
+the ten phrases and count the ones the caption shows right (small
+punctuation slips don't count):
+"what's on my calendar tomorrow", "move my dentist appointment to Friday",
+"what assignments are due this week", "mark my physics lab as done",
+"remind me to call Mom at six", "delete my three o'clock meeting",
+"reschedule the study group to Thursday", "what's my next Canvas quiz",
+"when is my chemistry exam", "add a note: buy printer paper".
+(The three "delete"/"move"/"mark" phrases only need to be heard right:
+answer "no" when it asks.) Then make five throwaway events ("add an event
+called test one tomorrow at 9 PM", ... "test five"), delete them one at a
+time ("delete the test one event") and answer each "Should I...?" with a
+short, quick "yes" (or "yeah").
+- [ ] **Phone, push-to-talk** (the mic button): ___/10 right; the
+      captions show every word you'd expect.
+- [ ] **Phone, hands-free** (voice conversation): ___/10 right, and
+      ___/5 quick "yes" answers were taken as yes (none ignored as a
+      misfire, none needed repeating).
+- [ ] **PC, wake word** (`python -m assistant`): ___/10 right; ___/5 "yes".
+  - Should: at least 9/10 on each and 5/5 "yes". Names it gets wrong: add
+    them as `hotwords = "..."` in `config.local.toml`, under its `[stt]`
+    line (add that line only if the file has none), and try again.
+  - Optional, only if you added `OPENAI_API_KEY` or `DEEPGRAM_API_KEY`
+    and set `[stt] engine`: repeat the ten phrases on one of them and
+    compare. `logs/assistant.log` shows "Cloud speech-to-text (openai
+    ...)" lines with lengths only, never your words.
 
 ## 12. Conversation history (4 min)
 - [ ] `python -m assistant`, then "Hey Claude, how do I add error bars to a
@@ -397,6 +428,8 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 - [ ] With `ELEVENLABS_API_KEY` in `.env` (optional, paid): restart.
   - Should: your ElevenLabs voices appear with a small **paid** tag, and an
     "ElevenLabs voice ID" box; a family member's phone shows neither.
+    With `[tts] family_paid_voices = true` on the cloud, a **Family**
+    account sees them too, and a **Beta** account still sees neither.
 - [ ] On the cloud with a family member signed in on another phone: each
       picks a different voice.
   - Should: each hears only their own; changing one doesn't change the
@@ -435,10 +468,12 @@ phone (or yours signed in as her test user).
   - Should: a Chinese yes/no question is spoken; "不要" cancels (nothing
     added). Repeat and say "好的": the event appears in her Google Calendar.
     Repeat once more and answer "还是明天吧" (out loud, in voice
-    conversation): not a yes, nothing added.
+    conversation): not a yes; it says "不好意思，我没听清。" once, then
+    "还是没听清，所以我没有做。" if she answers unclearly again, and nothing is
+    added.
 - [ ] Ask it to draft a reply to one email; answer "可以吗？".
-  - Should: a question is not a yes: no draft. Answer "是的": a draft
-    appears in her Gmail Drafts, nothing is sent.
+  - Should: a question is not a yes: it asks once more ("不好意思，我没听清。").
+    Answer "是的": a draft appears in her Gmail Drafts, nothing is sent.
 - [ ] Say "再见".
   - Should: "再见！" and the conversation ends.
 
@@ -497,6 +532,21 @@ with the stopwatch button.
     Repeat and say "no": the event stays. Repeat and talk over the question
     ("okay, and what about Friday?"): it says "OK, I won't delete it", the
     event stays, and it then answers about Friday.
+- [ ] Misheard yes (voice view, a real phone mic): delete a test event and
+      answer "ya", "yep", "okay" or "sure" in your normal voice.
+  - Should: each one deletes it after a single question. Then answer with
+    something unclear ("hmm", "the dentist"): it says "Sorry, I didn't
+    catch that. Please say yes or no." once; say "yes" and it deletes. Do
+    it again and stay unclear twice: it says "I still didn't catch that, so
+    I left it", the event stays, and it never asks a third time.
+- [ ] Move without a question: in a new conversation, "What's on tomorrow?"
+      (with only your own events, one of them with notes), then "Move the
+      test event to 4".
+  - Should: it moves it without asking anything, neither the app nor
+    Claude ("are you sure?"). If it does ask, note whether tomorrow had an
+    invite from someone else, an event Gmail made, one your guests may
+    edit, or a calendar someone shared with you (those make every change
+    ask, on purpose).
 - [ ] Follow-up cue: after an answer finishes, wait.
   - Should: a very quiet low note and **Still listening…** with the mic
     meter lit; after about 5 s the label goes back to **Listening** without
@@ -617,7 +667,9 @@ for all of this except the Google sign-in.
 - [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
-    folder; check Render -> Shell `ls /data/users` if you like.)
+    folder; check Render -> Shell `ls /data/users` if you like.) At
+    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    is gone too: Remove revokes their Google grant first.
 - [ ] **Beta tester (Calendar only).** Invite someone with the Account left
       on **Beta (Calendar only)** and open the link on another phone,
       before `GOOGLE_PUBLIC_CLIENT_JSON` is set (BLOCKERS "Beta testers'
@@ -631,6 +683,22 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **Download my data** (a test invite, signed in on a second phone or
+      a private Safari window, after a short chat): ⚙ -> **Download my
+      data**.
+  - Should: iOS offers to save `hey-claude-data.zip`; opened in Files it
+    holds `profile.json` (name, language, time zone, tier, created) and a
+    `conversations/` file per chat, and nothing else. A fourth download
+    within the hour says "Too many downloads". On your own (owner) phone
+    there is no such button.
+- [ ] **Delete my account** (same test person): ⚙ -> **Delete my
+      account**, type `DELETE`, tap **Delete everything**, answer OK.
+  - Should: the phone goes back to the sign-in page. Your list no longer
+    shows them, their other phone is signed out too, and at
+    myaccount.google.com/permissions (their Google account) "Hey Claude"
+    is gone if they had connected Google (and from their Notion's Settings
+    -> Connections if they had connected Notion). In Chinese the section reads
+    下载我的数据 / 删除我的账户.
 - [ ] **A beta tester's own Anthropic key** (after BLOCKERS "`USER_DATA_KEY`
       on Render"). On the beta tester's phone, before adding a key, type
       "hello" and also try hands-free voice.
@@ -647,6 +715,40 @@ for all of this except the Google sign-in.
 - [ ] **Remove key**, confirm.
   - Should: the next "hello" says to add a key again. On a **Family**
     account the same steps work, and without a key they use yours as before.
+- [ ] **A tester's own Notion** (after BLOCKERS "Testers' Notion"). With a
+      second Notion account (not yours) that has an Assignments database
+      (Assignment, Status, Due) with one row due this week: on the test
+      person's phone ⚙ -> **Connect Notion**, share only that database,
+      Allow.
+  - Should: back in the app; ⚙ shows "Notion connected." and the workspace
+    and database names. In Chinese the buttons read 连接 Notion / 断开 Notion.
+- [ ] Ask "What assignments do I have this week?", then "Mark <that one>
+      as done".
+  - Should: it reads that account's row (never yours), asks before changing
+    it, and after "yes" the row's Status is Done in Notion.
+- [ ] ⚙ -> **Connect Notion** again, the same workspace and the same
+      database, Allow. Then ask "What assignments do I have this week?"
+  - Should: it still lists that row (the old sign-in wasn't revoked under
+    the new one), and Settings -> **Connections** in Notion shows "Hey
+    Claude" once.
+- [ ] If that Notion account has a second workspace with its own
+      Assignments database: Connect Notion again, pick the second
+      workspace, share its database, Allow, then ask for assignments.
+  - Should: it reads the second workspace's rows; in the first
+    workspace's Settings -> **Connections** "Hey Claude" is gone.
+- [ ] ⚙ -> **Disconnect Notion**, OK. Then in that Notion account open
+      Settings -> **Connections**.
+  - Should: "Hey Claude" is no longer listed; asking about assignments
+    again says it can't see them. Reconnecting while sharing no database
+    (or two) shows "couldn't find exactly one Assignments database".
+- [ ] **Their limits.** On an invited person's phone, type seven short
+      messages ("1", "2", ...) as fast as you can, then wait a minute and
+      send one more. Repeat with hands-free voice (seven quick questions).
+  - Should: the seventh gets "That's a lot of messages at once. Please wait
+    a minute and try again." (Chinese on a Chinese account), shown and, in
+    voice, spoken, with no reply from Claude and nothing added to that
+    conversation in History; after the minute they answer normally. On your
+    own phone the same burst is answered every time.
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server
@@ -742,6 +844,30 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 - [ ] Choose a screenshot (PNG) from the gallery, then try a GIF or a PDF.
   - Should: the PNG works; the others are refused with a short message.
 
+## Student deadlines from Canvas (optional, ~10 min)
+Needs a real Canvas account. The **School deadlines** card is in the
+phone app's menu.
+- [ ] In Canvas (browser): **Calendar** -> **Calendar Feed**, copy the link.
+      Put it in `.env` as `CANVAS_ICS_URL=...` (Render: Environment), restart.
+- [ ] Phone app -> menu -> **School deadlines** -> **Sync now**.
+  - Should: "Found N new."; "What I captured" lists your real assignments
+    and exams with the right day and time in your time zone (check two
+    against Canvas). Tap **Sync now** again: "synced recently".
+- [ ] Ask "What's due this week?" by voice.
+  - Should: the same items, soonest first, with unchecked ones called out.
+- [ ] Tap **Looks right** on one; in Canvas, change that assignment's due
+      date (if you can, e.g. a test course), wait 15 minutes, **Sync now**.
+  - Should: your confirmed date stays; nothing is listed twice.
+- [ ] **Delete** one and sync again later.
+  - Should: it asks first, and the deleted item doesn't come back.
+- [ ] On an invited test account: paste the feed link in the card.
+  - Should: "Canvas connected (your school's address)"; the link is not
+    shown back anywhere; **Disconnect Canvas** asks, and "Also delete what
+    I captured" empties the list.
+- [ ] Open the log (`logs/assistant.log`, or Render's log) and search for
+      `user_` and an assignment title.
+  - Should: not found.
+
 ---
 
 ## Smart home (optional, ~10 min)
@@ -804,7 +930,11 @@ Setup is in README.md ("Raspberry Pi").
     `speaker-test -t wav -c 2`.
 - [ ] `.venv/bin/python -m assistant --timings`: repeat steps 3 (1 m normal
       only), 4 and 11.
-  - If slow: `[stt] model = "tiny.en"` and `[tts] engine = "piper"` (with
+  - Should: `--check` shows "Whisper model: base.en cached" (the
+    installer's `config.local.toml`), not `small.en`.
+  - If slow: change `model` under the existing `[stt]` in
+    `config.local.toml` to `"tiny.en"` (don't add a second `[stt]`) and
+    `[tts] engine = "piper"` (with
     "auto" the Pi already prefers Piper over Kokoro).
 - [ ] Optional, Kokoro on the Pi: `.venv/bin/python -m assistant
       --download-voice kokoro`, set `[tts] engine = "kokoro"`, run with
@@ -852,7 +982,7 @@ phone app installed from the cloud URL with Tailscale on.
   - Should: only `{"ok":true,"api":1,"role":"pi"}`.
 
 ## Agent run dashboard (optional, ~10 min)
-The dev team's run list at https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G
+The dev team's run list at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn
 (the page, its README and its desktop launchers are in the private
 kylechen839-max/agent-dashboard repo, under `dashboard/`).
 The dashboard is desktop only (no phone layout).

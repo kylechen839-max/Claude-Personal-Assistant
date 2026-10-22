@@ -90,6 +90,7 @@ def g(fake_client, tmp_path, monkeypatch):
     config["family"].update(enabled=True, dir=str(tmp_path / "users"))
     config["webapp"]["public_origin"] = ORIGIN
     config["calendar"]["token"] = str(tmp_path / "kyle_token.json")
+    config["student"]["enabled"] = False  # their deadlines: tests/test_student_web.py
     monkeypatch.setenv("GOOGLE_WEB_CLIENT_JSON", json.dumps(WEB_CLIENT))
     monkeypatch.setenv("GOOGLE_TOKEN_JSON", json.dumps(KYLE))  # Kyle's, on the server
     # a person's own Anthropic key (userkeys.py) gets the same mocked client
@@ -361,14 +362,19 @@ def test_disconnect_removes_the_token_and_the_tools(g):
     assert mom.get("/api/google/status").json()["connected"] is False
 
 
-def test_removing_a_member_deletes_their_token(g):
+def test_removing_a_member_deletes_their_token(g, monkeypatch):
+    from assistant import account
+
     mom, mom_id = g.member("Mom")
     dad, dad_id = g.member("Dad", "en")
-    connected(g, mom, mom_id, "mom")
+    mom_token = connected(g, mom, mom_id, "mom")
     connected(g, dad, dad_id, "dad")
+    revoked = []  # no network: the Remove revokes her grant first
+    monkeypatch.setattr(account, "revoke_google", revoked.append)
     kyle = TestClient(g.app, base_url=BASE)
     login(kyle)
     assert kyle.post(f"/api/users/{mom_id}/remove", json={}).status_code == 200
+    assert revoked == [mom_token.get("refresh_token") or mom_token["token"]]
     assert not g.fam.google_token(mom_id).exists()
     assert not (g.tmp / "users" / mom_id).exists()
     assert g.fam.google_token(dad_id).exists()  # Dad's stays
@@ -479,6 +485,11 @@ def test_family_speech_from_config():
     t = speech.transcriber("zh")
     assert (t.model_name, t.language) == (config["family"]["zh_stt_model"], "zh")
     assert speech.transcriber("en") is None
+    # [stt] beam_size applies; the owner's English vocabulary and names don't
+    config["stt"].update(beam_size=3, hotwords="Kyle")
+    t = webapp.family_speech(config).transcriber("zh")
+    assert t.beam_size == 3 and t.hotwords == ""
+    assert t.initial_prompt == "以下是普通话的句子。"
 
 
 # --- server sentences in each person's language --------------------------------------

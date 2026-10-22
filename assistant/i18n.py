@@ -36,6 +36,9 @@ EN = {
     "file_unreadable": "Claude couldn't read that file.",
     "say_yes_no": " Please say yes or no.",
     "no_answer": "No answer, so I didn't do it.",
+    # an unclear answer to a yes/no question: asked once more, then dropped
+    "confirm_again": "Sorry, I didn't catch that.",
+    "confirm_unclear": "I still didn't catch that, so I left it.",
     "not_caught": "I didn't catch that. Try again?",
     "wont_delete": "OK, I won't delete it.",
     "wont_do": "OK, I won't do that.",
@@ -68,9 +71,17 @@ EN = {
     "draft_also": " Careful: replies also go to {others}.",
     "draft_instead": " Careful: replies go to {others}, not to the sender {sender}.",
     "google_failed": "Google sign-in didn't finish. Go back to the app and try again.",
+    "notion_failed": "Notion sign-in didn't finish. Go back to the app and try again.",
+    "notion_reconnect": "The Notion sign-in stopped working. Reconnect Notion from the "
+                        "app's settings: tap the gear, then \"Connect Notion\".",
     "google_beta_off": "Google isn't set up for beta accounts yet.",
     "note_delete": "Do you want me to delete the note: {text}?",
     "note_delete_any": "Do you want me to delete that note?",
+    # a student's deadlines (tools/deadlines.py)
+    "deadline_confirm": "Do you want me to mark {title} as due {when}?",
+    "deadline_add": "Do you want me to add {title}, due {when}, to your deadlines?",
+    "deadline_delete": "Do you want me to delete the deadline {title}, due {when}?",
+    "deadline_delete_any": "Do you want me to delete that deadline?",
     # Home Assistant (tools/home_assistant.py)
     "ha_ask_unlock": "Do you want me to unlock {name}?",
     "ha_ask_lock": "Do you want me to lock {name}?",
@@ -117,6 +128,12 @@ EN = {
     "spotify_not_found": "I couldn't find {query} on Spotify.",
     "spotify_nothing_playing": "Nothing is playing on Spotify right now.",
     "still_working": "I'm still working on your last request.",
+    # an invited person's limits (quotas.py)
+    "limit_minute": "That's a lot of messages at once. Please wait a minute and try again.",
+    "limit_day": "You've reached today's limit of {per_day} messages. "
+                 "You can talk to me again tomorrow.",
+    "limit_speech": "You've used today's {minutes} minutes of speech. "
+                    "You can still type, and talking works again tomorrow.",
     "google_reconnect": "Reconnect Google from the app's settings: tap the gear, "
                         "then \"Connect Google account\".",
 }
@@ -135,6 +152,8 @@ ZH = {
     "file_unreadable": "Claude 读不了这个文件。",
     "say_yes_no": "请说“是”或者“不”。",
     "no_answer": "没有听到回答，所以我没有做。",
+    "confirm_again": "不好意思，我没听清。",
+    "confirm_unclear": "还是没听清，所以我没有做。",
     "not_caught": "我没听清楚，请再说一遍？",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",
@@ -164,9 +183,15 @@ ZH = {
     "draft_also": "注意：回复也会发给 {others}。",
     "draft_instead": "注意：回复会发给 {others}，而不是发件人 {sender}。",
     "google_failed": "Google 登录没有完成。请回到应用里再试一次。",
+    "notion_failed": "Notion 登录没有完成。请回到应用里再试一次。",
+    "notion_reconnect": "Notion 连接已失效。请在应用的设置里重新连接 Notion：点齿轮，再点“连接 Notion”。",
     "google_beta_off": "测试版账户暂时还不能连接 Google。",
     "note_delete": "要我删除这条记忆吗：{text}？",
     "note_delete_any": "要我删除这条记忆吗？",
+    "deadline_confirm": "要我把{title}的截止时间定为{when}吗？",
+    "deadline_add": "要我把{title}加到你的截止日期里吗？截止时间是{when}。",
+    "deadline_delete": "要我删除截止日期{title}吗？它的截止时间是{when}。",
+    "deadline_delete_any": "要我删除这个截止日期吗？",
     "ha_ask_unlock": "要我把{name}解锁吗？",
     "ha_ask_lock": "要我把{name}锁上吗？",
     "ha_ask_open": "要我打开{name}吗？",
@@ -206,6 +231,9 @@ ZH = {
     "spotify_not_found": "在 Spotify 上没找到“{query}”。",
     "spotify_nothing_playing": "Spotify 现在没有在播放。",
     "still_working": "我还在处理你上一个请求。",
+    "limit_minute": "一下子消息太多了，请等一分钟再试。",
+    "limit_day": "你今天的 {per_day} 条消息已经用完了，明天再来找我吧。",
+    "limit_speech": "你今天的 {minutes} 分钟语音已经用完了。还可以打字，明天就能再说话了。",
     "google_reconnect": "请在应用的设置里重新连接 Google：点齿轮，再点“连接 Google 账户”。",
 }
 

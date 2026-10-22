@@ -1,10 +1,17 @@
 <!doctype html>
-<!-- Release check before `[webapp] public_site = true`: these claims depend on
-     other public-beta pieces being on master and deployed:
-     - "Bring your own Anthropic API key", "stored encrypted on the server and
-       used only for your requests": G2 (BYOK)
-     - "Calendar only, for now", "No Gmail access is asked for": G1 (beta tier)
-     - "Your Notion assignments" for beta users: G6 (Notion public OAuth) -->
+<!-- Deploy checks (BLOCKERS.md, "Public beta launch", in that order). The
+     claims below are built and on master (beta tier, your own Anthropic key,
+     Notion sign-in). First, in one launch PR: privacy.html and terms.html
+     approved, `legal_draft = false` and `support_email` in config.toml
+     [webapp], `"public_site": True` in SERVER_PROFILE (assistant/config.py);
+     with PUBLIC_ORIGIN and USER_DATA_KEY set (and never changed). Then, with
+     /privacy and /terms live (Google's consent screen and Notion's
+     integration form need them), and before inviting anyone:
+     - GOOGLE_PUBLIC_CLIENT_JSON on Render (else beta testers can't connect
+       the Calendar-only Google this page describes)
+     - NOTION_OAUTH_CLIENT_ID / NOTION_OAUTH_CLIENT_SECRET on Render (else
+       there is no Connect Notion button)
+     Keep this an HTML comment: no inline script or style (CSP). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

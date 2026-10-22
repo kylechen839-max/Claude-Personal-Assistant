@@ -20,7 +20,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 |---|---|---|
 | `test_chat.py` | 9 | stage 1 |
 | `test_tts.py` | 16 | stage 2 |
-| `test_stt.py` | 4 | stage 3 |
+| `test_stt.py` | 17 | stage 3; beam search, vocabulary prompt, prompt echo, short answers on small.en |
+| `test_stt_cloud.py` | 12 | optional OpenAI / Deepgram speech-to-text, local fallback |
 | `test_wakeword.py` | 15 | stage 4 |
 | `test_follow_up.py` | 14 | follow-up mode |
 | `test_barge_in.py` | 43 | barge-in on the PC loop (talk over a reply), with follow-ups |
@@ -64,7 +65,9 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/attachments.test.mjs` | 6 | chat attachments: the tray, chips and shrunk photos (`node --test`) |
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
-| `tests/js/family.test.mjs` | 8 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
+| `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `test_confirm_ux.py` | 123 | yes/no answers: misheard yeses, one more try then cancel (text, PC voice, phone voice, `/api/confirm`), calendar moves without a question |
+| `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
 - `assistant/chat.py`: `ClaudeChat` keeps the conversation history, sends a
@@ -901,7 +904,7 @@ A read-only claude.ai page for checking on `/build-feature` runs at a
 glance, apart from the chat list (LLM Council verdict, 2026-10-19). It
 is not part of the assistant and loads nothing from it.
 - `tools/agent-dashboard/index.html`: the page behind
-  https://claude.ai/artifact/CpPTyJkkHZ7CK8jsPYZq4G (the master publishes
+  https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn (the master publishes
   it). One subscription to the `runs` collection (newest 100). A summary
   line ("2 need you · 1 running · 1 silent"), then one card per run with a
   state pill and a coloured edge: needs you (PR ready or blocked), silent
@@ -1328,7 +1331,11 @@ still the default.
   (`7eefabe3-...`) is configured.
 - `piper-tts` is GPL-3.0; fine for personal use. Kokoro's model is
   Apache-2.0, `kokoro-onnx` is MIT, and it pulls in `phonemizer` (GPL-3.0)
-  and a bundled espeak-ng (GPL-3.0); also fine for personal use.
+  and a bundled espeak-ng (GPL-3.0); also fine for personal use. The cloud's
+  Docker image (with piper-tts) is built on Render from this repo and never
+  published; serving replies over a network to beta testers is not
+  distribution under GPL-3.0 (it isn't the AGPL), so no source offer is
+  owed. Publishing the image or shipping it to someone would be.
 - **Kokoro and pyttsx3 can't share a process on Linux**: kokoro-onnx loads
   its own libespeak-ng, and pyttsx3's eSpeak driver then crashed the process
   in the test suite. The app only ever builds one engine (and the web app's
@@ -3756,6 +3763,147 @@ key, Calendar-only Google, no funding). This is piece G1 of that plan.
 - **Counts** (Linux sandbox, Python 3.13): 2442 passed, 58 skipped
   (master b96e6ed: 2435 passed, 58 skipped); JS 236 pass (was 232).
 
+## Public beta G4: account self-service (2026-10-21)
+Kyle: let invited people manage their own account. New module
+`assistant/account.py`; small additive hooks in `family.py`
+(`app.state.family_sign_out`) and `webapp.py` (`account.register`, and a
+shared `clear_session_cookie` that sign-out now uses too).
+- **`POST /api/me/delete`** (a family member's own cookie session; the
+  owner gets 403, signed out 401, `[family]` off 404, cross-site 403 from
+  the existing guard). Needs `{"confirm": "DELETE"}` or their name (any
+  case). First a best-effort Google revoke (`Account.revoke`, default
+  `revoke_google`: POST to `oauth2.googleapis.com/revoke` with the
+  refresh token in the body); a failure is logged with the error type and
+  the delete goes on. Then `Family.remove(uid, sign_out)`, the owner's
+  Remove path: every session and voice call of theirs signed out, the whole
+  `<dir>/<id>/` deleted (history, Google token, and G2's
+  `anthropic_key.enc` / `notion.enc`), with the existing retry. The
+  response deletes the cookie and sends `Clear-Site-Data: "cookies"`.
+- **`GET /api/me/export`**: a zip with `profile.json` (id, name,
+  language, time zone, tier, created) and `conversations/<id>.json`
+  (`history.export(conv, "json")`, archived included). Nothing is copied
+  from their folder, so no token or key file can get in. Bounded by
+  `[family] export_max_mb` (new, 50; content before compression, 413),
+  one at a time per person (409), 3 per hour per person (429). Built in a
+  `mkdtemp` folder, streamed, removed when sent; one left by a dropped
+  download is swept by the next export after 10 minutes.
+- **UI** (`family.js` `setupAccount`, markup in `index.html`): a family
+  member's ⚙ has **Download my data** (fetched and saved as a file, so an
+  error never replaces the page) and **Delete my account** (typed
+  confirmation, a confirm() saying it can't be undone, then back to the
+  sign-in page). English and Chinese (`i18n.js`). `sw.js` cache v24 (v23
+  is taken by PR #35).
+- **Tests.** `tests/test_account.py` (28): whole folder gone with planted
+  key, Notion and Google files and history; every session signed out;
+  revoke called with the refresh token before the folder goes; delete
+  succeeds when revoke raises (no token in the log); revoke posts the
+  token in the body; confirmation required (6 bad values) and the name
+  works; owner (cookie and Bearer) refused; another member's id in body or
+  query ignored; cross-site and Origin-mismatch 403; export holds
+  conversations and profile, no tokens or keys, never another member's or
+  the owner's text; cap (413) with nothing left behind; temp folder
+  removed; dropped downloads swept; one at a time; rate limit per person;
+  rate map bounded; caplog shows ids only. JS: family.test.mjs +5 (shown
+  only to family members, download saved as a file, refusals explained,
+  delete needs the word and a yes then signs out, no/failed cases) and
+  i18n.test.mjs +1 (every account string in both languages).
+  `test_webapp.py`'s sw.js check now expects v24.
+  - Revert check: 18 source reverts (account.py pieces and the route
+    hook), each alone with `__pycache__` cleared, all fail their tests;
+    family.js and i18n.js reverted alone fail the 6 and 1 JS tests.
+- **Counts** (Linux sandbox, Python 3.13): 2495 passed, 33 skipped,
+  2528 collected (master 5d18d7e: 2442 passed, 58 skipped, 2500
+  collected; +28 new tests; the other 25 were skips that passed in this
+  run because the sandbox's model and network checks differed between
+  runs, not because of this change). JS 242 pass (was 236).
+### Round 2 (judge findings, after merging master e45ee95)
+- **No export outlives the account.** Exports now live in
+  `<family dir>/.exports/export-<id>.<random>` (made 0700), not the shared
+  `<system temp>/hey-claude-exports`. `.exports` can never be an id
+  (`u_...`), and the "." separator keeps one id's folders apart from
+  another's. Account tracks each person's export folder; **Delete my
+  account** removes all their `export-<id>.*` folders and frees their
+  slot. Cleanup no longer depends on the generator starting: the export is
+  an `ExportResponse` (a `StreamingResponse` whose `__call__` cleans up in
+  `finally`), because with ASGI 2.4 Starlette raises ClientDisconnect
+  before the body and runs neither the generator's `finally` nor a
+  BackgroundTask. Folders older than 10 minutes are swept at startup (when
+  `register` makes the Account) as well as on every export. No backup
+  download exists on master, and `Family.remove`/`_load` only touch valid
+  ids, so neither sees `.exports` (tested).
+- **Archived conversations** are in the export test now (one of the two
+  planted ones is archived).
+- **/privacy and /terms** say people can download their data and delete
+  their account themselves in Settings; the support-email route stays.
+  Still `legal_draft` until Kyle approves. (Not in the sw.js shell, so no
+  cache bump.)
+- Docs: SECURITY's rate-limit wording (only an export that starts counts,
+  one ending in 413 too; 409/429 refusals don't); the table's
+  `family.test.mjs` count is 15.
+- **Tests.** `test_account.py` +5 (33): an export built and never
+  streamed is gone after the delete (and an earlier run's, but not another
+  person's); a raw ASGI 2.4 request whose `send` raises OSError at the
+  response start leaves no folder and no busy slot; the startup sweep
+  removes an old folder and keeps a fresh one; exports sit in
+  `<family dir>/.exports` at 0700 and survive another person's removal and
+  a reload of the list; the pages' self-service sentences (and that
+  family.js calls both routes).
+  - Revert check (each alone, `__pycache__` cleared): dropping the delete's
+    folder removal, using a plain StreamingResponse, dropping the startup
+    sweep, `archived=False`, the old temp root, and the old privacy.html
+    or terms.html each fail their test.
+- **Counts** (Linux sandbox, Python 3.13): 2569 passed, 34 skipped (the
+  merge commit abf3b0f: 2564 passed, 34 skipped; +5). JS 242 pass.
+### Round 3 (judge's two low findings)
+- **An old export can't free a newer one's slot.** The slot is now
+  `_busy[uid] = (started, token, folder)`: `_start` makes a fresh token,
+  `build` binds the folder to it once `mkdtemp` returns (only if the slot
+  is still that token's), a build error frees by token, and `finish` frees
+  only when the slot's folder is its own. Before, the slot was set first
+  but the folder map still named the old folder (and an unset one counted
+  as a match), so a stale download ending during the next export's build
+  freed that export's slot and let a third in. The separate `_folders`
+  map is gone.
+- **A mid-body disconnect closes the zip before cleanup.**
+  `ExportResponse.__call__`'s `finally` now closes the body first: it calls
+  `aclose()` on Starlette's iterator, then `close()` on our own generator.
+  Both are needed, because `aclose()` only ends Starlette's thread-pool
+  wrapper and leaves a sync generator suspended with the file open.
+  Closing the generator runs its `with` and `finally`, so the zip is closed
+  before the folder is removed (Windows can't remove an open file), and
+  the folder is gone when the app returns.
+- **Tests.** `test_account.py` +2 (35): export 1's download goes stale,
+  export 2 starts and export 1 ends inside export 2's build (before its
+  folder exists) and again afterwards; export 2 keeps the slot (a third
+  gets 409) until its own download ends. A raw ASGI 2.4 request whose
+  `send` raises OSError on the first body chunk (`more_body` true): at the
+  first `finish` the zip's file handle is already closed, and the exports
+  folder is empty inside the event loop with gc off.
+  - Revert check (each alone, `__pycache__` cleared): HEAD's account.py
+    fails both. `_done` as an unconditional pop fails the overlap test.
+    Dropping `close_body()` fails the disconnect test, and so does
+    `aclose()` alone without closing the generator (the file is still open).
+- **Counts** (Linux sandbox, Python 3.13): 2571 passed, 34 skipped (round
+  2: 2569 passed, 34 skipped; +2). JS 242 pass.
+- **Round 3 review** (APPROVED, 1 LOW test gap): two more tests pin the
+  token guards: a delete during a build leaves no slot behind, and a build
+  failing before its folder exists never frees a newer export's slot
+  (each fails with its guard removed). `test_account.py` 37.
+## Dev team dashboard: new artifact URL (2026-10-21)
+- The old dashboard artifact stopped delivering chat wakes to the
+  coordinator; a fresh copy of the same page wakes it reliably. Every
+  reference now points at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn:
+  the page's `LAUNCHER_KINDS`, both desktop launchers (CRLF and LF/exec bit
+  kept), the dashboard README and watchdog prompt, MANUAL_TEST, the
+  Dev team dashboard section above, TEAM_MEMORY (plus a dated lesson) and
+  the test that pins the URL. The page itself lives on in the
+  agent-dashboard repo, which also gets a static `moved.html` for the old
+  artifact.
+- **Tests.** `test_agent_dashboard.py` pins the new URL; with the old
+  launchers and page it fails 4 tests (launcher URL and the page/desktop
+  byte-for-byte checks). test_docs + test_agent_dashboard: 75 passed,
+  1 skipped (Linux sandbox, Python 3.13).
+
 ## Public beta G7: ops (error tracking, backup download, uptime) (2026-10-21)
 
 - **Error tracking** (`assistant/errortracking.py`): Sentry, optional. On
@@ -3963,3 +4111,826 @@ ran on the owner's `anthropic.Anthropic()`.
   contract test's live variants). Earlier the same day the G1 tree gave
   2442 passed, 58 skipped: 25 environment-dependent tests skipped then and
   run now, the same on both trees. JS 241 pass (was 236).
+## Public beta G6: Notion sign-in for invited people (2026-10-21)
+Built on `claude/account-self-service` (G4, PR #41), which revokes on
+self-delete. Any invited person (beta or family) can connect their own
+Notion workspace and gets exactly two tools on their own token.
+- **`assistant/notion_web.py`** (new), mirroring `google_web.GoogleConnect`:
+  `GET /api/notion/status` (`{enabled, connected, workspace, database}`),
+  `POST /api/notion/connect` (`{url}` of
+  `api.notion.com/v1/oauth/authorize?owner=user`), `POST
+  /api/notion/disconnect`, `GET /notion/callback`. The same state + nonce
+  cookie (`hc_notion`, Lax, path `/notion/callback`, 10 min) + session +
+  still-listed checks, 4 pending per person and 32 in all; the owner gets
+  404. The code is exchanged with notion-client's own `oauth.token`
+  (Basic auth, JSON body); no PKCE (Notion documents none). Then one
+  data-source search (page_size 100, one page): exactly one data source
+  with the Assignments schema (`Assignment` title, `Status` status with the
+  three options, `Due` date) is used, preferring the copy of the
+  integration's template (`duplicated_template_id` = the database's parent
+  page); none or several -> `database: null` and Settings says to share
+  only that database and reconnect (no picker, by decision). A grant that
+  can't be saved (removed meanwhile, write failed) is revoked at once.
+  The SDK gets its own logger at ERROR (its default adds a console handler
+  per client, and its warnings quote Notion's messages, which can echo a
+  title); a 10 s timeout per request.
+- **`assistant/userkeys.py`**: generic `seal(label, uid, payload)` /
+  `unseal(...)` (Fernet/HKDF under a label, the uid inside the ciphertext);
+  `KeyStore` now uses them (same behaviour and messages); `NOTION_LABEL =
+  hey-claude/notion-token/v1`. `<dir>/<id>/notion.enc` holds `{uid,
+  access_token, refresh_token, bot_id, workspace_id, workspace_name,
+  database_id, data_source_id, database_title}`; never Notion's `owner`
+  (their email). Without a usable `USER_DATA_KEY` connect answers 503 and
+  the callback never exchanges the code.
+- **`assistant/family.py`**: `notion_enabled/notion_status/save_notion/
+  disconnect_notion/revoke_notion/refresh_notion` and `_notion_tools`
+  (registered next to Google's; `_refresh_tools` swaps them in place).
+  The tools are `NotionAssignments.tools()` re-bound: a client built on
+  their token (never `token=`, whose falsy fallback is `NOTION_TOKEN`),
+  `untrusted_output` and `private` on both, "Kyle's ... his" rewritten,
+  and only `list_assignments` / `update_assignment_status` (the update
+  keeps `confirm_if_untrusted`). A 401 refreshes once under a per-person
+  lock (a second turn that waited uses the new token); a refresh token is
+  replaced only if Notion sends one; a failed refresh says "reconnect
+  Notion" (i18n `notion_reconnect`, en/zh). Notion's error text is replaced
+  by its code before it reaches Claude or the tool-failure log.
+- **Revoke** (`POST /v1/oauth/revoke`, token in the body) on Disconnect, on
+  "Delete my account" (`Account.revoke_token`, before Google's) and on the
+  owner's Remove (`remove_user`, before `Family.remove`). Best effort: a
+  failure is logged by type and never blocks; `notion.enc` goes with the
+  folder (`_finish_deletes` rmtree).
+- **Wiring**: one line in `create_app` after `userkeys_web.register`;
+  `/notion.js` in the static routes, `sw.js` SHELL (cache v27) and
+  CloudGuard `PUBLIC_GET` with `/notion/callback`. Config: `[family] notion
+  = true` (DEFAULTS and config.toml), `NOTION_OAUTH_CLIENT_ID` /
+  `NOTION_OAUTH_CLIENT_SECRET` in `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`,
+  render.yaml (`sync: false`) and conftest's cleared variables. No redirect
+  setting: it is `own_origin + /notion/callback`.
+- **UI**: `assistant/web/notion.js` (new): Connect / Reconnect / Disconnect
+  Notion beside Google's, shown only for an invited person's session, the
+  workspace and database names as text only, a confirm before disconnect,
+  and only Notion's authorize URL is followed. en and zh strings in
+  i18n.js. The public privacy page now describes the Notion sign-in (what
+  is stored, revoke on disconnect/delete, the Connections page); its and
+  landing.html's release-check comments say G6 is built and goes live
+  with the Render variables.
+- **Tests.** New `tests/test_notion_web.py` (42): every Notion call
+  through the real notion-client over an httpx MockTransport with Notion's
+  response shapes (the token answer with `owner.user.person.email`, the
+  2025-09-03 data-source search), asserting Basic auth and the JSON bodies:
+  the full connect (URL params, cookie flags, only `notion.enc` written, no
+  plaintext, private mode, not openable under the Anthropic label or as
+  someone else), tools only after connecting (in place, in an open
+  conversation), a real turn's tool list without "Kyle", seven refused
+  callbacks (unknown, reused, no cookie, other browser, signed out,
+  removed, no code) with no exchange and no file, a denied consent in
+  Chinese, a refused code, a grant that can't be saved being revoked, no
+  `USER_DATA_KEY` (503 and no exchange), off without the integration or the
+  switch, owner 404 / signed-out 401, pending bounds, five no-single-match
+  schemas, the template preference, a failed search, untrusted + private
+  flags, `NOTION_TOKEN` set and never sent, refresh once keeping the
+  refresh token, a rotated one stored, a failed refresh -> "Reconnect
+  Notion", two concurrent turns -> one refresh, Notion's error text kept
+  out of Claude and the log, disconnect revoke + delete, a failed revoke
+  still deleting, owner removal and self-delete revoking first (and
+  deleting when it fails), `Family.remove` deleting `notion.enc`, a
+  caplog at DEBUG with no token, code, nonce, secret, email, workspace,
+  database or assignment title, config/deploy/page wiring, and
+  seal/unseal. `test_cloud.py` +1 (a made-up state on the public callback
+  -> 400 through CloudGuard, status still needs sign-in). JS: new
+  `tests/js/notion.test.mjs` (9).
+  - Revert check: 34 Python and 6 JS source reverts, each alone with
+    `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1`, all fail their
+    tests (the two best-effort revoke guards are reverted together: either
+    one alone still catches the failure). Not
+    revert-checked: passing `token=` instead of a client (it would make a
+    real Notion call), and the owner 404 (structural: the owner's session
+    has no id).
+- **Counts** (Linux sandbox, Python 3.13): 2647 passed, 36 skipped (+42
+  test_notion_web.py, +1 test_cloud.py); JS 256 pass (+9). Baseline on this
+  branch: 2604 passed, 36 skipped; JS 247. Existing tests touched: the
+  sw.js pin is v27, `/notion.js` joins test_webapp's public list, and
+  test_docs knows the two tool names.
+### G6 Round 2 (review fixes, 2026-10-21)
+Merged `claude/account-self-service` (6f09947, with master 0005342: the
+ops PR, design skills and #9, which removed the PC hub and moved the
+dashboard); the only conflict was `ISOLATED_ENV_VARS` (both `SENTRY_DSN`
+and the Notion OAuth variables kept). sw.js stays v27 (master: v26).
+- **Reconnect revokes the old grant.** `Family.replace_notion` reads the
+  stored record and saves the new one under the per-person Notion lock;
+  `NotionConnect.finish` then revokes the old access token (quietly) if it
+  differs from the new one.
+- **A disconnect can't be undone by a refresh in flight.**
+  `disconnect_notion` holds the per-person Notion lock around revoke +
+  delete, `revoke_notion` (used by "Delete my account") takes it too, and
+  the owner's Remove holds it around revoke + `Family.remove`; a refresh
+  in flight finishes first and its new token is the one revoked. Belt and
+  braces: `save_notion(expect=...)` saves a refreshed record only if the
+  file still holds the token the refresh started from.
+- **Rate limits are bounded.** `notion_web.api()` passes notion-client's
+  `RetryOptions(max_retries=1, max_retry_delay_ms=2000)` (3.1's default
+  honours `Retry-After` up to 60 s, twice: about 2.5 min of stall on a
+  voice turn, disconnect or delete). requirements.txt: `notion-client>=3.1`
+  (a 3.0 install, which has no retries, is left as it is).
+- **Tests**: `tests/test_notion_web.py` +7 (49): reconnect A -> B revokes
+  A only and B stays live; the same token again revokes nothing;
+  disconnect and revoke while a refresh is blocked inside `refresh_grant`
+  (file gone, status not connected, the refreshed token revoked); a
+  refresh never saves over a changed or deleted sign-in; the owner's
+  Remove runs `Family.remove` under the Notion lock; a 429 with
+  `retry-after: 60` sleeps once, at most 2 s (`time.sleep` patched), for
+  a search and a revoke.
+  - Revert check (`__pycache__` cleared each time): the finish revoke,
+    the disconnect/revoke lock, the `expect` check, the Remove lock and the
+    retry options, each reverted alone, fail their tests.
+- **Counts** (Linux sandbox, Python 3.13): 2616 passed, 35 skipped; JS
+  118 pass. Baseline (the merge, before these fixes): 2609 passed, 35
+  skipped; JS 118 (master's #9 removed the dashboard and hub tests).
+### G6 Round 3 (two low findings, 2026-10-21)
+- **"Delete my account" holds the Notion lock around revoke and removal.**
+  `Account.delete` takes `Family._notion_lock(uid)` around
+  `Family._revoke_notion` and `Family.remove`, as the owner's Remove does.
+  Before, `revoke_notion` let the lock go before `remove`, so a refresh in
+  that gap could save a new token that the folder then took away without
+  revoking it. `Family.revoke_notion` had no other caller and is removed;
+  the lock isn't reentrant, so callers hold it and call `_revoke_notion`.
+  The Google revoke stays outside the lock.
+- **A refreshed token that isn't saved is revoked.** If `refresh_notion`'s
+  `save_notion` returns False (they were removed, or the sign-in changed)
+  or raises (KeyProblem/OSError), the new access token is revoked quietly
+  instead of being left live at Notion.
+- **A reconnect to the same bot revokes nothing.** `replace_notion` returns
+  no old token when `notion_web.same_bot(old, new)`: the same `bot_id`, or,
+  if either record has none, the same `workspace_id`. Notion may reuse the
+  bot for a workspace, and revoking its old token could end the new grant.
+  A different bot (another workspace) still has its old token revoked.
+  SECURITY.md records this as a deliberate non-fix; README and MANUAL_TEST
+  (same workspace, then another workspace) updated.
+- **Tests**: `tests/test_notion_web.py` +6 (55): "Delete my account" runs
+  `Family.remove` under the Notion lock, and a refresh started in that gap
+  waits, finds nothing and never calls Notion's token endpoint; a refresh
+  whose save is refused (False, or OSError) revokes the new token, logs no
+  token, and leaves the stored one; reconnecting the same bot (with and
+  without a stored `bot_id`) revokes nothing and the new token stays live;
+  `same_bot` cases. The reconnect A -> B test now uses another bot and
+  workspace. The race test's "revoke" case now runs `Account.delete`.
+  - Revert check (`__pycache__` cleared each time): `Account.delete`
+    releasing the lock before `remove` fails the delete-lock test; dropping
+    the refresh revoke fails both refused-save cases; dropping the
+    `same_bot` check fails both same-bot cases.
+- **Counts** (Linux sandbox, Python 3.13): 2622 passed, 35 skipped; JS 118
+  pass. Baseline (round 2): 2616 passed, 35 skipped; JS 118.
+
+## Public beta G3: per-person limits (2026-10-21)
+
+Gap (d) of the beta brief: nothing stopped one invited account from running
+turns or Whisper without end (CPU on the shared server; cost on the owner's
+key for family members without their own).
+- **`assistant/quotas.py`** (`UserQuotas`, shaped like
+  `cloud.RateLimiter`): per person (user id, across all their browsers and
+  the voice view) a sliding 60-second window of turns, turns per day and
+  seconds of speech transcribed per day. New `[family]` keys
+  `turns_per_minute` (6), `turns_per_day` (200) and `stt_seconds_per_day`
+  (1800), in `DEFAULTS` and config.toml; 0 = no limit. A day is the
+  person's own calendar day (their `timezone` from users.json), UTC when
+  they have none or it doesn't load. **In memory only** (decision: a
+  restart resets the counts; nothing personal is written). Bounded: people
+  with nothing counted in the current minute or their day are pruned when
+  room is needed, at most 1000 kept (oldest dropped); a removed person's
+  counts are forgotten (`Family.remove`).
+- **Where it is checked.** `Family.quotas` is the one instance; the owner
+  (session user None) is never looked up.
+  - `WebAssistant.start_turn` (typed, push-to-talk and attachment turns,
+    all through `/api/turn`): `limit_message` counts the turn or refuses
+    it before the thread starts; a refusal puts `{"type": "error",
+    "message": <sentence>}` and "done" (the page already shows server
+    sentences), so nothing is sent to Claude, the conversation and history
+    are untouched and the stale-conversation end doesn't run. A recording
+    also needs speech time left; typing still works when it is used up.
+  - `VoiceConversation._turn_body` (hands-free, via a `limit` callable
+    from `voice_ws.py`): checked before Whisper (nothing counted), then the
+    turn is counted just before Claude is asked, so noise heard as nothing
+    and "goodbye" don't use up turns. The refusal is sent as an error event
+    and spoken (`Chunk(reply=False)`).
+  - Speech seconds: `WebAssistant.transcribe(..., user=)` adds the
+    recording's length (samples / 16 kHz, measured from the audio) after
+    Whisper ran, also when it failed. Every path that transcribes for a
+    person passes it: push-to-talk, the voice socket (turns and spoken
+    yes/no), `/api/confirm`'s recorded answer, `transcribe_upload`. A spoken
+    yes/no in the voice view is counted but never refused (it belongs to
+    a running turn; refusing would only make it a "no"); a recorded answer
+    to the page's question is checked for speech time first (round 2). A
+    clip already started finishes, so the day's total can go past the
+    limit by one recording per session in flight. The lecture recorder
+    and tutor are owner-only (`require_owner`), so not limited.
+- **Sentences** (i18n.py, en + zh): `limit_minute`, `limit_day` (with the
+  day's number), `limit_speech` (minutes, "you can still type"). No JS
+  change: the page and voice view show the server's sentence; sw.js not
+  bumped.
+- **Logs:** INFO `Limits: refused a turn for <id> (<limit>)` and
+  `Voice turn <n>: refused (a limit)`; the speech total at DEBUG. No text.
+- **Tests.** New `tests/test_quotas.py` (19): each limit refuses at the
+  boundary and lets the next window through (minute, UTC day, the
+  person's own Asia/Shanghai day, an unknown zone as UTC, speech for
+  recordings only, 0 = off); bounded memory and pruning; defaults and
+  config; en/zh sentences; the web path (refused with no Anthropic call,
+  chat history and saved messages unchanged, the lock released, allowed
+  after the minute), the zh refusal, the owner never limited (web and
+  voice, nothing even tracked), recordings refused before Whisper while
+  typing still works, every transcription counted (failed Whisper,
+  `transcribe_upload`, `/api/confirm`), removal forgets, caplog (id and
+  limit only; no utterance, name or sentence), and the voice socket (minute
+  limit before Whisper, empty speech not counted, zh speech limit before
+  Whisper with no call to Claude).
+  - Revert check: 13 single source reverts, each alone with `__pycache__`
+    cleared (the Family attribute, `forget`, the start_turn refusal, the
+    speech count in `transcribe`, `/api/confirm`'s user, both voice checks,
+    the voice socket's `limit` and `user`, the zh sentence, a config
+    default, the owner guard, pruning): every one fails at least one test.
+- **Counts** (Linux sandbox, Python 3.13): 2586 passed, 36 skipped; master
+  7d55f8e in the same sandbox at the same time: 2567 passed, 36 skipped
+  (+19). JS 241 pass (unchanged).
+- **Round 2** (review fixes, after merging master 770e642):
+  - `/api/confirm` with a recording: checked for speech time first
+    (`WebAssistant.speech_refusal`, speech only: a spoken answer to a turn
+    already counted isn't a new turn). Out of time: 429 with the
+    `limit_speech` sentence in their language, Whisper doesn't run and the
+    question stays open (the page shows the sentence and the buttons again;
+    a tap or a typed yes still answers it; a refusal is never a "no").
+    Then the question is claimed (`PendingConfirm.claim`, under its own
+    lock, like the voice view's `pending.answering`): a second recording
+    for the same question gets 409 without running Whisper, and a failed
+    decode or transcription releases the claim so they can try again.
+  - A turn in flight when someone is removed can't bring their counters
+    back: `UserQuotas(is_listed=...)` (Family: `uid in self.users`, so
+    people being deleted are out too), checked under the quota lock by
+    `check`, `admit` and `add_speech`. `Family.remove` swaps the list before
+    `forget`, so either order of the race ends with no entry.
+  - Docs: the overshoot is "one recording per session in flight"
+    (quotas.py, SECURITY, above); PRIVACY says the times of the last
+    minute's messages are kept too. `tzdata` was already in
+    requirements.txt (unconditional), so zoneinfo works on Windows.
+  - Tests (+6 in `tests/test_quotas.py`): five concurrent recordings with
+    speech used up (all 429, Whisper never ran, question still pending and
+    unclaimed, a tap then answers it; caplog: INFO `Limits: refused a
+    spoken answer for <id> (limit_speech)`, no name or question); one slow transcription holding the
+    claim while four more get 409 (Whisper ran once, 1 s counted); a failed
+    transcription and an unreadable upload both release the claim; a
+    spoken yes at the turns-per-minute limit still answers; admit, remove,
+    add_speech leaves no entry; unlisted ids never counted. Revert check,
+    each alone with `__pycache__` cleared: the whole webapp change (3
+    fail), the claim (1), the releases (1), the speech check (1),
+    `turns=False` (1), the Family `is_listed` (1), the quota guards (2),
+    the `add_speech` guard alone (2), the new INFO log line (1).
+  - Counts (Linux sandbox): 2619 passed, 36 skipped; the merge commit
+    142a0b2 in the same sandbox: 2613 passed, 36 skipped (+6). JS 241 pass.
+
+## Public beta launch prep (2026-10-21)
+
+From the public beta go/no-go review. Prepares the launch; does not turn
+it on (`public_site`, `legal_draft` and `support_email` are unchanged:
+Kyle approves the wording and picks the address first, in a separate PR).
+
+- **Integrated count on master** 4b770b5 (G1-G7 all merged), Linux
+  sandbox, Python 3.13: 2649 passed, 35 skipped (measured on a clean
+  export of 4b770b5); JS 118 pass.
+- **Paid voices never reach beta testers.** `voice_picker.Catalog.paid_ok`
+  allowed any invited person ElevenLabs voices once `[tts]
+  family_paid_voices` was on, whatever their tier, so a beta tester could
+  run up Kyle's ElevenLabs bill. It now also asks the Family
+  (`Family.tier(uid) == "family"`; someone unknown or no longer listed
+  counts as beta, and without a Family nobody but the owner gets them).
+  `paid_ok` gates the listing (`voices`, the `custom` box) and `find`,
+  which `choose`, the preview and the reply voice (`voice_of` ->
+  `engine_for`) all go through, so a paid voice saved earlier falls back
+  to the default for a beta tester. The `config.toml` comment says
+  "family-tier members only (never beta testers)".
+- **The owner's Remove revokes Google too.** `family.py`'s
+  `revoke_and_remove` revoked only Notion; "Delete my account" revoked
+  both. The Google revoke moved from `Account.revoke_token` into
+  `account.revoke_google_grant(family, uid, revoke=None, label=...)`,
+  which both now call (Account passes its own `revoke`, so its behaviour
+  and log lines are unchanged). Remove runs it first, only for a listed
+  id, best effort (a failure is logged with the exception type, never
+  the token, and the removal goes ahead), then the Notion revoke and
+  removal under the Notion lock as before.
+- **Docs.** BLOCKERS has one ordered "Public beta launch" item (Render
+  env, legal approval, the launch PR before Google and Notion since they
+  need `/privacy` and `/terms`, then Google, verification, Notion,
+  Sentry/UptimeRobot, `family_paid_voices`, a dry run, invites, the tag),
+  pointing to the existing items. README's Render step lists
+  `GOOGLE_PUBLIC_CLIENT_JSON`, `NOTION_OAUTH_CLIENT_ID`/`_SECRET`,
+  `SENTRY_DSN`, `PUBLIC_ORIGIN` and `USER_DATA_KEY`; its `[family]` key
+  list is one complete list matching `DEFAULTS` (it had a broken
+  duplicate and lacked `enabled`, `export_max_mb`); "Persistent disk" says
+  to watch Render's disk graph and drops a stale "until merged" sentence.
+  The release-check comments in `landing.html` and `privacy.html` list the
+  remaining deploy checks instead of G1/G2/G6 (still HTML comments; the
+  pages are served by the server, not the service worker, so no cache
+  bump). CHANGELOG Unreleased: the dashboard, dev team, launcher, hub and
+  design-skill bullets are in a "Dev tooling" subsection at its end, the
+  dashboard ones folded into one that says it lives in its own repo (the
+  old ones named `tools/agent-dashboard/`, a hub and a phone layout that
+  are gone). MANUAL_TEST: Remove also clears "Hey Claude" from their
+  Google permissions; a Beta account never sees paid voices.
+- **Tests** (+3, 1 changed):
+  - `test_voice_picker.py`: `test_paid_voices_are_family_tier_only_even_when_allowed`
+    (through the routes: a beta tester with `family_paid_voices` on sees
+    no paid voice and no ID box, `choose` gets 400, a paid voice saved for
+    them falls back to the default engine; a family-tier member and the
+    owner can list and choose it). `test_family_members_get_paid_voices_only_if_allowed`
+    now passes a Family stand-in and checks beta, unlisted and no-Family.
+  - `test_account.py`: the owner's Remove revokes the refresh token before
+    the folder goes (INFO line has the id, no token; an unknown id revokes
+    nothing); a revoke failure still removes them.
+  - `test_family_google.py::test_removing_a_member_deletes_their_token`
+    now fakes the revoke (it would otherwise call Google) and checks it.
+  - Revert checks (source only, `__pycache__` cleared): the
+    `voice_picker.py` change fails both voice tests (`assert True is False`:
+    the beta tester was offered the ID box); the `family.py` call fails
+    all three Remove tests.
+- **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
+  over master's 2649 passed, 35 skipped); JS 118 pass.
+
+## Confirmations that don't nag (2026-10-21)
+
+Kyle: moving a calendar event asked for confirmation, and the app asked up
+to three times because speech-to-text misheard his "yes".
+
+- **Why a move asked.** Not a `confirm_prompt`: `move_calendar_event` has
+  only `confirm_if_untrusted`, and create/update ask without taint only for
+  guest changes. Two causes remained: (1) Claude asking "are you sure?" on
+  its own (only the delete tool told it not to), then the app's own
+  question on top when the conversation was tainted; (2) taint from the
+  listing every move starts with. `list_events` marks the result untrusted
+  when any listed event has notes (`description`), even Kyle's own
+  (`organizer.self` True), or is an invite, a Gmail-made event, a
+  `guestsCanModify` event, or comes from a calendar he doesn't own
+  (`calendar="all"` takes in subscribed holiday calendars). From then on
+  `ClaudeChat.tainted()` (`has_marked_results`) makes every change ask.
+  The taint rules are unchanged (SECURITY.md "Calendar data from Kyle's
+  own events"); cause 1 is fixed.
+- **Tool descriptions.** `create_calendar_event`, `move_calendar_event`
+  and `update_calendar_event` end with `JUST_DO_IT` ("just call the tool:
+  don't ask him to confirm first yourself"). Their `confirm_if_untrusted`,
+  guest questions and every delete question are unchanged.
+- **One answer classifier.** `cli.classify_answer` returns "yes", "no" or
+  "unclear", ignoring case and punctuation (and the iPhone's curly
+  apostrophe). Yes: yes/yeah/yep/yup/ya/yah/yea, sure, ok/okay, do it, go
+  ahead, please, correct, right, yes please, affirmative, sounds good,
+  alright, 是/对/好/可以/行 (the existing whole-answer Chinese rule), in a
+  short answer (at most 8 words) of yes words and filler. Any negation is a
+  no. Everything else is unclear. `cli.is_yes` and
+  `voice_session.is_explicit_yes` are now this one rule (they were two
+  lists; "okay" alone used to be a no in the voice view).
+- **One more try, then cancel.** An unclear answer gets "Sorry, I didn't
+  catch that. Please say yes or no." once; a second unclear one cancels
+  with "I still didn't catch that, so I left it." A clear no cancels at
+  once. Same in all four places: `text_confirm`, `voice_confirm` (PC; a
+  barge-in over the second question is still a no), the voice view
+  (`VoiceConversation._ask_again`: same turn, same pending question, a new
+  "confirm" event with `again: true` and a new question chunk; only that
+  chunk's own "played" opens it, so a stale "played" or an early answer is
+  "not heard" = no, and talking over it is "interrupted" = no), and
+  `/api/confirm` (`WebAssistant.ask_again`: the same confirmation id is
+  asked again; no page change needed, `app.js` already shows a new
+  "confirm"). The cancelled tool result now tells Claude to say so in one
+  short sentence and not to call the tool or ask again, so it doesn't
+  re-ask by itself.
+- **Logs.** INFO has lengths and the verdict ("Voice confirmation (11
+  chars) -> unclear", "Confirmation of turn 1 unclear: asking once more");
+  the answer text stays at DEBUG (caplog tests).
+- **Tests** (+125): new `tests/test_confirm_ux.py` (123: 50 yeses incl.
+  misheard ones, 25 noes, 26 unclear; a move with no taint runs with no
+  question; a delete asks exactly once; a misheard delete answer asks once
+  more then cancels; a move after listing an outside invite still asks;
+  own-event notes still taint (pins the reported cause); calendar edit
+  descriptions; text, PC voice, hands-free voice and `/api/confirm`
+  re-ask flows, including a barge-in on the second question, a stale
+  "played", and a clear no that never re-asks), plus
+  `test_voice_ws.py::test_unclear_answer_is_asked_again_over_the_socket`.
+  Changed: `test_voice.py::test_only_an_explicit_yes_confirms` ("okay" is
+  now a yes; "ya", "Yep!", "Cancel.", "stop" added; the unclear answers
+  moved to the re-ask tests) and one `test_voice_ws.py` case ("okay, and
+  what about Friday?" now re-asks, so the clear-no case says "Nope, cancel
+  that.").
+  - Revert check (old source, with only `classify_answer`/`JUST_DO_IT`/
+    `text_confirm(output_fn=)` shims so the file imports): 6 calendar/text
+    tests fail as expected (descriptions, misheard delete, text re-ask) and
+    every classifier, re-ask and voice test fails; the move-without-taint,
+    delete-asks-once, tainted-move and own-notes tests pass on the old code
+    too, as they should (they guard behaviour that must not change).
+- **Round 2 (judge, 5 low findings).** Digits are words (`[a-z0-9']+`), so
+  "Yes, 11" to "move it to 10?" is unclear, not a yes; an answer with "?"
+  or "？" ("Right?", "Okay?") is unclear; 没错 and a repeated yes
+  (是的是的, 对对对, 好的好的) are yeses while 不对 and 错了 stay noes; the
+  stale-"played" test now delivers the late report inside `_ask_again`
+  (before the new question's audio exists) and fails without the
+  `pending.chunk = None` guard; SECURITY, README and MANUAL_TEST no longer
+  say any other answer is a no. Revert check: the old `cli.py` fails the
+  15 new classifier cases ("okay 4 pm" was already unclear), and removing
+  the guard fails the stale-"played" test.
+- **Counts** (Linux sandbox, Python 3.13): 2793 passed, 35 skipped (+125
+  over master 5f42072's 2668 passed, 35 skipped); JS 158 pass (every file
+  in `tests/js`, none changed).
+
+## Speech accuracy: small.en, beam search, vocabulary prompt, optional cloud STT (2026-10-21)
+
+Kyle: the app "always mishears me" in voice conversation. Every path
+(wake word, push-to-talk, the phone's mic button, hands-free) goes through
+`stt.Transcriber`, which ran `base.en` with greedy decoding (`beam_size=1`)
+and no English prompt.
+
+- **`stt.py`.** `Transcriber(beam_size=5, initial_prompt=None,
+  hotwords=None)`: beam search 5 (falsy = the default, never greedy by
+  accident); `initial_prompt` None = the language's built-in prompt (new
+  `EN_PROMPT`: "calendar, assignment, Notion, reschedule, tomorrow, remind
+  me, delete, move, Canvas, exam, quiz"; Chinese keeps `ZH_PROMPT`), "" =
+  none; `hotwords` (names; only sent when set, so faster-whisper < 1.0.2
+  still works). `options()` feeds both the first decode and `redecode`,
+  which keeps beam, prompt and hotwords (temperature 0, no conditioning,
+  as before). **Prompt-echo guard:** a transcript that is the whole prompt,
+  or a run of it across two or more of its items, is silence (""); one
+  item alone ("Tomorrow.", "Remind me.") and a single hotword ("Kai") are
+  kept. The transcript is logged at DEBUG only; the echo line has its
+  length. `stt.from_config(stt, language, make=None)` builds it from
+  `[stt]` (cli.py and webapp.py now use it; cli passes its own
+  `Transcriber` so tests that patch `cli.Transcriber` still work).
+  `family_speech` (Chinese members on an English server) passes
+  `beam_size` but not the owner's prompt or hotwords.
+- **Defaults.** `[stt] model = "small.en"` (int8) for the PC, new keys
+  `beam_size = 5`, `initial_prompt = "auto"`, `hotwords = ""`, `engine =
+  "whisper"`, `cloud_model = ""`, `cloud_timeout = 10` (DEFAULTS and
+  config.toml). `SERVER_PROFILE` pins `stt.model = "base.en"` (baked into
+  the image; small.en's RAM on Render unmeasured), so Render stays on
+  base.en with beam 5; `WHISPER_MODEL` still overrides. `config.mom.toml`
+  keeps `small`, with beam 5, the Mandarin prompt and `engine = "whisper"`.
+  The Pi: `install_pi.sh` appends `[stt] model = "base.en"` to
+  `config.local.toml` unless it already has an `[stt]` section, so the Pi
+  downloads and runs base.en; the pi-arm64 simulation checks it (once, and
+  that `load_config()` gives base.en). `doctor.check_whisper_model` names
+  the beam (and warns that 1 is greedy), mentions small.en's ~480 MB;
+  `check_cloud_stt` says whether the engine's key is set, never its value.
+- **Cloud engine `stt_cloud.py`** (mirrors `tts_elevenlabs.py`).
+  `CloudTranscriber(local, engine, ...)` with `[stt] engine = "openai"`
+  (`gpt-4o-transcribe`, multipart WAV, `{"text": ...}`, the prompt plus
+  hotwords as `prompt`) or `"deepgram"` (`nova-3`, raw WAV, `keyterm`
+  query params from the prompt's items and hotwords, max 50,
+  `results.channels[0].alternatives[0].transcript`). Active only with
+  `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` (both added to `SECRET_ENV_VARS`
+  and `ISOLATED_ENV_VARS`; an OpenAI `sk-...` pattern added to the log
+  redaction). Timeout 1-60 s (default 10; 0 = default), then local
+  Whisper; any error, 5xx or odd reply also goes local and the cloud is
+  skipped for 60 s. Over 5 minutes of audio stays local. Logs: INFO has
+  engine, model, seconds, length, time; transcript at DEBUG; failures
+  give the HTTP status or exception type only (a `requests` error quotes
+  the URL, whose query holds keyterms). Invited people's audio is already
+  counted against `stt_seconds_per_day` before any engine runs
+  (quotas.py). `STT_ENGINE` env override for Render; render.yaml offers
+  `STT_ENGINE`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` (all `sync: false`).
+- **Endpointer** (`web/voice-core.js`): `Endpointer.answerPending` and
+  `answerMinUtteranceMs` (150): while a yes/no question is open, only
+  sounds shorter than 150 ms (instead of `min_utterance_ms`, 300) are
+  misfires, so a quick "yes" reaches the server. A lower
+  `min_utterance_ms` is never raised. `voice.js` sets the flag from
+  `controller.awaitingAnswer` before each frame. The confirmation logic
+  (voice_session.py, `is_yes`, `/api/confirm`, TurnController) is
+  untouched. `sw.js` cache v27 -> v28.
+- **CI.** `tests.yml` caches `whisper-base.en-small.en-<os>` and has a
+  "Download Whisper models" step (base.en and small.en) before pytest, so
+  a download failure shows instead of the real-model tests skipping. A
+  cold cache fetches ~550 MB (Windows too).
+- **Not done (left as found):** the 3-tap box downsample in
+  `web/voice-worklet.js` and the linear-interpolation resample in
+  `audio.py` (the researcher ranked them last); `lecture.py` keeps its
+  own Whisper settings.
+- **Measured:** nothing about accuracy; Hugging Face is blocked here, so
+  no Whisper model ran in this sandbox (the slow tests skip and run in CI).
+  The speed cost of small.en + beam 5 over base.en greedy is an estimate
+  (README says "about two to three times", not measured). MANUAL_TEST
+  11b is the real measurement: ten phrases and five quick "yes" answers,
+  phone push-to-talk, phone hands-free and the PC.
+- **Tests:**
+  - `test_stt.py`: `test_beam_size_and_prompt_come_from_config` (beam 5,
+    `EN_PROMPT`, `small.en`/int8 from DEFAULTS; custom beam, prompt,
+    hotwords; 0/None/"" beam = 5; "" prompt = none; Chinese "auto" =
+    `ZH_PROMPT`), `test_whisper_echoing_its_prompt_is_silence`,
+    `test_transcript_logged_at_debug_only`; the redecode test now checks
+    beam 5 and the prompt on the retry; `test_transcriber_language`
+    expects the English prompt. Slow (CI): the `whisper` fixture is now
+    the shipped transcriber (small.en, beam 5, prompt);
+    `test_short_answers_through_the_shipped_model` ("yes", "yeah go
+    ahead", "no", "move my dentist appointment to Friday", TTS-generated)
+    and `test_near_silence_never_comes_back_as_the_prompt`.
+  - `test_stt_cloud.py` (new, 12): both request/reply shapes, fallback
+    and 60 s cooldown on a timeout, a 503 and a reply without a
+    transcript, no key (one warning), long or empty audio stays local,
+    the echo guard, INFO/DEBUG caplog (no transcript, key or keyterm at
+    INFO), `from_config` (engine case, timeout bounds, unknown engine),
+    keys secret and isolated, doctor never prints the key.
+  - `test_docs.py`: `[stt]` mirrored in config.toml and README's table,
+    the keys in `.env.example` and render.yaml, Mom's `[stt]`.
+    `test_server_profile.py`: the server keeps base.en under the shipped
+    config.toml; `STT_ENGINE`. `test_family_google.py`: family speech
+    gets `beam_size`, not the owner's hotwords. `test_doctor.py`,
+    `test_end_to_end.py` (skip guard checks the shipped model),
+    `test_webapp.py` (sw v28) updated.
+  - JS: `voice-core.test.js` "a short yes to an open question isn't a
+    misfire".
+  - Revert checks (one source change at a time, restored after): greedy
+    beam fails 2 tests; no English prompt fails 7; no echo guard fails
+    the echo test; the transcript at INFO fails 2; `beam_size is not None`
+    fails the config test; logging the exception message fails the
+    cloud caplog test; no cooldown fails the 3 fallback cases; ignoring
+    `answerPending` fails the JS test; no `stt` in SERVER_PROFILE fails
+    the server test; family speech without `beam_size` fails its test.
+- **Counts** (Linux sandbox, Python 3.13): 2685 passed, 40 skipped (+17
+  passed, +5 skipped over master 5f42072's 2668 passed, 35 skipped,
+  measured on a clean export; the 5 new skips are the slow small.en tests,
+  Hugging Face being blocked here). JS: 118 pass in the `.mjs` files plus
+  41 in `voice-core.test.js` (+1).
+
+### Round 2 (judge: CHANGES_NEEDED, 6 findings; merged master 515ca4e)
+
+1. **A blip over the question no longer cuts it off.** The 150 ms minimum
+   applied while the yes/no question was still playing, so a 150-299 ms
+   sound over it became a barge-in that cut the question and declined
+   the action. New `TurnController.answerWindow` (`awaitingAnswer &&
+   !replyAudible`) feeds `endpointer.answerPending` in `voice.js`, and the
+   Endpointer latches it per utterance (`answerShort`: true only if the
+   speech began in the window and it never closed while speaking).
+   PR #51 changed no web code; its re-ask replays question audio, which
+   closes the window. Tests: a TurnController + Endpointer test (a 190 ms
+   blip during question audio sends no interrupt and no utterance; speech
+   that began over it and ended after it keeps the 300 ms minimum; a
+   190 ms "yes" after it is sent), and the window closing mid-utterance.
+2. **Separate instances start with the keys in the environment.**
+   `OPENAI_API_KEY` and `DEEPGRAM_API_KEY` left `ISOLATED_ENV_VARS` (still
+   in `SECRET_ENV_VARS`): OpenAI's quickstart does `setx OPENAI_API_KEY`,
+   which would stop Mom's and Kai's instances, and `config.mom.toml` pins
+   `engine = "whisper"`. SECURITY.md records it as deliberate.
+3. **Two-item answers are kept.** The echo guard now needs the whole
+   prompt (a 1-2 item one only if it is the initial prompt sentence) or
+   a run across 3+ of its items. "Reschedule tomorrow.", "Canvas exam.",
+   "Tomorrow, remind me.", "Exam, quiz.", "Kyle, Kai." are in the test's
+   kept list.
+4. PRIVACY.md wording sent to the master.
+5. `pi-arm64.yml` cache key `pi-sim-small.en-<requirements hash>`, so the
+   Pi simulation saves small.en once.
+6. PI_MIGRATION, README and MANUAL_TEST say to add `[stt]` settings
+   under the existing `[stt]` line of `config.local.toml` (a second header
+   is invalid TOML). `test_pi_stt_advice_keeps_config_local_toml_valid`
+   parses the installer's block with an added key, checks the wording, the
+   pi-sim key and the pin below.
+- `requirements.txt`: `faster-whisper>=1.0.2` (hotwords).
+- Each new test fails on the round-1 code: the TurnController test with
+  `answerWindow = awaitingAnswer`; the mid-utterance case without the
+  per-frame latch reset; the key test with round-1 `config.py`; the echo
+  test with round-1 `stt.py` ("Reschedule tomorrow." dropped); the docs
+  test with the old PI_MIGRATION sentence or the old cache key.
+- **Counts** (Linux sandbox, Python 3.13, after merging 515ca4e): 2811
+  passed, 40 skipped (+18 passed, +5 skipped over 515ca4e's 2793 passed,
+  35 skipped, measured on a clean export). JS: 118 in the `.mjs` files
+  plus 42 in `voice-core.test.js` (+2 over master).
+## Student assistant P1: school deadlines from Canvas (2026-10-21)
+The data foundation of the student assistant: each person's deadlines
+(exams, assignments, quizzes, classes), captured from Canvas, Canvas's
+notification emails or said by hand, with conflict handling, for the owner
+and every invited person. P2 (scheduler and push) and P3 (planner, quiz,
+screenshot import) read it through `DeadlineStore.list(uid)`.
+- **`assistant/deadlines.py`** (new): `DeadlineStore`, one SQLite per
+  person (the owner's `[student] dir`/deadlines.sqlite, an invited
+  person's `<[family] dir>/<id>/deadlines.sqlite`), `secure_delete=ON`, WAL
+  with a TRUNCATE checkpoint after every delete, one short connection per
+  call (nothing holds a file open), reads never create a file. API (uid
+  None = the owner): `list(uid)` -> `{id, course, title, kind, due,
+  status, source, source_due, captured_at}` soonest first, copies that
+  agree shown once; `propose(uid, candidates, source)` upserts on
+  (source, source_key); the same item (course code + title) with another
+  date from another source is a `conflict` on both; a confirmed date is
+  never overwritten (only `source_due` follows the feed); dismissed stays
+  dismissed; a deleted synced row leaves a SHA-256 tombstone of its key so
+  it doesn't come back; `resolve(uid, id, "confirm"|"dismiss"|date)`,
+  `add` (by hand, confirmed), `delete`, `delete_source`, `export`.
+  Bounded by `[student] max_items` / `max_per_source`; rows over 60 days
+  past are pruned and never re-added. `open_store(config)` gives the
+  process one store per config (owner tools, Family, routes share it);
+  Family sets `member_guard` so a write for someone just removed is
+  refused under Family's lock.
+- **`assistant/canvas.py`** (new): a bounded RFC 5545 reader (unfolding,
+  VEVENT/VTODO, VALARM skipped, DTSTART/DUE with `VALUE=DATE`, `Z`, `TZID`
+  or floating, SUMMARY's `[course]`, UID kinds; 2 MB, 2000 events, no new
+  dependency); `public_url` (https, port 443, no userinfo, every resolved
+  address `is_global`); `fetch_ics` (each redirect hop checked, size cap
+  while streaming); `CanvasAPI(base, token, http)` on httpx (planner items,
+  courses, assignments, module pages; `Link rel="next"` on the same host
+  only; 403/`X-Rate-Limit-Remaining` and 429 backoff 1, 2, 4 s);
+  `find_school` (Canvas's own lookup, else a guess from a domain);
+  `extract_from_pages` (structured output like `lecture.summarize`, never a
+  forced tool call; only {title, course, kind, due} kept, keyed by text so
+  a re-read doesn't duplicate; usage on the person's meter).
+- **`assistant/student_web.py`** (new): `StudentSync` (credentials, sync,
+  throttle) and the routes: `GET /api/student/items`, `POST
+  /api/student/canvas` ({ics_url} or {base_url, token}; invited people
+  only, sealed under `canvas.CANVAS_LABEL` in `<id>/canvas.enc`, 503
+  without `USER_DATA_KEY`; the owner gets 409 and uses `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` + `[canvas] base_url`), `POST /api/student/disconnect`
+  ({delete_items}), `POST /api/student/sync` (429 + Retry-After within
+  `sync_minutes`, 409 while one runs), `POST .../items/{id}/resolve`,
+  `DELETE` (and `POST .../delete`) for an item or a source, `GET
+  /api/student/schools` (10 a minute). Sync reads the feed or the planner
+  (and module pages with `[canvas] pages`), then with `[student] gmail`
+  the Canvas emails of the last 14 days (`GmailInbox.search`, read-only,
+  each email once), on the person's own key when they have one
+  (`family.UserApi`); errors come back as codes only.
+- **`assistant/tools/deadlines.py`** (new): `list_deadlines`
+  (`untrusted_output`, `private`), `confirm_deadline` and `add_deadline`
+  (`confirm_if_untrusted`), `delete_deadline` (`confirm_prompt` always);
+  questions in English and Chinese (i18n `deadline_*`).
+- **Phase B wiring**: `cli.register_student` in `build_tools`;
+  `cli.owner_gmail` split out of `register_gmail` (same behaviour);
+  `Family._deadline_tools` in `_register_tools`, `Family.gmail_inbox`
+  (now also used by `_google_tools`), `Family.while_listed`; `account`
+  export adds `deadlines.json` (never the Canvas link); one
+  `student_web.register` line in `create_app`; `[student]` and `[canvas]`
+  in `DEFAULTS` and config.toml, `[student] dir = "/data/student"` in the
+  server profile, `config.mom.toml` off with its own folder;
+  `CANVAS_BASE_URL` override; `CANVAS_TOKEN`/`CANVAS_ICS_URL` in
+  `SECRET_ENV_VARS`, `ISOLATED_ENV_VARS`, render.yaml, .env.example and
+  conftest's cleared variables; redaction patterns for feed links and
+  Canvas tokens.
+- **UI**: `assistant/web/student.js` (new, self-contained: builds its
+  own "School deadlines" card in `#student` or before the API key section,
+  text only). Not yet on the page: `/student.js` still needs the static
+  route, `sw.js` SHELL (cache bump), `cloud.py` `PUBLIC_GET` and a script
+  tag in index.html, which the P2 branch owns. Chinese strings for the card
+  (i18n.js) are left for that merge too.
+- **Tests.** New `tests/test_deadlines.py` (23), `tests/test_canvas.py`
+  (31), `tests/test_student_web.py` (27), `tests/js/student.test.mjs` (7),
+  `tests/test_contract.py` +3 (the extraction request against the
+  contract fake, plus two `output_config` refusals; live variants run in
+  CI's api-contract job), and the fixture `tests/fixtures/canvas_feed.ics`
+  in Canvas's shape (CRLF, folded lines, `VALUE=DATE`, `TZID`, a VALARM,
+  `event-assignment-123`; kept byte-exact by .gitattributes). The fake
+  Canvas answers with Canvas's planner JSON, `Link rel="next"`, the 403
+  rate limit; Claude with the Messages API's shape. Existing tests
+  updated for the new default tools: test_family's isolation test now
+  expects exactly the member's own four deadline tools bound to her id;
+  the Notion and family-Google fixtures turn `[student]` off (only the
+  tools that piece adds); test_config_cli turns it off with the rest;
+  test_account expects `deadlines.json` in the export; test_docs knows the
+  tool names.
+  - Failing first: `test_resyncing_the_same_feed_adds_no_duplicates` and
+    `test_a_confirmed_date_survives_a_changed_feed`. Reverting the
+    (source, source_key) upsert fails both (`added 3 != 0`, a second copy);
+    reverting the confirmed-date guard fails the second
+    (`2026-11-11T04:59:00Z != 2026-11-04T04:59:00Z`).
+  - Found while testing: a feed's long-past item was re-added on every
+    sync and pruned again (now skipped at proposal).
+- **Counts** (Linux sandbox, Python 3.13, not real hardware): 2739
+  passed, 37 skipped (+84 passed, +2 skipped: the live variants of the
+  extraction contract test, which need `ANTHROPIC_API_KEY`) over master
+  3b7ae54's 2655 passed, 35 skipped; JS 125 pass (+7).
+### P1 Round 2 (judge: CHANGES_NEEDED, 7 findings)
+- **HIGH 1, repeated titles:** a title that one source repeats under other
+  keys (a weekly "Lecture", a lab) was a conflict, and confirming one
+  dismissed the others. Now only rows from *different* sources can
+  conflict or be dismissed, and only when each is its source's only copy
+  of the item (`DeadlineStore._singles`). Several Canvas emails about one
+  item never conflict: the newest email's date wins, older ones that
+  disagree are dismissed and ones that agree follow it. `list` collapses
+  same-date copies across sources only (two same-day "Lab" rows from one
+  feed both show). The judge's probe now gives 0 conflicts, and
+  confirming one lecture leaves the other two drafts.
+- **MED 2, unbounded API answers:** every Canvas API answer (and the
+  school lookup) is now streamed up to `MAX_API_BYTES` (2 MB); a listing
+  keeps at most `MAX_API_ITEMS` (1000).
+- **MED 3, separate instances:** `cli.main` turns `[student]` off for an
+  instance started with its own `--env-file` unless its config sets its
+  own `[student] dir` (logged); README's family-copy section says so.
+- **LOW 4, no overall time limit:** a feed fetch has `FETCH_SECONDS` (60)
+  in all and a whole sync `SYNC_SECONDS` (180), checked between chunks,
+  requests and backoff sleeps; past it the remaining sources (Gmail too)
+  report `timed_out`.
+- **LOW 5, rate limit and module pages:** a 403 is a rate limit only with
+  "Rate Limit Exceeded" or no quota left (Canvas sends
+  `X-Rate-Limit-Remaining` on every answer; FakeCanvas now does too); a
+  course or page that can't be read is skipped, and only a rate limit or
+  the deadline stops the modules step.
+- **LOW 6, SECURITY wording:** a password field is ignored and never
+  stored (it isn't a 400). The "Bounded" bullet lists the new caps.
+- **LOW 7, page wiring:** `/student.js` added (one line each) to the
+  static routes, `sw.js` SHELL (cache version left for the merge),
+  CloudGuard `PUBLIC_GET`, index.html and test_webapp's public list;
+  Chinese for every fixed string of the card in i18n.js (the dynamic
+  pieces became separate elements, confirm() questions are translated).
+- **Tests** (+10 Python, +1 JS): test_deadlines (repeated titles, newest
+  email), test_canvas (plain 403, skipped page/course, size and item caps,
+  slow-drip deadline), test_student_web (one sync deadline, password not
+  stored + SECURITY wording, page wiring), test_config_cli (separate
+  instance), student.test.mjs (every fixed string translated). Each was
+  revert-checked against its source change alone (`__pycache__` cleared):
+  all fail without it.
+- **Counts** (Linux sandbox, Python 3.13): 2749 passed, 37 skipped (+94
+  over master 3b7ae54's 2655 / 35); JS 126 pass.
+### P1 Round 3 (judge: CHANGES_NEEDED; findings 1, 2, 4 here, 3 at merge)
+- **1, the newest email by Gmail's arrival time:** rows from one sync
+  share `captured_at`, and Gmail lists newest first, so the oldest email
+  was taken as the newest and the right date was dismissed for good. The
+  arrival time (Gmail's `internalDate`, set on arrival, not the sender's
+  Date header) now goes `GmailInbox.search` (`received`) ->
+  `email_texts` -> `extract_from_pages` (`sent_at`) -> a new `sent_at`
+  column (added to older files on open). The newest is the highest
+  `sent_at` (else `captured_at`, then the earlier row of one sync). Older
+  emails are now `superseded`, hidden from `list()` but not dismissed:
+  deleting a bad newest email brings the older one back.
+- **2, a confirmed email date is always an anchor:** a confirmed gmail row
+  that isn't the newest still takes part, so a newer email that disagrees
+  shows as `conflict`; confirming the newer one dismisses the old answer.
+- **4, the separate-instance off-switch compares resolved paths**
+  (`./data/student`, `data/../data/student` or the absolute path are all
+  the owner's folder).
+- **Tests** (+4, 2 extended): test_deadlines (both emails in one
+  `propose`, newest first, and delete brings the older back; a confirmed
+  email date vs a newer email; a round-2 file without `sent_at`),
+  test_canvas (arrival time carried through extraction; the search and
+  `email_texts` shapes), test_config_cli (three spellings of the owner's
+  folder). Revert-checked: the round-2 store logic fails the two store
+  tests; dropping the time from `email_texts` and the plain string compare
+  each fail theirs. The judge's r2a.py probe now gives Nov 9 draft / Nov 2
+  superseded, and confirmed + newer -> conflict.
+- **Counts** (Linux sandbox, Python 3.13): 2753 passed, 37 skipped (+98
+  over master 3b7ae54's 2655 / 35); JS 126 pass.
+
+## Kyle's own calendar data doesn't ask (2026-10-22)
+
+Kyle: moving an event still asked for confirmation after listing his
+calendar, though the events were his own. Cause: `list_events` tainted the
+listing whenever any event had notes (`description`), even on his own
+events, and whenever a calendar he doesn't own was read (with
+`calendar="all"`, Google's subscribed holiday calendar); `list_calendars`
+tainted whenever a shared calendar existed. Kyle decided his own data must
+not trigger confirmations.
+
+- **What changed** (`assistant/tools/calendar.py`): one rule,
+  `GoogleCalendar._outside`, now decides taint for listings, moves and
+  updates. An event is someone else's text when it is on a calendar Kyle
+  doesn't own or `is_from_others` (no `organizer.self is True`, an
+  `eventType` other than default/focusTime/outOfOffice/workingLocation/
+  birthday, or `guestsCanModify`). Notes alone no longer taint. Google's own
+  read-only calendars (`is_google_public`: ids ending
+  `@group.v.calendar.google.com` with reader or freeBusyReader access, e.g.
+  holidays) never taint, and their events aren't flagged `from_others`.
+  Birthday events (`eventType` "birthday") count as Kyle's.
+  `list_calendars` no longer taints (names and access only, never a
+  description); another person's calendar name is cut to 60 characters.
+- **Still taints:** invites from others, `fromGmail` events,
+  `guestsCanModify` events (notes included), any calendar shared with Kyle.
+  Remaining risk (SECURITY.md): text Kyle pastes into his own event notes
+  is trusted, and so is a note edited by someone he gave write access to
+  one of his own calendars.
+- **Tests** (+5, 5 changed): `tests/test_confirm_ux.py`:
+  `test_own_event_notes_taint_the_conversation_unchanged` now pins the new
+  behaviour (own event with notes, then a move: no question, patch runs);
+  `test_others_text_on_the_calendar_still_taints_and_the_move_asks`
+  (invite, fromGmail, guestsCanModify: tainted, the move asks);
+  `test_holidays_and_birthdays_do_not_taint` ("all calendars" with a
+  birthday and Google's holidays calendar, then a move with no question).
+  Fixtures are full events.list item shapes (kind, etag, creator,
+  organizer, eventType, birthdayProperties). `tests/test_calendar_features.py`:
+  new `test_list_calendars_does_not_taint_and_cuts_a_shared_name_short`;
+  the own-notes, other-calendar, all-calendars, `list_calendars` and
+  changes-on-a-calendar tests now use a friend's shared calendar for the
+  tainting case and expect no taint from holidays.
+  - Revert check: with the old `calendar.py`, 7 tests fail (the own-notes
+    pin, holidays/birthdays, own-notes listing, other-calendar,
+    all-calendars, both `list_calendars` tests). Taking only "birthday" out
+    of the allowed types fails the holidays/birthdays test. The three
+    still-taints cases pass on the old code by design; an over-broad fix
+    (dropping `is_from_others` from `_outside`) fails all three.
+- **Round 2 (judge: CHANGES_NEEDED, 3 findings).**
+  1. No laundering through Kyle's own events: when `create_event` or
+     `update_event` writes a title, place or notes while
+     `UNTRUSTED_CONTEXT` is set, the event gets
+     `extendedProperties.private.hc_untrusted = "1"` (the event's other
+     private properties are sent with it, so the patch can't drop them).
+     `is_from_others` treats a marked event as someone else's, so later
+     listings, moves and updates taint. A clean change never sends the
+     field, so the marker stays. No events.list `fields` mask is used, so
+     the property comes back as is. Tests:
+     `test_confirm_ux.py::test_notes_written_in_a_tainted_conversation_taint_the_next_one`
+     (a tainted create with notes, then a clean conversation: listing
+     taints and the move asks) and
+     `test_calendar_features.py::test_text_written_in_a_tainted_conversation_is_marked_for_good`
+     (clean update keeps the marker; tainted color-only update adds none;
+     tainted update merges the private map; tainted/clean create).
+  2. Whitespace in `SERIES = {` restored.
+  3. `test_a_google_public_calendar_id_without_the_extras_does_not_taint`:
+     a `...@group.v.calendar.google.com` id with no calendar list doesn't
+     taint, a `...@group.calendar.google.com` id does.
+  - Revert check: with the round-1 `calendar.py` both finding-1 tests fail.
+    The finding-3 test passes on round-1 code (it covers an untested
+    branch); it fails if the `entry is None` branch is dropped, and fails
+    if the suffix check also accepts `@group.calendar.google.com`.
+- **Counts** (Linux sandbox, Python 3.13): 2917 passed, 42 skipped (+8
+  over master 6ea4081's 2909 passed, 42 skipped). No JS touched.

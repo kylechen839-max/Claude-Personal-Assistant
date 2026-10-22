@@ -43,8 +43,21 @@ services:
       # The phone's sign-in token: Render makes a random one (256 bits).
       - key: WEB_TOKEN
         generateValue: true
-      - key: WHISPER_MODEL          # base.en (better) or tiny.en (smaller, faster)
+      # base.en (better) or tiny.en (smaller, faster); both are baked into the
+      # image. Not small.en (the PC's default): its RAM here is unmeasured.
+      # Beam search 5 and the vocabulary prompt come from config.toml.
+      - key: WHISPER_MODEL
         value: base.en
+      # Optional, paid, more accurate: "openai" or "deepgram" with that
+      # service's key below (README "Cloud speech-to-text"). Then the
+      # speech sent to this server is also sent to that service; on any
+      # error base.en transcribes it. Empty = local Whisper only.
+      - key: STT_ENGINE
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
       - key: DATA_DIR               # on the persistent disk
         value: /data
       - key: HISTORY_PATH
@@ -63,7 +76,24 @@ services:
       # connect Google (they never use the family client above).
       - key: GOOGLE_PUBLIC_CLIENT_JSON
         sync: false
-      # Encrypts each tester's own Anthropic API key on the disk (userkeys.py).
+      # Invited people's own Notion (notion_web.py): a *public* Notion
+      # integration whose redirect URI is <PUBLIC_ORIGIN>/notion/callback.
+      # Left empty, the "Connect Notion" button stays hidden.
+      - key: NOTION_OAUTH_CLIENT_ID
+        sync: false
+      - key: NOTION_OAUTH_CLIENT_SECRET
+        sync: false
+      # Your own Canvas for school deadlines (README "Student deadlines"):
+      # the Calendar Feed link (it is a secret), or an access token with
+      # CANVAS_BASE_URL. Left empty, only invited people's links are used.
+      - key: CANVAS_ICS_URL
+        sync: false
+      - key: CANVAS_TOKEN
+        sync: false
+      - key: CANVAS_BASE_URL        # e.g. https://canvas.school.edu
+        sync: false
+      # Encrypts each tester's own Anthropic API key on the disk (userkeys.py),
+      # and their Notion sign-in and Canvas link.
       # Render makes a random one; keep it: if it changes, everyone has to
       # enter their key again (nothing else breaks). Never share it.
       - key: USER_DATA_KEY

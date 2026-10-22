@@ -345,7 +345,12 @@ def test_latency_budget_excludes_only_the_os_voice(make_voice, monkeypatch,
     # The turn's marks use time.monotonic (about 16 ms ticks on Windows), the
     # renders time.perf_counter, so with no slow Whisper the difference can
     # come out a few ms below zero (-0.005 s once): allow 50 ms of clock slack.
-    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.3, 0.75 * voice_s)
+    # The room scales with the OS-voice work before the first audio (3/4 of
+    # it, at least 0.6 s): a loaded Windows runner spent 1.1 s outside the
+    # renders once around 3 failed tries and their logged traceback, and 0.47 s
+    # once in the fake Claude stream of the slow-Whisper case. Had the OS
+    # voice not been taken out, the pipeline would read at least os_voice.
+    assert 0.9 * stt_s - 0.05 <= pipeline < stt_s + max(0.6, 0.75 * os_voice)
 
 
 @pytest.mark.slow
@@ -418,7 +423,7 @@ def test_barge_in_over_the_socket(make_voice):
 
 @pytest.mark.parametrize("answer, deleted, barge_in", [
     ("yes", ["Dentist"], False), ("no", [], False),
-    ("okay, and what about Friday?", [], False), ("yes", [], True)])
+    ("Nope, cancel that.", [], False), ("yes", [], True)])
 def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted, barge_in):
     from assistant.tools import Tool, ToolRegistry
     from tests.conftest import tool_use_block
@@ -463,6 +468,54 @@ def test_spoken_confirmation_over_the_socket(make_voice, answer, deleted, barge_
     asked = [m["content"] for call in client.stream_calls for m in call["messages"]
              if m["role"] == "user" and isinstance(m["content"], str)]
     assert answer not in asked  # the answer never went to Claude as a request
+
+
+def test_unclear_answer_is_asked_again_over_the_socket(make_voice):
+    """The re-ask (cli.classify_answer "unclear") through the real socket:
+    a second "confirm" of the same turn, its own question audio, and only
+    its own "played" opens it."""
+    from assistant.tools import Tool, ToolRegistry
+    from tests.conftest import tool_use_block
+
+    done = []
+    tools = ToolRegistry()
+    tools.register(Tool(
+        name="delete_event", description="Delete an event.",
+        input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+        handler=lambda title: done.append(title) or {"deleted": title},
+        confirm_prompt=lambda i: f"Do you want me to delete {i['title']}?"))
+    client, http = make_voice(
+        streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
+                 stop_reason="tool_use"),
+        streamed("All done."),
+        heard=("delete my dentist appointment", "okay, and what about Friday?",
+               "yeah"), tools=tools)
+    login(http)
+
+    def question(ws):
+        got = [m for m in receive(ws, "audio") if m["type"] == "audio"]
+        while not got[-1]["text"].endswith("Please say yes or no."):
+            got += [m for m in receive(ws, "audio") if m["type"] == "audio"]
+        assert got[-1]["question"] is True
+        return got[-1]
+
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        receive(ws, "confirm")
+        first = question(ws)
+        ws.send_text(json.dumps({"type": "played", "turn": 1, "index": first["index"]}))
+        ws.send_bytes(utterance(2))
+        again = receive(ws, "confirm")[-1]
+        assert again["turn"] == 1 and again["again"] is True
+        second = question(ws)
+        assert second["text"] == "Sorry, I didn't catch that. Please say yes or no."
+        ws.send_text(json.dumps({"type": "played", "turn": 1, "index": second["index"]}))
+        ws.send_bytes(utterance(3))
+        rest = receive(ws, "turn_done")
+    answers = [m for m in rest if m["type"] == "confirm_answer"]
+    assert len(answers) == 1 and answers[0]["yes"] is True and answers[0]["turn"] == 1
+    assert done == ["Dentist"]
 
 
 def test_voice_continues_the_push_to_talk_conversation(make_voice):

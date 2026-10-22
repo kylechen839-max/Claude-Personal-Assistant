@@ -146,10 +146,14 @@ def check_audio_devices(config: dict, sd=None) -> list[Check]:
 
 
 def check_whisper_model(config: dict, download_model=None) -> Check:
-    """Is the faster-whisper model on disk (so startup needs no download)?"""
-    name = config["stt"]["model"]
+    """Is the faster-whisper model on disk (so startup needs no download)?
+    Also names the beam size (1 = greedy, which mishears more)."""
+    stt = config["stt"]
+    name = stt["model"]
+    beam = int(stt.get("beam_size") or 5)  # 0 = the default
+    how = f"beam {beam}" + (" (greedy: faster, mishears more)" if beam == 1 else "")
     if Path(name).is_dir():
-        return Check("Whisper model", True, f"local folder {name}")
+        return Check("Whisper model", True, f"local folder {name}, {how}")
     if download_model is None:
         try:
             from faster_whisper.utils import download_model
@@ -159,9 +163,27 @@ def check_whisper_model(config: dict, download_model=None) -> Check:
         path = download_model(name, local_files_only=True)
     except Exception:
         return Check("Whisper model", False,
-                     f"{name} not cached yet (downloads on first run, needs internet)",
-                     required=False)
-    return Check("Whisper model", True, f"{name} cached at {path}")
+                     f"{name} not cached yet (downloads on first run, needs internet; "
+                     "small.en is about 480 MB)", required=False)
+    return Check("Whisper model", True, f"{name} cached at {path}, {how}")
+
+
+def check_cloud_stt(config: dict, environ=os.environ) -> list[Check]:
+    """[stt] engine = "openai" / "deepgram": is its key set (never the value)?"""
+    from assistant.stt_cloud import KEY_ENV
+
+    engine = str(config["stt"].get("engine") or "whisper").strip().lower()
+    if engine == "whisper":
+        return []
+    if engine not in KEY_ENV:
+        return [Check(f"STT ({engine})", False, "unknown engine; using local Whisper "
+                      "(choose whisper, openai or deepgram)", required=False)]
+    var = KEY_ENV[engine]
+    if environ.get(var):
+        return [Check(f"STT ({engine})", True,
+                      f"{var} set; local Whisper is the fallback")]
+    return [Check(f"STT ({engine})", False, f"{var} not set in .env; using local "
+                  "Whisper instead", required=False)]
 
 
 def check_tts(config: dict, which=shutil.which, environ=os.environ) -> Check:
@@ -292,11 +314,13 @@ def run_checks(config: dict, keyword_path: str | None = None,
         return [*check_keys(environ), *check_server(config, environ),
                 *check_google_env(config, environ),
                 check_whisper_model(config, download_model),
+                *check_cloud_stt(config, environ),
                 *check_server_tts(config, which), *check_web(environ)[1:]]
     return [*check_keys(environ), *check_google_files(config),
             check_wake_model(config, keyword_path),
             *check_audio_devices(config, sd),
             check_whisper_model(config, download_model),
+            *check_cloud_stt(config, environ),
             check_tts(config, which), *check_web(environ)]
 
 

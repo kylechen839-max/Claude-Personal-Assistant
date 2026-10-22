@@ -71,6 +71,14 @@
         Math.min(0.9, this.threshold + 0.25);
       this.silenceMs = opts.silenceMs ?? this.silenceMs ?? 700;
       this.minUtteranceMs = opts.minUtteranceMs ?? this.minUtteranceMs ?? 300;
+      // While a yes/no question waits for its answer (`answerPending`: asked
+      // and no longer playing, TurnController.answerWindow), a quick "yes"
+      // can be shorter than that: only shorter sounds than this are
+      // misfires. Only for speech that began and ended in that window; a
+      // blip while the question plays keeps the full minimum (else it
+      // would cut the question off and decline the action).
+      this.answerMinUtteranceMs = opts.answerMinUtteranceMs ?? this.answerMinUtteranceMs ?? 150;
+      this.answerPending = this.answerPending ?? false;
       this.maxUtteranceMs = opts.maxUtteranceMs ?? this.maxUtteranceMs ?? 30000;
       this.confirmMs = opts.confirmMs ?? this.confirmMs ?? 250;
       this.prePadMs = opts.prePadMs ?? this.prePadMs ?? 320;
@@ -82,6 +90,7 @@
       this.silentFrames = 0;
       this.silentMs = 0;
       this.confirmed = false;
+      this.answerShort = false; // this utterance stayed in the answer window
     }
     // Feed one frame and its speech probability; returns events.
     process(frame, prob, strict = false) {
@@ -96,6 +105,7 @@
         while (this.prePad.length > keep) this.prePad.shift();
         if (positive && !held) {
           this.speaking = true;
+          this.answerShort = this.answerPending;
           this.frames = this.prePad.slice();
           this.prePad = [];
           this.speechFrames = 1;
@@ -107,6 +117,7 @@
         return events;
       }
       this.frames.push(frame);
+      if (!this.answerPending) this.answerShort = false;
       if (positive) {
         this.speechFrames++;
         this.silentFrames = 0;
@@ -136,8 +147,10 @@
       // keep ~100 ms of the trailing silence, drop the rest
       const trailing = Math.max(0, this.silentFrames - Math.ceil(100 / this.frameMs));
       const frames = this.frames.slice(0, this.frames.length - trailing);
+      const minMs = this.answerShort
+        ? Math.min(this.minUtteranceMs, this.answerMinUtteranceMs) : this.minUtteranceMs;
       this.reset();
-      if (speechMs < this.minUtteranceMs) return { type: "misfire", speechMs };
+      if (speechMs < minMs) return { type: "misfire", speechMs };
       return { type: "speechEnd", audio: concat(frames), speechMs, cutOff };
     }
   }
@@ -268,6 +281,9 @@
     // "thinking" because he was talking when it started): the VAD should
     // ask for more certainty, so its echo doesn't count as speech.
     get replyAudible() { return this.state === "speaking" || this.playing; }
+    // A yes/no question has been asked and is no longer playing: what is
+    // said now is its answer (the endpointer then keeps a quick "yes").
+    get answerWindow() { return this.awaitingAnswer && !this.replyAudible; }
 
     setMuted(muted) {
       this.muted = muted;

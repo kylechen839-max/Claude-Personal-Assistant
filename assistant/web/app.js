@@ -362,6 +362,7 @@ async function refreshState() {
     if (window.HeyClaudeFamily) window.HeyClaudeFamily.onState(state);  // family.js
     if (window.HeyClaudeMemory) window.HeyClaudeMemory.onState(state);  // memory.js
     if (window.HeyClaudeSpotify) window.HeyClaudeSpotify.onState(state);  // spotify.js
+    if (window.HeyClaudeNotion) window.HeyClaudeNotion.onState(state);  // notion.js
     if (window.HeyClaudeVoicePicker) window.HeyClaudeVoicePicker.onState(state);  // voice-picker.js
     if (window.HeyClaudeUI) window.HeyClaudeUI.renderHealth(document, state.health);  // ui.js
     setConfirm(state.confirm);

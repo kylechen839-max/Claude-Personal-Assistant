@@ -120,8 +120,11 @@ browser and at most 4 server-wide; the rate limits are kept per session, so
 reconnecting doesn't reset them. Transcripts are not logged at INFO. Closing the socket aborts the Claude stream and pending TTS and
 answers a pending confirmation with "no". A spoken confirmation counts only once the
 page reports the question finished playing, and only as a short explicit
-yes ("yes", "yeah, delete it"); talking over the question, answering before
-it was heard, or any other reply is a no, and it says so. Turns never run
+yes ("yes", "yeah, delete it"; `cli.classify_answer`); a negation ("no",
+"cancel", "stop"), talking over the question or answering before it was
+heard is a no, and it says so. Any other reply (unclear, a number, a
+question back) is asked once more ("Sorry, I didn't catch that"), under the
+same rules, and a second unclear reply cancels. Turns never run
 two at a time, and a confirmation stays with the turn that asked it. The VAD runs from files the app serves
 itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
 compilation), still no inline script, eval or third-party hosts. Tests:
@@ -236,11 +239,17 @@ smuggled into the event), search words up to 100 characters, 10 calendars
 in an "all calendars" listing, and labels and the calendar list cached for
 5 minutes (at most 20 entries).
 
-Untrusted text: event notes, other people's invites, RSVP results, and
-anything from a calendar Kyle doesn't own (a shared or subscribed calendar,
-`accessRole` other than "owner"; listings, moves and updates alike) mark
-the result `"untrusted_content"`,
-and `list_calendars` does too when any shared calendar's name is in it.
+Untrusted text: other people's invites (titles and notes), events made
+from Gmail, events whose guests may edit them, RSVP results, and anything
+from a calendar Kyle doesn't own (a shared calendar, `accessRole` other
+than "owner"; listings, moves and updates alike) mark the result
+`"untrusted_content"`. Since 2026-10-22 (Kyle's call) notes on events Kyle
+organizes on his own calendar, his contacts' birthdays (`eventType`
+"birthday") and Google's own read-only calendars (ids ending
+`@group.v.calendar.google.com`: holidays, birthdays) don't, and neither
+does `list_calendars`: it holds only names and access levels, never a
+calendar's description, and another person's calendar name is cut to 60
+characters (see "Calendar data from Kyle's own events" below).
 Guest names are never sent, only a count. Logs: the calendar tools log
 counts and field names at INFO (e.g. "updated an event (attendees,
 summary)"), never titles, notes or addresses; tool inputs stay at DEBUG as
@@ -594,6 +603,34 @@ server (`[family] enabled`, on in the server profile).
   `SECRET_ENV_VARS`: masked in logs and not passed to child processes.
   Each person's history is capped at `[family] max_history_mb` (20 MB), not
   the owner's `[history] max_mb`, so a few people can't fill the 1 GB disk.
+- **Per-person limits** (public beta piece G3, `quotas.py`). Every invited
+  person (either tier; never the owner) gets `[family] turns_per_minute`
+  (6), `turns_per_day` (200) and `stt_seconds_per_day` (1800), counted by
+  their user id across all their browsers and the voice view, so one
+  account can't run up CPU (Whisper is one shared lock) or, on the owner's
+  key, cost. Checked before a typed/push-to-talk turn starts
+  (`WebAssistant.start_turn`) and before Whisper runs on a hands-free
+  utterance; a refusal is a sentence in their language, with no request to
+  Claude and no history change. Every recording transcribed for them (a
+  spoken yes/no too) adds its length, measured from the audio, after it is
+  transcribed. The maps are bounded (idle people pruned, at most 1000
+  kept) and logs carry the id and the limit's name only. Deliberate
+  non-fixes: the counts are in memory, so a restart resets them (a beta
+  tester could gain a day's allowance from a deploy); the day total can go
+  past the speech limit by one recording per session in flight (each up
+  to `[voice] max_utterance_s`, 30 s, or `[webapp] max_audio_seconds` for
+  push-to-talk; a person with several tabs or phones open can overshoot by
+  one clip on each), since each clip was allowed when it started; and a
+  spoken yes/no in the voice view is counted but never refused (refusing
+  it there would only make it a "no"). A recorded answer to the page's
+  question (`/api/confirm`) is checked for speech time before Whisper:
+  out of time, it isn't transcribed, the page shows the limit sentence and
+  the question stays open for the buttons or a typed yes (a refusal is
+  never a "no"). Only one recording per question is transcribed at a time
+  (`PendingConfirm.claim`); a burst of recordings gets 409 without running
+  Whisper, and a failed transcription releases the claim. A turn still in
+  flight when someone is removed can't bring their counters back
+  (`UserQuotas.is_listed`).
 - **Their own Anthropic key** (bring your own key, public beta piece G2;
   `userkeys.py`, `userkeys_web.py`).
   - *Storage.* `<dir>/<id>/anthropic_key.enc`, written with `write_private`
@@ -650,6 +687,57 @@ server (`[family] enabled`, on in the server profile).
   language, and each turn's thread runs `i18n.using(its language)`, so a
   tool's confirmation question is asked in the language of the person who
   will answer it.
+- **Download my data / Delete my account** (`account.py`, public beta
+  piece G4). Both routes take no id: they act on the caller's own cookie
+  session only, so nobody can name another account (an `id` in the body
+  or query is ignored). The owner (cookie, Bearer WEB_TOKEN or failover
+  token) gets 403; not signed in is 401; with `[family]` off, 404.
+  Cross-site requests get 403 from webapp's guard before the route.
+  - `POST /api/me/delete` needs `{"confirm": "DELETE"}` or their account
+    name (any case); anything else is 400 and changes nothing. It first
+    asks Google to revoke their grant (the refresh token, in the POST body
+    to `oauth2.googleapis.com/revoke`, never a URL; 5 s timeout); a
+    failure is logged with the error type only and never blocks the
+    delete. The owner's Remove (`POST /api/users/{id}/remove`) does the
+    same Google revoke first, through the same helper
+    (`account.revoke_google_grant`), only for a listed id. Then
+    `Family.remove` (the same path as the owner's Remove):
+    every session of theirs and live voice call is signed out and
+    `<dir>/<id>/` is deleted in one rmtree (history, Google token, their
+    own API key and Notion token files), retried as above. The response
+    deletes the cookie and sends `Clear-Site-Data: "cookies"`.
+  - `GET /api/me/export` is a zip of `profile.json` (id, name, language,
+    time zone, tier, created) and one `history.export(conv, "json")` file
+    per conversation (archived ones included; text masked with
+    `config.redact` as in the single-conversation export). Nothing is
+    copied from their folder, so no token or key file can be included.
+    Bounded: `[family] export_max_mb` (50 MB) of content before
+    compression (413 past it), one export at a time per person (409), 3
+    per person per hour (429; every export that starts counts, one that
+    ends in 413 too, but a 409 or 429 refusal doesn't), and the rate map
+    keeps only people with an export in the last hour. Built in
+    `mkdtemp` (0700) under `<family dir>/.exports/` (made 0700; not the
+    shared system temp folder; `.exports` can't be a person's id, which
+    must match `u_...`, so `Family.remove` and the list never touch it),
+    streamed, and removed when the response ends, however it ends: a
+    `StreamingResponse` subclass cleans up in `__call__`'s `finally`,
+    because a generator's `finally` and a BackgroundTask never run when the
+    phone leaves before the body starts (ASGI 2.4 ClientDisconnect). It
+    closes the body first (Starlette's iterator and our generator), so a
+    phone that leaves mid-download has its zip closed before the folder is
+    removed (Windows can't remove an open file). The one-at-a-time slot
+    holds a token made when the export starts, bound to its folder; only
+    that export frees it, so an old download ending late never frees a
+    newer export's slot. Deleting the account also removes every `export-<id>.*` folder of
+    theirs and frees their slot, so no copy outlives the account. Folders
+    older than 10 minutes (a crash) are swept at startup and on every
+    export; a stuck slot frees after 10 minutes.
+  - Logs: ids, counts and sizes only; never names, titles, text or tokens
+    (caplog test).
+  - Not done, on purpose: no delete grace period or undo (the person asked
+    twice, typed and confirmed); Render's disk snapshots still hold a copy
+    until they expire (PRIVACY wording from the master). The owner's own
+    data isn't exported here: Kyle has the whole server.
 
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
@@ -682,7 +770,9 @@ server reads their replies with (`[tts] picker`, on by default).
 - **Money.** ElevenLabs voices are listed only with `ELEVENLABS_API_KEY`
   set, and offered to family members only with `[tts]
   family_paid_voices = true` (off by default: they would spend the owner's
-  plan). The voice list is fetched at most hourly (failures: every 5
+  plan), and then only to the family tier: a beta tester (or anyone not
+  listed, per `Family.tier`) is refused in the listing, in `choose` and
+  when their saved voice is looked up for a reply. The voice list is fetched at most hourly (failures: every 5
   minutes); the key goes only in the `xi-api-key` header and is never
   logged. Preview clips are cached (the last 8), so tapping Preview again
   costs nothing. Callers asking for the same clip at once share one render,
@@ -698,6 +788,52 @@ server reads their replies with (`[tts] picker`, on by default).
   choices, 50 Piper files and 100 ElevenLabs voices looked at.
 - Voice names from ElevenLabs are cut to one printable line of 60
   characters and shown with `textContent` only.
+
+## Speech-to-text (`stt.py`, optional cloud `stt_cloud.py`)
+
+- **Local by default.** `[stt] engine = "whisper"`: recordings are
+  transcribed on the machine and never leave it. The vocabulary prompt
+  and `[stt] hotwords` are config, not conversation; names belong in
+  `config.local.toml` (gitignored), not the committed `config.toml`.
+- **Cloud only when asked twice.** `engine = "openai"` or `"deepgram"`
+  *and* `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` set. Then every recording
+  transcribed by that server (the owner's, a spoken yes/no, and invited
+  people's on the cloud) is sent as a 16 kHz WAV over HTTPS to
+  `api.openai.com` or `api.deepgram.com`, with the prompt (OpenAI) or the
+  prompt's words and hotwords as keyterms (Deepgram, in the query string).
+  Recordings over five minutes, and Chinese family members' speech
+  (`family_speech` builds its own local Whisper), stay local. `config.mom.toml`
+  pins `engine = "whisper"`.
+- **Secrets.** Both keys are in `SECRET_ENV_VARS` (masked in logs; an
+  OpenAI `sk-...` key is also masked by pattern). The key goes only in the
+  `Authorization` header; `--check` says "set", never the value.
+- **Not isolated, on purpose.** They are not in `ISOLATED_ENV_VARS`:
+  OpenAI's quickstart puts `OPENAI_API_KEY` in the Windows user
+  environment, and that would stop Mom's and Kai's instances from
+  starting. It also guards nothing: a separate instance only sends audio
+  with its own `[stt] engine`, which `config.mom.toml` pins to "whisper".
+  A separate instance whose own config picks a cloud engine would use an
+  inherited key (the owner's bill); set the engine only in configs you
+  mean to.
+- **Logs.** INFO: engine, model, seconds of audio, transcript length and
+  time taken. The transcript only at DEBUG (local Whisper the same). A
+  failure logs the HTTP status or the exception's type name only, never
+  its message: a `requests` error quotes the URL, whose query holds the
+  keyterms. Response bodies are never logged.
+- **Bounded.** One request per recording, `cloud_timeout` (1-60 s,
+  default 10) on it; on any error, timeout or odd reply that recording
+  goes to local Whisper and the cloud is skipped for 60 s, so an outage
+  can't add a timeout to every turn. Invited people's recordings count
+  against `[family] stt_seconds_per_day` before either engine runs
+  (quotas.py), which bounds what they can spend.
+- **Prompt echo.** On near-silent audio Whisper (or the cloud) can return
+  its own prompt; a transcript that is the prompt, or a run of it spanning
+  two or more of its items, is treated as silence, so the vocabulary is
+  never sent to Claude as if Kyle had said it.
+- **Not fixed, on purpose:** the owner's own recordings have no daily
+  cloud cap (his account, his bill); a slow but steady cloud reply is
+  bounded by the `requests` read timeout between bytes, not a total
+  deadline (the reply is a few hundred bytes of JSON).
 
 ## PC hub: removed (2026-10-20)
 
@@ -744,9 +880,11 @@ a PKCE challenge, `access_type=offline` and the redirect
   `gmail.compose` scope also allows sending; sending is blocked in code, as
   for Kyle). Deletes still ask. In Chinese a yes is the whole answer from
   a short allowlist (是的, 好的, 没问题, 删吧, ...; each part between
-  punctuation, after a leading 嗯/哦/啊/呃): a sentence that only contains a
-  yes character (还是明天吧, 是谁, 好，等一下, 对了还有一个) is a no, as is
-  anything not on the list.
+  punctuation, after a leading 嗯/哦/啊/呃, or one of them repeated: 是的是的,
+  对对对): a sentence that only contains a yes character (还是明天吧, 是谁,
+  对了还有一个) is never a yes. One with a negation (不/别/取消/算了/等/错:
+  不对, 好，等一下) is a no; anything else is unclear, asked once more and
+  then cancelled.
 - **Separate instance, separate data.** `load_dotenv` never overrides a
   variable already set in the shell, and `google_auth` reads
   `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` before any file, so her
@@ -760,6 +898,155 @@ a PKCE challenge, `access_type=offline` and the redirect
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
+
+## Notion sign-in for invited people (`notion_web.py`, public beta G6)
+
+A family member or beta tester can connect their own Notion through a
+public Notion integration (`NOTION_OAUTH_CLIENT_ID` /
+`NOTION_OAUTH_CLIENT_SECRET`, both in `SECRET_ENV_VARS` and
+`ISOLATED_ENV_VARS`). The owner gets 404 from every `/api/notion/*` route:
+Kyle's Notion stays `NOTION_TOKEN` on his machines.
+
+- **The callback is authenticated exactly like Google's** (above): random
+  `state` made only for a signed-in session, in memory only (4 per person,
+  32 in all, 10 minutes), used once, bound to the person and session; plus
+  the `hc_notion` HttpOnly, Secure, `SameSite=Lax` cookie (path
+  `/notion/callback`) whose nonce's SHA-256 is kept with the state and
+  compared in constant time. An unknown, replayed, `error=` or
+  other-browser callback, a signed-out session or a removed person gets a
+  400 before any call to Notion, and nothing is written. CloudGuard lets
+  `/notion/callback` (and the page code `/notion.js`) through without a
+  session; every other route needs one.
+- **No PKCE** (Notion doesn't document it): the client secret never leaves
+  the server (Basic auth on the token call, never in a URL or the page) and
+  a code only works with the registered redirect URI. The redirect URI is
+  `own_origin + /notion/callback`, never taken from the request.
+- **Stored encrypted, bound to the person.** The token answer is kept as
+  `<dir>/<id>/notion.enc`: Fernet under an HKDF key from `USER_DATA_KEY`
+  with its own label (`hey-claude/notion-token/v1`), so it never opens as an
+  Anthropic key file or the other way round, with the person's id inside
+  the ciphertext (a file copied into another folder doesn't open). Written
+  with `write_private`. Only the access and refresh tokens, bot and
+  workspace ids, workspace name and the chosen database's ids and title
+  are kept; Notion's `owner.user` (their email) is dropped. Without a usable
+  `USER_DATA_KEY` connect answers 503 and no code is ever exchanged.
+- **Their token only.** The two tools (`list_assignments`,
+  `update_assignment_status`) always get a client built on the person's own
+  token: `NotionAssignments` would otherwise fall back to `NOTION_TOKEN`
+  (a test sets Kyle's and checks no request carries it). Both results are
+  `untrusted_output` (a title can be written to steer Claude) and
+  `private`; the status change asks first once the conversation is tainted.
+- **Refresh**: only after a 401, once, under a per-person lock (two turns
+  never both refresh; the second uses the first's new token). A new refresh
+  token is stored when Notion sends one, else the old one is kept. If the
+  refresh fails the tool says "reconnect Notion". The refreshed record is
+  saved only if the file still holds the token the refresh started from.
+- **Revoked on the way out**: Disconnect, "Delete my account" and the
+  owner's Remove call `POST /v1/oauth/revoke` (token in the JSON body)
+  before the file goes. Best effort: a failure is logged by type and never
+  blocks the delete. They take the same per-person lock as a refresh
+  (Disconnect around revoke + delete, Remove around revoke + removal), so a
+  refresh in flight finishes first and its new token is the one revoked;
+  a disconnect never comes back. "Delete my account" holds it around the
+  Notion revoke and the removal too (round 3: before, it let go between
+  them), and a refreshed token that isn't saved (the sign-in changed, or
+  the write failed) is revoked straight away. A reconnect to another bot
+  (another workspace) revokes the grant it replaced (read and saved under
+  that lock) once the new one is stored. **Deliberate non-fix:** a
+  reconnect to the same bot (same `bot_id`; if either record has none,
+  the same `workspace_id`) revokes nothing, because Notion may reuse the
+  bot and revoking its old token could end the new grant; the old token
+  is no longer stored anywhere, and the person can remove the connection
+  in Notion's Settings -> Connections.
+- **Logs**: ids, counts and error type names only. The SDK gets its own
+  logger at ERROR, because its warnings quote Notion's error messages,
+  which can echo a request body (a filter holding a title); Notion's error
+  text is also replaced by its error code before it reaches Claude or the
+  tool-failure log. A caplog test checks that no token, code, nonce,
+  client secret, email, workspace name, database title or assignment title
+  is logged at any level.
+- **Bounded**: pending sign-ins as above; one search (`page_size` 100, one
+  page) at connect; a 10 s timeout per request, and notion-client's own
+  429/5xx retries bounded to one, at most 2 s later (its default honours a
+  `Retry-After` of up to 60 s twice, which could hold a voice turn, a
+  disconnect or a delete for minutes), so one call takes at most about
+  22 s; the cached per-person client and refresh lock exist only for
+  listed people and go on removal.
+- Not fixed (deliberate): no database picker. Exactly one shared data
+  source with the Assignments schema is used (preferring the copy of the
+  integration's template); otherwise the tools stay off and Settings says
+  to share only that database and reconnect.
+
+## Student deadlines and Canvas (`deadlines.py`, `canvas.py`, `student_web.py`)
+
+Each person (the owner and every invited person) has their own deadlines,
+captured from their Canvas, Canvas's notification emails or said by hand.
+
+- **No school password, ever.** Canvas is reached with the calendar feed
+  link or a personal access token only; the connect route stores nothing
+  else (a password field is ignored and never stored, and a body with
+  neither a feed link nor a token is a 400 that writes nothing).
+- **The feed link is a secret.** `https://<school>/feeds/calendars/user_<secret>.ics`
+  reads the calendar without a sign-in, so it is handled like the token:
+  an invited person's link is sealed with `userkeys.seal` under its own
+  label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
+  Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
+  (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
+  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
+  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
+  the owner's connect route is a 409. Neither is ever returned (the status
+  says only the kind and the school's host), logged, or exported. The
+  redacting log formatter masks `/feeds/calendars/...` paths and Canvas
+  token shapes too, because httpx logs request URLs at INFO (kept at
+  WARNING by `setup_logging`).
+- **Server-side requests to an address someone typed.** Every feed link
+  and school address must be `https` on port 443, without `user:pass@`,
+  and resolve only to public addresses (`ipaddress.is_global`: never
+  loopback, the LAN, Tailscale's 100.64/10 or the 169.254.169.254
+  metadata address). Redirects are followed by hand (3 at most), each hop
+  checked; API calls follow none, and a `Link: rel="next"` page on another
+  host is never followed, so the token is only ever sent to the school's
+  own host. **Deliberate non-fix:** the check resolves the name, then
+  httpx resolves it again to connect, so a DNS answer that changes in
+  between (rebinding) could still reach a private address once; pinning
+  the address would need a custom transport, and the fetch is a GET whose
+  answer is only parsed as a calendar or Canvas JSON (nothing else of it
+  is shown or stored).
+- **Untrusted content.** Feed titles, planner items, module pages and
+  emails are written by other people: `list_deadlines` is
+  `untrusted_output` (and `private`), so once it ran, `add_deadline` and
+  `confirm_deadline` ask for a spoken yes; `delete_deadline` always asks.
+  Claude reads emails and pages only to pick out {title, course, kind,
+  due} (structured output, told the text is data), on the person's own
+  key when they have one; only those fields are stored, never the page or
+  email text or an event's description. The Gmail step uses the
+  read-only `GmailInbox.search` (metadata: subject and snippet) behind
+  the same NoSendGmail guard.
+- **Deleted means gone.** Deleting an item, a source or the Canvas link
+  removes it: SQLite `secure_delete=ON` and a `wal_checkpoint(TRUNCATE)`
+  after every delete (a test reads the file and its WAL for the title).
+  A deleted synced item leaves only a SHA-256 of its feed key so the next
+  sync doesn't bring it back. An invited person's `deadlines.sqlite` and
+  `canvas.enc` go with their folder on removal or "Delete my account";
+  their export holds the deadlines, never the link. Every connection is
+  closed after each call (nothing holds the file open on Windows), and a
+  write for someone just removed is refused under Family's lock, so a sync
+  that was running can't bring their folder back.
+- **Bounded.** A feed is read (streamed) up to 2 MB and 2000 events, the
+  whole fetch within 60 s; every API answer is streamed up to 2 MB, a
+  listing at most 10 pages and 1000 items; 3 rate-limit retries (1, 2,
+  4 s; a rate limit is a 429, or a 403 saying "Rate Limit Exceeded" or
+  with no quota left, since Canvas sends its quota header on every answer);
+  a whole sync stops after 180 s (the per-request timeout counts per read
+  only, so a host dripping bytes can't hold it); a module page or course
+  that can't be read is skipped, not the whole step; 20 module pages and 20
+  emails per sync, each text cut to 8000 characters; `[student] max_items`
+  per person and `max_per_source` per source; one sync at a time per
+  person, at most every `sync_minutes`; 10 school lookups a minute per
+  person; request bodies 8 KB. The throttle and lock maps hold at most 1024
+  people.
+- **Logs**: ids, counts, source names and error codes only (caplog tests
+  at DEBUG for the store, the tools, Canvas and the routes).
 
 ## Smart home (`tools/home_assistant.py`)
 
@@ -1090,16 +1377,59 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   events that someone else could have written count: invites (the Calendar
   API marks only Kyle's own events with `organizer.self`), events created
   from Gmail (`eventType` "fromGmail") and events whose guests may edit
-  them (`guestsCanModify`): a listing that includes one carries
-  `"untrusted_content": true`, and from then on changes in that
-  conversation ask first (`chat.has_marked_results`). An event's notes
-  (description, first 300 characters) are sent to Claude since the fuller
-  calendar tools, and a listing with any notes is marked untrusted too,
-  even on Kyle's own events (notes are often pasted from someone else's
-  invite or email). Deletes always ask. Notion assignment titles
+  them (`guestsCanModify`), plus anything on a calendar someone else owns:
+  a listing that includes one carries `"untrusted_content": true`, and
+  from then on changes in that conversation ask first
+  (`chat.has_marked_results`). An event's notes (description, first 300
+  characters) are sent to Claude. Until 2026-10-22 any notes tainted the
+  listing, even on Kyle's own events, so a move after "what's on
+  tomorrow?" asked whenever one of his events had notes. Kyle decided his
+  own data must not trigger confirmations: notes on an event whose
+  `organizer.self` is true, on a calendar he owns, and that isn't from
+  Gmail or guest-editable, no longer taint (`GoogleCalendar._outside`).
+  Google's own read-only calendars (holidays, ids ending
+  `@group.v.calendar.google.com`, "reader" access) and his contacts'
+  birthdays (`eventType` "birthday") don't either, and `list_calendars`
+  no longer taints because a shared calendar exists (names only, another
+  person's cut to 60 characters). Text can't be laundered through his own
+  events: a title, place or notes the assistant writes while the
+  conversation is tainted gets a private marker
+  (`extendedProperties.private.hc_untrusted`, sent with the event's other
+  private properties so none is lost, never cleared by a later clean
+  change), and a marked event counts as someone else's in every later
+  listing, move and update. Remaining risk, accepted by Kyle: text he
+  pastes into his own event notes (say, from an email) is trusted, so an
+  instruction hidden in it would not make a later move or change ask; a
+  contact's own name on a birthday and a shared calendar's name are trusted
+  the same way; and someone Kyle gives write access to one of his own
+  calendars could edit notes there without tainting (the app can't see a
+  calendar's sharing list with its scopes). Deletes, invites and RSVPs
+  still always ask. Notion assignment titles
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **A wider "yes" and one more try (2026-10-21).** Kyle was asked up to
+  three times because speech-to-text misheard his "yes". One shared
+  classifier (`cli.classify_answer`, used by the PC loop, the phone's
+  buttons/typed/recorded answer and the hands-free voice view) now also
+  takes near-misses and short affirmatives ("ya", "yep", "okay", "sure",
+  "please", "right", "do it", 好/可以/行), ignoring case and punctuation.
+  What still holds: a yes must be a short answer (at most 8 words) made only
+  of yes words and filler, with no number ("Yes, 11" to "...at 10?") and no
+  question mark ("Right?"); any negation ("no", "cancel", "stop", "wait",
+  "don't", 不/别/取消/算了) is a no; talking over a question, or answering
+  before it was heard to the end, is a no; the answer stays bound to its own
+  turn and confirmation id. An unclear answer is asked once more ("Sorry, I
+  didn't catch that"), under the same rules, and a second unclear one
+  cancels. The cost: a stray "okay" or "right" said just after a question
+  now confirms it, where before only "yes"-type words did.
+- **Calendar create, move and update don't ask without untrusted text.**
+  Their tool descriptions tell Claude not to ask "are you sure?" itself;
+  the app's own question still comes whenever `confirm_if_untrusted`
+  applies (see the calendar entry above: invites from others, Gmail-made
+  and guest-editable events, shared calendars, web, email, attachments;
+  since 2026-10-22 not notes on Kyle's own events), and guest changes, invite
+  answers and deletes always ask.
 - **Spotify playback control never asks, even with untrusted content in
   the conversation.** A web page or email could make Claude play
   something, skip, or set the volume. That is an annoyance at worst, easy

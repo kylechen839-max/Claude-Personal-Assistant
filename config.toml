@@ -40,12 +40,22 @@ elevenlabs_model = "eleven_flash_v2_5"
 picker = true
 voices_dir = "voices"         # Piper voices found here are offered
 voice_file = "data/voice_choice.json"  # your pick; a family member's is in their own folder
-family_paid_voices = false    # true = family members may pick ElevenLabs voices (your bill)
+family_paid_voices = false    # true = family-tier members only (never beta testers) may pick ElevenLabs voices (your bill)
 
 [stt]
-model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
+model = "small.en"            # faster-whisper model (~480 MB); "base.en" on a Pi 5 or the
+                              # cloud server (set there), "tiny.en" on a Pi 4: faster, mishears more
 device = "cpu"
 compute_type = "int8"
+beam_size = 5                 # 1 = greedy (faster, mishears more); 0 = the default (5)
+initial_prompt = "auto"       # "auto" = the built-in app vocabulary (calendar, assignment,
+                              # Notion, reschedule, ...); "" = none; or your own text
+hotwords = ""                 # extra words Whisper should favor, e.g. names: "Kyle, Kai"
+engine = "whisper"            # "whisper" (local, private), or paid cloud: "openai" (needs
+                              # OPENAI_API_KEY) or "deepgram" (DEEPGRAM_API_KEY); your
+                              # speech is then sent to them; local Whisper on any error
+cloud_model = ""              # "" = gpt-4o-transcribe (openai) / nova-3 (deepgram)
+cloud_timeout = 10            # seconds before local Whisper takes over
 
 [wake]
 keyword_path = "keywords/hey_claude.onnx"  # openWakeWord model (Windows and Pi)
@@ -256,13 +266,37 @@ invite_days = 30              # an invite link works this many days, and only on
 google = true                 # they may connect their own Google from their phone (Calendar, Gmail drafts)
 google_client = ""            # a *Web application* OAuth client file; GOOGLE_WEB_CLIENT_JSON (its contents) overrides
 public_google_client = ""     # beta testers' Calendar-only Web client (own GCP project); GOOGLE_PUBLIC_CLIENT_JSON overrides; "" = no Google for beta
+notion = true                 # they may connect their own Notion Assignments database (public integration: NOTION_OAUTH_CLIENT_ID / NOTION_OAUTH_CLIENT_SECRET)
 max_history_mb = 20           # each person's own history size cap (their [history] max_mb)
+# Each invited person's limits (never yours); counted in memory, so a restart resets
+# them; 0 = no limit. A day is their own calendar day (their time zone, else UTC).
+turns_per_minute = 6          # messages (typed, push-to-talk or voice) a minute
+turns_per_day = 200           # messages a day
+stt_seconds_per_day = 1800    # seconds of their speech turned into text a day (30 min)
+export_max_mb = 50            # "Download my data": the zip's contents (before compression) at most this big
 # Each person's own Anthropic API key (Settings -> "Your Anthropic API key"): beta
 # testers must add one (they pay for their own use); family members may. Stored
 # encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret
 # USER_DATA_KEY (no config setting; Render generates it; without it keys aren't stored).
 zh_stt_model = "small"        # Whisper model for Chinese-speaking family members (loaded on first use; ZH_WHISPER_MODEL overrides)
 zh_piper_voice = "voices/zh_CN-huayan-medium.onnx"  # their Piper voice (python -m assistant --download-voice zh_CN-huayan-medium)
+
+[student]                     # school deadlines from Canvas, emails or said by hand (README "Student deadlines")
+enabled = true                # the deadline tools and the phone app's "What I captured" card
+dir = "data/student"          # your deadlines.sqlite (Render: /data/student); invited people's live in [family] dir/<id>/
+sync_minutes = 15             # "Sync now" at most this often per person
+gmail = true                  # also read Canvas's notification emails (read-only), once Gmail is connected
+extract_model = ""            # the model that reads emails and pages into deadlines; "" = [assistant] fast_model
+max_items = 2000              # deadlines kept per person
+max_per_source = 500          # ... and per source (calendar feed, Canvas API, emails, ...)
+
+[canvas]                      # where deadlines come from; a feed link or an access token, never a school password
+# Yours: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed) or CANVAS_TOKEN
+# (Account -> Settings -> New access token) in .env. Invited people paste theirs in the app.
+base_url = ""                 # your school's Canvas for CANVAS_TOKEN, e.g. "https://canvas.school.edu" (CANVAS_BASE_URL overrides)
+pages = false                 # also read module pages (Claude picks the dates out; one call per sync when pages changed)
+max_pages = 20                # module pages read per sync, at most
+timeout = 15                  # seconds per Canvas request
 
 [logging]
 file = "logs/assistant.log"
