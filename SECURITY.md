@@ -239,11 +239,17 @@ smuggled into the event), search words up to 100 characters, 10 calendars
 in an "all calendars" listing, and labels and the calendar list cached for
 5 minutes (at most 20 entries).
 
-Untrusted text: event notes, other people's invites, RSVP results, and
-anything from a calendar Kyle doesn't own (a shared or subscribed calendar,
-`accessRole` other than "owner"; listings, moves and updates alike) mark
-the result `"untrusted_content"`,
-and `list_calendars` does too when any shared calendar's name is in it.
+Untrusted text: other people's invites (titles and notes), events made
+from Gmail, events whose guests may edit them, RSVP results, and anything
+from a calendar Kyle doesn't own (a shared calendar, `accessRole` other
+than "owner"; listings, moves and updates alike) mark the result
+`"untrusted_content"`. Since 2026-10-22 (Kyle's call) notes on events Kyle
+organizes on his own calendar, his contacts' birthdays (`eventType`
+"birthday") and Google's own read-only calendars (ids ending
+`@group.v.calendar.google.com`: holidays, birthdays) don't, and neither
+does `list_calendars`: it holds only names and access levels, never a
+calendar's description, and another person's calendar name is cut to 60
+characters (see "Calendar data from Kyle's own events" below).
 Guest names are never sent, only a count. Logs: the calendar tools log
 counts and field names at INFO (e.g. "updated an event (attendees,
 summary)"), never titles, notes or addresses; tool inputs stay at DEBUG as
@@ -1456,13 +1462,34 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   events that someone else could have written count: invites (the Calendar
   API marks only Kyle's own events with `organizer.self`), events created
   from Gmail (`eventType` "fromGmail") and events whose guests may edit
-  them (`guestsCanModify`): a listing that includes one carries
-  `"untrusted_content": true`, and from then on changes in that
-  conversation ask first (`chat.has_marked_results`). An event's notes
-  (description, first 300 characters) are sent to Claude since the fuller
-  calendar tools, and a listing with any notes is marked untrusted too,
-  even on Kyle's own events (notes are often pasted from someone else's
-  invite or email). Deletes always ask. Notion assignment titles
+  them (`guestsCanModify`), plus anything on a calendar someone else owns:
+  a listing that includes one carries `"untrusted_content": true`, and
+  from then on changes in that conversation ask first
+  (`chat.has_marked_results`). An event's notes (description, first 300
+  characters) are sent to Claude. Until 2026-10-22 any notes tainted the
+  listing, even on Kyle's own events, so a move after "what's on
+  tomorrow?" asked whenever one of his events had notes. Kyle decided his
+  own data must not trigger confirmations: notes on an event whose
+  `organizer.self` is true, on a calendar he owns, and that isn't from
+  Gmail or guest-editable, no longer taint (`GoogleCalendar._outside`).
+  Google's own read-only calendars (holidays, ids ending
+  `@group.v.calendar.google.com`, "reader" access) and his contacts'
+  birthdays (`eventType` "birthday") don't either, and `list_calendars`
+  no longer taints because a shared calendar exists (names only, another
+  person's cut to 60 characters). Text can't be laundered through his own
+  events: a title, place or notes the assistant writes while the
+  conversation is tainted gets a private marker
+  (`extendedProperties.private.hc_untrusted`, sent with the event's other
+  private properties so none is lost, never cleared by a later clean
+  change), and a marked event counts as someone else's in every later
+  listing, move and update. Remaining risk, accepted by Kyle: text he
+  pastes into his own event notes (say, from an email) is trusted, so an
+  instruction hidden in it would not make a later move or change ask; a
+  contact's own name on a birthday and a shared calendar's name are trusted
+  the same way; and someone Kyle gives write access to one of his own
+  calendars could edit notes there without tainting (the app can't see a
+  calendar's sharing list with its scopes). Deletes, invites and RSVPs
+  still always ask. Notion assignment titles
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
@@ -1484,8 +1511,9 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
 - **Calendar create, move and update don't ask without untrusted text.**
   Their tool descriptions tell Claude not to ask "are you sure?" itself;
   the app's own question still comes whenever `confirm_if_untrusted`
-  applies (see the calendar entry above: invites from others, event notes,
-  shared calendars, web, email, attachments), and guest changes, invite
+  applies (see the calendar entry above: invites from others, Gmail-made
+  and guest-editable events, shared calendars, web, email, attachments;
+  since 2026-10-22 not notes on Kyle's own events), and guest changes, invite
   answers and deletes always ask.
 - **Spotify playback control never asks, even with untrusted content in
   the conversation.** A web page or email could make Claude play

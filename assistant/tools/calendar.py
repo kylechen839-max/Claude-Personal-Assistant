@@ -60,6 +60,11 @@ MAX_COMMENT = 200        # an RSVP note
 MAX_FREE_SLOTS = 30
 CACHE_SECONDS = 300      # labels and the calendar list
 CACHE_ENTRIES = 20
+GOOGLE_PUBLIC_SUFFIX = "@group.v.calendar.google.com"  # holidays, birthdays
+MAX_CALENDAR_NAME = 60   # list_calendars: another person's calendar name
+# extendedProperties.private key on events whose text the assistant wrote
+# in a tainted conversation; never cleared (written_under_taint)
+UNTRUSTED_PROPERTY = "hc_untrusted"
 _EMAIL = re.compile(r"^[^@\s,;<>\"()]+@[^@\s,;<>\"()]+\.[^@\s,;<>\"()]+$")
 
 
@@ -74,13 +79,43 @@ def is_from_others(event: dict) -> bool:
     """Could someone other than Kyle have written this event's title or
     location? The Calendar API sets organizer.self only when it is true, so
     anything else is an invite. Events made from Gmail (eventType
-    "fromGmail") and events whose guests may edit them count too."""
+    "fromGmail") and events whose guests may edit them count too; Google's
+    birthday events (from Kyle's contacts) don't."""
     if (event.get("organizer") or {}).get("self") is not True:
         return True
+    if written_under_taint(event):
+        return True
     if event.get("eventType", "default") not in ("default", "focusTime",
-                                                 "outOfOffice", "workingLocation"):
+                                                 "outOfOffice", "workingLocation",
+                                                 "birthday"):
         return True
     return bool(event.get("guestsCanModify"))
+
+
+def written_under_taint(event: dict) -> bool:
+    """Did the assistant write this event's text while untrusted text was
+    in the conversation? Then it may carry that text (an email's, a web
+    page's) and stays someone else's in every later conversation."""
+    private = (event.get("extendedProperties") or {}).get("private") or {}
+    return private.get(UNTRUSTED_PROPERTY) == "1"
+
+
+def _mark_written_under_taint(body: dict, current: dict | None = None) -> None:
+    """Add the sticky marker to an insert/patch body. The event's other
+    private properties go along, so the patch keeps them either way."""
+    private = dict(((current or {}).get("extendedProperties") or {})
+                   .get("private") or {})
+    private[UNTRUSTED_PROPERTY] = "1"
+    body["extendedProperties"] = {"private": private}
+
+
+def is_google_public(calendar_id: str, entry: dict | None) -> bool:
+    """One of Google's own read-only calendars (holidays, contacts'
+    birthdays): its text is Google's, not another person's. Their ids end
+    in @group.v.calendar.google.com, which nobody else can create."""
+    if not str(calendar_id).endswith(GOOGLE_PUBLIC_SUFFIX):
+        return False
+    return entry is None or entry.get("accessRole") in ("reader", "freeBusyReader")
 
 
 def _is_date(value: str) -> bool:
@@ -329,6 +364,14 @@ class GoogleCalendar:
             return entry.get("accessRole") == "owner"
         return calendar_id in ("primary", self.calendar_id)
 
+    def _outside(self, event: dict, calendar_id: str, entry: dict | None) -> bool:
+        """Could this event's text, notes included, be someone else's?
+        Events Kyle organizes on his own calendars are his, notes and all
+        (Kyle's call, 2026-10-22), and so are Google's public calendars."""
+        if is_google_public(calendar_id, entry):
+            return False
+        return not self._owned(calendar_id, entry) or is_from_others(event)
+
     def color_choices(self, calendar_id: str | None = None) -> dict:
         labels = self._labels(calendar_id or self.calendar_id)
         return {"classic": list(CLASSIC_COLORS.values()),
@@ -462,10 +505,13 @@ class GoogleCalendar:
                 log.warning("Calendar: skipped a calendar (%s)", type(e).__name__)
                 skipped += 1
                 continue
-            if not self._owned(cal_id, entry):
-                untrusted = True  # someone else's calendar: names, titles
+            public = is_google_public(cal_id, entry)
             for e in result.get("items", []):
                 info = self._summarize(e, cal_id, notes=True)
+                if public:  # Google's holidays/birthdays aren't invites
+                    info.pop("from_others", None)
+                if self._outside(e, cal_id, entry):
+                    untrusted = True
                 if merged:
                     info["calendar"] = self._calendar_name(entry)
                 s, _ = self._event_times(e)
@@ -484,10 +530,11 @@ class GoogleCalendar:
                 out["unreadable_calendars"] = skipped
         log.info("Calendar: listed %d events from %d calendars", len(events),
                  len(sources))
-        if untrusted or any(e.get("from_others") or e.get("description")
-                            for e in events):
-            # Invites from other people, notes and shared calendars hold
-            # untrusted text, so changes this conversation need a yes.
+        if untrusted:
+            # Invites, Gmail events, events guests may edit (notes and all)
+            # and shared calendars hold untrusted text, so changes this
+            # conversation need a yes. Kyle's own events, their notes and
+            # Google's holidays/birthdays don't.
             out[UNTRUSTED_MARK] = True
         return out
 
@@ -516,6 +563,8 @@ class GoogleCalendar:
             body["location"] = location
         if description:
             body["description"] = description
+        if UNTRUSTED_CONTEXT.get():  # its title/notes may be outside text
+            _mark_written_under_taint(body)
         options = {}
         if repeat is not None:
             lines = check_repeat(repeat)
@@ -580,8 +629,7 @@ class GoogleCalendar:
         out = {"status": "moved", "event": self._summarize(event, cal_id)}
         if target.get("recurrence"):
             out["series"] = True
-        return mark_untrusted(out, is_from_others(event)
-                              or not self._owned(cal_id, entry))
+        return mark_untrusted(out, self._outside(event, cal_id, entry))
 
     def _original_start(self, event: dict) -> datetime | date:
         """Where the series put this occurrence (originalStartTime), even
@@ -658,6 +706,8 @@ class GoogleCalendar:
             patch["location"] = location
         if description is not None:
             patch["description"] = description
+        if UNTRUSTED_CONTEXT.get() and patch:  # title, place or notes
+            _mark_written_under_taint(patch, target)
         if reminders is not None:
             patch["reminders"] = check_reminders(reminders)
         if repeat is not None:
@@ -723,8 +773,7 @@ class GoogleCalendar:
             out["series"] = True
         if added:
             out["invited"] = len(added)
-        return mark_untrusted(out, is_from_others(updated)
-                              or not self._owned(cal_id, entry))
+        return mark_untrusted(out, self._outside(updated, cal_id, entry))
 
     def respond_to_invite(self, event_id: str, response: str,
                           comment: str | None = None, scope: str = "this",
@@ -826,16 +875,23 @@ class GoogleCalendar:
 
     def list_calendars(self) -> dict:
         entries = self._calendar_list()
-        calendars = [{"name": self._calendar_name(e), "id": e["id"],
+        calendars = [{"name": self._list_name(e), "id": e["id"],
                       "access": e.get("accessRole", "unknown"),
                       **({"primary": True} if e.get("primary") else {})}
                      for e in entries[:50]]
         log.info("Calendar: listed %d calendars", len(calendars))
-        out = {"count": len(entries), "calendars": calendars,
-               "colors": self.color_choices()}
-        # names of calendars shared with Kyle are other people's text
-        return mark_untrusted(out, any(e.get("accessRole") != "owner"
-                                       for e in entries))
+        # Only short names, never a calendar's description, so a shared
+        # calendar on the list doesn't make later changes ask (Kyle's call).
+        return {"count": len(entries), "calendars": calendars,
+                "colors": self.color_choices()}
+
+    def _list_name(self, entry: dict) -> str:
+        """A calendar's name; another person's is cut short (their text)."""
+        name = self._calendar_name(entry)
+        if entry.get("summaryOverride") or entry.get("accessRole") == "owner":
+            return name  # Kyle's own words
+        return (name[:MAX_CALENDAR_NAME] + "..."
+                if len(name) > MAX_CALENDAR_NAME else name)
 
     # ----- confirmation questions -----
     def describe_for_delete(self, tool_input: dict) -> str:

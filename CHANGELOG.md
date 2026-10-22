@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Calendar: listing your own events no longer makes the next move or change
+  ask for confirmation. Notes on events you organize, your contacts'
+  birthdays, Google's holiday calendars and the calendar list now count as
+  your own data; invites from others, events Gmail made, events your guests
+  may edit and calendars shared with you still make changes ask. An event the
+  assistant wrote while outside text was in the conversation stays marked, so
+  it keeps asking.
 - Study briefings: optional phone notifications (morning, evening, weekly,
   exam reminders, new deadlines, after class) with a tap-to-play brief; at
   most 2 a day, quiet 22:00-07:30 in your time zone, built from your School

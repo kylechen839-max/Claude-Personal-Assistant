@@ -540,12 +540,13 @@ with the stopwatch button.
     it again and stay unclear twice: it says "I still didn't catch that, so
     I left it", the event stays, and it never asks a third time.
 - [ ] Move without a question: in a new conversation, "What's on tomorrow?"
-      (with only your own events, none with notes), then "Move the test
-      event to 4".
+      (with only your own events, one of them with notes), then "Move the
+      test event to 4".
   - Should: it moves it without asking anything, neither the app nor
     Claude ("are you sure?"). If it does ask, note whether tomorrow had an
-    invite from someone else, an event with notes, or a shared calendar
-    (those make every change ask, on purpose).
+    invite from someone else, an event Gmail made, one your guests may
+    edit, or a calendar someone shared with you (those make every change
+    ask, on purpose).
 - [ ] Follow-up cue: after an answer finishes, wait.
   - Should: a very quiet low note and **Still listening…** with the mic
     meter lit; after about 5 s the label goes back to **Listening** without

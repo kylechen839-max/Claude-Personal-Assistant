@@ -72,7 +72,11 @@ as the work. Never put secrets, tokens or personal data in this file.
    - Taint is only cleared by `reset()`. Summaries must not launder it, and
      resume must carry it.
    - Calendar: the API *omits* `organizer.self` when it is false, so treat
-     an event as outside unless `self is True`.
+     an event as outside unless `self is True`. Kyle's own data never
+     taints (his call, 2026-10-22): notes on events he organizes on his
+     own calendars, birthdays, Google's holiday calendars and the
+     calendar list. Invites, `fromGmail`, `guestsCanModify` and shared
+     calendars still do.
 3. **Every confirmation path holds.**
    - Check `cancel` before every `tools.dispatch`.
    - A barge-in is never a "yes".

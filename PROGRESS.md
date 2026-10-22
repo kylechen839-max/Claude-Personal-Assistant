@@ -4862,6 +4862,78 @@ screenshot import) read it through `DeadlineStore.list(uid)`.
 - **Counts** (Linux sandbox, Python 3.13): 2753 passed, 37 skipped (+98
   over master 3b7ae54's 2655 / 35); JS 126 pass.
 
+## Kyle's own calendar data doesn't ask (2026-10-22)
+
+Kyle: moving an event still asked for confirmation after listing his
+calendar, though the events were his own. Cause: `list_events` tainted the
+listing whenever any event had notes (`description`), even on his own
+events, and whenever a calendar he doesn't own was read (with
+`calendar="all"`, Google's subscribed holiday calendar); `list_calendars`
+tainted whenever a shared calendar existed. Kyle decided his own data must
+not trigger confirmations.
+
+- **What changed** (`assistant/tools/calendar.py`): one rule,
+  `GoogleCalendar._outside`, now decides taint for listings, moves and
+  updates. An event is someone else's text when it is on a calendar Kyle
+  doesn't own or `is_from_others` (no `organizer.self is True`, an
+  `eventType` other than default/focusTime/outOfOffice/workingLocation/
+  birthday, or `guestsCanModify`). Notes alone no longer taint. Google's own
+  read-only calendars (`is_google_public`: ids ending
+  `@group.v.calendar.google.com` with reader or freeBusyReader access, e.g.
+  holidays) never taint, and their events aren't flagged `from_others`.
+  Birthday events (`eventType` "birthday") count as Kyle's.
+  `list_calendars` no longer taints (names and access only, never a
+  description); another person's calendar name is cut to 60 characters.
+- **Still taints:** invites from others, `fromGmail` events,
+  `guestsCanModify` events (notes included), any calendar shared with Kyle.
+  Remaining risk (SECURITY.md): text Kyle pastes into his own event notes
+  is trusted, and so is a note edited by someone he gave write access to
+  one of his own calendars.
+- **Tests** (+5, 5 changed): `tests/test_confirm_ux.py`:
+  `test_own_event_notes_taint_the_conversation_unchanged` now pins the new
+  behaviour (own event with notes, then a move: no question, patch runs);
+  `test_others_text_on_the_calendar_still_taints_and_the_move_asks`
+  (invite, fromGmail, guestsCanModify: tainted, the move asks);
+  `test_holidays_and_birthdays_do_not_taint` ("all calendars" with a
+  birthday and Google's holidays calendar, then a move with no question).
+  Fixtures are full events.list item shapes (kind, etag, creator,
+  organizer, eventType, birthdayProperties). `tests/test_calendar_features.py`:
+  new `test_list_calendars_does_not_taint_and_cuts_a_shared_name_short`;
+  the own-notes, other-calendar, all-calendars, `list_calendars` and
+  changes-on-a-calendar tests now use a friend's shared calendar for the
+  tainting case and expect no taint from holidays.
+  - Revert check: with the old `calendar.py`, 7 tests fail (the own-notes
+    pin, holidays/birthdays, own-notes listing, other-calendar,
+    all-calendars, both `list_calendars` tests). Taking only "birthday" out
+    of the allowed types fails the holidays/birthdays test. The three
+    still-taints cases pass on the old code by design; an over-broad fix
+    (dropping `is_from_others` from `_outside`) fails all three.
+- **Round 2 (judge: CHANGES_NEEDED, 3 findings).**
+  1. No laundering through Kyle's own events: when `create_event` or
+     `update_event` writes a title, place or notes while
+     `UNTRUSTED_CONTEXT` is set, the event gets
+     `extendedProperties.private.hc_untrusted = "1"` (the event's other
+     private properties are sent with it, so the patch can't drop them).
+     `is_from_others` treats a marked event as someone else's, so later
+     listings, moves and updates taint. A clean change never sends the
+     field, so the marker stays. No events.list `fields` mask is used, so
+     the property comes back as is. Tests:
+     `test_confirm_ux.py::test_notes_written_in_a_tainted_conversation_taint_the_next_one`
+     (a tainted create with notes, then a clean conversation: listing
+     taints and the move asks) and
+     `test_calendar_features.py::test_text_written_in_a_tainted_conversation_is_marked_for_good`
+     (clean update keeps the marker; tainted color-only update adds none;
+     tainted update merges the private map; tainted/clean create).
+  2. Whitespace in `SERIES = {` restored.
+  3. `test_a_google_public_calendar_id_without_the_extras_does_not_taint`:
+     a `...@group.v.calendar.google.com` id with no calendar list doesn't
+     taint, a `...@group.calendar.google.com` id does.
+  - Revert check: with the round-1 `calendar.py` both finding-1 tests fail.
+    The finding-3 test passes on round-1 code (it covers an untested
+    branch); it fails if the `entry is None` branch is dropped, and fails
+    if the suffix check also accepts `@group.calendar.google.com`.
+- **Counts** (Linux sandbox, Python 3.13): 2917 passed, 42 skipped (+8
+  over master 6ea4081's 2909 passed, 42 skipped). No JS touched.
 ## Student assistant P2: study briefings and phone notifications (2026-10-21)
 Branch `claude/student-proactive` from master 3b7ae54. The app speaks up
 first: rules over the student deadline store (P1's `DeadlineStore`, built
