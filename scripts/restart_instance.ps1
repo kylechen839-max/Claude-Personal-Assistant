@@ -11,6 +11,9 @@
     Stops the task, stops any copy of that app still running (a hung one, or
     one started by hand, so the new one gets the port), then starts the task.
     Never touches the go-live check's side-port copies (--candidate).
+    Your own app may still run from an older hand-made task, "\Hey Claude Web"
+    (install_windows_service.ps1 offers to replace it); without \HeyClaude\Web
+    that task is restarted instead, so a deploy doesn't leave it on old code.
     Exit codes: 0 restarted, 3 the task isn't installed. No administrator
     rights needed. Windows PowerShell 5.1 and 7.
 #>
@@ -30,6 +33,15 @@ function Get-TaskName {
     return "Family-$Instance"
 }
 
+function Get-TaskCandidates {
+    # Where the instance's task may live, in order: ours first, then (for
+    # your own app only) the older hand-made "\Hey Claude Web" task.
+    param([string]$Instance)
+    $list = @(@{ Path = '\HeyClaude\'; Name = (Get-TaskName $Instance) })
+    if ($Instance -eq 'main') { $list += @{ Path = '\'; Name = 'Hey Claude Web' } }
+    return $list
+}
+
 function Test-InstanceCommandLine {
     # Is this a running copy of that instance's web app (not a side-port candidate)?
     param([string]$Instance, [string]$CommandLine)
@@ -42,11 +54,15 @@ function Test-InstanceCommandLine {
     return $CommandLine -match ('-m\s+assistant\b.*--config\s+"?' + [regex]::Escape("config.$Instance.toml") + '(\s|"|$)')
 }
 
-$task = Get-TaskName $Name
-if (-not (Get-ScheduledTask -TaskPath $taskPath -TaskName $task -ErrorAction SilentlyContinue)) {
-    Write-Output "$taskPath$task isn't installed."
+$found = Get-TaskCandidates $Name | Where-Object {
+    Get-ScheduledTask -TaskPath $_.Path -TaskName $_.Name -ErrorAction SilentlyContinue
+} | Select-Object -First 1
+if (-not $found) {
+    Write-Output "$taskPath$(Get-TaskName $Name) isn't installed."
     exit 3
 }
+$taskPath = $found.Path
+$task = $found.Name
 if ($PSCmdlet.ShouldProcess("$taskPath$task", 'Restart')) {
     Stop-ScheduledTask -TaskPath $taskPath -TaskName $task -ErrorAction SilentlyContinue
     Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
