@@ -90,6 +90,10 @@ phase "install_pi.sh again (must be a no-op)"
 grep -q "Using existing virtual environment" /tmp/second-run.log \
     || fail "second run re-created the venv"
 grep -q ".env already exists" /tmp/second-run.log || fail "second run replaced .env"
+# a Pi stays on base.en (config.toml's small.en is the PC's), written once
+grep -q '^model = "base.en"' config.local.toml || fail "no base.en in config.local.toml"
+[[ "$(grep -c '^\[stt\]' config.local.toml)" == 1 ]] || fail "second run added [stt] again"
+"$PY" -c 'from assistant.config import load_config; m = load_config()["stt"]["model"]; assert m == "base.en", m'
 
 phase "Piper voice (cached)"
 mkdir -p voices

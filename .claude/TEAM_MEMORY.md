@@ -148,6 +148,13 @@ as the work. Never put secrets, tokens or personal data in this file.
   - eSpeak audio never fires the trained wake model (the committed SAPI
     WAVs do), so `test_real_hey_claude_model` fails on Linux.
 - Chromium/Playwright are preinstalled; never run `playwright install`.
+- Baseline counts: `git archive <sha> | tar -x -C <new empty dir>` and run
+  pytest there. The scratchpad can hold another session's old files; a
+  reused folder once had a stale `test_devhub.py` that broke collection.
+- Speech-to-text: the PC runs `small.en` (beam 5, vocabulary prompt); the
+  server profile and the Pi (`install_pi.sh` -> `config.local.toml`) stay
+  on `base.en`. Build transcribers with `stt.from_config` (it adds the
+  optional cloud engine); only `family_speech` (Chinese) builds its own.
 - The usage limit is shared by every session and agent; nine at once used
   it up in about 90 minutes.
   - Run at most 2–3 builders at once and work lean.

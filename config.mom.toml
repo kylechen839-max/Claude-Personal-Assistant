@@ -20,6 +20,10 @@ usage_file = "data/mom/usage.json"  # her API usage, never added to (or shown as
 
 [stt]
 model = "small"               # multilingual Whisper (".en" models can't hear Chinese)
+beam_size = 5                 # beam search (1 = greedy: faster, mishears more)
+initial_prompt = "auto"       # "auto" = the Mandarin prompt (Simplified characters)
+hotwords = ""                 # names she says often, if Whisper mishears them
+engine = "whisper"            # local only: her speech never leaves this computer
 
 [tts]
 engine = "piper"              # python -m assistant --download-voice zh_CN-huayan-medium

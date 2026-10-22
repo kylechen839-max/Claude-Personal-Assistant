@@ -16,13 +16,30 @@ from assistant import audio, i18n, usage
 from assistant.chat import ClaudeChat
 from assistant.timing import TurnTimer
 from assistant.stt import Transcriber, record_push_to_talk
+from assistant.stt import from_config as stt_from_config
 from assistant.tools import ToolRegistry
 from assistant.tts import ENGINES, make_tts
 
 EXIT_WORDS = {"quit", "exit", "goodbye", "bye"}
-YES_WORDS = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct",
-             "affirmative", "confirm", "confirmed", "absolutely", "definitely"}
-NO_WORDS = {"no", "nope", "don't", "dont", "not", "cancel", "stop", "wait"}
+# Answers to a spoken yes/no question (classify_answer). Speech-to-text
+# often turns "yes" into "ya", "yeah." or "Yep!", so near-misses count too.
+YES_WORDS = {"yes", "yeah", "yep", "yup", "ya", "yah", "yea", "yeh", "yess",
+             "yas", "yesh", "sure", "ok", "okay", "okey", "k", "kay", "alright",
+             "please", "correct", "right", "affirmative", "confirm", "confirmed",
+             "absolutely", "definitely"}
+YES_PHRASES = ("go ahead", "do it", "please do", "yes please", "sounds good",
+               "all right", "of course", "go for it", "that works")
+# Words that may sit around a yes without changing it ("yeah, move it now").
+YES_FILLER = {"please", "do", "it", "go", "ahead", "delete", "move", "change",
+              "add", "update", "open", "save", "that", "that's", "thats", "this",
+              "the", "event", "one", "now", "thanks", "thank", "you", "hey",
+              "claude", "i", "said", "um", "uh", "oh", "o", "well", "so", "just",
+              "sounds", "good", "great", "cool", "all", "of", "course", "for",
+              "works", "sir", "yes"}
+MAX_YES_WORDS = 8
+NO_WORDS = {"no", "nope", "nah", "don't", "dont", "not", "cancel", "stop", "wait",
+            "never", "negative", "hold", "wrong", "nevermind"}
+ZH_NO_MARKS = ("不", "别", "没有", "取消", "算了", "停", "等", "错")
 # Chinese (Mandarin) answers. A single character means too much on its own
 # (还是明天吧, 好像错了, 是谁, 对了还有一个), so a yes is the whole answer, from
 # this short list: each part between punctuation, after leading fillers
@@ -31,7 +48,7 @@ NO_WORDS = {"no", "nope", "don't", "dont", "not", "cancel", "stop", "wait"}
 ZH_EXIT_WORDS = {"再见", "拜拜", "再会"}
 ZH_YES_ANSWERS = frozenset({
     "是", "是的", "对", "对的", "好", "好的", "好啊", "好吧", "行", "可以", "确定",
-    "确认", "没问题", "删吧", "删除吧", "加吧"})
+    "确认", "没问题", "没错", "删吧", "删除吧", "加吧"})
 ZH_FILLERS = "嗯哦啊呃"
 CJK = re.compile(r"[\u4e00-\u9fff]")
 log = logging.getLogger(__name__)
@@ -54,13 +71,20 @@ def is_stop(text: str) -> bool:
     return " ".join(words) in STOP_PHRASES
 
 
+def _zh_yes_part(part: str) -> bool:
+    """On ZH_YES_ANSWERS, or one of them said again without a pause
+    ("是的是的", "对对对", "好的好的")."""
+    return any(part == answer * (len(part) // len(answer))
+               for answer in ZH_YES_ANSWERS if len(part) % len(answer) == 0)
+
+
 def zh_is_yes(text: str) -> bool:
     """Whole-answer Chinese yes: every part is on ZH_YES_ANSWERS."""
     if "?" in text or "？" in text:  # "确定？" asks back; it isn't an answer
         return False
     parts = [p.lstrip(ZH_FILLERS) for p in re.split(r"[\s\W_]+", text)]
     parts = [p for p in parts if p]
-    return bool(parts) and all(p in ZH_YES_ANSWERS for p in parts)
+    return bool(parts) and all(_zh_yes_part(p) for p in parts)
 
 
 def download_voice_command(name: str, output_fn=print) -> int:
@@ -87,15 +111,38 @@ def download_voice_command(name: str, output_fn=print) -> int:
     return 0
 
 
-def is_yes(text: str) -> bool:
-    """Strict yes: a yes word and no negation ('yes, but no' -> False)."""
-    words = set(re.findall(r"[a-z']+", text.lower()))
-    phrase = " ".join(re.findall(r"[a-z']+", text.lower()))
-    yes = bool(words & YES_WORDS) or phrase in {"go ahead", "do it", "please do"}
-    no = bool(words & NO_WORDS)
-    if CJK.search(text):  # "好的" yes; "不好", "好不好", "可以吗？", "是谁" no
-        return zh_is_yes(text)
-    return yes and not no
+def classify_answer(text: str | None) -> str:
+    """An answer to a yes/no question: "yes", "no" or "unclear".
+
+    Case and punctuation don't matter. A yes is a short answer made only of
+    yes words and filler ("Yeah, move it.", "yes please", "好的", "没错");
+    any negation makes it a no ("yes... actually no", "不要", "不对"). Anything
+    else (silence, a number, a question back such as "Right?", "okay, and
+    Friday?") is unclear: the callers ask once more, then cancel."""
+    text = (text or "").replace("\u2019", "'")  # iPhone dictation's apostrophe
+    # digits are words too: "Yes, 11" to "move it to 10?" is not a yes
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if set(words) & NO_WORDS:
+        return "no"
+    if "?" in text or "？" in text:  # "Right?", "可以吗？" ask back
+        return "unclear"
+    if CJK.search(text):  # "好的" yes; "不好", "好不好" no; "是谁", "可以吗？" unclear
+        if zh_is_yes(text):
+            return "yes"
+        return "no" if any(m in text for m in ZH_NO_MARKS) else "unclear"
+    if not words or len(words) > MAX_YES_WORDS:
+        return "unclear"
+    phrase = " ".join(words)
+    has_yes = bool(set(words) & YES_WORDS) or any(
+        re.search(rf"\b{p}\b", phrase) for p in YES_PHRASES)
+    if has_yes and all(w in YES_WORDS or w in YES_FILLER for w in words):
+        return "yes"
+    return "unclear"
+
+
+def is_yes(text: str | None) -> bool:
+    """Only a clear yes confirms (classify_answer); unclear counts as no."""
+    return classify_answer(text) == "yes"
 
 
 def parse_args(argv=None):
@@ -842,31 +889,49 @@ def note_to_history(note: dict) -> bool:
                                 f"Saved a note to long-term memory{tags}.")
 
 
-def text_confirm(input_fn=None):
+CONFIRM_TRIES = 2  # the question, then once more after an unclear answer
+
+
+def text_confirm(input_fn=None, output_fn=print):
     def confirm(question: str) -> bool:
-        confirm.last_answer = (input_fn or input)(f"{question} (yes/no): ")
-        return is_yes(confirm.last_answer)
+        for attempt in range(CONFIRM_TRIES):
+            asked = question if attempt == 0 else i18n.t("confirm_again")
+            confirm.last_answer = (input_fn or input)(f"{asked} (yes/no): ")
+            verdict = classify_answer(confirm.last_answer)
+            if verdict != "unclear":
+                return verdict == "yes"
+        output_fn(i18n.t("confirm_unclear"))
+        return False
     return confirm
 
 
 def voice_confirm(tts, record_fn, transcriber, output_fn=print):
-    """Ask out loud, record the answer, and treat only a clear yes as yes."""
+    """Ask out loud, record the answer, and treat only a clear yes as yes.
+    An unclear answer gets one more "sorry, I didn't catch that"."""
     def confirm(question: str) -> bool:
-        output_fn(f"Claude: {question}")
-        tts.speak(question + i18n.t("say_yes_no"))
-        cut = take_interruption(tts)
-        if cut is not None:
-            # talked over the question: never a yes, and what he said
-            # (maybe an early "yes") isn't taken as an answer either
-            log.info("Confirmation question interrupted (%s): treated as no", cut.by)
-            output_fn("(Interrupted the question, so it's a no)")
-            confirm.last_answer = ""
-            return False
-        recording = record_fn()
-        answer = transcriber.transcribe(recording) if recording is not None else ""
-        output_fn(f"You: {answer}")
-        confirm.last_answer = answer  # saved in conversation history
-        return is_yes(answer)
+        for attempt in range(CONFIRM_TRIES):
+            asked = question if attempt == 0 else i18n.t("confirm_again")
+            output_fn(f"Claude: {asked}")
+            tts.speak(asked + i18n.t("say_yes_no"))
+            cut = take_interruption(tts)
+            if cut is not None:
+                # talked over the question: never a yes, and what he said
+                # (maybe an early "yes") isn't taken as an answer either
+                log.info("Confirmation question interrupted (%s): treated as no",
+                         cut.by)
+                output_fn("(Interrupted the question, so it's a no)")
+                confirm.last_answer = ""
+                return False
+            recording = record_fn()
+            answer = transcriber.transcribe(recording) if recording is not None else ""
+            output_fn(f"You: {answer}")
+            confirm.last_answer = answer  # saved in conversation history
+            verdict = classify_answer(answer)
+            log.info("Voice confirmation (%d chars) -> %s", len(answer), verdict)
+            if verdict != "unclear":
+                return verdict == "yes"
+        output_fn(f"Claude: {i18n.t('confirm_unclear')}")
+        return False
     return confirm
 
 
@@ -1148,9 +1213,8 @@ def main(argv=None) -> int:
         if callable(getattr(tts, "warm_up", None)):  # load the voice model now
             threading.Thread(target=tts.warm_up, name="tts-warm-up",
                              daemon=True).start()
-        transcriber = Transcriber(stt_cfg["model"], stt_cfg["device"],
-                                  stt_cfg["compute_type"],
-                                  language=config["assistant"]["language"])
+        transcriber = stt_from_config(stt_cfg, config["assistant"]["language"],
+                                      make=Transcriber)
         if args.mode == "voice":
             mic = audio.resolve_mic_device(config["wake"]["mic_device"])
 

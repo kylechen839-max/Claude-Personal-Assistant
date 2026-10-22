@@ -13,7 +13,7 @@ piper-tts==1.8.0
 kokoro-onnx>=0.4; python_version >= "3.11" and python_version < "3.14"
 onnxruntime>=1.25; python_version >= "3.11"
 sounddevice>=0.4.6
-faster-whisper>=1.0
+faster-whisper>=1.0.2
 # openWakeWord: on Linux its metadata pulls in tflite-runtime, which has no
 # wheels for Python 3.12+. We only use its ONNX backend, so on Linux (Pi)
 # install it with `pip install --no-deps openwakeword` (see README).

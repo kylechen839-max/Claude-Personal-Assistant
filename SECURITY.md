@@ -120,8 +120,11 @@ browser and at most 4 server-wide; the rate limits are kept per session, so
 reconnecting doesn't reset them. Transcripts are not logged at INFO. Closing the socket aborts the Claude stream and pending TTS and
 answers a pending confirmation with "no". A spoken confirmation counts only once the
 page reports the question finished playing, and only as a short explicit
-yes ("yes", "yeah, delete it"); talking over the question, answering before
-it was heard, or any other reply is a no, and it says so. Turns never run
+yes ("yes", "yeah, delete it"; `cli.classify_answer`); a negation ("no",
+"cancel", "stop"), talking over the question or answering before it was
+heard is a no, and it says so. Any other reply (unclear, a number, a
+question back) is asked once more ("Sorry, I didn't catch that"), under the
+same rules, and a second unclear reply cancels. Turns never run
 two at a time, and a confirmation stays with the turn that asked it. The VAD runs from files the app serves
 itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
 compilation), still no inline script, eval or third-party hosts. Tests:
@@ -780,6 +783,52 @@ server reads their replies with (`[tts] picker`, on by default).
 - Voice names from ElevenLabs are cut to one printable line of 60
   characters and shown with `textContent` only.
 
+## Speech-to-text (`stt.py`, optional cloud `stt_cloud.py`)
+
+- **Local by default.** `[stt] engine = "whisper"`: recordings are
+  transcribed on the machine and never leave it. The vocabulary prompt
+  and `[stt] hotwords` are config, not conversation; names belong in
+  `config.local.toml` (gitignored), not the committed `config.toml`.
+- **Cloud only when asked twice.** `engine = "openai"` or `"deepgram"`
+  *and* `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` set. Then every recording
+  transcribed by that server (the owner's, a spoken yes/no, and invited
+  people's on the cloud) is sent as a 16 kHz WAV over HTTPS to
+  `api.openai.com` or `api.deepgram.com`, with the prompt (OpenAI) or the
+  prompt's words and hotwords as keyterms (Deepgram, in the query string).
+  Recordings over five minutes, and Chinese family members' speech
+  (`family_speech` builds its own local Whisper), stay local. `config.mom.toml`
+  pins `engine = "whisper"`.
+- **Secrets.** Both keys are in `SECRET_ENV_VARS` (masked in logs; an
+  OpenAI `sk-...` key is also masked by pattern). The key goes only in the
+  `Authorization` header; `--check` says "set", never the value.
+- **Not isolated, on purpose.** They are not in `ISOLATED_ENV_VARS`:
+  OpenAI's quickstart puts `OPENAI_API_KEY` in the Windows user
+  environment, and that would stop Mom's and Kai's instances from
+  starting. It also guards nothing: a separate instance only sends audio
+  with its own `[stt] engine`, which `config.mom.toml` pins to "whisper".
+  A separate instance whose own config picks a cloud engine would use an
+  inherited key (the owner's bill); set the engine only in configs you
+  mean to.
+- **Logs.** INFO: engine, model, seconds of audio, transcript length and
+  time taken. The transcript only at DEBUG (local Whisper the same). A
+  failure logs the HTTP status or the exception's type name only, never
+  its message: a `requests` error quotes the URL, whose query holds the
+  keyterms. Response bodies are never logged.
+- **Bounded.** One request per recording, `cloud_timeout` (1-60 s,
+  default 10) on it; on any error, timeout or odd reply that recording
+  goes to local Whisper and the cloud is skipped for 60 s, so an outage
+  can't add a timeout to every turn. Invited people's recordings count
+  against `[family] stt_seconds_per_day` before either engine runs
+  (quotas.py), which bounds what they can spend.
+- **Prompt echo.** On near-silent audio Whisper (or the cloud) can return
+  its own prompt; a transcript that is the prompt, or a run of it spanning
+  two or more of its items, is treated as silence, so the vocabulary is
+  never sent to Claude as if Kyle had said it.
+- **Not fixed, on purpose:** the owner's own recordings have no daily
+  cloud cap (his account, his bill); a slow but steady cloud reply is
+  bounded by the `requests` read timeout between bytes, not a total
+  deadline (the reply is a few hundred bytes of JSON).
+
 ## PC hub: removed (2026-10-20)
 
 The PC hub (`/devteam` on the PC's web app, `assistant/devhub.py`) was
@@ -825,9 +874,11 @@ a PKCE challenge, `access_type=offline` and the redirect
   `gmail.compose` scope also allows sending; sending is blocked in code, as
   for Kyle). Deletes still ask. In Chinese a yes is the whole answer from
   a short allowlist (是的, 好的, 没问题, 删吧, ...; each part between
-  punctuation, after a leading 嗯/哦/啊/呃): a sentence that only contains a
-  yes character (还是明天吧, 是谁, 好，等一下, 对了还有一个) is a no, as is
-  anything not on the list.
+  punctuation, after a leading 嗯/哦/啊/呃, or one of them repeated: 是的是的,
+  对对对): a sentence that only contains a yes character (还是明天吧, 是谁,
+  对了还有一个) is never a yes. One with a negation (不/别/取消/算了/等/错:
+  不对, 好，等一下) is a no; anything else is unclear, asked once more and
+  then cancelled.
 - **Separate instance, separate data.** `load_dotenv` never overrides a
   variable already set in the shell, and `google_auth` reads
   `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` before any file, so her
@@ -1330,6 +1381,27 @@ with `SPOTIFY_CLIENT_ID` set and a saved sign-in.
   stay trusted only because the Assignments database is not shared with
   anyone else; if it ever is, its read tools should be marked untrusted
   too (`Tool.untrusted_output`).
+- **A wider "yes" and one more try (2026-10-21).** Kyle was asked up to
+  three times because speech-to-text misheard his "yes". One shared
+  classifier (`cli.classify_answer`, used by the PC loop, the phone's
+  buttons/typed/recorded answer and the hands-free voice view) now also
+  takes near-misses and short affirmatives ("ya", "yep", "okay", "sure",
+  "please", "right", "do it", 好/可以/行), ignoring case and punctuation.
+  What still holds: a yes must be a short answer (at most 8 words) made only
+  of yes words and filler, with no number ("Yes, 11" to "...at 10?") and no
+  question mark ("Right?"); any negation ("no", "cancel", "stop", "wait",
+  "don't", 不/别/取消/算了) is a no; talking over a question, or answering
+  before it was heard to the end, is a no; the answer stays bound to its own
+  turn and confirmation id. An unclear answer is asked once more ("Sorry, I
+  didn't catch that"), under the same rules, and a second unclear one
+  cancels. The cost: a stray "okay" or "right" said just after a question
+  now confirms it, where before only "yes"-type words did.
+- **Calendar create, move and update don't ask without untrusted text.**
+  Their tool descriptions tell Claude not to ask "are you sure?" itself;
+  the app's own question still comes whenever `confirm_if_untrusted`
+  applies (see the calendar entry above: invites from others, event notes,
+  shared calendars, web, email, attachments), and guest changes, invite
+  answers and deletes always ask.
 - **Spotify playback control never asks, even with untrusted content in
   the conversation.** A web page or email could make Claude play
   something, skip, or set the volume. That is an annoyance at worst, easy

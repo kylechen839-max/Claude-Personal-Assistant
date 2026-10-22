@@ -43,9 +43,19 @@ voice_file = "data/voice_choice.json"  # your pick; a family member's is in thei
 family_paid_voices = false    # true = family-tier members only (never beta testers) may pick ElevenLabs voices (your bill)
 
 [stt]
-model = "base.en"             # faster-whisper model; "tiny.en" is faster on a Pi
+model = "small.en"            # faster-whisper model (~480 MB); "base.en" on a Pi 5 or the
+                              # cloud server (set there), "tiny.en" on a Pi 4: faster, mishears more
 device = "cpu"
 compute_type = "int8"
+beam_size = 5                 # 1 = greedy (faster, mishears more); 0 = the default (5)
+initial_prompt = "auto"       # "auto" = the built-in app vocabulary (calendar, assignment,
+                              # Notion, reschedule, ...); "" = none; or your own text
+hotwords = ""                 # extra words Whisper should favor, e.g. names: "Kyle, Kai"
+engine = "whisper"            # "whisper" (local, private), or paid cloud: "openai" (needs
+                              # OPENAI_API_KEY) or "deepgram" (DEEPGRAM_API_KEY); your
+                              # speech is then sent to them; local Whisper on any error
+cloud_model = ""              # "" = gpt-4o-transcribe (openai) / nova-3 (deepgram)
+cloud_timeout = 10            # seconds before local Whisper takes over
 
 [wake]
 keyword_path = "keywords/hey_claude.onnx"  # openWakeWord model (Windows and Pi)

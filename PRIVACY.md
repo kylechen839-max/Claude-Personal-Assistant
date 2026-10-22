@@ -9,7 +9,7 @@ except to the services listed below, using your own keys.
 
 | Service | What is sent | When |
 |---|---|---|
-| **Anthropic** (Claude API) | What you say (as text, after local speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events with their colors, labels, guest counts and the first 300 characters of their notes, your calendars' names, guest addresses you ask to invite; assignments, email you asked about, web pages) | Every turn |
+| **Anthropic** (Claude API) | What you say (as text, after speech-to-text), the conversation so far, relevant memory notes, tool results (calendar events with their colors, labels, guest counts and the first 300 characters of their notes, your calendars' names, guest addresses you ask to invite; assignments, email you asked about, web pages) | Every turn |
 | **Pinecone** (your index) | Short conversation summaries and notes you ask it to remember; search queries built from what you say | Before each reply (search) and after each conversation (summary) |
 | **Google Calendar** | Event reads and the changes you ask for. After your spoken yes, Google emails the guests you invite or remove, and the organizer (with your note, if any) when you answer an invite; for other changes, moves and deletes the assistant asks Google not to email anyone (Google says it may still send some notices) | When you ask about or change your calendar |
 | **Gmail** (only if `[gmail]` is enabled) | Searches and reads you ask for; **drafts** you approve. Nothing is ever sent: the code blocks every send call | When you ask about email |
@@ -18,6 +18,8 @@ except to the services listed below, using your own keys.
 | **Web search / fetch** (Anthropic-run tools) | The search query or URL | When Claude decides to look something up |
 | **ElevenLabs** (only if `ELEVENLABS_API_KEY` is set) | The reply text to be spoken | Each reply |
 | **Sentry** (only if `SENTRY_DSN` is set) | Error reports: the error's type and code location, the request's method and path, the app version and Python version. Never what you said, the error's message, cookies, IP or request contents | When something fails |
+| **OpenAI** (optional, off by default) | Speech-to-text, only with `[stt] engine = "openai"` and `OPENAI_API_KEY`: every recording that machine transcribes, plus the vocabulary prompt | Each recording |
+| **Deepgram** (optional, off by default) | Speech-to-text, only with `[stt] engine = "deepgram"` and `DEEPGRAM_API_KEY`: every recording that machine transcribes, plus the vocabulary as keyterms | Each recording |
 | **Hugging Face / GitHub releases** | Nothing about you: model downloads. Kokoro is checksum-verified at setup; Piper voices download at setup, and the Whisper and openWakeWord models on first use, without a checksum check | Once per model |
 
 Some requests are answered by Claude Haiku instead of Claude Sonnet; both are
@@ -95,9 +97,20 @@ and they are deleted when the account is removed. No text or audio is kept for
 this.
 
 Speech-to-text (faster-whisper), the wake word (openWakeWord) and the default
-voices (Kokoro, Piper, pyttsx3) all run **locally**. Raw audio never leaves
-the machine that recorded it, except your phone's recording going to your own
-backend (PC, Pi or your Render server) over HTTPS.
+voices (Kokoro, Piper, pyttsx3) all run **locally**. By default, raw audio never
+leaves the machine that recorded it, except your phone's recording going to
+your own backend (PC, Pi or your Render server) over HTTPS.
+
+Cloud speech-to-text is off by default. Only if `[stt] engine` is set to
+`"openai"` or `"deepgram"` (on the cloud server, `STT_ENGINE`) and that
+service's API key is added, each recording that machine transcribes, including
+invited people's recordings on the cloud server and spoken yes/no answers, is
+sent over HTTPS as a WAV file, with a short word list (the app's vocabulary and
+any names in `[stt] hotwords`), to OpenAI (`api.openai.com`, gpt-4o-transcribe)
+or Deepgram (`api.deepgram.com`, nova-3) under their API terms. Recordings over
+five minutes, and Chinese-speaking family members' speech, always stay local;
+if the service fails, that recording is transcribed locally instead.
+Transcripts are written to the log only at DEBUG level.
 
 ## What is stored, and where
 

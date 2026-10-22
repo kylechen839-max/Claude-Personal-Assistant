@@ -20,7 +20,8 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 |---|---|---|
 | `test_chat.py` | 9 | stage 1 |
 | `test_tts.py` | 16 | stage 2 |
-| `test_stt.py` | 4 | stage 3 |
+| `test_stt.py` | 17 | stage 3; beam search, vocabulary prompt, prompt echo, short answers on small.en |
+| `test_stt_cloud.py` | 12 | optional OpenAI / Deepgram speech-to-text, local fallback |
 | `test_wakeword.py` | 15 | stage 4 |
 | `test_follow_up.py` | 14 | follow-up mode |
 | `test_barge_in.py` | 43 | barge-in on the PC loop (talk over a reply), with follow-ups |
@@ -65,6 +66,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `test_confirm_ux.py` | 123 | yes/no answers: misheard yeses, one more try then cancel (text, PC voice, phone voice, `/api/confirm`), calendar moves without a question |
 | `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
 ## Stage 1 - Core chat ✅
@@ -4450,6 +4452,246 @@ Kyle approves the wording and picks the address first, in a separate PR).
 - **Counts** (Linux sandbox, Python 3.13): 2652 passed, 35 skipped (+3
   over master's 2649 passed, 35 skipped); JS 118 pass.
 
+## Confirmations that don't nag (2026-10-21)
+
+Kyle: moving a calendar event asked for confirmation, and the app asked up
+to three times because speech-to-text misheard his "yes".
+
+- **Why a move asked.** Not a `confirm_prompt`: `move_calendar_event` has
+  only `confirm_if_untrusted`, and create/update ask without taint only for
+  guest changes. Two causes remained: (1) Claude asking "are you sure?" on
+  its own (only the delete tool told it not to), then the app's own
+  question on top when the conversation was tainted; (2) taint from the
+  listing every move starts with. `list_events` marks the result untrusted
+  when any listed event has notes (`description`), even Kyle's own
+  (`organizer.self` True), or is an invite, a Gmail-made event, a
+  `guestsCanModify` event, or comes from a calendar he doesn't own
+  (`calendar="all"` takes in subscribed holiday calendars). From then on
+  `ClaudeChat.tainted()` (`has_marked_results`) makes every change ask.
+  The taint rules are unchanged (SECURITY.md "Calendar data from Kyle's
+  own events"); cause 1 is fixed.
+- **Tool descriptions.** `create_calendar_event`, `move_calendar_event`
+  and `update_calendar_event` end with `JUST_DO_IT` ("just call the tool:
+  don't ask him to confirm first yourself"). Their `confirm_if_untrusted`,
+  guest questions and every delete question are unchanged.
+- **One answer classifier.** `cli.classify_answer` returns "yes", "no" or
+  "unclear", ignoring case and punctuation (and the iPhone's curly
+  apostrophe). Yes: yes/yeah/yep/yup/ya/yah/yea, sure, ok/okay, do it, go
+  ahead, please, correct, right, yes please, affirmative, sounds good,
+  alright, 是/对/好/可以/行 (the existing whole-answer Chinese rule), in a
+  short answer (at most 8 words) of yes words and filler. Any negation is a
+  no. Everything else is unclear. `cli.is_yes` and
+  `voice_session.is_explicit_yes` are now this one rule (they were two
+  lists; "okay" alone used to be a no in the voice view).
+- **One more try, then cancel.** An unclear answer gets "Sorry, I didn't
+  catch that. Please say yes or no." once; a second unclear one cancels
+  with "I still didn't catch that, so I left it." A clear no cancels at
+  once. Same in all four places: `text_confirm`, `voice_confirm` (PC; a
+  barge-in over the second question is still a no), the voice view
+  (`VoiceConversation._ask_again`: same turn, same pending question, a new
+  "confirm" event with `again: true` and a new question chunk; only that
+  chunk's own "played" opens it, so a stale "played" or an early answer is
+  "not heard" = no, and talking over it is "interrupted" = no), and
+  `/api/confirm` (`WebAssistant.ask_again`: the same confirmation id is
+  asked again; no page change needed, `app.js` already shows a new
+  "confirm"). The cancelled tool result now tells Claude to say so in one
+  short sentence and not to call the tool or ask again, so it doesn't
+  re-ask by itself.
+- **Logs.** INFO has lengths and the verdict ("Voice confirmation (11
+  chars) -> unclear", "Confirmation of turn 1 unclear: asking once more");
+  the answer text stays at DEBUG (caplog tests).
+- **Tests** (+125): new `tests/test_confirm_ux.py` (123: 50 yeses incl.
+  misheard ones, 25 noes, 26 unclear; a move with no taint runs with no
+  question; a delete asks exactly once; a misheard delete answer asks once
+  more then cancels; a move after listing an outside invite still asks;
+  own-event notes still taint (pins the reported cause); calendar edit
+  descriptions; text, PC voice, hands-free voice and `/api/confirm`
+  re-ask flows, including a barge-in on the second question, a stale
+  "played", and a clear no that never re-asks), plus
+  `test_voice_ws.py::test_unclear_answer_is_asked_again_over_the_socket`.
+  Changed: `test_voice.py::test_only_an_explicit_yes_confirms` ("okay" is
+  now a yes; "ya", "Yep!", "Cancel.", "stop" added; the unclear answers
+  moved to the re-ask tests) and one `test_voice_ws.py` case ("okay, and
+  what about Friday?" now re-asks, so the clear-no case says "Nope, cancel
+  that.").
+  - Revert check (old source, with only `classify_answer`/`JUST_DO_IT`/
+    `text_confirm(output_fn=)` shims so the file imports): 6 calendar/text
+    tests fail as expected (descriptions, misheard delete, text re-ask) and
+    every classifier, re-ask and voice test fails; the move-without-taint,
+    delete-asks-once, tainted-move and own-notes tests pass on the old code
+    too, as they should (they guard behaviour that must not change).
+- **Round 2 (judge, 5 low findings).** Digits are words (`[a-z0-9']+`), so
+  "Yes, 11" to "move it to 10?" is unclear, not a yes; an answer with "?"
+  or "？" ("Right?", "Okay?") is unclear; 没错 and a repeated yes
+  (是的是的, 对对对, 好的好的) are yeses while 不对 and 错了 stay noes; the
+  stale-"played" test now delivers the late report inside `_ask_again`
+  (before the new question's audio exists) and fails without the
+  `pending.chunk = None` guard; SECURITY, README and MANUAL_TEST no longer
+  say any other answer is a no. Revert check: the old `cli.py` fails the
+  15 new classifier cases ("okay 4 pm" was already unclear), and removing
+  the guard fails the stale-"played" test.
+- **Counts** (Linux sandbox, Python 3.13): 2793 passed, 35 skipped (+125
+  over master 5f42072's 2668 passed, 35 skipped); JS 158 pass (every file
+  in `tests/js`, none changed).
+
+## Speech accuracy: small.en, beam search, vocabulary prompt, optional cloud STT (2026-10-21)
+
+Kyle: the app "always mishears me" in voice conversation. Every path
+(wake word, push-to-talk, the phone's mic button, hands-free) goes through
+`stt.Transcriber`, which ran `base.en` with greedy decoding (`beam_size=1`)
+and no English prompt.
+
+- **`stt.py`.** `Transcriber(beam_size=5, initial_prompt=None,
+  hotwords=None)`: beam search 5 (falsy = the default, never greedy by
+  accident); `initial_prompt` None = the language's built-in prompt (new
+  `EN_PROMPT`: "calendar, assignment, Notion, reschedule, tomorrow, remind
+  me, delete, move, Canvas, exam, quiz"; Chinese keeps `ZH_PROMPT`), "" =
+  none; `hotwords` (names; only sent when set, so faster-whisper < 1.0.2
+  still works). `options()` feeds both the first decode and `redecode`,
+  which keeps beam, prompt and hotwords (temperature 0, no conditioning,
+  as before). **Prompt-echo guard:** a transcript that is the whole prompt,
+  or a run of it across two or more of its items, is silence (""); one
+  item alone ("Tomorrow.", "Remind me.") and a single hotword ("Kai") are
+  kept. The transcript is logged at DEBUG only; the echo line has its
+  length. `stt.from_config(stt, language, make=None)` builds it from
+  `[stt]` (cli.py and webapp.py now use it; cli passes its own
+  `Transcriber` so tests that patch `cli.Transcriber` still work).
+  `family_speech` (Chinese members on an English server) passes
+  `beam_size` but not the owner's prompt or hotwords.
+- **Defaults.** `[stt] model = "small.en"` (int8) for the PC, new keys
+  `beam_size = 5`, `initial_prompt = "auto"`, `hotwords = ""`, `engine =
+  "whisper"`, `cloud_model = ""`, `cloud_timeout = 10` (DEFAULTS and
+  config.toml). `SERVER_PROFILE` pins `stt.model = "base.en"` (baked into
+  the image; small.en's RAM on Render unmeasured), so Render stays on
+  base.en with beam 5; `WHISPER_MODEL` still overrides. `config.mom.toml`
+  keeps `small`, with beam 5, the Mandarin prompt and `engine = "whisper"`.
+  The Pi: `install_pi.sh` appends `[stt] model = "base.en"` to
+  `config.local.toml` unless it already has an `[stt]` section, so the Pi
+  downloads and runs base.en; the pi-arm64 simulation checks it (once, and
+  that `load_config()` gives base.en). `doctor.check_whisper_model` names
+  the beam (and warns that 1 is greedy), mentions small.en's ~480 MB;
+  `check_cloud_stt` says whether the engine's key is set, never its value.
+- **Cloud engine `stt_cloud.py`** (mirrors `tts_elevenlabs.py`).
+  `CloudTranscriber(local, engine, ...)` with `[stt] engine = "openai"`
+  (`gpt-4o-transcribe`, multipart WAV, `{"text": ...}`, the prompt plus
+  hotwords as `prompt`) or `"deepgram"` (`nova-3`, raw WAV, `keyterm`
+  query params from the prompt's items and hotwords, max 50,
+  `results.channels[0].alternatives[0].transcript`). Active only with
+  `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` (both added to `SECRET_ENV_VARS`
+  and `ISOLATED_ENV_VARS`; an OpenAI `sk-...` pattern added to the log
+  redaction). Timeout 1-60 s (default 10; 0 = default), then local
+  Whisper; any error, 5xx or odd reply also goes local and the cloud is
+  skipped for 60 s. Over 5 minutes of audio stays local. Logs: INFO has
+  engine, model, seconds, length, time; transcript at DEBUG; failures
+  give the HTTP status or exception type only (a `requests` error quotes
+  the URL, whose query holds keyterms). Invited people's audio is already
+  counted against `stt_seconds_per_day` before any engine runs
+  (quotas.py). `STT_ENGINE` env override for Render; render.yaml offers
+  `STT_ENGINE`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` (all `sync: false`).
+- **Endpointer** (`web/voice-core.js`): `Endpointer.answerPending` and
+  `answerMinUtteranceMs` (150): while a yes/no question is open, only
+  sounds shorter than 150 ms (instead of `min_utterance_ms`, 300) are
+  misfires, so a quick "yes" reaches the server. A lower
+  `min_utterance_ms` is never raised. `voice.js` sets the flag from
+  `controller.awaitingAnswer` before each frame. The confirmation logic
+  (voice_session.py, `is_yes`, `/api/confirm`, TurnController) is
+  untouched. `sw.js` cache v27 -> v28.
+- **CI.** `tests.yml` caches `whisper-base.en-small.en-<os>` and has a
+  "Download Whisper models" step (base.en and small.en) before pytest, so
+  a download failure shows instead of the real-model tests skipping. A
+  cold cache fetches ~550 MB (Windows too).
+- **Not done (left as found):** the 3-tap box downsample in
+  `web/voice-worklet.js` and the linear-interpolation resample in
+  `audio.py` (the researcher ranked them last); `lecture.py` keeps its
+  own Whisper settings.
+- **Measured:** nothing about accuracy; Hugging Face is blocked here, so
+  no Whisper model ran in this sandbox (the slow tests skip and run in CI).
+  The speed cost of small.en + beam 5 over base.en greedy is an estimate
+  (README says "about two to three times", not measured). MANUAL_TEST
+  11b is the real measurement: ten phrases and five quick "yes" answers,
+  phone push-to-talk, phone hands-free and the PC.
+- **Tests:**
+  - `test_stt.py`: `test_beam_size_and_prompt_come_from_config` (beam 5,
+    `EN_PROMPT`, `small.en`/int8 from DEFAULTS; custom beam, prompt,
+    hotwords; 0/None/"" beam = 5; "" prompt = none; Chinese "auto" =
+    `ZH_PROMPT`), `test_whisper_echoing_its_prompt_is_silence`,
+    `test_transcript_logged_at_debug_only`; the redecode test now checks
+    beam 5 and the prompt on the retry; `test_transcriber_language`
+    expects the English prompt. Slow (CI): the `whisper` fixture is now
+    the shipped transcriber (small.en, beam 5, prompt);
+    `test_short_answers_through_the_shipped_model` ("yes", "yeah go
+    ahead", "no", "move my dentist appointment to Friday", TTS-generated)
+    and `test_near_silence_never_comes_back_as_the_prompt`.
+  - `test_stt_cloud.py` (new, 12): both request/reply shapes, fallback
+    and 60 s cooldown on a timeout, a 503 and a reply without a
+    transcript, no key (one warning), long or empty audio stays local,
+    the echo guard, INFO/DEBUG caplog (no transcript, key or keyterm at
+    INFO), `from_config` (engine case, timeout bounds, unknown engine),
+    keys secret and isolated, doctor never prints the key.
+  - `test_docs.py`: `[stt]` mirrored in config.toml and README's table,
+    the keys in `.env.example` and render.yaml, Mom's `[stt]`.
+    `test_server_profile.py`: the server keeps base.en under the shipped
+    config.toml; `STT_ENGINE`. `test_family_google.py`: family speech
+    gets `beam_size`, not the owner's hotwords. `test_doctor.py`,
+    `test_end_to_end.py` (skip guard checks the shipped model),
+    `test_webapp.py` (sw v28) updated.
+  - JS: `voice-core.test.js` "a short yes to an open question isn't a
+    misfire".
+  - Revert checks (one source change at a time, restored after): greedy
+    beam fails 2 tests; no English prompt fails 7; no echo guard fails
+    the echo test; the transcript at INFO fails 2; `beam_size is not None`
+    fails the config test; logging the exception message fails the
+    cloud caplog test; no cooldown fails the 3 fallback cases; ignoring
+    `answerPending` fails the JS test; no `stt` in SERVER_PROFILE fails
+    the server test; family speech without `beam_size` fails its test.
+- **Counts** (Linux sandbox, Python 3.13): 2685 passed, 40 skipped (+17
+  passed, +5 skipped over master 5f42072's 2668 passed, 35 skipped,
+  measured on a clean export; the 5 new skips are the slow small.en tests,
+  Hugging Face being blocked here). JS: 118 pass in the `.mjs` files plus
+  41 in `voice-core.test.js` (+1).
+
+### Round 2 (judge: CHANGES_NEEDED, 6 findings; merged master 515ca4e)
+
+1. **A blip over the question no longer cuts it off.** The 150 ms minimum
+   applied while the yes/no question was still playing, so a 150-299 ms
+   sound over it became a barge-in that cut the question and declined
+   the action. New `TurnController.answerWindow` (`awaitingAnswer &&
+   !replyAudible`) feeds `endpointer.answerPending` in `voice.js`, and the
+   Endpointer latches it per utterance (`answerShort`: true only if the
+   speech began in the window and it never closed while speaking).
+   PR #51 changed no web code; its re-ask replays question audio, which
+   closes the window. Tests: a TurnController + Endpointer test (a 190 ms
+   blip during question audio sends no interrupt and no utterance; speech
+   that began over it and ended after it keeps the 300 ms minimum; a
+   190 ms "yes" after it is sent), and the window closing mid-utterance.
+2. **Separate instances start with the keys in the environment.**
+   `OPENAI_API_KEY` and `DEEPGRAM_API_KEY` left `ISOLATED_ENV_VARS` (still
+   in `SECRET_ENV_VARS`): OpenAI's quickstart does `setx OPENAI_API_KEY`,
+   which would stop Mom's and Kai's instances, and `config.mom.toml` pins
+   `engine = "whisper"`. SECURITY.md records it as deliberate.
+3. **Two-item answers are kept.** The echo guard now needs the whole
+   prompt (a 1-2 item one only if it is the initial prompt sentence) or
+   a run across 3+ of its items. "Reschedule tomorrow.", "Canvas exam.",
+   "Tomorrow, remind me.", "Exam, quiz.", "Kyle, Kai." are in the test's
+   kept list.
+4. PRIVACY.md wording sent to the master.
+5. `pi-arm64.yml` cache key `pi-sim-small.en-<requirements hash>`, so the
+   Pi simulation saves small.en once.
+6. PI_MIGRATION, README and MANUAL_TEST say to add `[stt]` settings
+   under the existing `[stt]` line of `config.local.toml` (a second header
+   is invalid TOML). `test_pi_stt_advice_keeps_config_local_toml_valid`
+   parses the installer's block with an added key, checks the wording, the
+   pi-sim key and the pin below.
+- `requirements.txt`: `faster-whisper>=1.0.2` (hotwords).
+- Each new test fails on the round-1 code: the TurnController test with
+  `answerWindow = awaitingAnswer`; the mid-utterance case without the
+  per-frame latch reset; the key test with round-1 `config.py`; the echo
+  test with round-1 `stt.py` ("Reschedule tomorrow." dropped); the docs
+  test with the old PI_MIGRATION sentence or the old cache key.
+- **Counts** (Linux sandbox, Python 3.13, after merging 515ca4e): 2811
+  passed, 40 skipped (+18 passed, +5 skipped over 515ca4e's 2793 passed,
+  35 skipped, measured on a clean export). JS: 118 in the `.mjs` files
+  plus 42 in `voice-core.test.js` (+2 over master).
 ## Student assistant P1: school deadlines from Canvas (2026-10-21)
 The data foundation of the student assistant: each person's deadlines
 (exams, assignments, quizzes, classes), captured from Canvas, Canvas's

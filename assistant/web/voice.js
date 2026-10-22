@@ -311,6 +311,10 @@
       try { prob = quick ? quickVad.process(frame) : await vad.process(frame); } catch (e) { prob = 0; }
       backlog--;
       if (!controller) return; // ended meanwhile
+      // a short "yes" to an open question isn't dropped as a misfire
+      // (only once the question has finished playing: a blip over it
+      // mustn't cut it off)
+      endpointer.answerPending = controller.answerWindow;
       // stricter while reply audio plays, whatever the state shows
       for (const ev of endpointer.process(frame, prob, controller.replyAudible)) controller.onVad(ev);
     });
