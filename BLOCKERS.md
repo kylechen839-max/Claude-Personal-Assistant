@@ -13,10 +13,11 @@ Only what is still open for Kyle. None of it blocks the code.
          trailing slash). Decide on a custom domain *now*: changing it
          later changes the Google and Notion redirect URIs and the cookies
          (everyone signs in again).
-      2. **Approve the legal pages.** Read `assistant/web/privacy.html`
+      2. **Done (2026-10-22): Kyle approved the wording; support email
+         heyclaude.app@gmail.com.** **Approve the legal pages.** Read `assistant/web/privacy.html`
          and `terms.html` (MANUAL_TEST "Public site and waitlist"), fix any
          wording, and pick a support email address.
-      3. **The launch PR** (one small PR, after step 2): `"public_site":
+      3. **Done (2026-10-22, the launch PR).** **The launch PR** (one small PR, after step 2): `"public_site":
          True` in `SERVER_PROFILE` `"webapp"` (`assistant/config.py`), plus
          `support_email = "<address>"` and `legal_draft = false` in
          `config.toml` `[webapp]`. After Render redeploys, open `/welcome`,
