@@ -33,7 +33,7 @@ function Get-TaskName {
     return "Family-$Instance"
 }
 
-function Get-TaskCandidates {
+function Get-TaskLocation {
     # Where the instance's task may live, in order: ours first, then (for
     # your own app only) the older hand-made "\Hey Claude Web" task.
     param([string]$Instance)
@@ -54,7 +54,7 @@ function Test-InstanceCommandLine {
     return $CommandLine -match ('-m\s+assistant\b.*--config\s+"?' + [regex]::Escape("config.$Instance.toml") + '(\s|"|$)')
 }
 
-$found = Get-TaskCandidates $Name | Where-Object {
+$found = Get-TaskLocation $Name | Where-Object {
     Get-ScheduledTask -TaskPath $_.Path -TaskName $_.Name -ErrorAction SilentlyContinue
 } | Select-Object -First 1
 if (-not $found) {
