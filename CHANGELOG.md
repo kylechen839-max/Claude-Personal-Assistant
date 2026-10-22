@@ -9,6 +9,15 @@
   may edit and calendars shared with you still make changes ask. An event the
   assistant wrote while outside text was in the conversation stays marked, so
   it keeps asking.
+- Study briefings: optional phone notifications (morning, evening, weekly,
+  exam reminders, new deadlines, after class) with a tap-to-play brief; at
+  most 2 a day, quiet 22:00-07:30 in your time zone, built from your School
+  deadlines. Claude writes a message only when a rule fires, from the
+  deadline fields alone. Settings > Enable notifications (iPhone: Home
+  Screen app, iOS 16.4+). Each backend sends to the phones subscribed
+  through it. New `[push]` and `[proactive]` settings; `pywebpush`
+  dependency; `cryptography>=47`. A separate instance without its own
+  `[push] owner_dir` has notifications off.
 
 - Speech recognition is much more accurate on the PC: Whisper small.en with
   beam search and a vocabulary prompt (calendar, assignment, Notion, ...),

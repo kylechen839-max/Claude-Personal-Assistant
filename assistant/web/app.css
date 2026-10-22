@@ -425,3 +425,12 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
   background: var(--warn); color: var(--warn-ink); border: 1px solid var(--warn-line);
   white-space: pre-line; line-height: 1.45; font-size: .92rem; }
 .health-banner[hidden] { display: none; }
+
+/* The study brief a notification opens (brief.js): its text and a Play button */
+.brief .meta { color: var(--muted); font-size: .8125rem; margin: 1rem 0 0; padding: 0 var(--pad); text-align: center; }
+.brief .summary { margin: .75rem var(--pad) 0; padding: .85rem 1rem; border-radius: var(--r-lg);
+  background: var(--surface); box-shadow: var(--shadow-1); font-size: 1rem; color: var(--text-2);
+  line-height: 1.45; white-space: pre-line; }
+.brief .summary:empty { display: none; }
+.brief .primary { margin: 1rem var(--pad) 0; min-height: 50px; border-radius: var(--r-md); }
+.brief .primary[hidden] { display: none; }

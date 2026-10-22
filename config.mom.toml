@@ -89,6 +89,9 @@ token = "data/mom/spotify_token.json"
 [family]
 dir = "data/mom/users"
 
+[push]                         # her phone's notifications and her own VAPID key
+owner_dir = "data/mom/student"
+
 [teamchat]                     # off for her anyway (cli.py forces it)
 digest_state_file = "data/mom/teamchat_digests.json"
 

@@ -296,7 +296,33 @@ DEFAULTS: dict = {
         "volume_step": 15,          # "turn it up" / "down" by this much (percent)
         "timeout": 10,              # seconds per Spotify request
     },
-    "family": {                     # invite family members (cloud web app)
+    "push": {                       # phone notifications (push.py; README "Study briefings")
+        "enabled": True,            # "Enable notifications" in Settings; needs USER_DATA_KEY
+        # the owner's subscriptions, briefing state and (without
+        # VAPID_PRIVATE_KEY) the generated VAPID key; invited people's
+        # are in their own [family] dir folder
+        "owner_dir": "data/student",
+        "subject": "",              # VAPID contact, mailto: or https:; "" = public_origin
+        "max_devices": 5,           # per person (at most 5); the oldest is dropped
+        "ttl": 86400,               # seconds a push service keeps an undelivered one
+        "timeout": 10,              # seconds per push request
+    },
+    "proactive": {                  # study briefings (proactive.py); only with a device subscribed
+        "enabled": True,
+        "check_minutes": 120,       # how often the rules are looked at
+        "morning": "07:30",         # today's and tomorrow's deadlines
+        "evening": "20:30",         # tomorrow's deadlines
+        "weekly_day": "sun",        # the week ahead, on this day ...
+        "weekly_time": "18:00",     # ... at this time
+        "quiet_start": "22:00",     # nothing between these (the person's time zone)
+        "quiet_end": "07:30",
+        "max_per_day": 2,           # notifications per person per day
+        "exam_days": 14,            # exam reminders from this many days out
+        "class_minutes": 75,        # "how did class go?" this long after a class starts
+        "model": "",                # wording the message; "" = [assistant] fast_model
+        "max_tokens": 1000,         # room for adaptive thinking (Sonnet); the text is cut to 240
+    },
+    "family": {                   # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
         "max_users": 10,
@@ -373,6 +399,7 @@ SERVER_PROFILE: dict = {
     "student": {"dir": "/data/student"},  # on the disk
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
+    "push": {"owner_dir": "/data/student"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
 }
 PROFILES = {"server": SERVER_PROFILE}
@@ -415,7 +442,8 @@ ISOLATED_ENV_VARS = ("GOOGLE_TOKEN_JSON", "GOOGLE_CLIENT_JSON", "GOOGLE_TOKEN",
                      "PINECONE_INDEX", "HA_URL", "HA_TOKEN", "SENTRY_DSN",
                      "USER_DATA_KEY",
                      "NOTION_OAUTH_CLIENT_ID", "NOTION_OAUTH_CLIENT_SECRET",
-                     "CANVAS_TOKEN", "CANVAS_ICS_URL")
+                     "CANVAS_TOKEN", "CANVAS_ICS_URL",
+                     "VAPID_PRIVATE_KEY")
 # USER_DATA_KEY too: it opens the Anthropic keys stored under [family] dir,
 # so a separate instance sets its own (or none) and never borrows the
 # owner's from the shell.
@@ -503,7 +531,9 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "PINECONE_API_KEY", "NOTION_TOKEN",
                    # that is a secret itself
                    "CANVAS_TOKEN", "CANVAS_ICS_URL",
                    # optional cloud speech-to-text (stt_cloud.py)
-                   "OPENAI_API_KEY", "DEEPGRAM_API_KEY")
+                   "OPENAI_API_KEY", "DEEPGRAM_API_KEY",
+                   # signs this server's phone notifications (push.py)
+                   "VAPID_PRIVATE_KEY")
 _SECRET_PATTERNS = [
     re.compile(r"sk-ant-[\w-]+"),               # Anthropic keys
     re.compile(r"\bsk-(?:proj-)?[\w-]{20,}"),   # OpenAI keys (cloud STT)
