@@ -300,14 +300,3 @@ Only what is still open for Kyle. None of it blocks the code.
   set `target_word`, Run all, accept the restart, Run all again.
 - Full `pytest` on Kyle's PC with keys loaded: 0 skipped; text mode answered
   calendar and assignment questions from live data.
-
-## Session watcher (`claude/session-watch`), 2026-10-22
-Three build-judge rounds used without approval, so no PR yet. Round 3's
-judge left two MEDIUM findings, both small and well scoped:
-1. With the hook installed, a session stopped by a security check shows as
-   "idle" (the idle_prompt marker wins over the transcript's
-   `security_denied`).
-2. The denial patterns also match ordinary failing commands (a pre-commit
-   hook refusal, git's "Permission to ... denied" 403).
-Needs Kyle: approve one more round to fix these two, or take the branch
-as it is.
