@@ -5050,6 +5050,7 @@ assistant package):
     no longer clears a denial; the docs test on the old docs).
 - **Counts** (Linux sandbox, Python 3.13, no eSpeak installed in this
   sandbox): 2949 passed, 69 skipped, 9 failed, 26 errors, against the
-  same tree without this change's 2855 passed, 69 skipped, 9 failed, 26 errors; the failures and errors are the
-  same eSpeak-missing tests on both. Round 2 was 2918 passed. No JS
+  same tree without this change's 2855 passed, 69 skipped, 9 failed, 26
+  errors; the failures and errors are the same eSpeak-missing tests on
+  both. Round 2 was 2918 passed. No JS
   touched.
