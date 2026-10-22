@@ -826,7 +826,10 @@ def test_an_unwritable_state_folder_exits_3_without_a_traceback_or_storm(
         [record] = caplog.records
         assert record.levelno == logging.WARNING
         assert "can't save state" in record.getMessage()
-        assert "NotADirectoryError" in record.getMessage()
+        # A file where the folder should be: NotADirectoryError on POSIX,
+        # FileNotFoundError on Windows. Only the type name is logged.
+        assert any(name in record.getMessage()
+                   for name in ("NotADirectoryError", "FileNotFoundError"))
     assert notified_calls == []  # nothing notified that couldn't be saved
 
 
@@ -1040,6 +1043,9 @@ def test_a_denial_inside_a_subagent_is_reported(tmp_path):
 def test_denial_text_never_reaches_json_log_or_notification(
         tmp_path, notified_calls, capsys, caplog, monkeypatch):
     monkeypatch.setattr(session_watch.time, "time", lambda: NOW)
+    # Pin the notifier whose body is the last argument (on Windows the body
+    # travels in an environment variable instead; the argv test covers that).
+    monkeypatch.setattr(session_watch.sys, "platform", "linux")
     _transcript(tmp_path, [_tool_use("d1", "Bash", "m1"), _error("d1", CLASSIFIER)], age=300)
     with caplog.at_level(logging.DEBUG, logger="session_watch"):
         assert session_watch.main(["--once", "--json", "--claude-dir", str(tmp_path)]) == 0
@@ -1058,7 +1064,11 @@ def test_denial_text_never_reaches_json_log_or_notification(
 
 
 @pytest.mark.parametrize("content", [None, 7, {"text": CLASSIFIER}, [CLASSIFIER, 3, None],
-                                     [{"type": "text", "text": ["x"]}], "x" * 100_000])
+                                     [{"type": "text", "text": ["x"]}], "x" * 100_000],
+                         # Short ids: pytest puts the test id in an environment
+                         # variable, and Windows caps those at 32767 characters.
+                         ids=["none", "int", "dict", "mixed-list", "list-of-list",
+                              "huge-string"])
 def test_malformed_denial_shapes_do_not_crash(tmp_path, content):
     weird = _entry("user", [{"type": "tool_result", "tool_use_id": "d1",
                              "content": content, "is_error": True},
