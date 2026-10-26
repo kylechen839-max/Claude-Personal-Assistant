@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.1.0 (2026-10-26)
+
+- The server's `/` and `/healthz` also answer HEAD (uptime monitors and link
+  checkers got 405), and the cloud profile's lecture piece and photo sizes
+  now fit its 4 MB upload cap, so the startup log no longer warns about them.
 - Session watcher (`tools/session-watch/`): a local, report-only tool for
   Windows and macOS that notices when a Claude Code session on your computer
   is waiting on you: an approval prompt, a question, an idle session, or a

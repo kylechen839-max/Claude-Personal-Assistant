@@ -403,6 +403,9 @@ SERVER_PROFILE: dict = {
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
+    # just under max_upload_mb (4) above, so check_limits has nothing to lower
+    "lecture": {"chunk_mb": 3.9},
+    "tutor": {"max_image_mb": 3.9},
 }
 PROFILES = {"server": SERVER_PROFILE}
 
