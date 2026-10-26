@@ -717,6 +717,10 @@ def test_only_the_page_pwa_files_and_healthz_are_public(make_app):
     assistant, client = make_app()
     for path in PUBLIC:
         assert client.get(path).status_code == 200, path
+    # uptime monitors ask with HEAD
+    for path in ("/", "/healthz"):
+        r = client.head(path)
+        assert r.status_code == 200 and r.content == b"", path
     # every other route needs the session cookie
     from fastapi.routing import APIRoute
 

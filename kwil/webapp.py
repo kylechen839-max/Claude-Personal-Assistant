@@ -1724,7 +1724,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     app.state.owner_of = owner_of  # for owner-only routes added by others (and tests)
 
     # --- public: the page, PWA files, health check ---
-    @app.get("/")
+    # HEAD too: uptime monitors and link checkers ask with HEAD (405 otherwise)
+    @app.api_route("/", methods=["GET", "HEAD"])
     def index(request: Request):
         # in the language of whoever is signed in: a family member's own,
         # else [assistant] language; "connect Google" for their own account
@@ -1798,7 +1799,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     from kwil.version import version
 
-    @app.get("/healthz")
+    @app.api_route("/healthz", methods=["GET", "HEAD"])
     def healthz(request: Request):
         # The version lets the page reload after an update. Only a request
         # from this machine itself (the host supervisor waiting to restart,

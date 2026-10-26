@@ -274,3 +274,8 @@ def test_limits_are_lowered_to_fit_the_request_cap():
     server["webapp"]["max_upload_mb"] = 4  # the cloud profile
     webfeatures.check_limits(server)
     assert server["lecture"]["chunk_mb"] == 3.9
+
+
+def test_server_profile_limits_already_fit():
+    server = load_config(None, None, profile="server")
+    assert webfeatures.check_limits(server) == []  # no warnings in the Render log

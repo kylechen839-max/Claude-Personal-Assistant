@@ -220,8 +220,8 @@ def test_limits_from_config_stay_under_the_request_cap():
     assert attachments.limits(load_config(None, None)) == {
         "max_image_bytes": 8_000_000, "max_attachment_bytes": 10_000_000}
     server = load_config(None, None, profile="server")  # 4 MB requests
-    assert attachments.limits(server) == {
-        "max_image_bytes": 4_000_000, "max_attachment_bytes": 4_000_000}
+    assert attachments.limits(server) == {  # photos 3.9: room for the form itself
+        "max_image_bytes": 3_900_000, "max_attachment_bytes": 4_000_000}
     assert webapp.MAX_FORM_FILES == 1 + attachments.MAX_ATTACHMENTS + 1
 
 
