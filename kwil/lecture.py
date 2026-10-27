@@ -83,6 +83,20 @@ def _write_json(path: Path, data: dict) -> None:
             time.sleep(0.05)
 
 
+def _read_json(path: Path) -> dict:
+    """json.loads(path.read_text()), retried like _write_json: on Windows a
+    read that lands while another thread's os.replace swaps the file in
+    gets PermissionError for a moment."""
+    for attempt in range(20):
+        try:
+            return json.loads(path.read_text())
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
+    raise AssertionError("unreachable")
+
+
 class ChunkedUploads:
     def __init__(self, root: str | Path, max_bytes: int = 300_000_000,
                  max_chunk_bytes: int = 8_000_000, max_active: int = 3,
@@ -636,7 +650,7 @@ class LecturePipeline:
         return self.uploads.directory(upload_id) / "job.json"
 
     def job(self, upload_id: str) -> LectureJob:
-        data = json.loads(self._job_path(upload_id).read_text())
+        data = _read_json(self._job_path(upload_id))
         return LectureJob(**data)
 
     def _save(self, job: LectureJob) -> None:
@@ -645,7 +659,7 @@ class LecturePipeline:
             path = self._job_path(job.id)
             if path.exists():  # keep "Add" taps made while the worker ran
                 try:
-                    on_disk = json.loads(path.read_text()).get("added", [])
+                    on_disk = _read_json(path).get("added", [])
                 except (OSError, ValueError):
                     on_disk = []
                 job.added = sorted(set(job.added) | set(on_disk))
@@ -659,7 +673,7 @@ class LecturePipeline:
         out = []
         for d in sorted(self.uploads.root.iterdir()):
             if (d / "job.json").exists():
-                out.append(LectureJob(**json.loads((d / "job.json").read_text())))
+                out.append(LectureJob(**_read_json(d / "job.json")))
         return sorted(out, key=lambda j: j.started_at, reverse=True)
 
     # ----- control -----
