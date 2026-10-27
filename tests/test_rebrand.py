@@ -322,6 +322,7 @@ ALLOWED = [re.compile(p, re.IGNORECASE) for p in (
     r"hey claude[^.\n]{0,40}until",          # "... until a Hey Kwil model ships"
 )]
 OLD_NAME = re.compile(r"hey[ _-]?claude", re.IGNORECASE)
+SPLIT_NAME = re.compile(r"hey[ \t]*\n\s*claude", re.IGNORECASE)  # wrapped across two lines
 
 
 def stale(text: str) -> list[str]:
@@ -329,6 +330,7 @@ def stale(text: str) -> list[str]:
     for line in text.splitlines():
         if OLD_NAME.search(line) and not any(a.search(line) for a in ALLOWED):
             hits.append(line.strip())
+    hits += [" ".join(m.group(0).split()) for m in SPLIT_NAME.finditer(text)]
     return hits
 
 
