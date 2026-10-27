@@ -23,9 +23,9 @@ for the public internet with no Tailscale in front:
 - X-Forwarded-For / -Proto count only when the connection comes from the
   host's TLS proxy (a private address); then plain http is redirected to
   https and HSTS is sent. Cookies are always Secure, HttpOnly, SameSite=Strict.
-- Request bodies are capped: audio and attachment uploads (/api/turn) at
-  [webapp] max_upload_mb, everything else at [cloud] max_body_kb, chunked
-  uploads included.
+- Request bodies are capped: audio and attachment uploads (/api/turn) and
+  the owner's history import (family_import.py) at [webapp] max_upload_mb,
+  everything else at [cloud] max_body_kb, chunked uploads included.
 - The voice WebSocket (/api/voice) gets the same checks before the
   handshake: rate limit, cookie or Bearer token (wrong ones count toward the
   lockout) and an Origin naming this site. X-Forwarded-Host, which the web
@@ -125,12 +125,15 @@ HEALTH = "/healthz"
 UPLOAD_PATHS = {"/api/turn", "/api/confirm", "/api/tutor"}
 # Lecture recordings arrive in pieces at /api/lecture/<id>/chunk.
 UPLOAD_PREFIX, UPLOAD_SUFFIX = "/api/lecture/", "/chunk"
+# The owner's history import (family_import.py): /api/users/<id>/history/import
+IMPORT_PREFIX, IMPORT_SUFFIX = "/api/users/", "/history/import"
 
 
 def is_upload(path: str) -> bool:
     """Requests whose body may be as big as [webapp] max_upload_mb."""
     return path in UPLOAD_PATHS or (path.startswith(UPLOAD_PREFIX)
-                                    and path.endswith(UPLOAD_SUFFIX))
+                                    and path.endswith(UPLOAD_SUFFIX)) or (
+        path.startswith(IMPORT_PREFIX) and path.endswith(IMPORT_SUFFIX))
 WEBSOCKETS = {"/api/voice"}  # the hands-free voice conversation
 WS_MAX_SIZE = 2_000_000  # largest WebSocket message: a 30 s utterance is ~1 MB
 HSTS = "max-age=31536000; includeSubDomains"

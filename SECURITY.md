@@ -738,6 +738,44 @@ server (`[family] enabled`, on in the server profile).
     twice, typed and confirmed); Render's disk snapshots still hold a copy
     until they expire (PRIVACY wording from the master). The owner's own
     data isn't exported here: Kyle has the whole server.
+- **History import** (`family_import.py`: moving a PC family copy to the
+  cloud). `POST /api/users/{id}/history/import` is owner-only
+  (`require_owner`: a family member's session gets 404, nobody signed in
+  401, `[family]` off 404). The id must be listed and active (unknown 404,
+  invite not yet accepted 409). The write runs inside
+  `Family.while_listed`, holding the family lock, so a Remove at the same
+  time waits for it and then deletes the folder; one that came first makes
+  the import 404 without creating a folder (tests). Each conversation is
+  checked before anything is written (a valid id, user/assistant roles,
+  ISO times; anything else is 400 and nothing is kept); text goes through
+  `_clean` (`config.redact`) and the `MAX_TEXT` / title / summary caps like
+  a live turn, tool events are cut down to `tool_event`'s shape, times are
+  never later than now. It writes the same events a live conversation does
+  into the member's own store (`eventlog=False`: no sync log, nothing goes
+  to the Pi or PC); the source's `sync_events` are never sent or copied.
+  An id already there, or imported before and deleted since (an
+  `import:<id>` mark in `history_meta`, the id only), is skipped, so a
+  retry never duplicates and never brings back a conversation the member
+  deleted; an import cut off by a crash is finished by the next one (its
+  event ids come from a salt kept until it completes). A batch that would leave their store
+  over `[family] max_history_mb` (measured like prune: used pages) is
+  deleted again (secure_delete) and answers 413, so prune never drops
+  their older conversations to make room. Its body may be as big as
+  `[webapp] max_upload_mb` (`cloud.is_upload`), which CloudGuard allows
+  only after the cookie or Bearer check; a family member can send that
+  much and get 404, as they can already to `/api/turn`. Logs: member id
+  and counts only (caplog test).
+  - The PC-side CLI (`python -m kwil.family_import`) reads the source
+    through `backup.copy_database` (read-only, into a `mkdtemp` folder that
+    is deleted afterwards), takes the cloud's WEB_TOKEN from
+    `KWIL_CLOUD_TOKEN` and sends it only in the `Authorization: Bearer`
+    header (never in a URL, never printed; redirects aren't followed), and
+    refuses an `--to` that isn't https unless it is localhost, or that has
+    a path, query or user name. It prints counts and sizes only.
+  - Not done, on purpose: the import runs with the family lock held, so
+    every member's turn waits for a batch (a few seconds at most, a
+    one-off migration); a conversation over ~3.5 MB on its own is left out
+    and counted, not split.
 
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that

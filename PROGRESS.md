@@ -66,6 +66,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
+| `test_family_import.py` | 30 | moving a PC family copy's history to the cloud: owner-only import route, idempotent retries, size cap (413), no sync log, logs, delete and removal, the CLI (batches, Bearer, dry run, https only) |
 | `test_confirm_ux.py` | 123 | yes/no answers: misheard yeses, one more try then cancel (text, PC voice, phone voice, `/api/confirm`), calendar moves without a question |
 | `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
@@ -5412,3 +5413,68 @@ model or Anthropic ("powered by Claude", `CLAUDE_MODEL`, the Claude API).
   renamed attributes of variables called `assistant` (`assistant.tools`,
   `assistant.backup`); they were restored and the rename redone by import
   shape.
+
+## Move a PC family copy's history to the cloud (2026-10-27)
+
+Mom and Kai move from their own PC copies (`config.mom.toml`,
+`data/mom/history.sqlite`) to the cloud as Family members; their
+conversations come with them.
+
+- **`HistoryStore.import_conversation` / `import_conversations`**
+  (`history.py`): takes `export(conv, "json")`'s shape, keeps the
+  original id, start, message times (one ms apart within an exported
+  second, so the order holds), title, summary, "ended" and pin, and writes
+  them as the same events a live conversation makes (`_record`: text
+  through `_clean` and `MAX_TEXT`, tool events cut to `tool_event`'s
+  shape). An imported conversation exports exactly as it did on the PC.
+  Everything is checked before anything is written (400 otherwise). An
+  `import:<id>` mark in `history_meta` holds a salt for the event ids
+  while it is written and "done" afterwards: a retry skips it (also after
+  the member deleted it, so it never comes back), and an import cut off
+  by a crash is finished without duplicates. With `max_mb` set, a batch
+  that leaves the store over it (measured like prune, used pages) is
+  deleted again and raises `HistoryFull`. Never touches `sync_events`;
+  member stores have no event log.
+- **`kwil/family_import.py`**: `POST /api/users/{id}/history/import`
+  (owner only: member 404, anonymous 401; unknown id 404, invite not
+  accepted 409, over `[family] max_history_mb` 413), written under
+  `Family.while_listed` into `family.context(uid).history`; logs the id
+  and counts only. Registered beside `account.register` in
+  `webapp.create_app`. And the PC CLI, `python -m kwil.family_import
+  --from <history.sqlite> --to <https origin> --user <id or name>
+  [--dry-run]`: reads a `backup.copy_database` copy in a temp folder
+  (deleted after), posts batches under 3.5 MB with `KWIL_CLOUD_TOKEN` as
+  `Authorization: Bearer` (no redirects followed), prints counts only,
+  refuses non-https unless localhost. `--user` may be the invite-list
+  name (looked up with GET /api/users).
+- **Decision: the upload list, not tiny batches.** CloudGuard caps every
+  body that isn't an upload at `[cloud] max_body_kb` (16 KB), smaller than
+  one long message, so batching under it would mean splitting
+  conversations. `cloud.is_upload` now also matches
+  `/api/users/<id>/history/import`, so it gets `[webapp] max_upload_mb`
+  (4 MB on the server), only after CloudGuard's sign-in check.
+- New modules need no `assistant/` shim (`test_rebrand.py` covers
+  610017b's modules only).
+- **Tests:** `tests/test_family_import.py` (30): the owner imports and the
+  member's History lists it with its turns and an identical export
+  (failed first: 404 without the route), native-looking fields, owner only
+  (401/404), unknown and not-yet-accepted members, bad bodies write
+  nothing, retries skip, a crash-interrupted import finishes without
+  duplicates, a failed import is undone, no `sync_events` rows in the
+  member's file, over the cap is 413 with nothing kept, caplog has counts
+  and no text or title at INFO, a delete leaves no text in the file and a
+  re-import doesn't restore it, a deleted id stays deleted on an
+  event-log store, removal after (no folder; a later import 404) and
+  during an import (waits; no folder), `[family]` off 404, CloudGuard
+  lets a 50 KB import body through but not to another owner route and not
+  before sign-in; the CLI through an httpx MockTransport: batches under
+  the limit, the Bearer header, the token never in the URL or output,
+  the live database untouched and the copy deleted, `--dry-run` posts
+  nothing, https-only `--to`, name lookup. `test_docs.py` now reads the
+  CLI's flags. Each was checked to fail with its source change reverted
+  (route registration, `is_upload`, salted ids, size check,
+  `while_listed`, the "done" mark, the empty-row cleanup).
+- **Counts** (Linux sandbox, Python 3.13): 3214 passed, 37 skipped
+  (baseline 48cb030 on the same machine: 3183 passed, 38 skipped; the
+  extra skip there is a git-history test, as the baseline is a `git
+  archive` copy). No JS changed.

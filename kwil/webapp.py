@@ -2082,6 +2082,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from kwil import account
 
     account.register(app, family, web, error)  # their own export / delete
+    from kwil import family_import
+
+    family_import.register(app, family, error)  # the owner moves a PC copy's history in
     from kwil import userkeys_web
 
     userkeys_web.register(app, family, error)  # a person's own Anthropic key

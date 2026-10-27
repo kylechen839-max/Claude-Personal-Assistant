@@ -180,6 +180,15 @@ them out and deletes their folder and entry; if a file can't be deleted right aw
 server retries at the next start, the next removal, or when you open the
 family list.
 
+Moving from a PC copy: you can copy a family member's conversation
+history from their old copy on your PC into their cloud account
+(`python -m kwil.family_import`). Only conversations go: text, titles,
+summaries, times and pins, with secrets masked as in an export; never
+sign-ins, tokens or sync data. They land in that person's own history on
+the server, under the same size limit, and are deleted with it. A
+conversation they delete on the cloud is not brought back by running the
+copy again. The PC copy stays on the PC until you retire it.
+
 ## A second instance for someone else
 
 If you run a separate instance for a family member (`config.mom.toml`), it
