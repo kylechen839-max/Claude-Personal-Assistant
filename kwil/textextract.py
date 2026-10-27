@@ -17,7 +17,8 @@ content-type or the file name (both are whatever the uploader said):
   declaration is refused, found by expat in whatever encoding the part is
   (OOXML never has one; entity expansion is how XML bombs work), and the
   rest is pull-parsed, each element dropped once read, so memory holds one
-  paragraph, never a 20 MB part's whole tree.
+  chunk's elements and one paragraph, at most MAX_XML_DEPTH elements deep
+  (deeper is refused), never a 20 MB part's whole tree.
 - HTML: tools.gmail.html_to_text (at most MAX_HTML_CHARS of markup).
 - Plain text (UTF-8, or Latin-1 when that fails), when it has no NUL bytes.
 
@@ -49,6 +50,7 @@ MAX_ZIP_BYTES = 60_000_000   # a .docx/.pptx's declared uncompressed size
 MAX_ZIP_MEMBERS = 5000       # ... and its number of parts
 MAX_XML_BYTES = 20_000_000   # one XML part read (streamed, never held as a whole tree)
 MAX_PARAGRAPH_NODES = 50_000  # elements of one paragraph held while it is read
+MAX_XML_DEPTH = 256          # open elements at once (Word's nested tables stay far below)
 XML_CHUNK = 64 * 1024           # bytes parsed at a time (each chunk's nodes are held until read)
 MAX_SLIDES = 500             # slides of one .pptx read
 MAX_HTML_CHARS = 2_000_000   # markup given to html_to_text (its regexes)
@@ -192,8 +194,9 @@ def _lines(zf: zipfile.ZipFile, name: str, para: str, text: str, tab: str | None
     """The paragraphs of one XML part (None: no such part), streamed: read
     in chunks up to MAX_XML_BYTES whatever the zip declares, checked for a
     DTD before any of it is parsed for real, and pull-parsed with each
-    element dropped once read, so memory holds one paragraph at a time
-    (at most MAX_PARAGRAPH_NODES elements), not the whole tree."""
+    element dropped once read, so memory holds one chunk's elements and one
+    paragraph at a time (at most MAX_PARAGRAPH_NODES elements), at most
+    MAX_XML_DEPTH open elements deep, never the whole tree."""
     from xml.parsers import expat
 
     guard, puller = _prolog_guard(), ElementTree.XMLPullParser(events=("start", "end"))
@@ -232,6 +235,8 @@ def _lines(zf: zipfile.ZipFile, name: str, para: str, text: str, tab: str | None
             for event, node in puller.read_events():
                 if event == "start":
                     stack.append(node)
+                    if len(stack) > MAX_XML_DEPTH:  # OOXML is never this deep
+                        raise ExtractError("too_large")
                     if node.tag == para:
                         in_para += 1
                     if in_para:

@@ -5872,3 +5872,24 @@ including the old generation read for 1, the waking request for 2 and
 the missing exclusion check for 3). The judge's `probe_races.py` passes.
 Counts (Linux sandbox, Python 3.13, not real hardware): 3340 passed, 37
 skipped; JavaScript 168 passed.
+
+### Round 3: the judge's two remaining findings (2026-10-27)
+
+1. MED, unbounded nesting: an 18 KB DOCX of about 6.3 million nested
+   elements took 1.9 GB and 138 s (the judge's measurement). The parse now
+   refuses more than `MAX_XML_DEPTH` (256) open elements at once
+   ("too_large"); with the cap held, the per-chunk drop loop scans at most
+   256 elements. The judge's `probe_xml2.py` under `ulimit -v 1500000`:
+   the 20 MB and 2 MB nested parts are refused in under 0.1 s with peak
+   RSS +6 MB; the flat 20 MB part still reads in 3.9 s with no rise. Test
+   `test_deeply_nested_xml_is_refused_at_once_with_little_memory` (a 5 s
+   deadline and a 20 MB tracemalloc bound; 20 nested tables still read);
+   without the cap it fails (runs out of its time).
+2. LOW, the start-of-sync generation read had no test of its own: new
+   `test_a_disconnect_and_new_link_during_the_planner_get_nothing_from_the_old_run`
+   disconnects and connects a fresh link inside the planner step; the old
+   run writes nothing into the new store. With the read moved back into
+   `_content` it fails.
+
+Counts (Linux sandbox, Python 3.13, not real hardware): 3342 passed, 37
+skipped; JavaScript 168 passed.

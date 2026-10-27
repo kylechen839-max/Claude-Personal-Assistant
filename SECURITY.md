@@ -1265,9 +1265,11 @@ tools. This changes the earlier "never page text" rule on purpose.
   is refused (XML bombs): expat finds it in whatever encoding the part
   declares (UTF-16 included; an encoding expat lacks is refused too)
   before the part is parsed for real. The part is pull-parsed and each
-  element dropped once read, so memory holds one paragraph (at most 50,000
-  elements), never the whole tree (a 29 KB DOCX of 20 MB XML used to take
-  350 MB). HTML goes through `html_to_text` (scripts and styles dropped),
+  element dropped once read, so memory holds one 64 KB chunk's elements,
+  one paragraph (at most 50,000 elements) and at most 256 open elements
+  (deeper nesting is refused at once), never the whole tree (a 29 KB DOCX
+  of 20 MB XML used to take 350 MB, and an 18 KB one of 6 million nested
+  elements 1.9 GB; both are now refused or read within a few MB). HTML goes through `html_to_text` (scripts and styles dropped),
   at most 2 MB of markup. **Deliberate non-fix:** pypdf can't be
   interrupted inside one page, so a hostile PDF can hold one sync for as
   long as that page takes; the size and page caps bound it, and a

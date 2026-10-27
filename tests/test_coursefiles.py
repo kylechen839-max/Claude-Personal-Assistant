@@ -931,3 +931,59 @@ def test_delete_all_retries_a_file_windows_holds_and_reads_leave_nothing_open(
     monkeypatch.setattr(Path, "unlink", locked_once)
     assert store.delete_all(None) == 1
     assert held and not list(tmp_path.glob("coursefiles.sqlite*"))
+
+
+# --- judge round 2 ----------------------------------------------------------------
+
+def test_a_disconnect_and_new_link_during_the_planner_get_nothing_from_the_old_run(
+        c, monkeypatch):
+    """The generation is read when the sync starts: a run that began on
+    the old link writes nothing into the store of a link connected while
+    it ran (the link-exists check alone can't tell the two apart)."""
+    real = canvas.CanvasAPI.deadlines
+
+    def deadlines_then_relink(self, now=None):
+        out = real(self, now)
+        c.sync.disconnect(c.uid)
+        assert c.sync.connect(c.uid, {"kind": "api", "base_url": BASE, "token": TOKEN})
+        return out
+
+    monkeypatch.setattr(canvas.CanvasAPI, "deadlines", deadlines_then_relink)
+    c.client.queue.append(dates_reply())
+    c.courses.tick()
+    assert (c.folder / student_web.CANVAS_FILE).exists()      # the new link
+    assert not list(c.folder.glob("coursefiles.sqlite*"))      # nothing from the old run
+    assert c.fake.downloads == []
+
+
+def test_deeply_nested_xml_is_refused_at_once_with_little_memory():
+    """Judge round 2: about 6.3 million nested elements in an 18 KB DOCX
+    took 1.9 GB and 138 s; the depth cap refuses it at the first chunk."""
+    import time
+    import tracemalloc
+
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    deep = f'<w:document xmlns:w="{w}"><w:body>'.encode() + b"<a>" * 6_000_000
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", deep)
+    data = buf.getvalue()
+    assert len(data) < 40_000
+    del deep
+    tracemalloc.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(textextract.ExtractError, match="too_large"):
+            textextract.extract(data, deadline=time.monotonic() + 5)  # old: 138 s
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert time.monotonic() - started < 5 and peak < 20_000_000
+    # nested tables a real document has are well inside the cap
+    nested = (f'<w:document xmlns:w="{w}"><w:body>'
+              + "<w:tbl><w:tr><w:tc>" * 20 + "<w:p><w:r><w:t>inner cell</w:t></w:r></w:p>"
+              + "</w:tc></w:tr></w:tbl>" * 20 + "</w:body></w:document>").encode()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", nested)
+    assert textextract.extract(buf.getvalue()) == ("docx", "inner cell")
