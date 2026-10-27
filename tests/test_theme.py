@@ -15,7 +15,7 @@ from kwil import webapp  # noqa: E402
 
 WEB = webapp.STATIC
 # Claude's clay/terracotta family that the app and site used before.
-OLD_ORANGE = ("#c96442", "#d97757", "#e0876a", "#eb9a7c", "#a8492b", "#b4532f",
+OLD_ORANGE = ("#878580", "%23878580", "#c96442", "#d97757", "#e0876a", "#eb9a7c", "#a8492b", "#b4532f",
               "#f6b59a", "#f0a487", "#7a3520")
 PAGES = ("index.html", "landing.html", "privacy.html", "terms.html", "waitlist.html")
 
