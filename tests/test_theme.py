@@ -77,13 +77,33 @@ def test_manifest_and_theme_color_metas_match_the_page_background():
 
 
 def test_icons_use_the_accent():
+    # the logo sits on a gradient around the accent: lighter top left, deeper
+    # bottom right; the SVG and the PNG agree on both ends
     accent = tokens((WEB / "app.css").read_text(encoding="utf-8"), False)["accent"]
-    assert webapp.ICON_BG == accent and f'fill="{accent}"' in webapp.ICON_SVG
-    png = webapp.icon_png(32)
+    assert webapp.ICON_BG == accent
+    assert webapp.ICON_TOP in webapp.ICON_SVG and webapp.ICON_BOTTOM in webapp.ICON_SVG
+    size = 32
+    png = webapp.icon_png(size)
     idat_len = struct.unpack(">I", png[33:37])[0]
     raw = zlib.decompress(png[41:41 + idat_len])
-    corner = raw[1:4]  # row 0 after its filter byte: the top-left pixel
-    assert "#" + corner.hex() == accent
+    row = 1 + size * 3
+
+    def pixel(r, c):
+        return raw[r * row + 1 + c * 3:r * row + 4 + c * 3]
+
+    def near(px, colour, slack):
+        return all(abs(a - int(colour[1 + 2 * i:3 + 2 * i], 16)) <= slack
+                   for i, a in enumerate(px))
+    assert near(pixel(0, 0), webapp.ICON_TOP, 4)
+    assert near(pixel(size - 1, size - 1), webapp.ICON_BOTTOM, 4)
+    # the feather's middle is drawn in white
+    assert max(pixel(size // 2, size // 2)) > 200
+
+
+def test_icon_svg_and_png_draw_the_same_marks():
+    marks = webapp._icon_marks()
+    assert len(marks) == 11  # the shaft and ten barbs
+    assert webapp.ICON_SVG.count("<path") == len(marks)
 
 
 @pytest.mark.parametrize("sheet", ["app.css", "site.css"])

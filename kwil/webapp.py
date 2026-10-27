@@ -536,37 +536,77 @@ def decode_upload(data: bytes, max_seconds: float | None = None) -> np.ndarray:
 
 # --- icons (generated, so there are no binary files to ship) ------------------
 
-# The icon's background: the app's light-mode --accent (web/app.css).
+# The icon's background: a diagonal gradient around the app's light-mode
+# --accent (web/app.css), lighter top left, deeper bottom right.
 ICON_BG = "#2f5d8a"
+ICON_TOP, ICON_BOTTOM = "#3a6ea5", "#1d3a5c"
 # The installed app's splash and title bar: the light-mode --bg, the same
 # colour as index.html's light theme-color meta.
 THEME_BG = "#f5f7fa"
+_SHAFT = "#b7d0ec"
 
-ICON_SVG = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="{ICON_BG}"/>
-<rect x="24" y="12" width="16" height="26" rx="8" fill="#fff"/>
-<path d="M17 31a15 15 0 0 0 30 0" fill="none" stroke="#fff" stroke-width="4"
- stroke-linecap="round"/>
-<path d="M32 46v7M25 53h14" stroke="#fff" stroke-width="4"
- stroke-linecap="round"/>
-</svg>"""
+
+def _icon_marks() -> list[tuple[float, float, float, float, float, str, float]]:
+    """The logo, "a feather made of sound waves": round-capped strokes on a
+    512 grid, (x0, y0, x1, y1, width, colour, opacity). A pale shaft runs
+    bottom left to top right; bars across it are the barbs, their lengths a
+    feather's outline and a sound wave's envelope, fading toward both ends.
+    ICON_SVG and icon_png both draw this list, so they can't drift apart."""
+    x0, y0, x1, y1 = 86.0, 444.0, 430.0, 82.0
+    dx, dy = x1 - x0, y1 - y0
+    length = (dx * dx + dy * dy) ** 0.5
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux
+    half = (14, 36, 62, 86, 100, 100, 86, 62, 36, 17)
+    fade = (.55, .7, .85, 1, 1, 1, 1, .9, .75, .6)
+    marks = [(x0, y0, x1, y1, 12.0, _SHAFT, 1.0)]
+    for i, (h, op) in enumerate(zip(half, fade)):
+        t = 0.16 + 0.8 * i / (len(half) - 1)
+        cx, cy = x0 + dx * t, y0 + dy * t
+        marks.append((cx + nx * h, cy + ny * h, cx - nx * h, cy - ny * h,
+                      19.0, "#ffffff", op))
+    return marks
+
+
+def _icon_svg() -> str:
+    body = "".join(
+        f'<path d="M{a:.1f} {b:.1f}L{c:.1f} {d:.1f}" stroke="{col}" '
+        f'stroke-width="{w:g}" stroke-linecap="round"'
+        + (f' opacity="{op:g}"' if op < 1 else "") + "/>"
+        for a, b, c, d, w, col, op in _icon_marks())
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+            '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
+            f'<stop offset="0" stop-color="{ICON_TOP}"/>'
+            f'<stop offset="1" stop-color="{ICON_BOTTOM}"/></linearGradient></defs>'
+            '<rect width="512" height="512" rx="112" fill="url(#bg)"/>'
+            + body + "</svg>")
+
+
+ICON_SVG = _icon_svg()
+
+
+def _rgb(hexcolour: str) -> np.ndarray:
+    return np.array([int(hexcolour[i:i + 2], 16) for i in (1, 3, 5)], np.float32)
 
 
 def icon_png(size: int) -> bytes:
-    """The app icon (a white microphone on the calm blue accent) as a PNG."""
-    s = size / 64.0
-    y, x = np.mgrid[0:size, 0:size].astype(np.float32) / s + 0.5 / s
-    img = np.empty((size, size, 3), dtype=np.uint8)
-    img[:] = tuple(int(ICON_BG[i:i + 2], 16) for i in (1, 3, 5))
-    # capsule: x 24..40, y 12..38, radius 8
-    cy = np.clip(y, 20, 30)
-    mic = (x - 32) ** 2 + (y - cy) ** 2 <= 64
-    # arc: radius 15 around (32, 31), lower half, 4 wide
-    r = np.hypot(x - 32, y - 31)
-    arc = (np.abs(r - 15) <= 2) & (y >= 31)
-    stem = (np.abs(x - 32) <= 2) & (y >= 44) & (y <= 55)
-    base = (np.abs(y - 53) <= 2) & (x >= 23) & (x <= 41)
-    img[mic | arc | stem | base] = 255
+    """The app icon (the sound-wave feather on the blue gradient) as a PNG,
+    drawn from _icon_marks with 3x supersampling. Full bleed: the PNG is
+    also the maskable icon, and iOS rounds the corners itself."""
+    ss = 3
+    n = size * ss
+    scale = 512.0 / n
+    y, x = (np.mgrid[0:n, 0:n].astype(np.float32) + 0.5) * scale
+    t = np.clip((x + y) / 1024.0, 0, 1)[..., None]
+    img = _rgb(ICON_TOP) * (1 - t) + _rgb(ICON_BOTTOM) * t
+    for x0, y0, x1, y1, width, colour, opacity in _icon_marks():
+        vx, vy = x1 - x0, y1 - y0
+        k = np.clip(((x - x0) * vx + (y - y0) * vy) / (vx * vx + vy * vy), 0, 1)
+        dist = np.hypot(x - (x0 + k * vx), y - (y0 + k * vy))
+        cover = np.clip(width / 2 - dist + 0.5 * scale, 0, 1)[..., None] * opacity
+        img = img * (1 - cover) + _rgb(colour) * cover
+    img = img.reshape(size, ss, size, ss, 3).mean(axis=(1, 3))
+    img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
     raw = b"".join(b"\x00" + row.tobytes() for row in img)
 
     def chunk(kind: bytes, data: bytes) -> bytes:
