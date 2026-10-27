@@ -128,3 +128,36 @@ def test_palette_meets_wcag_contrast(sheet, dark):
     assert contrast(t["text"], t["surface"]) >= 7
     assert contrast(t["muted"], t["bg"]) >= 4.5
     assert contrast(t["muted"], t["surface"]) >= 4.5
+
+
+def test_data_uri_icon_grey_meets_3_to_1_in_both_modes():
+    # a data URI can't follow the dark-mode query: one grey must serve both
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    greys = set(re.findall(r"stroke='%23([0-9a-f]{6})'", css))
+    assert greys == {"738094"}
+    light = tokens(css, False)
+    dark = {**light, **tokens(css, True)}
+    for t in (light, dark):
+        for bg in ("bg", "surface", "surface-2"):
+            assert contrast("#738094", t[bg]) >= 3, bg
+
+
+def test_accent_graphic_meets_3_to_1_in_both_modes():
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    blocks = re.findall(r":root\s*\{(.*?)\}", css, re.S)
+    for i, body in enumerate(blocks[:2]):
+        ref = re.search(r"--accent-graphic:\s*var\(--([\w-]+)\)", body).group(1)
+        t = {**tokens(css, False), **tokens(css, bool(i))}
+        for bg in ("bg", "surface", "surface-2"):
+            assert contrast(t[ref], t[bg]) >= 3, (i, bg)
+
+
+def test_maskable_icon_keeps_the_quill_in_the_safe_zone():
+    entries = {e["src"]: e for e in webapp.MANIFEST["icons"]}
+    assert entries["/icon-maskable.png"]["purpose"] == "maskable"
+    assert "maskable" not in entries["/icon-512.png"].get("purpose", "")
+    k = webapp.MASKABLE_SCALE
+    for _, pts, width, _, _ in webapp._icon_marks():
+        for px, py in pts:
+            reach = ((px - 256) ** 2 + (py - 256) ** 2) ** 0.5 * k + width * k / 2
+            assert reach <= 0.4 * 512

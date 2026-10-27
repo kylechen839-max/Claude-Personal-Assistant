@@ -613,31 +613,47 @@ def _rgb(hexcolour: str) -> np.ndarray:
     return np.array([int(hexcolour[i:i + 2], 16) for i in (1, 3, 5)], np.float32)
 
 
-def icon_png(size: int) -> bytes:
+# A maskable icon's art must stay inside the centre circle of radius 0.4 x
+# size (Android crops the rest), so that copy draws the quill smaller.
+MASKABLE_SCALE = 0.68
+
+
+def icon_png(size: int, maskable: bool = False) -> bytes:
     """The app icon (the sound-wave quill on the blue gradient) as a PNG,
-    drawn from _icon_marks with 3x supersampling. Full bleed: the PNG is
-    also the maskable icon, and iOS rounds the corners itself."""
+    drawn from _icon_marks with 3x supersampling. Full bleed: iOS rounds the
+    corners itself; `maskable` shrinks the quill into Android's safe zone.
+    Each mark is drawn only inside its own bounding box, which keeps the 512
+    render fast and small enough for a Pi."""
     ss = 3
     n = size * ss
     scale = 512.0 / n
     y, x = (np.mgrid[0:n, 0:n].astype(np.float32) + 0.5) * scale
     t = np.clip((x + y) / 1024.0, 0, 1)[..., None]
     img = _rgb(ICON_TOP) * (1 - t) + _rgb(ICON_BOTTOM) * t
+    k = MASKABLE_SCALE if maskable else 1.0
     for kind, pts, width, colour, opacity in _icon_marks():
+        pts = [(256 + (px - 256) * k, 256 + (py - 256) * k) for px, py in pts]
+        width *= k
+        pad = width / 2 + scale
+        c0 = max(0, int((min(p[0] for p in pts) - pad) / scale))
+        c1 = min(n, int((max(p[0] for p in pts) + pad) / scale) + 2)
+        r0 = max(0, int((min(p[1] for p in pts) - pad) / scale))
+        r1 = min(n, int((max(p[1] for p in pts) + pad) / scale) + 2)
+        bx, by = x[r0:r1, c0:c1], y[r0:r1, c0:c1]
         # distance from each pixel to the shape's outline (or its edges)
-        dist = np.full(x.shape, np.inf, np.float32)
+        dist = np.full(bx.shape, np.inf, np.float32)
         edges = list(zip(pts, pts[1:] + pts[:1] if kind == "fill" else pts[1:]))
         for (x0, y0), (x1, y1) in edges:
             vx, vy = x1 - x0, y1 - y0
-            k = np.clip(((x - x0) * vx + (y - y0) * vy) / (vx * vx + vy * vy), 0, 1)
-            dist = np.minimum(dist, np.hypot(x - (x0 + k * vx), y - (y0 + k * vy)))
+            seg = max(vx * vx + vy * vy, 1e-9)
+            f = np.clip(((bx - x0) * vx + (by - y0) * vy) / seg, 0, 1)
+            dist = np.minimum(dist, np.hypot(bx - (x0 + f * vx), by - (y0 + f * vy)))
         if kind == "fill":  # inside a convex polygon: every edge's cross has one sign
-            sides = [np.sign((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0))
+            sides = [np.sign((x1 - x0) * (by - y0) - (y1 - y0) * (bx - x0))
                      for (x0, y0), (x1, y1) in edges]
-            inside = np.abs(sum(sides)) == len(sides)
-            dist = np.where(inside, 0, dist)
+            dist = np.where(np.abs(sum(sides)) == len(sides), 0, dist)
         cover = np.clip(width / 2 - dist + 0.5 * scale, 0, 1)[..., None] * opacity
-        img = img * (1 - cover) + _rgb(colour) * cover
+        img[r0:r1, c0:c1] = img[r0:r1, c0:c1] * (1 - cover) + _rgb(colour) * cover
     img = img.reshape(size, ss, size, ss, 3).mean(axis=(1, 3))
     img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
     raw = b"".join(b"\x00" + row.tobytes() for row in img)
@@ -664,8 +680,9 @@ MANIFEST = {
     "icons": [
         {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"},
         {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png",
-         "purpose": "any maskable"},
+        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        {"src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "maskable"},
     ],
 }
 
@@ -1852,15 +1869,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return Response(ICON_SVG, media_type="image/svg+xml")
 
     icons = {}
+    icons_lock = threading.Lock()
+
+    def cached_icon(key, size, maskable=False):
+        with icons_lock:  # render each icon once, even for parallel fetches
+            if key not in icons:
+                icons[key] = icon_png(size, maskable)
+            return Response(icons[key], media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/icon-maskable.png")
+    def icon_maskable():
+        return cached_icon("maskable", 512, maskable=True)
 
     @app.get("/icon-{size}.png")
     def icon(size: int):
         if size not in ICON_SIZES:
             return error("not found", 404)
-        if size not in icons:
-            icons[size] = icon_png(size)
-        return Response(icons[size], media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
+        return cached_icon(size, size)
 
     @app.get("/silence.wav")
     def silence():
