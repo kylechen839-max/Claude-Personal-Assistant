@@ -1373,17 +1373,26 @@ by default, needs `[canvas] content`). Kwil fetches nothing for it.
   failover edge's origin check and its bearer check let exactly
   `canvas_helper.push_request`s through (POST, those two paths, a `kcs1.`
   bearer). No cookie is read on them, so there is nothing to forge; every
-  other route still refuses that origin. No CORS headers are sent
+  other route still refuses that origin. A `kcs1.` bearer on any other
+  route is a 401 that the web app, CloudGuard and the failover edge never
+  count as a wrong WEB_TOKEN (it can't be one). No CORS headers are sent
   (an extension with host permission doesn't need them; a page can't read
   the answer).
-- **Bodies.** CloudGuard gives the push routes a slot pool of their own
-  and `[webapp] max_upload_mb` (Render: 4 MB); a file is read up to
+- **Bodies.** CloudGuard checks the sync key first (its exact shape, then
+  `HelperKeys.verify` against the stored hashes) and reads no body for a
+  malformed or wrong key: that counts like a wrong token, and from a
+  locked-out address it is refused at once, so an unidentified caller
+  never gets a large body read or a helper slot. Only a current key gets
+  the push routes' own slot pool and `[webapp] max_upload_mb` (Render:
+  4 MB); a file is read up to
   `min(max_file_mb, max_upload_mb - 64 KB)` and a bigger one is kept as
   "too_large", not read. A manifest has at most 100 courses and 1000
   items per listing.
 - **Untrusted content, re-checked.** A manifest is Canvas's own JSON as
   the helper read it; it is validated (ids are positive integers, lists
-  are lists) and run through `coursefiles.sync_content` with a
+  are lists, a module's `items` a list of objects, HTML fields strings,
+  else dropped; anything the pipeline still can't take is a 400) and run
+  through `coursefiles.sync_content` with a
   `PushedCanvas` adapter: the same HTML-to-text, text extraction, per
   course/person bounds, excluded (deleted) courses, generation/alive
   checks and date drafts as the token sync, with origin "helper". It

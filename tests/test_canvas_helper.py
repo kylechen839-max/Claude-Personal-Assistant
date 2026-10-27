@@ -208,6 +208,34 @@ def test_manifest_shapes_are_checked(h):
     assert r.status_code == 400
 
 
+def test_odd_nested_shapes_are_dropped_not_a_crash(h):
+    """A module whose items aren't a list, or HTML that isn't text, used to
+    reach coursefiles' loop (a TypeError: a 500 after a partial write)."""
+    key, _ = pair(h, h.sam)
+    odd = course(files=[], modules=[{"name": "W", "items": 5},
+                                    {"name": "X", "items": [3, {"title": "Quiz", "type": "Q"}]}],
+                 pages=[{"page_id": 8, "url": "p8", "title": "P8", "body": 5}],
+                 assignments=[{"id": 4, "name": "A4", "description": {"x": 1}}])
+    r = push(h, key, manifest(odd, announcements=[{"id": 2, "title": "T", "message": [1],
+                                                   "context_code": f"course_{COURSE}"}]))
+    assert r.status_code == 200, r.text
+    modules = next(r for r in h.fam.coursefiles.export(h.uid) if r["kind"] == "module")
+    assert "Quiz" in modules["text"] and "Module: W" in modules["text"]
+    # HTML that isn't text is taken as no body: nothing made up from it
+    titles = {r["title"] for r in h.fam.coursefiles.export(h.uid)}
+    assert "P8" not in titles and "T" not in titles
+
+
+def test_a_shape_the_checks_miss_is_a_400(h, monkeypatch):
+    key, _ = pair(h, h.sam)
+
+    def boom(*a, **k):
+        raise TypeError("odd")
+
+    monkeypatch.setattr(coursefiles, "sync_content", boom)
+    assert push(h, key).status_code == 400
+
+
 def test_a_listing_not_sent_keeps_what_is_stored(h):
     key, _ = pair(h, h.sam)
     push(h, key)
@@ -449,8 +477,10 @@ def test_push_request_is_exactly_the_push_routes_with_a_key():
 def guard(s, **kwargs):
     from tests.test_cloud import PUBLIC, TRUSTED, at
 
+    # one shared limiter, as cloud.build_app makes it
+    s.app.state.web.limiter = limiter = cloud.BoundedLoginLimiter()
     g = cloud.CloudGuard(s.app, TOKEN, trusted_proxies=TRUSTED, max_upload_bytes=200_000,
-                         max_body_bytes=16_384, lockout=s.app.state.web.limiter, **kwargs)
+                         max_body_bytes=16_384, lockout=limiter, **kwargs)
     return g, TestClient(at(PUBLIC, g), base_url=BASE)
 
 
@@ -474,7 +504,7 @@ def test_cloud_guard_lets_a_key_through_only_on_the_push_routes(h):
                          ("POST", canvas_helper.PAIR_PATH), ("GET", canvas_helper.MANIFEST_PATH)):
         assert c.request(method, path, headers=bearer(key)).status_code == 401, path
     assert not g.lockout.failures
-    # a wrong key is counted (by the app, on the shared limiter)
+    # a wrong key is counted (at the guard, before any body; one shared limiter)
     for _ in range(5):
         assert c.post(canvas_helper.MANIFEST_PATH, json=manifest(),
                       headers=bearer("kcs1." + "z" * 43)).status_code == 401
@@ -526,11 +556,13 @@ def test_failover_edge_passes_a_push_untouched_and_never_counts_the_key():
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
 
-    def call(path, auth):
+    def call(path, auth, origin=EXTENSION):
         sent.clear()
-        scope = {"type": "http", "method": "POST", "path": path, "headers": [
-            (b"origin", EXTENSION.encode()), (b"authorization", auth.encode()),
-            (b"host", b"heykwil.com")], "client": ("203.0.113.9", 1)}
+        headers = [(b"authorization", auth.encode()), (b"host", b"heykwil.com")]
+        if origin:
+            headers.append((b"origin", origin.encode()))
+        scope = {"type": "http", "method": "POST", "path": path, "headers": headers,
+                 "client": ("203.0.113.9", 1)}
         asyncio.run(edge(scope, receive, send))
         return sent[0]
 
@@ -541,6 +573,13 @@ def test_failover_edge_passes_a_push_untouched_and_never_counts_the_key():
     # anywhere else, the extension's origin is refused as before
     assert call("/api/student/items", "Bearer kcs1." + "a" * 43)["status"] == 403
     assert len(seen) == 1
+    # with no Origin (a script), a key on another route is a 401 that is
+    # never counted as a guess at WEB_TOKEN; a real wrong bearer still is
+    assert call("/api/student/items", "Bearer kcs1." + "a" * 43, origin=None)["status"] == 401
+    assert call("/api/state", "Bearer kcs1.short", origin=None)["status"] == 401
+    assert not limiter.failures and len(seen) == 1
+    assert call("/api/state", "Bearer " + "x" * 43, origin=None)["status"] == 401
+    assert limiter.failures
 
 
 # --- logs ------------------------------------------------------------------------------
@@ -569,3 +608,46 @@ def test_keys_and_codes_are_redacted_from_log_lines():
     key, code = "kcs1." + "K" * 43, "kcp1." + "C" * 32
     line = redact(f"posting {key} and {{'code': '{code}'}}")
     assert key[5:] not in line and code[5:] not in line
+
+
+def test_cloud_guard_reads_no_body_for_a_malformed_or_wrong_key(h):
+    """Who it is comes first: a malformed or wrong sync key never gets a
+    (4 MB-sized) body read or a helper slot, counts like a wrong token, and
+    is refused at once once its address is locked out; the right key from
+    that address still gets through."""
+    import asyncio
+
+    key, _ = pair(h, h.sam)
+    g, _ = guard(h)
+    size = 150_000   # over the 16 KB cap, under max_upload_bytes
+
+    def call(auth):
+        reads, sent = [], []
+
+        async def receive():
+            reads.append(1)
+            return {"type": "http.request", "body": b"x" * size, "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "method": "POST", "path": canvas_helper.MANIFEST_PATH,
+                 "headers": [(b"authorization", f"Bearer {auth}".encode()),
+                             (b"content-length", str(size).encode()),
+                             (b"content-type", b"application/json"),
+                             (b"host", b"testserver")],
+                 "client": ("203.0.113.9", 1), "scheme": "https", "query_string": b"",
+                 "http_version": "1.1", "root_path": "", "raw_path": b""}
+        asyncio.run(g(scope, receive, send))
+        return sent[0]["status"], len(reads)
+
+    wrong = ["kcs1.short", "kcs1." + "!" * 43, "kcs1." + "z" * 43]
+    for auth in wrong + wrong[:2]:
+        assert call(auth) == (401, 0), auth
+    assert g.lockout.blocked("203.0.113.9")
+    assert call("kcs1." + "y" * 43) == (429, 0)       # locked out: refused at once
+    assert not g.helper_slots.busy
+    status, reads = call(key)                          # the right key: read, then 400
+    assert status == 400 and reads
+    h.config["canvas"]["helper"] = False
+    assert call(key) == (404, 0)

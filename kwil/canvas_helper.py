@@ -89,8 +89,15 @@ MAX_ID = 10 ** 15
 MAX_NAME = 300
 MAX_PAIR_BODY = 4096
 LISTINGS = ("pages", "assignments", "modules", "files")
+# each listing's HTML field, which sync_content reads as text (else None)
+_HTML = {"pages": "body", "assignments": "description", "announcements": "message"}
 UPLOAD_MARGIN = 65_536          # multipart overhead under [webapp] max_upload_mb
 _NOBODY = object()
+
+
+def is_key(text) -> bool:
+    """Shaped like a sync key (`kcs1.` + 43 base64url characters)."""
+    return isinstance(text, str) and bool(_KEY.match(text.strip()))
 
 
 def push_request(method: str, path: str, authorization: str | None) -> bool:
@@ -281,12 +288,25 @@ def clean_manifest(body) -> dict:
     if len(body["courses"]) > MAX_COURSES:
         raise ValueError(f"at most {MAX_COURSES} courses at a time")
 
-    def listing(value):
+    def listing(value, name: str):
         if value is None:
             return None
         if not isinstance(value, list) or len(value) > MAX_LISTING:
             raise ValueError(f"a listing is a list of at most {MAX_LISTING}")
-        return [x for x in value if isinstance(x, dict)]
+        out = []
+        for x in value:
+            if not isinstance(x, dict):
+                continue
+            x = dict(x)
+            html = _HTML.get(name)
+            if html in x and not isinstance(x[html], str):
+                x[html] = None          # not text: as if Canvas sent no body
+            if name == "modules":       # a module's items: a list of objects, or none
+                items = x.get("items")
+                x["items"] = [i for i in items[:MAX_LISTING] if isinstance(i, dict)] \
+                    if isinstance(items, list) else []
+            out.append(x)
+        return out
 
     courses, seen = [], set()
     for c in body["courses"]:
@@ -301,12 +321,13 @@ def clean_manifest(body) -> dict:
                   "course_code": str(c.get("course_code") or "")[:MAX_NAME],
                   "syllabus_body": syllabus if isinstance(syllabus, str) else ""}
         for name in LISTINGS:
-            course[name] = listing(c.get(name))
+            course[name] = listing(c.get(name), name)
         if course["files"] is not None:
             course["files"] = [{**f, "id": _id(f.get("id"))} for f in course["files"]
                                if _id(f.get("id")) is not None]
         courses.append(course)
-    return {"courses": courses, "announcements": listing(body.get("announcements"))}
+    return {"courses": courses,
+            "announcements": listing(body.get("announcements"), "announcements")}
 
 
 class PushedCanvas:
@@ -410,6 +431,10 @@ class HelperPush:
         self.rate = RateLimiter(PUSHES_PER_HOUR, clock=clock, max_tracked=MAX_PEOPLE,
                                 window=3600)
         self.max_people = MAX_PEOPLE
+
+    def enabled(self) -> bool:
+        """[canvas] helper (read on every call)."""
+        return bool(self.sync.config["canvas"].get("helper"))
 
     def max_file_bytes(self) -> int:
         c, w = self.sync.config["canvas"], self.sync.config["webapp"]
@@ -561,7 +586,7 @@ def register(app, sync, course_sync, web, error) -> None:
     app.state.canvas_helper = helper  # tests
 
     def on() -> bool:
-        return helper is not None and bool(sync.config["canvas"].get("helper"))
+        return helper is not None and helper.enabled()
 
     def nostore(data, status=200):
         return JSONResponse(data, status, headers={"Cache-Control": "no-store"})
@@ -671,6 +696,10 @@ def register(app, sync, course_sync, web, error) -> None:
                          else "bad manifest", 400)
         try:
             return nostore(await run_in_threadpool(helper.manifest, uid, digest, manifest))
+        except (TypeError, ValueError) as e:  # a shape clean_manifest let through
+            log.warning("Canvas helper: a manifest of %s didn't fit (%s)", _who(uid),
+                        type(e).__name__)
+            return error("bad manifest", 400)
         except SyncBusy:
             return error("a push is already running", 409)
         except KeyError:

@@ -6011,3 +6011,30 @@ server side and the card.
   passed, 37 skipped (baseline 63d2ee7: 3353 passed, 38 skipped, run
   from a `git archive` copy where `test_rebrand`'s git-history test
   skips; it runs here). JavaScript 173 passed (168 before).
+
+### Round 2: the judge's findings (2026-10-27)
+
+1. MED, CloudGuard read up to `max_upload_mb` for any `kcs1.`-prefixed
+   bearer, from a locked-out address too. It now checks the key before
+   any body: the exact `kcs1.` shape, then `HelperKeys.verify` (a few
+   small file reads, off the event loop); a malformed or wrong key goes
+   through `refuse_token` (counted, 429 at once when locked out, no slot
+   of the helper pool, nothing read); `[canvas] helper` off is a 404
+   there. The right key still works from a locked-out address. Test
+   `test_cloud_guard_reads_no_body_for_a_malformed_or_wrong_key` (an
+   ASGI call recording `receive`); without the check it fails, and with
+   only the shape check removed too.
+2. LOW, a module's non-list `items` gave a TypeError (500 after a partial
+   write). `clean_manifest` now makes `items` a list of objects (or
+   empty) and HTML fields (`body`, `description`, `message`) strings or
+   none; a shape the pipeline still can't take answers 400. Tests
+   `test_odd_nested_shapes_are_dropped_not_a_crash` and
+   `test_a_shape_the_checks_miss_is_a_400`; each of the three changes
+   reverted alone fails its test.
+3. LOW, the failover edge counted a `kcs1.` bearer on other `/api/`
+   routes as a wrong WEB_TOKEN; it now skips it as it does `hc1.`. The
+   edge test adds the no-Origin case (and that a plain wrong bearer is
+   still counted); reverted, it fails.
+
+Counts (Linux sandbox, Python 3.13, not real hardware): 3386 passed, 37
+skipped; JavaScript 173 passed.

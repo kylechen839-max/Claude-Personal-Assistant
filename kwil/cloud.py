@@ -40,10 +40,12 @@ for the public internet with no Tailscale in front:
   call's short deadline; the waitlist's owner routes need the owner.
 - The Canvas helper (canvas_helper.py): pairing (POST
   /api/student/canvas/pair, a one-time code in the body) is public like an
-  invite; its two push routes take its `kcs1.` sync key as the bearer
-  (checked by the web app, wrong ones counted toward the same lockout),
-  from a body pool of their own with bodies up to [webapp] max_upload_mb.
-  A sync key on any other path gets 401.
+  invite; its two push routes take its `kcs1.` sync key as the bearer,
+  checked here (against the stored hashes) before any body is read: a
+  malformed or wrong one counts toward the same lockout and is refused at
+  once from a locked-out address. Only then is a body read, from a pool of
+  their own and up to [webapp] max_upload_mb. A sync key on any other path
+  gets 401.
 - Errors never reach the client as stack traces.
 - With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
   the derived `hc1.` bearer tokens (checked here, never counted as wrong
@@ -523,8 +525,18 @@ class CloudGuard:
             if not (method == "POST" and path in HELPER_POST):
                 # a sync key opens the helper's push routes and nothing else
                 return await _json(send, 401, {"error": "not signed in"}, extra)
+            # who it is comes first here too: the key is checked before any
+            # body is read; a malformed or wrong one counts like a wrong
+            # token (refused at once from a locked-out address), the right
+            # one is never locked out
+            push = getattr(getattr(self.app, "state", None), "canvas_helper", None)
+            if push is None or not push.enabled():
+                return await _json(send, 404, {"error": "not found"}, extra)
+            if not canvas_helper.is_key(bearer) or \
+                    await _in_thread(push.keys.verify, bearer) is None:
+                return await self.refuse_token(send, ip, "sync key", extra)
             bearer, helper = None, True
-            public = True  # the web app checks the key
+            public = True  # a current key (the web app checks it again)
         login = method == "POST" and path in public_post and bearer is None
         invite = invite and bearer is None
         signing_in = login or invite  # one try at a time when locked out
@@ -536,7 +548,8 @@ class CloudGuard:
             bearer = None
             public = True  # signed in with an access token
         # Who it is comes first: nothing reads a body for an unknown caller
-        # except the login call (16 KB at most).
+        # except the login call and invites/pairing (16 KB at most); the
+        # helper's pushes (up to max_upload_mb) only with a current sync key.
         if bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
                 return await self.refuse_token(send, ip, "bearer token", extra)
@@ -643,6 +656,13 @@ class CloudGuard:
 def _bearer(scope) -> str | None:
     auth = _headers(scope).get("authorization", "")
     return auth[7:] if auth[:7].lower() == "bearer " else None
+
+
+async def _in_thread(fn, *args):
+    """fn(*args) off the event loop (a few small file reads)."""
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
 def _headers(scope) -> dict[str, str]:

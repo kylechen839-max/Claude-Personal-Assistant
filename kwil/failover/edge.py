@@ -39,7 +39,7 @@ import json
 import logging
 from urllib.parse import urlsplit
 
-from kwil.canvas_helper import push_request
+from kwil.canvas_helper import KEY_PREFIX, push_request
 from kwil.failover import API_VERSION
 from kwil.failover.peers import Backend, normalize_url
 from kwil.failover.tokens import MAX_SESSION, Claims, TokenAuthority, bearer_of
@@ -237,7 +237,10 @@ class EdgeMiddleware:
                 # phone retrying must not lock out its owner). Only a bearer
                 # that could be a guess at WEB_TOKEN itself counts.
                 given = bearer_of(headers.get("authorization"))
-                if given and self.root_bearer_sid and not given.startswith("hc1.") \
+                # (nor a Canvas helper's sync key: it opens only the helper's
+                # push routes, which never get here, and can't be WEB_TOKEN)
+                if given and self.root_bearer_sid \
+                        and not given.startswith(("hc1.", KEY_PREFIX)) \
                         and self.needed_scope(path) == "app":
                     ip = self.client_ip(scope)
                     if self.limiter.blocked(ip):
