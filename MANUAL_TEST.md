@@ -685,6 +685,17 @@ for all of this except the Google sign-in.
     family one) and asks only for calendar access, with no Gmail line.
     After signing in, "What's on my calendar tomorrow?" reads their
     calendar; "Any new email?" says it can't read email.
+- [ ] **Move Mom's PC copy to the cloud** (README "Move a PC family copy
+      to the cloud"): after she accepted a **Family** invite, on the PC run
+      the `python -m kwil.family_import` lines there, first with
+      `--dry-run`, then without, then once more.
+  - Should: the dry run prints how many conversations it read and sends
+    nothing; the real run prints "Done: imported N, skipped 0" and never
+    the token or any text; the third run imports 0 and skips N. On her
+    phone, History lists her old conversations with their titles, dates
+    and turns as on the PC (one opened reads the same), while her PC copy
+    kept answering during the copy. After retiring the PC copy, her old
+    `https://<pc>:8443` address no longer opens.
 - [ ] **Download my data** (a test invite, signed in on a second phone or
       a private Safari window, after a short chat): ⚙ -> **Download my
       data**.

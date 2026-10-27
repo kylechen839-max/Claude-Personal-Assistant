@@ -19,6 +19,7 @@ every query is scoped to the store's owner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -151,6 +152,10 @@ END;
 
 class HistoryError(Exception):
     pass
+
+
+class HistoryFull(HistoryError):
+    """An import would take the store past its `max_mb` (nothing was kept)."""
 
 
 def new_id() -> str:
@@ -406,22 +411,24 @@ class HistoryStore:
     # tombstone plus a new message, and a delete is a tombstone, which
     # redacts the covered events' data in the log and removes the rows
     # (and their search index entries) here.
-    def _event(self, kind: str, conv: str, data: dict, ts: int | None = None):
+    def _event(self, kind: str, conv: str, data: dict, ts: int | None = None,
+               eid: str | None = None):
         if ts is None:
             # Never earlier than the conversation's newest event, so the
             # order of a turn is kept even within one millisecond.
             row = self._con.execute("SELECT last_ts FROM conversations WHERE id = ?",
                                     (conv,)).fetchone()
             ts = max(int(self.clock() * 1000), (row[0] + 1) if row else 0)
-        raw = {"id": secrets.token_hex(16), "ts": ts, "origin": self.origin,
+        raw = {"id": eid or secrets.token_hex(16), "ts": ts, "origin": self.origin,
                "kind": kind, "conv": conv, "data": data}
         sync = _sync_module()
         return sync.parse_event(raw) if sync else _LocalEvent(**raw)
 
-    def _record(self, kind: str, conv: str, data: dict, ts: int | None = None):
+    def _record(self, kind: str, conv: str, data: dict, ts: int | None = None,
+                eid: str | None = None):
         """Make an event, add it to the event log, and project it."""
         with self._lock:
-            event = self._event(kind, conv, data, ts)
+            event = self._event(kind, conv, data, ts, eid)
             if self.eventlog is not None:
                 event = self.eventlog.record(event)
             self._apply(event)
@@ -692,8 +699,15 @@ class HistoryStore:
             else:  # never had an event: nothing to tell the other backends
                 self._con.execute("DELETE FROM conversations WHERE id = ?",
                                   (conversation_id,))
+            self._imported_gone(conversation_id)
             self._purge()
         return vectors
+
+    def _imported_gone(self, cid: str) -> None:
+        """A deleted conversation that came from an import (even one cut
+        off midway) is never imported again: its mark becomes "done"."""
+        self._con.execute("UPDATE history_meta SET value = 'done' WHERE key = ?",
+                          ("import:" + cid,))
 
     def _purge(self) -> None:
         """After a delete: drop the deleted text from the search index's
@@ -710,6 +724,98 @@ class HistoryStore:
                 "SELECT 1 FROM conversations WHERE id = ? AND owner = ?",
                 (conversation_id, self.owner)).fetchone():
             raise KeyError("no such conversation")
+
+    # ---------- importing ----------
+    def import_conversation(self, conv: dict) -> bool:
+        """Add one conversation in the shape `export(conv, "json")` gives
+        (parsed), keeping its id, timestamps, title, summary and pin, as
+        the same events a live conversation writes (text masked and capped
+        as add_message does). False, with nothing written, if the id is
+        already here: importing again never duplicates. ValueError if it is
+        malformed."""
+        plan = _import_plan(conv, self.clock())
+        with self._lock:
+            return self._import(plan)
+
+    def import_conversations(self, convs) -> tuple[list[str], int]:
+        """import_conversation for each: (ids imported, number skipped).
+        All checked first (ValueError: nothing written). With `max_mb` set,
+        a batch that would leave the store over it is deleted again and
+        HistoryFull raised, rather than prune deleting older conversations
+        to make room."""
+        now = self.clock()
+        plans = [_import_plan(c, now) for c in convs]
+        done: list[str] = []
+        skipped = 0
+        with self._lock:
+            try:
+                for plan in plans:
+                    if self._import(plan):
+                        done.append(plan["id"])
+                    else:
+                        skipped += 1
+                if done and self.max_mb > 0 and \
+                        self._used_bytes() > self.max_mb * 1024 * 1024:
+                    raise HistoryFull(f"over the {self.max_mb:g} MB history limit")
+            except BaseException:
+                for cid in done:
+                    self._undo_import(cid)
+                if done:
+                    self._con.execute("PRAGMA incremental_vacuum")
+                raise
+        return done, skipped
+
+    def _import(self, plan: dict) -> bool:
+        """Write one checked conversation. `import:<id>` in history_meta
+        holds a salt while it is written and "done" afterwards: its event
+        ids come from the salt, so an import cut off by a crash is finished
+        by the next one without writing anything twice, and one imported
+        before is skipped even after it was deleted here (deleted means
+        gone: running the import again doesn't bring it back; delete and
+        prune set the mark of a half-written one to "done" too)."""
+        cid, key = plan["id"], "import:" + plan["id"]
+        salt = self._meta_get(key)
+        if salt == "done":
+            return False
+        if salt is None:
+            if self._con.execute("SELECT 1 FROM conversations WHERE id = ?",
+                                 (cid,)).fetchone():
+                return False
+            salt = secrets.token_hex(8)
+            self._meta_set(key, salt)
+        try:
+            # as create() makes it, with the original id and start
+            self._con.execute(
+                "INSERT OR IGNORE INTO conversations (id, owner, source, "
+                "started_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (cid, self.owner, plan["source"], plan["started_at"],
+                 plan["started_at"]))
+            for n, (kind, data, ts) in enumerate(plan["events"]):
+                eid = hashlib.sha256(f"{salt}:{cid}:{n}".encode()).hexdigest()[:32]
+                self._record(kind, cid, data, ts, eid)
+        except BaseException:
+            self._undo_import(cid)
+            raise
+        if not self._con.execute("SELECT 1 FROM messages WHERE conversation_id = ?",
+                                 (cid,)).fetchone():
+            # an event log's tombstone redacted it: deleted here before
+            self._con.execute("DELETE FROM conversations WHERE id = ?", (cid,))
+            self._meta_set(key, "done")
+            return False
+        self._meta_set(key, "done")
+        return True
+
+    def _undo_import(self, cid: str) -> None:
+        """Delete a conversation this import wrote, and its import mark.
+        With an event log (the owner's store) the delete is a tombstone,
+        so that id can't be imported again; members' stores have none."""
+        try:
+            self.delete(cid)
+        except KeyError:
+            pass
+        except Exception:  # noqa: BLE001 - the first error is the one to report
+            log.exception("History: undoing an import failed")
+        self._con.execute("DELETE FROM history_meta WHERE key = ?", ("import:" + cid,))
 
     # ---------- housekeeping ----------
     def prune(self) -> int:
@@ -745,6 +851,7 @@ class HistoryStore:
             self._record("delete", cid, {})
         else:
             self._con.execute("DELETE FROM conversations WHERE id = ?", (cid,))
+        self._imported_gone(cid)
 
     def _shrink(self, limit: float) -> int:
         """Delete the oldest unpinned conversations until the database is
@@ -1037,6 +1144,75 @@ def snippet_parts(snippet: str) -> list[tuple[str, bool]]:
 
 def plain_snippet(snippet: str, start: str = "", end: str = "") -> str:
     return "".join(f"{start}{t}{end}" if m else t for t, m in snippet_parts(snippet))
+
+
+# ---------- importing (HistoryStore.import_conversation) ----------
+def _import_time(value, now: float) -> float:
+    """An exported ISO time as unix seconds, never later than `now`."""
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError("bad time")
+    when = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    return min(when.timestamp() if when.tzinfo else when.astimezone().timestamp(), now)
+
+
+def _import_tools(events) -> list[dict]:
+    """Tool events reduced to what `tool_event` keeps."""
+    out = []
+    for e in events[:20] if isinstance(events, list) else []:
+        if not isinstance(e, dict) or not e.get("tool"):
+            continue
+        args = e.get("args") if isinstance(e.get("args"), dict) else {}
+        out.append({"tool": str(e["tool"])[:64],
+                    "args": {str(k)[:24]: _truncate(_clean(v), 40)
+                             for k, v in list(args.items())[:4]},
+                    "status": str(e.get("status") or "")[:16]})
+    return out
+
+
+def _import_plan(conv, now: float) -> dict:
+    """A conversation from `export(..., "json")`, checked, as the events
+    a live one writes: (kind, data, ts ms), in order. ValueError if it
+    is malformed (the message never quotes it)."""
+    if not isinstance(conv, dict) or not valid_id(conv.get("id")):
+        raise ValueError("a conversation has no valid id")
+    messages = conv.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("a conversation has no messages")
+    source = conv.get("source") if conv.get("source") in SOURCES else "web"
+    events, ts = [], 0
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant") \
+                or not isinstance(m.get("text"), str):
+            raise ValueError("a message is malformed")
+        # exports keep whole seconds: one ms apart keeps their order
+        ts = max(int(_import_time(m.get("created_at"), now) * 1000), ts + 1)
+        data = {"role": m["role"], "text": _clean(m["text"])[:MAX_TEXT],
+                "source": source}
+        if m.get("kind") in MESSAGE_KINDS and m["kind"] != "chat":
+            data["kind"] = m["kind"]
+        if m.get("interrupted") is True:
+            data["interrupted"] = True
+        tools = _import_tools(m.get("tool_events"))
+        if tools:
+            data["tools"] = tools
+        events.append(("message", data, ts))
+    # finish(): the title and summary, and "ended" at the original time
+    title, summary = conv.get("title"), conv.get("summary")
+    ended = conv.get("ended_at")
+    if title or summary or ended:
+        data = {"title": _clean(title if isinstance(title, str) else "")[:200],
+                "by": "auto"}
+        if ended:
+            data["ended"] = True
+            ts = max(ts, int(_import_time(ended, now) * 1000))
+        if isinstance(summary, str) and summary:
+            data["summary"] = _clean(summary)[:1000]
+        events.append(("rename", data, ts))
+    if conv.get("pinned") is True:
+        events.append(("pin", {"pinned": True, "archived": False}, ts))
+    started = conv.get("started_at")
+    return {"id": conv["id"], "source": source, "events": events,
+            "started_at": _import_time(started, now) if started else events[0][2] / 1000}
 
 
 # ---------- dates ----------

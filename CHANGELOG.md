@@ -5,6 +5,13 @@
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.
+- Move a family member's PC copy to the cloud with their history: new
+  owner-only `POST /api/users/{id}/history/import` and `python -m
+  kwil.family_import --from <history.sqlite> --to <https origin> --user <id
+  or name> [--dry-run]`, which reads a copy of the database, signs in with
+  `KWIL_CLOUD_TOKEN` as a Bearer header and prints counts only. Retries skip
+  what's already there; past `[family] max_history_mb` the server answers 413
+  and keeps nothing. README: "Move a PC family copy to the cloud".
 - Conversation titles and summaries no longer label a family member's or
   beta tester's words as Kyle's: the transcript sent for titling says
   "User:" and the prompt is neutral.

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kwil import cli, deploy, preflight, smoke, tts, tts_kokoro, watch
+from kwil import cli, deploy, family_import, preflight, smoke, tts, tts_kokoro, watch
 from kwil.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
@@ -68,6 +68,7 @@ def code_flags(monkeypatch):
             | _parser_flags(monkeypatch, lambda: smoke.main([]))
             | _parser_flags(monkeypatch, lambda: watch.main([]))
             | _parser_flags(monkeypatch, lambda: deploy.main([]))
+            | _parser_flags(monkeypatch, lambda: family_import.main([]))
             | _parser_flags(monkeypatch, lambda: runpy.run_module(
                 "kwil.tools.calendar", run_name="__main__")))
 
