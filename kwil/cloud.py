@@ -103,6 +103,10 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # one-time state + hc_notion binding cookie), and the page
               # code of its "Connect Notion" button (its API needs sign-in)
               "/notion/callback", "/notion.js",
+              # the owner's Connected services (owner_connect.py): Home
+              # Assistant's redirect back (one-time state + hc_connect
+              # binding cookie) and the page code (its API needs the owner)
+              "/ha/callback", "/connect.js",
               "/student.js",  # the "School deadlines" card (its API needs sign-in)
               # the public site (public_site.py): landing, privacy, terms
               "/welcome", "/privacy", "/terms", "/site.css",

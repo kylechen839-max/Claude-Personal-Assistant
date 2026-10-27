@@ -24,6 +24,7 @@
 <script src="/memory.js" defer></script>
 <script src="/spotify.js" defer></script>
 <script src="/notion.js" defer></script>
+<script src="/connect.js" defer></script>
 <script src="/student.js" defer></script>
 <script src="/voice-picker.js" defer></script>
 <script src="/brief.js" defer></script>
@@ -109,6 +110,11 @@
         <button id="notion-disconnect" type="button" hidden>Disconnect Notion</button>
         <p id="notion-status" class="hint" hidden></p>
         <p id="notion-detail" class="hint" hidden></p>
+        <section id="connectors" class="api-key connectors" hidden>
+          <p class="api-key-title">Connected services</p>
+          <div id="connector-list"></div>
+          <p id="connectors-status" class="hint" role="status" hidden></p>
+        </section>
         <button id="push-toggle" type="button" hidden>Enable notifications</button>
         <p id="push-status" class="hint" role="status" hidden></p>
         <button id="spotify-connect" type="button" hidden>Connect Spotify</button>

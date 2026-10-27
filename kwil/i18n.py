@@ -72,6 +72,7 @@ EN = {
     "draft_instead": " Careful: replies go to {others}, not to the sender {sender}.",
     "google_failed": "Google sign-in didn't finish. Go back to the app and try again.",
     "notion_failed": "Notion sign-in didn't finish. Go back to the app and try again.",
+    "connect_failed": "The sign-in didn't finish. Go back to the app and try again.",
     "notion_reconnect": "The Notion sign-in stopped working. Reconnect Notion from the "
                         "app's settings: tap the gear, then \"Connect Notion\".",
     "google_beta_off": "Google isn't set up for beta accounts yet.",
@@ -97,6 +98,8 @@ EN = {
     "ha_down": "I can't reach Home Assistant right now. Is it running?",
     "ha_auth": "Home Assistant didn't accept my access token. "
                "It needs a new long-lived token.",
+    "ha_reconnect": "The Home Assistant sign-in stopped working. Connect it again "
+                    "in the app's settings: tap the gear, then Connected services.",
     "ha_not_found": "Home Assistant doesn't know that device.",
     "ha_rejected": "Home Assistant couldn't do that.",
     "ha_no_match": "I couldn't find a device called {name}.",
@@ -184,6 +187,7 @@ ZH = {
     "draft_instead": "注意：回复会发给 {others}，而不是发件人 {sender}。",
     "google_failed": "Google 登录没有完成。请回到应用里再试一次。",
     "notion_failed": "Notion 登录没有完成。请回到应用里再试一次。",
+    "connect_failed": "登录没有完成。请回到应用里再试一次。",
     "notion_reconnect": "Notion 连接已失效。请在应用的设置里重新连接 Notion：点齿轮，再点“连接 Notion”。",
     "google_beta_off": "测试版账户暂时还不能连接 Google。",
     "note_delete": "要我删除这条记忆吗：{text}？",
@@ -205,6 +209,7 @@ ZH = {
     "ha_not_set_up": "Home Assistant 还没有设置好：缺少 HA_URL 和 HA_TOKEN。",
     "ha_down": "现在连不上 Home Assistant，它在运行吗？",
     "ha_auth": "Home Assistant 不接受我的访问令牌，需要一个新的长期令牌。",
+    "ha_reconnect": "Home Assistant 的登录已失效。请在应用的设置里重新连接：点齿轮，再点“已连接的服务”。",
     "ha_not_found": "Home Assistant 里没有这个设备。",
     "ha_rejected": "Home Assistant 没能完成这个操作。",
     "ha_no_match": "我找不到叫“{name}”的设备。",

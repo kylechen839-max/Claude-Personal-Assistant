@@ -149,6 +149,10 @@ DEFAULTS: dict = {
                                     # rewrites the Host header
         "google_connect": False,    # "connect Google" button in the phone app
                                     # (needs a Web application OAuth client)
+        # The cloud server owner's "Connect Google account" (google_web.py):
+        # the token saved to [calendar] token wins over GOOGLE_TOKEN_JSON,
+        # which stays the fallback. The server profile turns it on.
+        "owner_google": False,
         "public_origin": "",        # https://... the phone opens; Google
                                     # returns to <public_origin>/google/callback
         "backup_max_mb": 200,       # GET /api/backup (owner): refused above this
@@ -298,6 +302,12 @@ DEFAULTS: dict = {
         "volume_step": 15,          # "turn it up" / "down" by this much (percent)
         "timeout": 10,              # seconds per Spotify request
     },
+    "connect": {                    # the owner's "Connected services" in the phone app
+        "enabled": True,            # (owner_connect.py; README "Connect your services in the app")
+        "dir": "data/owner",        # the sealed sign-ins (needs USER_DATA_KEY)
+        "notion": True,             # needs NOTION_OAUTH_CLIENT_ID/_SECRET; NOTION_TOKEN wins if set
+        "home_assistant": True,     # its built-in sign-in; HA_TOKEN wins if set
+    },
     "push": {                       # phone notifications (push.py; README "Study briefings")
         "enabled": True,            # "Enable notifications" in Settings; needs USER_DATA_KEY
         # the owner's subscriptions, briefing state and (without
@@ -368,7 +378,7 @@ DEFAULTS: dict = {
     },
     "canvas": {                     # where deadlines come from (canvas.py); never a school password
         # the owner's school, for CANVAS_TOKEN (CANVAS_BASE_URL overrides),
-        # e.g. "https://canvas.school.edu"; invited people paste their own
+        # e.g. "https://canvas.school.edu"; a link pasted in the app has its own
         "base_url": "",
         "pages": False,             # also read module pages (one Claude call per sync for new pages)
         "max_pages": 20,            # module pages read per sync, at most
@@ -380,19 +390,23 @@ DEFAULTS: dict = {
 
 # Settings for a headless cloud server (the Docker image): no speakers, mic
 # or wake word; Piper with the voice baked into the image, then espeak-ng;
-# nothing written to disk (Google tokens are refreshed in memory, logs go to
-# stdout for the host's log viewer); no PC-only tools.
+# nothing written to disk but /data (Google tokens are refreshed in memory,
+# never written back; logs go to stdout for the host's log viewer); no
+# PC-only tools.
 SERVER_PROFILE: dict = {
     "tts": {"engine": "piper", "piper_voice": "voices/en_US-lessac-medium.onnx",
             "fallback": "espeak", "voice_file": "/data/voice_choice.json"},
     # baked into the image; small.en's RAM on Render is unmeasured
     "stt": {"model": "base.en"},
     "wake": {"chime": False, "follow_up_seconds": 0},
-    "calendar": {"save_token": False},
+    # the owner's in-app Google sign-in ([webapp] owner_google), on the
+    # disk; outside /data/users, so never in an export or the backup
+    "calendar": {"save_token": False, "token": "/data/google_token.json"},
     "web": {"browser": False},
     "webapp": {"host": "0.0.0.0", "max_upload_mb": 4,
                "sessions_file": "/data/web_sessions.json",  # on the disk
                "public_site": True,   # on since the public beta launch (Kyle, 2026-10-22)
+               "owner_google": True,  # Connect Google in the app; GOOGLE_TOKEN_JSON the fallback
                "waitlist_file": "/data/waitlist.json"},  # on the disk
     # Render's TLS proxy reaches the container from its 10.x private network
     # (check the "Proxy check" lines in the log after the first deploy).
@@ -402,6 +416,7 @@ SERVER_PROFILE: dict = {
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
+    "connect": {"dir": "/data/owner"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
     # just under max_upload_mb (4) above, so check_limits has nothing to lower
     "lecture": {"chunk_mb": 3.9},
@@ -559,6 +574,10 @@ _SECRET_PATTERNS = [
     re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
     re.compile(r"\b\d{1,6}~[A-Za-z0-9]{32,}"),     # Canvas access tokens
     re.compile(r"(/feeds/calendars/)[\w.-]+"),    # Canvas calendar feed links
+    # Home Assistant access tokens (JWTs) and refresh tokens (128 hex
+    # characters): the owner's sign-in from the app (owner_connect.py)
+    re.compile(r"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"),
+    re.compile(r"\b[0-9a-f]{128}\b"),
 ]
 
 

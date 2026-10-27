@@ -4,8 +4,22 @@
 
 - Kwil's web app, voice view, public site, icons and home-screen colours
   move from Claude's orange to a calm, darker blue with cool neutrals; every
-  pair meets WCAG AA contrast in light and dark mode. Phones reload the new
-  look once (service-worker cache v2).
+  pair meets WCAG AA contrast in light and dark mode. New icon: a quill whose
+  barbs are a sound wave. Phones reload the new look once (service-worker
+  cache v5).
+- Connected services (owner, cloud): sign in to your own Notion and Home
+  Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
+  server. Environment tokens still win. Sign-ins are encrypted with
+  `USER_DATA_KEY`, refreshed automatically, and revoked on Disconnect. New
+  `[connect]` settings.
+- The owner can connect Canvas in the app (feed link or access token, sealed
+  on the disk) instead of CANVAS_ICS_URL / CANVAS_TOKEN in the environment;
+  the env still wins while set. A guided Canvas connect for everyone: find
+  your school, open its Canvas calendar, Paste the feed link.
+- Cloud: the owner can connect (and disconnect) their own Google account in
+  the app (⚙ → Connect Google account). The token is kept on /data and
+  replaces GOOGLE_TOKEN_JSON, which is now optional and stays the fallback.
+  New setting `[webapp] owner_google` (on in the server profile).
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.

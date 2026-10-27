@@ -611,13 +611,19 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     registry = ToolRegistry()
     tz = config["assistant"]["timezone"] or None
     register_google(registry, config, output_fn)
+    from kwil import owner_connect  # NOTION_TOKEN first, else the app's sign-in
+
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from kwil.tools.notion import NotionAssignments
 
         registry.register(*NotionAssignments(config["notion"]["database_id"],
                                              timezone=tz).tools())
-    elif config["notion"]["enabled"]:
-        output_fn("(Notion tools off: NOTION_TOKEN not set)")
+    elif config["notion"]["enabled"] and owner_connect.managed(config, "notion") == "none":
+        output_fn("(Notion tools off: NOTION_TOKEN not set and Notion not "
+                  "connected in the app)")
+    # services the owner signed in to from the phone app (Settings ->
+    # Connected services); env-managed ones are registered as before
+    owner_connect.register_tools(registry, config, output_fn)
     register_devteam(registry, config, output_fn)
     register_home_assistant(registry, config, output_fn)
     register_teamchat(registry, config, output_fn)
@@ -637,23 +643,29 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
 def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> None:
     """Calendar and Gmail tools. With [webapp] google_connect (the phone's
     "connect Google" button) only once that sign-in saved a token: without
-    one, Calendar would start a browser sign-in on this computer."""
+    one, Calendar would start a browser sign-in on this computer. With
+    [webapp] owner_google (the cloud server) the token the owner connected
+    in the app wins over GOOGLE_TOKEN_JSON, which is the fallback
+    (google_auth.owner_environ)."""
     cal = config["calendar"]
     if not cal["enabled"]:
         return
     from kwil.tools.calendar import GoogleCalendar, has_credentials
-    from kwil.tools.google_auth import load_token_info
+    from kwil.tools.google_auth import load_token_info, owner_connected, owner_environ
 
-    if config["webapp"]["google_connect"]:
+    environ = owner_environ(config)
+    if config["webapp"]["google_connect"] or config["webapp"]["owner_google"]:
         try:
-            ready = load_token_info(cal["token"]) is not None
+            ready = load_token_info(cal["token"], environ) is not None
         except (OSError, ValueError):
             ready = False
         if not ready:
             output_fn("(Google tools off until the phone app's "
-                      "\"connect Google\" sign-in finishes)")
+                      "\"connect Google\" sign-in finishes"
+                      + (" or GOOGLE_TOKEN_JSON is set)"
+                         if config["webapp"]["owner_google"] else ")"))
             return
-    elif not has_credentials(cal["credentials"], cal["token"]):
+    elif not has_credentials(cal["credentials"], cal["token"], environ):
         output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
                   "GOOGLE_TOKEN_JSON not set)")
         register_gmail(registry, config, output_fn)
@@ -662,6 +674,8 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
         credentials_path=cal["credentials"], token_path=cal["token"],
         calendar_id=cal["calendar_id"], timezone=config["assistant"]["timezone"] or None,
         save_token=cal["save_token"], color_labels=cal["color_labels"],
+        # connected in the app: errors say to reconnect there
+        environ=environ, in_app=owner_connected(config),
         extras=calendar_extras(config, output_fn)).tools())
     register_gmail(registry, config, output_fn)
 
@@ -672,13 +686,14 @@ def calendar_extras(config: dict, output_fn=print) -> bool:
     and this says how to add them."""
     from kwil.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
                                              SIGN_IN_COMMAND, load_token_info,
-                                             missing_scopes)
+                                             missing_scopes, owner_environ)
 
     token = config["calendar"]["token"]
+    environ = owner_environ(config)
     try:
-        if load_token_info(token) is None:
+        if load_token_info(token, environ) is None:
             return False  # no sign-in yet (google_auth asks for them)
-        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, token)
+        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, token, environ)
     except (OSError, ValueError):
         return False
     if lacking:
@@ -717,8 +732,12 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
         output_fn("(Dev team tools off: [devteam] coordinator_session is not "
                   "a session id or claude.ai/code link)")
         return False
-    if not (os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]):
-        output_fn("(Dev team replies off: NOTION_TOKEN not set; messages still go out)")
+    from kwil import owner_connect
+
+    if not (owner_connect.managed(config, "notion") != "none"
+            and config["notion"]["database_id"]):
+        output_fn("(Dev team replies off until Notion is set: NOTION_TOKEN, or "
+                  "Connected services in the app; messages still go out)")
     link = link_from_config(config, team["state_file"])
     registry.register(*link.tools())
     return True
@@ -734,7 +753,10 @@ def register_home_assistant(registry: ToolRegistry, config: dict,
         return False
     url = ha["url"] or os.environ.get("HA_URL", "")
     if not (url and os.environ.get("HA_TOKEN")):
-        output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
+        from kwil import owner_connect
+
+        if owner_connect.managed(config, "home_assistant") != "app":  # (build_tools adds those)
+            output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
         return False
     from kwil.tools.home_assistant import HomeAssistant, plain_http_off_lan
 
@@ -766,6 +788,10 @@ def register_teamchat(registry: ToolRegistry, config: dict, output_fn=print,
         notion = NotionAssignments(config["notion"]["database_id"],
                                    token=environ["NOTION_TOKEN"],
                                    timezone=config["assistant"]["timezone"] or None)
+    else:  # the app's sign-in, looked up per request (works once connected)
+        from kwil import owner_connect
+
+        notion = owner_connect.owner_assignments(config, environ)
     chat, missing = teamchat_from_config(config, environ=environ, session=session,
                                          notion=notion)
     for label, var in missing:  # only services that are turned on
@@ -793,15 +819,17 @@ def owner_gmail(config: dict, output_fn=print):
     Google sign-in, or the Gmail scopes not granted (said on output_fn).
     Also read by student_web's sync (Canvas emails, read-only)."""
     from kwil.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
-                                             load_token_info, missing_scopes)
+                                             load_token_info, missing_scopes,
+                                             owner_connected, owner_environ)
 
     cal = config["calendar"]
     if not config["gmail"]["enabled"] or not cal["enabled"]:
         return None
+    environ = owner_environ(config)  # the app's connected token wins on the server
     try:
-        if load_token_info(cal["token"]) is None:
+        if load_token_info(cal["token"], environ) is None:
             return None  # no Google sign-in at all (Calendar says so)
-        lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
+        lacking = missing_scopes(GMAIL_SCOPES, cal["token"], environ)
     except (OSError, ValueError) as e:
         output_fn(f"(Gmail tools off: Google token unreadable: {e})")
         return None
@@ -813,7 +841,8 @@ def owner_gmail(config: dict, output_fn=print):
 
     return GmailInbox(credentials_path=cal["credentials"], token_path=cal["token"],
                       timezone=config["assistant"]["timezone"] or None,
-                      max_summary=config["gmail"]["max_summary"])
+                      max_summary=config["gmail"]["max_summary"],
+                      environ=environ, in_app=owner_connected(config))
 
 
 def register_student(registry: ToolRegistry, config: dict) -> bool:
@@ -1159,6 +1188,14 @@ def main(argv=None) -> int:
         config["push"]["enabled"] = False
         log.info("Notifications off: a separate instance (--env-file %s) "
                  "without its own [push] owner_dir", args.env_file)
+    if separate and config["connect"]["enabled"] \
+            and Path(config["connect"]["dir"]).resolve() \
+            == Path(DEFAULTS["connect"]["dir"]).resolve():
+        # and Connected services: its sign-ins would be the owner's
+        # data/owner/*.enc (opened, replaced or deleted from the wrong app)
+        config["connect"]["enabled"] = False
+        log.info("Connected services off: a separate instance (--env-file %s) "
+                 "without its own [connect] dir", args.env_file)
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"

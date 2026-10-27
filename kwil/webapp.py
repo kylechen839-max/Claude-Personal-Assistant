@@ -1836,6 +1836,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("memory.js", "text/javascript"),
                         ("spotify.js", "text/javascript"),
                         ("notion.js", "text/javascript"),
+                        ("connect.js", "text/javascript"),
                         ("student.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript"),
@@ -2170,6 +2171,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from kwil import notion_web
 
     notion_web.register(app, family, web, error)  # a person's own Notion
+    from kwil import owner_connect
+
+    # the owner's Connected services (after notion_web: it hands his states over)
+    owner_connect.register(app, getattr(assistant, "connectors", None), web, error)
     from kwil import student_web
 
     student_web.register(app, family, web, error)  # each person's own deadlines
@@ -2349,6 +2354,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
 
     assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
+    from kwil import owner_connect
+
+    # the owner's Connected services (create_app adds their routes)
+    assistant.connectors = owner_connect.from_config(config, tools)
     from kwil import proactive
 
     # each person's school deadlines (deadlines.py; the store the owner's

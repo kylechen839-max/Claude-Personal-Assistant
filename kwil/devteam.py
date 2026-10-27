@@ -9,7 +9,8 @@ a machine with the CLI (the home PC), not the session itself.
 Replies come back through a Notion database, "Hey Claude coordinator inbox",
 next to the Assignments database: the coordinator writes one row per
 message (Reply ID, Reply, Status) with Kyle's Notion connector, and this
-module reads it with NOTION_TOKEN.
+module reads it with NOTION_TOKEN, or his Notion sign-in from the app
+(owner_connect.py).
 """
 
 from __future__ import annotations
@@ -320,18 +321,29 @@ class CoordinatorLink:
 
 
 def link_from_config(config: dict, state_file: str | Path, **kw) -> CoordinatorLink:
-    """A CoordinatorLink from [devteam]; replies need NOTION_TOKEN, and the
-    inbox is made next to the Assignments database when it is missing."""
-    team = config["devteam"]
-    assignments = None
-    if os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]:
-        from kwil.tools.notion import NotionAssignments
+    """A CoordinatorLink from [devteam]; replies need the owner's Notion
+    (NOTION_TOKEN, else his sign-in from the app's Connected services,
+    looked up per request so it works once he connects), and the inbox is
+    made next to the Assignments database when it is missing."""
+    from kwil.tools.notion import NotionAssignments
 
-        assignments = NotionAssignments(config["notion"]["database_id"])
+    team = config["devteam"]
+    db = config["notion"]["database_id"]
+    assignments, client = None, kw.pop("notion_client", None)
+    if os.environ.get("NOTION_TOKEN"):
+        if db:
+            assignments = NotionAssignments(db, client=client)
+    elif client is None:
+        from kwil import owner_connect
+
+        client = owner_connect.owner_notion_client(config)
+    if assignments is None and client is not None and db:
+        assignments = NotionAssignments(db, client=client)
     return CoordinatorLink(team["coordinator_session"],
                            claude_command=team["claude_command"],
                            repo_dir=team["repo_dir"], timeout=team["timeout"],
-                           state_file=state_file, assignments=assignments, **kw)
+                           state_file=state_file, assignments=assignments,
+                           notion_client=client, **kw)
 
 
 def _parse_json(out: str) -> dict:

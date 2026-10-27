@@ -50,6 +50,7 @@ class Features:
         self.assistant = assistant  # the WebAssistant (TTS, transcriber)
         self._client = client
         self._assignments = assignments
+        self._fixed_assignments = assignments is not None  # (tests)
         self._pipeline = pipeline
         self._courses: tuple[float, list[str]] | None = None
         self.tutors: dict[str, object] = {}  # web session id -> TutorSession
@@ -67,15 +68,21 @@ class Features:
 
     @property
     def assignments(self):
-        import os
+        """The owner's NotionAssignments, or None while his Notion isn't set
+        (NOTION_TOKEN, or Connected services in the app: asked each time,
+        so a connect or disconnect applies at once)."""
+        if self._fixed_assignments:
+            return self._assignments
+        from kwil import owner_connect
 
-        if self._assignments is None and self.config["notion"]["enabled"] \
-                and os.environ.get("NOTION_TOKEN"):
-            from kwil.tools.notion import NotionAssignments
-
-            self._assignments = NotionAssignments(
-                self.config["notion"]["database_id"],
-                timezone=self.config["assistant"]["timezone"] or None)
+        if not self.config["notion"]["enabled"] \
+                or owner_connect.managed(self.config, "notion") == "none":
+            return None
+        if self._assignments is None:
+            # with an app sign-in its client looks the token up per request
+            self._assignments = owner_connect.owner_assignments(self.config)
+            if self._pipeline is not None:  # built while Notion wasn't set
+                self._pipeline.notes_db.assignments = self._assignments
         return self._assignments
 
     @property
@@ -208,7 +215,8 @@ def install(app, features: Features) -> None:
         if (off := lecture_on()) is not None:
             return off
         if features.assignments is None:
-            return error("Notion isn't set up (NOTION_TOKEN), so lecture notes "
+            return error("Notion isn't connected (NOTION_TOKEN, or Connected "
+                         "services in Settings), so lecture notes "
                          "have nowhere to go", 400)
         body = await json_body(request)
         uploads = features.pipeline.uploads

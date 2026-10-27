@@ -16,7 +16,9 @@ Never Kyle's NOTION_TOKEN, never his lecture recorder, tutor or digests.
   GET  /notion/callback        ?state&code from Notion -> token saved, 303 to /
 
 The owner (WEB_TOKEN) gets 404 from all of them: Kyle's Notion is
-NOTION_TOKEN on his own machines.
+NOTION_TOKEN, or his own sign-in under Settings -> Connected services
+(owner_connect.py), which uses the same integration and redirect URI: a
+state of his is handed to owner_connect at the callback.
 
 The callback is authenticated exactly like google_web.py's: the session
 cookie is SameSite=Strict, so it isn't sent on Notion's redirect back; the
@@ -426,6 +428,10 @@ def register(app, family, web, error) -> None:
     @app.get(CALLBACK)
     async def notion_callback(request: Request):
         q = request.query_params
+        owner = getattr(app.state, "owner_connect", None)  # owner_connect.py
+        if owner is not None and owner.claims("notion", q.get("state", "")):
+            # the owner's own Notion: same integration, same redirect URI
+            return await app.state.owner_connect_callback("notion", request)
         nonce = request.cookies.get(BIND_COOKIE)
         if q.get("error"):  # e.g. access_denied; still use up the state
             log.info("Notion sign-in not finished (%d-character error code)",

@@ -573,7 +573,8 @@ server (`[family] enabled`, on in the server profile).
   `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
   never read for them, and `save_token=False`, so a missing or revoked
   token is an error, never a sign-in started on the server. Kyle's tools
-  read only his own token, never `<dir>`. The tools go only into their own
+  read only his own token (`/data/google_token.json` once he connects in
+  the app, else `GOOGLE_TOKEN_JSON`; below), never `<dir>`. The tools go only into their own
   registry (shared by their sessions; added before stale ones are removed,
   so a running turn never sees none), with the descriptions about them,
   not Kyle; the calendar is their `primary`. Gmail stays drafts-only
@@ -947,6 +948,37 @@ a PKCE challenge, `access_type=offline` and the redirect
   a different value; it names the variables, never their values.
 - Without a saved token the Google tools stay off: Calendar would otherwise
   start a browser sign-in on the PC.
+- **The cloud owner's own Google** (`[webapp] owner_google`, on in the
+  server profile). Kyle, signed in with `WEB_TOKEN` (owner-only:
+  `s.user is None`; a family member's Connect and Disconnect act only on
+  their own account), uses the same flow (state, binding cookie, PKCE,
+  one `PUBLIC_ORIGIN`). It signs in with `[calendar] credentials` only if
+  that is a Web client, else the family's Web client
+  (`GOOGLE_WEB_CLIENT_JSON`), never the Desktop `GOOGLE_CLIENT_JSON`; the
+  saved token carries that client's id and secret, so a refresh never
+  borrows another client. The token goes to `/data/google_token.json`
+  (`write_private`); it is outside `/data/users`, so no "Download my data"
+  export includes it, and the owner's backup is an allowlist without
+  tokens. While a readable token is there it wins over
+  `GOOGLE_TOKEN_JSON` (`google_auth.owner_environ` hides that variable
+  from Calendar, Gmail, the student sync and `--check`); refreshes stay
+  in memory (`save_token` off), and an expired or revoked one says to
+  reconnect in the app. An unreadable file counts as not connected, so
+  `GOOGLE_TOKEN_JSON` keeps working. **Disconnect** (only when that file
+  exists; otherwise 404 as before) revokes the grant at Google outside
+  the lock (best effort, `account.revoke_google_token_file`, the helper
+  family members' Disconnect uses), deletes the file, and rebuilds
+  Calendar and Gmail on `GOOGLE_TOKEN_JSON` (or removes them without it),
+  adding before removing in the shared registry. The confirm question
+  warns that Google may end the PC copy's grant too: grants of one user to
+  one Google Cloud project can be revoked together (not confirmed).
+  Deliberate non-fixes: the token is not sealed (`userkeys.seal`) like
+  invited people's Anthropic keys, so anyone with the disk (Render, its
+  daily snapshot until it expires) can read it, as with family members'
+  Google tokens; and `cli.main` does not treat `owner_google` like
+  `google_connect` (that refusal of inherited secrets is for separate
+  instances, and Render sets `GOOGLE_TOKEN_JSON` in the process
+  environment on purpose).
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
@@ -1029,6 +1061,76 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   integration's template); otherwise the tools stay off and Settings says
   to share only that database and reconnect.
 
+## Owner's connected services (`owner_connect.py`, cloud)
+
+Kyle signs in to his own Notion and Home Assistant from ⚙ -> Connected
+services instead of pasting `NOTION_TOKEN` / `HA_TOKEN` into Render.
+
+- **Owner only.** `GET /api/connect/status`, `POST /api/connect/<id>/start`
+  and `/disconnect` use `webapp.require_owner`: a family member's session
+  gets 404, no session 401. State changes are POSTs; a start body is at
+  most 2 KB (413).
+- **Precedence: the environment first.** With `NOTION_TOKEN` (or
+  `HA_TOKEN`) set, that service is `managed: "env"`: every caller builds
+  exactly the client it built before, Connect and Disconnect answer 409,
+  and the page shows no buttons. Otherwise `"app"` once signed in here,
+  else `"none"`.
+- **Sealed storage.** One file per service in `[connect] dir` (Render:
+  `/data/owner`): `userkeys.seal` under its own HKDF label
+  (`kwil/notion/v1`, `kwil/home_assistant/v1`; neither opens a member's
+  `notion.enc`, nor the other way round) with the id `owner` inside,
+  written with `google_auth.write_private` (mkstemp in the same folder,
+  atomic replace, retried on Windows; 0600 on POSIX only). Notion keeps
+  what `notion_web.record_of` keeps (tokens, bot and workspace ids and
+  name; never Notion's `owner` object with his email). Home Assistant
+  keeps its address and refresh token; access tokens (30 minutes) live in
+  memory only. **Fails closed:** without a usable `USER_DATA_KEY` nothing
+  is started (503) or exchanged.
+- **OAuth state.** Like `notion_web.py`: random, made only for the
+  owner's signed-in session, at most 4 pending for 10 minutes, single use,
+  bound to the browser by the `hc_connect` cookie (HttpOnly, Secure,
+  SameSite=Lax, path = that service's callback only) whose nonce's hash is
+  kept, and void once that session signs out. A wrong, used, expired or
+  other-service state is a 400 and writes nothing. Tokens and codes never
+  go in a URL Kwil makes; Home Assistant gets PKCE (S256; HA 2026.10
+  checks it, older versions ignore it), Notion documents none (its client
+  secret never leaves the server). The owner's Notion shares the
+  integration and redirect URI with invited people: `notion_web`'s
+  callback hands a state only `owner_connect` issued to it. His lecture
+  notes, digests and inbox create pages, so the integration needs Notion's
+  *Insert content* capability, which then also applies to invited people's
+  tokens; their registry still has only `list_assignments` and
+  `update_assignment_status` (`family._notion_tools`), so nothing of theirs
+  creates pages.
+- **Revoke, delete, drop.** Disconnect revokes at the service first (Notion
+  `/v1/oauth/revoke`; Home Assistant `/auth/revoke`, which also ends every
+  access token of that refresh token), best effort with a WARNING naming
+  only the error type or HTTP status; then deletes the file; then removes
+  the tools from the owner's shared registry. A grant that can't be stored
+  is revoked at once, and a reconnect to another Notion bot revokes the
+  grant it replaces. Refreshes, (re)connects and disconnects of a service
+  hold one lock, so none brings back a sign-in another just deleted.
+- **Home Assistant's address is typed by a person.** It must pass
+  `canvas.public_url` (https on port 443, no `user:pass@`, every resolved
+  address `is_global`: never loopback, the LAN, Tailscale's 100.64/10 or
+  169.254.169.254), and is checked again before every token request.
+  Plain http is refused, so `plain_http_off_lan` never applies. The OAuth
+  calls follow no redirects; the tools' requests use `allow_redirects=False`
+  as before. **Deliberate non-fix:** as with Canvas, a DNS answer that
+  changes between the check and the connection (rebinding) could reach a
+  private address once; the tools' REST calls aren't re-checked per
+  request. They only carry the HA access token to the address the owner
+  himself typed, and answers are parsed as Home Assistant JSON.
+- **Taint and confirmations unchanged.** The tools are the same objects
+  as with `NOTION_TOKEN`/`HA_TOKEN` (same flags, same
+  `confirm_if_untrusted`, Home Assistant's own per-call `mark_untrusted`
+  and always-ask secure entities). Family members never get them.
+- **Logs.** Ids, service names, counts, HTTP statuses and error type names
+  only. Never a code, token, nonce, typed address or workspace name; the
+  provider's error text is never kept. The redacting formatter also masks
+  Home Assistant's JWT access tokens and 128-hex refresh tokens (Notion's
+  `ntn_`/`secret_` shapes were already masked).
+
 ## Student deadlines and Canvas (`deadlines.py`, `canvas.py`, `student_web.py`)
 
 Each person (the owner and every invited person) has their own deadlines,
@@ -1044,9 +1146,22 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
   Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
   (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
-  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
-  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
-  the owner's connect route is a 409. Neither is ever returned (the status
+  and writes nothing. The owner connects in the app the same way: sealed
+  under the same label with the id `"owner"` inside (push.py's
+  convention; invited ids are `u_...`, so a member's file never opens as
+  the owner's or the reverse) in `<[student] dir>/canvas.enc`, with the
+  same 503 without `USER_DATA_KEY`, the same `public_url` checks, and
+  **Disconnect** deleting the file. A separate instance can't share that
+  folder (`[student]` is turned off for one that keeps the default
+  `dir`). The older way still wins while it is set: `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` in the environment (both in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS`), read on every request; then the owner's connect
+  route is a 409 and the sealed file, if any, is not read, but
+  disconnect still deletes that file (status `app_link`), so an older
+  link can't come back silently once the env is removed; with no file it
+  is a 409, and the env is never touched. The routes take no id: each session reaches only its own link
+  (the owner's session the owner's file, a member's their own folder).
+  Neither the link nor the token is ever returned (the status
   says only the kind and the school's host), logged, or exported. The
   redacting log formatter masks `/feeds/calendars/...` paths and Canvas
   token shapes too, because httpx logs request URLs at INFO (kept at
@@ -1064,6 +1179,19 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   the address would need a custom transport, and the fetch is a GET whose
   answer is only parsed as a calendar or Canvas JSON (nothing else of it
   is shown or stored).
+- **The guided connect (student.js).** **Open my Canvas calendar** opens
+  `https://<host>/calendar` with `noopener`, only for a host from the
+  school lookup that passes a page-side copy of the `public_url` rules
+  (https, port 443, no `user:pass@`, a dotted DNS name, never an IP
+  literal, `localhost` or a LAN-only suffix such as `.local`); the page
+  can't resolve DNS, so the server's check of the pasted link stays the
+  real one. A Canvas address typed in the search box (`https://...`, or a
+  `canvas.` / `.instructure.` host) is used directly after the same check;
+  anything else goes to the lookup. School names are shown as text.
+  **Paste** reads the clipboard only on its tap (`navigator.clipboard.readText`), fills the field only
+  with an `https://` / `webcal://` link, says nothing if permission is
+  denied, and never submits: the person still taps Connect. No inline
+  handlers (the CSP is unchanged).
 - **Untrusted content.** Feed titles, planner items, module pages and
   emails are written by other people: `list_deadlines` is
   `untrusted_output` (and `private`), so once it ran, `add_deadline` and
@@ -1079,7 +1207,8 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   after every delete (a test reads the file and its WAL for the title).
   A deleted synced item leaves only a SHA-256 of its feed key so the next
   sync doesn't bring it back. An invited person's `deadlines.sqlite` and
-  `canvas.enc` go with their folder on removal or "Delete my account";
+  `canvas.enc` go with their folder on removal or "Delete my account"
+  (the owner's `canvas.enc` is deleted by **Disconnect Canvas**);
   their export holds the deadlines, never the link. Every connection is
   closed after each call (nothing holds the file open on Windows), and a
   write for someone just removed is refused under Family's lock, so a sync

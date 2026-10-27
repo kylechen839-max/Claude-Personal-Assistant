@@ -131,6 +131,9 @@ trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; o
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
 google_connect = false        # true: a "connect Google" button in the phone app signs in to
                               # Calendar and Gmail (needs a Web application OAuth client)
+owner_google = false          # true (the cloud server's profile): the owner's "Connect Google
+                              # account" saves the token to [calendar] token, which then wins
+                              # over GOOGLE_TOKEN_JSON (used until then, and after Disconnect)
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
                               # and family members' Google (PUBLIC_ORIGIN overrides it)
@@ -258,6 +261,12 @@ local_device = ""             # this computer's name in Spotify's device list; "
 volume_step = 15              # "turn it up" / "turn it down" by this many percent
 timeout = 10                  # seconds per Spotify request
 
+[connect]                     # Settings -> "Connected services": sign in to your own services from the app (README "Connect your services in the app")
+enabled = true                # needs USER_DATA_KEY (sign-ins are stored encrypted) and [webapp] public_origin
+dir = "data/owner"            # your sealed sign-ins (Render: /data/owner)
+notion = true                 # your Notion via the public integration (NOTION_OAUTH_CLIENT_ID/_SECRET); NOTION_TOKEN wins if set
+home_assistant = true         # your Home Assistant's own sign-in (it must be reachable from the internet); HA_TOKEN wins if set
+
 [push]                        # phone notifications: Settings -> "Enable notifications" (README "Study briefings")
 enabled = true                # needs USER_DATA_KEY (subscriptions are stored encrypted); iPhone: Home Screen app, iOS 16.4+
 owner_dir = "data/student"    # your subscriptions, briefing state and the generated VAPID key (Render: /data/student)
@@ -316,8 +325,9 @@ max_items = 2000              # deadlines kept per person
 max_per_source = 500          # ... and per source (calendar feed, Canvas API, emails, ...)
 
 [canvas]                      # where deadlines come from; a feed link or an access token, never a school password
-# Yours: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed) or CANVAS_TOKEN
-# (Account -> Settings -> New access token) in .env. Invited people paste theirs in the app.
+# Everyone, you included, pastes a link in the app's School deadlines card (sealed with
+# USER_DATA_KEY). Or, the older way: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed)
+# or CANVAS_TOKEN (Account -> Settings -> New access token) in .env, which wins while set.
 base_url = ""                 # your school's Canvas for CANVAS_TOKEN, e.g. "https://canvas.school.edu" (CANVAS_BASE_URL overrides)
 pages = false                 # also read module pages (Claude picks the dates out; one call per sync when pages changed)
 max_pages = 20                # module pages read per sync, at most

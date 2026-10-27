@@ -327,7 +327,7 @@ def test_family_never_gets_the_owners_google(fake_client, tmp_path):
     # no family web client set up: her own Google is off, and Kyle's isn't hers
     assert mom.get("/api/google/status").json() == {
         "enabled": False, "connected": False, "disconnect": True, "gmail": True,
-        "note": None}
+        "note": None, "server_owner": False}
     assert mom.post("/api/google/connect", json={}).status_code == 503
     page = mom.get("/").text
     assert '<html lang="zh-CN">' in page and "data-google" not in page

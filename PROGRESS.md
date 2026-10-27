@@ -5575,3 +5575,214 @@ conversations come with them.
   parsed from `app.css` and `site.css` in light and dark. All 7 fail with
   the source change reverted. `test_webapp.py` and `sw-push.test.mjs` now
   expect `kwil-shell-v2`. Full suite: 3232 passed, 37 skipped; JS 144 passed.
+
+## Owner's connected services: Notion and Home Assistant by sign-in (2026-10-27)
+- **What:** on the cloud app, ⚙ -> **Connected services** lets Kyle sign in
+  to his own services instead of pasting their secrets into Render
+  (`kwil/owner_connect.py`, `kwil/web/connect.js`, README "Connect your
+  services in the app (cloud)"). A small shared framework (sealed storage
+  per service under `[connect] dir`, owner-only routes, bounded single-use
+  OAuth state bound to the browser by the `hc_connect` cookie, revoke ->
+  delete -> drop tools on Disconnect) with two connectors:
+  - **Notion**, through the public integration invited people already use
+    (same client and redirect URI; `notion_web`'s `/notion/callback` hands
+    an owner state to `owner_connect`). `owner_notion_client()` replaces the
+    `NOTION_TOKEN` readers in `cli.build_tools`, `register_devteam`,
+    `register_teamchat`, `webfeatures.Features.assignments` and
+    `devteam.link_from_config`: with `NOTION_TOKEN` set they build exactly
+    the client they built before; otherwise the client looks the token up
+    on every request (an httpx.Auth that also refreshes once on a 401 and
+    writes the new token back sealed), so lecture notes, digests and the
+    dev team inbox work as soon as he connects and stop when he
+    disconnects.
+  - **Home Assistant**, through HA's own IndieAuth-style OAuth (client id =
+    `PUBLIC_ORIGIN/`, redirect `/ha/callback`, PKCE S256). The typed
+    address must pass `canvas.public_url` (https:443, public addresses
+    only). The refresh token is sealed; access tokens are kept and renewed
+    in memory (`HAAuth`), and `HomeAssistant(token_fn=...)` refreshes once
+    on a 401 (not on the admin-only template API).
+  - Precedence: `NOTION_TOKEN` / `HA_TOKEN` in the environment win
+    (`managed: "env"`, Connect refused with 409 and hidden).
+- **HA facts:** checked against developers.home-assistant.io/docs/auth_api
+  and Home Assistant core/frontend sources (2026.10): `/auth/authorize`
+  with `client_id`, `redirect_uri`, `state` (+ optional `code_challenge`,
+  S256 only), `/auth/token` form posts (`authorization_code` with
+  `client_id`, `code`, `code_verifier`; `refresh_token` with `client_id`),
+  `expires_in` 1800, refresh tokens `secrets.token_hex(64)`, access
+  tokens JWTs, `/auth/revoke` with `token` (always 200; also ends that
+  refresh token's access tokens). Not checked against a real HA instance.
+- **Redaction:** `config._SECRET_PATTERNS` now also masks HA's JWT access
+  tokens and 128-hex refresh tokens (Notion's `ntn_`/`secret_` were
+  already covered).
+- **Tests:** `tests/test_owner_connect.py` (56, all offline: Notion through
+  `notion_web.TRANSPORT` with the real SDK, HA through
+  `owner_connect.TRANSPORT`, names through a fake `canvas.RESOLVE`) and
+  `tests/js/connect.test.mjs` (13, node:vm). Each fails with its source
+  change reverted: the `notion_web` hand-over (10 failures, incl. the
+  connect test with family accounts on), `webfeatures` (lecture notes: 3),
+  `cli.build_tools` (startup: 1), `HomeAssistant(token_fn=)` (4), the
+  admin-only guard (1), `devteam` (1), the IPv6 brackets (1) and the
+  redaction patterns (2). `sw.js` cache bumped to `kwil-shell-v2`.
+- **Counts:** full suite 3283 passed, 37 skipped (master 5e83590: 3224 passed,
+  38 skipped, run from a `git archive` copy, where one git-dependent test
+  skips); JavaScript 157 passed (master: 144). Linux sandbox, Python 3.13.
+- **Judge LOW fixed:** `cli.main` now turns `[connect]` off for a separate
+  instance (`--env-file .env.<name>`) whose `[connect] dir` resolves to the
+  default `data/owner` (as for `[student]` and `[push]`), so Kai's copy
+  can't open, replace or delete Kyle's sealed sign-ins; `config.mom.toml`
+  also sets `[connect] home_assistant = false`. Tests
+  `test_separate_instance_never_shares_the_owners_connected_services` and
+  `test_the_mom_instance_never_connects_kyles_home` (tests/test_config_cli.py)
+  each fail with their change reverted.
+## The owner connects Canvas in the app, with a guided connect (2026-10-27)
+- **Behaviour change:** the owner no longer has to put `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` in Render's environment. Without them, the owner's
+  **School deadlines** card shows the same connect form as an invited
+  person's (feed link, or school + access token), and the link is sealed
+  with `userkeys.seal` under `canvas.CANVAS_LABEL` with the id `"owner"`
+  (push.py's convention) in `<[student] dir>/canvas.enc` (Render:
+  `/data/student/canvas.enc`), written with `write_private`. Same
+  `canvas.public_url` checks, 503 without a usable `USER_DATA_KEY`, and
+  **Disconnect Canvas** deletes the file (and, asked, what came from
+  Canvas). `test_owner_uses_the_environment_never_the_app` was replaced on
+  purpose by `test_owner_connects_in_the_app_sealed_at_rest_and_syncs`.
+- **Env still wins while set** (`StudentSync.env_managed`, read on every
+  request): the status says `managed: "env"`, connect and disconnect are
+  409, sync uses the env and never the sealed file. Deleting the env vars
+  hands the link to the app with no restart.
+- **Guided connect (student.js, owner and members):** **Find my school**
+  (the existing `/api/student/schools` lookup), **Open my Canvas
+  calendar** (`window.open("https://<host>/calendar", "_blank",
+  "noopener")` straight from the tap, so iOS allows it; hosts must pass a
+  page-side copy of `public_url`'s rules: https, port 443, no
+  `user:pass@`, a dotted DNS name, no IP literal, `localhost` or LAN-only
+  suffix), the hint "Tap Calendar Feed (bottom right), copy the link, come
+  back.", and **Paste** (`navigator.clipboard.readText()` on the tap only;
+  fills the feed field with an `https://`/`webcal://` link, silent if
+  permission is denied, never submits). EN + ZH strings in `i18n.js`.
+  `sw.js` cache `kwil-shell-v2`.
+- **Tests:** `tests/test_student_web.py` +7 (owner connect sealed at rest
+  and synced through `canvas.TRANSPORT`; owner link checks; env wins incl.
+  `CANVAS_TOKEN` alone, then app takes over; owner Disconnect deletes the
+  file and the source purge works; 503 without `USER_DATA_KEY`; a member
+  never reads or touches the owner's file and the sealed files don't open
+  across ids; caplog: no feed URL, token or host in any log, ids at INFO),
+  replacing 1. All 7 fail with only `kwil/student_web.py` reverted.
+  `tests/js/student.test.mjs` +5 (owner form visible with `managed:
+  "app"`; guided lookup filters unsafe hosts and opens the calendar from
+  the tap; a lookup with nothing usable says so; Paste fills and never
+  connects; denied is silent, non-links aren't filled, no clipboard hides
+  the button) and the i18n scenario covers the new strings; the four
+  guided tests and the i18n test fail with `student.js` / `i18n.js`
+  reverted (the owner-form test passes on the old page too: the page
+  already keyed on `managed`, the server change is what makes it true).
+- **Counts** (Linux sandbox, Python 3.13): 3231 passed, 37 skipped
+  (baseline 5e83590 as a `git archive` copy on the same machine: 3224
+  passed, 38 skipped; the extra skip there is a git-history test). JS:
+  149 passed (baseline 144).
+
+### Round 2 (judge: APPROVED with four LOWs)
+1. **PRIVACY "School deadlines (Canvas)" row** said the owner's link was in
+   `.env`: now encrypted with USER_DATA_KEY for everyone (the owner's in
+   `[student] dir`), `.env` the older way for the owner.
+2. **A typed Canvas address found nothing** (`https://canvas.school.edu/`,
+   `canvas.school.edu/`): with no spaces, `schoolHost(text)` is chosen
+   directly when it was typed with `https://` or is a `canvas.` /
+   `.instructure.` host; a bare domain (`school.edu`) still goes to the
+   lookup (it knows the Canvas host or guesses `canvas.<domain>`, which a
+   direct `school.edu/calendar` would miss), sent as the clean host. JS
+   test fails without the change.
+3. **An older app-stored owner link came back once the env was removed.**
+   While env-managed, Disconnect now deletes `<[student] dir>/canvas.enc`
+   if it exists (never the env; 409 with no file), and status has
+   `app_link` so the card shows Disconnect in that state.
+   `test_owner_environment_wins_while_it_is_set` no longer asserts the
+   file stays; new `test_owner_can_forget_an_older_app_link_while_the_env_wins`
+   and a JS test; both Python tests and the JS test fail without the change.
+4. **Family-less (PC owner) path:** two tests (`family=None`): connect
+   seals to "owner", sync adds 3, disconnect deletes the file; 503 without
+   USER_DATA_KEY. Coverage only: they pass on the round-1 code too.
+- **Counts** (Linux sandbox, Python 3.13): 3234 passed, 37 skipped (round
+  1: 3231; baseline 5e83590: 3224 passed, 38 skipped). JS: 151 passed
+  (round 1: 149).
+## The owner connects Google in the app on the cloud server (2026-10-27)
+
+On https://heykwil.com Kyle, signed in with `WEB_TOKEN`, can now tap ⚙ ->
+**Connect Google account** himself; before, the cloud built the flow with
+`owner=False` (family members only) and his Google was the
+`GOOGLE_TOKEN_JSON` secret alone.
+
+- **Setting.** New `[webapp] owner_google` (default false, true in the
+  server profile, commented in config.toml). The server profile's
+  `[calendar] token` is now `/data/google_token.json` (`save_token` stays
+  off). `google_web.from_config` turns the owner's flow on for
+  `google_connect` or `owner_google`; `cli.main`'s refusal of inherited
+  secrets still keys off `google_connect` only, so Render's
+  `GOOGLE_TOKEN_JSON` is not refused.
+- **Which token.** `google_auth.owner_connected(config)` /
+  `owner_environ(config)`: with `owner_google` on and a readable token in
+  that file, the owner's Google is read with `GOOGLE_TOKEN_JSON` hidden;
+  otherwise the environment as before (a missing, empty or corrupt file
+  falls back to the env token). Used by `register_google` (also
+  `has_credentials`), `calendar_extras`, `owner_gmail` (and so the student
+  sync), `GoogleConnect.connected` and `doctor.check_google_env`. Tools on
+  the connected token get `in_app=True` (errors say "reconnect in the
+  app"). With `owner_google` on and no token at all, the Google tools stay
+  off instead of failing at first use.
+- **Client.** The owner's sign-in uses `[calendar] credentials` /
+  `GOOGLE_CLIENT_JSON` only if it is a Web client, else the family's Web
+  client (`GOOGLE_WEB_CLIENT_JSON`); the Desktop client can't take the
+  https redirect. Google returns to `PUBLIC_ORIGIN`/google/callback. The
+  saved token carries the Web client's id and secret.
+- **Disconnect.** `POST /api/google/disconnect` now also serves the owner
+  when that file exists (still 404 otherwise). It revokes the grant
+  outside the lock (`account.revoke_google_token_file`, the path-based
+  helper `revoke_google_grant` now wraps), deletes the file
+  (`family._unlink`) and rebuilds Calendar and Gmail on the env token (or
+  removes them), adding before removing in the shared registry.
+- **Status and page.** `/api/google/status` has a new `server_owner`
+  field; `"disconnect"` is true for a family member or the owner's file.
+  i18n.js hides the first-run guide for the server owner and asks a
+  different confirm question (EN and ZH) that says Google may also sign
+  out the PC copy (grants in one Google project may be revoked together;
+  not confirmed). sw.js cache `kwil-shell-v2`. Side effect: the server's
+  signed-out page now has `data-google`, so its login line reads "Enter
+  the sign-in code you were sent..." instead of the WEB_TOKEN wording.
+- **Tests.** `tests/test_google_web.py` +10: the owner connects on the
+  server profile (consent URL has the Web client id and
+  `<origin>/google/callback`, the saved token has the Web client's id and
+  secret and mode 0600, the built Calendar and Gmail credentials carry the
+  connected refresh token though `GOOGLE_TOKEN_JSON` is set, no code,
+  state, token or client secret at INFO; Flow.fetch_token is faked at
+  Google's token-response shape so the real Flow builds the credentials);
+  the env fallback with no file and with junk files; disconnect revokes
+  then deletes and falls back to the env token; without an env token the
+  tools go, in the same dict; a failing revoke and a corrupt file still
+  delete; a family member's Connect and Disconnect never touch the
+  owner's file; another browser's callback with the owner's state is a
+  400; `--check`; with `owner_google` off `GOOGLE_TOKEN_JSON` still wins
+  over token.json; `cli.main` with the server profile and an inherited
+  `GOOGLE_TOKEN_JSON` starts. `tests/js/i18n.test.mjs` +2 (the owner's
+  disconnect wording, EN and ZH; the guide off for the server owner).
+  Updated: the exact status dicts (+`server_owner`), the cache version
+  pins, and `test_from_config_builds_it_for_family_only_servers` (the
+  server now builds `owner=True`). Run against origin/master's source, 12
+  of the 12 new or changed google_web tests and both new JS tests fail
+  (two of them, the flag-off and `cli.main` guards, only on the missing
+  `owner_google` key: they pin behaviour that must not change).
+- **Judge follow-ups.** (1) A Connect that finishes while Disconnect is
+  revoking is kept: Disconnect snapshots the file before the revoke and,
+  under the lock, deletes it only if unchanged (else returns without
+  deleting; the tools stay on the new token). Test
+  `test_a_connect_finishing_during_the_disconnects_revoke_is_kept` fails
+  without it (the file is gone). (2) The signed-out page polled
+  `/api/google/status` every 3 s for 10 minutes, and each 401 counts
+  against CloudGuard's per-address request limit: i18n.js now stops
+  polling on a 401 (or 404) and starts again when the sign-in form is
+  submitted. JS test "signed out: a 401 stops the status polling..."
+  fails on the old i18n.js (a timer still running); test_cloud pins the
+  signed-out page's `data-google` tag. (3) README and MANUAL_TEST say the
+  `GOOGLE_TOKEN_JSON` fallback is the same PC token, to re-paste if
+  Google ends it.
+- **Counts** (Linux sandbox, Python 3.13): 3236 passed, 37 skipped
+  (3225/37 before); JavaScript 147 (144 before).

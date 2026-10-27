@@ -3,6 +3,22 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Connected services: the steps only Kyle can do (2026-10-27).**
+      The code is done (README "Connect your services in the app (cloud)").
+      1. **Notion integration capabilities:** notion.so/profile/integrations
+         -> the public Kwil integration -> Capabilities: also tick
+         **Insert content** (lecture notes, chat digests and the dev team
+         inbox create pages; invited people's tools still never create
+         anything). Its redirect URIs already cover `/notion/callback`.
+      2. **Render:** make sure `PUBLIC_ORIGIN` is the address you use
+         (`https://heykwil.com`), then delete `NOTION_TOKEN` (Environment
+         -> Save). While it is set, Notion says "Set on the server."
+      3. **Phone:** ⚙ -> Connected services -> Notion -> **Connect**; on
+         Notion's page tick the Assignments database and the pages for
+         Lecture Notes, Chat Digests and the "Hey Claude coordinator
+         inbox". Then Home Assistant: type its Nabu Casa (or tunnel) https
+         address -> **Connect** -> sign in as the non-admin Kwil user.
+      4. Run the "Connected services on the cloud" checks in MANUAL_TEST.md.
 - [ ] **Kwil rebrand: the steps only Kyle can do (2026-10-22).** The code
       and docs say Kwil and run under both names; these are UI clicks.
       1. **Rename the GitHub repo** to `Kwil` (Settings -> General ->
@@ -136,6 +152,20 @@ Only what is still open for Kyle. None of it blocks the code.
       is set there and Google returns there, so a LAN `http://` address or
       a second hostname (e.g. a custom domain next to `*.onrender.com`)
       makes their sign-in fail.
+- [ ] **Your own Google on the cloud, connected in the app (~3 min; README
+      "Run it in the cloud" step 3).** Only you can: (1) in
+      console.cloud.google.com, project `hey-claude-511904` -> APIs &
+      Services -> Credentials -> the **Web application** client (the one in
+      `GOOGLE_WEB_CLIENT_JSON`), confirm
+      `https://heykwil.com/google/callback` is an authorized redirect URI
+      and `PUBLIC_ORIGIN` in Render is exactly `https://heykwil.com`; (2)
+      after the deploy, open https://heykwil.com signed in with `WEB_TOKEN`,
+      tap ⚙ -> **Connect Google account** and allow every box. From then on
+      the server uses that sign-in (`/data/google_token.json`) instead of
+      `GOOGLE_TOKEN_JSON`, which you may then leave as a fallback or clear.
+      If Calendar on the PC stops afterwards (Google may tie the grants of
+      one project together), run `python -m kwil.tools.google_auth` there
+      again.
 - [ ] **Beta testers' Google: a Calendar-only OAuth client (~20 min plus
       Google's review; README "Invite family" -> "Account types").** Only
       you can: (1) create a *new* Google Cloud project (e.g. "Hey Claude
