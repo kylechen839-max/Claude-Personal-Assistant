@@ -5593,3 +5593,28 @@ conversations come with them.
   (baseline 5e83590 as a `git archive` copy on the same machine: 3224
   passed, 38 skipped; the extra skip there is a git-history test). JS:
   149 passed (baseline 144).
+
+### Round 2 (judge: APPROVED with four LOWs)
+1. **PRIVACY "School deadlines (Canvas)" row** said the owner's link was in
+   `.env`: now encrypted with USER_DATA_KEY for everyone (the owner's in
+   `[student] dir`), `.env` the older way for the owner.
+2. **A typed Canvas address found nothing** (`https://canvas.school.edu/`,
+   `canvas.school.edu/`): with no spaces, `schoolHost(text)` is chosen
+   directly when it was typed with `https://` or is a `canvas.` /
+   `.instructure.` host; a bare domain (`school.edu`) still goes to the
+   lookup (it knows the Canvas host or guesses `canvas.<domain>`, which a
+   direct `school.edu/calendar` would miss), sent as the clean host. JS
+   test fails without the change.
+3. **An older app-stored owner link came back once the env was removed.**
+   While env-managed, Disconnect now deletes `<[student] dir>/canvas.enc`
+   if it exists (never the env; 409 with no file), and status has
+   `app_link` so the card shows Disconnect in that state.
+   `test_owner_environment_wins_while_it_is_set` no longer asserts the
+   file stays; new `test_owner_can_forget_an_older_app_link_while_the_env_wins`
+   and a JS test; both Python tests and the JS test fail without the change.
+4. **Family-less (PC owner) path:** two tests (`family=None`): connect
+   seals to "owner", sync adds 3, disconnect deletes the file; 503 without
+   USER_DATA_KEY. Coverage only: they pass on the round-1 code too.
+- **Counts** (Linux sandbox, Python 3.13): 3234 passed, 37 skipped (round
+  1: 3231; baseline 5e83590: 3224 passed, 38 skipped). JS: 151 passed
+  (round 1: 149).

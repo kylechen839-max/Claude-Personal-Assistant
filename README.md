@@ -1436,8 +1436,10 @@ feed link; after disconnecting a token, also delete it in Canvas ->
 Older setups put the owner's link in the environment instead:
 `CANVAS_ICS_URL`, or `CANVAS_TOKEN` with `[canvas] base_url` (or
 `CANVAS_BASE_URL`), in `.env` (on Render: Environment). While either is
-set, the environment wins: the card shows the connection with no form and
-no **Disconnect** (connect and disconnect answer 409). To move to the app,
+set, the environment wins: the card shows the connection with no form
+(connect answers 409). **Disconnect** shows only if the app still holds
+an older link of yours; it deletes that file and never touches the
+environment (with no such file, disconnect answers 409). To move to the app,
 delete `CANVAS_ICS_URL` / `CANVAS_TOKEN` (and `CANVAS_BASE_URL`) from
 `.env` or Render's Environment (the server reads them on every request),
 then paste the link in the card. **Sync now** fetches everything at most

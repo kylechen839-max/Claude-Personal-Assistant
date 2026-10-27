@@ -7,7 +7,8 @@ each on their own deadlines (deadlines.py).
                                        Canvas link (409 for the owner while
                                        CANVAS_ICS_URL / CANVAS_TOKEN is set)
   POST /api/student/disconnect         {delete_items?}: forget the link (and,
-                                       asked, what came from Canvas; 409 as above)
+                                       asked, what came from Canvas); while the env
+                                       is set, only an app-stored owner's link (else 409)
   POST /api/student/sync               fetch now: at most every [student]
                                        sync_minutes per person, one at a time
   POST /api/student/items/{id}/resolve {choice: "confirm" | "dismiss" | a date}
@@ -27,7 +28,8 @@ canvas.CANVAS_LABEL, bound to their id, in `<[family] dir>/<id>/canvas.enc`
 bound to "owner" (as push.py's; invited ids are u_..., so they can't
 collide) in `<[student] dir>/canvas.enc`, unless the server's environment
 has CANVAS_ICS_URL or CANVAS_TOKEN: then the environment wins ("managed":
-"env") and the app neither stores nor forgets the owner's link (409).
+"env"): the app doesn't store the owner's link (409), and Disconnect
+only deletes an older app-stored file (409 if there is none).
 Without a usable USER_DATA_KEY nothing is stored (503). The feed URL is
 itself a secret (it reads their calendar without a sign-in) and is treated like the token:
 never logged, never returned (the status says only which kind and the
@@ -169,6 +171,9 @@ class StudentSync:
         return {"connected": found is not None,
                 "kind": found["kind"] if found else None, "school": school,
                 "managed": "env" if env else "app",
+                # env-managed, with an older link still stored by the app: only
+                # that file can be forgotten here (Disconnect), never the env
+                "app_link": env and self._file(None).exists(),
                 "can_store": env or userkeys.secret_problem(self._keys_env()) is None,
                 "gmail": bool(self.config["student"]["gmail"]) and self._inbox(uid) is not None,
                 "last_sync": self.store.last_sync(uid)}
@@ -472,7 +477,8 @@ def register(app, family, web, error) -> None:
         ok, uid = person(session)
         if not ok:
             return error("not found", 404)
-        if uid is None and sync.env_managed():
+        if uid is None and sync.env_managed() and not sync._file(None).exists():
+            # nothing of the app's to forget: the env stays (only its owner edits it)
             return error(f"on your own server, remove {OWNER_ICS_ENV} / {OWNER_TOKEN_ENV} "
                          "from its environment", 409)
         body = await body_of(request)

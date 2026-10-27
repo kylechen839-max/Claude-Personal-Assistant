@@ -1054,8 +1054,10 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   `dir`). The older way still wins while it is set: `CANVAS_ICS_URL` /
   `CANVAS_TOKEN` in the environment (both in `SECRET_ENV_VARS` and
   `ISOLATED_ENV_VARS`), read on every request; then the owner's connect
-  and disconnect routes are a 409 and the sealed file, if any, is not
-  read. The routes take no id: each session reaches only its own link
+  route is a 409 and the sealed file, if any, is not read, but
+  disconnect still deletes that file (status `app_link`), so an older
+  link can't come back silently once the env is removed; with no file it
+  is a 409, and the env is never touched. The routes take no id: each session reaches only its own link
   (the owner's session the owner's file, a member's their own folder).
   Neither the link nor the token is ever returned (the status
   says only the kind and the school's host), logged, or exported. The
@@ -1081,8 +1083,10 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   (https, port 443, no `user:pass@`, a dotted DNS name, never an IP
   literal, `localhost` or a LAN-only suffix such as `.local`); the page
   can't resolve DNS, so the server's check of the pasted link stays the
-  real one. School names are shown as text. **Paste** reads the clipboard
-  only on its tap (`navigator.clipboard.readText`), fills the field only
+  real one. A Canvas address typed in the search box (`https://...`, or a
+  `canvas.` / `.instructure.` host) is used directly after the same check;
+  anything else goes to the lookup. School names are shown as text.
+  **Paste** reads the clipboard only on its tap (`navigator.clipboard.readText`), fills the field only
   with an `https://` / `webcal://` link, says nothing if permission is
   denied, and never submits: the person still taps Connect. No inline
   handlers (the CSP is unchanged).

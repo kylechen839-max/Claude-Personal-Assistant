@@ -212,7 +212,8 @@
           : "Connect Canvas and I'll keep track of your deadlines.";
       }
       connectBox.hidden = owner || Boolean(st.connected) || st.can_store === false;
-      unlink.hidden = owner || !st.connected;
+      // env-managed: Disconnect only forgets an older link the app stored
+      unlink.hidden = owner ? !st.app_link : !st.connected;
       syncBtn.hidden = !st.connected && !st.gmail;
       const items = Array.isArray(body.items) ? body.items : [];
       list.replaceChildren(...items.map(row));
@@ -240,8 +241,20 @@
     }
 
     async function findSchool() {
-      const q = find.value.trim().slice(0, 100);
+      let q = find.value.trim().slice(0, 100);
       if (q.length < 3) { say("Type at least 3 letters of your school's name."); return; }
+      // a Canvas address typed or pasted ("https://canvas.school.edu/",
+      // "canvas.school.edu/"): use it as it is; a bare domain ("school.edu")
+      // still goes to the lookup, which knows the school's Canvas host (or
+      // guesses canvas.<domain>)
+      const typed = /\s/.test(q) ? null : schoolHost(q);
+      if (typed && (/:\/\//.test(q) || /(^|\.)(canvas|instructure)\./.test(typed))) {
+        results.replaceChildren();
+        say("");
+        choose(typed);
+        return;
+      }
+      if (typed) q = typed;
       findBtn.disabled = true;
       try {
         const r = await call("/api/student/schools?q=" + encodeURIComponent(q));

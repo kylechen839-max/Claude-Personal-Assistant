@@ -230,16 +230,17 @@ def test_owner_link_is_checked_like_anyone_elses(s):
 
 def test_owner_environment_wins_while_it_is_set(s, monkeypatch):
     kyle = s.owner()
-    connect(kyle, FEED_URL.replace(FEED_SECRET, "A" * 40))  # an app link from before
     monkeypatch.setenv("CANVAS_ICS_URL", FEED_URL)
     r = kyle.post("/api/student/canvas", json={"ics_url": FEED_URL})
     assert r.status_code == 409 and "CANVAS_ICS_URL" in r.json()["error"]
     status = kyle.get("/api/student/items").json()["canvas"]
     assert status["connected"] and status["managed"] == "env" and FEED_SECRET not in str(status)
-    assert kyle.post("/api/student/disconnect", json={}).status_code == 409
-    assert (s.tmp / "student" / "canvas.enc").exists()  # not the app's to forget now
+    assert status["app_link"] is False
+    # nothing of the app's to forget: the env stays, 409
+    r = kyle.post("/api/student/disconnect", json={"delete_items": True})
+    assert r.status_code == 409 and "CANVAS_ICS_URL" in r.json()["error"]
     assert kyle.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
-    assert [str(q.url) for q in s.host.requests] == [FEED_URL]  # the env's, not the file's
+    assert [str(q.url) for q in s.host.requests] == [FEED_URL]
     assert len(titles(kyle)) == 3
     # an invited person sees none of the owner's
     tess, uid = s.member()
@@ -253,7 +254,31 @@ def test_owner_environment_wins_while_it_is_set(s, monkeypatch):
     monkeypatch.delenv("CANVAS_TOKEN")
     assert kyle.get("/api/student/items").json()["canvas"]["managed"] == "app"
     assert kyle.post("/api/student/disconnect", json={}).status_code == 200
-    assert not (s.tmp / "student" / "canvas.enc").exists()
+
+
+def test_owner_can_forget_an_older_app_link_while_the_env_wins(s, monkeypatch):
+    """Judge LOW 3: an app-stored link from before the env was set came
+    back silently once the env vars were removed; Disconnect deletes it
+    (never the env)."""
+    kyle = s.owner()
+    connect(kyle, FEED_URL.replace(FEED_SECRET, "A" * 40))
+    path = s.tmp / "student" / "canvas.enc"
+    monkeypatch.setenv("CANVAS_ICS_URL", FEED_URL)
+    status = kyle.get("/api/student/items").json()["canvas"]
+    assert status["managed"] == "env" and status["app_link"] is True
+    assert kyle.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
+    assert [str(q.url) for q in s.host.requests] == [FEED_URL]  # the env's, not the file's
+    r = kyle.post("/api/student/disconnect", json={})
+    assert r.status_code == 200 and r.json()["had"] is True
+    assert not path.exists()
+    status = kyle.get("/api/student/items").json()["canvas"]
+    assert status["connected"] and status["managed"] == "env" and status["app_link"] is False
+    assert len(titles(kyle)) == 3  # kept unless asked
+    assert kyle.post("/api/student/disconnect", json={}).status_code == 409
+    # with the env gone, the old link doesn't come back
+    monkeypatch.delenv("CANVAS_ICS_URL")
+    status = kyle.get("/api/student/items").json()["canvas"]
+    assert status["connected"] is False and status["managed"] == "app"
 
 
 def test_owner_disconnect_deletes_the_file_and_what_came_from_canvas(s):
@@ -607,6 +632,56 @@ def test_owner_without_family_accounts_uses_the_process_store(fake_client, tmp_p
     login(c)
     assert c.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
     assert tools.tools["list_deadlines"].handler(days=60)["count"] == 3
+
+
+def _pc_owner_app(fake_client, tmp_path, monkeypatch):
+    """The PC's own app: no family accounts (family=None), the process store."""
+    monkeypatch.setattr(canvas, "RESOLVE", fake_resolve)
+    host = FakeCanvasHost()
+    monkeypatch.setattr(canvas, "TRANSPORT", httpx.MockTransport(host))
+    config = load_config(None, None)
+    config["student"]["dir"] = str(tmp_path / "student")
+    config["family"]["dir"] = str(tmp_path / "users")
+    config["student"]["gmail"] = False
+    tools = cli.build_tools(config, lambda *_: None)
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber(), PrintTTS(), tools=tools, clock=Clock())
+    app = webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                            sessions_file=tmp_path / "sessions.json")
+    assert app.state.student.family is None
+    c = TestClient(app, base_url=BASE)
+    login(c)
+    return c, host
+
+
+def test_owner_without_family_accounts_connects_in_the_app(fake_client, tmp_path,
+                                                           monkeypatch):
+    """Judge LOW 4: the PC owner path (family=None) seals, syncs, deletes."""
+    monkeypatch.setenv("USER_DATA_KEY", SECRET)
+    c, host = _pc_owner_app(fake_client, tmp_path, monkeypatch)
+    status = connect(c)
+    assert status["managed"] == "app" and status["kind"] == "ics"
+    path = tmp_path / "student" / "canvas.enc"
+    raw = path.read_bytes()
+    assert FEED_SECRET.encode() not in raw
+    assert userkeys.unseal(canvas.CANVAS_LABEL, "owner", raw, {"USER_DATA_KEY": SECRET}) == {
+        "uid": "owner", "kind": "ics", "ics_url": FEED_URL}
+    assert c.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
+    assert [str(q.url) for q in host.requests] == [FEED_URL]
+    r = c.post("/api/student/disconnect", json={"delete_items": True})
+    assert r.status_code == 200 and r.json() == {"connected": False, "had": True, "deleted": 3}
+    assert not path.exists()
+
+
+def test_owner_without_family_accounts_fails_closed_without_key(fake_client, tmp_path,
+                                                                monkeypatch):
+    monkeypatch.delenv("USER_DATA_KEY", raising=False)
+    c, _ = _pc_owner_app(fake_client, tmp_path, monkeypatch)
+    r = c.post("/api/student/canvas", json={"ics_url": FEED_URL})
+    assert r.status_code == 503 and "USER_DATA_KEY" in r.json()["error"]
+    assert not (tmp_path / "student" / "canvas.enc").exists()
+    assert c.get("/api/student/items").json()["canvas"]["can_store"] is False
 
 
 def test_school_lookup_is_rate_limited(s, monkeypatch):

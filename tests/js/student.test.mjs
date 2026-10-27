@@ -164,6 +164,45 @@ test('guided: find the school, open its Canvas calendar from the tap', async () 
   assert.ok(!fetches.some((f) => f.opts.method === 'POST'));  // nothing sent
 });
 
+test('guided: a typed Canvas address is used as it is', async () => {
+  for (const [typed, host] of [['https://canvas.school.edu/', 'canvas.school.edu'],
+                               ['canvas.school.edu/', 'canvas.school.edu'],
+                               ['  canvas.school.edu  ', 'canvas.school.edu'],
+                               ['https://school.instructure.com/courses', 'school.instructure.com']]) {
+    const { card, fetches, opened } = load();
+    await tick();
+    card.find((e) => e.attrs['aria-label'] === 'Find your school').value = typed;
+    await card.buttons('Find my school')[0].fire('click');
+    assert.ok(!fetches.some((f) => f.url.startsWith('/api/student/schools')), typed);
+    const openBtn = card.buttons('Open my Canvas calendar')[0];
+    assert.equal(openBtn.parentNode.hidden, false, typed);
+    await openBtn.fire('click');
+    assert.deepEqual(opened, [[`https://${host}/calendar`, '_blank', 'noopener']], typed);
+  }
+  // unsafe or bare ones still go to the lookup (which knows the Canvas host)
+  for (const [typed, q] of [['https://localhost/', 'https%3A%2F%2Flocalhost%2F'],
+                            ['http://canvas.school.edu/', 'http%3A%2F%2Fcanvas.school.edu%2F'],
+                            ['school.edu', 'school.edu'], ['school.edu/', 'school.edu']]) {
+    const { card, fetches } = load();
+    await tick();
+    card.find((e) => e.attrs['aria-label'] === 'Find your school').value = typed;
+    await card.buttons('Find my school')[0].fire('click');
+    assert.equal(fetches.at(-1).url, '/api/student/schools?q=' + q, typed);
+    assert.equal(card.buttons('Open my Canvas calendar')[0].parentNode.hidden, true, typed);
+  }
+});
+
+test('env-managed owner: Disconnect only with an older app-stored link', async () => {
+  for (const [appLink, hidden] of [[true, false], [false, true]]) {
+    const { card } = load({ items: { status: 200, body: { items: [], canvas: {
+      connected: true, managed: 'env', can_store: true, app_link: appLink } } } });
+    await tick();
+    assert.equal(card.buttons('Disconnect Canvas')[0].hidden, hidden);
+    const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
+    assert.equal(form.hidden, true);
+  }
+});
+
 test('guided: a lookup with nothing usable says so', async () => {
   const { card, opened } = load({ routes: { '/api/student/schools': { status: 200,
     body: { schools: [{ name: 'Loopback', base_url: 'https://localhost' }] } } } });
