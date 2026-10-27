@@ -1,8 +1,8 @@
 /* Hands-free voice conversation view: one big orb, a live caption, and
    End / Mute / Captions. Follows the phone's light or dark mode. */
 .voice {
-  --v-bg: #faf9f5; --v-text: #1f1e1d; --v-muted: #7b7a73; --v-panel: #f0eee6; --v-panel-2: #e6e3d8;
-  --v-orb-a: #f6b59a; --v-orb-b: #d97757; --v-orb-c: #a8492b; --v-end: #b3382c;
+  --v-bg: #f5f7fa; --v-text: #1a2330; --v-muted: #5d6878; --v-panel: #eaeef3; --v-panel-2: #dde3ea;
+  --v-orb-a: #b7d0ec; --v-orb-b: #3a6ea5; --v-orb-c: #234a6e; --v-end: #b3382c;
   position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
   align-items: center; justify-content: space-between; color: var(--v-text);
   background: radial-gradient(120% 70% at 50% 42%, color-mix(in srgb, var(--v-orb-b) 9%, var(--v-bg)), var(--v-bg) 70%);
@@ -11,8 +11,8 @@
   -webkit-user-select: none; user-select: none; animation: voice-in .3s ease-out;
 }
 @media (prefers-color-scheme: dark) {
-  .voice { --v-bg: #1f1e1d; --v-text: #f5f4ee; --v-muted: #9c9a91; --v-panel: #30302e; --v-panel-2: #3c3b38;
-    --v-orb-a: #f0a487; --v-orb-b: #d97757; --v-orb-c: #7a3520; --v-end: #c4463a; }
+  .voice { --v-bg: #0e151e; --v-text: #e8edf3; --v-muted: #8d9aab; --v-panel: #1b2532; --v-panel-2: #26334a;
+    --v-orb-a: #9cc0ea; --v-orb-b: #3f74b3; --v-orb-c: #1d3a5c; --v-end: #c4463a; }
 }
 body.voice-open { overflow: hidden; }
 @keyframes voice-in { from { opacity: 0; } to { opacity: 1; } }

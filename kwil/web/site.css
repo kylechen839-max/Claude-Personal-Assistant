@@ -2,9 +2,9 @@
    The app's palette and the system font; light by default, dark when the
    device is (prefers-color-scheme). No web fonts, nothing from another site. */
 :root {
-  --bg: #faf9f5; --surface: #ffffff; --surface-2: #f0eee6;
-  --text: #1f1e1d; --text-2: #4d4c48; --muted: #6b6a63; --line: #1f1e1d1f;
-  --accent: #c96442; --accent-strong: #b4532f; --accent-ink: #a8492b; --on-accent: #fff;
+  --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eaeef3;
+  --text: #1a2330; --text-2: #3d4a5c; --muted: #5d6878; --line: #1a23301f;
+  --accent: #2f5d8a; --accent-strong: #244a70; --accent-ink: #234a6e; --on-accent: #fff;
   --ok-soft: #3f7d4f1f; --bad-soft: #b3382c17; --warn: #f7ecdc; --warn-ink: #6b4a1f;
   --warn-line: #e7d2b2;
   --r-md: 14px; --r-lg: 20px;
@@ -13,9 +13,9 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #262624; --surface: #30302e; --surface-2: #383835;
-    --text: #f5f4ee; --text-2: #d3d1c7; --muted: #a9a79e; --line: #ffffff1f;
-    --accent: #d97757; --accent-strong: #c96442; --accent-ink: #eb9a7c;
+    --bg: #121a24; --surface: #1b2532; --surface-2: #233042;
+    --text: #e8edf3; --text-2: #c3cdd9; --muted: #8d9aab; --line: #ffffff1f;
+    --accent: #3f74b3; --accent-strong: #335f94; --accent-ink: #8fb6e3;
     --ok-soft: #6fbf8626; --bad-soft: #e5675a26; --warn: #3b3124; --warn-ink: #f1d9b3;
     --warn-line: #574630;
     color-scheme: dark;

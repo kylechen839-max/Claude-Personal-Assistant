@@ -5547,6 +5547,53 @@ conversations come with them.
   "Kyle"). It fails with the `history.py` change reverted (`'Kyle: how
   lo...' == 'User: how lo...'`). Full suite: 3186 passed, 37 skipped.
 
+## Calm blue theme (2026-10-27)
+- **What:** Kyle asked to retheme the web app and the public site from
+  Claude's orange and warm cream to a calm, darker blue with cool neutrals.
+  Only colours changed: the tokens in `web/app.css` and `web/site.css`, the
+  voice view's orb and panels (`web/voice.css`), the cool shadows
+  (`static/features.css`), the mic button's highlight (now a soft blue
+  `color-mix` of `--accent` with white), the theme-color metas (now also on
+  `waitlist.html`), the PWA manifest (theme and background are the light
+  `--bg`, `#f5f7fa`, as in index.html's light meta) and the generated icons
+  (`webapp.ICON_BG`, the light `--accent`, used by both `ICON_SVG` and
+  `icon_png`). The PC backend badge moved from blue to teal so it is not
+  confused with the cloud badge, which uses the accent. Semantic green, red
+  and amber are unchanged. `sw.js` cache is now `kwil-shell-v5`, so phones
+  reload the CSS and icons.
+- **New logo:** a quill whose barbs are a sound wave, on a diagonal blue
+  gradient (`ICON_TOP` to `ICON_BOTTOM`): a pale, gently bowed shaft, ten
+  swept-back barbs fading toward both ends and a plain triangle nib (Kyle
+  picked "S1"). `webapp._icon_marks()` lists the shapes ("line" polylines
+  and a "fill" triangle); `ICON_SVG` and the numpy `icon_png` both draw it,
+  each mark only inside its bounding box (512 renders in about 1 s). The
+  512 PNG is plain `any`; a separate `/icon-maskable.png` draws the quill at
+  0.68 scale so it stays inside Android's safe circle (radius 0.4 x size).
+  Icons render once per process under a lock.
+- **Judge follow-ups:** dark-mode graphics (voice button, progress fills,
+  tutor glyphs) use a new `--accent-graphic` (light `--accent`, dark
+  `--accent-ink`), 3:1 or better on bg, surface and surface-2. The three
+  data-URI icons (select chevron, search, empty history) use `#738094`,
+  which clears 3:1 on all three backgrounds in both modes (a data URI can't
+  follow the dark-mode query).
+- **Palette:** light bg `#f5f7fa`, surface `#ffffff`, text `#1a2330`,
+  muted `#5d6878`, accent `#2f5d8a` / strong `#244a70` / ink `#234a6e`;
+  dark bg `#121a24`, surface `#1b2532`, text `#e8edf3`, muted `#8d9aab`,
+  accent `#3f74b3` / strong `#335f94` / ink `#8fb6e3`. The suggested dark
+  accent `#4f86c6` gives white text only 3.78:1, so it was darkened to
+  `#3f74b3` (4.82:1); `#4f86c6` stays in the translucent soft/mark tints.
+- **Contrast (WCAG, computed):** white on accent 6.88 light / 4.82 dark;
+  accent-ink on bg 8.60 / 8.31; text on bg 14.75 / 14.88, on surface
+  15.82 / 13.14; muted on bg 5.26 / 6.12, on surface 5.65 / 5.41.
+- **Tests:** `tests/test_theme.py` (11): no old orange in the web CSS/HTML,
+  icon SVG or manifest; manifest and theme-color metas equal the CSS `--bg`;
+  the PNG has the gradient corners and white where the marks are; the SVG
+  and the PNG draw the same marks; the contrast thresholds above, parsed
+  from `app.css` and `site.css` in light and dark; the data-URI grey and
+  `--accent-graphic` at 3:1 in both modes; and the maskable icon inside the
+  safe zone. The cache pins in `test_webapp.py`, `test_owner_connect.py` and
+  `sw-push.test.mjs` expect `kwil-shell-v5`.
+
 ## Owner's connected services: Notion and Home Assistant by sign-in (2026-10-27)
 - **What:** on the cloud app, ⚙ -> **Connected services** lets Kyle sign in
   to his own services instead of pasting their secrets into Render
