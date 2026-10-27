@@ -942,6 +942,48 @@ in `config.toml` (`enabled`, `dir`, `max_users`, `invite_days`, `google`,
 `turns_per_minute`, `turns_per_day`, `stt_seconds_per_day`,
 `export_max_mb`, `zh_stt_model`, `zh_piper_voice`).
 
+### Move a PC family copy to the cloud
+
+Someone who has their own copy on your PC ("A Chinese instance for
+someone else" above, e.g. Mom's `config.mom.toml` with `data/mom/history.sqlite`) can
+move to the cloud as a family member and keep their conversations:
+
+1. **Invite them** at the cloud's address (step 1 above) and pick
+   **Family** as the account type (**Beta** is preselected). Get their
+   language and time zone right: neither can be changed later. They open
+   the link on their phone (step 2).
+2. **Google**: on the PC, delete their old sign-in
+   (`data/mom/google_token.json`) and remove the app at
+   myaccount.google.com -> Security -> Third-party access, so the PC copy
+   can't keep reading their Calendar and Gmail. Then they tap ⚙ -> **Connect
+   Google account** in the cloud app.
+3. **Copy their history** from the PC (PowerShell, in the project folder;
+   the cloud's `WEB_TOKEN` goes in an environment variable, never on the
+   command line):
+   ```powershell
+   $env:KWIL_CLOUD_TOKEN = Read-Host "Cloud WEB_TOKEN"
+   python -m kwil.family_import --from data/mom/history.sqlite --to https://hey-claude.onrender.com --user Mom --dry-run
+   python -m kwil.family_import --from data/mom/history.sqlite --to https://hey-claude.onrender.com --user Mom
+   Remove-Item Env:KWIL_CLOUD_TOKEN
+   ```
+   `--user` is the name in your invite list (or their `u_...` id). It
+   reads a copy of the database, so their PC copy may keep running, and
+   prints only counts. Running it again skips what is already there. If
+   the server answers 413, their history is bigger than `[family]
+   max_history_mb` (20 MB) allows: raise it on the server and run it
+   again (nothing of the refused batch was kept).
+4. **Check** that their History screen in the cloud app lists their old
+   conversations.
+5. **Retire the PC copy**: `.\scripts\install_family_tasks.ps1 -Uninstall`
+   (this removes every family task; reinstall it if another copy stays),
+   move `.env.mom` (and `.env.kai`) out of the project folder, and stop
+   publishing their ports (`tailscale serve --https=8443 off`, and the same
+   for each copy's port).
+
+On the cloud, finding an old conversation and continuing it by voice
+("what did we say about...") is owner-only; a family member searches,
+reads and continues theirs in the History screen.
+
 ## Public beta: landing page and waitlist (cloud)
 
 The server can also serve a small public site, from the app itself (no
