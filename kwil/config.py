@@ -383,6 +383,16 @@ DEFAULTS: dict = {
         "pages": False,             # also read module pages (one Claude call per sync for new pages)
         "max_pages": 20,            # module pages read per sync, at most
         "timeout": 15,              # seconds per Canvas request
+        # course content (coursefiles.py): with an access token, each active
+        # course's syllabus, pages, assignments, announcements and files
+        # (PDF, Word, PowerPoint, HTML, text) kept as searchable text
+        "content": True,
+        "auto_sync_hours": 6,       # background sync of everyone connected; 0 = only "Sync now"
+        "max_files": 40,            # files downloaded per sync, at most (the rest next time)
+        "max_file_mb": 20,          # one file's size, at most (bigger: listed, not read)
+        "max_course_mb": 20,        # text kept per course, at most
+        "max_person_mb": 100,       # text kept per person, at most
+        "content_seconds": 300,     # time for one person's content step
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -413,6 +423,7 @@ SERVER_PROFILE: dict = {
     "cloud": {"trusted_proxies": ["10.0.0.0/8"]},
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
     "student": {"dir": "/data/student"},  # on the disk
+    "canvas": {"max_file_mb": 4},  # a course file is held in RAM while it is read
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
@@ -574,6 +585,9 @@ _SECRET_PATTERNS = [
     re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
     re.compile(r"\b\d{1,6}~[A-Za-z0-9]{32,}"),     # Canvas access tokens
     re.compile(r"(/feeds/calendars/)[\w.-]+"),    # Canvas calendar feed links
+    # Canvas file links and the file store's signed redirects carry capabilities
+    re.compile(r"(?i)([?&](?:verifier|sf_verifier|token)=)[^&\s\"']+"),
+    re.compile(r"(?i)([?&]X-Amz-(?:Signature|Credential|Security-Token)=)[^&\s\"']+"),
     # Home Assistant access tokens (JWTs) and refresh tokens (128 hex
     # characters): the owner's sign-in from the app (owner_connect.py)
     re.compile(r"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"),

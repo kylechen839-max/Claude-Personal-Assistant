@@ -332,6 +332,16 @@ base_url = ""                 # your school's Canvas for CANVAS_TOKEN, e.g. "htt
 pages = false                 # also read module pages (Claude picks the dates out; one call per sync when pages changed)
 max_pages = 20                # module pages read per sync, at most
 timeout = 15                  # seconds per Canvas request
+# Course content (with an access token): each active course's syllabus, pages, assignment
+# descriptions, announcements and files (PDF, Word, PowerPoint, HTML, text) kept as text
+# you can search by voice; dates found become unconfirmed drafts. Never media or grades.
+content = true                # read course content too
+auto_sync_hours = 6           # sync everyone connected in the background this often; 0 = only "Sync now"
+max_files = 40                # files downloaded per sync, at most (the rest next time)
+max_file_mb = 20              # one file's size, at most (bigger: listed, not read; Render: 4)
+max_course_mb = 20            # text kept per course, at most
+max_person_mb = 100           # text kept per person, at most
+content_seconds = 300         # time for one person's content step
 
 [logging]
 file = "logs/assistant.log"

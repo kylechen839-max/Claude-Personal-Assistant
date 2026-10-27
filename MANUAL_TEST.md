@@ -914,6 +914,32 @@ phone app's menu.
       `user_` and an assignment title.
   - Should: not found.
 
+### Course files (optional, ~15 min; needs a Canvas access token)
+Deploy first with `--requirements` (it adds `pypdf`).
+- [ ] In the card tap **Use an access token instead**, enter your school's
+      address and a new token (Canvas -> **Account** -> **Settings** ->
+      **New access token**), tap **Connect Canvas**, then leave the app
+      alone for 10 minutes.
+  - Should: no other tap needed. Afterwards new drafts marked "Course
+    files" may appear in "What I captured" (dates from a syllabus or
+    announcement), none of them confirmed.
+- [ ] Ask by voice about something that is only in a course PDF or slide
+      deck (e.g. "what's the late policy in <course>?").
+  - Should: the right answer, saying which course and file it came from.
+- [ ] Then say "add that as a deadline".
+  - Should: Kwil asks out loud before adding it.
+- [ ] Ask about a course whose syllabus is a large scanned PDF or a video.
+  - Should: Kwil says it couldn't read that file; nothing else breaks.
+- [ ] In Canvas, check your school's acceptable-use policy for tools that
+      read Canvas with your token.
+  - Should: you are fine with it (otherwise set `[canvas] content =
+    false`).
+- [ ] Open the log and search for a course file's name, `verifier=` and
+      `inscloudgate`.
+  - Should: not found (only counts and ids).
+- [ ] Tap **Disconnect Canvas**, then ask about the late policy again.
+  - Should: Kwil has no course files any more.
+
 ---
 
 ## Smart home (optional, ~10 min)

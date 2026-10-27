@@ -847,8 +847,9 @@ def owner_gmail(config: dict, output_fn=print):
 
 def register_student(registry: ToolRegistry, config: dict) -> bool:
     """The owner's deadline tools (list, confirm, add, delete) on
-    `[student] dir`/deadlines.sqlite; invited people get their own
-    (family.py). Filled from Canvas by student_web.py."""
+    `[student] dir`/deadlines.sqlite, and with [canvas] content the course
+    file tools (search, read) on its coursefiles.sqlite; invited people get
+    their own (family.py). Filled from Canvas by student_web.py."""
     if not config["student"]["enabled"]:
         return False
     from kwil.deadlines import open_store
@@ -856,6 +857,11 @@ def register_student(registry: ToolRegistry, config: dict) -> bool:
 
     registry.register(*DeadlineTools(open_store(config), None,
                                      config["assistant"]["timezone"] or None).tools())
+    if config["canvas"]["content"]:
+        from kwil import coursefiles
+        from kwil.tools.coursefiles import CourseFileTools
+
+        registry.register(*CourseFileTools(coursefiles.open_store(config), None).tools())
     return True
 
 

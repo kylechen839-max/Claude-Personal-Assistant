@@ -261,6 +261,10 @@ as the work. Never put secrets, tokens or personal data in this file.
 - The product is **Kwil** (said "quill"); it was Hey Claude. "Claude" stays
   only where it names the model or Anthropic ("powered by Claude",
   `CLAUDE_MODEL`, `CLAUDE_FAST_MODEL`, `CLAUDE_ROUTER`).
+- Lesson (2026-10-27, course files): a new dependency uses a `>=` floor
+  (`updater.requirements_problem` reads only `>=`, so `==` hides a venv
+  that lacks it), and `test_rebrand` now pins requirements.txt only for
+  the rebrand's release (v1.1.0), not for every later change.
 - Package `kwil/`, run as `python -m kwil`. `assistant/` is an alias kept
   for at least one stable release: a `sys.meta_path` finder makes
   `import assistant.X` return the `kwil.X` module itself (and runs

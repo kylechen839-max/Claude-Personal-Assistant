@@ -175,6 +175,7 @@
     "Couldn't connect Canvas. Try again.": "没能连接 Canvas，请再试一次。",
     "Couldn't sync. Try again.": "没能同步，请再试一次。",
     "Nothing new.": "没有新内容。",
+    "Syncing in the background.": "正在后台同步。",
     "Synced, but some sources didn't answer. Try reconnecting.": "已同步，但有些来源没有回应。请试试重新连接。",
     "Disconnect Canvas? I'll forget the link.": "要断开 Canvas 吗？我会忘掉这个链接。",
     "Also delete what I captured from Canvas?": "也删除我从 Canvas 记下的内容吗？",

@@ -5804,3 +5804,139 @@ On https://heykwil.com Kyle, signed in with `WEB_TOKEN`, can now tap ⚙ ->
   Google ends it.
 - **Counts** (Linux sandbox, Python 3.13): 3236 passed, 37 skipped
   (3225/37 before); JavaScript 147 (144 before).
+
+## Canvas course content, PR (a): store, extraction, token sync (2026-10-27)
+
+With a Canvas access token, Kwil now keeps the text of each active
+course's syllabus, pages, assignment descriptions, announcements, module
+list and files (PDF, DOCX, PPTX, HTML, text) per person, and syncs it in
+the background with no taps (Kyle: "pull syllabus and files without
+needing input from the user"). The browser helper and sync keys (PRs b to
+d) are not in this change.
+
+- **Store** (`kwil/coursefiles.py`): one SQLite per person
+  (`<[student] dir>/coursefiles.sqlite`, an invited person's in their
+  folder), `docs` + an FTS5 external-content index (porter, bm25 with the
+  title weighted 4x) with history.py's query builder and LIKE fallback.
+  `secure_delete=ON`, the FTS `secure-delete` option, an `optimize` and a
+  TRUNCATE checkpoint after deletes; Family's `while_listed` guards member
+  writes; a generation check stops a sync's writes once the person
+  disconnects. Bounds: `[canvas] max_course_mb` 20, `max_person_mb` 100,
+  5000 documents.
+- **Text** (`kwil/textextract.py`): the type sniffed from bytes; pypdf page
+  by page (300 pages, time checked between pages); DOCX/PPTX with zipfile
+  + ElementTree (declared size and part count checked first, each part
+  capped, DTDs refused); HTML through `html_to_text`. `pypdf>=6.21.3,<7`
+  added to requirements.txt (deploys need `--requirements`; without it a
+  PDF is left for a later sync).
+- **Canvas** (`kwil/canvas.py`): `courses(syllabus=True)`, `pages`,
+  `page`, `modules`, `files`, `announcements` and `download`: redirects by
+  hand (3), `public_url` on every hop, the token only while every hop was
+  the school's host, streamed with `[canvas] max_file_mb` (20; server
+  profile 4). Redaction now masks `verifier=`, `token=`,
+  `X-Amz-Signature=` and `X-Amz-Credential=`.
+- **Sync** (`kwil/student_web.py`): a content step after the planner and
+  Gmail, on its own `content_seconds` (300) budget, up to `max_files` (40)
+  downloads a run, incremental by `updated_at`/size/lock state; dates in
+  syllabus, pages, announcements and schedule-like files go to the new
+  deadline source `course_text` as drafts (each text version read once;
+  `_extract` now sends and marks at most `MAX_TEXTS` per sync, which also
+  fixes `[canvas] max_pages` above 20 marking unread pages as read).
+  `CourseSync` runs in the webapp lifespan: every `auto_sync_hours` (6)
+  for everyone connected, right after a connect or "Sync now" (which now
+  answers `"content": "queued"`), the owner only where the failover
+  `LeaderCheck` leads, never on a `--candidate` copy. Disconnect always
+  deletes the person's content store. New routes: `GET
+  /api/student/courses` (counts), `POST /api/student/courses/{id}/delete`
+  (+ DELETE alias; the course stays out of later syncs). Export adds
+  `coursefiles.json`.
+- **Tools** (`kwil/tools/coursefiles.py`): `search_course_files` (8
+  snippets) and `read_course_file` (6000 characters), `untrusted_output`
+  and `private`, in `READ_ONLY_TOOLS` and the router's read-only set;
+  registered for the owner (`cli.register_student`) and each member
+  (`family._deadline_tools`). The phone card labels the new source
+  "Course files" (sw.js `kwil-shell-v5`).
+- **Tests.** New `tests/test_coursefiles.py` (29): the whole path through
+  the background tick with a Canvas fake in real shapes (File objects, the
+  302 to an inst-fs host with a signed URL, a committed two-page PDF
+  fixture) and `search_course_files("late policy")`; the token never on
+  a cross-host hop (headers and URL recorded) and a 10.x hop refused;
+  streaming size cap, zip and XML bombs, page and time caps, per-course
+  and per-person caps, files per run; incremental and a changed file
+  replacing its text; delete-course and Disconnect purge (file and WAL
+  bytes grepped, with the FTS option off and another connection holding
+  the log); member isolation; export; caplog; taint; a prompt-injection
+  syllabus never confirming; leader, candidate and retry policy; no
+  pypdf; the FTS-less fallback. Each guarded change was reverted alone
+  and its test failed (25 reversions); against origin/master's source the
+  file doesn't import. Updated: the family tool set and export file list,
+  the cache version pins, `test_docs` identifiers, and
+  `test_rebrand`'s requirements check (now the v1.1.0 release against
+  610017b, since a dependency is added after that release).
+- **Counts** (Linux sandbox, Python 3.13, not real hardware): 3332
+  passed, 37 skipped (baseline 9003902: 3302 passed, 38 skipped, run from
+  a `git archive` copy where `test_rebrand`'s git-history test skips; it
+  runs here). JavaScript 167 passed (167 before).
+
+### Round 2: the judge's findings (2026-10-27)
+
+1. HIGH, a Disconnect during the planner step let the content step
+   rewrite the deleted store: `sync()` now reads the person's generation
+   before their link and passes it down, and `alive()` also needs the link
+   (the app's file, or the owner's environment) to still be there.
+2. MED, `CourseSync` busy-looped while a person's sync was running (the
+   judge's probe: 227k `try_sync` calls a second): the request is kept
+   without waking the thread, which looks again after `BUSY_SECONDS`
+   (30). The probe now makes 2 calls a second.
+3. MED, a course deleted during a sync came back: `upsert` refuses a
+   course marked excluded, in the same connection as the write.
+4. LOW, the page's sync right after connecting got a 409 when the
+   background held the lock: the connect no longer queues anything (the
+   page's own sync queues the content), "Sync now" while the background
+   holds the person's sync answers `{content: "queued", background: true}`
+   (the card says "Syncing in the background.", with Chinese in i18n.js),
+   and the background's runs don't count toward the tap throttle
+   (`try_sync(record=False)`), so no "synced recently" right after one.
+5. LOW, a UTF-16 DTD got past the byte check: an expat pre-pass with
+   DOCTYPE and entity handlers that raise sees the prolog in the part's
+   own encoding; an encoding expat lacks is refused.
+6. LOW, a 29 KB DOCX could take 350 MB: parts are streamed (64 KB
+   chunks, still at most `MAX_XML_BYTES`) through `XMLPullParser`, and
+   each element is dropped once read; a paragraph holds at most 50,000
+   elements. On the judge's probe peak RSS no longer moves (3.7 s);
+   tracemalloc on a 400,000-paragraph part: about 3 MB against 34 MB for
+   the whole tree.
+7. LOW, one file's transport error stopped every later file on every run:
+   `httpx.HTTPError` (and a 5xx) is now a per-file transient skip.
+8. Windows: `delete_all` removes the files with `family._unlink` (retried
+   on PermissionError) while holding the store's lock, and every store call
+   closes its own connection; a test checks both.
+
+Tests: +8 in `tests/test_coursefiles.py` (37 now) and +1 in
+`tests/js/student.test.mjs`; the headline test's first assertion changed
+with item 4. Reverting each fix alone fails its test (10 reversions,
+including the old generation read for 1, the waking request for 2 and
+the missing exclusion check for 3). The judge's `probe_races.py` passes.
+Counts (Linux sandbox, Python 3.13, not real hardware): 3340 passed, 37
+skipped; JavaScript 168 passed.
+
+### Round 3: the judge's two remaining findings (2026-10-27)
+
+1. MED, unbounded nesting: an 18 KB DOCX of about 6.3 million nested
+   elements took 1.9 GB and 138 s (the judge's measurement). The parse now
+   refuses more than `MAX_XML_DEPTH` (256) open elements at once
+   ("too_large"); with the cap held, the per-chunk drop loop scans at most
+   256 elements. The judge's `probe_xml2.py` under `ulimit -v 1500000`:
+   the 20 MB and 2 MB nested parts are refused in under 0.1 s with peak
+   RSS +6 MB; the flat 20 MB part still reads in 3.9 s with no rise. Test
+   `test_deeply_nested_xml_is_refused_at_once_with_little_memory` (a 5 s
+   deadline and a 20 MB tracemalloc bound; 20 nested tables still read);
+   without the cap it fails (runs out of its time).
+2. LOW, the start-of-sync generation read had no test of its own: new
+   `test_a_disconnect_and_new_link_during_the_planner_get_nothing_from_the_old_run`
+   disconnects and connects a fresh link inside the planner step; the old
+   run writes nothing into the new store. With the read moved back into
+   `_content` it fails.
+
+Counts (Linux sandbox, Python 3.13, not real hardware): 3342 passed, 37
+skipped; JavaScript 168 passed.

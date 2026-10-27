@@ -1534,6 +1534,43 @@ account. Limits: `[student] max_items` (2000) per person and
 `max_per_source` (500) per source. `[student] enabled = false` turns it
 all off.
 
+**Background sync.** Once Canvas is connected nobody has to tap anything:
+the server syncs everyone connected every `[canvas] auto_sync_hours` (6;
+`0` = only **Sync now**), and right after you connect. On a failover setup
+your own sync runs only on the machine that leads (Pi, then PC, then the
+cloud), so your Canvas and Claude are read once. A side-port check copy
+never syncs.
+
+**Course files** (with an access token; `[canvas] content`, on by
+default). Each active course's syllabus, pages, assignment descriptions,
+announcements, module list and files (PDF, Word, PowerPoint, HTML and
+text; never images, video, audio, spreadsheets or zips, and never grades
+or submissions) are kept as text you can ask about: "what's the late
+policy in physics?", "what does the week 5 reading cover?". Two read-only
+tools: `search_course_files` (up to 8 snippets) and `read_course_file`
+(6000 characters at a time). Their text is written by teachers and others,
+so it counts like an email: after a search, adding or confirming a
+deadline asks out loud first. Dates found in the syllabus, pages,
+announcements and schedule-like files become **unconfirmed drafts** (source
+"Course files") in your deadline list, each text read by Claude once.
+Only the text is stored, never the files, in `coursefiles.sqlite` next to
+your deadlines (an invited person's in their own folder, in their
+"Download my data" zip, deleted with their account). **Disconnect Canvas**
+always deletes it all; `POST /api/student/courses/<id>/delete` deletes one
+course and keeps it out of later syncs. A file is downloaded again only
+when Canvas changes it. Limits: `[canvas] max_files` (40) downloads per
+sync (the rest come in the next one, half an hour later), `max_file_mb`
+(20; Render: 4) per file (bigger files are listed, not read),
+`max_course_mb` (20) and `max_person_mb` (100) of text, and
+`content_seconds` (300) per sync, apart from the planner's time. Locked
+or hidden files, and a course that hides its Files tab, are skipped. The
+token is sent to your school's Canvas only, never to the file store
+Canvas redirects downloads to. Reading course files needs `pypdf` (in
+`requirements.txt`: update with `--requirements`). Kwil reads only your
+own courses, with your own token, like opening the pages yourself; some
+schools' rules limit automated access, so check yours. It is read-only
+and rate-limited.
+
 ### Study briefings (notifications)
 The phone app can speak up first: a notification in the morning with
 what's due today and tomorrow, in the evening with what's due tomorrow, a

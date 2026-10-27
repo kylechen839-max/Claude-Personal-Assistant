@@ -23,12 +23,13 @@ from `<dir>/<id>/notion.enc` (encrypted, userkeys.NOTION_LABEL), never
 NOTION_TOKEN (Kyle's). Their own school deadlines ([student] on;
 deadlines.py): the deadline tools on `<dir>/<id>/deadlines.sqlite`, filled
 from their own Canvas link (`<dir>/<id>/canvas.enc`, encrypted,
-canvas.CANVAS_LABEL; student_web.py). Nothing else: no Kyle's Notion,
-Pinecone memory or notes, Kyle's Google, dev team, lecture recorder or
-tutor, and no way to see anyone else's history. Removing someone signs
-them out and deletes their folder, Google token, Notion token, deadlines
-and Canvas link included (the Google and Notion grants are revoked first,
-best effort).
+canvas.CANVAS_LABEL; student_web.py), and with [canvas] content the
+course file tools on `<dir>/<id>/coursefiles.sqlite` (coursefiles.py).
+Nothing else: no Kyle's Notion, Pinecone memory or notes, Kyle's Google,
+dev team, lecture recorder or tutor, and no way to see anyone else's
+history. Removing someone signs them out and deletes their folder, Google
+token, Notion token, deadlines, course files and Canvas link included (the
+Google and Notion grants are revoked first, best effort).
 
 Each person has a tier (`tier` in users.json, chosen at invite): "family"
 (the above; people listed before tiers existed load as this) or "beta" (an
@@ -241,11 +242,19 @@ class Family:
         # the process's one store, which writes for a member only while
         # they are still listed
         self.deadlines = None
+        # ... and their Canvas course content ([canvas] content; coursefiles.py)
+        # in <dir>/<id>/coursefiles.sqlite, guarded the same way
+        self.coursefiles = None
         if config.get("student", {}).get("enabled"):
             from kwil.deadlines import open_store
 
             self.deadlines = open_store(config)
             self.deadlines.member_guard = self.while_listed
+            if config.get("canvas", {}).get("content"):
+                from kwil import coursefiles
+
+                self.coursefiles = coursefiles.open_store(config)
+                self.coursefiles.member_guard = self.while_listed
         self._load()
         self._finish_deletes()
 
@@ -542,13 +551,18 @@ class Family:
                           save_token=False, environ={}, in_app=True)
 
     def _deadline_tools(self, user: dict) -> list:
-        """Their own deadlines (deadlines.py), in their own time zone."""
+        """Their own deadlines (deadlines.py), in their own time zone, and
+        their own course content (coursefiles.py)."""
         if self.deadlines is None or not valid_id(user.get("id")):
             return []
         from kwil.tools.deadlines import DeadlineTools
 
-        return DeadlineTools(self.deadlines, user["id"],
-                             user.get("timezone") or None).tools()
+        tools = DeadlineTools(self.deadlines, user["id"], user.get("timezone") or None).tools()
+        if self.coursefiles is not None:
+            from kwil.tools.coursefiles import CourseFileTools
+
+            tools += CourseFileTools(self.coursefiles, user["id"]).tools()
+        return tools
 
     def save_google(self, uid: str, token_text: str) -> bool:
         """Store their token (privately, atomically) and add their Google

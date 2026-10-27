@@ -2,11 +2,17 @@
 
 ## Unreleased
 
+- Canvas course files: with an access token, Kwil syncs each course's
+  syllabus, pages, announcements and files in the background and can answer
+  questions about them ("what's the late policy?"); dates found become
+  unconfirmed drafts. New `[canvas]` settings `content`, `auto_sync_hours`,
+  `max_files`, `max_file_mb`, `max_course_mb`, `max_person_mb`,
+  `content_seconds`. Adds `pypdf` (update with `--requirements`).
 - Kwil's web app, voice view, public site, icons and home-screen colours
   move from Claude's orange to a calm, darker blue with cool neutrals; every
   pair meets WCAG AA contrast in light and dark mode. New icon: a quill whose
   barbs are a sound wave. Phones reload the new look once (service-worker
-  cache v5).
+  cache v6).
 - Connected services (owner, cloud): sign in to your own Notion and Home
   Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
   server. Environment tokens still win. Sign-ins are encrypted with

@@ -22,7 +22,8 @@ UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
 # An allowlist, so a new tool is never runnable there by default. Anthropic's
 # server tools (web search and fetch) are read-only too.
 READ_ONLY_TOOLS = ("list_calendar_events", "list_assignments", "ha_list", "ha_state",
-                   "spotify_now_playing", "spotify_devices")
+                   "spotify_now_playing", "spotify_devices", "search_course_files",
+                   "read_course_file")
 
 
 def mark_untrusted(result: dict, untrusted: bool) -> dict:
