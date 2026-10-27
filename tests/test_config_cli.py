@@ -467,6 +467,46 @@ def test_separate_instance_never_shares_the_owners_push_folder(tmp_path, monkeyp
     assert seen[-1]["push"]["enabled"] is True
 
 
+def test_separate_instance_never_shares_the_owners_connected_services(tmp_path, monkeypatch):
+    """Connected services judge LOW: a copy with its own env file (Kai's) and
+    no [connect] dir of its own would open, replace or delete Kyle's sealed
+    data/owner/*.enc sign-ins: off there. With its own folder it stays on;
+    Kyle's own instance is unchanged."""
+    from kwil import webapp
+
+    _no_inherited(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    (tmp_path / ".env.kai").write_text("WEB_TOKEN=" + "k" * 43 + "\n")
+    seen = []
+    monkeypatch.setattr(webapp, "serve", lambda config, **kw: seen.append(config) or 0)
+    said = []  # (setup_logging replaces the root handlers, so not caplog)
+    monkeypatch.setattr(cli.log, "info", lambda msg, *a: said.append(msg % a))
+    assert cli.main(["--mode", "web", "--config", "none.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["connect"]["enabled"] is False
+    assert any(s.startswith("Connected services off: a separate instance") for s in said)
+    (tmp_path / "kai.toml").write_text('[connect]\ndir = "data/kai/owner"\n')
+    assert cli.main(["--mode", "web", "--config", "kai.toml", "--env-file", ".env.kai"]) == 0
+    assert seen[-1]["connect"]["enabled"] is True
+    for same in ("./data/owner", "data/../data/owner",
+                 str((tmp_path / "data" / "owner").resolve())):
+        (tmp_path / "kai.toml").write_text(f'[connect]\ndir = "{same}"\n'.replace("\\", "/"))
+        assert cli.main(["--mode", "web", "--config", "kai.toml",
+                         "--env-file", ".env.kai"]) == 0
+        assert seen[-1]["connect"]["enabled"] is False, same
+    monkeypatch.setenv("WEB_TOKEN", "o" * 43)
+    assert cli.main(["--mode", "web", "--config", "none.toml"]) == 0
+    assert seen[-1]["connect"]["enabled"] is True
+
+
+def test_the_mom_instance_never_connects_kyles_home():
+    from pathlib import Path
+
+    config = load_config(str(Path(__file__).resolve().parent.parent / "config.mom.toml"), None)
+    assert config["connect"]["home_assistant"] is False
+    assert config["connect"]["dir"] == "data/mom/owner"
+
+
 def test_tests_never_log_into_the_real_log_file(tmp_path, restore_root_logging):
     """conftest's _logs_in_tmp: setup_logging as cli.main reaches it (the
     module attribute, default config, run from the repo) writes under

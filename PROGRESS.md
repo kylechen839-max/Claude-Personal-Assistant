@@ -5594,6 +5594,14 @@ conversations come with them.
   `cli.build_tools` (startup: 1), `HomeAssistant(token_fn=)` (4), the
   admin-only guard (1), `devteam` (1), the IPv6 brackets (1) and the
   redaction patterns (2). `sw.js` cache bumped to `kwil-shell-v2`.
-- **Counts:** full suite 3281 passed, 37 skipped (master 5e83590: 3224 passed,
+- **Counts:** full suite 3283 passed, 37 skipped (master 5e83590: 3224 passed,
   38 skipped, run from a `git archive` copy, where one git-dependent test
   skips); JavaScript 157 passed (master: 144). Linux sandbox, Python 3.13.
+- **Judge LOW fixed:** `cli.main` now turns `[connect]` off for a separate
+  instance (`--env-file .env.<name>`) whose `[connect] dir` resolves to the
+  default `data/owner` (as for `[student]` and `[push]`), so Kai's copy
+  can't open, replace or delete Kyle's sealed sign-ins; `config.mom.toml`
+  also sets `[connect] home_assistant = false`. Tests
+  `test_separate_instance_never_shares_the_owners_connected_services` and
+  `test_the_mom_instance_never_connects_kyles_home` (tests/test_config_cli.py)
+  each fail with their change reverted.

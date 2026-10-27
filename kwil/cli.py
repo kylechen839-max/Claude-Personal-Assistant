@@ -1176,6 +1176,14 @@ def main(argv=None) -> int:
         config["push"]["enabled"] = False
         log.info("Notifications off: a separate instance (--env-file %s) "
                  "without its own [push] owner_dir", args.env_file)
+    if separate and config["connect"]["enabled"] \
+            and Path(config["connect"]["dir"]).resolve() \
+            == Path(DEFAULTS["connect"]["dir"]).resolve():
+        # and Connected services: its sign-ins would be the owner's
+        # data/owner/*.enc (opened, replaced or deleted from the wrong app)
+        config["connect"]["enabled"] = False
+        log.info("Connected services off: a separate instance (--env-file %s) "
+                 "without its own [connect] dir", args.env_file)
     if args.download_voice:
         return download_voice_command(args.download_voice)
     server = config["profile"] == "server"
