@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Disconnect Google account now also revokes Kwil's access at Google (best
+  effort; the token is deleted even if Google can't be reached), so Kwil no
+  longer stays listed at myaccount.google.com/permissions.
 - The privacy page now carries Google's Limited Use statement (needed for
   Google to verify the beta testers' sign-in app), and its last "Hey Claude"
   is now Kwil.

@@ -580,10 +580,16 @@ server (`[family] enabled`, on in the server profile).
   (`NoSendGmail`), deletes and drafts ask first, created/moved events ask
   once anything untrusted is in the conversation, as for Kyle.
   **Disconnect** (`POST /api/google/disconnect`, family sessions only)
-  deletes the file and the tools; removing them deletes their folder,
-  token included. Not done, on purpose: the token isn't revoked at Google
-  on disconnect (deleting it from the server is what stops the assistant;
-  they can also remove "Kwil" (or "Hey Claude") at myaccount.google.com/permissions).
+  first revokes the grant at Google (`account.revoke_google_grant`, the
+  helper "Delete my account" and Remove use: refresh token, else access
+  token, in the form body, 5 s timeout), then deletes the file and the
+  tools; removing them deletes their folder, token included. The revoke is
+  best effort: a failure is logged by exception type only, never the
+  token, and the delete goes ahead. It runs outside the family lock (a
+  slow Google never holds up other people's sign-ins). Either tier: the
+  revoke endpoint needs only the token, not the (public or family) client.
+  (Until 2026-10-27 Disconnect only deleted the file, so "Kwil" stayed
+  listed at myaccount.google.com/permissions.)
 - **Tiers: beta testers are Calendar only** (public beta piece G1). Each
   person's `tier` in `users.json` is "family" or "beta"; a new invite is
   beta unless the owner picks family, a user listed before tiers loads as

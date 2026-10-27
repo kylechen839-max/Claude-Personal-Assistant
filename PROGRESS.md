@@ -5412,3 +5412,36 @@ model or Anthropic ("powered by Claude", `CLAUDE_MODEL`, the Claude API).
   renamed attributes of variables called `assistant` (`assistant.tools`,
   `assistant.backup`); they were restored and the rename redone by import
   shape.
+
+## Disconnect Google account revokes the grant (2026-10-27)
+
+Needed before recording Google's verification demo: a member's
+**Disconnect Google account** only deleted their token file, so "Kwil"
+stayed listed at myaccount.google.com/permissions. "Delete my account" and
+the owner's Remove already revoked it.
+
+- **What changed.** `Family.disconnect_google` (behind
+  `POST /api/google/disconnect` via `GoogleConnect.disconnect`) now calls
+  `account.revoke_google_grant(family, uid, label="Family")` first, the
+  same helper as the other two (refresh token, else access token, form
+  body, 5 s timeout), then deletes the file and the tools as before. Best
+  effort: a failure is logged at WARNING by exception type only, never the
+  token, and the delete goes ahead. The revoke runs outside the family lock
+  (a slow Google never holds up other people), with the "still listed"
+  check repeated under the lock before deleting. Both tiers: Google's
+  revoke endpoint needs only the token, so the beta's public client and
+  the family's web client work the same.
+- **Tests** (`tests/test_family_google.py`, +3): disconnect revokes with
+  the saved refresh token while the file still exists, then deletes it,
+  logs "revoked" at INFO with the id and no token, and a second disconnect
+  sends nothing (parametrized over the family and beta tiers); a revoke
+  that raises (with the token in its message) still disconnects, logs the
+  type at WARNING and never the token. The module's autouse
+  `no_google_network` fixture now also stubs `account.revoke_google`, so
+  the existing disconnect tests stay offline. All three new tests fail
+  with the `family.py` change reverted (`seen == []`).
+- **Docs.** SECURITY.md's family Google paragraph (the "not revoked on
+  disconnect" non-fix is gone), README's family Google section,
+  MANUAL_TEST's disconnect check (Kwil gone from the permissions page).
+- **Counts** (Linux sandbox, Python 3.13): 3188 passed, 37 skipped
+  (3185/37 before: the three new tests). No JS changed.

@@ -862,7 +862,8 @@ first) and their Gmail (read, and draft replies, never send), exactly like
 yours. Their token is kept in their own folder
 (`<dir>/<id>/google_token.json`), is never mixed with yours (your Google on
 the server stays `GOOGLE_TOKEN_JSON`), and **Disconnect Google account**
-or removing them deletes it. One-time setup for you:
+or removing them asks Google to end access (best effort: a failure there
+never stops the delete) and deletes it. One-time setup for you:
 
 1. Google Cloud console, the same project as your own sign-in -> APIs &
    Services -> Credentials -> **Create credentials -> OAuth client ID ->
