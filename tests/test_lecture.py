@@ -819,3 +819,27 @@ def test_upload_ids_must_match_fully(tmp_path):
     uid = up.start()
     with pytest.raises(UploadNotFound):
         up.status(uid + "\n")
+
+
+def test_job_reads_retry_while_windows_swaps_the_file(tmp_path, monkeypatch):
+    # Windows: opening job.json while another thread's os.replace swaps it
+    # in raises PermissionError for a moment (seen in CI); reads retry.
+    from pathlib import Path
+
+    from kwil import lecture
+
+    path = tmp_path / "job.json"
+    path.write_text('{"id": "x"}')
+    real, fails = Path.read_text, [3]
+
+    def flaky(self, *a, **kw):
+        if self == path and fails[0]:
+            fails[0] -= 1
+            raise PermissionError(13, "Permission denied")
+        return real(self, *a, **kw)
+    monkeypatch.setattr(Path, "read_text", flaky)
+    monkeypatch.setattr(lecture.time, "sleep", lambda s: None)
+    assert lecture._read_json(path) == {"id": "x"} and fails == [0]
+    fails[0] = 99
+    with pytest.raises(PermissionError):
+        lecture._read_json(path)
