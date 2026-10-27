@@ -907,6 +907,38 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 - [ ] As a family member (phone app invite), ask to turn on a light.
   - Should: it has no smart home control.
 
+## Connected services on the cloud (optional, ~15 min)
+On the iPhone Home Screen app signed in to the cloud (README "Connect your
+services in the app"). Needs `USER_DATA_KEY`, `PUBLIC_ORIGIN` and the
+public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
+- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connected services.
+  - Should: Notion says "Set on the server." with no buttons.
+- [ ] Delete `NOTION_TOKEN` in Render (Environment -> Save, it restarts),
+      open ⚙ again and tap Notion's **Connect**.
+  - Should: Notion's consent page opens in the app itself (not Safari).
+    Tick your Assignments database and the pages for Lecture Notes, Chat
+    Digests and the coordinator inbox, Allow; you land back in the app and
+    the row says "Connected." with your workspace name.
+- [ ] Ask "what assignments do I have this week?", start a lecture
+      recording for a few seconds and stop it.
+  - Should: the right assignments; the lecture is filed in Notion.
+- [ ] Tap Notion's **Disconnect**, say Cancel, then again and OK.
+  - Should: Cancel changes nothing; OK says "Disconnected.", Notion's
+    Settings -> Connections no longer lists Kwil, and "what assignments do
+    I have?" no longer reaches Notion.
+- [ ] Home Assistant: type your Nabu Casa (or tunnel) address, tap
+      **Connect**, sign in as the dedicated non-admin user.
+  - Should: back in the app, "Connected." with your Home Assistant's host;
+    "turn off the bedroom lights" works; an hour later it still works
+    (the 30-minute token was renewed).
+- [ ] Type `http://homeassistant.local:8123` or `192.168.1.10` instead.
+  - Should: "Check the address..." and nothing opens.
+- [ ] Disconnect Home Assistant.
+  - Should: in Home Assistant, your profile -> Security -> Refresh tokens
+    no longer lists Kwil's address; light commands stop working.
+- [ ] As a family member, open ⚙.
+  - Should: no Connected services section.
+
 ## Team chat (optional, ~10 min)
 Needs at least one of `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`
 in `.env` and `[teamchat] enabled = true` with that service turned on

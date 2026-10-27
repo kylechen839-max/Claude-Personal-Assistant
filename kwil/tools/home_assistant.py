@@ -175,9 +175,13 @@ class HomeAssistant:
     def __init__(self, url: str | None = None, token: str | None = None,
                  domains=None, scripts=None, secure_entities=None,
                  cache_seconds: float = 30, timeout: float = 10,
-                 session=None, clock=time.monotonic):
+                 session=None, clock=time.monotonic, token_fn=None):
         self.url = (url or os.environ.get("HA_URL", "")).rstrip("/")
-        self.token = token or os.environ.get("HA_TOKEN", "")
+        # token_fn(failed=None) -> an access token: the owner's sign-in from
+        # the phone app (owner_connect.HAAuth, refreshed in memory), never
+        # HA_TOKEN then. It raises HAError when there is none.
+        self.token_fn = token_fn
+        self.token = "" if token_fn is not None else (token or os.environ.get("HA_TOKEN", ""))
         # a TOML string by mistake must not become a list of letters
         self.domains = set([domains] if isinstance(domains, str)
                            else (domains if domains is not None else DEFAULT_DOMAINS))
@@ -204,30 +208,41 @@ class HomeAssistant:
 
     def _request(self, method: str, path: str, body: dict | None = None,
                  admin_only: bool = False):
-        if not self.url or not self.token:
+        token = self.token_fn() if self.token_fn is not None and self.url else self.token
+        if not self.url or not token:
             raise HAError("ha_not_set_up")
-        headers = {"Authorization": f"Bearer {self.token}",
-                   "Content-Type": "application/json"}
-        try:
-            resp = self.session.request(method, self.url + path, headers=headers,
-                                        json=body, timeout=self.timeout,
-                                        allow_redirects=False)
-        except Exception as e:  # requests' ConnectionError, Timeout, ...
-            log.warning("Home Assistant unreachable: %s", type(e).__name__)
-            raise HAError("ha_down", type(e).__name__) from None
+        resp = self._send(method, path, body, token)
         status = resp.status_code
+        if status == 401 and self.token_fn is not None and not admin_only:
+            # an app sign-in's access token ended early: one refresh, one retry
+            # (not for an admin-only API: a non-admin user's 401 is expected)
+            resp = self._send(method, path, body, self.token_fn(failed=token))
+            status = resp.status_code
         if status in (401, 403):
             if admin_only:  # expected with a non-admin token
                 log.debug("Home Assistant: HTTP %s from an admin-only API", status)
             else:
                 log.warning("Home Assistant refused the token (HTTP %s)", status)
-            raise HAError("ha_auth", f"HTTP {status}")
+            # an app sign-in is fixed by signing in again, not a long-lived token
+            raise HAError("ha_reconnect" if self.token_fn is not None and not admin_only
+                          else "ha_auth", f"HTTP {status}")
         if status == 404:
             raise HAError("ha_not_found", "HTTP 404")
         if status >= 400 or 300 <= status < 400:
             log.warning("Home Assistant answered HTTP %s to a %s", status, method)
             raise HAError("ha_down" if status >= 500 else "ha_rejected", f"HTTP {status}")
         return resp
+
+    def _send(self, method: str, path: str, body: dict | None, token: str):
+        headers = {"Authorization": f"Bearer {token}",
+                   "Content-Type": "application/json"}
+        try:
+            return self.session.request(method, self.url + path, headers=headers,
+                                        json=body, timeout=self.timeout,
+                                        allow_redirects=False)
+        except Exception as e:  # requests' ConnectionError, Timeout, ...
+            log.warning("Home Assistant unreachable: %s", type(e).__name__)
+            raise HAError("ha_down", type(e).__name__) from None
 
     # ----- entities -----
     def _areas(self) -> dict[str, str]:

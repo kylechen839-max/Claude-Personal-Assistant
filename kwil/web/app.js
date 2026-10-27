@@ -363,6 +363,7 @@ async function refreshState() {
     if (window.KwilMemory) window.KwilMemory.onState(state);  // memory.js
     if (window.KwilSpotify) window.KwilSpotify.onState(state);  // spotify.js
     if (window.KwilNotion) window.KwilNotion.onState(state);  // notion.js
+    if (window.KwilConnect) window.KwilConnect.onState(state);  // connect.js
     if (window.KwilVoicePicker) window.KwilVoicePicker.onState(state);  // voice-picker.js
     if (window.KwilBrief) window.KwilBrief.onState(state);  // brief.js
     if (window.KwilUI) window.KwilUI.renderHealth(document, state.health);  // ui.js

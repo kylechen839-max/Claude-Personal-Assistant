@@ -5546,3 +5546,54 @@ conversations come with them.
   "User: ...\nAssistant: ..." and neither it nor the system prompt says
   "Kyle"). It fails with the `history.py` change reverted (`'Kyle: how
   lo...' == 'User: how lo...'`). Full suite: 3186 passed, 37 skipped.
+
+## Owner's connected services: Notion and Home Assistant by sign-in (2026-10-27)
+- **What:** on the cloud app, ⚙ -> **Connected services** lets Kyle sign in
+  to his own services instead of pasting their secrets into Render
+  (`kwil/owner_connect.py`, `kwil/web/connect.js`, README "Connect your
+  services in the app (cloud)"). A small shared framework (sealed storage
+  per service under `[connect] dir`, owner-only routes, bounded single-use
+  OAuth state bound to the browser by the `hc_connect` cookie, revoke ->
+  delete -> drop tools on Disconnect) with two connectors:
+  - **Notion**, through the public integration invited people already use
+    (same client and redirect URI; `notion_web`'s `/notion/callback` hands
+    an owner state to `owner_connect`). `owner_notion_client()` replaces the
+    `NOTION_TOKEN` readers in `cli.build_tools`, `register_devteam`,
+    `register_teamchat`, `webfeatures.Features.assignments` and
+    `devteam.link_from_config`: with `NOTION_TOKEN` set they build exactly
+    the client they built before; otherwise the client looks the token up
+    on every request (an httpx.Auth that also refreshes once on a 401 and
+    writes the new token back sealed), so lecture notes, digests and the
+    dev team inbox work as soon as he connects and stop when he
+    disconnects.
+  - **Home Assistant**, through HA's own IndieAuth-style OAuth (client id =
+    `PUBLIC_ORIGIN/`, redirect `/ha/callback`, PKCE S256). The typed
+    address must pass `canvas.public_url` (https:443, public addresses
+    only). The refresh token is sealed; access tokens are kept and renewed
+    in memory (`HAAuth`), and `HomeAssistant(token_fn=...)` refreshes once
+    on a 401 (not on the admin-only template API).
+  - Precedence: `NOTION_TOKEN` / `HA_TOKEN` in the environment win
+    (`managed: "env"`, Connect refused with 409 and hidden).
+- **HA facts:** checked against developers.home-assistant.io/docs/auth_api
+  and Home Assistant core/frontend sources (2026.10): `/auth/authorize`
+  with `client_id`, `redirect_uri`, `state` (+ optional `code_challenge`,
+  S256 only), `/auth/token` form posts (`authorization_code` with
+  `client_id`, `code`, `code_verifier`; `refresh_token` with `client_id`),
+  `expires_in` 1800, refresh tokens `secrets.token_hex(64)`, access
+  tokens JWTs, `/auth/revoke` with `token` (always 200; also ends that
+  refresh token's access tokens). Not checked against a real HA instance.
+- **Redaction:** `config._SECRET_PATTERNS` now also masks HA's JWT access
+  tokens and 128-hex refresh tokens (Notion's `ntn_`/`secret_` were
+  already covered).
+- **Tests:** `tests/test_owner_connect.py` (56, all offline: Notion through
+  `notion_web.TRANSPORT` with the real SDK, HA through
+  `owner_connect.TRANSPORT`, names through a fake `canvas.RESOLVE`) and
+  `tests/js/connect.test.mjs` (13, node:vm). Each fails with its source
+  change reverted: the `notion_web` hand-over (10 failures, incl. the
+  connect test with family accounts on), `webfeatures` (lecture notes: 3),
+  `cli.build_tools` (startup: 1), `HomeAssistant(token_fn=)` (4), the
+  admin-only guard (1), `devteam` (1), the IPv6 brackets (1) and the
+  redaction patterns (2). `sw.js` cache bumped to `kwil-shell-v2`.
+- **Counts:** full suite 3281 passed, 37 skipped (master 5e83590: 3224 passed,
+  38 skipped, run from a `git archive` copy, where one git-dependent test
+  skips); JavaScript 157 passed (master: 144). Linux sandbox, Python 3.13.

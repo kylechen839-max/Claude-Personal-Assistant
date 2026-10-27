@@ -1029,6 +1029,76 @@ Kyle's Notion stays `NOTION_TOKEN` on his machines.
   integration's template); otherwise the tools stay off and Settings says
   to share only that database and reconnect.
 
+## Owner's connected services (`owner_connect.py`, cloud)
+
+Kyle signs in to his own Notion and Home Assistant from ⚙ -> Connected
+services instead of pasting `NOTION_TOKEN` / `HA_TOKEN` into Render.
+
+- **Owner only.** `GET /api/connect/status`, `POST /api/connect/<id>/start`
+  and `/disconnect` use `webapp.require_owner`: a family member's session
+  gets 404, no session 401. State changes are POSTs; a start body is at
+  most 2 KB (413).
+- **Precedence: the environment first.** With `NOTION_TOKEN` (or
+  `HA_TOKEN`) set, that service is `managed: "env"`: every caller builds
+  exactly the client it built before, Connect and Disconnect answer 409,
+  and the page shows no buttons. Otherwise `"app"` once signed in here,
+  else `"none"`.
+- **Sealed storage.** One file per service in `[connect] dir` (Render:
+  `/data/owner`): `userkeys.seal` under its own HKDF label
+  (`kwil/notion/v1`, `kwil/home_assistant/v1`; neither opens a member's
+  `notion.enc`, nor the other way round) with the id `owner` inside,
+  written with `google_auth.write_private` (mkstemp in the same folder,
+  atomic replace, retried on Windows; 0600 on POSIX only). Notion keeps
+  what `notion_web.record_of` keeps (tokens, bot and workspace ids and
+  name; never Notion's `owner` object with his email). Home Assistant
+  keeps its address and refresh token; access tokens (30 minutes) live in
+  memory only. **Fails closed:** without a usable `USER_DATA_KEY` nothing
+  is started (503) or exchanged.
+- **OAuth state.** Like `notion_web.py`: random, made only for the
+  owner's signed-in session, at most 4 pending for 10 minutes, single use,
+  bound to the browser by the `hc_connect` cookie (HttpOnly, Secure,
+  SameSite=Lax, path = that service's callback only) whose nonce's hash is
+  kept, and void once that session signs out. A wrong, used, expired or
+  other-service state is a 400 and writes nothing. Tokens and codes never
+  go in a URL Kwil makes; Home Assistant gets PKCE (S256; HA 2026.10
+  checks it, older versions ignore it), Notion documents none (its client
+  secret never leaves the server). The owner's Notion shares the
+  integration and redirect URI with invited people: `notion_web`'s
+  callback hands a state only `owner_connect` issued to it. His lecture
+  notes, digests and inbox create pages, so the integration needs Notion's
+  *Insert content* capability, which then also applies to invited people's
+  tokens; their registry still has only `list_assignments` and
+  `update_assignment_status` (`family._notion_tools`), so nothing of theirs
+  creates pages.
+- **Revoke, delete, drop.** Disconnect revokes at the service first (Notion
+  `/v1/oauth/revoke`; Home Assistant `/auth/revoke`, which also ends every
+  access token of that refresh token), best effort with a WARNING naming
+  only the error type or HTTP status; then deletes the file; then removes
+  the tools from the owner's shared registry. A grant that can't be stored
+  is revoked at once, and a reconnect to another Notion bot revokes the
+  grant it replaces. Refreshes, (re)connects and disconnects of a service
+  hold one lock, so none brings back a sign-in another just deleted.
+- **Home Assistant's address is typed by a person.** It must pass
+  `canvas.public_url` (https on port 443, no `user:pass@`, every resolved
+  address `is_global`: never loopback, the LAN, Tailscale's 100.64/10 or
+  169.254.169.254), and is checked again before every token request.
+  Plain http is refused, so `plain_http_off_lan` never applies. The OAuth
+  calls follow no redirects; the tools' requests use `allow_redirects=False`
+  as before. **Deliberate non-fix:** as with Canvas, a DNS answer that
+  changes between the check and the connection (rebinding) could reach a
+  private address once; the tools' REST calls aren't re-checked per
+  request. They only carry the HA access token to the address the owner
+  himself typed, and answers are parsed as Home Assistant JSON.
+- **Taint and confirmations unchanged.** The tools are the same objects
+  as with `NOTION_TOKEN`/`HA_TOKEN` (same flags, same
+  `confirm_if_untrusted`, Home Assistant's own per-call `mark_untrusted`
+  and always-ask secure entities). Family members never get them.
+- **Logs.** Ids, service names, counts, HTTP statuses and error type names
+  only. Never a code, token, nonce, typed address or workspace name; the
+  provider's error text is never kept. The redacting formatter also masks
+  Home Assistant's JWT access tokens and 128-hex refresh tokens (Notion's
+  `ntn_`/`secret_` shapes were already masked).
+
 ## Student deadlines and Canvas (`deadlines.py`, `canvas.py`, `student_web.py`)
 
 Each person (the owner and every invited person) has their own deadlines,

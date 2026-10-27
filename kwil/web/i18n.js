@@ -104,6 +104,27 @@
     "Disconnect Notion? I won't see your assignments any more.":
       "要断开 Notion 吗？之后我就看不到你的作业了。",
     "Notion disconnected.": "Notion 已断开。",
+    // the owner's Connected services (connect.js, owner_connect.py)
+    "Connected services": "已连接的服务",
+    "Set on the server.": "已在服务器上设置。",
+    "Connected.": "已连接。",
+    "Not connected.": "未连接。",
+    "Not set up on this server.": "这台服务器还没有设置好。",
+    "This server can't store sign-ins yet (USER_DATA_KEY).": "这台服务器暂时还不能保存登录（缺少 USER_DATA_KEY）。",
+    "The sign-in stopped working. Connect again.": "登录已失效，请重新连接。",
+    "Connect": "连接",
+    "Disconnect": "断开",
+    "Home Assistant's public https address": "Home Assistant 的公网 https 地址",
+    "Type your Home Assistant's public https address.": "请输入 Home Assistant 的公网 https 地址。",
+    "Kwil reaches it over the internet: use Nabu Casa's address or a tunnel.":
+      "Kwil 通过互联网访问它：请用 Nabu Casa 的地址或隧道。",
+    "Opening the sign-in…": "正在打开登录页面…",
+    "Couldn't start the sign-in.": "无法开始登录。",
+    "Check the address: it must be your Home Assistant's public https address.":
+      "请检查地址：必须是你的 Home Assistant 的公网 https 地址。",
+    "Disconnect Home Assistant? I won't control your home any more.":
+      "要断开 Home Assistant 吗？之后我就不能控制你家里的设备了。",
+    "Disconnected.": "已断开。",
     // a student's deadlines card (student.js, student_web.py)
     "School deadlines": "学校截止日期",
     "Canvas calendar feed link": "Canvas 日历订阅链接",

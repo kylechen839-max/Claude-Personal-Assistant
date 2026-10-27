@@ -611,13 +611,19 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
     registry = ToolRegistry()
     tz = config["assistant"]["timezone"] or None
     register_google(registry, config, output_fn)
+    from kwil import owner_connect  # NOTION_TOKEN first, else the app's sign-in
+
     if config["notion"]["enabled"] and os.environ.get("NOTION_TOKEN"):
         from kwil.tools.notion import NotionAssignments
 
         registry.register(*NotionAssignments(config["notion"]["database_id"],
                                              timezone=tz).tools())
-    elif config["notion"]["enabled"]:
-        output_fn("(Notion tools off: NOTION_TOKEN not set)")
+    elif config["notion"]["enabled"] and owner_connect.managed(config, "notion") == "none":
+        output_fn("(Notion tools off: NOTION_TOKEN not set and Notion not "
+                  "connected in the app)")
+    # services the owner signed in to from the phone app (Settings ->
+    # Connected services); env-managed ones are registered as before
+    owner_connect.register_tools(registry, config, output_fn)
     register_devteam(registry, config, output_fn)
     register_home_assistant(registry, config, output_fn)
     register_teamchat(registry, config, output_fn)
@@ -717,8 +723,12 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
         output_fn("(Dev team tools off: [devteam] coordinator_session is not "
                   "a session id or claude.ai/code link)")
         return False
-    if not (os.environ.get("NOTION_TOKEN") and config["notion"]["database_id"]):
-        output_fn("(Dev team replies off: NOTION_TOKEN not set; messages still go out)")
+    from kwil import owner_connect
+
+    if not (owner_connect.managed(config, "notion") != "none"
+            and config["notion"]["database_id"]):
+        output_fn("(Dev team replies off until Notion is set: NOTION_TOKEN, or "
+                  "Connected services in the app; messages still go out)")
     link = link_from_config(config, team["state_file"])
     registry.register(*link.tools())
     return True
@@ -734,7 +744,10 @@ def register_home_assistant(registry: ToolRegistry, config: dict,
         return False
     url = ha["url"] or os.environ.get("HA_URL", "")
     if not (url and os.environ.get("HA_TOKEN")):
-        output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
+        from kwil import owner_connect
+
+        if owner_connect.managed(config, "home_assistant") != "app":  # (build_tools adds those)
+            output_fn("(Home Assistant tools off: HA_URL or HA_TOKEN not set)")
         return False
     from kwil.tools.home_assistant import HomeAssistant, plain_http_off_lan
 
@@ -766,6 +779,10 @@ def register_teamchat(registry: ToolRegistry, config: dict, output_fn=print,
         notion = NotionAssignments(config["notion"]["database_id"],
                                    token=environ["NOTION_TOKEN"],
                                    timezone=config["assistant"]["timezone"] or None)
+    else:  # the app's sign-in, looked up per request (works once connected)
+        from kwil import owner_connect
+
+        notion = owner_connect.owner_assignments(config, environ)
     chat, missing = teamchat_from_config(config, environ=environ, session=session,
                                          notion=notion)
     for label, var in missing:  # only services that are turned on

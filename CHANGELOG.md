@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Connected services (owner, cloud): sign in to your own Notion and Home
+  Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
+  server. Environment tokens still win. Sign-ins are encrypted with
+  `USER_DATA_KEY`, refreshed automatically, and revoked on Disconnect. New
+  `[connect]` settings.
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.
