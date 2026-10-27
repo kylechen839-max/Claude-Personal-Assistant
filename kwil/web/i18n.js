@@ -110,6 +110,18 @@
     "In Canvas, open Calendar, tap Calendar Feed and copy the link. I never ask for your school password.":
       "在 Canvas 里打开“日历”，点“日历订阅”，复制链接。我绝不会问你的学校密码。",
     "Connect Canvas": "连接 Canvas",
+    "Your school's name or Canvas address": "你学校的名字或 Canvas 地址",
+    "Find your school": "查找你的学校",
+    "Find my school": "查找我的学校",
+    "Open my Canvas calendar": "打开我的 Canvas 日历",
+    "Tap Calendar Feed (bottom right), copy the link, come back.":
+      "点右下角的“日历订阅”，复制链接，再回到这里。",
+    "Paste": "粘贴",
+    "Type at least 3 letters of your school's name.": "请至少输入学校名字的 3 个字母。",
+    "Couldn't look up schools. Try again.": "没能查找学校，请再试一次。",
+    "I couldn't find that school. Type its Canvas address, e.g. canvas.school.edu.":
+      "没有找到这所学校。请输入它的 Canvas 地址，例如 canvas.school.edu。",
+    "Copy the Calendar Feed link in Canvas first.": "请先在 Canvas 里复制“日历订阅”链接。",
     "Use an access token instead": "改用访问令牌",
     "Your school's Canvas, e.g. canvas.school.edu": "你学校的 Canvas 地址，例如 canvas.school.edu",
     "School": "学校",

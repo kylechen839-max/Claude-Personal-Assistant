@@ -2,10 +2,13 @@
 //
 // Runs the phone page's kwil/web/student.js in node:vm with a minimal
 // fake DOM: the card stays hidden when the routes are off or signed out;
-// the owner is told to use the environment (no link form); an invited
-// person's link is POSTed once and cleared from the page; captured titles
-// are shown as text only; conflicts get both buttons; deleting asks first
-// and POSTs (the failover preflight allows only GET and POST).
+// the owner is told to use the environment (no link form) only while it
+// sets the link, else gets the form; an invited person's link is POSTed
+// once and cleared from the page; the guided way (find the school, open
+// its Canvas calendar from the tap, Paste the link) only fills the field;
+// captured titles are shown as text only; conflicts get both buttons;
+// deleting asks first and POSTs (the failover preflight allows only GET
+// and POST).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,17 +51,22 @@ const ITEMS = [
 
 function load({ items = { status: 200, body: { items: [], canvas: { connected: false,
                 managed: 'app', can_store: true, gmail: false } } },
-                routes = {}, confirm = () => true } = {}) {
+                routes = {}, confirm = () => true, clipboard } = {}) {
   const menu = new El('details');
   const apiKey = new El('section'); apiKey.id = 'api-key';
   menu.append(apiKey);
   const fetches = [];
   const asked = [];
+  const opened = [];
   const win = {
+    navigator: clipboard ? { clipboard } : {},
+    open: (...args) => { opened.push(args); return null; },
     confirm: (q) => { asked.push(q); return confirm(q); },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
-      const r = url === '/api/student/items' ? items : routes[url] || { status: 200, body: {} };
+      const path = url.split('?')[0];
+      const r = url === '/api/student/items' ? items
+        : routes[url] || routes[path] || { status: 200, body: {} };
       return { ok: r.status < 300, status: r.status, json: async () => r.body };
     },
     document: {
@@ -68,13 +76,13 @@ function load({ items = { status: 200, body: { items: [], canvas: { connected: f
       createElement: (tag) => new El(tag),
       addEventListener() {},
     },
-    Date, Number, String, Object, Array, JSON, isNaN,
+    Date, Number, String, Object, Array, JSON, isNaN, URL, encodeURIComponent,
   };
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
   const card = menu.children.find((c) => c.id === 'student');
-  return { win, menu, card, fetches, asked };
+  return { win, menu, card, fetches, asked, opened };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -102,6 +110,104 @@ test('the owner is told to use the environment, with no link form', async () => 
   assert.match(card.find((e) => e.attrs.role === 'status').textContent, /CANVAS_ICS_URL/);
   const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
   assert.equal(form.hidden, true);
+});
+
+test('the owner gets the link form once the environment no longer sets it', async () => {
+  const { card } = load({ items: { status: 200, body: { items: [], canvas: {
+    connected: false, managed: 'app', can_store: true } } } });
+  await tick();
+  assert.doesNotMatch(card.find((e) => e.attrs.role === 'status').textContent, /CANVAS_ICS_URL/);
+  const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
+  assert.equal(form.hidden, false);
+  assert.equal(card.buttons('Disconnect Canvas')[0].hidden, true);
+});
+
+const SCHOOLS = { status: 200, body: { schools: [
+  { name: 'Example University', base_url: 'https://canvas.example.edu' },
+  { name: 'Evil LAN', base_url: 'https://10.0.0.1' },
+  { name: 'Loopback', base_url: 'https://localhost' },
+  { name: 'Plain http', base_url: 'http://canvas.other.edu' },
+  { name: 'With password', base_url: 'https://me:pw@canvas.other.edu' },
+  { name: 'Odd port', base_url: 'https://canvas.other.edu:8443' },
+  { name: 'Intranet', base_url: 'https://canvas.school.local' },
+  { name: 'Not a URL', base_url: 'javascript:alert(1)' },
+  { name: 'Second U', base_url: 'https://second.instructure.com' },
+] } };
+
+test('guided: find the school, open its Canvas calendar from the tap', async () => {
+  const { card, fetches, opened } = load({ routes: { '/api/student/schools': SCHOOLS } });
+  await tick();
+  const find = card.find((e) => e.attrs['aria-label'] === 'Find your school');
+  const openBtn = card.buttons('Open my Canvas calendar')[0];
+  assert.equal(openBtn.parentNode.hidden, true);
+  find.value = 'Ex';
+  await card.buttons('Find my school')[0].fire('click');
+  assert.ok(card.all().some((e) => e.textContent === "Type at least 3 letters of your school's name."));
+  find.value = ' Example U ';
+  await card.buttons('Find my school')[0].fire('click');
+  assert.equal(fetches.at(-1).url, '/api/student/schools?q=Example%20U');
+  // only the public https Canvas hosts are offered
+  assert.equal(card.buttons('Example University').length, 1);
+  assert.equal(card.buttons('Second U').length, 1);
+  for (const bad of ['Evil LAN', 'Loopback', 'Plain http', 'With password', 'Odd port',
+                     'Intranet', 'Not a URL']) {
+    assert.equal(card.buttons(bad).length, 0, bad);
+  }
+  assert.equal(openBtn.parentNode.hidden, true);
+  await card.buttons('Example University')[0].fire('click');
+  assert.equal(openBtn.parentNode.hidden, false);
+  assert.ok(card.all().some((e) => e.textContent === 'canvas.example.edu'));
+  assert.ok(card.all().some((e) => e.textContent ===
+    'Tap Calendar Feed (bottom right), copy the link, come back.'));
+  await openBtn.fire('click');
+  assert.deepEqual(opened, [['https://canvas.example.edu/calendar', '_blank', 'noopener']]);
+  assert.ok(!fetches.some((f) => f.opts.method === 'POST'));  // nothing sent
+});
+
+test('guided: a lookup with nothing usable says so', async () => {
+  const { card, opened } = load({ routes: { '/api/student/schools': { status: 200,
+    body: { schools: [{ name: 'Loopback', base_url: 'https://localhost' }] } } } });
+  await tick();
+  card.find((e) => e.attrs['aria-label'] === 'Find your school').value = 'loopback';
+  await card.buttons('Find my school')[0].fire('click');
+  assert.ok(card.all().some((e) => e.textContent ===
+    "I couldn't find that school. Type its Canvas address, e.g. canvas.school.edu."));
+  await card.buttons('Open my Canvas calendar')[0].fire('click');
+  assert.deepEqual(opened, []);
+});
+
+test('Paste fills the feed field and never connects by itself', async () => {
+  const link = 'https://canvas.example.edu/feeds/calendars/user_SECRET.ics';
+  let reads = 0;
+  const { card, fetches } = load({ clipboard: { readText: async () => { reads++; return ` ${link} `; } } });
+  await tick();
+  const feed = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link');
+  const paste = card.buttons('Paste')[0];
+  assert.equal(paste.hidden, false);
+  assert.equal(reads, 0);  // only on the tap
+  await paste.fire('click');
+  assert.equal(reads, 1);
+  assert.equal(feed.value, link);
+  assert.ok(!fetches.some((f) => f.opts.method === 'POST'));
+  await card.buttons('Connect Canvas')[0].fire('click');
+  assert.deepEqual(JSON.parse(fetches.find((f) => f.url === '/api/student/canvas').opts.body),
+                   { ics_url: link });
+});
+
+test('Paste: denied is silent, other text is not filled, no clipboard hides it', async () => {
+  const denied = load({ clipboard: { readText: async () => { throw new Error('NotAllowedError'); } } });
+  await tick();
+  await denied.card.buttons('Paste')[0].fire('click');
+  assert.equal(denied.card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').value, '');
+  assert.ok(denied.card.all().every((e) => e.hidden || !/NotAllowed|Couldn't/.test(e.textContent)));
+  const other = load({ clipboard: { readText: async () => 'my grocery list' } });
+  await tick();
+  await other.card.buttons('Paste')[0].fire('click');
+  assert.equal(other.card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').value, '');
+  assert.ok(other.card.all().some((e) => e.textContent === 'Copy the Calendar Feed link in Canvas first.'));
+  const none = load();
+  await tick();
+  assert.equal(none.card.buttons('Paste')[0].hidden, true);
 });
 
 test('an invited person connects a feed link once, and it is cleared', async () => {
@@ -172,8 +278,21 @@ test('every fixed string it shows or asks has Chinese in i18n.js', async () => {
       school: 'canvas.example.edu', managed: 'app' } } },
            routes: { '/api/student/sync': { status: 200, body: { sources: {}, errors: { ics: 'x' } } } } }),
     load({ items: { status: 200, body: { items: ITEMS, canvas: { connected: true, managed: 'app' } } } }),
+    load({ routes: { '/api/student/schools': SCHOOLS } }),
+    load({ routes: { '/api/student/schools': { status: 200, body: { schools: [] } } } }),
+    load({ routes: { '/api/student/schools': { status: 500, body: {} } },
+           clipboard: { readText: async () => 'not a link' } }),
   ];
   await tick();
+  for (const [i, q] of [[5, 'Example'], [6, 'Nowhere'], [7, 'Broken']]) {
+    const { card } = scenarios[i];
+    card.find((e) => e.attrs['aria-label'] === 'Find your school').value = 'Ex';
+    await card.buttons('Find my school')[0].fire('click');
+    card.find((e) => e.attrs['aria-label'] === 'Find your school').value = q;
+    await card.buttons('Find my school')[0].fire('click');
+  }
+  await scenarios[5].card.buttons('Example University')[0].fire('click');
+  await scenarios[7].card.buttons('Paste')[0].fire('click');
   const busy = scenarios[3];
   await busy.card.buttons('Sync now')[0].fire('click');
   await busy.card.buttons('Disconnect Canvas')[0].fire('click');
@@ -191,4 +310,12 @@ test('every fixed string it shows or asks has Chinese in i18n.js', async () => {
   for (const s of fixed) assert.notEqual(translate(s), s, s);
   assert.equal(translate('Found 3 new.'), '找到 3 条新内容。');
   assert.equal(translate('School deadlines'), '学校截止日期');
+  // the guided way's messages (some are only ever the last one said)
+  for (const s of ["Type at least 3 letters of your school's name.",
+                   "I couldn't find that school. Type its Canvas address, e.g. canvas.school.edu.",
+                   "Couldn't look up schools. Try again.",
+                   'Tap Calendar Feed (bottom right), copy the link, come back.']) {
+    assert.ok(seen.has(s) || SCRIPT.includes(s.slice(0, 30)), s);
+    assert.notEqual(translate(s), s, s);
+  }
 });

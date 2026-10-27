@@ -368,7 +368,7 @@ DEFAULTS: dict = {
     },
     "canvas": {                     # where deadlines come from (canvas.py); never a school password
         # the owner's school, for CANVAS_TOKEN (CANVAS_BASE_URL overrides),
-        # e.g. "https://canvas.school.edu"; invited people paste their own
+        # e.g. "https://canvas.school.edu"; a link pasted in the app has its own
         "base_url": "",
         "pages": False,             # also read module pages (one Claude call per sync for new pages)
         "max_pages": 20,            # module pages read per sync, at most

@@ -4,10 +4,10 @@ each on their own deadlines (deadlines.py).
 
   GET  /api/student/items              {items, canvas: status} (the person's own)
   POST /api/student/canvas             {ics_url} or {base_url, token}: save their
-                                       Canvas link (invited people; the owner's is
-                                       CANVAS_ICS_URL / CANVAS_TOKEN in the env)
+                                       Canvas link (409 for the owner while
+                                       CANVAS_ICS_URL / CANVAS_TOKEN is set)
   POST /api/student/disconnect         {delete_items?}: forget the link (and,
-                                       asked, what came from Canvas)
+                                       asked, what came from Canvas; 409 as above)
   POST /api/student/sync               fetch now: at most every [student]
                                        sync_minutes per person, one at a time
   POST /api/student/items/{id}/resolve {choice: "confirm" | "dismiss" | a date}
@@ -23,9 +23,13 @@ With [student] off they are 404.
 
 An invited person's link is stored with userkeys.seal under
 canvas.CANVAS_LABEL, bound to their id, in `<[family] dir>/<id>/canvas.enc`
-(google_auth.write_private), deleted with their folder. Without a usable
-USER_DATA_KEY nothing is stored (503). The feed URL is itself a secret
-(it reads their calendar without a sign-in) and is treated like the token:
+(google_auth.write_private), deleted with their folder. The owner's is
+bound to "owner" (as push.py's; invited ids are u_..., so they can't
+collide) in `<[student] dir>/canvas.enc`, unless the server's environment
+has CANVAS_ICS_URL or CANVAS_TOKEN: then the environment wins ("managed":
+"env") and the app neither stores nor forgets the owner's link (409).
+Without a usable USER_DATA_KEY nothing is stored (503). The feed URL is
+itself a secret (it reads their calendar without a sign-in) and is treated like the token:
 never logged, never returned (the status says only which kind and the
 school's host). A school password is never asked for or stored.
 
@@ -55,7 +59,8 @@ from kwil.deadlines import SOURCES, DeadlineError
 
 log = logging.getLogger(__name__)
 
-CANVAS_FILE = "canvas.enc"      # in <[family] dir>/<id>/
+CANVAS_FILE = "canvas.enc"      # in <[family] dir>/<id>/, the owner's in [student] dir
+OWNER_UID = "owner"             # the owner's id inside the sealed record (push.py's too)
 OWNER_ICS_ENV = "CANVAS_ICS_URL"
 OWNER_TOKEN_ENV = "CANVAS_TOKEN"
 MAX_TOKEN = 200
@@ -111,7 +116,15 @@ class StudentSync:
             return local_zone(None)
 
     def _file(self, uid) -> Path:
+        if uid is None:
+            return Path(self.config["student"]["dir"]) / CANVAS_FILE
         return Path(self.config["family"]["dir"]) / uid / CANVAS_FILE
+
+    def env_managed(self) -> bool:
+        """The owner's Canvas comes from CANVAS_ICS_URL / CANVAS_TOKEN (read
+        on every call: deleting them hands the link to the app at once)."""
+        return bool(self.env.get(OWNER_ICS_ENV, "").strip()
+                    or self.env.get(OWNER_TOKEN_ENV, "").strip())
 
     def _keys_env(self):
         return self.family.keys.environ if self.family is not None else self.environ
@@ -119,7 +132,7 @@ class StudentSync:
     # ---------- their Canvas link ----------
     def credentials(self, uid) -> dict | None:
         """{kind: "ics", ics_url} or {kind: "api", base_url, token}, or None."""
-        if uid is None:
+        if uid is None and self.env_managed():
             ics = self.env.get(OWNER_ICS_ENV, "").strip()
             token = self.env.get(OWNER_TOKEN_ENV, "").strip()
             base = self.config["canvas"]["base_url"].strip()
@@ -135,10 +148,11 @@ class StudentSync:
         except FileNotFoundError:
             return None
         except OSError as e:
-            log.warning("Student: %s's Canvas file is unreadable (%s)", uid, type(e).__name__)
+            log.warning("Student: %s's Canvas file is unreadable (%s)", uid or "the owner",
+                        type(e).__name__)
             return None
-        data = unseal(canvas.CANVAS_LABEL, uid, raw, self._keys_env(), what="Canvas link",
-                      redo="connect Canvas again")
+        data = unseal(canvas.CANVAS_LABEL, uid or OWNER_UID, raw, self._keys_env(),
+                      what="Canvas link", redo="connect Canvas again")
         if data is None or data.get("kind") not in ("ics", "api"):
             return None
         return data
@@ -151,10 +165,11 @@ class StudentSync:
         school = None
         if found is not None:
             school = urlsplit(found.get("base_url") or found.get("ics_url") or "").hostname
+        env = uid is None and self.env_managed()
         return {"connected": found is not None,
                 "kind": found["kind"] if found else None, "school": school,
-                "managed": "env" if uid is None else "app",
-                "can_store": uid is None or userkeys.secret_problem(self._keys_env()) is None,
+                "managed": "env" if env else "app",
+                "can_store": env or userkeys.secret_problem(self._keys_env()) is None,
                 "gmail": bool(self.config["student"]["gmail"]) and self._inbox(uid) is not None,
                 "last_sync": self.store.last_sync(uid)}
 
@@ -175,26 +190,33 @@ class StudentSync:
         return {"kind": "api", "base_url": canvas.base_url(str(body["base_url"])),
                 "token": token}
 
-    def connect(self, uid: str, record: dict) -> bool:
-        """Seal and store an invited person's link (replacing any). False
-        if they were removed meanwhile; userkeys.KeyProblem 503 without
-        USER_DATA_KEY (nothing written)."""
+    def connect(self, uid, record: dict) -> bool:
+        """Seal and store a person's link (replacing any); `uid` None is
+        the owner's. False if they were removed meanwhile;
+        userkeys.KeyProblem 503 without USER_DATA_KEY (nothing written)."""
         from kwil.tools.google_auth import write_private
         from kwil.userkeys import seal
 
-        text = seal(canvas.CANVAS_LABEL, uid, record, self._keys_env())
-        with self.family.while_listed(uid) as listed:
-            if not listed:
-                return False
+        text = seal(canvas.CANVAS_LABEL, uid or OWNER_UID, record, self._keys_env())
+
+        def write():
             path = self._file(uid)
             path.parent.mkdir(parents=True, exist_ok=True)
             write_private(path, text)
+
+        if uid is None:
+            write()
+        else:
+            with self.family.while_listed(uid) as listed:
+                if not listed:
+                    return False
+                write()
         with self.lock:  # a new link may sync at once
-            self._last.pop(uid, None)
-        log.info("Student: %s connected Canvas (%s)", uid, record["kind"])
+            self._last.pop(uid or "", None)
+        log.info("Student: %s connected Canvas (%s)", uid or "the owner", record["kind"])
         return True
 
-    def disconnect(self, uid: str, delete_items: bool = False) -> dict:
+    def disconnect(self, uid, delete_items: bool = False) -> dict:
         from kwil.family import _unlink
 
         path = self._file(uid)
@@ -204,7 +226,8 @@ class StudentSync:
         if delete_items:
             for source in CANVAS_SOURCES:
                 deleted += self.store.delete_source(uid, source)
-        log.info("Student: %s disconnected Canvas (%d item(s) deleted)", uid, deleted)
+        log.info("Student: %s disconnected Canvas (%d item(s) deleted)", uid or "the owner",
+                 deleted)
         return {"connected": False, "had": had, "deleted": deleted}
 
     # ---------- syncing ----------
@@ -420,12 +443,13 @@ def register(app, family, web, error) -> None:
         ok, uid = person(session)
         if not ok:
             return error("not found", 404)
-        if uid is None:
-            return error(f"on your own server, put {OWNER_ICS_ENV} (or {OWNER_TOKEN_ENV} "
-                         "and [canvas] base_url) in its environment", 409)
-        if userkeys.secret_problem(family.keys.environ) is not None:  # fail closed
+        if uid is None and sync.env_managed():
+            return error(f"your server's environment sets {OWNER_ICS_ENV} / "
+                         f"{OWNER_TOKEN_ENV}, and it wins; remove them there to connect "
+                         "Canvas here", 409)
+        if userkeys.secret_problem(sync._keys_env()) is not None:  # fail closed
             log.warning("Student: can't store %s's Canvas link (%s isn't usable)",
-                        uid, userkeys.ENV)
+                        uid or "the owner", userkeys.ENV)
             return error("this server can't store sign-ins yet (its owner needs "
                          f"to set {userkeys.ENV})", 503)
         body = await body_of(request)
@@ -448,7 +472,7 @@ def register(app, family, web, error) -> None:
         ok, uid = person(session)
         if not ok:
             return error("not found", 404)
-        if uid is None:
+        if uid is None and sync.env_managed():
             return error(f"on your own server, remove {OWNER_ICS_ENV} / {OWNER_TOKEN_ENV} "
                          "from its environment", 409)
         body = await body_of(request)

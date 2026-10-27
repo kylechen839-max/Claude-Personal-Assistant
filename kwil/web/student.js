@@ -6,12 +6,35 @@
 // Everything shown from the server (titles, courses, the school's host) is
 // set as text, never HTML. The feed link and token are sent once and never
 // shown back. It never asks for a school password. Loaded with defer.
+// The guided way in: find the school (/api/student/schools), open its
+// Canvas calendar in a new tab from the tap (so iOS allows it), and Paste
+// the copied feed link back into the field; the person still taps Connect.
 "use strict";
 
 (function (root) {
   const SOURCES = { ics: "Canvas calendar", canvas_api: "Canvas", modules: "Canvas pages",
                     gmail: "Canvas email", screenshot: "Screenshot", manual: "Added by you" };
   let setup = null;
+
+  // A school's Canvas host from a lookup answer or what was typed, checked
+  // as far as a page can (canvas.public_url's rules without the DNS
+  // lookup, which the server does on the pasted link): https on the normal
+  // port, no user:password@, a dotted DNS name (never an IP, localhost or a
+  // LAN-only name). null if not.
+  const LOCAL_TLDS = /\.(local|localhost|internal|lan|home|arpa|test|invalid|example)$/;
+  function schoolHost(value) {
+    let text = String(value || "").trim();
+    if (!text || text.length > 300) return null;
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = "https://" + text;
+    let url;
+    try { url = new URL(text); } catch (e) { return null; }
+    if (url.protocol !== "https:" || url.username || url.password ||
+        (url.port && url.port !== "443")) return null;
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
+        LOCAL_TLDS.test(host)) return null;
+    return host;
+  }
 
   function create(win, doc) {
     const menu = doc.querySelector("details.menu");
@@ -61,7 +84,26 @@
 
     // connect: the calendar feed link, or school + access token
     const connectBox = el("div");
+    // guided: find the school, open its Canvas calendar, paste the link back
+    const guide = el("div");
+    const find = input("text", "Your school's name or Canvas address", "Find your school");
+    const findBtn = button("Find my school", findSchool);
+    const findRow = el("div", undefined, "api-key-row");
+    findRow.append(findBtn);
+    const results = el("div", undefined, "api-key-row");  // a button per school, names as text
+    const chosenHost = el("p", "", "hint");                // the chosen school's host, as text
+    const openCal = button("Open my Canvas calendar", openCalendar);
+    const openHelp = el("p", "Tap Calendar Feed (bottom right), copy the link, come back.",
+                        "hint");
+    const openBox = el("div");
+    openBox.hidden = true;
+    openBox.append(chosenHost, openCal, openHelp);
+    guide.append(find, findRow, results, openBox);
+    let chosen = null;
     const feed = input("url", "https://…/feeds/calendars/user_….ics", "Canvas calendar feed link");
+    const clip = win.navigator && win.navigator.clipboard;
+    const paste = button("Paste", pasteFeed);
+    paste.hidden = !(clip && typeof clip.readText === "function");
     const feedHelp = el("p", "In Canvas, open Calendar, tap Calendar Feed and copy the " +
                         "link. I never ask for your school password.", "hint");
     const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }));
@@ -77,8 +119,8 @@
       connect({ base_url: school.value.trim(), token: token.value.trim() }));
     tokenBox.append(school, token, tokenHelp, connectToken);
     const connectRow = el("div", undefined, "api-key-row");
-    connectRow.append(connectFeed, useToken);
-    connectBox.append(feed, feedHelp, connectRow, tokenBox);
+    connectRow.append(paste, connectFeed, useToken);
+    connectBox.append(guide, feed, feedHelp, connectRow, tokenBox);
 
     const actions = el("div", undefined, "api-key-row");
     const syncBtn = button("Sync now", sync);
@@ -195,6 +237,54 @@
         say("Connected. Syncing…");
         await sync();
       } catch (e) { say("Couldn't connect Canvas. Try again."); }
+    }
+
+    async function findSchool() {
+      const q = find.value.trim().slice(0, 100);
+      if (q.length < 3) { say("Type at least 3 letters of your school's name."); return; }
+      findBtn.disabled = true;
+      try {
+        const r = await call("/api/student/schools?q=" + encodeURIComponent(q));
+        if (!r.ok) { say(r.body.error || "Couldn't look up schools. Try again."); return; }
+        const schools = (Array.isArray(r.body.schools) ? r.body.schools : [])
+          .map((s) => ({ name: String((s && s.name) || "").slice(0, 100),
+                         host: schoolHost(s && s.base_url) }))
+          .filter((s) => s.host).slice(0, 10);
+        results.replaceChildren(...schools.map((s) =>
+          button(s.name || s.host, () => choose(s.host))));
+        say(schools.length ? "" : "I couldn't find that school. Type its Canvas address, " +
+            "e.g. canvas.school.edu.");
+        if (schools.length === 1) choose(schools[0].host);
+      } catch (e) {
+        say("Couldn't look up schools. Try again.");
+      } finally {
+        findBtn.disabled = false;
+      }
+    }
+
+    function choose(host) {
+      chosen = schoolHost(host);
+      openBox.hidden = !chosen;
+      chosenHost.textContent = chosen || "";
+    }
+
+    // straight from the tap (no await before it), or iOS blocks the new tab
+    function openCalendar() {
+      if (!chosen || typeof win.open !== "function") return;
+      win.open("https://" + chosen + "/calendar", "_blank", "noopener");
+    }
+
+    // only fills the field: the person still checks it and taps Connect
+    async function pasteFeed() {
+      let text;
+      try { text = await clip.readText(); } catch (e) { return; }  // denied: paste by hand
+      text = typeof text === "string" ? text.trim() : "";
+      if (!/^(https|webcal):\/\//i.test(text) || text.length > 2000) {
+        say("Copy the Calendar Feed link in Canvas first.");
+        return;
+      }
+      feed.value = text;
+      say("");
     }
 
     async function sync() {

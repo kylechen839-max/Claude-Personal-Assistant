@@ -186,21 +186,153 @@ def test_api_token_link_syncs_the_planner(s, monkeypatch):
     assert {q.url.host for q in fake.requests} == {"canvas.example.edu"}
 
 
-def test_owner_uses_the_environment_never_the_app(s, monkeypatch):
+def test_owner_connects_in_the_app_sealed_at_rest_and_syncs(s):
+    """Behaviour change (owner Canvas connect; it replaces
+    test_owner_uses_the_environment_never_the_app): without CANVAS_ICS_URL /
+    CANVAS_TOKEN the owner pastes the link in the app like an invited
+    person; it is sealed to "owner" in <[student] dir>/canvas.enc."""
     kyle = s.owner()
+    before = kyle.get("/api/student/items").json()["canvas"]
+    assert before["connected"] is False and before["managed"] == "app"
+    assert before["can_store"] is True
+    status = connect(kyle)
+    assert status["connected"] and status["kind"] == "ics" and status["managed"] == "app"
+    assert status["school"] == "canvas.example.edu" and FEED_SECRET not in json.dumps(status)
+    path = s.tmp / "student" / "canvas.enc"
+    raw = path.read_bytes()
+    assert FEED_SECRET.encode() not in raw and b"canvas.example.edu" not in raw
+    if sys.platform != "win32":
+        assert path.stat().st_mode & 0o077 == 0
+    assert userkeys.unseal(canvas.CANVAS_LABEL, "owner", raw, {"USER_DATA_KEY": SECRET}) == {
+        "uid": "owner", "kind": "ics", "ics_url": FEED_URL}
+    assert not list((s.tmp / "users").rglob("canvas.enc"))
+    r = kyle.post("/api/student/sync")
+    assert r.status_code == 200, r.text
+    assert r.json()["errors"] == {} and r.json()["sources"]["ics"]["added"] == 3
+    assert [str(q.url) for q in s.host.requests] == [FEED_URL]
+    assert len(titles(kyle)) == 3 and (s.tmp / "student" / "deadlines.sqlite").exists()
+    # school + access token works for the owner too
+    r = kyle.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                               "token": CANVAS_TOKEN})
+    assert r.status_code == 200 and r.json()["kind"] == "api"
+    assert CANVAS_TOKEN not in r.text and CANVAS_TOKEN.encode() not in path.read_bytes()
+
+
+def test_owner_link_is_checked_like_anyone_elses(s):
+    kyle = s.owner()
+    for body in ({"ics_url": "https://intranet.example.edu/feeds/calendars/user_x.ics"},
+                 {"ics_url": "http://canvas.example.edu/feeds/calendars/user_x.ics"},
+                 {"base_url": "https://localhost", "token": CANVAS_TOKEN}, {}):
+        r = kyle.post("/api/student/canvas", json=body)
+        assert r.status_code == 400 and "user_x" not in r.text
+    assert not (s.tmp / "student" / "canvas.enc").exists()
+
+
+def test_owner_environment_wins_while_it_is_set(s, monkeypatch):
+    kyle = s.owner()
+    connect(kyle, FEED_URL.replace(FEED_SECRET, "A" * 40))  # an app link from before
+    monkeypatch.setenv("CANVAS_ICS_URL", FEED_URL)
     r = kyle.post("/api/student/canvas", json={"ics_url": FEED_URL})
     assert r.status_code == 409 and "CANVAS_ICS_URL" in r.json()["error"]
-    assert kyle.get("/api/student/items").json()["canvas"]["connected"] is False
-    monkeypatch.setenv("CANVAS_ICS_URL", FEED_URL)
     status = kyle.get("/api/student/items").json()["canvas"]
     assert status["connected"] and status["managed"] == "env" and FEED_SECRET not in str(status)
+    assert kyle.post("/api/student/disconnect", json={}).status_code == 409
+    assert (s.tmp / "student" / "canvas.enc").exists()  # not the app's to forget now
     assert kyle.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
-    assert (s.tmp / "student" / "deadlines.sqlite").exists()
+    assert [str(q.url) for q in s.host.requests] == [FEED_URL]  # the env's, not the file's
     assert len(titles(kyle)) == 3
-    # an invited person sees none of the owner's, and the reverse
+    # an invited person sees none of the owner's
     tess, uid = s.member()
     assert titles(tess) == []
-    assert kyle.post("/api/student/disconnect").status_code == 409
+    # a token in the env counts too, even without [canvas] base_url
+    monkeypatch.delenv("CANVAS_ICS_URL")
+    monkeypatch.setenv("CANVAS_TOKEN", CANVAS_TOKEN)
+    assert kyle.post("/api/student/canvas", json={"ics_url": FEED_URL}).status_code == 409
+    assert kyle.get("/api/student/items").json()["canvas"]["managed"] == "env"
+    # once removed there, the app manages the link at once (no restart)
+    monkeypatch.delenv("CANVAS_TOKEN")
+    assert kyle.get("/api/student/items").json()["canvas"]["managed"] == "app"
+    assert kyle.post("/api/student/disconnect", json={}).status_code == 200
+    assert not (s.tmp / "student" / "canvas.enc").exists()
+
+
+def test_owner_disconnect_deletes_the_file_and_what_came_from_canvas(s):
+    kyle = s.owner()
+    connect(kyle)
+    kyle.post("/api/student/sync")
+    assert len(titles(kyle)) == 3
+    r = kyle.post("/api/student/disconnect", json={"delete_items": True})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"connected": False, "had": True, "deleted": 3}
+    assert not (s.tmp / "student" / "canvas.enc").exists()
+    assert titles(kyle) == []
+    status = kyle.get("/api/student/items").json()["canvas"]
+    assert status["connected"] is False and status["managed"] == "app"
+    # kept items, then the per-source purge
+    connect(kyle)  # a new link may sync at once
+    assert kyle.post("/api/student/sync").json()["sources"]["ics"]["added"] == 3
+    assert kyle.post("/api/student/disconnect", json={}).json()["deleted"] == 0
+    assert len(titles(kyle)) == 3
+    assert delete(kyle, "/api/student/source/ics").json() == {"ok": True, "deleted": 3}
+    assert titles(kyle) == []
+
+
+def test_owner_fails_closed_without_user_data_key(s, monkeypatch):
+    kyle = s.owner()
+    monkeypatch.delenv("USER_DATA_KEY")
+    r = kyle.post("/api/student/canvas", json={"ics_url": FEED_URL})
+    assert r.status_code == 503 and "USER_DATA_KEY" in r.json()["error"]
+    assert not (s.tmp / "student" / "canvas.enc").exists()
+    assert kyle.get("/api/student/items").json()["canvas"]["can_store"] is False
+    # a stored link stays shut once the key is gone
+    monkeypatch.setenv("USER_DATA_KEY", SECRET)
+    connect(kyle)
+    monkeypatch.delenv("USER_DATA_KEY")
+    assert kyle.get("/api/student/items").json()["canvas"]["connected"] is False
+
+
+def test_members_never_reach_the_owners_link(s):
+    kyle = s.owner()
+    connect(kyle)
+    owner_file = s.tmp / "student" / "canvas.enc"
+    sealed = owner_file.read_bytes()
+    tess, uid = s.member()
+    status = tess.get("/api/student/items").json()["canvas"]
+    assert status["connected"] is False and status["managed"] == "app"
+    assert tess.post("/api/student/sync").json()["sources"] == {}
+    assert s.host.requests == []
+    # her connect and disconnect touch only her own folder
+    other = FEED_URL.replace(FEED_SECRET, "B" * 40)
+    connect(tess, other)
+    assert tess.post("/api/student/disconnect", json={"delete_items": True}).status_code == 200
+    assert owner_file.read_bytes() == sealed
+    # the owner's sealed file copied into her folder doesn't open as hers
+    (s.tmp / "users" / uid / "canvas.enc").write_bytes(sealed)
+    assert tess.get("/api/student/items").json()["canvas"]["connected"] is False
+    assert s.sync.credentials(uid) is None
+    # and hers never opens as the owner's
+    (s.tmp / "users" / uid / "canvas.enc").unlink()
+    connect(tess, other)
+    owner_file.write_bytes((s.tmp / "users" / uid / "canvas.enc").read_bytes())
+    assert s.sync.credentials(None) is None
+
+
+def test_owner_connect_logs_no_link_or_token(s, caplog):
+    caplog.set_level(logging.DEBUG)
+    kyle = s.owner()
+    connect(kyle)
+    kyle.post("/api/student/sync")
+    kyle.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                           "token": CANVAS_TOKEN})
+    kyle.post("/api/student/disconnect", json={"delete_items": True})
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("kwil"))
+    for plain in (FEED_SECRET, FEED_URL, CANVAS_TOKEN, "canvas.example.edu", "Problem Set"):
+        assert plain not in ours
+    info = [r.getMessage() for r in caplog.records
+            if r.name == "kwil.student_web" and r.levelno >= logging.INFO]
+    assert "Student: the owner connected Canvas (ics)" in info
+    assert "Student: the owner connected Canvas (api)" in info
+    assert any(m.startswith("Student: the owner disconnected Canvas") for m in info)
 
 
 def test_each_person_reaches_only_their_own_items(s, monkeypatch):

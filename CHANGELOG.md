@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The owner can connect Canvas in the app (feed link or access token, sealed
+  on the disk) instead of CANVAS_ICS_URL / CANVAS_TOKEN in the environment;
+  the env still wins while set. A guided Canvas connect for everyone: find
+  your school, open its Canvas calendar, Paste the feed link.
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.

@@ -860,10 +860,23 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 ## Student deadlines from Canvas (optional, ~10 min)
 Needs a real Canvas account. The **School deadlines** card is in the
 phone app's menu.
-- [ ] In Canvas (browser): **Calendar** -> **Calendar Feed**, copy the link.
-      Put it in `.env` as `CANVAS_ICS_URL=...` (Render: Environment), restart.
-- [ ] Phone app -> menu -> **School deadlines** -> **Sync now**.
-  - Should: "Found N new."; "What I captured" lists your real assignments
+- [ ] If `CANVAS_ICS_URL` / `CANVAS_TOKEN` are in Render's Environment (or
+      `.env`): open the card first.
+  - Should: "Canvas connected." with no link form and no **Disconnect**.
+    Then delete both (and `CANVAS_BASE_URL`) there and save.
+- [ ] On the iPhone app (Home Screen), signed in as you: menu -> **School
+      deadlines**. Type your school's name, tap **Find my school**, pick
+      it, tap **Open my Canvas calendar**.
+  - Should: Canvas's calendar opens in a new tab (not blocked); sign in
+    there if asked.
+- [ ] In Canvas tap **Calendar Feed** (bottom right), copy the link, switch
+      back to Kwil and tap **Paste**.
+  - Should: iOS shows its "Paste" bubble or asks to allow; the link fills
+    the field and nothing connects yet. Tap **Don't Allow** once: nothing
+    happens and no error. Then tap **Connect Canvas**: "Connected.
+    Syncing…", then "Found N new.".
+- [ ] Look at "What I captured", then tap **Sync now**.
+  - Should: it lists your real assignments
     and exams with the right day and time in your time zone (check two
     against Canvas). Tap **Sync now** again: "synced recently".
 - [ ] Ask "What's due this week?" by voice.
