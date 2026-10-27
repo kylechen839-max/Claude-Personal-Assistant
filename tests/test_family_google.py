@@ -418,6 +418,20 @@ def test_disconnect_goes_ahead_when_the_revoke_fails(g, monkeypatch, caplog):
     assert saved["refresh_token"] not in caplog.text and saved["token"] not in caplog.text
 
 
+@pytest.mark.parametrize("junk", ["[]", '"x"'])
+def test_disconnect_still_deletes_a_corrupt_token_file(g, monkeypatch, junk):
+    from kwil import account
+
+    mom, mom_id = g.member("Mom")
+    connected(g, mom, mom_id, "mom")
+    g.fam.google_token(mom_id).write_text(junk, encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(account, "revoke_google", calls.append)
+    r = mom.post("/api/google/disconnect", json={})
+    assert r.status_code == 200 and r.json()["connected"] is False
+    assert calls == [] and not g.fam.google_token(mom_id).exists()
+
+
 def test_removing_a_member_deletes_their_token(g, monkeypatch):
     from kwil import account
 

@@ -87,9 +87,11 @@ def revoke_google_grant(family, uid: str, revoke: Callable[[str], None] | None =
 
     try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
         info = load_token_info(family.google_token(uid), environ={})
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError, TypeError):  # e.g. a file holding []
         info = None
-    token = (info or {}).get("refresh_token") or (info or {}).get("token")
+    if not isinstance(info, dict):
+        info = {}
+    token = info.get("refresh_token") or info.get("token")
     if not token:
         return
     try:
