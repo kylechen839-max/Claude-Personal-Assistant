@@ -40,6 +40,7 @@ import ipaddress
 import itertools
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -546,34 +547,57 @@ THEME_BG = "#f5f7fa"
 _SHAFT = "#b7d0ec"
 
 
-def _icon_marks() -> list[tuple[float, float, float, float, float, str, float]]:
-    """The logo, "a feather made of sound waves": round-capped strokes on a
-    512 grid, (x0, y0, x1, y1, width, colour, opacity). A pale shaft runs
-    bottom left to top right; bars across it are the barbs, their lengths a
-    feather's outline and a sound wave's envelope, fading toward both ends.
+def _icon_marks() -> list[tuple[str, list[tuple[float, float]], float, str, float]]:
+    """The logo, a quill whose barbs are a sound wave: shapes on a 512 grid,
+    (kind, points, width, colour, opacity). "line" is a round-capped,
+    round-joined polyline; "fill" is a filled polygon with its edge stroked
+    at `width`. A pale shaft bows gently from the nib (bottom left) to the
+    tip (top right); swept-back barbs follow a feather's outline and a sound
+    wave's envelope, fading toward both ends; a plain triangle is the nib.
     ICON_SVG and icon_png both draw this list, so they can't drift apart."""
-    x0, y0, x1, y1 = 86.0, 444.0, 430.0, 82.0
+    x0, y0, x1, y1 = 70.0, 456.0, 436.0, 74.0
     dx, dy = x1 - x0, y1 - y0
-    length = (dx * dx + dy * dy) ** 0.5
+    length = math.hypot(dx, dy)
     ux, uy = dx / length, dy / length
     nx, ny = -uy, ux
-    half = (14, 36, 62, 86, 100, 100, 86, 62, 36, 17)
-    fade = (.55, .7, .85, 1, 1, 1, 1, .9, .75, .6)
-    marks = [(x0, y0, x1, y1, 12.0, _SHAFT, 1.0)]
+    bow = 26.0
+
+    def at(t):
+        b = bow * math.sin(math.pi * t)
+        return x0 + dx * t + nx * b, y0 + dy * t + ny * b
+
+    def along(t, e=1e-3):
+        (ax, ay), (bx, by) = at(max(0.0, t - e)), at(min(1.0, t + e))
+        d = math.hypot(bx - ax, by - ay)
+        return (bx - ax) / d, (by - ay) / d
+
+    marks = [("line", [at(i / 24) for i in range(25)], 11.0, _SHAFT, 1.0)]
+    half = (18, 40, 62, 80, 90, 90, 82, 66, 44, 22)
+    fade = (.6, .75, .9, 1, 1, 1, 1, .9, .75, .6)
+    ca, sa = math.cos(0.55), math.sin(0.55)  # barbs sweep back toward the tip
     for i, (h, op) in enumerate(zip(half, fade)):
-        t = 0.16 + 0.8 * i / (len(half) - 1)
-        cx, cy = x0 + dx * t, y0 + dy * t
-        marks.append((cx + nx * h, cy + ny * h, cx - nx * h, cy - ny * h,
-                      19.0, "#ffffff", op))
+        t = 0.30 + 0.67 * i / (len(half) - 1)
+        cx, cy = at(t)
+        tx, ty = along(t)
+        px, py = -ty, tx
+        left = (cx + (px * ca + tx * sa) * h, cy + (py * ca + ty * sa) * h)
+        right = (cx + (-px * ca + tx * sa) * h, cy + (-py * ca + ty * sa) * h)
+        marks.append(("line", [left, (cx, cy), right], 17.0, "#ffffff", op))
+    tip = (x0 - ux * 18, y0 - uy * 18)
+    bx, by = x0 + ux * 44, y0 + uy * 44
+    marks.append(("fill", [tip, (bx + nx * 14, by + ny * 14),
+                           (bx - nx * 14, by - ny * 14)], 4.0, "#ffffff", 1.0))
     return marks
 
 
 def _icon_svg() -> str:
-    body = "".join(
-        f'<path d="M{a:.1f} {b:.1f}L{c:.1f} {d:.1f}" stroke="{col}" '
-        f'stroke-width="{w:g}" stroke-linecap="round"'
-        + (f' opacity="{op:g}"' if op < 1 else "") + "/>"
-        for a, b, c, d, w, col, op in _icon_marks())
+    def path(kind, pts, w, col, op):
+        d = "M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+        paint = (f'{d}Z" fill="{col}"' if kind == "fill" else f'{d}" fill="none"')
+        return (f'<path d="{paint} stroke="{col}" stroke-width="{w:g}" '
+                'stroke-linecap="round" stroke-linejoin="round"'
+                + (f' opacity="{op:g}"' if op < 1 else "") + "/>")
+    body = "".join(path(*mark) for mark in _icon_marks())
     return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
             '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
             f'<stop offset="0" stop-color="{ICON_TOP}"/>'
@@ -590,7 +614,7 @@ def _rgb(hexcolour: str) -> np.ndarray:
 
 
 def icon_png(size: int) -> bytes:
-    """The app icon (the sound-wave feather on the blue gradient) as a PNG,
+    """The app icon (the sound-wave quill on the blue gradient) as a PNG,
     drawn from _icon_marks with 3x supersampling. Full bleed: the PNG is
     also the maskable icon, and iOS rounds the corners itself."""
     ss = 3
@@ -599,10 +623,19 @@ def icon_png(size: int) -> bytes:
     y, x = (np.mgrid[0:n, 0:n].astype(np.float32) + 0.5) * scale
     t = np.clip((x + y) / 1024.0, 0, 1)[..., None]
     img = _rgb(ICON_TOP) * (1 - t) + _rgb(ICON_BOTTOM) * t
-    for x0, y0, x1, y1, width, colour, opacity in _icon_marks():
-        vx, vy = x1 - x0, y1 - y0
-        k = np.clip(((x - x0) * vx + (y - y0) * vy) / (vx * vx + vy * vy), 0, 1)
-        dist = np.hypot(x - (x0 + k * vx), y - (y0 + k * vy))
+    for kind, pts, width, colour, opacity in _icon_marks():
+        # distance from each pixel to the shape's outline (or its edges)
+        dist = np.full(x.shape, np.inf, np.float32)
+        edges = list(zip(pts, pts[1:] + pts[:1] if kind == "fill" else pts[1:]))
+        for (x0, y0), (x1, y1) in edges:
+            vx, vy = x1 - x0, y1 - y0
+            k = np.clip(((x - x0) * vx + (y - y0) * vy) / (vx * vx + vy * vy), 0, 1)
+            dist = np.minimum(dist, np.hypot(x - (x0 + k * vx), y - (y0 + k * vy)))
+        if kind == "fill":  # inside a convex polygon: every edge's cross has one sign
+            sides = [np.sign((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0))
+                     for (x0, y0), (x1, y1) in edges]
+            inside = np.abs(sum(sides)) == len(sides)
+            dist = np.where(inside, 0, dist)
         cover = np.clip(width / 2 - dist + 0.5 * scale, 0, 1)[..., None] * opacity
         img = img * (1 - cover) + _rgb(colour) * cover
     img = img.reshape(size, ss, size, ss, 3).mean(axis=(1, 3))

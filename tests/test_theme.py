@@ -96,14 +96,21 @@ def test_icons_use_the_accent():
                    for i, a in enumerate(px))
     assert near(pixel(0, 0), webapp.ICON_TOP, 4)
     assert near(pixel(size - 1, size - 1), webapp.ICON_BOTTOM, 4)
-    # the feather's middle is drawn in white
-    assert max(pixel(size // 2, size // 2)) > 200
+    # the middle barb meets the shaft in white, drawn where _icon_marks puts it
+    bx, by = webapp._icon_marks()[5][1][1]
+    assert min(pixel(int(by * size / 512), int(bx * size / 512))) > 200
+    # the nib's centre is white too
+    nib = webapp._icon_marks()[-1][1]
+    nx, ny = (sum(p[0] for p in nib) / 3, sum(p[1] for p in nib) / 3)
+    assert min(pixel(int(ny * size / 512), int(nx * size / 512))) > 200
 
 
 def test_icon_svg_and_png_draw_the_same_marks():
     marks = webapp._icon_marks()
-    assert len(marks) == 11  # the shaft and ten barbs
+    # the shaft, ten swept barbs and the nib
+    assert [kind for kind, *_ in marks] == ["line"] * 11 + ["fill"]
     assert webapp.ICON_SVG.count("<path") == len(marks)
+    assert webapp.ICON_SVG.count('fill="none"') == 11
 
 
 @pytest.mark.parametrize("sheet", ["app.css", "site.css"])
