@@ -23,8 +23,9 @@ The PC side:
       --to https://<cloud host> --user <their id u_..., or name> [--dry-run]
 
 copies the database first (backup.copy_database: a running PC instance is
-never disturbed), reads every conversation through the store's export,
-and posts them in batches under BATCH_BYTES. It signs in with the cloud's
+never disturbed) into a private temp folder, deleted afterwards (if it
+can't be, e.g. a file Windows kept locked, it prints the folder's path and
+exits 1), reads every conversation through the store's export, and posts them in batches under BATCH_BYTES. It signs in with the cloud's
 WEB_TOKEN from the KWIL_CLOUD_TOKEN environment variable, sent only as an
 `Authorization: Bearer` header, never in a URL, never printed. It prints
 counts only. `--user` is their id or, looked up in GET /api/users, the
@@ -146,29 +147,39 @@ def find_member(http, origin: str, user: str, headers: dict) -> str:
     return found[0]["id"]
 
 
-def read_conversations(path: Path) -> list[dict]:
+def read_conversations(path: Path, copy: Path) -> list[dict]:
     """Every conversation in a history database, as history.export's JSON,
-    read from a private copy (the original is opened read-only, once)."""
+    read from a private copy at `copy` (the original is opened read-only,
+    once). The caller deletes the copy's folder."""
     from kwil import backup, history
 
-    folder = Path(tempfile.mkdtemp(prefix="kwil-import-"))
+    backup.copy_database(path, copy)
+    store = history.HistoryStore(copy)  # no retention or size limit: nothing pruned
     try:
-        copy = folder / "history.sqlite"
-        backup.copy_database(path, copy)
-        store = history.HistoryStore(copy)  # no retention or size limit: nothing pruned
-        try:
-            out, offset = [], 0
-            while True:
-                page = store.list(limit=PAGE, offset=offset, archived=None)
-                for conv in page:
-                    out.append(json.loads(history.export(store.get(conv["id"]), "json")))
-                if len(page) < PAGE:
-                    return out
-                offset += PAGE
-        finally:
-            store.close()
+        out, offset = [], 0
+        while True:
+            page = store.list(limit=PAGE, offset=offset, archived=None)
+            for conv in page:
+                out.append(json.loads(history.export(store.get(conv["id"]), "json")))
+            if len(page) < PAGE:
+                return out
+            offset += PAGE
     finally:
-        backup.cleanup(folder)
+        store.close()
+
+
+def remove_copy(folder: Path, out) -> bool:
+    """Delete the private copy's folder; False (and its path printed, so
+    it can be deleted by hand) if it is still there, e.g. a file Windows
+    kept locked. backup.sweep doesn't look in the system temp folder."""
+    from kwil import backup
+
+    backup.cleanup(folder)
+    if not folder.exists():
+        return True
+    out(f"Warning: couldn't delete the temporary copy of the history in "
+        f"{folder}; delete that folder yourself.")
+    return False
 
 
 def batches(conversations: list[dict], limit: int = BATCH_BYTES):
@@ -231,11 +242,17 @@ def main(argv=None, environ=None, out=print) -> int:
     if not source.is_file():
         out("Error: --from isn't a file")
         return 2
+    folder = Path(tempfile.mkdtemp(prefix="kwil-import-"))
     try:
-        conversations = read_conversations(source)
+        conversations = read_conversations(source, folder / "history.sqlite")
     except Exception as e:  # noqa: BLE001 - a wrong or damaged file
-        out(f"Error: couldn't read that history database ({type(e).__name__})")
+        conversations = None
+        failure = type(e).__name__
+    removed = remove_copy(folder, out)
+    if conversations is None:
+        out(f"Error: couldn't read that history database ({failure})")
         return 1
+    status = 0 if removed else 1  # the exit code when everything else worked
     bodies, too_big = batches(conversations, BATCH_BYTES)
     size = sum(len(b) for b in bodies) / 1_000_000
     out(f"Read {len(conversations)} conversation(s), {size:.1f} MB; "
@@ -244,7 +261,7 @@ def main(argv=None, environ=None, out=print) -> int:
         out(f"Warning: {too_big} conversation(s) are too big to send and are left out.")
     if args.dry_run:
         out("Dry run: nothing was sent.")
-        return 0
+        return status
     import httpx
 
     imported = skipped = 0
@@ -278,7 +295,7 @@ def main(argv=None, environ=None, out=print) -> int:
             out(f"Batch {n} of {len(bodies)}: imported {result.get('imported', 0)}, "
                 f"skipped {result.get('skipped', 0)}.")
     out(f"Done: imported {imported}, skipped {skipped} (already there).")
-    return 1 if too_big else 0
+    return 1 if too_big else status
 
 
 if __name__ == "__main__":

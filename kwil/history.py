@@ -699,8 +699,15 @@ class HistoryStore:
             else:  # never had an event: nothing to tell the other backends
                 self._con.execute("DELETE FROM conversations WHERE id = ?",
                                   (conversation_id,))
+            self._imported_gone(conversation_id)
             self._purge()
         return vectors
+
+    def _imported_gone(self, cid: str) -> None:
+        """A deleted conversation that came from an import (even one cut
+        off midway) is never imported again: its mark becomes "done"."""
+        self._con.execute("UPDATE history_meta SET value = 'done' WHERE key = ?",
+                          ("import:" + cid,))
 
     def _purge(self) -> None:
         """After a delete: drop the deleted text from the search index's
@@ -764,7 +771,8 @@ class HistoryStore:
         ids come from the salt, so an import cut off by a crash is finished
         by the next one without writing anything twice, and one imported
         before is skipped even after it was deleted here (deleted means
-        gone: running the import again doesn't bring it back)."""
+        gone: running the import again doesn't bring it back; delete and
+        prune set the mark of a half-written one to "done" too)."""
         cid, key = plan["id"], "import:" + plan["id"]
         salt = self._meta_get(key)
         if salt == "done":
@@ -843,6 +851,7 @@ class HistoryStore:
             self._record("delete", cid, {})
         else:
             self._con.execute("DELETE FROM conversations WHERE id = ?", (cid,))
+        self._imported_gone(cid)
 
     def _shrink(self, limit: float) -> int:
         """Delete the oldest unpinned conversations until the database is
