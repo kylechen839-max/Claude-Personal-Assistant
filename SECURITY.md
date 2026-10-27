@@ -573,7 +573,8 @@ server (`[family] enabled`, on in the server profile).
   `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
   never read for them, and `save_token=False`, so a missing or revoked
   token is an error, never a sign-in started on the server. Kyle's tools
-  read only his own token, never `<dir>`. The tools go only into their own
+  read only his own token (`/data/google_token.json` once he connects in
+  the app, else `GOOGLE_TOKEN_JSON`; below), never `<dir>`. The tools go only into their own
   registry (shared by their sessions; added before stale ones are removed,
   so a running turn never sees none), with the descriptions about them,
   not Kyle; the calendar is their `primary`. Gmail stays drafts-only
@@ -947,6 +948,37 @@ a PKCE challenge, `access_type=offline` and the redirect
   a different value; it names the variables, never their values.
 - Without a saved token the Google tools stay off: Calendar would otherwise
   start a browser sign-in on the PC.
+- **The cloud owner's own Google** (`[webapp] owner_google`, on in the
+  server profile). Kyle, signed in with `WEB_TOKEN` (owner-only:
+  `s.user is None`; a family member's Connect and Disconnect act only on
+  their own account), uses the same flow (state, binding cookie, PKCE,
+  one `PUBLIC_ORIGIN`). It signs in with `[calendar] credentials` only if
+  that is a Web client, else the family's Web client
+  (`GOOGLE_WEB_CLIENT_JSON`), never the Desktop `GOOGLE_CLIENT_JSON`; the
+  saved token carries that client's id and secret, so a refresh never
+  borrows another client. The token goes to `/data/google_token.json`
+  (`write_private`); it is outside `/data/users`, so no "Download my data"
+  export includes it, and the owner's backup is an allowlist without
+  tokens. While a readable token is there it wins over
+  `GOOGLE_TOKEN_JSON` (`google_auth.owner_environ` hides that variable
+  from Calendar, Gmail, the student sync and `--check`); refreshes stay
+  in memory (`save_token` off), and an expired or revoked one says to
+  reconnect in the app. An unreadable file counts as not connected, so
+  `GOOGLE_TOKEN_JSON` keeps working. **Disconnect** (only when that file
+  exists; otherwise 404 as before) revokes the grant at Google outside
+  the lock (best effort, `account.revoke_google_token_file`, the helper
+  family members' Disconnect uses), deletes the file, and rebuilds
+  Calendar and Gmail on `GOOGLE_TOKEN_JSON` (or removes them without it),
+  adding before removing in the shared registry. The confirm question
+  warns that Google may end the PC copy's grant too: grants of one user to
+  one Google Cloud project can be revoked together (not confirmed).
+  Deliberate non-fixes: the token is not sealed (`userkeys.seal`) like
+  invited people's Anthropic keys, so anyone with the disk (Render, its
+  daily snapshot until it expires) can read it, as with family members'
+  Google tokens; and `cli.main` does not treat `owner_google` like
+  `google_connect` (that refusal of inherited secrets is for separate
+  instances, and Render sets `GOOGLE_TOKEN_JSON` in the process
+  environment on purpose).
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
@@ -1114,9 +1146,22 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
   Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
   (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
-  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
-  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
-  the owner's connect route is a 409. Neither is ever returned (the status
+  and writes nothing. The owner connects in the app the same way: sealed
+  under the same label with the id `"owner"` inside (push.py's
+  convention; invited ids are `u_...`, so a member's file never opens as
+  the owner's or the reverse) in `<[student] dir>/canvas.enc`, with the
+  same 503 without `USER_DATA_KEY`, the same `public_url` checks, and
+  **Disconnect** deleting the file. A separate instance can't share that
+  folder (`[student]` is turned off for one that keeps the default
+  `dir`). The older way still wins while it is set: `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` in the environment (both in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS`), read on every request; then the owner's connect
+  route is a 409 and the sealed file, if any, is not read, but
+  disconnect still deletes that file (status `app_link`), so an older
+  link can't come back silently once the env is removed; with no file it
+  is a 409, and the env is never touched. The routes take no id: each session reaches only its own link
+  (the owner's session the owner's file, a member's their own folder).
+  Neither the link nor the token is ever returned (the status
   says only the kind and the school's host), logged, or exported. The
   redacting log formatter masks `/feeds/calendars/...` paths and Canvas
   token shapes too, because httpx logs request URLs at INFO (kept at
@@ -1134,6 +1179,19 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   the address would need a custom transport, and the fetch is a GET whose
   answer is only parsed as a calendar or Canvas JSON (nothing else of it
   is shown or stored).
+- **The guided connect (student.js).** **Open my Canvas calendar** opens
+  `https://<host>/calendar` with `noopener`, only for a host from the
+  school lookup that passes a page-side copy of the `public_url` rules
+  (https, port 443, no `user:pass@`, a dotted DNS name, never an IP
+  literal, `localhost` or a LAN-only suffix such as `.local`); the page
+  can't resolve DNS, so the server's check of the pasted link stays the
+  real one. A Canvas address typed in the search box (`https://...`, or a
+  `canvas.` / `.instructure.` host) is used directly after the same check;
+  anything else goes to the lookup. School names are shown as text.
+  **Paste** reads the clipboard only on its tap (`navigator.clipboard.readText`), fills the field only
+  with an `https://` / `webcal://` link, says nothing if permission is
+  denied, and never submits: the person still taps Connect. No inline
+  handlers (the CSP is unchanged).
 - **Untrusted content.** Feed titles, planner items, module pages and
   emails are written by other people: `list_deadlines` is
   `untrusted_output` (and `private`), so once it ran, `add_deadline` and
@@ -1149,7 +1207,8 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   after every delete (a test reads the file and its WAL for the title).
   A deleted synced item leaves only a SHA-256 of its feed key so the next
   sync doesn't bring it back. An invited person's `deadlines.sqlite` and
-  `canvas.enc` go with their folder on removal or "Delete my account";
+  `canvas.enc` go with their folder on removal or "Delete my account"
+  (the owner's `canvas.enc` is deleted by **Disconnect Canvas**);
   their export holds the deadlines, never the link. Every connection is
   closed after each call (nothing holds the file open on Windows), and a
   write for someone just removed is refused under Family's lock, so a sync

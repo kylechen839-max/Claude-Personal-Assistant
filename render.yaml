@@ -41,6 +41,8 @@ services:
       # Assistant works the same way: no HA_TOKEN/HA_URL needed here.
       - key: NOTION_TOKEN
         sync: false
+      # Optional: the owner's ⚙ -> Connect Google account saves a token to
+      # /data/google_token.json, which wins; these stay the fallback.
       - key: GOOGLE_TOKEN_JSON      # the whole contents of token.json
         sync: false
       - key: GOOGLE_CLIENT_JSON     # the whole contents of credentials.json
@@ -69,8 +71,8 @@ services:
         value: /data
       - key: HISTORY_PATH
         value: /data/history.sqlite
-      # Family members (README "Invite family"): their own Google sign-in
-      # from their phones needs this service's address and a *Web
+      # Family members (README "Invite family") and the owner: the Google
+      # sign-in from the phone needs this service's address and a *Web
       # application* OAuth client whose redirect URI is
       # <PUBLIC_ORIGIN>/google/callback. Left empty, invites still work and
       # the "Connect Google account" button stays hidden.
@@ -90,9 +92,11 @@ services:
         sync: false
       - key: NOTION_OAUTH_CLIENT_SECRET
         sync: false
-      # Your own Canvas for school deadlines (README "Student deadlines"):
-      # the Calendar Feed link (it is a secret), or an access token with
-      # CANVAS_BASE_URL. Left empty, only invited people's links are used.
+      # Optional, the older way: your own Canvas for school deadlines (README
+      # "Student deadlines"), the Calendar Feed link (it is a secret), or an
+      # access token with CANVAS_BASE_URL. Leave them empty and connect
+      # Canvas in the app's School deadlines card instead (stored encrypted
+      # on the disk); while either is set, it wins over the app.
       - key: CANVAS_ICS_URL
         sync: false
       - key: CANVAS_TOKEN

@@ -585,9 +585,29 @@ for all of this except the Google sign-in.
       into `GOOGLE_TOKEN_JSON` in Render.
   - Should: a week later the calendar still works (in Testing mode it would
     stop after 7 days).
+- [ ] Your own Google in the app: open https://heykwil.com signed in with
+      `WEB_TOKEN`, tap ⚙ -> **Connect Google account**, sign in and allow
+      every box. Ask "What's on my calendar tomorrow?" and "Any new email
+      today?".
+  - Should: Google's page names Kwil and comes back to the chat page
+    (no "redirect_uri_mismatch"); no welcome guide card appears for you;
+    the answers are right; Render's log has "Google account connected"
+    and no token or code; in ⚙ the button now says "Reconnect Google
+    account" and **Disconnect Google account** shows.
+- [ ] Tap **Disconnect Google account**, read the question, answer OK.
+  - Should: the question warns that it may also sign out Kwil on the PC;
+    afterwards "Google account disconnected.", Kwil is gone from (or no
+    longer lists that grant at) myaccount.google.com/permissions, the
+    calendar question still works if `GOOGLE_TOKEN_JSON` is set (else
+    Kwil says it has no calendar), and Disconnect is hidden again. Then
+    check Calendar on the PC; if it stopped, run
+    `python -m kwil.tools.google_auth` there, and connect again on the
+    server. `GOOGLE_TOKEN_JSON` is that same PC token, so if Google ended
+    it, also paste the new `token.json` into `GOOGLE_TOKEN_JSON` in Render.
 - [ ] Render Shell: `python -m kwil --check`.
-  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
-    time zone, Whisper model and Piper voice OK.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, "Google account:
+    connected in the app" (or `GOOGLE_TOKEN_JSON`), the time zone,
+    Whisper model and Piper voice OK.
 - [ ] In Safari on the iPhone (Wi-Fi off), open
       `https://hey-claude.onrender.com`. Enter a wrong token, then the
       `WEB_TOKEN` from Render -> Environment.
@@ -860,10 +880,23 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
 ## Student deadlines from Canvas (optional, ~10 min)
 Needs a real Canvas account. The **School deadlines** card is in the
 phone app's menu.
-- [ ] In Canvas (browser): **Calendar** -> **Calendar Feed**, copy the link.
-      Put it in `.env` as `CANVAS_ICS_URL=...` (Render: Environment), restart.
-- [ ] Phone app -> menu -> **School deadlines** -> **Sync now**.
-  - Should: "Found N new."; "What I captured" lists your real assignments
+- [ ] If `CANVAS_ICS_URL` / `CANVAS_TOKEN` are in Render's Environment (or
+      `.env`): open the card first.
+  - Should: "Canvas connected." with no link form and no **Disconnect**.
+    Then delete both (and `CANVAS_BASE_URL`) there and save.
+- [ ] On the iPhone app (Home Screen), signed in as you: menu -> **School
+      deadlines**. Type your school's name, tap **Find my school**, pick
+      it, tap **Open my Canvas calendar**.
+  - Should: Canvas's calendar opens in a new tab (not blocked); sign in
+    there if asked.
+- [ ] In Canvas tap **Calendar Feed** (bottom right), copy the link, switch
+      back to Kwil and tap **Paste**.
+  - Should: iOS shows its "Paste" bubble or asks to allow; the link fills
+    the field and nothing connects yet. Tap **Don't Allow** once: nothing
+    happens and no error. Then tap **Connect Canvas**: "Connected.
+    Syncing…", then "Found N new.".
+- [ ] Look at "What I captured", then tap **Sync now**.
+  - Should: it lists your real assignments
     and exams with the right day and time in your time zone (check two
     against Canvas). Tap **Sync now** again: "synced recently".
 - [ ] Ask "What's due this week?" by voice.

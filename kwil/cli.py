@@ -643,23 +643,29 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
 def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> None:
     """Calendar and Gmail tools. With [webapp] google_connect (the phone's
     "connect Google" button) only once that sign-in saved a token: without
-    one, Calendar would start a browser sign-in on this computer."""
+    one, Calendar would start a browser sign-in on this computer. With
+    [webapp] owner_google (the cloud server) the token the owner connected
+    in the app wins over GOOGLE_TOKEN_JSON, which is the fallback
+    (google_auth.owner_environ)."""
     cal = config["calendar"]
     if not cal["enabled"]:
         return
     from kwil.tools.calendar import GoogleCalendar, has_credentials
-    from kwil.tools.google_auth import load_token_info
+    from kwil.tools.google_auth import load_token_info, owner_connected, owner_environ
 
-    if config["webapp"]["google_connect"]:
+    environ = owner_environ(config)
+    if config["webapp"]["google_connect"] or config["webapp"]["owner_google"]:
         try:
-            ready = load_token_info(cal["token"]) is not None
+            ready = load_token_info(cal["token"], environ) is not None
         except (OSError, ValueError):
             ready = False
         if not ready:
             output_fn("(Google tools off until the phone app's "
-                      "\"connect Google\" sign-in finishes)")
+                      "\"connect Google\" sign-in finishes"
+                      + (" or GOOGLE_TOKEN_JSON is set)"
+                         if config["webapp"]["owner_google"] else ")"))
             return
-    elif not has_credentials(cal["credentials"], cal["token"]):
+    elif not has_credentials(cal["credentials"], cal["token"], environ):
         output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
                   "GOOGLE_TOKEN_JSON not set)")
         register_gmail(registry, config, output_fn)
@@ -668,6 +674,8 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
         credentials_path=cal["credentials"], token_path=cal["token"],
         calendar_id=cal["calendar_id"], timezone=config["assistant"]["timezone"] or None,
         save_token=cal["save_token"], color_labels=cal["color_labels"],
+        # connected in the app: errors say to reconnect there
+        environ=environ, in_app=owner_connected(config),
         extras=calendar_extras(config, output_fn)).tools())
     register_gmail(registry, config, output_fn)
 
@@ -678,13 +686,14 @@ def calendar_extras(config: dict, output_fn=print) -> bool:
     and this says how to add them."""
     from kwil.tools.google_auth import (CALENDAR_EXTRA_SCOPES,
                                              SIGN_IN_COMMAND, load_token_info,
-                                             missing_scopes)
+                                             missing_scopes, owner_environ)
 
     token = config["calendar"]["token"]
+    environ = owner_environ(config)
     try:
-        if load_token_info(token) is None:
+        if load_token_info(token, environ) is None:
             return False  # no sign-in yet (google_auth asks for them)
-        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, token)
+        lacking = missing_scopes(CALENDAR_EXTRA_SCOPES, token, environ)
     except (OSError, ValueError):
         return False
     if lacking:
@@ -810,15 +819,17 @@ def owner_gmail(config: dict, output_fn=print):
     Google sign-in, or the Gmail scopes not granted (said on output_fn).
     Also read by student_web's sync (Canvas emails, read-only)."""
     from kwil.tools.google_auth import (GMAIL_SCOPES, SIGN_IN_COMMAND,
-                                             load_token_info, missing_scopes)
+                                             load_token_info, missing_scopes,
+                                             owner_connected, owner_environ)
 
     cal = config["calendar"]
     if not config["gmail"]["enabled"] or not cal["enabled"]:
         return None
+    environ = owner_environ(config)  # the app's connected token wins on the server
     try:
-        if load_token_info(cal["token"]) is None:
+        if load_token_info(cal["token"], environ) is None:
             return None  # no Google sign-in at all (Calendar says so)
-        lacking = missing_scopes(GMAIL_SCOPES, cal["token"])
+        lacking = missing_scopes(GMAIL_SCOPES, cal["token"], environ)
     except (OSError, ValueError) as e:
         output_fn(f"(Gmail tools off: Google token unreadable: {e})")
         return None
@@ -830,7 +841,8 @@ def owner_gmail(config: dict, output_fn=print):
 
     return GmailInbox(credentials_path=cal["credentials"], token_path=cal["token"],
                       timezone=config["assistant"]["timezone"] or None,
-                      max_summary=config["gmail"]["max_summary"])
+                      max_summary=config["gmail"]["max_summary"],
+                      environ=environ, in_app=owner_connected(config))
 
 
 def register_student(registry: ToolRegistry, config: dict) -> bool:

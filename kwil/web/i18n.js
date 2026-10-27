@@ -131,6 +131,18 @@
     "In Canvas, open Calendar, tap Calendar Feed and copy the link. I never ask for your school password.":
       "在 Canvas 里打开“日历”，点“日历订阅”，复制链接。我绝不会问你的学校密码。",
     "Connect Canvas": "连接 Canvas",
+    "Your school's name or Canvas address": "你学校的名字或 Canvas 地址",
+    "Find your school": "查找你的学校",
+    "Find my school": "查找我的学校",
+    "Open my Canvas calendar": "打开我的 Canvas 日历",
+    "Tap Calendar Feed (bottom right), copy the link, come back.":
+      "点右下角的“日历订阅”，复制链接，再回到这里。",
+    "Paste": "粘贴",
+    "Type at least 3 letters of your school's name.": "请至少输入学校名字的 3 个字母。",
+    "Couldn't look up schools. Try again.": "没能查找学校，请再试一次。",
+    "I couldn't find that school. Type its Canvas address, e.g. canvas.school.edu.":
+      "没有找到这所学校。请输入它的 Canvas 地址，例如 canvas.school.edu。",
+    "Copy the Calendar Feed link in Canvas first.": "请先在 Canvas 里复制“日历订阅”链接。",
     "Use an access token instead": "改用访问令牌",
     "Your school's Canvas, e.g. canvas.school.edu": "你学校的 Canvas 地址，例如 canvas.school.edu",
     "School": "学校",
@@ -191,6 +203,11 @@
       "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
     "Google account disconnected.": "Google 账户已断开。",
     "Couldn't disconnect. Try again.": "没能断开，请再试一次。",
+    // the cloud server owner's own (google_web.py, [webapp] owner_google)
+    "Disconnect the Google account connected here? I won't see your calendar or email through it any more. This may also sign out Kwil's Google on your PC (same Google project).":
+      "要断开在这里连接的 Google 账户吗？之后我就不能再通过它看你的日历和邮件了。这也可能会让电脑上的 Kwil 退出 Google（同一个 Google 项目）。",
+    "Disconnect the Google account connected here? I won't see your calendar through it any more. This may also sign out Kwil's Google on your PC (same Google project).":
+      "要断开在这里连接的 Google 账户吗？之后我就不能再通过它看你的日历了。这也可能会让电脑上的 Kwil 退出 Google（同一个 Google 项目）。",
     // a family member's own account (family.js setupAccount, account.py)
     "Download my data": "下载我的数据",
     "Delete my account": "删除我的账户",
@@ -634,15 +651,22 @@
 
     let signedIn = false;
     let mail = true;  // the last status's "gmail" (false: no mail wording)
+    let owner = false;  // the last status's "server_owner": the cloud owner's own
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
                                     { credentials: "same-origin", cache: "no-store" });
-        if (!res.ok) return;  // not signed in yet, or the button is off
+        if (!res.ok) return res.status;  // 401: not signed in yet; 404: the button is off
         const st = await res.json();
         signedIn = true;
         mail = st.gmail !== false;
-        renderGuide(win, doc, st, say);
+        owner = st.server_owner === true;
+        if (owner) {  // the first-run guide is for invited people, not the owner
+          const box = doc.getElementById("guide");
+          if (box) box.hidden = true;
+        } else {
+          renderGuide(win, doc, st, say);
+        }
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
@@ -675,9 +699,14 @@
     });
     if (unlink) {
       unlink.addEventListener("click", async () => {
-        const ask = say(mail
-          ? "Disconnect your Google account? I won't see your calendar or email any more."
-          : "Disconnect your Google account? I won't see your calendar any more.");
+        // the owner's: grants in one Google project may be revoked together
+        const ask = say(owner
+          ? (mail
+            ? "Disconnect the Google account connected here? I won't see your calendar or email through it any more. This may also sign out Kwil's Google on your PC (same Google project)."
+            : "Disconnect the Google account connected here? I won't see your calendar through it any more. This may also sign out Kwil's Google on your PC (same Google project).")
+          : mail
+            ? "Disconnect your Google account? I won't see your calendar or email any more."
+            : "Disconnect your Google account? I won't see your calendar any more.");
         if (typeof win.confirm === "function" && !win.confirm(ask)) return;
         unlink.disabled = true;
         let ok = false;
@@ -698,15 +727,33 @@
         }
       });
     }
+    // After signing in the page doesn't reload: look again until it works.
+    // Not while signed out: every 401 counts against the cloud's
+    // per-address request limit (a campus NAT shares one), so a 401 stops
+    // it and the sign-in form starts it again.
+    let tries = 0;
+    let timer = null;
+    function stopPolling() {
+      if (timer !== null) { win.clearInterval(timer); timer = null; }
+    }
+    function poll() {
+      if (timer !== null || signedIn || typeof win.setInterval !== "function") return;
+      tries = 0;
+      timer = win.setInterval(() => {
+        if (signedIn || ++tries > 200) { stopPolling(); return; }
+        check();
+      }, 3000);
+    }
+    async function check() {
+      const status = await refresh();
+      if (status === 401 || status === 404) stopPolling();  // signed out, or nothing here
+    }
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
-    refresh();
-    // After signing in the page doesn't reload: look again until it works.
-    let tries = 0;
-    const timer = typeof win.setInterval === "function" ? win.setInterval(() => {
-      if (signedIn || ++tries > 200) { win.clearInterval(timer); return; }
-      refresh();
-    }, 3000) : null;
+    const form = doc.getElementById("login-form");
+    if (form) form.addEventListener("submit", () => poll());
+    poll();
+    check();
     return { refresh };
   }
 
