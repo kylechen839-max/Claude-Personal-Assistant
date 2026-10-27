@@ -167,6 +167,14 @@ def test_privacy_page_shows_the_support_email(site_env):
     assert "Draft: Kyle to review" in page
 
 
+def test_privacy_page_has_googles_limited_use_disclosure(site_env):
+    # Google's verification of the beta app looks for this statement
+    page = site_env().client.get("/privacy", headers=via_proxy(PUBLIC)).text
+    flat = " ".join(page.split())
+    assert "Google API Services User Data Policy</a>, including the Limited Use requirements" in flat
+    assert 'href="https://developers.google.com/terms/api-services-user-data-policy"' in page
+
+
 def test_without_a_support_email_the_pages_say_contact_the_owner(site_env):
     env = site_env(support_email="", legal_draft=False)
     for path in ("/privacy", "/terms"):
