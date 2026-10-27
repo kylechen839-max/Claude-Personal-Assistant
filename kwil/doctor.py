@@ -259,20 +259,30 @@ def check_web(environ=os.environ, find_spec=None) -> list[Check]:
 
 
 def check_google_env(config: dict, environ=os.environ) -> list[Check]:
-    """Server variant: the OAuth files come from GOOGLE_*_JSON secrets."""
+    """Server variant: the OAuth files come from GOOGLE_*_JSON secrets, or
+    the owner connected Google in the app ([webapp] owner_google), which
+    then wins (google_auth.owner_environ)."""
     from kwil.tools.calendar import CLIENT_ENV, TOKEN_ENV, token_info
+    from kwil.tools.google_auth import owner_connected, owner_environ
 
     if not config["calendar"]["enabled"]:
         return [Check("Google Calendar", True, "disabled in config.toml",
                       required=False)]
+    if owner_connected(config):
+        return [Check("Google account", True, "connected in the app (token on "
+                      "the server's disk, refreshed in memory)")]
     try:
         info, from_env = token_info(config["calendar"]["token"],
-                                    config["calendar"]["credentials"], environ)
+                                    config["calendar"]["credentials"],
+                                    owner_environ(config, environ))
     except ValueError as e:  # the message names the variable, not its value
         return [Check(TOKEN_ENV, False, str(e), required=False)]
     if not from_env:
-        return [Check(TOKEN_ENV, False, "not set (calendar tools will be off; "
-                      "paste the contents of token.json)", required=False)]
+        how = ("tap Connect Google account in the app, or paste the contents "
+               "of token.json" if config["webapp"].get("owner_google")
+               else "paste the contents of token.json")
+        return [Check(TOKEN_ENV, False, f"not set (calendar tools will be off; "
+                      f"{how})", required=False)]
     missing = [k for k in ("refresh_token", "client_id", "client_secret")
                if not info.get(k)]
     if missing:

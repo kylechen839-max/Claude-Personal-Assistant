@@ -6,6 +6,10 @@
   on the disk) instead of CANVAS_ICS_URL / CANVAS_TOKEN in the environment;
   the env still wins while set. A guided Canvas connect for everyone: find
   your school, open its Canvas calendar, Paste the feed link.
+- Cloud: the owner can connect (and disconnect) their own Google account in
+  the app (⚙ → Connect Google account). The token is kept on /data and
+  replaces GOOGLE_TOKEN_JSON, which is now optional and stays the fallback.
+  New setting `[webapp] owner_google` (on in the server profile).
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.

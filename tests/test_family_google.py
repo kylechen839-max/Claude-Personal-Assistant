@@ -191,7 +191,7 @@ def test_each_member_has_their_own_token_never_kyles(g):
     dad, dad_id = g.member("Dad", "en")
     assert mom.get("/api/google/status").json() == {
         "enabled": True, "connected": False, "disconnect": True, "gmail": True,
-        "note": None}
+        "note": None, "server_owner": False}
     assert connected(g, mom, mom_id, "mom")["refresh_token"] == "1//mom-refresh-secret"
     assert dad.get("/api/google/status").json()["connected"] is False  # not Mom's
     assert connected(g, dad, dad_id, "dad")["refresh_token"] == "1//dad-refresh-secret"
@@ -216,8 +216,11 @@ def test_each_member_has_their_own_token_never_kyles(g):
 
 
 def test_the_owner_has_no_google_connect_on_the_cloud(g):
-    """Kyle's Google on the server is GOOGLE_TOKEN_JSON: his session can't
-    start this flow (owner=False), and nothing writes his token file."""
+    """With [webapp] owner_google off, Kyle's Google on the server is
+    GOOGLE_TOKEN_JSON alone: his session can't start this flow
+    (owner=False), and nothing writes his token file. (On, the server
+    profile's default: tests/test_google_web.py, "the owner's own Google on
+    the cloud server".)"""
     kyle = TestClient(g.app, base_url=BASE)
     login(kyle)
     assert kyle.get("/api/google/status").status_code == 404
@@ -481,7 +484,11 @@ def test_from_config_builds_it_for_family_only_servers(g):
     cfg = load_config(None, None, profile="server")
     a = MagicMock(family=g.fam)
     connect = google_web.from_config(cfg, a)
-    assert connect is not None and connect.owner is False  # the cloud: Kyle's is env
+    # the cloud: Kyle connects his own in the app ([webapp] owner_google)
+    assert connect is not None and connect.owner is True and connect.owner_google is True
+    cfg["webapp"]["owner_google"] = False  # then his is the env's alone
+    connect = google_web.from_config(cfg, a)
+    assert connect is not None and connect.owner is False and connect.owner_google is False
     cfg["family"]["google"] = False
     assert google_web.from_config(cfg, a) is None
     assert google_web.from_config(cfg, MagicMock(family=None)) is None
@@ -842,7 +849,7 @@ def test_a_beta_consent_screen_asks_for_calendar_only_on_the_public_client(g, mo
     mom, _ = g.member("Mom", "zh")  # family
     assert tester.get("/api/google/status").json() == {
         "enabled": True, "connected": False, "disconnect": True, "gmail": False,
-        "note": None}
+        "note": None, "server_owner": False}
     q = consent(tester)
     scopes = q["scope"][0].split()
     assert sorted(scopes) == sorted([CALENDAR_SCOPE, *CALENDAR_EXTRA_SCOPES])
