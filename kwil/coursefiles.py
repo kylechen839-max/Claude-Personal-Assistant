@@ -78,7 +78,8 @@ _SKIP_TYPE = re.compile(r"^(image|video|audio)/|spreadsheet|ms-excel|zip|compres
 _DATED = re.compile(r"syllabus|schedule|calendar|outline|\bexams?\b|\bdue\b", re.I)
 MAX_DATED = 200            # documents dated_texts() offers per sync
 # codes a later sync may get past: no row is kept, so the file is tried again
-TRANSIENT = ("timed_out", "rate_limited", "no_pdf_reader", "full", "network")
+# ("wanted": the browser helper pushes that file next, canvas_helper.py)
+TRANSIENT = ("timed_out", "rate_limited", "no_pdf_reader", "full", "network", "wanted")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -541,20 +542,54 @@ def _skip_file(f: dict, max_bytes: int) -> str | None:
     return None
 
 
-def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 40,
-                 max_file_bytes: int = 20_000_000, alive: Callable[[], bool] | None = None,
-                 now: datetime | None = None) -> dict:
-    """Read one person's active courses over `api` (a canvas.CanvasAPI,
-    whose deadline bounds the whole run) into `store`. Returns counts
-    {added, updated, unchanged, skipped, removed, files, more, courses}
-    (files: downloads this run; more: files left for the next run). A rate
-    limit, the deadline or a revoked token stop the run (CanvasError; what
-    was stored stays), `alive()` going false stops it quietly; one
-    course's hidden tab or a missing page skips only that listing."""
+def file_version(f: dict, code: str | None) -> str:
+    """What a stored file's updated_at holds: a new version, or a file
+    locked or unlocked since, is read again."""
+    return f"{f.get('updated_at') or f.get('modified_at') or ''}|{f.get('size')}|{code or ''}"
+
+
+def read_file(doc: dict, fetch: Callable[[], bytes], deadline: float | None,
+              clock: Callable[[], float]) -> str | None:
+    """Fill a file document's text (and etag) from fetch()'s bytes, which
+    live only in memory here. Returns None, or the code saying why it
+    wasn't read (TRANSIENT ones: try again later). A rate limit or the
+    deadline stop the whole run (CanvasError)."""
     import httpx
 
     from kwil import canvas
     from kwil.textextract import ExtractError, extract
+
+    try:
+        data = fetch()
+        _, text = extract(data, deadline=deadline, clock=clock)
+        del data
+        doc.update(text=text, etag=text_etag(text))
+    except canvas.CanvasError as e:
+        if str(e) in ("rate_limited", "timed_out"):
+            raise
+        return str(e) if str(e) in ("too_large", *TRANSIENT) else \
+            "network" if re.fullmatch(r"http_5\d\d", str(e)) else "unavailable"
+    except httpx.HTTPError as e:  # this file's connection: the rest go on
+        log.info("Course files: a download failed (%s)", type(e).__name__)
+        return "network"
+    except ExtractError as e:
+        return str(e)
+    return None
+
+
+def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 40,
+                 max_file_bytes: int = 20_000_000, alive: Callable[[], bool] | None = None,
+                 now: datetime | None = None, origin: str = "token") -> dict:
+    """Read one person's active courses over `api` (a canvas.CanvasAPI,
+    whose deadline bounds the whole run, or canvas_helper.PushedCanvas:
+    what the browser helper pushed) into `store`. Returns counts
+    {added, updated, unchanged, skipped, removed, files, more, courses}
+    (files: downloads this run; more: files left for the next run). A rate
+    limit, the deadline or a revoked token stop the run (CanvasError; what
+    was stored stays), `alive()` going false stops it quietly; one
+    course's hidden tab or a missing page skips only that listing.
+    `origin`: "token" or "helper", kept with each document."""
+    from kwil import canvas
 
     now = now or datetime.now(timezone.utc)
     counts = {"added": 0, "updated": 0, "unchanged": 0, "skipped": 0, "removed": 0,
@@ -567,7 +602,7 @@ def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 4
         pass
 
     def put(doc: dict) -> None:
-        result = store.upsert(uid, doc, alive)
+        result = store.upsert(uid, {**doc, "origin": origin}, alive)
         if result == "stale":
             raise Stale()
         counts[result] += 1
@@ -679,9 +714,7 @@ def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 4
             seen.add(key)
             title = str(f.get("display_name") or f.get("filename") or "")
             code = _skip_file(f, max_file_bytes)
-            # a new version, or a file locked or unlocked since: read again
-            version = (f"{f.get('updated_at') or f.get('modified_at') or ''}|"
-                       f"{f.get('size')}|{code or ''}")
+            version = file_version(f, code)
             if known.get(key, ("",))[0] == version:
                 counts["unchanged"] += 1
                 continue
@@ -694,21 +727,9 @@ def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 4
                 code = "full"
             if code is None:
                 counts["files"] += 1
-                try:
-                    data = api.download(str(f["url"]), max_file_bytes)
-                    _, text = extract(data, deadline=api.deadline, clock=api.clock)
-                    del data
-                    doc.update(text=text, etag=text_etag(text))
-                except canvas.CanvasError as e:
-                    if str(e) in ("rate_limited", "timed_out"):
-                        raise
-                    code = str(e) if str(e) == "too_large" else \
-                        "network" if re.fullmatch(r"http_5\d\d", str(e)) else "unavailable"
-                except httpx.HTTPError as e:  # this file's connection: the rest go on
-                    log.info("Course files: a download failed (%s)", type(e).__name__)
-                    code = "network"
-                except ExtractError as e:
-                    code = str(e)
+                url = str(f["url"])
+                code = read_file(doc, lambda: api.download(url, max_file_bytes),
+                                 api.deadline, api.clock)
             if code is not None:
                 if code in TRANSIENT:
                     counts["skipped"] += 1

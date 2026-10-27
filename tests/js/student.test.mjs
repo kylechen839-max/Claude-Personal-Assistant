@@ -8,7 +8,9 @@
 // its Canvas calendar from the tap, Paste the link) only fills the field;
 // captured titles are shown as text only; conflicts get both buttons;
 // deleting asks first and POSTs (the failover preflight allows only GET
-// and POST).
+// and POST). The Canvas helper: a pairing code shown as text in the
+// data-kwil-pair element (never in a URL), taken off the page once the
+// helper paired; revoking asks first.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,6 +35,7 @@ class El {
   }
   replaceChildren(...kids) { this.children = []; this.append(...kids); }
   setAttribute(k, v) { this.attrs[k] = v; }
+  removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
   async fire(type) { for (const fn of this.listeners[type] || []) await fn({ preventDefault() {} }); }
   all() { return [this, ...this.children.flatMap((c) => c.all())]; }
@@ -370,6 +373,95 @@ test('every fixed string it shows or asks has Chinese in i18n.js', async () => {
                    "Couldn't look up schools. Try again.",
                    'Tap Calendar Feed (bottom right), copy the link, come back.']) {
     assert.ok(seen.has(s) || SCRIPT.includes(s.slice(0, 30)), s);
+    assert.notEqual(translate(s), s, s);
+  }
+});
+
+// --- the Canvas helper (kwil/canvas_helper.py) -------------------------------------
+
+const CODE = 'kcp1.' + 'A'.repeat(32);
+const helperItems = (helper, extra = {}) => ({ status: 200, body: { items: [], canvas: {
+  connected: false, managed: 'app', can_store: true, helper, ...extra } } });
+const codeNode = (card) => card.find((e) => e.tagName === 'code');
+
+test('the helper section stays hidden while the server has it off', async () => {
+  for (const helper of [undefined, { enabled: false, paired: false }]) {
+    const { card } = load({ items: helperItems(helper) });
+    await tick();
+    assert.equal(card.buttons('Set up Canvas helper')[0].parentNode.parentNode.hidden, true);
+  }
+});
+
+test('set up shows a one-time code for the helper to read, never in a URL', async () => {
+  const items = helperItems({ enabled: true, paired: false });
+  const { card, menu, fetches } = load({ items, routes: {
+    '/api/student/canvas/helper': { status: 200, body: { code: CODE, expires_in: 600 } } } });
+  await tick();
+  const setup = card.buttons('Set up Canvas helper')[0];
+  assert.equal(setup.hidden, false);
+  assert.equal(card.buttons('Revoke helper')[0].hidden, true);
+  assert.equal(codeNode(card).hidden, true);
+  await setup.fire('click');
+  const post = fetches.find((f) => f.url === '/api/student/canvas/helper');
+  assert.equal(post.opts.method, 'POST');
+  assert.equal(codeNode(card).textContent, CODE);           // as text, never HTML
+  assert.equal(codeNode(card).attrs['data-kwil-pair'], CODE);
+  assert.equal(codeNode(card).hidden, false);
+  assert.equal(setup.hidden, true);
+  assert.ok(fetches.every((f) => !f.url.includes(CODE)));
+  // the helper paired: the next refresh takes the code off the page
+  items.body.canvas.helper = { enabled: true, paired: true };
+  menu.open = true;
+  await menu.fire('toggle');
+  await tick();
+  assert.equal(codeNode(card).textContent, '');
+  assert.equal(codeNode(card).attrs['data-kwil-pair'], undefined);
+  assert.equal(codeNode(card).hidden, true);
+  assert.ok(card.all().some((e) => e.textContent === 'Canvas helper connected.'));
+  assert.equal(card.buttons('Revoke helper')[0].hidden, false);
+  assert.equal(card.buttons('Set up Canvas helper')[0].hidden, true);
+  // with only the helper, Disconnect is offered (it revokes the key, deletes the content)
+  assert.equal(card.buttons('Disconnect Canvas')[0].hidden, false);
+});
+
+test('an answer that is not a pairing code is never shown', async () => {
+  const { card } = load({ items: helperItems({ enabled: true, paired: false }), routes: {
+    '/api/student/canvas/helper': { status: 200, body: { code: '<img src=x>' } } } });
+  await tick();
+  await card.buttons('Set up Canvas helper')[0].fire('click');
+  assert.equal(codeNode(card).hidden, true);
+  assert.equal(codeNode(card).attrs['data-kwil-pair'], undefined);
+  assert.ok(card.all().some((e) => e.textContent === "Couldn't start pairing. Try again."));
+});
+
+test('revoking the helper asks first, then POSTs', async () => {
+  for (const yes of [false, true]) {
+    const { card, fetches, asked } = load({
+      items: helperItems({ enabled: true, paired: true }), confirm: () => yes });
+    await tick();
+    await card.buttons('Revoke helper')[0].fire('click');
+    assert.match(asked[0], /Revoke the Canvas helper\?/);
+    const post = fetches.find((f) => f.url === '/api/student/canvas/helper/revoke');
+    assert.equal(Boolean(post), yes);
+    if (yes) assert.equal(post.opts.method, 'POST');
+  }
+});
+
+test('the helper strings have Chinese in i18n.js', async () => {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N, ctx);
+  const { translate } = ctx.KwilI18n;
+  const { card, asked } = load({ items: helperItems({ enabled: true, paired: true }) });
+  await tick();
+  await card.buttons('Revoke helper')[0].fire('click');
+  const shown = card.all().map((e) => e.textContent)
+    .filter((s) => s && /helper|For schools/.test(s));
+  assert.ok(shown.length >= 4, String(shown));
+  for (const s of [...shown, ...asked, 'Set up Canvas helper',
+                   'Open the Kwil Canvas helper in this browser: it picks this code up by ' +
+                   'itself. It works once, for 10 minutes.',
+                   "Couldn't start pairing. Try again.", "Couldn't revoke the helper. Try again."]) {
     assert.notEqual(translate(s), s, s);
   }
 });

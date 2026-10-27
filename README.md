@@ -1571,6 +1571,30 @@ own courses, with your own token, like opening the pages yourself; some
 schools' rules limit automated access, so check yours. It is read-only
 and rate-limited.
 
+**Canvas helper** (for schools that block access tokens; `[canvas]
+helper`, on by default, needs `[canvas] content`). The Kwil Canvas helper,
+a Chrome/Edge extension (coming next; an iOS Shortcut after it), reads
+your courses in your own signed-in Canvas tab and sends the same content
+to Kwil, which stores it exactly as the token sync does (same limits,
+same drafts, same tools, same deletes). Setup is one tap: **Set up Canvas
+helper** in the School deadlines card shows a one-time pairing code for
+10 minutes; the helper, open in the same browser, picks it up by itself
+and trades it for its own **sync key** (shown to the helper once, never
+to the page). The key opens only the helper's two push routes; only its
+SHA-256 is kept (`canvas_helper.json` in `[student] dir`, or in an invited
+person's own folder). **Revoke helper** ends it (what it sent stays until
+you disconnect); **Disconnect Canvas** ends it and deletes the content;
+removing a person ends theirs. Signing out does not: the helper has its
+own key, so revoke it separately. Pairing again replaces the old key.
+Wrong keys and codes count toward the sign-in lockout, and a key gets 120
+pushes an hour. Kwil never fetches anything for the helper and never sees
+your Canvas sign-in or cookies: the helper sends only the courses' JSON
+and file bytes it read. Pair it from the Kwil address the helper talks to
+(the cloud app, `heykwil.com`): what it sends is stored on that server.
+The helper reads only your own courses, with your own sign-in, like
+opening the pages yourself; some schools' rules limit automated access,
+so check yours. It is read-only and rate-limited.
+
 ### Study briefings (notifications)
 The phone app can speak up first: a notification in the morning with
 what's due today and tomorrow, in the evening with what's due tomorrow, a

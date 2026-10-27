@@ -20,6 +20,10 @@ It owns everything that is the same on all three:
   cookie decides (cookie clients keep working); cross-origin requests
   always need a bearer token (browsers send no cookies there).
 - GET /api/backends: this backend's configured list, for the app to cache.
+- The Canvas helper's pushes (canvas_helper.push_request: POST to its two
+  push routes with a `kcs1.` sync key) go straight to the web app, which
+  checks the key: no origin check (they come from a browser extension),
+  no CORS headers, and the key is never taken for a guess at WEB_TOKEN.
 - WebSockets: the token comes in the first message after the socket opens,
   {"type": "auth", "token": "..."}, never in the URL. No valid token within
   `ws_auth_timeout` seconds -> closed (4401 wrong/missing, 4408 too slow).
@@ -35,6 +39,7 @@ import json
 import logging
 from urllib.parse import urlsplit
 
+from kwil.canvas_helper import push_request
 from kwil.failover import API_VERSION
 from kwil.failover.peers import Backend, normalize_url
 from kwil.failover.tokens import MAX_SESSION, Claims, TokenAuthority, bearer_of
@@ -180,6 +185,10 @@ class EdgeMiddleware:
     async def _http(self, scope, receive, send):
         headers = _headers(scope)
         path, method = scope.get("path", ""), scope.get("method", "GET")
+        if push_request(method, path, headers.get("authorization")):
+            # the Canvas helper's push: its extension's origin, its own sync
+            # key (the web app checks it), no cookie and no CORS headers
+            return await self.app(scope, receive, send)
         allowed, cors_origin = self.origin_verdict(headers, scope)
         if not allowed:
             log.warning("Refused a request from another origin")

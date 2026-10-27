@@ -9,6 +9,12 @@
 // The guided way in: find the school (/api/student/schools), open its
 // Canvas calendar in a new tab from the tap (so iOS allows it), and Paste
 // the copied feed link back into the field; the person still taps Connect.
+// The Canvas helper (kwil/canvas_helper.py), for schools that block tokens:
+// "Set up Canvas helper" shows a one-time pairing code for 10 minutes in
+// the element with data-kwil-pair (the helper extension's content script
+// reads it there, nothing to type; never in a URL), then removes it once
+// the helper paired or the code ran out. The helper's key never reaches
+// the page.
 "use strict";
 
 (function (root) {
@@ -128,11 +134,34 @@
     const unlink = button("Disconnect Canvas", disconnect, "danger");
     actions.append(syncBtn, unlink);
 
+    // the Canvas helper: pair it with a one-time code, or revoke it
+    const helperBox = el("div");
+    helperBox.hidden = true;
+    const helperTitle = el("p", "Canvas helper", "api-key-title");
+    const helperState = el("p", "", "hint");
+    const helperHelp = el("p", "For schools that block access tokens: the Kwil Canvas helper " +
+                          "reads your own courses with your own sign-in, like opening the " +
+                          "pages yourself. Some schools' rules limit automated access; check " +
+                          "yours. It is read-only and rate-limited.", "hint");
+    const pairCode = el("code", "", "pair-code");  // the code, as text, for the helper to read
+    pairCode.hidden = true;
+    const pairHelp = el("p", "Open the Kwil Canvas helper in this browser: it picks this code " +
+                        "up by itself. It works once, for 10 minutes.", "hint");
+    pairHelp.hidden = true;
+    const setupHelper = button("Set up Canvas helper", startPairing);
+    const revokeHelper = button("Revoke helper", revoke, "danger");
+    const helperRow = el("div", undefined, "api-key-row");
+    helperRow.append(setupHelper, revokeHelper);
+    helperBox.append(helperTitle, helperState, helperHelp, pairCode, pairHelp, helperRow);
+    let pairTimer = null;
+    let pairUntil = 0;
+
     const listTitle = el("p", "What I captured", "api-key-title");
     const list = el("ul", undefined, "student-items");
     const empty = el("p", "Nothing captured yet.", "hint");
 
-    card.append(title, state, host, connectBox, actions, message, listTitle, list, empty);
+    card.append(title, state, host, connectBox, actions, helperBox, message, listTitle, list,
+                empty);
 
     // confirm() text isn't in the page, so i18n.js's observer can't see it
     function translated(text) {
@@ -213,12 +242,68 @@
           : "Connect Canvas and I'll keep track of your deadlines.";
       }
       connectBox.hidden = owner || Boolean(st.connected) || st.can_store === false;
+      const helper = st.helper || {};
       // env-managed: Disconnect only forgets an older link the app stored
-      unlink.hidden = owner ? !st.app_link : !st.connected;
+      // (or the helper's key)
+      unlink.hidden = owner ? !(st.app_link || helper.paired) : !(st.connected || helper.paired);
       syncBtn.hidden = !st.connected && !st.gmail;
+      renderHelper(helper);
       const items = Array.isArray(body.items) ? body.items : [];
       list.replaceChildren(...items.map(row));
       empty.hidden = items.length > 0;
+    }
+
+    function clearCode() {
+      pairCode.textContent = "";
+      pairCode.removeAttribute("data-kwil-pair");
+      pairCode.hidden = true;
+      pairHelp.hidden = true;
+      if (pairTimer !== null) { win.clearInterval(pairTimer); pairTimer = null; }
+    }
+
+    function renderHelper(helper) {
+      helperBox.hidden = !helper.enabled;
+      if (helper.paired || Date.now() > pairUntil) clearCode();
+      helperState.textContent = helper.paired ? "Canvas helper connected." : "";
+      helperState.hidden = !helper.paired;
+      setupHelper.hidden = Boolean(helper.paired) || !pairCode.hidden;
+      revokeHelper.hidden = !helper.paired;
+    }
+
+    async function startPairing() {
+      setupHelper.disabled = true;
+      try {
+        const r = await call("/api/student/canvas/helper", { body: {} });
+        const code = r.ok && typeof r.body.code === "string" ? r.body.code : "";
+        if (!/^kcp1\.[A-Za-z0-9_-]{32}$/.test(code)) {
+          say(r.body.error || "Couldn't start pairing. Try again.");
+          return;
+        }
+        say("");
+        pairUntil = Date.now() + 1000 * Math.min(Number(r.body.expires_in) || 600, 600);
+        pairCode.textContent = code;
+        pairCode.setAttribute("data-kwil-pair", code);
+        pairCode.hidden = false;
+        pairHelp.hidden = false;
+        setupHelper.hidden = true;
+        // until the helper paired (refresh() then clears the code) or it ran out
+        if (pairTimer === null && typeof win.setInterval === "function") {
+          pairTimer = win.setInterval(refresh, 4000);
+        }
+      } catch (e) {
+        say("Couldn't start pairing. Try again.");
+      } finally {
+        setupHelper.disabled = false;
+      }
+    }
+
+    async function revoke() {
+      const ask = "Revoke the Canvas helper? It stops sending your courses; what it " +
+        "sent stays until you disconnect.";
+      if (typeof win.confirm === "function" && !win.confirm(translated(ask))) return;
+      const r = await call("/api/student/canvas/helper/revoke", { body: {} });
+      say(r.ok ? "Canvas helper revoked." : "Couldn't revoke the helper. Try again.");
+      await refresh();
     }
 
     async function refresh() {
@@ -323,6 +408,7 @@
 
     async function disconnect() {
       const ask = "Disconnect Canvas? I'll forget the link.";
+      clearCode();
       if (typeof win.confirm === "function" && !win.confirm(translated(ask))) return;
       const also = typeof win.confirm === "function" &&
         win.confirm(translated("Also delete what I captured from Canvas?"));

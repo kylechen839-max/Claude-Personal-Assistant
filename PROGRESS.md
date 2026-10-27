@@ -5940,3 +5940,74 @@ skipped; JavaScript 168 passed.
 
 Counts (Linux sandbox, Python 3.13, not real hardware): 3342 passed, 37
 skipped; JavaScript 168 passed.
+
+## Canvas course content, PR (b): the helper's push endpoint, sync keys and pairing (2026-10-27)
+
+For schools that block Canvas access tokens ("many schools block
+[tokens]"), a browser helper in the student's own signed-in Canvas tab
+can now push course content to Kwil, with one tap in the app to pair it.
+The helper itself (an MV3 extension) is PR (c); this change is the
+server side and the card.
+
+- **Sync keys and pairing** (`kwil/canvas_helper.py`, new). "Set up Canvas
+  helper" (signed in, `POST /api/student/canvas/helper`) makes a one-time
+  `kcp1.` code valid 10 minutes; the card shows it as text in a
+  `data-kwil-pair` element (never in a URL) for the extension's content
+  script to read, and drops it once paired or expired. `POST
+  /api/student/canvas/pair` {code} returns a `kcs1.` key once. Per
+  person, owner included; only SHA-256 hashes are stored
+  (`family.hash_token`, `hmac.compare_digest`), in `canvas_helper.json`
+  (owner: `[student] dir`; members: their folder) via `write_private`.
+  Pairing again replaces the key; **Revoke helper** (`POST
+  .../helper/revoke`, DELETE alias), **Disconnect Canvas** and removing the
+  person end it; signing out doesn't (documented). Wrong keys and codes
+  count on the web app's shared LoginLimiter (CloudGuard's client key);
+  120 pushes an hour per key; one push at a time per person.
+- **Push routes.** `POST /api/student/canvas/push/manifest` takes Canvas's
+  own JSON (courses with `syllabus_body`, pages, assignments, modules,
+  files; top-level announcements), validated, then run through
+  `coursefiles.sync_content` with a `PushedCanvas` adapter: the token
+  sync's pipeline unchanged (HTML to text, bounds, excluded courses,
+  generation/alive, forget-what-is-gone for listings sent in full),
+  origin "helper". It answers which files it wants (incremental by
+  `updated_at`/size, at most `[canvas] max_files`). `POST .../push/file`
+  (multipart) is accepted only for a file a manifest of that person asked
+  for within the hour, read with the same extraction (`coursefiles.read_file`,
+  now shared with the token sync); a bigger file is kept as "too_large".
+  The helper's file URLs are dropped (Kwil fetches nothing). Dates in
+  pushed text are read by `CourseSync` at its next tick as drafts
+  (`StudentSync.course_dates`, source `course_text`).
+- **Outer layers.** `canvas_helper.push_request` (POST, the two push
+  paths, a `kcs1.` bearer) is the one exemption: webapp's cross-site check
+  and the failover edge's origin/bearer checks let it through (an
+  extension's `chrome-extension://` origin; no cookie read, no CORS
+  headers); CloudGuard passes it as public with its own slot pool and
+  `[webapp] max_upload_mb`, answers 401 to a `kcs1.` key anywhere else,
+  and treats pairing like accepting an invite. WebAuth no longer counts a
+  `kcs1.` bearer on other routes as a wrong WEB_TOKEN.
+- **Settings and logs.** `[canvas] helper` (true) in DEFAULTS and
+  config.toml; `_SECRET_PATTERNS` masks `kcs1.`/`kcp1.`. Logs: ids,
+  counts, sizes, codes.
+- **Card** (`web/student.js`, `i18n.js` Chinese, sw.js `kwil-shell-v7`):
+  the Canvas helper section with the AUP note, **Set up Canvas helper**,
+  the code, **Revoke helper** (asks first); Disconnect shows for a
+  helper-only person.
+- **Tests.** New `tests/test_canvas_helper.py` (29): the whole path
+  (pair, manifest, the wanted PDF, `search_course_files("late policy")`,
+  drafts at the next tick); incremental; files not asked for, oversized,
+  bounds, manifest shapes, partial listings; the key hashed and private,
+  shown once; the owner; a code single-use and expiring; re-pairing;
+  the key only on the push routes (401 elsewhere, not counted); cookies
+  never standing in; wrong keys/codes on the shared lockout; revoke,
+  Disconnect and removal; signing out keeps it; Disconnect or revoke
+  mid-push writing nothing; member isolation; rate limit; busy; helper
+  off; an extension origin accepted on push only, no CORS; CloudGuard
+  (body cap, pool, 401 elsewhere, pairing public); the failover edge;
+  caplog and redaction. `tests/js/student.test.mjs` +5. Failing first:
+  against the base the new file doesn't import and the 5 JS tests fail;
+  17 source changes were each reverted alone and their test failed (one,
+  the generation check, needed a new test first), plus 3 in student.js.
+- **Counts** (Linux sandbox, Python 3.13, not real hardware): 3383
+  passed, 37 skipped (baseline 63d2ee7: 3353 passed, 38 skipped, run
+  from a `git archive` copy where `test_rebrand`'s git-history test
+  skips; it runs here). JavaScript 173 passed (168 before).

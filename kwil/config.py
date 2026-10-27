@@ -393,6 +393,9 @@ DEFAULTS: dict = {
         "max_course_mb": 20,        # text kept per course, at most
         "max_person_mb": 100,       # text kept per person, at most
         "content_seconds": 300,     # time for one person's content step
+        # the browser helper (canvas_helper.py): pushes course content from
+        # the person's own signed-in Canvas tab, for schools that block tokens
+        "helper": True,
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -574,6 +577,7 @@ _SECRET_PATTERNS = [
     re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"),
     re.compile(r"\bhc1\.[\w.-]+"),             # failover access tokens
     re.compile(r"\bhcinv\.[\w-]+"),            # family invite tokens
+    re.compile(r"\bkc[sp]1\.[\w-]+"),           # Canvas helper sync keys and pairing codes
     re.compile(r"(#invite=)[^&\s\"']+"),         # ... and invite links
     # OAuth / API fields in JSON, dict reprs, form bodies and URLs
     re.compile(r"(?i)(\b(?:access_token|refresh_token|id_token|client_secret"
