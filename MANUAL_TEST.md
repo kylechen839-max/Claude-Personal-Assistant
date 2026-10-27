@@ -602,7 +602,8 @@ for all of this except the Google sign-in.
     Kwil says it has no calendar), and Disconnect is hidden again. Then
     check Calendar on the PC; if it stopped, run
     `python -m kwil.tools.google_auth` there, and connect again on the
-    server.
+    server. `GOOGLE_TOKEN_JSON` is that same PC token, so if Google ended
+    it, also paste the new `token.json` into `GOOGLE_TOKEN_JSON` in Render.
 - [ ] Render Shell: `python -m kwil --check`.
   - Should: no mic or speaker lines; `WEB_TOKEN`, "Google account:
     connected in the app" (or `GOOGLE_TOKEN_JSON`), the time zone,

@@ -623,7 +623,7 @@
       try {
         const res = await win.fetch("/api/google/status",
                                     { credentials: "same-origin", cache: "no-store" });
-        if (!res.ok) return;  // not signed in yet, or the button is off
+        if (!res.ok) return res.status;  // 401: not signed in yet; 404: the button is off
         const st = await res.json();
         signedIn = true;
         mail = st.gmail !== false;
@@ -694,15 +694,33 @@
         }
       });
     }
+    // After signing in the page doesn't reload: look again until it works.
+    // Not while signed out: every 401 counts against the cloud's
+    // per-address request limit (a campus NAT shares one), so a 401 stops
+    // it and the sign-in form starts it again.
+    let tries = 0;
+    let timer = null;
+    function stopPolling() {
+      if (timer !== null) { win.clearInterval(timer); timer = null; }
+    }
+    function poll() {
+      if (timer !== null || signedIn || typeof win.setInterval !== "function") return;
+      tries = 0;
+      timer = win.setInterval(() => {
+        if (signedIn || ++tries > 200) { stopPolling(); return; }
+        check();
+      }, 3000);
+    }
+    async function check() {
+      const status = await refresh();
+      if (status === 401 || status === 404) stopPolling();  // signed out, or nothing here
+    }
     const menu = doc.querySelector("details.menu");
     if (menu) menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
-    refresh();
-    // After signing in the page doesn't reload: look again until it works.
-    let tries = 0;
-    const timer = typeof win.setInterval === "function" ? win.setInterval(() => {
-      if (signedIn || ++tries > 200) { win.clearInterval(timer); return; }
-      refresh();
-    }, 3000) : null;
+    const form = doc.getElementById("login-form");
+    if (form) form.addEventListener("submit", () => poll());
+    poll();
+    check();
     return { refresh };
   }
 

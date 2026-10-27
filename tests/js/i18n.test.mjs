@@ -52,9 +52,13 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   const guideText = new El('p', { id: 'guide-text' });
   const guideDone = new El('button', { id: 'guide-done' }, ['Got it']);
   const loginP = new El('p', { id: 'login-text' }, ['Enter your access token']);
+  const loginForm = new El('form', { id: 'login-form' });
   const body = new El('body', {}, [loginText, menu, input, mic, status, reply]);
   const byId = { 'google-connect': google, 'google-disconnect': unlink, 'google-status': hint, text: input, status,
-                 guide, 'guide-text': guideText, 'guide-done': guideDone, 'login-text': loginP };
+                 guide, 'guide-text': guideText, 'guide-done': guideDone, 'login-text': loginP,
+                 'login-form': loginForm };
+  const timers = new Map();  // setInterval: the test ticks them by hand
+  let nextTimer = 1;
   const stored = {};
   const observers = [];
   const fetches = [];
@@ -79,7 +83,9 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
     localStorage: { getItem: (k) => local[k] ?? null, setItem: (k, v) => { local[k] = v; } },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
-      if (url === '/api/google/status') return { ok: gstatus !== null, json: async () => gstatus };
+      if (url === '/api/google/status') {
+        return { ok: gstatus !== null, status: gstatus === null ? 401 : 200, json: async () => gstatus };
+      }
       if (url === '/api/google/disconnect') {
         if (disconnectOk) gstatus = { ...gstatus, connected: false };
         return { ok: disconnectOk, json: async () => ({}) };
@@ -90,13 +96,16 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
       return { ok: false };
     },
   };
+  win.setInterval = (fn) => { timers.set(nextTimer, fn); return nextTimer++; };
+  win.clearInterval = (id) => { timers.delete(id); };
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
   const flush = () => new Promise((r) => setImmediate(r));
   const mutate = (records) => observers[0].fn(records);
   return { win, guide, guideText, guideDone, loginP, google, unlink, hint, menu, input, mic, status, reply, loginText, observers,
-           fetches, asked, flush, mutate };
+           fetches, asked, flush, mutate, loginForm, timers,
+           setStatus: (st) => { gstatus = st; } };
 }
 
 test('no data-google: the button stays hidden and nothing is fetched', async () => {
@@ -305,6 +314,34 @@ test('Disconnect: the cloud owner gets it for a token connected here, with its o
   const env = page('en', { gstatus: { ...st, disconnect: false } });
   await env.flush();
   assert.equal(env.unlink.hidden, true);
+});
+
+test('signed out: a 401 stops the status polling; signing in starts it again', async () => {
+  const p = page('en', { gstatus: null });  // the cloud's signed-out page
+  await p.flush();
+  assert.equal(p.timers.size, 0);  // stopped after the first 401
+  // the cloud's login line is the invitees' (data-google on the signed-out page)
+  assert.equal(p.loginP.textContent,
+    'Enter the sign-in code you were sent. You only need to do this once on this phone.');
+  const asked = () => p.fetches.filter((f) => f.url === '/api/google/status').length;
+  assert.equal(asked(), 1);
+  // the owner signs in with the form (the page doesn't reload)
+  for (const fn of p.loginForm.listeners.submit) fn();
+  assert.equal(p.timers.size, 1);
+  p.setStatus({ enabled: true, connected: false, disconnect: false, server_owner: true });
+  for (const fn of [...p.timers.values()]) fn();
+  await p.flush();
+  assert.equal(asked(), 2);
+  assert.equal(p.google.hidden, false);  // the Connect button appeared
+  for (const fn of [...p.timers.values()]) fn();  // signed in: polling ends
+  assert.equal(p.timers.size, 0);
+  // a wrong token: the next poll's 401 stops it again
+  const q = page('en', { gstatus: null });
+  await q.flush();
+  for (const fn of q.loginForm.listeners.submit) fn();
+  for (const fn of [...q.timers.values()]) fn();
+  await q.flush();
+  assert.equal(q.timers.size, 0);
 });
 
 test('first-run guide: off for the cloud owner, on for an invited person', async () => {

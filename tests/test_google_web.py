@@ -439,6 +439,30 @@ def test_owner_disconnect_when_the_revoke_fails_or_the_file_is_corrupt(server, m
     assert s.revoked == [] and not s.token.exists()
 
 
+def test_a_connect_finishing_during_the_disconnects_revoke_is_kept(server, monkeypatch):
+    """The revoke runs outside the lock: a new sign-in saved meanwhile must
+    survive (only the token that was revoked is deleted)."""
+    from kwil import account
+
+    s = server
+    kyle = owner_client(s)
+    owner_connects(s, kyle)
+    real = account.revoke_google_token_file
+    newer = {**ENV_TOKEN, "refresh_token": "1//newer-refresh-secret"}
+
+    def revoke_then_reconnect(path, *args, **kwargs):
+        real(path, *args, **kwargs)
+        from kwil.tools.google_auth import write_private
+        write_private(path, json.dumps(newer))  # Connect's callback, mid-revoke
+
+    monkeypatch.setattr(account, "revoke_google_token_file", revoke_then_reconnect)
+    assert kyle.post("/api/google/disconnect", json={}).status_code == 200
+    assert s.revoked == ["1//connected-refresh-secret"]  # only the old one
+    assert json.loads(s.token.read_text())["refresh_token"] == "1//newer-refresh-secret"
+    assert tool_refresh_token(s) == "1//newer-refresh-secret"
+    assert kyle.get("/api/google/status").json()["disconnect"] is True
+
+
 def test_a_family_member_cant_start_or_disconnect_the_owners_google(server):
     s = server
     kyle = owner_client(s)

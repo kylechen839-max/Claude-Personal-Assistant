@@ -1155,7 +1155,10 @@ one instance and a deploy has a short gap of downtime.
    end that access, deletes the file and goes back to `GOOGLE_TOKEN_JSON`
    (if set). Google may end your PC copy's sign-in at the same time (same
    Google project); if Calendar stops on the PC, run
-   `python -m kwil.tools.google_auth` there again. The old way still works:
+   `python -m kwil.tools.google_auth` there again. The `GOOGLE_TOKEN_JSON`
+   fallback is that same PC token, so if Google ended it, it stops working
+   on the server too: after re-running the sign-in on the PC, paste the new
+   `token.json` into `GOOGLE_TOKEN_JSON` in Render again. The old way still works:
    sign in once more on the PC, delete `token.json`, run
    `python -m kwil.tools.calendar`, and paste the new `token.json` into
    `GOOGLE_TOKEN_JSON` in Render (Environment -> Save; it restarts).

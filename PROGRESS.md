@@ -5612,5 +5612,19 @@ On https://heykwil.com Kyle, signed in with `WEB_TOKEN`, can now tap ⚙ ->
   of the 12 new or changed google_web tests and both new JS tests fail
   (two of them, the flag-off and `cli.main` guards, only on the missing
   `owner_google` key: they pin behaviour that must not change).
-- **Counts** (Linux sandbox, Python 3.13): 3235 passed, 37 skipped
-  (3225/37 before); JavaScript 146 (144 before).
+- **Judge follow-ups.** (1) A Connect that finishes while Disconnect is
+  revoking is kept: Disconnect snapshots the file before the revoke and,
+  under the lock, deletes it only if unchanged (else returns without
+  deleting; the tools stay on the new token). Test
+  `test_a_connect_finishing_during_the_disconnects_revoke_is_kept` fails
+  without it (the file is gone). (2) The signed-out page polled
+  `/api/google/status` every 3 s for 10 minutes, and each 401 counts
+  against CloudGuard's per-address request limit: i18n.js now stops
+  polling on a 401 (or 404) and starts again when the sign-in form is
+  submitted. JS test "signed out: a 401 stops the status polling..."
+  fails on the old i18n.js (a timer still running); test_cloud pins the
+  signed-out page's `data-google` tag. (3) README and MANUAL_TEST say the
+  `GOOGLE_TOKEN_JSON` fallback is the same PC token, to re-paste if
+  Google ends it.
+- **Counts** (Linux sandbox, Python 3.13): 3236 passed, 37 skipped
+  (3225/37 before); JavaScript 147 (144 before).

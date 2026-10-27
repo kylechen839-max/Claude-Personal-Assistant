@@ -287,22 +287,30 @@ class GoogleConnect:
         """The cloud owner's Disconnect ([webapp] owner_google): revoke the
         grant at Google (best effort, as a family member's), delete the
         token file, and rebuild Calendar and Gmail on GOOGLE_TOKEN_JSON, or
-        none without it. False if there was no file."""
+        none without it. False if there was no file, or a new sign-in
+        replaced it meanwhile (that one is kept, with its tools)."""
         if not self.owner_file():
             return False
         from kwil.account import revoke_google_token_file
         from kwil.family import _unlink
 
         token = Path(self._cal["token"])
+        with self.owner_lock:
+            before = _read_bytes(token)
+        if before is None:
+            return False
         # outside the lock: the network call (up to its timeout) mustn't
         # hold up a sign-in
         revoke_google_token_file(token, label="Google", who="the owner")
         with self.owner_lock:
-            had = token.exists()
+            if _read_bytes(token) != before:
+                # a Connect finished during the revoke: keep its token
+                log.info("Google disconnect skipped: the owner connected again meanwhile")
+                return False
             _unlink(token)
             self._register_tools()
         log.info("Google account disconnected (the owner's)")
-        return had
+        return True
 
     def _register_tools(self) -> None:
         """Calendar and Gmail on the owner's current token. Every
@@ -326,6 +334,14 @@ class GoogleConnect:
         """The language for a page shown to `user` (None: the server's)."""
         person = self.family.get(user) if user and self.family is not None else None
         return person.get("language") if person else None
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    """The file's contents, or None if it is gone or unreadable."""
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
 
 
 def _google_tool_names() -> set[str]:
