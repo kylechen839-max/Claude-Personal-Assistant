@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The support address on /privacy and /terms is now support@heykwil.com
+  (forwarded to the support Gmail).
 ## 1.1.0 (2026-10-26)
 
 - The server's `/` and `/healthz` also answer HEAD (uptime monitors and link
