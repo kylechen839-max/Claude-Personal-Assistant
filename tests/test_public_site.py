@@ -418,7 +418,7 @@ def test_new_settings_have_defaults_and_config_toml_lines():
 
     web = DEFAULTS["webapp"]
     # Kyle approved the wording and picked the address at launch (2026-10-22)
-    assert web["support_email"] == "heyclaude.app@gmail.com" and web["legal_draft"] is False
+    assert web["support_email"] == "support@heykwil.com" and web["legal_draft"] is False
     # off by default, and no public write endpoint on a PC (judge round 1)
     assert web["public_site"] is False and web["waitlist_file"] == ""
     with open(Path(__file__).resolve().parent.parent / "config.toml", "rb") as f:
