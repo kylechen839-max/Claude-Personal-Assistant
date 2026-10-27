@@ -300,6 +300,21 @@ test('a throttled sync says why', async () => {
   assert.ok(card.all().some((e) => e.textContent === 'synced recently; try again in 14 minute(s)'));
 });
 
+test('connecting while the background sync runs says so, not an error', async () => {
+  const { card } = load({ routes: { '/api/student/sync': { status: 200, body: {
+    sources: {}, errors: {}, content: 'queued', background: true } } } });
+  await tick();
+  const feed = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link');
+  feed.value = 'https://canvas.example.edu/feeds/calendars/user_SECRET.ics';
+  await card.buttons('Connect Canvas')[0].fire('click');
+  assert.ok(card.all().some((e) => e.textContent === 'Syncing in the background.'));
+  assert.ok(!card.all().some((e) => /Nothing new|Couldn't/.test(String(e.textContent))));
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8'), ctx);
+  assert.equal(ctx.KwilI18n.translate('Syncing in the background.'), '正在后台同步。');
+});
+
 const I18N = readFileSync(new URL('../../kwil/web/i18n.js', import.meta.url), 'utf8');
 
 test('every fixed string it shows or asks has Chinese in i18n.js', async () => {

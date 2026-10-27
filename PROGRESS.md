@@ -5830,3 +5830,45 @@ d) are not in this change.
   passed, 37 skipped (baseline 9003902: 3302 passed, 38 skipped, run from
   a `git archive` copy where `test_rebrand`'s git-history test skips; it
   runs here). JavaScript 167 passed (167 before).
+
+### Round 2: the judge's findings (2026-10-27)
+
+1. HIGH, a Disconnect during the planner step let the content step
+   rewrite the deleted store: `sync()` now reads the person's generation
+   before their link and passes it down, and `alive()` also needs the link
+   (the app's file, or the owner's environment) to still be there.
+2. MED, `CourseSync` busy-looped while a person's sync was running (the
+   judge's probe: 227k `try_sync` calls a second): the request is kept
+   without waking the thread, which looks again after `BUSY_SECONDS`
+   (30). The probe now makes 2 calls a second.
+3. MED, a course deleted during a sync came back: `upsert` refuses a
+   course marked excluded, in the same connection as the write.
+4. LOW, the page's sync right after connecting got a 409 when the
+   background held the lock: the connect no longer queues anything (the
+   page's own sync queues the content), "Sync now" while the background
+   holds the person's sync answers `{content: "queued", background: true}`
+   (the card says "Syncing in the background.", with Chinese in i18n.js),
+   and the background's runs don't count toward the tap throttle
+   (`try_sync(record=False)`), so no "synced recently" right after one.
+5. LOW, a UTF-16 DTD got past the byte check: an expat pre-pass with
+   DOCTYPE and entity handlers that raise sees the prolog in the part's
+   own encoding; an encoding expat lacks is refused.
+6. LOW, a 29 KB DOCX could take 350 MB: parts are streamed (64 KB
+   chunks, still at most `MAX_XML_BYTES`) through `XMLPullParser`, and
+   each element is dropped once read; a paragraph holds at most 50,000
+   elements. On the judge's probe peak RSS no longer moves (3.7 s);
+   tracemalloc on a 400,000-paragraph part: about 3 MB against 34 MB for
+   the whole tree.
+7. LOW, one file's transport error stopped every later file on every run:
+   `httpx.HTTPError` (and a 5xx) is now a per-file transient skip.
+8. Windows: `delete_all` removes the files with `family._unlink` (retried
+   on PermissionError) while holding the store's lock, and every store call
+   closes its own connection; a test checks both.
+
+Tests: +8 in `tests/test_coursefiles.py` (37 now) and +1 in
+`tests/js/student.test.mjs`; the headline test's first assertion changed
+with item 4. Reverting each fix alone fails its test (10 reversions,
+including the old generation read for 1, the waking request for 2 and
+the missing exclusion check for 3). The judge's `probe_races.py` passes.
+Counts (Linux sandbox, Python 3.13, not real hardware): 3340 passed, 37
+skipped; JavaScript 168 passed.

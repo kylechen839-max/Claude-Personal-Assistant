@@ -34,7 +34,10 @@ Rules:
   the whole file.
 - A write for an invited person happens only while they are listed
   (member_guard, as deadlines.py), and only while the sync that read it is
-  still current (`alive`: Disconnect during a sync wins).
+  still current (`alive`, checked under the lock before a file is made:
+  student_web reads the generation before the link, so a Disconnect at
+  any point of the sync wins), and never for a course the person deleted
+  (checked in the same connection, so a delete during a sync holds).
 
 Everything stored here was written by someone else (teachers, Canvas):
 the search tools mark it untrusted (tools/coursefiles.py). Logs say ids,
@@ -75,7 +78,7 @@ _SKIP_TYPE = re.compile(r"^(image|video|audio)/|spreadsheet|ms-excel|zip|compres
 _DATED = re.compile(r"syllabus|schedule|calendar|outline|\bexams?\b|\bdue\b", re.I)
 MAX_DATED = 200            # documents dated_texts() offers per sync
 # codes a later sync may get past: no row is kept, so the file is tried again
-TRANSIENT = ("timed_out", "rate_limited", "no_pdf_reader", "full")
+TRANSIENT = ("timed_out", "rate_limited", "no_pdf_reader", "full", "network")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -271,6 +274,9 @@ class CourseStore:
         with self._db(uid, write=True, alive=alive) as con:
             if con is None:
                 return "stale"
+            if con.execute("SELECT 1 FROM meta WHERE key = ?",
+                           (f"excluded:{row[0]}",)).fetchone():
+                return "skipped"  # deleted by the person, maybe during this very sync
             old = con.execute("SELECT id, course_id, size, updated_at, etag, title, note, "
                               "course FROM docs WHERE source_key = ?", (key,)).fetchone()
             if old is not None and (old["updated_at"], old["etag"], old["title"],
@@ -545,6 +551,8 @@ def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 4
     limit, the deadline or a revoked token stop the run (CanvasError; what
     was stored stays), `alive()` going false stops it quietly; one
     course's hidden tab or a missing page skips only that listing."""
+    import httpx
+
     from kwil import canvas
     from kwil.textextract import ExtractError, extract
 
@@ -694,7 +702,11 @@ def sync_content(api, store: CourseStore, uid: str | None, *, max_files: int = 4
                 except canvas.CanvasError as e:
                     if str(e) in ("rate_limited", "timed_out"):
                         raise
-                    code = "too_large" if str(e) == "too_large" else "unavailable"
+                    code = str(e) if str(e) == "too_large" else \
+                        "network" if re.fullmatch(r"http_5\d\d", str(e)) else "unavailable"
+                except httpx.HTTPError as e:  # this file's connection: the rest go on
+                    log.info("Course files: a download failed (%s)", type(e).__name__)
+                    code = "network"
                 except ExtractError as e:
                     code = str(e)
             if code is not None:

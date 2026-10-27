@@ -58,9 +58,12 @@ it never starves the planner; then dates in it go to the deadline list as
 drafts (source "course_text", read once per text version). It runs in the
 background (CourseSync): every [canvas] auto_sync_hours for everyone
 connected (the owner's only where the failover leader check says this
-machine leads), and soon after "Sync now" or a new connection, never in
-the request. Disconnect deletes the person's whole content store, and a
-sync still running then stops writing (its generation is stale).
+machine leads), and right after "Sync now" (which the page also runs as
+soon as Canvas is connected), never in the request; "Sync now" while the
+background holds the person's sync answers {content: "queued",
+background: true}. Disconnect deletes the person's whole content store,
+and a sync that started before it (the generation is read before the
+link) writes nothing more, nor once the link is gone.
 """
 
 # No `from __future__ import annotations` here: FastAPI must see the real
@@ -93,6 +96,7 @@ TICK_SECONDS = 300              # the background sync looks for who is due this 
 FIRST_TICK = 60                 # ... first this long after startup
 RETRY_MINUTES = 30              # a run that left files for later, or failed: again after this
 MAX_PER_TICK = 20               # people synced in one tick, at most (the rest next tick)
+BUSY_SECONDS = 30               # an asked-for sync found another running: look again after this
 
 
 class SyncBusy(Exception):
@@ -323,19 +327,34 @@ class StudentSync:
         """Course content is read for this link (an access token)."""
         return self.courses is not None and found is not None and found["kind"] == "api"
 
-    def _content(self, uid, found, now) -> dict:
-        """The course content step (coursefiles.sync_content), on its own
-        [canvas] content_seconds; stops writing once they disconnect."""
-        from kwil import coursefiles
-
-        c = self.config["canvas"]
-        key = uid or ""
+    def _generation_of(self, uid):
         with self.lock:
-            generation = self._generation.get(key)
+            return self._generation.get(uid or "")
+
+    def _alive(self, uid, generation):
+        """alive() for a sync that started at `generation`: true while
+        nobody disconnected since and the link is still there (the app's
+        file, or the owner's environment)."""
+        key = uid or ""
 
         def alive() -> bool:
             with self.lock:
-                return self._generation.get(key) == generation
+                if self._generation.get(key) != generation:
+                    return False
+            return self._file(uid).exists() or (uid is None and self.env_managed())
+
+        return alive
+
+    def _content(self, uid, found, now, generation) -> dict:
+        """The course content step (coursefiles.sync_content), on its own
+        [canvas] content_seconds; it writes nothing once they disconnect
+        after the sync started (`generation`, read before the link was)."""
+        from kwil import coursefiles
+
+        c = self.config["canvas"]
+        alive = self._alive(uid, generation)
+        if not alive():
+            return {}
 
         base = canvas.base_url(found["base_url"])  # checked again: DNS can change
         api = canvas.CanvasAPI(base, found["token"], timeout=c["timeout"], clock=self.clock,
@@ -359,6 +378,8 @@ class StudentSync:
         # the whole sync's time (each request's timeout is per read only)
         deadline = self.clock() + canvas.SYNC_SECONDS
         out, errors = {}, {}
+        # before the link is read: a Disconnect from here on stops the content writes
+        generation = self._generation_of(uid)
         found = self.credentials(uid)
         c = self.config["canvas"]
 
@@ -409,18 +430,19 @@ class StudentSync:
                     tz), now))
         result = {"sources": out, "errors": errors}
         if content and self.content_on(found):
-            result["content"] = self._content_step(uid, found, tz, now, run, errors)
+            result["content"] = self._content_step(uid, found, tz, now, run, errors,
+                                                   generation)
         self.store.note_sync(uid)
         log.info("Student: synced %s (%d source(s), %d failed)", uid or "the owner",
                  len(out), len(errors))
         return result
 
-    def _content_step(self, uid, found, tz, now, run, errors) -> dict:
+    def _content_step(self, uid, found, tz, now, run, errors, generation) -> dict:
         """The content, then the dates in it (drafts, each text version
         read once), even when the content step stopped partway."""
         counts = {}
         try:
-            counts = self._content(uid, found, now)
+            counts = self._content(uid, found, now, generation)
         except KeyError:
             raise
         except canvas.CanvasError as e:
@@ -434,24 +456,30 @@ class StudentSync:
             uid, "course_text", self.courses.dated_texts(uid), tz), now))
         return counts
 
-    def try_sync(self, uid, content: bool = False, throttle: bool = True) -> dict:
+    def try_sync(self, uid, content: bool = False, throttle: bool = True,
+                 record: bool = True) -> dict:
         """sync(), unless one is running for them (SyncBusy(0)) or, with
-        `throttle`, the last one started less than [student] sync_minutes
-        ago (SyncBusy(wait))."""
+        `throttle`, the last recorded one started less than [student]
+        sync_minutes ago (SyncBusy(wait)). `record`: this one counts for
+        that throttle ("Sync now"; the background's runs don't, so a tap
+        right after one of them isn't refused)."""
         key, gap = uid or "", float(self.config["student"]["sync_minutes"]) * 60
         with self.lock:
-            last = self._last.get(key)
-            if throttle and last is not None and self.clock() - last < gap:
-                raise SyncBusy(gap - (self.clock() - last))
             running = self._running.get(key)
             if running is None:
                 running = self._running[key] = threading.Lock()
             self._running.move_to_end(key)
+            if running.locked():
+                raise SyncBusy(0)
+            last = self._last.get(key)
+            if throttle and last is not None and self.clock() - last < gap:
+                raise SyncBusy(gap - (self.clock() - last))
             if not running.acquire(blocking=False):
                 raise SyncBusy(0)
-            self._last[key] = self.clock()
-            self._last.move_to_end(key)
-            _trim(self._last)
+            if record:
+                self._last[key] = self.clock()
+                self._last.move_to_end(key)
+                _trim(self._last)
             idle = [k for k, lock in self._running.items() if not lock.locked()]
             for k in idle[:max(0, len(self._running) - MAX_PEOPLE)]:
                 del self._running[k]
@@ -495,9 +523,16 @@ class CourseSync:
         self.lock = threading.Lock()
         self._asked: OrderedDict[str, bool] = OrderedDict()
         self._retry: OrderedDict[str, float] = OrderedDict()   # key -> clock() when due
+        self._running: set[str] = set()   # whose sync this thread runs right now
+        self._busy = False                 # an asked-for sync waits for another one
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread = None
+
+    def running(self, uid) -> bool:
+        """Is this thread syncing this person right now?"""
+        with self.lock:
+            return (uid or "") in self._running
 
     def people(self) -> list:
         """The owner (None) and every active invited person's id."""
@@ -508,13 +543,14 @@ class CourseSync:
             out += [u["id"] for u in users if u.get("status") == "active" and u.get("id")]
         return out
 
-    def request(self, uid) -> None:
-        """Sync this person soon (in the background thread)."""
+    def request(self, uid, wake: bool = True) -> None:
+        """Sync this person soon (in the background thread; `wake`: now)."""
         with self.lock:
             self._asked[uid or ""] = True
             self._asked.move_to_end(uid or "")
             _trim(self._asked)
-        self._wake.set()
+        if wake:
+            self._wake.set()
 
     def _last(self, uid) -> float | None:
         from datetime import datetime
@@ -549,6 +585,7 @@ class CourseSync:
     def tick(self) -> int:
         """Sync whoever is due; returns how many syncs ran."""
         ran = 0
+        self._busy = False
         for uid in self.people():
             if self._stop.is_set() or ran >= MAX_PER_TICK:
                 break
@@ -561,12 +598,16 @@ class CourseSync:
                 continue
             if uid is None and not self._leads():
                 continue
+            with self.lock:
+                self._running.add(key)
             try:
                 # asked: "Sync now" just ran without the content; go again at once
-                result = self.sync.try_sync(uid, content=True, throttle=not asked)
+                result = self.sync.try_sync(uid, content=True, throttle=not asked,
+                                            record=False)
             except SyncBusy:
-                if asked:
-                    self.request(uid)
+                if asked:  # kept for the next look, BUSY_SECONDS on: never a spin
+                    self.request(uid, wake=False)
+                    self._busy = True
                 continue
             except KeyError:  # removed meanwhile
                 continue
@@ -574,6 +615,9 @@ class CourseSync:
                 log.warning("Student: background sync for %s failed (%s)", uid or "the owner",
                             type(e).__name__)
                 result = {}
+            finally:
+                with self.lock:
+                    self._running.discard(key)
             ran += 1
             # files left for later, or out of time: again sooner than auto_sync_hours
             # (never after a rate limit or a failure that would only fail again)
@@ -601,7 +645,7 @@ class CourseSync:
                 self.tick()
             except Exception as e:  # noqa: BLE001 - keep the thread alive
                 log.error("Student: background sync check failed (%s)", type(e).__name__)
-            delay = TICK_SECONDS
+            delay = BUSY_SECONDS if self._busy else TICK_SECONDS
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -729,8 +773,8 @@ def register(app, family, web, error) -> None:
             return error("couldn't save the Canvas link; try again", 500)
         if not saved:
             return error("not found", 404)
-        if courses is not None:  # the first sync, content included, without a tap
-            courses.request(uid)
+        # no background request here: the page syncs right after connecting,
+        # and that sync queues the content (a request now would race it)
         return nostore(await run_in_threadpool(sync.status, uid))
 
     @app.post("/api/student/disconnect")
@@ -757,6 +801,10 @@ def register(app, family, web, error) -> None:
         try:
             result = await run_in_threadpool(sync.try_sync, uid)
         except SyncBusy as e:
+            if not e.wait and courses is not None and courses.running(uid):
+                # the background sync has it (content included): not an error
+                return nostore({"sources": {}, "errors": {}, "content": "queued",
+                                "background": True})
             wait = int(e.wait) + 1 if e.wait else 0
             response = error("a sync is already running" if not wait else
                              f"synced recently; try again in {wait // 60 + 1} minute(s)",

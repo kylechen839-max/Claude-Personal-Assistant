@@ -13,8 +13,11 @@ content-type or the file name (both are whatever the uploader said):
   standard library's zipfile and xml.etree, no lxml. The zip's declared
   uncompressed sizes are checked first (MAX_ZIP_BYTES, MAX_ZIP_MEMBERS),
   and each member is read with a cap too (a zip can lie about its sizes):
-  a zip bomb is refused, not inflated. An XML part with a DTD is refused
-  (OOXML never has one; entity expansion is how XML bombs work).
+  a zip bomb is refused, not inflated. An XML part with a DTD or an entity
+  declaration is refused, found by expat in whatever encoding the part is
+  (OOXML never has one; entity expansion is how XML bombs work), and the
+  rest is pull-parsed, each element dropped once read, so memory holds one
+  paragraph, never a 20 MB part's whole tree.
 - HTML: tools.gmail.html_to_text (at most MAX_HTML_CHARS of markup).
 - Plain text (UTF-8, or Latin-1 when that fails), when it has no NUL bytes.
 
@@ -44,7 +47,9 @@ MAX_PDF_PAGES = 300          # pages of one PDF read
 MAX_CHARS = 1_000_000        # characters of text kept from one file
 MAX_ZIP_BYTES = 60_000_000   # a .docx/.pptx's declared uncompressed size
 MAX_ZIP_MEMBERS = 5000       # ... and its number of parts
-MAX_XML_BYTES = 20_000_000   # one XML part read
+MAX_XML_BYTES = 20_000_000   # one XML part read (streamed, never held as a whole tree)
+MAX_PARAGRAPH_NODES = 50_000  # elements of one paragraph held while it is read
+XML_CHUNK = 64 * 1024           # bytes parsed at a time (each chunk's nodes are held until read)
 MAX_SLIDES = 500             # slides of one .pptx read
 MAX_HTML_CHARS = 2_000_000   # markup given to html_to_text (its regexes)
 KINDS = ("pdf", "docx", "pptx", "html", "text")
@@ -157,47 +162,121 @@ def _zip(data: bytes) -> zipfile.ZipFile:
     return zf
 
 
-def _xml(zf: zipfile.ZipFile, name: str):
-    """One XML part, parsed; read with a cap whatever the zip declares."""
+class _Root(Exception):
+    """The prolog is over (the first element started): no DTD in it."""
+
+
+def _prolog_guard():
+    """An expat parser that raises ExtractError at a DOCTYPE or an entity
+    declaration (never in OOXML; entity expansion is how XML bombs work)
+    and _Root at the first element. expat reads the encoding itself, so
+    UTF-16 or a BOM can't hide a DTD from it."""
+    from xml.parsers import expat
+
+    guard = expat.ParserCreate()
+
+    def refuse(*_):
+        raise ExtractError("unreadable")
+
+    def root(*_):
+        raise _Root()
+
+    guard.StartDoctypeDeclHandler = refuse
+    guard.EntityDeclHandler = refuse
+    guard.StartElementHandler = root
+    return guard
+
+
+def _lines(zf: zipfile.ZipFile, name: str, para: str, text: str, tab: str | None,
+           br: str | None, deadline, clock) -> list[str] | None:
+    """The paragraphs of one XML part (None: no such part), streamed: read
+    in chunks up to MAX_XML_BYTES whatever the zip declares, checked for a
+    DTD before any of it is parsed for real, and pull-parsed with each
+    element dropped once read, so memory holds one paragraph at a time
+    (at most MAX_PARAGRAPH_NODES elements), not the whole tree."""
+    from xml.parsers import expat
+
+    guard, puller = _prolog_guard(), ElementTree.XMLPullParser(events=("start", "end"))
+    out: list[str] = []
+    stack: list = []
+    in_para = held = total = 0
     try:
-        with zf.open(name) as f:
-            raw = f.read(MAX_XML_BYTES + 1)
+        f = zf.open(name)
     except KeyError:
         return None
-    except (zipfile.BadZipFile, OSError, ValueError, RuntimeError, EOFError):
+    except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
         raise ExtractError("unreadable") from None
-    if len(raw) > MAX_XML_BYTES:
-        raise ExtractError("too_large")
-    if b"<!DOCTYPE" in raw[:4096].upper() or b"<!ENTITY" in raw.upper():
-        raise ExtractError("unreadable")  # never in OOXML: an XML bomb
     try:
-        return ElementTree.fromstring(raw)
-    except ElementTree.ParseError:
+        while True:
+            try:
+                chunk = f.read(XML_CHUNK)
+            except (zipfile.BadZipFile, OSError, ValueError, RuntimeError, EOFError):
+                raise ExtractError("unreadable") from None
+            total += len(chunk)
+            if total > MAX_XML_BYTES:
+                raise ExtractError("too_large")
+            _check_time(deadline, clock)
+            if guard is not None:
+                try:
+                    guard.Parse(chunk, not chunk)
+                except _Root:
+                    guard = None
+                except (expat.ExpatError, ValueError):  # ValueError: an encoding expat lacks
+                    raise ExtractError("unreadable") from None
+            if not chunk:
+                if guard is not None:
+                    raise ExtractError("unreadable")  # no element at all
+                puller.close()
+            else:
+                puller.feed(chunk)
+            for event, node in puller.read_events():
+                if event == "start":
+                    stack.append(node)
+                    if node.tag == para:
+                        in_para += 1
+                    if in_para:
+                        held += 1
+                        if held > MAX_PARAGRAPH_NODES:
+                            raise ExtractError("too_large")
+                    continue
+                stack.pop()
+                if node.tag == para:
+                    in_para -= 1
+                    bits = []
+                    for sub in node.iter():
+                        if sub.tag == text and sub.text:
+                            bits.append(sub.text)
+                        elif sub.tag in (tab, br):
+                            bits.append("\t" if sub.tag == tab else "\n")
+                    line = "".join(bits).strip()
+                    if line:
+                        out.append(line)
+                    if not in_para:
+                        held = 0
+            # drop what was read: every finished child of the open elements
+            # outside a paragraph (the open one, if any, is the last child)
+            for i, parent in enumerate(stack):
+                if parent.tag == para:
+                    break
+                del parent[:len(parent) - 1 if i + 1 < len(stack) else len(parent)]
+            if not chunk:
+                return out
+    except ExtractError:
+        raise  # a ValueError too: keep its own code
+    except (ElementTree.ParseError, ValueError):  # ValueError: an encoding it lacks
         raise ExtractError("unreadable") from None
-
-
-def _paragraphs(root, para: str, text: str, tab: str | None, br: str | None) -> list[str]:
-    out = []
-    for p in root.iter(para):
-        bits = []
-        for node in p.iter():
-            if node.tag == text and node.text:
-                bits.append(node.text)
-            elif node.tag in (tab, br):
-                bits.append("\t" if node.tag == tab else "\n")
-        line = "".join(bits).strip()
-        if line:
-            out.append(line)
-    return out
+    finally:
+        f.close()
 
 
 def _docx(data: bytes, deadline, clock) -> str:
     with _zip(data) as zf:
         _check_time(deadline, clock)
-        root = _xml(zf, "word/document.xml")
-        if root is None:
+        lines = _lines(zf, "word/document.xml", W + "p", W + "t", W + "tab", W + "br",
+                       deadline, clock)
+        if lines is None:
             raise ExtractError("unreadable")
-        return "\n".join(_paragraphs(root, W + "p", W + "t", W + "tab", W + "br"))
+        return "\n".join(lines)
 
 
 def _pptx(data: bytes, deadline, clock) -> str:
@@ -207,9 +286,7 @@ def _pptx(data: bytes, deadline, clock) -> str:
         out = []
         for number, name in slides[:MAX_SLIDES]:
             _check_time(deadline, clock)
-            root = _xml(zf, name)
-            lines = _paragraphs(root, A + "p", A + "t", None, A + "br") if root is not None \
-                else []
+            lines = _lines(zf, name, A + "p", A + "t", None, A + "br", deadline, clock)
             if lines:
                 out.append(f"Slide {number}\n" + "\n".join(lines))
         return "\n\n".join(out)

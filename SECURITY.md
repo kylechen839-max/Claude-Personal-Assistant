@@ -1260,9 +1260,14 @@ tools. This changes the earlier "never page text" rule on purpose.
   listing or `Content-Length` said. PDFs: pypdf, at most 300 pages, the
   time checked between pages; encrypted files are skipped. DOCX/PPTX: the
   zip's declared uncompressed size (60 MB) and part count (5000) are
-  checked before anything is inflated, each XML part is read with its own
-  cap (a zip can lie), and a part with a DTD or entity is refused (XML
-  bombs). HTML goes through `html_to_text` (scripts and styles dropped),
+  checked before anything is inflated, each XML part is streamed with its
+  own cap (a zip can lie), and a part with a DTD or an entity declaration
+  is refused (XML bombs): expat finds it in whatever encoding the part
+  declares (UTF-16 included; an encoding expat lacks is refused too)
+  before the part is parsed for real. The part is pull-parsed and each
+  element dropped once read, so memory holds one paragraph (at most 50,000
+  elements), never the whole tree (a 29 KB DOCX of 20 MB XML used to take
+  350 MB). HTML goes through `html_to_text` (scripts and styles dropped),
   at most 2 MB of markup. **Deliberate non-fix:** pypdf can't be
   interrupted inside one page, so a hostile PDF can hold one sync for as
   long as that page takes; the size and page caps bound it, and a
@@ -1289,10 +1294,16 @@ tools. This changes the earlier "never page text" rule on purpose.
   connection holding the log. **Disconnect Canvas** always deletes the
   whole store (then removes the files); deleting one course
   (`/api/student/courses/<id>/delete`) also keeps it out of later syncs.
-  A content sync that was running when the person disconnected stops
-  writing (a generation check under the store's lock, before any file is
-  made), and a write for someone removed is refused under Family's lock,
-  so neither brings data back. An invited person's store goes with their
+  A sync writes course content only while it is still current: the
+  person's generation is read when the sync starts, before the link is,
+  and every write checks it under the store's lock, before any file is
+  made, together with the link still being there; so a Disconnect at any
+  point of a sync (the planner step included) stops its writes. A
+  course deleted during a sync is refused by the write itself (its
+  exclusion is checked inside the same connection). A write for someone
+  removed is refused under Family's lock. None of them brings data back.
+  Every call closes its own connection, and the files are removed with
+  `family._unlink`, which retries while Windows still holds one. An invited person's store goes with their
   folder and is in their "Download my data" zip (text only, never a link
   or token).
 - **Bounded.** `[canvas] max_files` (40) downloads per sync, newest first;
@@ -1306,7 +1317,12 @@ tools. This changes the earlier "never page text" rule on purpose.
 - **Background sync.** `student_web.CourseSync` runs in the webapp's
   lifespan, never on a `--candidate` check copy; it goes through
   `try_sync` (one sync per person at a time), at most 20 people per
-  5-minute tick, each every `[canvas] auto_sync_hours`. The owner's runs
+  5-minute tick, each every `[canvas] auto_sync_hours`. A person whose
+  sync is already running is looked at again after 30 s, never in a
+  loop; "Sync now" while the background holds it answers that it is
+  syncing in the background, and the background's runs don't count
+  toward the tap throttle. One file's network error skips that file
+  only (tried again next run). The owner's runs
   only where the failover `LeaderCheck` says this machine leads, so his
   Canvas and Claude aren't read three times.
 - **School rules.** It reads only the person's own courses with their own

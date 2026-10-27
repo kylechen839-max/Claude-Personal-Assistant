@@ -185,7 +185,10 @@ def test_connected_sync_stores_syllabus_and_pdf_and_search_finds_them(c):
     """Connected with a token, the background sync (no tap) stores the
     syllabus, page, assignment, announcement, module list and the PDF's
     text; search_course_files finds the late policy inside the PDF."""
-    assert c.uid in c.courses._asked and c.courses._wake.is_set()  # the connect woke it
+    # never synced: due at the next tick with no tap (the page's own sync
+    # after connecting queues it too; the connect itself doesn't, see
+    # test_connect_then_the_pages_sync_never_races_the_background)
+    assert c.courses.due(c.uid) and c.uid not in c.courses._asked
     synced(c, {"text_index": 0, "title": "Midterm 1", "course": "MATH 241",
                "kind": "exam", "due": "2026-11-12"})
     tools = c.fam.context(c.uid).registry
@@ -654,7 +657,7 @@ def test_background_sync_runs_when_due_and_only_for_connected_people(c, monkeypa
     monkeypatch.setattr(c.sync, "try_sync", lambda uid, **kw: ran.append((uid, kw)) or {
         "sources": {}, "errors": {}, "content": {"more": 0}})
     assert c.courses.tick() == 1                    # the owner has no Canvas: skipped
-    assert ran == [(c.uid, {"content": True, "throttle": True})]
+    assert ran == [(c.uid, {"content": True, "throttle": True, "record": False})]
     # synced just now: not due again for [canvas] auto_sync_hours
     c.fam.deadlines.note_sync(c.uid)
     assert not c.courses.due(c.uid)
@@ -722,3 +725,209 @@ def test_only_leftover_files_or_running_out_of_time_bring_the_next_run_forward(
         assert c.courses.tick() == 1
         retries.append(c.uid in c.courses._retry)
     assert retries == [False, True, True]  # a rate limit or a missing key waits the hours
+
+
+# --- judge round 1 ----------------------------------------------------------------
+
+def test_disconnect_during_the_planner_step_writes_nothing(c, monkeypatch):
+    """HIGH 1: the content step's generation was read only when it began,
+    after a Disconnect during the planner, so it rewrote the deleted store."""
+    real = canvas.CanvasAPI.deadlines
+
+    def deadlines_then_disconnect(self, now=None):
+        out = real(self, now)
+        c.sync.disconnect(c.uid)
+        return out
+
+    monkeypatch.setattr(canvas.CanvasAPI, "deadlines", deadlines_then_disconnect)
+    c.client.queue.append(dates_reply())
+    c.courses.tick()
+    assert not list(c.folder.glob("coursefiles.sqlite*"))
+    assert c.fake.downloads == []
+
+
+def test_content_stops_once_the_link_file_is_gone(c):
+    alive = c.sync._alive(c.uid, c.sync._generation_of(c.uid))
+    assert alive()
+    (c.folder / student_web.CANVAS_FILE).unlink()  # gone without a Disconnect
+    assert not alive()
+
+
+def test_a_busy_person_never_makes_the_background_spin(c, monkeypatch):
+    """MED 2: an asked-for sync that found the person's sync running woke
+    the thread again at once (227k try_sync calls a second)."""
+    import time
+
+    calls = []
+
+    def busy(uid, **kw):
+        calls.append(uid)
+        raise student_web.SyncBusy(0)
+
+    monkeypatch.setattr(c.sync, "try_sync", busy)
+    monkeypatch.setattr(student_web, "FIRST_TICK", 0)
+    c.courses.start()
+    try:
+        c.courses.request(c.uid)
+        time.sleep(0.5)
+    finally:
+        c.courses.stop()
+    assert 1 <= len(calls) <= 3
+    assert c.uid in c.courses._asked  # still wanted: tried again BUSY_SECONDS later
+
+
+def test_deleting_a_course_during_a_sync_keeps_it_deleted(c, monkeypatch):
+    """MED 3: the excluded courses were read once at the start, so a course
+    deleted mid-sync came back."""
+    synced(c)
+    c.fake.files[0].update(updated_at="2026-10-05T00:00:00Z")  # downloaded again
+    real = canvas.CanvasAPI.download
+
+    def download_then_delete(self, url, max_bytes=canvas.MAX_FILE_BYTES):
+        data = real(self, url, max_bytes)
+        assert c.sam.post("/api/student/courses/111/delete").status_code == 200
+        return data
+
+    monkeypatch.setattr(canvas.CanvasAPI, "download", download_then_delete)
+    c.client.queue.append(dates_reply())
+    c.courses.request(c.uid)
+    assert c.courses.tick() == 1
+    assert c.sam.get("/api/student/courses").json()["courses"] == []
+    assert b"ten percent" not in _raw(c.folder)
+
+
+def test_connect_then_the_pages_sync_never_races_the_background(c, monkeypatch):
+    """LOW 4: the page syncs right after connecting; with the background
+    thread holding the person's sync that was a 409."""
+    import threading
+
+    assert c.uid not in c.courses._asked   # the connect queues nothing itself
+    entered, release = threading.Event(), threading.Event()
+    real = canvas.CanvasAPI.deadlines
+
+    def slow(self, now=None):
+        entered.set()
+        release.wait(10)
+        return real(self, now)
+
+    monkeypatch.setattr(canvas.CanvasAPI, "deadlines", slow)
+    c.client.queue.append(dates_reply())
+    worker = threading.Thread(target=c.courses.tick)
+    worker.start()
+    try:
+        assert entered.wait(10)
+        r = c.sam.post("/api/student/sync")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"sources": {}, "errors": {}, "content": "queued",
+                            "background": True}
+    finally:
+        release.set()
+        worker.join(10)
+    assert not c.courses.running(c.uid)
+    # another sync of theirs (not the background's) is still a 409
+    with c.sync._running[c.uid]:
+        assert c.sam.post("/api/student/sync").status_code == 409
+    # the background's run doesn't count for the tap throttle: no "synced recently"
+    r = c.sam.post("/api/student/sync")
+    assert r.status_code == 200 and r.json()["content"] == "queued", r.text
+
+
+def test_a_dtd_is_refused_in_any_encoding_and_parts_are_streamed(monkeypatch):
+    """LOW 5 and 6: the byte check missed a UTF-16 DTD, and a 29 KB DOCX
+    became a 20 MB tree (350 MB of memory)."""
+    import tracemalloc
+
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def docx(xml: bytes) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("word/document.xml", xml)
+        return buf.getvalue()
+
+    for encoding in ("utf-16", "utf-16-le", "utf-8-sig"):
+        lol = (f'<?xml version="1.0" encoding="{encoding.replace("-sig", "")}"?>'
+               '<!DOCTYPE r [<!ENTITY a "AAAAAAAAAA">]>'
+               f'<w:document xmlns:w="{w}"><w:body><w:p><w:r><w:t>&a;&a;</w:t></w:r>'
+               '</w:p></w:body></w:document>').encode(encoding)
+        if encoding == "utf-16-le":
+            lol = b"\xff\xfe" + lol
+        with pytest.raises(textextract.ExtractError, match="unreadable"):
+            textextract.extract(docx(lol))
+    many = (f'<w:document xmlns:w="{w}"><w:body>'.encode() + b"<w:p/>" * 400_000
+            + b'<w:p><w:r><w:t>last line</w:t></w:r></w:p></w:body></w:document>')
+    data = docx(many)
+    tracemalloc.start()
+    try:
+        assert textextract.extract(data) == ("docx", "last line")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 8_000_000  # a few chunks; the whole tree took 34 MB
+    monkeypatch.setattr(textextract, "MAX_XML_BYTES", 1_000_000)
+    with pytest.raises(textextract.ExtractError, match="too_large"):
+        textextract.extract(docx(many))      # 2.4 MB: over the cap, by what was read
+
+
+def test_a_network_error_on_one_file_skips_only_that_file(c):
+    """LOW 7: an httpx transport error on one download aborted every later
+    file, on every run."""
+    c.fake.files.append(canvas_file(504, "Notes.txt", "text/plain", "text", 40,
+                                    updated="2026-09-01T12:00:00Z"))
+    c.fake.blobs[504] = b"Lecture notes: eigenvalues and eigenvectors."
+    real = c.fake.answer
+
+    def flaky(request):
+        if request.url.host == FILES_HOST and request.url.path == "/501":
+            raise httpx.ReadError("connection reset")
+        return real(request)
+
+    c.fake.answer = flaky
+    c.client.queue.append(dates_reply())
+    out = c.sync.try_sync(c.uid, content=True, throttle=False)
+    assert "content" not in out["errors"] and out["content"]["skipped"] >= 1
+    tools = c.fam.context(c.uid).registry
+    assert search(tools, "eigenvalues")["count"] == 1     # the next file went on
+    assert search(tools, "ten percent")["count"] == 0
+    c.fake.answer = real                                   # back: read next time
+    c.client.queue.append(dates_reply())
+    c.sync.try_sync(c.uid, content=True, throttle=False)
+    assert search(tools, "ten percent")["count"] == 1
+
+
+def test_delete_all_retries_a_file_windows_holds_and_reads_leave_nothing_open(
+        tmp_path, monkeypatch):
+    """Windows CI watch: deleting the store while a reader just closed its
+    connection: the unlink is retried (family._unlink), and every call of
+    the store closes its own connection, so nothing holds the file."""
+    import sqlite3
+
+    store = coursefiles.CourseStore(tmp_path, tmp_path / "f")
+    store.upsert(None, {"course_id": 1, "course": "C", "kind": "page", "source_key": "p:1:1",
+                        "title": "T", "etag": "e", "text": "quokka"})
+    opened, real_connect = [], sqlite3.connect
+
+    def tracking(*a, **kw):
+        con = real_connect(*a, **kw)
+        opened.append(con)
+        return con
+
+    monkeypatch.setattr(sqlite3, "connect", tracking)
+    store.search(None, "quokka")
+    store.read(None, 1)
+    store.stats(None)
+    assert len(opened) == 3
+    for con in opened:  # all closed: using one raises
+        with pytest.raises(sqlite3.ProgrammingError):
+            con.execute("SELECT 1")
+    real_unlink, held = Path.unlink, []
+
+    def locked_once(self, missing_ok=False):
+        if self.name == coursefiles.FILE and not held:
+            held.append(self)
+            raise PermissionError("in use")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked_once)
+    assert store.delete_all(None) == 1
+    assert held and not list(tmp_path.glob("coursefiles.sqlite*"))

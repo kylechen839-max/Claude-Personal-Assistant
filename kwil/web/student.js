@@ -307,6 +307,8 @@
         const r = await call("/api/student/sync", { body: {} });
         if (!r.ok) {
           say(r.body.error || "Couldn't sync. Try again.");
+        } else if (r.body.background) {  // the server's own sync of you is running
+          say("Syncing in the background.");
         } else {
           const added = Object.values(r.body.sources || {})
             .reduce((n, c) => n + (Number(c && c.added) || 0), 0);
