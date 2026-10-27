@@ -1440,12 +1440,31 @@ Connecting Canvas never uses a school password. Either:
   pages` on, the pages in your courses' modules, where Claude picks out the
   dates.
 
-You (the owner) put `CANVAS_ICS_URL`, or `CANVAS_TOKEN` with `[canvas]
-base_url` (or `CANVAS_BASE_URL`), in `.env` (on Render: Environment).
-Invited people paste theirs in the card; it is stored encrypted with
-`USER_DATA_KEY` (without it the server says it can't store sign-ins) and
-deleted on **Disconnect Canvas** (which can also delete what came from
-Canvas) and with their account. **Sync now** fetches everything at most
+Everyone, you (the owner) included, connects in the card: type your
+school's name and tap **Find my school**, pick it, tap **Open my Canvas
+calendar** (Canvas opens in a new tab), tap **Calendar Feed** (bottom
+right) and copy the link, come back and tap **Paste** (or paste it by
+hand), then **Connect Canvas**. Paste only fills the field (the phone may
+ask to allow it; if you say no, paste by hand); nothing connects until
+you tap Connect. **Use an access token instead** takes the school address
+and a token. The link is stored encrypted with `USER_DATA_KEY` (without it
+the server says it can't store sign-ins): yours in `[student] dir` as
+`canvas.enc`, an invited person's in their own folder. It is deleted on
+**Disconnect Canvas** (which can also delete what came from Canvas) and,
+for an invited person, with their account. Canvas has no way to revoke a
+feed link; after disconnecting a token, also delete it in Canvas ->
+**Account** -> **Settings**.
+
+Older setups put the owner's link in the environment instead:
+`CANVAS_ICS_URL`, or `CANVAS_TOKEN` with `[canvas] base_url` (or
+`CANVAS_BASE_URL`), in `.env` (on Render: Environment). While either is
+set, the environment wins: the card shows the connection with no form
+(connect answers 409). **Disconnect** shows only if the app still holds
+an older link of yours; it deletes that file and never touches the
+environment (with no such file, disconnect answers 409). To move to the app,
+delete `CANVAS_ICS_URL` / `CANVAS_TOKEN` (and `CANVAS_BASE_URL`) from
+`.env` or Render's Environment (the server reads them on every request),
+then paste the link in the card. **Sync now** fetches everything at most
 every `[student] sync_minutes` (15) per person. With `[student] gmail` on
 and Gmail connected, Canvas's notification emails from the last two weeks
 are read too (read-only; each email once), with `[student] extract_model`

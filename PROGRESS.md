@@ -5547,6 +5547,77 @@ conversations come with them.
   "Kyle"). It fails with the `history.py` change reverted (`'Kyle: how
   lo...' == 'User: how lo...'`). Full suite: 3186 passed, 37 skipped.
 
+## The owner connects Canvas in the app, with a guided connect (2026-10-27)
+- **Behaviour change:** the owner no longer has to put `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` in Render's environment. Without them, the owner's
+  **School deadlines** card shows the same connect form as an invited
+  person's (feed link, or school + access token), and the link is sealed
+  with `userkeys.seal` under `canvas.CANVAS_LABEL` with the id `"owner"`
+  (push.py's convention) in `<[student] dir>/canvas.enc` (Render:
+  `/data/student/canvas.enc`), written with `write_private`. Same
+  `canvas.public_url` checks, 503 without a usable `USER_DATA_KEY`, and
+  **Disconnect Canvas** deletes the file (and, asked, what came from
+  Canvas). `test_owner_uses_the_environment_never_the_app` was replaced on
+  purpose by `test_owner_connects_in_the_app_sealed_at_rest_and_syncs`.
+- **Env still wins while set** (`StudentSync.env_managed`, read on every
+  request): the status says `managed: "env"`, connect and disconnect are
+  409, sync uses the env and never the sealed file. Deleting the env vars
+  hands the link to the app with no restart.
+- **Guided connect (student.js, owner and members):** **Find my school**
+  (the existing `/api/student/schools` lookup), **Open my Canvas
+  calendar** (`window.open("https://<host>/calendar", "_blank",
+  "noopener")` straight from the tap, so iOS allows it; hosts must pass a
+  page-side copy of `public_url`'s rules: https, port 443, no
+  `user:pass@`, a dotted DNS name, no IP literal, `localhost` or LAN-only
+  suffix), the hint "Tap Calendar Feed (bottom right), copy the link, come
+  back.", and **Paste** (`navigator.clipboard.readText()` on the tap only;
+  fills the feed field with an `https://`/`webcal://` link, silent if
+  permission is denied, never submits). EN + ZH strings in `i18n.js`.
+  `sw.js` cache `kwil-shell-v2`.
+- **Tests:** `tests/test_student_web.py` +7 (owner connect sealed at rest
+  and synced through `canvas.TRANSPORT`; owner link checks; env wins incl.
+  `CANVAS_TOKEN` alone, then app takes over; owner Disconnect deletes the
+  file and the source purge works; 503 without `USER_DATA_KEY`; a member
+  never reads or touches the owner's file and the sealed files don't open
+  across ids; caplog: no feed URL, token or host in any log, ids at INFO),
+  replacing 1. All 7 fail with only `kwil/student_web.py` reverted.
+  `tests/js/student.test.mjs` +5 (owner form visible with `managed:
+  "app"`; guided lookup filters unsafe hosts and opens the calendar from
+  the tap; a lookup with nothing usable says so; Paste fills and never
+  connects; denied is silent, non-links aren't filled, no clipboard hides
+  the button) and the i18n scenario covers the new strings; the four
+  guided tests and the i18n test fail with `student.js` / `i18n.js`
+  reverted (the owner-form test passes on the old page too: the page
+  already keyed on `managed`, the server change is what makes it true).
+- **Counts** (Linux sandbox, Python 3.13): 3231 passed, 37 skipped
+  (baseline 5e83590 as a `git archive` copy on the same machine: 3224
+  passed, 38 skipped; the extra skip there is a git-history test). JS:
+  149 passed (baseline 144).
+
+### Round 2 (judge: APPROVED with four LOWs)
+1. **PRIVACY "School deadlines (Canvas)" row** said the owner's link was in
+   `.env`: now encrypted with USER_DATA_KEY for everyone (the owner's in
+   `[student] dir`), `.env` the older way for the owner.
+2. **A typed Canvas address found nothing** (`https://canvas.school.edu/`,
+   `canvas.school.edu/`): with no spaces, `schoolHost(text)` is chosen
+   directly when it was typed with `https://` or is a `canvas.` /
+   `.instructure.` host; a bare domain (`school.edu`) still goes to the
+   lookup (it knows the Canvas host or guesses `canvas.<domain>`, which a
+   direct `school.edu/calendar` would miss), sent as the clean host. JS
+   test fails without the change.
+3. **An older app-stored owner link came back once the env was removed.**
+   While env-managed, Disconnect now deletes `<[student] dir>/canvas.enc`
+   if it exists (never the env; 409 with no file), and status has
+   `app_link` so the card shows Disconnect in that state.
+   `test_owner_environment_wins_while_it_is_set` no longer asserts the
+   file stays; new `test_owner_can_forget_an_older_app_link_while_the_env_wins`
+   and a JS test; both Python tests and the JS test fail without the change.
+4. **Family-less (PC owner) path:** two tests (`family=None`): connect
+   seals to "owner", sync adds 3, disconnect deletes the file; 503 without
+   USER_DATA_KEY. Coverage only: they pass on the round-1 code too.
+- **Counts** (Linux sandbox, Python 3.13): 3234 passed, 37 skipped (round
+  1: 3231; baseline 5e83590: 3224 passed, 38 skipped). JS: 151 passed
+  (round 1: 149).
 ## The owner connects Google in the app on the cloud server (2026-10-27)
 
 On https://heykwil.com Kyle, signed in with `WEB_TOKEN`, can now tap ⚙ ->

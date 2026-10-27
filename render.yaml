@@ -88,9 +88,11 @@ services:
         sync: false
       - key: NOTION_OAUTH_CLIENT_SECRET
         sync: false
-      # Your own Canvas for school deadlines (README "Student deadlines"):
-      # the Calendar Feed link (it is a secret), or an access token with
-      # CANVAS_BASE_URL. Left empty, only invited people's links are used.
+      # Optional, the older way: your own Canvas for school deadlines (README
+      # "Student deadlines"), the Calendar Feed link (it is a secret), or an
+      # access token with CANVAS_BASE_URL. Leave them empty and connect
+      # Canvas in the app's School deadlines card instead (stored encrypted
+      # on the disk); while either is set, it wins over the app.
       - key: CANVAS_ICS_URL
         sync: false
       - key: CANVAS_TOKEN

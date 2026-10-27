@@ -319,8 +319,9 @@ max_items = 2000              # deadlines kept per person
 max_per_source = 500          # ... and per source (calendar feed, Canvas API, emails, ...)
 
 [canvas]                      # where deadlines come from; a feed link or an access token, never a school password
-# Yours: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed) or CANVAS_TOKEN
-# (Account -> Settings -> New access token) in .env. Invited people paste theirs in the app.
+# Everyone, you included, pastes a link in the app's School deadlines card (sealed with
+# USER_DATA_KEY). Or, the older way: CANVAS_ICS_URL (Canvas -> Calendar -> Calendar Feed)
+# or CANVAS_TOKEN (Account -> Settings -> New access token) in .env, which wins while set.
 base_url = ""                 # your school's Canvas for CANVAS_TOKEN, e.g. "https://canvas.school.edu" (CANVAS_BASE_URL overrides)
 pages = false                 # also read module pages (Claude picks the dates out; one call per sync when pages changed)
 max_pages = 20                # module pages read per sync, at most

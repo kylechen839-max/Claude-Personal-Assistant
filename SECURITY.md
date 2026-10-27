@@ -1076,9 +1076,22 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   label (`hey-claude/canvas/v1`, never opening as an Anthropic key or a
   Notion sign-in), their id inside, in `<dir>/<id>/canvas.enc`
   (`write_private`); without a usable `USER_DATA_KEY` connect answers 503
-  and writes nothing. The owner's are `CANVAS_ICS_URL` / `CANVAS_TOKEN` in
-  the environment (both in `SECRET_ENV_VARS` and `ISOLATED_ENV_VARS`), and
-  the owner's connect route is a 409. Neither is ever returned (the status
+  and writes nothing. The owner connects in the app the same way: sealed
+  under the same label with the id `"owner"` inside (push.py's
+  convention; invited ids are `u_...`, so a member's file never opens as
+  the owner's or the reverse) in `<[student] dir>/canvas.enc`, with the
+  same 503 without `USER_DATA_KEY`, the same `public_url` checks, and
+  **Disconnect** deleting the file. A separate instance can't share that
+  folder (`[student]` is turned off for one that keeps the default
+  `dir`). The older way still wins while it is set: `CANVAS_ICS_URL` /
+  `CANVAS_TOKEN` in the environment (both in `SECRET_ENV_VARS` and
+  `ISOLATED_ENV_VARS`), read on every request; then the owner's connect
+  route is a 409 and the sealed file, if any, is not read, but
+  disconnect still deletes that file (status `app_link`), so an older
+  link can't come back silently once the env is removed; with no file it
+  is a 409, and the env is never touched. The routes take no id: each session reaches only its own link
+  (the owner's session the owner's file, a member's their own folder).
+  Neither the link nor the token is ever returned (the status
   says only the kind and the school's host), logged, or exported. The
   redacting log formatter masks `/feeds/calendars/...` paths and Canvas
   token shapes too, because httpx logs request URLs at INFO (kept at
@@ -1096,6 +1109,19 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   the address would need a custom transport, and the fetch is a GET whose
   answer is only parsed as a calendar or Canvas JSON (nothing else of it
   is shown or stored).
+- **The guided connect (student.js).** **Open my Canvas calendar** opens
+  `https://<host>/calendar` with `noopener`, only for a host from the
+  school lookup that passes a page-side copy of the `public_url` rules
+  (https, port 443, no `user:pass@`, a dotted DNS name, never an IP
+  literal, `localhost` or a LAN-only suffix such as `.local`); the page
+  can't resolve DNS, so the server's check of the pasted link stays the
+  real one. A Canvas address typed in the search box (`https://...`, or a
+  `canvas.` / `.instructure.` host) is used directly after the same check;
+  anything else goes to the lookup. School names are shown as text.
+  **Paste** reads the clipboard only on its tap (`navigator.clipboard.readText`), fills the field only
+  with an `https://` / `webcal://` link, says nothing if permission is
+  denied, and never submits: the person still taps Connect. No inline
+  handlers (the CSP is unchanged).
 - **Untrusted content.** Feed titles, planner items, module pages and
   emails are written by other people: `list_deadlines` is
   `untrusted_output` (and `private`), so once it ran, `add_deadline` and
@@ -1111,7 +1137,8 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   after every delete (a test reads the file and its WAL for the title).
   A deleted synced item leaves only a SHA-256 of its feed key so the next
   sync doesn't bring it back. An invited person's `deadlines.sqlite` and
-  `canvas.enc` go with their folder on removal or "Delete my account";
+  `canvas.enc` go with their folder on removal or "Delete my account"
+  (the owner's `canvas.enc` is deleted by **Disconnect Canvas**);
   their export holds the deadlines, never the link. Every connection is
   closed after each call (nothing holds the file open on Windows), and a
   write for someone just removed is refused under Family's lock, so a sync
