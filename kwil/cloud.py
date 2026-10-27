@@ -73,6 +73,7 @@ log = logging.getLogger(__name__)
 PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/manifest.webmanifest",
               "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png",
+              "/icon-maskable.png",
               "/voice.js", "/voice-core.js", "/voice-worklet.js", "/voice.css",
               "/static/vad/ort.wasm.min.js", "/static/vad/ort-wasm-simd-threaded.mjs",
               "/static/vad/ort-wasm-simd-threaded.wasm",

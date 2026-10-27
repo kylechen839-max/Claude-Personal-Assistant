@@ -40,6 +40,7 @@ import ipaddress
 import itertools
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -536,31 +537,125 @@ def decode_upload(data: bytes, max_seconds: float | None = None) -> np.ndarray:
 
 # --- icons (generated, so there are no binary files to ship) ------------------
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="#c96442"/>
-<rect x="24" y="12" width="16" height="26" rx="8" fill="#fff"/>
-<path d="M17 31a15 15 0 0 0 30 0" fill="none" stroke="#fff" stroke-width="4"
- stroke-linecap="round"/>
-<path d="M32 46v7M25 53h14" stroke="#fff" stroke-width="4"
- stroke-linecap="round"/>
-</svg>"""
+# The icon's background: a diagonal gradient around the app's light-mode
+# --accent (web/app.css), lighter top left, deeper bottom right.
+ICON_BG = "#2f5d8a"
+ICON_TOP, ICON_BOTTOM = "#3a6ea5", "#1d3a5c"
+# The installed app's splash and title bar: the light-mode --bg, the same
+# colour as index.html's light theme-color meta.
+THEME_BG = "#f5f7fa"
+_SHAFT = "#b7d0ec"
 
 
-def icon_png(size: int) -> bytes:
-    """The app icon (a white microphone on terracotta) as a PNG."""
-    s = size / 64.0
-    y, x = np.mgrid[0:size, 0:size].astype(np.float32) / s + 0.5 / s
-    img = np.empty((size, size, 3), dtype=np.uint8)
-    img[:] = (0xC9, 0x64, 0x42)
-    # capsule: x 24..40, y 12..38, radius 8
-    cy = np.clip(y, 20, 30)
-    mic = (x - 32) ** 2 + (y - cy) ** 2 <= 64
-    # arc: radius 15 around (32, 31), lower half, 4 wide
-    r = np.hypot(x - 32, y - 31)
-    arc = (np.abs(r - 15) <= 2) & (y >= 31)
-    stem = (np.abs(x - 32) <= 2) & (y >= 44) & (y <= 55)
-    base = (np.abs(y - 53) <= 2) & (x >= 23) & (x <= 41)
-    img[mic | arc | stem | base] = 255
+def _icon_marks() -> list[tuple[str, list[tuple[float, float]], float, str, float]]:
+    """The logo, a quill whose barbs are a sound wave: shapes on a 512 grid,
+    (kind, points, width, colour, opacity). "line" is a round-capped,
+    round-joined polyline; "fill" is a filled polygon with its edge stroked
+    at `width`. A pale shaft bows gently from the nib (bottom left) to the
+    tip (top right); swept-back barbs follow a feather's outline and a sound
+    wave's envelope, fading toward both ends; a plain triangle is the nib.
+    ICON_SVG and icon_png both draw this list, so they can't drift apart."""
+    x0, y0, x1, y1 = 70.0, 456.0, 436.0, 74.0
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux
+    bow = 26.0
+
+    def at(t):
+        b = bow * math.sin(math.pi * t)
+        return x0 + dx * t + nx * b, y0 + dy * t + ny * b
+
+    def along(t, e=1e-3):
+        (ax, ay), (bx, by) = at(max(0.0, t - e)), at(min(1.0, t + e))
+        d = math.hypot(bx - ax, by - ay)
+        return (bx - ax) / d, (by - ay) / d
+
+    marks = [("line", [at(i / 24) for i in range(25)], 11.0, _SHAFT, 1.0)]
+    half = (18, 40, 62, 80, 90, 90, 82, 66, 44, 22)
+    fade = (.6, .75, .9, 1, 1, 1, 1, .9, .75, .6)
+    ca, sa = math.cos(0.55), math.sin(0.55)  # barbs sweep back toward the tip
+    for i, (h, op) in enumerate(zip(half, fade)):
+        t = 0.30 + 0.67 * i / (len(half) - 1)
+        cx, cy = at(t)
+        tx, ty = along(t)
+        px, py = -ty, tx
+        left = (cx + (px * ca + tx * sa) * h, cy + (py * ca + ty * sa) * h)
+        right = (cx + (-px * ca + tx * sa) * h, cy + (-py * ca + ty * sa) * h)
+        marks.append(("line", [left, (cx, cy), right], 17.0, "#ffffff", op))
+    tip = (x0 - ux * 18, y0 - uy * 18)
+    bx, by = x0 + ux * 44, y0 + uy * 44
+    marks.append(("fill", [tip, (bx + nx * 14, by + ny * 14),
+                           (bx - nx * 14, by - ny * 14)], 4.0, "#ffffff", 1.0))
+    return marks
+
+
+def _icon_svg() -> str:
+    def path(kind, pts, w, col, op):
+        d = "M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+        paint = (f'{d}Z" fill="{col}"' if kind == "fill" else f'{d}" fill="none"')
+        return (f'<path d="{paint} stroke="{col}" stroke-width="{w:g}" '
+                'stroke-linecap="round" stroke-linejoin="round"'
+                + (f' opacity="{op:g}"' if op < 1 else "") + "/>")
+    body = "".join(path(*mark) for mark in _icon_marks())
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+            '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
+            f'<stop offset="0" stop-color="{ICON_TOP}"/>'
+            f'<stop offset="1" stop-color="{ICON_BOTTOM}"/></linearGradient></defs>'
+            '<rect width="512" height="512" rx="112" fill="url(#bg)"/>'
+            + body + "</svg>")
+
+
+ICON_SVG = _icon_svg()
+
+
+def _rgb(hexcolour: str) -> np.ndarray:
+    return np.array([int(hexcolour[i:i + 2], 16) for i in (1, 3, 5)], np.float32)
+
+
+# A maskable icon's art must stay inside the centre circle of radius 0.4 x
+# size (Android crops the rest), so that copy draws the quill smaller.
+MASKABLE_SCALE = 0.68
+
+
+def icon_png(size: int, maskable: bool = False) -> bytes:
+    """The app icon (the sound-wave quill on the blue gradient) as a PNG,
+    drawn from _icon_marks with 3x supersampling. Full bleed: iOS rounds the
+    corners itself; `maskable` shrinks the quill into Android's safe zone.
+    Each mark is drawn only inside its own bounding box, which keeps the 512
+    render fast and small enough for a Pi."""
+    ss = 3
+    n = size * ss
+    scale = 512.0 / n
+    y, x = (np.mgrid[0:n, 0:n].astype(np.float32) + 0.5) * scale
+    t = np.clip((x + y) / 1024.0, 0, 1)[..., None]
+    img = _rgb(ICON_TOP) * (1 - t) + _rgb(ICON_BOTTOM) * t
+    k = MASKABLE_SCALE if maskable else 1.0
+    for kind, pts, width, colour, opacity in _icon_marks():
+        pts = [(256 + (px - 256) * k, 256 + (py - 256) * k) for px, py in pts]
+        width *= k
+        pad = width / 2 + scale
+        c0 = max(0, int((min(p[0] for p in pts) - pad) / scale))
+        c1 = min(n, int((max(p[0] for p in pts) + pad) / scale) + 2)
+        r0 = max(0, int((min(p[1] for p in pts) - pad) / scale))
+        r1 = min(n, int((max(p[1] for p in pts) + pad) / scale) + 2)
+        bx, by = x[r0:r1, c0:c1], y[r0:r1, c0:c1]
+        # distance from each pixel to the shape's outline (or its edges)
+        dist = np.full(bx.shape, np.inf, np.float32)
+        edges = list(zip(pts, pts[1:] + pts[:1] if kind == "fill" else pts[1:]))
+        for (x0, y0), (x1, y1) in edges:
+            vx, vy = x1 - x0, y1 - y0
+            seg = max(vx * vx + vy * vy, 1e-9)
+            f = np.clip(((bx - x0) * vx + (by - y0) * vy) / seg, 0, 1)
+            dist = np.minimum(dist, np.hypot(bx - (x0 + f * vx), by - (y0 + f * vy)))
+        if kind == "fill":  # inside a convex polygon: every edge's cross has one sign
+            sides = [np.sign((x1 - x0) * (by - y0) - (y1 - y0) * (bx - x0))
+                     for (x0, y0), (x1, y1) in edges]
+            dist = np.where(np.abs(sum(sides)) == len(sides), 0, dist)
+        cover = np.clip(width / 2 - dist + 0.5 * scale, 0, 1)[..., None] * opacity
+        img[r0:r1, c0:c1] = img[r0:r1, c0:c1] * (1 - cover) + _rgb(colour) * cover
+    img = img.reshape(size, ss, size, ss, 3).mean(axis=(1, 3))
+    img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
     raw = b"".join(b"\x00" + row.tobytes() for row in img)
 
     def chunk(kind: bytes, data: bytes) -> bytes:
@@ -580,13 +675,14 @@ MANIFEST = {
     "scope": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "background_color": "#1f1e1d",
-    "theme_color": "#1f1e1d",
+    "background_color": THEME_BG,
+    "theme_color": THEME_BG,
     "icons": [
         {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"},
         {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png",
-         "purpose": "any maskable"},
+        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        {"src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "maskable"},
     ],
 }
 
@@ -1773,15 +1869,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         return Response(ICON_SVG, media_type="image/svg+xml")
 
     icons = {}
+    icons_lock = threading.Lock()
+
+    def cached_icon(key, size, maskable=False):
+        with icons_lock:  # render each icon once, even for parallel fetches
+            if key not in icons:
+                icons[key] = icon_png(size, maskable)
+            return Response(icons[key], media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/icon-maskable.png")
+    def icon_maskable():
+        return cached_icon("maskable", 512, maskable=True)
 
     @app.get("/icon-{size}.png")
     def icon(size: int):
         if size not in ICON_SIZES:
             return error("not found", 404)
-        if size not in icons:
-            icons[size] = icon_png(size)
-        return Response(icons[size], media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
+        return cached_icon(size, size)
 
     @app.get("/silence.wav")
     def silence():

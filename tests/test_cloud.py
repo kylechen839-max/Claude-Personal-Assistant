@@ -99,7 +99,8 @@ def test_healthz_is_unauthenticated_and_reveals_nothing(make_cloud):
 
 @pytest.mark.parametrize("path", ["/", "/app.js", "/app.css", "/sw.js",
                                   "/manifest.webmanifest", "/icon.svg",
-                                  "/icon-192.png", "/icon-512.png", "/icon-180.png"])
+                                  "/icon-192.png", "/icon-512.png", "/icon-180.png",
+                                  "/icon-maskable.png"])
 def test_login_page_manifest_and_icons_are_public(make_cloud, path):
     _, client = make_cloud()
     assert client.get(path, headers=via_proxy(PUBLIC)).status_code == 200

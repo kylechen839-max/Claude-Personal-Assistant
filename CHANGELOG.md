@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Kwil's web app, voice view, public site, icons and home-screen colours
+  move from Claude's orange to a calm, darker blue with cool neutrals; every
+  pair meets WCAG AA contrast in light and dark mode. New icon: a quill whose
+  barbs are a sound wave. Phones reload the new look once (service-worker
+  cache v5).
 - Connected services (owner, cloud): sign in to your own Notion and Home
   Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
   server. Environment tokens still win. Sign-ins are encrypted with
