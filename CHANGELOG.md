@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The support address on /privacy and /terms is now support@heykwil.com
+  (forwarded to the support Gmail).
 - The privacy page now carries Google's Limited Use statement (needed for
   Google to verify the beta testers' sign-in app), and its last "Hey Claude"
   is now Kwil.
