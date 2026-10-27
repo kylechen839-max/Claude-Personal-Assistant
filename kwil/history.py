@@ -47,9 +47,9 @@ MARK_START, MARK_END = "\x02", "\x03"
 ELLIPSIS = "…"
 
 TITLE_PROMPT = (
-    "Below is a conversation between Kyle and his voice assistant. Reply with "
-    "JSON only, like {\"title\": \"...\", \"summary\": \"...\"}. The title is "
-    "at most six words naming the topic (no quotes, no final period), e.g. "
+    "Below is a conversation between a person and their voice assistant. "
+    "Reply with JSON only, like {\"title\": \"...\", \"summary\": \"...\"}. "
+    "The title is at most six words naming the topic (no quotes, no final period), e.g. "
     "\"Lab report error bars\". The summary is one or two plain sentences "
     "saying what was discussed or decided."
 )
@@ -1312,9 +1312,11 @@ def ask_title(client, messages: list[dict],
 
 
 def message_transcript(messages: list[dict], max_chars: int = 0) -> str:
+    """Plain "User: ..." / "Assistant: ..." lines for the title call. "User", not
+    "Kyle": the same store records family members and beta testers."""
     lines = []
     for m in messages:
-        who = "Kyle" if m["role"] == "user" else "Assistant"
+        who = "User" if m["role"] == "user" else "Assistant"
         text = m["text"].strip()
         if text:
             lines.append(f"{who}: {text}")

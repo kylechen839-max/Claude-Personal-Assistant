@@ -514,6 +514,25 @@ def test_generate_title_falls_back_when_the_api_is_down(fake_client):
     assert history.fallback_title([]) == ("Conversation", "")
 
 
+def test_a_members_title_request_never_says_kyle(store, fake_client):
+    # family.py records each member (and beta tester) through the same
+    # Recorder; their words must not reach Anthropic labelled "Kyle:".
+    fake_client.with_options.return_value = fake_client
+    rec = Recorder(store, "web", run_async=False, client_fn=lambda: fake_client)
+    chat = ClaudeChat(client=fake_client, model="m", recorder=rec, user_name="Mom")
+    fake_client.queue = [make_response(text_block("Use a timer.")),
+                         make_response(text_block(
+                             '{"title": "Rice timing", "summary": "Rice."}'))]
+    chat.ask("how long do I cook rice")
+    cid = chat.conversation_id
+    chat.end_conversation()
+    call = next(c for c in fake_client.calls if c.get("system") == history.TITLE_PROMPT)
+    sent = call["messages"][0]["content"]
+    assert sent == "User: how long do I cook rice\nAssistant: Use a timer."
+    assert "Kyle" not in sent and "Kyle" not in call["system"]
+    assert store.get(cid)["title"] == "Rice timing"
+
+
 # ---------- recording through ClaudeChat ----------
 def recorded_chat(store, fake_client, tools=None, memory=None, incognito=False,
                   source="text"):

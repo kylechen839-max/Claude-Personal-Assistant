@@ -9,6 +9,9 @@
   `KWIL_CLOUD_TOKEN` as a Bearer header and prints counts only. Retries skip
   what's already there; past `[family] max_history_mb` the server answers 413
   and keeps nothing. README: "Move a PC family copy to the cloud".
+- Conversation titles and summaries no longer label a family member's or
+  beta tester's words as Kyle's: the transcript sent for titling says
+  "User:" and the prompt is neutral.
 - The support address on /privacy and /terms is now support@heykwil.com
   (forwarded to the support Gmail).
 - The privacy page now carries Google's Limited Use statement (needed for
