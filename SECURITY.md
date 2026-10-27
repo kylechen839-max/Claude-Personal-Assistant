@@ -757,7 +757,9 @@ server (`[family] enabled`, on in the server profile).
   `import:<id>` mark in `history_meta`, the id only), is skipped, so a
   retry never duplicates and never brings back a conversation the member
   deleted; an import cut off by a crash is finished by the next one (its
-  event ids come from a salt kept until it completes). A batch that would leave their store
+  event ids come from a salt kept until it completes), unless the member
+  deleted the half-written conversation (or prune removed it) in between:
+  every delete sets its mark to "done", so it stays gone. A batch that would leave their store
   over `[family] max_history_mb` (measured like prune: used pages) is
   deleted again (secure_delete) and answers 413, so prune never drops
   their older conversations to make room. Its body may be as big as
@@ -766,15 +768,21 @@ server (`[family] enabled`, on in the server profile).
   much and get 404, as they can already to `/api/turn`. Logs: member id
   and counts only (caplog test).
   - The PC-side CLI (`python -m kwil.family_import`) reads the source
-    through `backup.copy_database` (read-only, into a `mkdtemp` folder that
-    is deleted afterwards), takes the cloud's WEB_TOKEN from
+    through `backup.copy_database` (read-only, into a `mkdtemp` folder in
+    the system temp folder, deleted afterwards; if that fails, e.g. a file
+    Windows kept locked, it prints that folder's path, never its contents,
+    and exits 1, since `backup.sweep` doesn't look there), takes the cloud's WEB_TOKEN from
     `KWIL_CLOUD_TOKEN` and sends it only in the `Authorization: Bearer`
     header (never in a URL, never printed; redirects aren't followed), and
     refuses an `--to` that isn't https unless it is localhost, or that has
     a path, query or user name. It prints counts and sizes only.
   - Not done, on purpose: the import runs with the family lock held, so
-    every member's turn waits for a batch (a few seconds at most, a
-    one-off migration); a conversation over ~3.5 MB on its own is left out
+    everything that looks up a family member waits for the batch: every
+    member's turn, and the owner's own page too (`GET /` asks
+    `family.get`). The judge measured a full 3.5 MB batch (421
+    conversations of 20 messages) at about 6 s, and a 413 undo at about
+    4 s more (Linux sandbox, not Kyle's server): seconds per batch, for a
+    one-off migration. A conversation over ~3.5 MB on its own is left out
     and counted, not split.
 
 Left as is: a family member's session lasts 90 days from its last use, like

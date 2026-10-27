@@ -482,14 +482,17 @@ def test_cli_names_a_temp_copy_it_couldnt_delete(tmp_path, cloud_api, monkeypatc
     kept = []
     monkeypatch.setattr(backup, "cleanup", lambda folder: kept.append(folder))
     for extra in (["--dry-run"], []):
-        code, out = run_cli(["--from", str(tmp_path / "mom.sqlite"), "--to", CLOUD,
-                             "--user", "u_abcdefgh123", *extra])
-        assert code == 1
-        folder = kept[-1]
-        assert folder.exists() and str(folder) in out
-        assert "delete that folder yourself" in out
-        assert SECRET_TEXT not in out and CLOUD_TOKEN not in out
-        shutil.rmtree(folder)
+        try:
+            code, out = run_cli(["--from", str(tmp_path / "mom.sqlite"), "--to", CLOUD,
+                                 "--user", "u_abcdefgh123", *extra])
+            assert code == 1
+            folder = kept[-1]
+            assert folder.exists() and str(folder) in out
+            assert "delete that folder yourself" in out
+            assert SECRET_TEXT not in out and CLOUD_TOKEN not in out
+        finally:
+            for folder in kept:
+                shutil.rmtree(folder, ignore_errors=True)
     assert "imported 1" in out  # the import itself still ran
     pc.close()
 
