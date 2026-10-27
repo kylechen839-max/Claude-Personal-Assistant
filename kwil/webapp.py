@@ -536,8 +536,14 @@ def decode_upload(data: bytes, max_seconds: float | None = None) -> np.ndarray:
 
 # --- icons (generated, so there are no binary files to ship) ------------------
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="#c96442"/>
+# The icon's background: the app's light-mode --accent (web/app.css).
+ICON_BG = "#2f5d8a"
+# The installed app's splash and title bar: the light-mode --bg, the same
+# colour as index.html's light theme-color meta.
+THEME_BG = "#f5f7fa"
+
+ICON_SVG = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="14" fill="{ICON_BG}"/>
 <rect x="24" y="12" width="16" height="26" rx="8" fill="#fff"/>
 <path d="M17 31a15 15 0 0 0 30 0" fill="none" stroke="#fff" stroke-width="4"
  stroke-linecap="round"/>
@@ -547,11 +553,11 @@ ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 
 
 def icon_png(size: int) -> bytes:
-    """The app icon (a white microphone on terracotta) as a PNG."""
+    """The app icon (a white microphone on the calm blue accent) as a PNG."""
     s = size / 64.0
     y, x = np.mgrid[0:size, 0:size].astype(np.float32) / s + 0.5 / s
     img = np.empty((size, size, 3), dtype=np.uint8)
-    img[:] = (0xC9, 0x64, 0x42)
+    img[:] = tuple(int(ICON_BG[i:i + 2], 16) for i in (1, 3, 5))
     # capsule: x 24..40, y 12..38, radius 8
     cy = np.clip(y, 20, 30)
     mic = (x - 32) ** 2 + (y - cy) ** 2 <= 64
@@ -580,8 +586,8 @@ MANIFEST = {
     "scope": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "background_color": "#1f1e1d",
-    "theme_color": "#1f1e1d",
+    "background_color": THEME_BG,
+    "theme_color": THEME_BG,
     "icons": [
         {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"},
         {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},

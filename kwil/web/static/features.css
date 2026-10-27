@@ -5,7 +5,7 @@
   color: var(--text-2); font-size: .9375rem; font-weight: 500; position: relative; }
 .tabs button:active:not(:disabled) { transform: none; }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 600;
-  box-shadow: 0 1px 3px #1f1e1d1f, 0 0 0 .5px #1f1e1d0f; }
+  box-shadow: 0 1px 3px #0f1a2a1f, 0 0 0 .5px #0f1a2a0f; }
 @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { background: var(--surface-3); } }
 
 .app[data-tab="lecture"] > :is(#log, #status, #confirm, footer),

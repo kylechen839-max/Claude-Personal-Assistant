@@ -5546,3 +5546,32 @@ conversations come with them.
   "User: ...\nAssistant: ..." and neither it nor the system prompt says
   "Kyle"). It fails with the `history.py` change reverted (`'Kyle: how
   lo...' == 'User: how lo...'`). Full suite: 3186 passed, 37 skipped.
+## Calm blue theme (2026-10-27)
+- **What:** Kyle asked to retheme the web app and the public site from
+  Claude's orange and warm cream to a calm, darker blue with cool neutrals.
+  Only colours changed: the tokens in `web/app.css` and `web/site.css`, the
+  voice view's orb and panels (`web/voice.css`), the cool shadows
+  (`static/features.css`), the mic button's highlight (now a soft blue
+  `color-mix` of `--accent` with white), the theme-color metas (now also on
+  `waitlist.html`), the PWA manifest (theme and background are the light
+  `--bg`, `#f5f7fa`, as in index.html's light meta) and the generated icons
+  (`webapp.ICON_BG`, the light `--accent`, used by both `ICON_SVG` and
+  `icon_png`). The PC backend badge moved from blue to teal so it is not
+  confused with the cloud badge, which uses the accent. Semantic green, red
+  and amber are unchanged. `sw.js` cache is now `kwil-shell-v2`, so phones
+  reload the CSS and icons.
+- **Palette:** light bg `#f5f7fa`, surface `#ffffff`, text `#1a2330`,
+  muted `#5d6878`, accent `#2f5d8a` / strong `#244a70` / ink `#234a6e`;
+  dark bg `#121a24`, surface `#1b2532`, text `#e8edf3`, muted `#8d9aab`,
+  accent `#3f74b3` / strong `#335f94` / ink `#8fb6e3`. The suggested dark
+  accent `#4f86c6` gives white text only 3.78:1, so it was darkened to
+  `#3f74b3` (4.82:1); `#4f86c6` stays in the translucent soft/mark tints.
+- **Contrast (WCAG, computed):** white on accent 6.88 light / 4.82 dark;
+  accent-ink on bg 8.60 / 8.31; text on bg 14.75 / 14.88, on surface
+  15.82 / 13.14; muted on bg 5.26 / 6.12, on surface 5.65 / 5.41.
+- **Tests:** `tests/test_theme.py` (7): no old orange in the web CSS/HTML,
+  icon SVG or manifest; manifest and theme-color metas equal the CSS `--bg`;
+  the PNG icon's pixels are the accent; and the contrast thresholds above,
+  parsed from `app.css` and `site.css` in light and dark. All 7 fail with
+  the source change reverted. `test_webapp.py` and `sw-push.test.mjs` now
+  expect `kwil-shell-v2`. Full suite: 3232 passed, 37 skipped; JS 144 passed.

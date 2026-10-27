@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Kwil's web app, voice view, public site, icons and home-screen colours
+  move from Claude's orange to a calm, darker blue with cool neutrals; every
+  pair meets WCAG AA contrast in light and dark mode. Phones reload the new
+  look once (service-worker cache v2).
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.
