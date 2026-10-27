@@ -585,9 +585,29 @@ for all of this except the Google sign-in.
       into `GOOGLE_TOKEN_JSON` in Render.
   - Should: a week later the calendar still works (in Testing mode it would
     stop after 7 days).
+- [ ] Your own Google in the app: open https://heykwil.com signed in with
+      `WEB_TOKEN`, tap ⚙ -> **Connect Google account**, sign in and allow
+      every box. Ask "What's on my calendar tomorrow?" and "Any new email
+      today?".
+  - Should: Google's page names Kwil and comes back to the chat page
+    (no "redirect_uri_mismatch"); no welcome guide card appears for you;
+    the answers are right; Render's log has "Google account connected"
+    and no token or code; in ⚙ the button now says "Reconnect Google
+    account" and **Disconnect Google account** shows.
+- [ ] Tap **Disconnect Google account**, read the question, answer OK.
+  - Should: the question warns that it may also sign out Kwil on the PC;
+    afterwards "Google account disconnected.", Kwil is gone from (or no
+    longer lists that grant at) myaccount.google.com/permissions, the
+    calendar question still works if `GOOGLE_TOKEN_JSON` is set (else
+    Kwil says it has no calendar), and Disconnect is hidden again. Then
+    check Calendar on the PC; if it stopped, run
+    `python -m kwil.tools.google_auth` there, and connect again on the
+    server. `GOOGLE_TOKEN_JSON` is that same PC token, so if Google ended
+    it, also paste the new `token.json` into `GOOGLE_TOKEN_JSON` in Render.
 - [ ] Render Shell: `python -m kwil --check`.
-  - Should: no mic or speaker lines; `WEB_TOKEN`, `GOOGLE_TOKEN_JSON`, the
-    time zone, Whisper model and Piper voice OK.
+  - Should: no mic or speaker lines; `WEB_TOKEN`, "Google account:
+    connected in the app" (or `GOOGLE_TOKEN_JSON`), the time zone,
+    Whisper model and Piper voice OK.
 - [ ] In Safari on the iPhone (Wi-Fi off), open
       `https://hey-claude.onrender.com`. Enter a wrong token, then the
       `WEB_TOKEN` from Render -> Environment.

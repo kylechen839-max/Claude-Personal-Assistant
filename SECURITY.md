@@ -573,7 +573,8 @@ server (`[family] enabled`, on in the server profile).
   `environ={}`, so Kyle's `GOOGLE_TOKEN_JSON` / `GOOGLE_CLIENT_JSON` are
   never read for them, and `save_token=False`, so a missing or revoked
   token is an error, never a sign-in started on the server. Kyle's tools
-  read only his own token, never `<dir>`. The tools go only into their own
+  read only his own token (`/data/google_token.json` once he connects in
+  the app, else `GOOGLE_TOKEN_JSON`; below), never `<dir>`. The tools go only into their own
   registry (shared by their sessions; added before stale ones are removed,
   so a running turn never sees none), with the descriptions about them,
   not Kyle; the calendar is their `primary`. Gmail stays drafts-only
@@ -947,6 +948,37 @@ a PKCE challenge, `access_type=offline` and the redirect
   a different value; it names the variables, never their values.
 - Without a saved token the Google tools stay off: Calendar would otherwise
   start a browser sign-in on the PC.
+- **The cloud owner's own Google** (`[webapp] owner_google`, on in the
+  server profile). Kyle, signed in with `WEB_TOKEN` (owner-only:
+  `s.user is None`; a family member's Connect and Disconnect act only on
+  their own account), uses the same flow (state, binding cookie, PKCE,
+  one `PUBLIC_ORIGIN`). It signs in with `[calendar] credentials` only if
+  that is a Web client, else the family's Web client
+  (`GOOGLE_WEB_CLIENT_JSON`), never the Desktop `GOOGLE_CLIENT_JSON`; the
+  saved token carries that client's id and secret, so a refresh never
+  borrows another client. The token goes to `/data/google_token.json`
+  (`write_private`); it is outside `/data/users`, so no "Download my data"
+  export includes it, and the owner's backup is an allowlist without
+  tokens. While a readable token is there it wins over
+  `GOOGLE_TOKEN_JSON` (`google_auth.owner_environ` hides that variable
+  from Calendar, Gmail, the student sync and `--check`); refreshes stay
+  in memory (`save_token` off), and an expired or revoked one says to
+  reconnect in the app. An unreadable file counts as not connected, so
+  `GOOGLE_TOKEN_JSON` keeps working. **Disconnect** (only when that file
+  exists; otherwise 404 as before) revokes the grant at Google outside
+  the lock (best effort, `account.revoke_google_token_file`, the helper
+  family members' Disconnect uses), deletes the file, and rebuilds
+  Calendar and Gmail on `GOOGLE_TOKEN_JSON` (or removes them without it),
+  adding before removing in the shared registry. The confirm question
+  warns that Google may end the PC copy's grant too: grants of one user to
+  one Google Cloud project can be revoked together (not confirmed).
+  Deliberate non-fixes: the token is not sealed (`userkeys.seal`) like
+  invited people's Anthropic keys, so anyone with the disk (Render, its
+  daily snapshot until it expires) can read it, as with family members'
+  Google tokens; and `cli.main` does not treat `owner_google` like
+  `google_connect` (that refusal of inherited secrets is for separate
+  instances, and Render sets `GOOGLE_TOKEN_JSON` in the process
+  environment on purpose).
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.

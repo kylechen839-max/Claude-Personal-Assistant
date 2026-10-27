@@ -5,6 +5,14 @@ Two kinds of account, one sign-in flow:
 - The owner's ([webapp] google_connect), for an instance whose user never
   touches the PC (e.g. config.mom.toml): the token goes to [calendar] token
   and Calendar and Gmail (read, drafts) join the shared tools.
+- The cloud server owner's ([webapp] owner_google, on in the server
+  profile): the same, to /data/google_token.json, and that token then wins
+  over GOOGLE_TOKEN_JSON (google_auth.owner_environ), which keeps working
+  until a connect and again after Disconnect (revoked at Google, the file
+  deleted, the tools rebuilt on the environment's token). It signs in with
+  [calendar] credentials if that is a Web client, else the family's Web
+  client (GOOGLE_WEB_CLIENT_JSON), so the saved token carries that client's
+  id and secret. Refreshed in memory only (save_token stays off).
 - A family member's on a shared server (family.py, [family] google): they
   sign in to *their own* Google from their own phone; the token goes to
   `<family dir>/<id>/google_token.json` and the tools join only their own
@@ -15,11 +23,14 @@ Two kinds of account, one sign-in flow:
   family client: its consent screen lists Gmail).
 
   GET  /api/google/status      {"enabled", "connected", "disconnect",
-                               "gmail", "note"}: the caller's own account
-                               (gmail false: no mail wording in the app;
-                               note: why it is off, or null)
+                               "gmail", "note", "server_owner"}: the
+                               caller's own account (gmail false: no mail
+                               wording in the app; note: why it is off, or
+                               null; server_owner: the cloud owner's, no
+                               first-run guide)
   POST /api/google/connect     {"url": Google's consent page}
-  POST /api/google/disconnect  a family member's token and tools deleted
+  POST /api/google/disconnect  a family member's token and tools deleted, or
+                               the cloud owner's connected one
   GET  /google/callback        ?state&code from Google -> token file, 303 to /
 
 The session cookie is SameSite=Strict, so the browser doesn't send it on
@@ -38,9 +49,10 @@ code verifier stays on the server) means a stolen code is useless.
 
 Needs a "Web application" OAuth client whose authorized redirect URI is
 <origin>/google/callback (a Desktop client only allows localhost): the
-owner's from [calendar] credentials / GOOGLE_CLIENT_JSON with [webapp]
-public_origin, the family's from GOOGLE_WEB_CLIENT_JSON / [family]
-google_client with the server's own address (family.own_origin).
+owner's from [calendar] credentials / GOOGLE_CLIENT_JSON (with owner_google,
+the family's if that one isn't a Web client) with [webapp] public_origin,
+the family's from GOOGLE_WEB_CLIENT_JSON / [family] google_client with the
+server's own address (family.own_origin).
 """
 
 # No `from __future__ import annotations` here: FastAPI must see the real
@@ -58,8 +70,9 @@ from typing import Callable
 
 from kwil import i18n
 from kwil.tools.google_auth import (_relax_scope_check, client_config,
-                                         load_token_info, sign_in_scopes,
-                                         token_json, write_private)
+                                         load_token_info, owner_environ,
+                                         sign_in_scopes, token_json,
+                                         web_client_config, write_private)
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +102,9 @@ class GoogleConnect:
     ToolRegistry: once the owner signs in, Calendar and Gmail are added to
     it, and every owner browser's SessionTools sees them (they share its
     dict). `family` (family.Family) handles family members' accounts;
-    `owner` False: only family members can connect (the cloud server, where
-    Kyle's Google comes from GOOGLE_TOKEN_JSON)."""
+    `owner` False: only family members can connect. `owner_google` ([webapp]
+    owner_google, the cloud server): the owner's connected token wins over
+    GOOGLE_TOKEN_JSON, and the owner can disconnect it here."""
 
     def __init__(self, config: dict, tools, clock=time.monotonic, family=None,
                  owner: bool = True):
@@ -99,8 +113,12 @@ class GoogleConnect:
         self.clock = clock
         self.family = family
         self.owner = owner
+        self.owner_google = bool(owner and config["webapp"].get("owner_google"))
         self.pending: OrderedDict[str, Pending] = OrderedDict()
         self.lock = threading.Lock()
+        # the owner's token file and the shared tools: a connect and a
+        # disconnect never interleave their write/delete and re-register
+        self.owner_lock = threading.Lock()
         # Who a session is now (webapp.WebAuth.user_of; webapp.GONE once
         # signed out). Set by register(); None: not checked.
         self.session_user: Callable[[str], object] | None = None
@@ -126,10 +144,23 @@ class GoogleConnect:
         if user is not None:  # theirs: the family or the public client by tier
             return self.family.google_client(user) if self.family is not None else None
         try:
-            return client_config(self._cal["credentials"])
+            client = client_config(self._cal["credentials"])
         except (OSError, ValueError):
             log.warning("Google client file %s is unreadable", self._cal["credentials"])
+            client = None
+        if not self.owner_google or (client is not None and "web" in client):
+            return client
+        # the cloud server: GOOGLE_CLIENT_JSON is usually the PC's Desktop
+        # client, which Google won't send back to an https address; use the
+        # family's Web client (the same Google Cloud project)
+        if self.family is not None:
+            return self.family.google_client(None)
+        try:
+            client = web_client_config(self.config["family"]["google_client"])
+        except (OSError, ValueError) as e:  # never the value
+            log.warning("The Google Web client is unreadable (%s)", e)
             return None
+        return client if client is not None and "web" in client else None
 
     def enabled(self, user: str | None = None) -> bool:
         """Can `user` (None: the owner) connect a Google account here?"""
@@ -143,10 +174,14 @@ class GoogleConnect:
             return self.family is not None and self.family.google_connected(user)
         if not self.owner:
             return False
-        try:
-            return load_token_info(self._cal["token"]) is not None
-        except (OSError, ValueError):
+        try:  # on the server: the connected token, else GOOGLE_TOKEN_JSON
+            return load_token_info(self._cal["token"], owner_environ(self.config)) is not None
+        except (OSError, ValueError, AttributeError, TypeError):
             return False
+
+    def owner_file(self) -> bool:
+        """Has the cloud owner a connected token file to disconnect?"""
+        return self.owner_google and Path(self._cal["token"]).is_file()
 
     def gmail(self, user: str | None = None) -> bool:
         """Does `user`'s sign-in ask for Gmail? Never a beta tester's."""
@@ -234,24 +269,66 @@ class GoogleConnect:
         if entry.user is not None:  # theirs, in their own folder
             return self.family.save_google(entry.user, text), entry.user
         token = Path(self._cal["token"])
-        token.parent.mkdir(parents=True, exist_ok=True)
-        write_private(token, text)
-        self._register_tools()
+        with self.owner_lock:
+            token.parent.mkdir(parents=True, exist_ok=True)
+            write_private(token, text)
+            self._register_tools()
         log.info("Google account connected; token saved to %s", token)
         return True, None
 
-    def disconnect(self, user: str) -> bool:
-        """A family member's token deleted and their Google tools removed."""
+    def disconnect(self, user: str | None) -> bool:
+        """A family member's token deleted and their Google tools removed;
+        `user` None: the cloud owner's connected token (disconnect_owner)."""
+        if user is None:
+            return self.disconnect_owner()
         return self.family is not None and self.family.disconnect_google(user)
 
+    def disconnect_owner(self) -> bool:
+        """The cloud owner's Disconnect ([webapp] owner_google): revoke the
+        grant at Google (best effort, as a family member's), delete the
+        token file, and rebuild Calendar and Gmail on GOOGLE_TOKEN_JSON, or
+        none without it. False if there was no file, or a new sign-in
+        replaced it meanwhile (that one is kept, with its tools)."""
+        if not self.owner_file():
+            return False
+        from kwil.account import revoke_google_token_file
+        from kwil.family import _unlink
+
+        token = Path(self._cal["token"])
+        with self.owner_lock:
+            before = _read_bytes(token)
+        if before is None:
+            return False
+        # outside the lock: the network call (up to its timeout) mustn't
+        # hold up a sign-in
+        revoke_google_token_file(token, label="Google", who="the owner")
+        with self.owner_lock:
+            if _read_bytes(token) != before:
+                # a Connect finished during the revoke: keep its token
+                log.info("Google disconnect skipped: the owner connected again meanwhile")
+                return False
+            _unlink(token)
+            self._register_tools()
+        log.info("Google account disconnected (the owner's)")
+        return True
+
     def _register_tools(self) -> None:
+        """Calendar and Gmail on the owner's current token. Every
+        SessionTools shares this registry's dict, so it is updated in place,
+        adding before removing (a running turn never sees it empty), as
+        family._refresh_tools does."""
         from kwil.cli import register_google
         from kwil.tools import ToolRegistry
 
         fresh = ToolRegistry()
         register_google(fresh, self.config, output_fn=lambda m: log.info("%s", m))
-        self.tools.tools.update(fresh.tools)  # one step: never half-registered
+        self.tools.tools.update(fresh.tools)
+        gone = sorted(_google_tool_names() & set(self.tools.tools) - set(fresh.tools))
+        for name in gone:
+            self.tools.tools.pop(name, None)
         log.info("Google tools added: %s", ", ".join(sorted(fresh.tools)) or "none")
+        if gone:
+            log.info("Google tools removed: %s", ", ".join(gone))
 
     def language_of(self, user: str | None) -> str | None:
         """The language for a page shown to `user` (None: the server's)."""
@@ -259,11 +336,28 @@ class GoogleConnect:
         return person.get("language") if person else None
 
 
+def _read_bytes(path: Path) -> bytes | None:
+    """The file's contents, or None if it is gone or unreadable."""
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _google_tool_names() -> set[str]:
+    """Every Calendar and Gmail tool name (built offline: no service yet)."""
+    from kwil.tools.calendar import GoogleCalendar
+    from kwil.tools.gmail import GmailInbox
+
+    return {t.name for t in GoogleCalendar(extras=True).tools() + GmailInbox().tools()}
+
+
 def from_config(config: dict, assistant) -> "GoogleConnect | None":
     """The web app's GoogleConnect: when the owner's button is on
-    ([webapp] google_connect) or family members may connect theirs."""
+    ([webapp] google_connect, or owner_google on the cloud server) or family
+    members may connect theirs."""
     family = getattr(assistant, "family", None)
-    owner = bool(config["webapp"]["google_connect"])
+    owner = bool(config["webapp"]["google_connect"] or config["webapp"]["owner_google"])
     if not (owner or (family is not None and config["family"]["google"])):
         return None
     return GoogleConnect(config, assistant.tools, family=family, owner=owner)
@@ -299,11 +393,15 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
         s, err = mine(request)
         if err is not None:
             return err
+        server_owner = s.user is None and connect.owner_google
         return {"enabled": connect.enabled(s.user), "connected": connect.connected(s.user),
-                # a family member can disconnect here (the owner's token is
-                # managed where it was made)
-                "disconnect": s.user is not None,
-                "gmail": connect.gmail(s.user), "note": connect.note(s.user)}
+                # a family member can disconnect here, and the cloud owner
+                # a token connected here (GOOGLE_TOKEN_JSON, or a PC's
+                # token.json, is managed where it was made)
+                "disconnect": s.user is not None or connect.owner_file(),
+                "gmail": connect.gmail(s.user), "note": connect.note(s.user),
+                # the cloud owner: no first-run guide (it's for invitees)
+                "server_owner": server_owner}
 
     @app.post("/api/google/connect")
     async def google_connect(request: Request):
@@ -325,7 +423,9 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
         s, err = mine(request)
         if err is not None:
             return err
-        if s.user is None:  # the owner's token is managed on the PC
+        if s.user is None and not connect.owner_file():
+            # the owner's token is managed where it was made (the PC, or
+            # GOOGLE_TOKEN_JSON); only one connected here can go here
             return error("not found", 404)
         await run_in_threadpool(connect.disconnect, s.user)
         return {"ok": True, "connected": False}

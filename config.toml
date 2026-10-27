@@ -131,6 +131,9 @@ trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; o
                               # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
 google_connect = false        # true: a "connect Google" button in the phone app signs in to
                               # Calendar and Gmail (needs a Web application OAuth client)
+owner_google = false          # true (the cloud server's profile): the owner's "Connect Google
+                              # account" saves the token to [calendar] token, which then wins
+                              # over GOOGLE_TOKEN_JSON (used until then, and after Disconnect)
 public_origin = ""            # the https:// address the phone opens (Google returns to
                               # <public_origin>/google/callback); needed for google_connect
                               # and family members' Google (PUBLIC_ORIGIN overrides it)

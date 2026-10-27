@@ -83,23 +83,36 @@ def revoke_google_grant(family, uid: str, revoke: Callable[[str], None] | None =
     file, before their folder (and the file) goes. Shared by "Delete my
     account" (Account.revoke_token) and the owner's Remove (family.py).
     `revoke` defaults to revoke_google. Never raises; never logs a token."""
+    try:
+        path = family.google_token(uid)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return
+    revoke_google_token_file(path, revoke, label=label, who=uid)
+
+
+def revoke_google_token_file(path, revoke: Callable[[str], None] | None = None,
+                             label: str = "Account", who: str = "the owner") -> None:
+    """Best effort: revoke the Google grant of the token file at `path`
+    before it is deleted (a family member's, via revoke_google_grant, or
+    the cloud owner's in-app one, google_web.py). `who` names whose it is
+    in the log. Never raises; never logs a token."""
     from kwil.tools.google_auth import load_token_info
 
-    try:  # environ={}: their file only, never GOOGLE_TOKEN_JSON (Kyle's)
-        info = load_token_info(family.google_token(uid), environ={})
+    try:  # environ={}: the file only, never GOOGLE_TOKEN_JSON
+        info = load_token_info(path, environ={})
     except (OSError, ValueError, AttributeError, TypeError):  # e.g. a file holding []
         info = None
     if not isinstance(info, dict):
         info = {}
     token = info.get("refresh_token") or info.get("token")
-    if not token:
+    if not token or not isinstance(token, str):
         return
     try:
         (revoke or revoke_google)(token)
-        log.info("%s: revoked %s's Google grant", label, uid)
+        log.info("%s: revoked %s's Google grant", label, who)
     except Exception as e:  # noqa: BLE001 - removing goes ahead regardless
         log.warning("%s: revoking %s's Google grant failed (%s); "
-                    "deleting anyway", label, uid, type(e).__name__)
+                    "deleting anyway", label, who, type(e).__name__)
 
 
 def confirmed(given, user: dict) -> bool:
