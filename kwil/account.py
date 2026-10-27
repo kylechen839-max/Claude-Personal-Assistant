@@ -2,7 +2,8 @@
 and "Delete my account" in their own Settings (web/family.js).
 
   GET  /api/me/export   a zip of their conversations (history.export JSON),
-                        profile and school deadlines (deadlines.json); never
+                        profile, school deadlines (deadlines.json) and Canvas
+                        course content text (coursefiles.json); never
                         tokens, keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
                         Notion and Google grants (best effort), then
@@ -311,6 +312,10 @@ class Account:
             if due is not None:  # their school deadlines; never their Canvas link
                 add(zf, "deadlines.json", json.dumps(due.export(user["id"]), indent=2,
                                                      ensure_ascii=False))
+            content = getattr(self.family, "coursefiles", None)
+            if content is not None:  # the text of their Canvas course content
+                add(zf, "coursefiles.json", json.dumps(content.export(user["id"]), indent=2,
+                                                       ensure_ascii=False))
             offset = 0
             while store is not None:
                 page = store.list(limit=PAGE, offset=offset, archived=None)

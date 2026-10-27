@@ -497,12 +497,17 @@ def test_backup_sweeps_temp_folders_of_either_name(tmp_path):
 def test_the_rebrand_left_requirements_txt_alone():
     """Any change to requirements.txt makes the old deploy and the updater
     ask for --requirements, which stops the automatic update that carries
-    the rebrand. Compared with 610017b (the commit before it) when this
-    clone has that commit (CI's shallow checkout doesn't)."""
-    have = subprocess.run(["git", "cat-file", "-e", "610017b^{commit}"], cwd=ROOT,
-                          capture_output=True, check=False)
-    if have.returncode != 0:
-        pytest.skip("610017b isn't in this clone")
-    old = subprocess.run(["git", "show", "610017b:requirements.txt"], cwd=ROOT,
-                         capture_output=True, check=True).stdout
-    assert (ROOT / "requirements.txt").read_bytes().replace(b"\r\n", b"\n") == old
+    the rebrand. The release that carried it (v1.1.0) has 610017b's file
+    (the commit before it) byte for byte; later releases may add a
+    dependency (pypdf, course files), their deploys run with
+    --requirements. Checked when this clone has both commits (CI's
+    shallow checkout doesn't)."""
+    for ref in ("610017b^{commit}", "v1.1.0^{commit}"):
+        have = subprocess.run(["git", "cat-file", "-e", ref], cwd=ROOT,
+                              capture_output=True, check=False)
+        if have.returncode != 0:
+            pytest.skip(f"{ref} isn't in this clone")
+    old, released = (subprocess.run(["git", "show", f"{ref}:requirements.txt"], cwd=ROOT,
+                                    capture_output=True, check=True).stdout
+                     for ref in ("610017b", "v1.1.0"))
+    assert released.replace(b"\r\n", b"\n") == old

@@ -733,7 +733,7 @@ def test_config_docs_and_deploy_know_the_new_settings():
     assert 'id="connectors"' in page and 'id="connector-list"' in page
     assert page.index("/connect.js") < page.index("/app.js")
     sw = (web / "sw.js").read_text(encoding="utf-8")
-    assert '"/connect.js"' in sw and "kwil-shell-v4" in sw
+    assert '"/connect.js"' in sw and "kwil-shell-v5" in sw
     assert "KwilConnect.onState" in (web / "app.js").read_text(encoding="utf-8")
     for table in (i18n.EN, i18n.ZH):
         assert table["connect_failed"] and table["ha_reconnect"]

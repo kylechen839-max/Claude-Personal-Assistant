@@ -14,6 +14,7 @@ The API other modules use (`uid` None is the owner, else a family id):
       status: draft (captured, not checked) | confirmed (the person said so)
               | conflict (two sources disagree on the date)
       source: ics | canvas_api | gmail | screenshot | manual | modules
+              | course_text (dates read from course content: coursefiles.py)
       source_due: what the source last said (differs from `due` once the
            person confirmed another date)
       captured_at: "YYYY-MM-DDTHH:MM:SSZ", when this row was first captured
@@ -69,12 +70,12 @@ log = logging.getLogger(__name__)
 
 FILE = "deadlines.sqlite"
 KINDS = ("exam", "assignment", "quiz", "class")
-SOURCES = ("ics", "canvas_api", "gmail", "screenshot", "manual", "modules")
+SOURCES = ("ics", "canvas_api", "gmail", "screenshot", "manual", "modules", "course_text")
 STATUSES = ("draft", "confirmed", "conflict", "dismissed",
             "superseded")  # an older email behind a newer one: hidden, not gone
 # which copy list() shows when two sources agree (most trusted first)
-SOURCE_RANK = {"manual": 0, "canvas_api": 1, "ics": 2, "modules": 3, "gmail": 4,
-               "screenshot": 5}
+SOURCE_RANK = {"manual": 0, "canvas_api": 1, "ics": 2, "modules": 3, "course_text": 4,
+               "gmail": 5, "screenshot": 6}
 MAX_TITLE = 200
 MAX_COURSE = 100
 MAX_KEY = 200

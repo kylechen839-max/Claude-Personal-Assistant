@@ -297,7 +297,7 @@ def test_export_has_no_tokens_or_keys(env, owner, acct):
     mom, link = env.member(owner)
     plant(env, link["user"]["id"])
     files = unzip(mom.get("/api/me/export"))
-    assert set(files) == {"profile.json", "deadlines.json"} | {
+    assert set(files) == {"profile.json", "deadlines.json", "coursefiles.json"} | {
         n for n in files if n.startswith("conversations/")}
     blob = "\n".join(files.values())
     for secret in (REFRESH, ACCESS, "csecret", "invite_hash", *KEY_FILES.values()):

@@ -1548,6 +1548,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if briefings.deadlines is None:  # the student deadline store, if any
                 briefings.deadlines = getattr(assistant, "deadlines", None)
             briefings.start()
+        # everyone's background Canvas sync (student_web.register made it)
+        course_sync = getattr(app.state, "course_sync", None)
+        if course_sync is not None:
+            course_sync.start()
 
         def reaper():
             while not stop.wait(reap_interval):
@@ -1564,6 +1568,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             stop.set()
             if briefings is not None:
                 briefings.stop()
+            if course_sync is not None:
+                course_sync.stop()
             await run_in_threadpool(assistant.shutdown)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Canvas course files: with an access token, Kwil syncs each course's
+  syllabus, pages, announcements and files in the background and can answer
+  questions about them ("what's the late policy?"); dates found become
+  unconfirmed drafts. New `[canvas]` settings `content`, `auto_sync_hours`,
+  `max_files`, `max_file_mb`, `max_course_mb`, `max_person_mb`,
+  `content_seconds`. Adds `pypdf` (update with `--requirements`).
 - Connected services (owner, cloud): sign in to your own Notion and Home
   Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
   server. Environment tokens still win. Sign-ins are encrypted with

@@ -34,8 +34,10 @@ OWNER_TOOLS = ("list_assignments", "update_assignment_status", "search_memory",
                "resume_conversation", "message_dev_team", "list_events",
                "ha_list", "ha_state", "ha_control", "chat_channels", "chat_read",
                "chat_search", "chat_files", "chat_read_file", "chat_save_digest")
-# a person's own school deadlines (deadlines.py; [student] is on by default)
-DEADLINE_TOOLS = {"list_deadlines", "confirm_deadline", "add_deadline", "delete_deadline"}
+# a person's own school deadlines and course content (deadlines.py, coursefiles.py;
+# [student] and [canvas] content are on by default)
+DEADLINE_TOOLS = {"list_deadlines", "confirm_deadline", "add_deadline", "delete_deadline",
+                  "search_course_files", "read_course_file"}
 
 
 def owner_registry():

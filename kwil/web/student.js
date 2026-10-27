@@ -13,7 +13,8 @@
 
 (function (root) {
   const SOURCES = { ics: "Canvas calendar", canvas_api: "Canvas", modules: "Canvas pages",
-                    gmail: "Canvas email", screenshot: "Screenshot", manual: "Added by you" };
+                    course_text: "Course files", gmail: "Canvas email",
+                    screenshot: "Screenshot", manual: "Added by you" };
   let setup = null;
 
   // A school's Canvas host from a lookup answer or what was typed, checked

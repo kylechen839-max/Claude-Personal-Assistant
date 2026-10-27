@@ -13,7 +13,8 @@ Three ways in, none of which ever sees a school password:
   rel="next", never to another host, so the token never leaves the school)
   and backs off on Canvas's rate limit (403 + X-Rate-Limit-Remaining, or
   429). With [canvas] pages on, module pages are read too and Claude picks
-  the dates out of them (extract_from_pages).
+  the dates out of them (extract_from_pages); with [canvas] content on, the
+  courses' content is read into coursefiles.py (sync_content).
 - Canvas's notification emails (Gmail, read-only, GmailInbox.search):
   subject and snippet only, through the same extractor.
 
@@ -25,9 +26,16 @@ follow none.
 
 Everything read here was written by someone else: the rows are untrusted
 (tools/deadlines.py marks them so), and Claude is told the text is data,
-not instructions. Only the extracted fields (title, course, due, kind) are
-kept, never page or email text. Logs say counts and error type names,
-never a URL, token, title or text.
+not instructions. For deadlines only the extracted fields (title, course,
+due, kind) are kept, never email text. With [canvas] content on, the
+course content (syllabus, pages, assignment descriptions, announcements,
+module lists, and the text of files: CanvasAPI.files/download) is kept as
+text in the person's own store (coursefiles.py), searchable by the
+course-file tools, untrusted too. A file's download URL carries a
+capability (verifier=, and the file store's signed redirect): download()
+sends the token to the school's own host only, never after a hop to
+another host, checks every hop like fetch_ics, and never logs a URL.
+Logs say counts and error type names, never a URL, token, title or text.
 """
 
 from __future__ import annotations
@@ -56,6 +64,7 @@ MAX_REDIRECTS = 3
 MAX_API_PAGES = 10        # pages of one listing (100 items each)
 MAX_API_ITEMS = 1000      # items kept from one listing
 MAX_API_BYTES = 2_000_000  # bytes of one API answer
+MAX_FILE_BYTES = 20_000_000  # bytes of one course file ([canvas] max_file_mb)
 FETCH_SECONDS = 60        # a whole feed fetch, redirects included
 SYNC_SECONDS = 180        # a whole sync of one person (feed or API, then emails)
 MAX_RETRIES = 3           # on Canvas's rate limit
@@ -423,12 +432,95 @@ class CanvasAPI:
             url, params = nxt, None  # the link carries its own query
         return items
 
-    def courses(self) -> list[dict]:
-        return [c for c in self.get("/api/v1/courses", {"enrollment_state": "active"})
+    def courses(self, syllabus: bool = False) -> list[dict]:
+        """Active courses; with `syllabus`, each with its syllabus_body (HTML)."""
+        params = {"enrollment_state": "active"}
+        if syllabus:
+            params["include[]"] = "syllabus_body"
+        return [c for c in self.get("/api/v1/courses", params)
                 if isinstance(c, dict) and c.get("id") is not None]
 
     def assignments(self, course_id) -> list[dict]:
+        """A course's assignments (each with its description, HTML)."""
         return self.get(f"/api/v1/courses/{int(course_id)}/assignments")
+
+    def modules(self, course_id) -> list[dict]:
+        return self.get(f"/api/v1/courses/{int(course_id)}/modules", {"include[]": "items"})
+
+    def pages(self, course_id) -> list[dict]:
+        """A course's published pages, newest first, with their bodies
+        when Canvas includes them (else page() reads one)."""
+        return self.get(f"/api/v1/courses/{int(course_id)}/pages",
+                        {"published": "true", "sort": "updated_at", "order": "desc",
+                         "include[]": "body"})
+
+    def page(self, course_id, slug: str) -> dict:
+        if not re.fullmatch(r"[\w.-]{1,200}", str(slug)):
+            raise CanvasError("bad_answer")
+        page = self._get(f"{self.base}/api/v1/courses/{int(course_id)}/pages/{slug}").json()
+        if not isinstance(page, dict):
+            raise CanvasError("bad_answer")
+        return page
+
+    def files(self, course_id) -> list[dict]:
+        """A course's files' metadata (id, display_name, size, content-type,
+        mime_class, url, updated_at, locked_for_user, ...), newest first.
+        A 403 when the course hides its Files tab."""
+        return self.get(f"/api/v1/courses/{int(course_id)}/files",
+                        {"sort": "updated_at", "order": "desc"})
+
+    def announcements(self, course_ids: list, start: date) -> list[dict]:
+        """The courses' announcements posted since `start` (each with its
+        context_code "course_<id>" and message, HTML)."""
+        out: list = []
+        ids = [int(c) for c in course_ids]
+        for i in range(0, len(ids), 10):  # a few courses per request
+            out += self.get("/api/v1/announcements",
+                            {"context_codes[]": [f"course_{c}" for c in ids[i:i + 10]],
+                             "start_date": start.isoformat()})
+            if len(out) >= MAX_API_ITEMS:
+                break
+        return out[:MAX_API_ITEMS]
+
+    def download(self, url: str, max_bytes: int = MAX_FILE_BYTES) -> bytes:
+        """A file's bytes from its Canvas `url` (/files/<id>/download?...
+        &verifier=...), at most `max_bytes` (counted while streaming,
+        whatever the listing or Content-Length said), by the deadline.
+        Redirects (Canvas sends files on to its file store, inst-fs or S3,
+        with a signed URL) are followed by hand, at most MAX_REDIRECTS,
+        each hop checked by public_url; the token goes only to this
+        school's own host, and never again after the first hop to another
+        host. The URL holds capability secrets: never logged."""
+        url, own = str(url or ""), True
+        try:
+            for _ in range(MAX_REDIRECTS + 1):
+                _check_time(self.deadline, self.clock)
+                url = public_url(url)
+                parts = urlsplit(url)
+                own = own and parts.hostname == self.host
+                headers = {"Accept": "*/*"}
+                if own:
+                    headers["Authorization"] = f"Bearer {self._token}"
+                with self.http.stream("GET", url, headers=headers) as r:
+                    if r.status_code in (301, 302, 303, 307, 308) \
+                            and r.headers.get("location"):
+                        url = urljoin(url, r.headers["location"])
+                        continue
+                    if r.status_code == 429 or (own and _rate_limited(
+                            r.status_code, r.headers, b"")):
+                        raise CanvasError("rate_limited")
+                    if r.status_code != 200:
+                        raise CanvasError(f"http_{r.status_code}")
+                    try:
+                        declared = int(r.headers.get("content-length") or 0)
+                    except ValueError:
+                        declared = 0
+                    if declared > max_bytes:
+                        raise CanvasError("too_large")
+                    return _read(r, max_bytes, self.deadline, self.clock)
+            raise CanvasError("too_many_redirects")
+        except ValueError as e:  # public_url: a hop to a private address
+            raise CanvasError("bad_address") from e
 
     def planner_items(self, start: date) -> list[dict]:
         return self.get("/api/v1/planner/items", {"start_date": start.isoformat()})
@@ -482,8 +574,7 @@ class CanvasAPI:
             if len(out) >= max_pages:
                 break
             cid = int(course["id"])
-            modules = fetch(lambda: self.get(f"/api/v1/courses/{cid}/modules",
-                                             {"include[]": "items"})) or []
+            modules = fetch(lambda: self.modules(cid)) or []
             for module in modules:
                 for item in (module.get("items") or []) if isinstance(module, dict) else []:
                     if len(out) >= max_pages:
