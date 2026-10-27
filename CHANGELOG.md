@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Canvas helper (server side): one-tap pairing (Set up Canvas helper),
+  per-person `kcs1.` sync keys (stored hashed, revocable, rate-limited), and
+  push routes that feed the same course-content pipeline, for schools that
+  block Canvas access tokens. New setting `[canvas] helper`.
 - Canvas course files: with an access token, Kwil syncs each course's
   syllabus, pages, announcements and files in the background and can answer
   questions about them ("what's the late policy?"); dates found become

@@ -60,7 +60,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from starlette.requests import HTTPConnection
 
-from kwil import audio, i18n, usage
+from kwil import audio, canvas_helper, i18n, usage
 from kwil.attachments import MAX_ATTACHMENTS
 from kwil.chat import is_user_turn
 from kwil.tools import READ_ONLY_TOOLS, ToolRegistry
@@ -1465,6 +1465,11 @@ class WebAuth:
         if auth[:7].lower() == "bearer ":
             if tokens_match(auth[7:], self.token):
                 return self.bearer_sid
+            if auth[7:].strip().startswith(canvas_helper.KEY_PREFIX):
+                # a Canvas helper's sync key: it opens only the helper's push
+                # routes (which check it), never a session; not a guess at
+                # WEB_TOKEN, so not counted (as CloudGuard doesn't)
+                return None
             ip = self.client_ip(conn)
             if not self.limiter.blocked(ip):
                 # the HTTP middleware waits this long before answering
@@ -1704,7 +1709,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if request.headers.get("x-forwarded-host"):
                 url = url.replace(netloc=request.headers["x-forwarded-host"])
             response = RedirectResponse(str(url), 308)
-        elif (unsafe or api) and web.cross_origin(request):
+        elif (unsafe or api) and web.cross_origin(request) and not canvas_helper.push_request(
+                request.method, path, request.headers.get("authorization")):
+            # (the Canvas helper's pushes come from its extension's origin,
+            # with its sync key and no cookie: nothing to forge, no CORS)
             log.warning("Rejected cross-origin %s %s", request.method, path)
             response = error("cross-origin request", 403)
         elif unsafe and length is None:

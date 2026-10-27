@@ -64,6 +64,13 @@ background holds the person's sync answers {content: "queued",
 background: true}. Disconnect deletes the person's whole content store,
 and a sync that started before it (the generation is read before the
 link) writes nothing more, nor once the link is gone.
+
+The Canvas helper (canvas_helper.py, its routes added by register()):
+for schools that block access tokens, a browser extension in the
+person's own Canvas tab pushes the same content with a sync key; the
+background reads the dates in it (CourseSync.request_dates). Disconnect
+revokes that key too; the status says only whether one is paired
+("helper": {enabled, paired, pairing, paired_at}).
 """
 
 # No `from __future__ import annotations` here: FastAPI must see the real
@@ -135,6 +142,10 @@ class StudentSync:
 
             self.courses = getattr(family, "coursefiles", None) or \
                 coursefiles.open_store(config)
+        # the Canvas helper's sync keys (canvas_helper.py): Disconnect revokes them
+        from kwil.canvas_helper import HelperKeys
+
+        self.helper = HelperKeys(config, family)
 
     @property
     def env(self):
@@ -214,7 +225,12 @@ class StudentSync:
                 "app_link": env and self._file(None).exists(),
                 "can_store": env or userkeys.secret_problem(self._keys_env()) is None,
                 "gmail": bool(self.config["student"]["gmail"]) and self._inbox(uid) is not None,
-                "last_sync": self.store.last_sync(uid)}
+                "last_sync": self.store.last_sync(uid),
+                # the browser helper (canvas_helper.py): never the key or a code
+                "helper": {"enabled": self.helper_on(), **self.helper.status(uid)}}
+
+    def helper_on(self) -> bool:
+        return self.courses is not None and bool(self.config["canvas"].get("helper"))
 
     @staticmethod
     def clean_link(body: dict) -> dict:
@@ -265,7 +281,8 @@ class StudentSync:
         path = self._file(uid)
         had = path.exists()
         _unlink(path)
-        with self.lock:  # a content sync running now stops writing
+        helper = self.helper.revoke(uid)  # its pushes stop too
+        with self.lock:  # a content sync (or a helper's push) running now stops writing
             self._generations += 1
             self._generation[uid or ""] = self._generations
             self._generation.move_to_end(uid or "")
@@ -278,7 +295,7 @@ class StudentSync:
                 deleted += self.store.delete_source(uid, source)
         log.info("Student: %s disconnected Canvas (%d item(s), %d document(s) deleted)",
                  uid or "the owner", deleted, documents)
-        return {"connected": False, "had": had, "deleted": deleted}
+        return {"connected": False, "had": had or helper, "deleted": deleted}
 
     # ---------- syncing ----------
     def _inbox(self, uid):
@@ -488,6 +505,29 @@ class StudentSync:
         finally:
             running.release()
 
+    def course_dates(self, uid) -> dict:
+        """The dates in the person's course content, as the content step
+        reads them (drafts, source "course_text", each text version read
+        once), for what the Canvas helper pushed. SyncBusy(0) while a sync
+        of theirs runs."""
+        from datetime import datetime, timezone
+
+        key = uid or ""
+        with self.lock:
+            running = self._running.get(key)
+            if running is None:
+                running = self._running[key] = threading.Lock()
+            self._running.move_to_end(key)
+            if not running.acquire(blocking=False):
+                raise SyncBusy(0)
+        try:
+            tz, now = self.timezone(uid), datetime.now(timezone.utc)
+            return self.store.propose(uid, canvas.upcoming(self._extract(
+                uid, "course_text", self.courses.dated_texts(uid), tz), now),
+                "course_text", tz=tz)
+        finally:
+            running.release()
+
     def lookup_allowed(self, uid) -> bool:
         """At most SCHOOL_LOOKUPS school searches a minute per person."""
         key, now = uid or "", self.clock()
@@ -523,6 +563,7 @@ class CourseSync:
         self.lock = threading.Lock()
         self._asked: OrderedDict[str, bool] = OrderedDict()
         self._retry: OrderedDict[str, float] = OrderedDict()   # key -> clock() when due
+        self._dates: OrderedDict[str, bool] = OrderedDict()    # helper pushes to read dates from
         self._running: set[str] = set()   # whose sync this thread runs right now
         self._busy = False                 # an asked-for sync waits for another one
         self._stop = threading.Event()
@@ -536,12 +577,17 @@ class CourseSync:
 
     def people(self) -> list:
         """The owner (None) and every active invited person's id."""
-        out = [None]
-        if self.family is not None:
-            with self.family.lock:
-                users = list(self.family.users.values())
-            out += [u["id"] for u in users if u.get("status") == "active" and u.get("id")]
-        return out
+        return people(self.family)
+
+    def request_dates(self, uid) -> None:
+        """Read the dates in what the Canvas helper pushed at the next tick
+        (not at once: the files a manifest asked for arrive right after
+        it). Where the push landed, the owner's too: a push reaches one
+        machine, so no leader check is needed."""
+        with self.lock:
+            self._dates[uid or ""] = True
+            self._dates.move_to_end(uid or "")
+            _trim(self._dates)
 
     def request(self, uid, wake: bool = True) -> None:
         """Sync this person soon (in the background thread; `wake`: now)."""
@@ -632,7 +678,29 @@ class CourseSync:
                     self._retry.pop(key, None)
         if ran:
             log.info("Student: background sync ran for %d person(s)", ran)
+        self._read_dates()
         return ran
+
+    def _read_dates(self) -> None:
+        """The dates in what the Canvas helper pushed (request_dates)."""
+        with self.lock:
+            keys = list(self._dates)[:MAX_PER_TICK]
+        for key in keys:
+            if self._stop.is_set():
+                break
+            with self.lock:
+                self._dates.pop(key, None)
+            uid = key or None
+            try:
+                if self.sync.listed(uid):
+                    self.sync.course_dates(uid)
+            except SyncBusy:  # a sync of theirs runs: next tick
+                self.request_dates(uid)
+            except KeyError:  # removed meanwhile
+                continue
+            except Exception as e:  # noqa: BLE001 - never the message: it can hold text
+                log.warning("Student: reading dates in %s's pushed content failed (%s)",
+                            uid or "the owner", type(e).__name__)
 
     def _loop(self) -> None:
         delay = FIRST_TICK
@@ -675,6 +743,16 @@ def leader_check(config: dict):
     from kwil.failover.leader import LeaderCheck
 
     return LeaderCheck(failover.role, peers)
+
+
+def people(family) -> list:
+    """The owner (None) and every active invited person's id."""
+    out = [None]
+    if family is not None:
+        with family.lock:
+            users = list(family.users.values())
+        out += [u["id"] for u in users if u.get("status") == "active" and u.get("id")]
+    return out
 
 
 def _trim(mapping: OrderedDict) -> None:
@@ -782,16 +860,20 @@ def register(app, family, web, error) -> None:
         ok, uid = person(session)
         if not ok:
             return error("not found", 404)
-        if uid is None and sync.env_managed() and not sync._file(None).exists():
+        if uid is None and sync.env_managed() and not sync._file(None).exists() \
+                and not sync.helper.status(None)["paired"]:
             # nothing of the app's to forget: the env stays (only its owner edits it)
             return error(f"on your own server, remove {OWNER_ICS_ENV} / {OWNER_TOKEN_ENV} "
                          "from its environment", 409)
         body = await body_of(request)
         try:
-            return nostore(await run_in_threadpool(sync.disconnect, uid,
-                                                   bool(body.get("delete_items"))))
+            result = await run_in_threadpool(sync.disconnect, uid,
+                                             bool(body.get("delete_items")))
         except (OSError, KeyError):
             return error("couldn't disconnect Canvas; try again", 500)
+        if getattr(app.state, "canvas_helper", None) is not None:
+            app.state.canvas_helper.forget(uid)
+        return nostore(result)
 
     @app.post("/api/student/sync")
     async def student_sync(session=Depends(webapp.require_session)):
@@ -922,3 +1004,8 @@ def register(app, family, web, error) -> None:
         if not sync.lookup_allowed(uid):
             return error("too many searches; wait a minute", 429)
         return nostore({"schools": await run_in_threadpool(canvas.find_school, q)})
+
+    # the Canvas helper's pairing and push routes (canvas_helper.py)
+    from kwil import canvas_helper
+
+    canvas_helper.register(app, sync, courses, web, error)

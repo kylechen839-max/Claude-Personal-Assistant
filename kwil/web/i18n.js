@@ -183,6 +183,19 @@
     "Couldn't save that. Try again.": "没能保存，请再试一次。",
     "Delete this deadline?": "要删除这个截止日期吗？",
     "Couldn't delete it. Try again.": "没能删除，请再试一次。",
+    "Canvas helper": "Canvas 助手",
+    "For schools that block access tokens: the Kwil Canvas helper reads your own courses with your own sign-in, like opening the pages yourself. Some schools' rules limit automated access; check yours. It is read-only and rate-limited.":
+      "适用于不允许使用访问令牌的学校：Kwil Canvas 助手用你自己的登录读取你自己的课程，就像你自己打开这些页面一样。有些学校的规定限制自动访问，请先确认你学校的规定。它只读取，不做任何修改，而且有频率限制。",
+    "Open the Kwil Canvas helper in this browser: it picks this code up by itself. It works once, for 10 minutes.":
+      "在这个浏览器里打开 Kwil Canvas 助手：它会自己读取这个配对码。配对码只能用一次，10 分钟内有效。",
+    "Set up Canvas helper": "设置 Canvas 助手",
+    "Revoke helper": "撤销助手",
+    "Canvas helper connected.": "Canvas 助手已连接。",
+    "Couldn't start pairing. Try again.": "没能开始配对，请再试一次。",
+    "Revoke the Canvas helper? It stops sending your courses; what it sent stays until you disconnect.":
+      "要撤销 Canvas 助手吗？它将不再发送你的课程；已经发送的内容会保留，直到你断开 Canvas。",
+    "Canvas helper revoked.": "Canvas 助手已撤销。",
+    "Couldn't revoke the helper. Try again.": "没能撤销助手，请再试一次。",
     // notifications and the study brief (brief.js, push.py, proactive.py)
     "Enable notifications": "开启通知",
     "Turn off notifications": "关闭通知",

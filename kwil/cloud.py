@@ -38,6 +38,14 @@ for the public internet with no Tailscale in front:
   stylesheet) needs no sign-in, nor does joining its waitlist (POST
   /api/waitlist), which gets a body pool of its own with the sign-in
   call's short deadline; the waitlist's owner routes need the owner.
+- The Canvas helper (canvas_helper.py): pairing (POST
+  /api/student/canvas/pair, a one-time code in the body) is public like an
+  invite; its two push routes take its `kcs1.` sync key as the bearer,
+  checked here (against the stored hashes) before any body is read: a
+  malformed or wrong one counts toward the same lockout and is refused at
+  once from a locked-out address. Only then is a body read, from a pool of
+  their own and up to [webapp] max_upload_mb. A sync key on any other path
+  gets 401.
 - Errors never reach the client as stack traces.
 - With failover on ([failover] role = "cloud", FAILOVER.md) it also accepts
   the derived `hc1.` bearer tokens (checked here, never counted as wrong
@@ -63,7 +71,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from kwil import webapp
+from kwil import canvas_helper, webapp
 
 log = logging.getLogger(__name__)
 
@@ -115,10 +123,16 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # /api/push and /api/student/brief routes need sign-in)
               "/brief.js"}
 PUBLIC_POST = {"/api/login"}
-# Accepting a family invite (family.py): public and limited like the login
-# call, but its body is an invite, not WEB_TOKEN, so the web app checks it
-# (wrong ones count toward the same shared lockout there).
-INVITE_POST = {"/api/invite/accept"}
+# Accepting a family invite (family.py), or pairing the Canvas helper with
+# its one-time code (canvas_helper.py): public and limited like the login
+# call, but its body is an invite or code, not WEB_TOKEN, so the web app
+# checks it (wrong ones count toward the same shared lockout there).
+INVITE_POST = {"/api/invite/accept", canvas_helper.PAIR_PATH}
+# The Canvas helper's pushes (canvas_helper.py): only with a `kcs1.` sync
+# key (which opens nothing else), checked by the web app (wrong ones count
+# toward the shared lockout there), from a body pool of their own, with
+# bodies up to [webapp] max_upload_mb.
+HELPER_POST = set(canvas_helper.PUSH_PATHS)
 # Joining the waitlist (public_site.py): anyone may post, from a pool of its
 # own (a flood can't take the sign-in slots) with the sign-in body deadline.
 WAITLIST_POST = {"/api/waitlist"}
@@ -315,6 +329,7 @@ class CloudGuard:
         self.slots = Slots(max_busy_per_ip, max_busy)
         self.login_slots = Slots(max_busy_per_ip, max_login_busy)
         self.waitlist_slots = Slots(max_busy_per_ip, max_login_busy)  # WAITLIST_POST
+        self.helper_slots = Slots(max_busy_per_ip, max_login_busy)    # HELPER_POST
         # failover voice sockets waiting for their first-message token
         self.preauth_slots = Slots(max_busy_per_ip, max_login_busy * 4)
         self.login_timeout = login_timeout  # a 16 KB sign-in body is quick
@@ -505,6 +520,23 @@ class CloudGuard:
         public = ((method in ("GET", "HEAD") and path in public_get)
                   or (method == "POST" and path in public_post) or invite or waitlist)
         bearer = _bearer(scope)
+        helper = False
+        if bearer is not None and bearer.startswith(canvas_helper.KEY_PREFIX):
+            if not (method == "POST" and path in HELPER_POST):
+                # a sync key opens the helper's push routes and nothing else
+                return await _json(send, 401, {"error": "not signed in"}, extra)
+            # who it is comes first here too: the key is checked before any
+            # body is read; a malformed or wrong one counts like a wrong
+            # token (refused at once from a locked-out address), the right
+            # one is never locked out
+            push = getattr(getattr(self.app, "state", None), "canvas_helper", None)
+            if push is None or not push.enabled():
+                return await _json(send, 404, {"error": "not found"}, extra)
+            if not canvas_helper.is_key(bearer) or \
+                    await _in_thread(push.keys.verify, bearer) is None:
+                return await self.refuse_token(send, ip, "sync key", extra)
+            bearer, helper = None, True
+            public = True  # a current key (the web app checks it again)
         login = method == "POST" and path in public_post and bearer is None
         invite = invite and bearer is None
         signing_in = login or invite  # one try at a time when locked out
@@ -516,7 +548,8 @@ class CloudGuard:
             bearer = None
             public = True  # signed in with an access token
         # Who it is comes first: nothing reads a body for an unknown caller
-        # except the login call (16 KB at most).
+        # except the login call and invites/pairing (16 KB at most); the
+        # helper's pushes (up to max_upload_mb) only with a current sync key.
         if bearer is not None:
             if not webapp.tokens_match(bearer, self.token):
                 return await self.refuse_token(send, ip, "bearer token", extra)
@@ -528,14 +561,15 @@ class CloudGuard:
             body = None  # nothing read: the app gets the server's receive
         else:
             pool = (self.login_slots if signing_in else
-                    self.waitlist_slots if waitlist else self.slots)
+                    self.waitlist_slots if waitlist else
+                    self.helper_slots if helper else self.slots)
             # a locked-out address may still sign in (right token), one try at a time
             if not pool.take(ip, limit=1 if signing_in and self.lockout.blocked(ip)
                              else None):
                 return await _json(send, 429, {"error": "too many requests at once"},
                                    {"Retry-After": "5", **extra})
             try:
-                limit = (self.max_upload_bytes if is_upload(path)
+                limit = (self.max_upload_bytes if is_upload(path) or helper
                          else self.max_body_bytes)
                 timeout = (self.login_timeout if signing_in or waitlist else
                            self.body_timeout + limit / self.min_upload_rate)
@@ -622,6 +656,13 @@ class CloudGuard:
 def _bearer(scope) -> str | None:
     auth = _headers(scope).get("authorization", "")
     return auth[7:] if auth[:7].lower() == "bearer " else None
+
+
+async def _in_thread(fn, *args):
+    """fn(*args) off the event loop (a few small file reads)."""
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
 def _headers(scope) -> dict[str, str]:

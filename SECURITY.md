@@ -1332,6 +1332,86 @@ tools. This changes the earlier "never page text" rule on purpose.
   the README says some schools' acceptable-use rules limit automated
   access.
 
+## The Canvas helper's pushes (`canvas_helper.py`)
+
+For schools that block access tokens, a browser helper in the person's own
+signed-in Canvas tab pushes the same course content (`[canvas] helper`, on
+by default, needs `[canvas] content`). Kwil fetches nothing for it.
+
+- **Sync keys.** `kcs1.` plus 32 random bytes (base64url), one per person,
+  the owner included. Only the SHA-256 is stored (`family.hash_token`,
+  compared with `hmac.compare_digest` against every listed person's, in
+  constant time per entry), in `<[student] dir>/canvas_helper.json` or the
+  invited person's `<dir>/<id>/canvas_helper.json`, written with
+  `google_auth.write_private` (an invited person's only while listed,
+  under Family's lock). The key is returned once, to the helper, and never
+  shown to the page or in any status. It opens only POST
+  `/api/student/canvas/push/manifest` and `/push/file`; anywhere else
+  CloudGuard answers 401 and the web app treats it as no sign-in (not
+  counted as a wrong WEB_TOKEN: it can't be one). It ends on **Revoke
+  helper**, **Disconnect Canvas** and removal of the person (their folder
+  goes); pairing again replaces it. **Deliberate non-fix:** signing out
+  (even "everywhere") doesn't revoke it: it is a separate credential, like
+  a scheduled job's, and the README says to revoke it on its own.
+- **Pairing.** "Set up Canvas helper" (signed in) makes a one-time code
+  (`kcp1.`, 24 random bytes, only its hash kept) valid for 10 minutes,
+  shown in the card's `data-kwil-pair` element as text, never in a URL; the
+  page drops it once the helper paired or it expired. POST
+  `/api/student/canvas/pair` {code} is public like accepting an invite
+  (CloudGuard's sign-in pool, 16 KB, 2 s); a code works once. The
+  extension trades it from its content script on the Kwil page
+  (same-origin), a Shortcut from no page at all; no cross-site exemption
+  exists for it.
+- **Wrong keys and codes** count toward the web app's LoginLimiter per
+  address (keyed as CloudGuard keys its lockout: the same table as
+  sign-in and invites); the right key always works. A missing key (or a
+  WEB_TOKEN sent to a push route) is a 401 without counting. Each key
+  gets 120 push requests an hour (`cloud.RateLimiter`, per person,
+  bounded), and one push runs at a time per person (409 otherwise).
+- **Cross-site and CORS.** The pushes come from the extension's origin
+  (`chrome-extension://…`), so the web app's cross-site check, the
+  failover edge's origin check and its bearer check let exactly
+  `canvas_helper.push_request`s through (POST, those two paths, a `kcs1.`
+  bearer). No cookie is read on them, so there is nothing to forge; every
+  other route still refuses that origin. A `kcs1.` bearer on any other
+  route is a 401 that the web app, CloudGuard and the failover edge never
+  count as a wrong WEB_TOKEN (it can't be one). No CORS headers are sent
+  (an extension with host permission doesn't need them; a page can't read
+  the answer).
+- **Bodies.** CloudGuard checks the sync key first (its exact shape, then
+  `HelperKeys.verify` against the stored hashes) and reads no body for a
+  malformed or wrong key: that counts like a wrong token, and from a
+  locked-out address it is refused at once, so an unidentified caller
+  never gets a large body read or a helper slot. Only a current key gets
+  the push routes' own slot pool and `[webapp] max_upload_mb` (Render:
+  4 MB); a file is read up to
+  `min(max_file_mb, max_upload_mb - 64 KB)` and a bigger one is kept as
+  "too_large", not read. A manifest has at most 100 courses and 1000
+  items per listing.
+- **Untrusted content, re-checked.** A manifest is Canvas's own JSON as
+  the helper read it; it is validated (ids are positive integers, lists
+  are lists, a module's `items` a list of objects, HTML fields strings,
+  else dropped; anything the pipeline still can't take is a 400) and run
+  through `coursefiles.sync_content` with a
+  `PushedCanvas` adapter: the same HTML-to-text, text extraction, per
+  course/person bounds, excluded (deleted) courses, generation/alive
+  checks and date drafts as the token sync, with origin "helper". It
+  writes only the paired person's own store, so a course id naming
+  someone else's course reaches nothing of theirs. A file's `url` is
+  dropped on arrival (Kwil fetches nothing, so there's no SSRF). A file
+  push is accepted only if a manifest of that person asked for it within
+  an hour (kept in memory, at most 200 per person), with the metadata that
+  manifest sent; its bytes live only in memory while extracted. A
+  Disconnect or revoke after the manifest (the generation, or the key no
+  longer matching) makes every later write of that push a no-op.
+- **Dates.** The dates in pushed text are read by the background
+  (`CourseSync`, next 5-minute tick) as drafts, each text version once,
+  with the same untrusted-text prompt; the owner's where the push landed
+  (a push reaches one machine, so no leader check is needed).
+- **Logs.** Ids, counts, sizes and codes only; never a key, code, title
+  or text. `config._SECRET_PATTERNS` masks `kcs1.`/`kcp1.` values in any
+  log line.
+
 ## Smart home (`tools/home_assistant.py`)
 
 Home Assistant controls physical things, including the front door, so its

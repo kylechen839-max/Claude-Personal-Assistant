@@ -940,6 +940,18 @@ Deploy first with `--requirements` (it adds `pypdf`).
 - [ ] Tap **Disconnect Canvas**, then ask about the late policy again.
   - Should: Kwil has no course files any more.
 
+### Canvas helper pairing (optional, ~5 min; on the cloud app)
+The helper extension itself comes in the next change; this checks the
+server side and the card.
+- [ ] On a computer, open the Kwil app at its cloud address, open the menu
+      and tap **Set up Canvas helper** in the School deadlines card.
+  - Should: a code starting `kcp1.` and "It works once, for 10 minutes";
+    the browser's address bar never shows the code.
+- [ ] Leave it open for 11 minutes, then close and reopen the menu.
+  - Should: the code is gone and **Set up Canvas helper** is back.
+- [ ] Open the server log (Render: Logs) and search for `kcp1.` and `kcs1.`.
+  - Should: not found (only "opened a pairing code" lines, no codes).
+
 ---
 
 ## Smart home (optional, ~10 min)

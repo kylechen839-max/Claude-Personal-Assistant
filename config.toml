@@ -342,6 +342,7 @@ max_file_mb = 20              # one file's size, at most (bigger: listed, not re
 max_course_mb = 20            # text kept per course, at most
 max_person_mb = 100           # text kept per person, at most
 content_seconds = 300         # time for one person's content step
+helper = true                 # accept course content from the Kwil Canvas helper (a browser extension) in each person's own Canvas tab
 
 [logging]
 file = "logs/assistant.log"
