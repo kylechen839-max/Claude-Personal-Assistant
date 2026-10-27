@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Disconnect Google account now also revokes Kwil's access at Google (best
+  effort; the token is deleted even if Google can't be reached), so Kwil no
+  longer stays listed at myaccount.google.com/permissions.
 - Move a family member's PC copy to the cloud with their history: new
   owner-only `POST /api/users/{id}/history/import` and `python -m
   kwil.family_import --from <history.sqlite> --to <https origin> --user <id

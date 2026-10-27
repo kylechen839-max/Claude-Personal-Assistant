@@ -52,8 +52,13 @@ KYLE = token_of("kyle")
 
 @pytest.fixture(autouse=True)
 def no_google_network(monkeypatch):
-    """Nothing here may reach Google (a refresh would)."""
+    """Nothing here may reach Google (a refresh would, and so would the
+    revoke on Disconnect: a test that checks it swaps in its own)."""
     from google.oauth2.credentials import Credentials
+
+    from kwil import account
+
+    monkeypatch.setattr(account, "revoke_google", lambda token: None)
 
     def refresh(self, request):
         raise AssertionError("a test tried to refresh a Google token")
@@ -360,6 +365,71 @@ def test_disconnect_removes_the_token_and_the_tools(g):
     assert not session.registry.has("list_calendar_events")
     assert session.registry.has("web_search")
     assert mom.get("/api/google/status").json()["connected"] is False
+
+
+@pytest.mark.parametrize("tier", ["family", "beta"])
+def test_disconnect_revokes_the_grant_then_deletes_the_token(g, monkeypatch, caplog, tier):
+    # Disconnect asks Google to end access (so Kwil leaves
+    # myaccount.google.com/permissions), through the helper "Delete my
+    # account" and Remove use, while the file is still there; then deletes
+    # it. Either tier: the beta's public client and the family's web client
+    # both revoke with the token alone
+    from kwil import account
+
+    monkeypatch.setenv("GOOGLE_PUBLIC_CLIENT_JSON", json.dumps(PUBLIC_CLIENT))
+    person, uid = g.member("Mom", "en", tier=tier)
+    saved = connected(g, person, uid, "mom")
+    seen = []
+    monkeypatch.setattr(account, "revoke_google",
+                        lambda token: seen.append((token, g.fam.google_token(uid).exists())))
+    caplog.set_level(logging.DEBUG)
+    r = person.post("/api/google/disconnect", json={})
+    assert r.status_code == 200 and r.json()["connected"] is False
+    assert seen == [(saved["refresh_token"], True)]  # revoked first, file still there
+    assert not g.fam.google_token(uid).exists()
+    assert any(uid in rec.getMessage() and "revoked" in rec.getMessage()
+               for rec in caplog.records if rec.levelno == logging.INFO)
+    assert saved["refresh_token"] not in caplog.text and saved["token"] not in caplog.text
+    # again: nothing left to revoke, nothing sent
+    assert person.post("/api/google/disconnect", json={}).status_code == 200
+    assert len(seen) == 1
+
+
+def test_disconnect_goes_ahead_when_the_revoke_fails(g, monkeypatch, caplog):
+    from kwil import account
+
+    mom, mom_id = g.member("Mom")
+    saved = connected(g, mom, mom_id, "mom")
+    calls = []
+
+    def broken(token):
+        calls.append(token)
+        raise ConnectionError(f"couldn't reach Google with {token}")
+    monkeypatch.setattr(account, "revoke_google", broken)
+    caplog.set_level(logging.DEBUG)
+    r = mom.post("/api/google/disconnect", json={})
+    assert r.status_code == 200 and r.json()["connected"] is False
+    assert calls == [saved["refresh_token"]]
+    assert not g.fam.google_token(mom_id).exists()
+    assert mom.get("/api/google/status").json()["connected"] is False
+    assert any("revoking" in rec.getMessage() and "ConnectionError" in rec.getMessage()
+               for rec in caplog.records if rec.levelno == logging.WARNING)
+    # the failure is logged by type only: never the token (the message has it)
+    assert saved["refresh_token"] not in caplog.text and saved["token"] not in caplog.text
+
+
+@pytest.mark.parametrize("junk", ["[]", '"x"'])
+def test_disconnect_still_deletes_a_corrupt_token_file(g, monkeypatch, junk):
+    from kwil import account
+
+    mom, mom_id = g.member("Mom")
+    connected(g, mom, mom_id, "mom")
+    g.fam.google_token(mom_id).write_text(junk, encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(account, "revoke_google", calls.append)
+    r = mom.post("/api/google/disconnect", json={})
+    assert r.status_code == 200 and r.json()["connected"] is False
+    assert calls == [] and not g.fam.google_token(mom_id).exists()
 
 
 def test_removing_a_member_deletes_their_token(g, monkeypatch):

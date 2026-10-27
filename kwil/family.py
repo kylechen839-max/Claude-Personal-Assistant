@@ -568,10 +568,21 @@ class Family:
         return True
 
     def disconnect_google(self, uid: str) -> bool:
-        """Delete their token and take their Google tools away. False if
-        there was nothing to delete."""
+        """Revoke their grant at Google, then delete their token and take
+        their Google tools away. False if there was nothing to delete.
+        The revoke is best effort (account.py's helper, as "Delete my
+        account" and Remove): a failure is logged by type and never blocks
+        the delete. Either tier: the revoke needs only the token."""
+        from kwil.account import revoke_google_grant
+
         with self.lock:
             if uid not in self.users or not valid_id(uid):
+                return False
+        # outside the lock: the network call (up to its timeout) mustn't
+        # hold up everyone else's sign-ins and tools
+        revoke_google_grant(self, uid, label="Family")
+        with self.lock:
+            if uid not in self.users:  # removed meanwhile: the folder went
                 return False
             path = self.google_token(uid)
             had = path.exists()

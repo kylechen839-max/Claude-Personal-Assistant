@@ -663,7 +663,9 @@ for all of this except the Google sign-in.
     and recognition are unchanged.
 - [ ] Their ⚙ -> 断开 Google 账户 -> confirm.
   - Should: "Google 账户已断开。"; asking about their calendar now says it
-    isn't connected.
+    isn't connected, and at myaccount.google.com/permissions (their Google
+    account) "Kwil"/"Hey Claude" is gone: Disconnect revokes their grant
+    first. (For the beta tester below, the same on their beta project.)
 - [ ] On your phone, at the cloud's address, tap Remove next to them.
   - Should: their phone is signed out on its next tap; your chat and
     history are unchanged. (Their Google token is deleted with their
