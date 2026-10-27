@@ -3,6 +3,22 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Connected services: the steps only Kyle can do (2026-10-27).**
+      The code is done (README "Connect your services in the app (cloud)").
+      1. **Notion integration capabilities:** notion.so/profile/integrations
+         -> the public Kwil integration -> Capabilities: also tick
+         **Insert content** (lecture notes, chat digests and the dev team
+         inbox create pages; invited people's tools still never create
+         anything). Its redirect URIs already cover `/notion/callback`.
+      2. **Render:** make sure `PUBLIC_ORIGIN` is the address you use
+         (`https://heykwil.com`), then delete `NOTION_TOKEN` (Environment
+         -> Save). While it is set, Notion says "Set on the server."
+      3. **Phone:** ⚙ -> Connected services -> Notion -> **Connect**; on
+         Notion's page tick the Assignments database and the pages for
+         Lecture Notes, Chat Digests and the "Hey Claude coordinator
+         inbox". Then Home Assistant: type its Nabu Casa (or tunnel) https
+         address -> **Connect** -> sign in as the non-admin Kwil user.
+      4. Run the "Connected services on the cloud" checks in MANUAL_TEST.md.
 - [ ] **Kwil rebrand: the steps only Kyle can do (2026-10-22).** The code
       and docs say Kwil and run under both names; these are UI clicks.
       1. **Rename the GitHub repo** to `Kwil` (Settings -> General ->

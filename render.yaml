@@ -35,6 +35,10 @@ services:
         sync: false
       - key: PINECONE_API_KEY
         sync: false
+      # Optional: leave empty and connect your Notion from the app instead
+      # (Settings -> Connected services; README "Connect your services in
+      # the app"). Set, it wins and the app's Connect is hidden. Home
+      # Assistant works the same way: no HA_TOKEN/HA_URL needed here.
       - key: NOTION_TOKEN
         sync: false
       # Optional: the owner's ⚙ -> Connect Google account saves a token to
@@ -100,7 +104,8 @@ services:
       - key: CANVAS_BASE_URL        # e.g. https://canvas.school.edu
         sync: false
       # Encrypts each tester's own Anthropic API key on the disk (userkeys.py),
-      # and their Notion sign-in and Canvas link.
+      # and their Notion sign-in and Canvas link, and your own Connected
+      # services' sign-ins (/data/owner).
       # Render makes a random one; keep it: if it changes, everyone has to
       # enter their key again (nothing else breaks). Never share it.
       - key: USER_DATA_KEY

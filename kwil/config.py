@@ -302,6 +302,12 @@ DEFAULTS: dict = {
         "volume_step": 15,          # "turn it up" / "down" by this much (percent)
         "timeout": 10,              # seconds per Spotify request
     },
+    "connect": {                    # the owner's "Connected services" in the phone app
+        "enabled": True,            # (owner_connect.py; README "Connect your services in the app")
+        "dir": "data/owner",        # the sealed sign-ins (needs USER_DATA_KEY)
+        "notion": True,             # needs NOTION_OAUTH_CLIENT_ID/_SECRET; NOTION_TOKEN wins if set
+        "home_assistant": True,     # its built-in sign-in; HA_TOKEN wins if set
+    },
     "push": {                       # phone notifications (push.py; README "Study briefings")
         "enabled": True,            # "Enable notifications" in Settings; needs USER_DATA_KEY
         # the owner's subscriptions, briefing state and (without
@@ -410,6 +416,7 @@ SERVER_PROFILE: dict = {
     "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
+    "connect": {"dir": "/data/owner"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
     # just under max_upload_mb (4) above, so check_limits has nothing to lower
     "lecture": {"chunk_mb": 3.9},
@@ -567,6 +574,10 @@ _SECRET_PATTERNS = [
     re.compile(r"\b[\w-]{24,}\.[\w-]{6}\.[\w-]{27,}"),  # Discord bot tokens
     re.compile(r"\b\d{1,6}~[A-Za-z0-9]{32,}"),     # Canvas access tokens
     re.compile(r"(/feeds/calendars/)[\w.-]+"),    # Canvas calendar feed links
+    # Home Assistant access tokens (JWTs) and refresh tokens (128 hex
+    # characters): the owner's sign-in from the app (owner_connect.py)
+    re.compile(r"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"),
+    re.compile(r"\b[0-9a-f]{128}\b"),
 ]
 
 

@@ -261,6 +261,12 @@ local_device = ""             # this computer's name in Spotify's device list; "
 volume_step = 15              # "turn it up" / "turn it down" by this many percent
 timeout = 10                  # seconds per Spotify request
 
+[connect]                     # Settings -> "Connected services": sign in to your own services from the app (README "Connect your services in the app")
+enabled = true                # needs USER_DATA_KEY (sign-ins are stored encrypted) and [webapp] public_origin
+dir = "data/owner"            # your sealed sign-ins (Render: /data/owner)
+notion = true                 # your Notion via the public integration (NOTION_OAUTH_CLIENT_ID/_SECRET); NOTION_TOKEN wins if set
+home_assistant = true         # your Home Assistant's own sign-in (it must be reachable from the internet); HA_TOKEN wins if set
+
 [push]                        # phone notifications: Settings -> "Enable notifications" (README "Study briefings")
 enabled = true                # needs USER_DATA_KEY (subscriptions are stored encrypted); iPhone: Home Screen app, iOS 16.4+
 owner_dir = "data/student"    # your subscriptions, briefing state and the generated VAPID key (Render: /data/student)

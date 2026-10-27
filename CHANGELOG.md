@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Connected services (owner, cloud): sign in to your own Notion and Home
+  Assistant from Settings instead of setting `NOTION_TOKEN`/`HA_TOKEN` on the
+  server. Environment tokens still win. Sign-ins are encrypted with
+  `USER_DATA_KEY`, refreshed automatically, and revoked on Disconnect. New
+  `[connect]` settings.
 - The owner can connect Canvas in the app (feed link or access token, sealed
   on the disk) instead of CANVAS_ICS_URL / CANVAS_TOKEN in the environment;
   the env still wins while set. A guided Canvas connect for everyone: find
