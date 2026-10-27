@@ -5,6 +5,9 @@
 - Disconnect Google account now also revokes Kwil's access at Google (best
   effort; the token is deleted even if Google can't be reached), so Kwil no
   longer stays listed at myaccount.google.com/permissions.
+- Conversation titles and summaries no longer label a family member's or
+  beta tester's words as Kyle's: the transcript sent for titling says
+  "User:" and the prompt is neutral.
 - The support address on /privacy and /terms is now support@heykwil.com
   (forwarded to the support Gmail).
 - The privacy page now carries Google's Limited Use statement (needed for

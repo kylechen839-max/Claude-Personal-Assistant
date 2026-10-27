@@ -5445,3 +5445,21 @@ the owner's Remove already revoked it.
   MANUAL_TEST's disconnect check (Kwil gone from the permissions page).
 - **Counts** (Linux sandbox, Python 3.13): 3188 passed, 37 skipped
   (3185/37 before: the three new tests). No JS changed.
+## Title transcripts no longer say "Kyle" (2026-10-27)
+- **Bug:** `history.message_transcript` labelled every user turn
+  "Kyle:", and `TITLE_PROMPT` said "a conversation between Kyle and his
+  voice assistant". The same `Recorder`/`HistoryStore` code records family
+  members and beta testers (`family.py` builds a per-member Recorder), so
+  their words reached Anthropic's title/summary call as Kyle's.
+- **Fix:** user turns are now "User:" and the prompt says "a person and
+  their voice assistant" for everyone, the owner included (a title doesn't
+  need his name, and no display name is plumbed into `Recorder`).
+  `ask_title` is the only caller. Out of scope and unchanged: the owner-only
+  Pinecone summary in `memory.py` (family chats run with `memory=None`; the
+  zh `config.mom.toml` instance has no Pinecone) and the Markdown export's
+  "**Kyle:**" label.
+- **Tests:** `tests/test_history.py::test_a_members_title_request_never_says_kyle`
+  (a family-style chat with `user_name="Mom"` ends; the title call's text is
+  "User: ...\nAssistant: ..." and neither it nor the system prompt says
+  "Kyle"). It fails with the `history.py` change reverted (`'Kyle: how
+  lo...' == 'User: how lo...'`). Full suite: 3186 passed, 37 skipped.
