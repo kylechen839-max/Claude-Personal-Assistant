@@ -840,7 +840,7 @@ def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     assert accept(client, invite).status_code == 200
     status = client.get("/api/google/status", headers=via_proxy(PUBLIC)).json()
     assert status == {"enabled": True, "connected": False, "disconnect": True,
-                      "gmail": True, "note": None}
+                      "gmail": True, "note": None, "server_owner": False}
     fam.close()
 
 

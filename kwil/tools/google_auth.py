@@ -6,8 +6,11 @@ with it, and the Gmail tools say exactly what to re-run
 (`python -m kwil.tools.google_auth`). The same goes for the read-only
 calendar list and labels scopes (CALENDAR_EXTRA_SCOPES).
 
-In cloud mode there is no token file: the token JSON comes from the
-GOOGLE_TOKEN_JSON environment variable (refreshed tokens stay in memory).
+In cloud mode the token JSON comes from the GOOGLE_TOKEN_JSON environment
+variable (refreshed tokens stay in memory), until the owner taps "Connect
+Google account" in the app ([webapp] owner_google): from then on the token
+that sign-in saved to [calendar] token wins (owner_environ), also refreshed
+in memory only.
 """
 
 from __future__ import annotations
@@ -170,6 +173,29 @@ def token_info(token_path="token.json", credentials_path="credentials.json",
             if client.get(key):
                 info.setdefault(key, client[key])
     return info, from_env
+
+
+def owner_connected(config: dict) -> bool:
+    """Has the owner connected Google in the cloud server's app ([webapp]
+    owner_google, google_web.py)? Then that token, in [calendar] token,
+    wins over GOOGLE_TOKEN_JSON. An unreadable file counts as not
+    connected, so the environment's token keeps working."""
+    if not config["webapp"].get("owner_google"):
+        return False
+    try:  # environ={}: the file only
+        info = load_token_info(config["calendar"]["token"], environ={})
+    except (OSError, ValueError, AttributeError, TypeError):  # e.g. a file holding []
+        return False
+    return isinstance(info, dict) and bool(info.get("refresh_token") or info.get("token"))
+
+
+def owner_environ(config: dict, environ=os.environ):
+    """Where the owner's Google sign-in is read from: `environ` without
+    GOOGLE_TOKEN_JSON once the owner has connected in the app
+    (owner_connected), else `environ` itself."""
+    if not owner_connected(config):
+        return environ
+    return {k: v for k, v in environ.items() if k != TOKEN_ENV}
 
 
 def has_credentials(credentials_path="credentials.json", token_path="token.json",

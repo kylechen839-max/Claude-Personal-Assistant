@@ -170,6 +170,11 @@
       "要断开你的 Google 账户吗？之后我就看不到你的日历和邮件了。",
     "Google account disconnected.": "Google 账户已断开。",
     "Couldn't disconnect. Try again.": "没能断开，请再试一次。",
+    // the cloud server owner's own (google_web.py, [webapp] owner_google)
+    "Disconnect the Google account connected here? I won't see your calendar or email through it any more. This may also sign out Kwil's Google on your PC (same Google project).":
+      "要断开在这里连接的 Google 账户吗？之后我就不能再通过它看你的日历和邮件了。这也可能会让电脑上的 Kwil 退出 Google（同一个 Google 项目）。",
+    "Disconnect the Google account connected here? I won't see your calendar through it any more. This may also sign out Kwil's Google on your PC (same Google project).":
+      "要断开在这里连接的 Google 账户吗？之后我就不能再通过它看你的日历了。这也可能会让电脑上的 Kwil 退出 Google（同一个 Google 项目）。",
     // a family member's own account (family.js setupAccount, account.py)
     "Download my data": "下载我的数据",
     "Delete my account": "删除我的账户",
@@ -613,6 +618,7 @@
 
     let signedIn = false;
     let mail = true;  // the last status's "gmail" (false: no mail wording)
+    let owner = false;  // the last status's "server_owner": the cloud owner's own
     async function refresh() {
       try {
         const res = await win.fetch("/api/google/status",
@@ -621,7 +627,13 @@
         const st = await res.json();
         signedIn = true;
         mail = st.gmail !== false;
-        renderGuide(win, doc, st, say);
+        owner = st.server_owner === true;
+        if (owner) {  // the first-run guide is for invited people, not the owner
+          const box = doc.getElementById("guide");
+          if (box) box.hidden = true;
+        } else {
+          renderGuide(win, doc, st, say);
+        }
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
@@ -654,9 +666,14 @@
     });
     if (unlink) {
       unlink.addEventListener("click", async () => {
-        const ask = say(mail
-          ? "Disconnect your Google account? I won't see your calendar or email any more."
-          : "Disconnect your Google account? I won't see your calendar any more.");
+        // the owner's: grants in one Google project may be revoked together
+        const ask = say(owner
+          ? (mail
+            ? "Disconnect the Google account connected here? I won't see your calendar or email through it any more. This may also sign out Kwil's Google on your PC (same Google project)."
+            : "Disconnect the Google account connected here? I won't see your calendar through it any more. This may also sign out Kwil's Google on your PC (same Google project).")
+          : mail
+            ? "Disconnect your Google account? I won't see your calendar or email any more."
+            : "Disconnect your Google account? I won't see your calendar any more.");
         if (typeof win.confirm === "function" && !win.confirm(ask)) return;
         unlink.disabled = true;
         let ok = false;

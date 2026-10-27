@@ -283,6 +283,42 @@ test('Disconnect: shown only to a family member who is connected; asks, then pos
   assert.equal(p.google.textContent, '连接 Google 账户');
 });
 
+test('Disconnect: the cloud owner gets it for a token connected here, with its own warning', async () => {
+  const st = { enabled: true, connected: true, disconnect: true, gmail: true, note: null,
+               server_owner: true };
+  const p = page('en', { gstatus: st });
+  await p.flush();
+  assert.equal(p.unlink.hidden, false);
+  for (const fn of p.unlink.listeners.click) await fn();
+  assert.equal(p.asked.length, 1);
+  assert.match(p.asked[0], /^Disconnect the Google account connected here\?/);
+  assert.match(p.asked[0], /calendar or email/);
+  assert.match(p.asked[0], /may also sign out Kwil's Google on your PC/);
+  assert.equal(p.fetches.filter((f) => f.url === '/api/google/disconnect').length, 1);
+  // the same in Chinese, and without mail wording when Gmail is off
+  const zh = page('zh-CN', { gstatus: { ...st, gmail: false } });
+  await zh.flush();
+  for (const fn of zh.unlink.listeners.click) await fn();
+  assert.equal(zh.asked[0],
+    '要断开在这里连接的 Google 账户吗？之后我就不能再通过它看你的日历了。这也可能会让电脑上的 Kwil 退出 Google（同一个 Google 项目）。');
+  // the env's token only (disconnect false): nothing to disconnect here
+  const env = page('en', { gstatus: { ...st, disconnect: false } });
+  await env.flush();
+  assert.equal(env.unlink.hidden, true);
+});
+
+test('first-run guide: off for the cloud owner, on for an invited person', async () => {
+  const owner = page('en', { gstatus: { enabled: true, connected: false, disconnect: false,
+                                        server_owner: true } });
+  await owner.flush();
+  assert.equal(owner.guide.hidden, true);
+  assert.equal(owner.google.hidden, false);  // the Connect button still shows
+  const member = page('en', { gstatus: { enabled: true, connected: false, disconnect: true,
+                                         server_owner: false } });
+  await member.flush();
+  assert.equal(member.guide.hidden, false);
+});
+
 test('Disconnect: a "no" sends nothing; a failure says so', async () => {
   const no = page('en', { gstatus: { enabled: true, connected: true, disconnect: true }, answer: false });
   await no.flush();
