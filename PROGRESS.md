@@ -66,7 +66,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `tests/js/app-send.test.mjs` | 2 | chat attachments: `app.js`'s submit path in node:vm (files never go with yes/no; chips clear only on an ok response) |
 | `test_family.py` | 38 | family invites: accounts, one-time links, isolation, sign-out, removal, failed saves, logs |
 | `test_account.py` | 37 | a family member's own "Download my data" / "Delete my account": own session only, Google revoke, whole folder, cap, temp files, one at a time, rate limit, logs |
-| `test_family_import.py` | 30 | moving a PC family copy's history to the cloud: owner-only import route, idempotent retries, size cap (413), no sync log, logs, delete and removal, the CLI (batches, Bearer, dry run, https only) |
+| `test_family_import.py` | 33 | moving a PC family copy's history to the cloud: owner-only import route, idempotent retries, size cap (413), no sync log, logs, delete and removal, the CLI (batches, Bearer, dry run, https only) |
 | `test_confirm_ux.py` | 123 | yes/no answers: misheard yeses, one more try then cancel (text, PC voice, phone voice, `/api/confirm`), calendar moves without a question |
 | `tests/js/family.test.mjs` | 19 | family invites: `#invite=` accept and the owner's menu (`node --test`) |
 
@@ -5478,3 +5478,21 @@ conversations come with them.
   (baseline 48cb030 on the same machine: 3183 passed, 38 skipped; the
   extra skip there is a git-history test, as the baseline is a `git
   archive` copy). No JS changed.
+
+### Round 2 (judge: APPROVED with four LOW findings; #4, PRIVACY wording, by the master)
+
+1. **A half-imported conversation the member deleted came back.** Fixed
+   with the smaller change: `delete()` and prune's `_tombstone` set an
+   existing `import:<id>` mark to "done" (`_imported_gone`), so a re-run
+   skips it. Test: crash mid-conversation, then delete (or prune), then
+   re-import: stays gone (both cases fail without the fix).
+2. **The family lock is held longer than SECURITY.md said.** Locking
+   unchanged; SECURITY.md now gives the judge's measurement (about 6 s
+   for a full 3.5 MB batch, about 4 s more for a 413 undo, sandbox) and
+   says the owner's own page waits too.
+3. **A temp copy could be left on Windows.** The CLI now checks the
+   folder after `backup.cleanup`; if it is still there it prints its path
+   (never contents) and exits 1, the import itself still done. Test with
+   cleanup stubbed (fails without the check).
+- **Counts** (Linux sandbox, Python 3.13): 3217 passed, 37 skipped
+  (baseline 48cb030: 3183 passed, 38 skipped); `test_family_import.py` 33.
