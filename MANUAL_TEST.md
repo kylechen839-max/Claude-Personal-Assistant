@@ -415,6 +415,30 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: the sign-in page is in Chinese right away (no reload needed).
 - [ ] Chinese (Mom's app): the sheet reads 拍照 / 照片图库 / 选择文件 / 取消,
       and a sent photo shows as "[照片]" in the chat and in History.
+### Typing while Kwil is thinking (iPhone, ~5 min)
+- [ ] Type "Write me a long story about a lighthouse" and send. While the
+      reply is still coming in, type "make it a poem instead" and tap Send.
+  - Should: the keyboard stays up the whole time (the box never greys out
+    or clears by itself); a dashed bubble with "Queued" and an × appears
+    under the chat; a square **Stop** button sits next to Send.
+- [ ] Wait for the story to finish.
+  - Should: "make it a poem instead" then goes on its own, as a normal
+    bubble, and the poem comes back.
+- [ ] Send another long question, queue two short ones, remove the first
+      with its ×, then tap **Stop**.
+  - Should: the reply stops where it was, without being spoken, with a
+    "Stopped." note; the remaining queued message goes right away. Try a
+    4th queued message: "You can queue up to 3 messages." and your text
+    stays in the box.
+- [ ] Ask "Delete the test event tomorrow" (make one first) and, while it
+      thinks, queue "what's next on my calendar?".
+  - Should: when Yes/No appears, Stop disappears and the queued message
+    waits. Type "no" and send: it answers the question (the event stays),
+    then the queued message goes.
+- [ ] With VoiceOver on, swipe to the queued bubble and to Stop.
+  - Should: the queued text is read with "Queued", the × as "Remove
+    queued message", and Stop as "Stop". In Mom's (Chinese) app they read
+    排队中 / 移除排队的消息 / 停止.
 ### Reply voice (optional, ~5 min)
 - [ ] Open the gear menu: **Reply voice** lists the voices on this server
       (Default, the Piper voices in `voices/`, Kokoro if downloaded, System

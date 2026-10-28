@@ -11,7 +11,9 @@ A turn runs in a worker thread and reports what happens as NDJSON events
 (transcript, tool, confirm, reply, error, done). When a tool needs a yes
 (e.g. deleting an event), the stream ends with a "confirm" event; the page
 answers with POST /api/confirm (buttons, or a spoken/typed "yes"), and that
-response carries the rest of the turn.
+response carries the rest of the turn. POST /api/stop (the page's Stop
+button) ends the running turn early, as a barge-in does; the turn's own
+stream still ends with its reply ("stopped": true) and "done".
 
 Privacy: binds to 127.0.0.1; every API call needs the session cookie, which
 is only given for the WEB_TOKEN from .env (generated on first run, never
@@ -741,6 +743,12 @@ class Session:
         # While chat_stream(on_event=...) runs, that caller gets this turn's
         # tool/confirm/status events instead of the shared queue.
         self.listener: Callable[[dict], None] | None = None
+        # Set while a page turn (start_turn) runs: the Stop button sets it
+        # (stop()). None between turns and during the voice view's turns.
+        self.cancel: threading.Event | None = None
+        # stop() and _confirm() decide under it: a Stop either lands before
+        # a question is asked (none is) or finds it open (refused).
+        self.stop_lock = threading.Lock()
 
     def emit(self, event: dict) -> None:
         (self.listener or self.events.put)(event)
@@ -1099,6 +1107,7 @@ class WebAssistant:
             if not s.busy.acquire(blocking=False):
                 return False
         s.last_active = self.clock()
+        s.cancel = threading.Event()
         s.thread = threading.Thread(target=self._run_turn,
                                     args=(s, text, recording, attachments),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
@@ -1115,6 +1124,7 @@ class WebAssistant:
     def _turn_body(self, s: Session, text, recording, attachments=None) -> None:
         from kwil.cli import get_reply, is_exit, loggable_reply
 
+        cancel = s.cancel
         try:
             if recording is not None:
                 text = self.transcribe(recording, s.language, user=s.user)
@@ -1131,24 +1141,27 @@ class WebAssistant:
                 return
             on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
             if attachments:
-                reply = self._ask_with_files(s, text, attachments, on_text)
+                reply = self._ask_with_files(s, text, attachments, on_text, cancel)
             else:
                 reply = get_reply(  # it logs errors itself
-                    s.chat, text, output_fn=lambda m: None, on_text=on_text)
+                    s.chat, text, output_fn=lambda m: None, on_text=on_text,
+                    cancel=cancel)
             log.info("Web replied %d chars", len(reply))
             log.debug("Web replied: %r", loggable_reply(s.chat, reply))
-            self._reply(s, reply)
+            self._reply(s, reply, stopped=cancel is not None and cancel.is_set())
         except Exception:
             log.exception("Web turn failed")
             s.events.put({"type": "error", "message": i18n.t("error")})
         finally:
             s.pending = None
+            s.cancel = None
             s.last_active = self.clock()
             s.events.put({"type": "done"})  # before release: see start_turn
             s.busy.release()
 
     @staticmethod
-    def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text) -> str:
+    def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text,
+                        cancel: threading.Event | None = None) -> str:
         """get_reply for a turn with files: Claude refusing the request gets
         a sentence about the file instead of the generic API error, "too
         long" when its reason is about length (a PDF over 100 pages, a file
@@ -1160,7 +1173,8 @@ class WebAssistant:
         from kwil.cli import friendly_error, uses_own_key
 
         try:
-            return s.chat.ask(text, on_text=on_text, attachments=attachments)
+            return s.chat.ask(text, on_text=on_text, attachments=attachments,
+                              cancel=cancel)
         except anthropic.BadRequestError as e:
             log.warning("Claude refused a turn with %d attachment(s) (HTTP %s)",
                         len(attachments), e.status_code)
@@ -1170,15 +1184,42 @@ class WebAssistant:
         except Exception as e:  # noqa: BLE001 - as get_reply
             return friendly_error(e, text, lambda m: None, own_key=uses_own_key(s.chat))
 
-    def _reply(self, s: Session, text: str, ended: bool = False) -> None:
-        s.events.put({"type": "reply", "text": text,
-                      "audio": f"/api/audio/{self.remember(text, s)}",
-                      "ended": ended})
+    def _reply(self, s: Session, text: str, ended: bool = False,
+               stopped: bool = False) -> None:
+        event = {"type": "reply", "text": text,
+                 "audio": f"/api/audio/{self.remember(text, s)}", "ended": ended}
+        if stopped:  # the Stop button: the page shows it and doesn't speak it
+            event["stopped"] = True
+        s.events.put(event)
+
+    def stop(self, s: Session) -> bool:
+        """The page's Stop button: end the running page turn where it is,
+        as a barge-in does (what Claude said so far stays in the
+        conversation, no further tool runs). The turn then ends as usual,
+        so the next one (the page's queued message) can start. False if no
+        page turn is running, or it is waiting on a yes/no question (that
+        is answered, not stopped)."""
+        with s.stop_lock:
+            cancel = s.cancel
+            if cancel is None or s.pending is not None:
+                return False
+            cancel.set()
+        if s.cancel is cancel:  # still that turn: close its open stream now
+            abort = getattr(s.chat, "abort", None)
+            if abort is not None:
+                abort()
+        log.info("Web turn stopped")
+        return True
 
     def _confirm(self, s: Session, question: str) -> bool:
-        """Called in the turn's thread: ask the page and wait for the answer."""
+        """Called in the turn's thread: ask the page and wait for the answer.
+        A turn the Stop button ended asks nothing: the answer is no."""
         pending = PendingConfirm(question, stream=s.listener is not None)
-        s.pending = pending
+        with s.stop_lock:
+            if s.cancel is not None and s.cancel.is_set():
+                log.info("Turn stopped: confirmation not asked")
+                return False
+            s.pending = pending
         s.emit({"type": "confirm", "question": question, "id": pending.id,
                 "audio": f"/api/audio/{self.remember(question, s)}"})
         answered = pending.answered.wait(self.confirm_timeout)
@@ -2141,6 +2182,15 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if not assistant.answer(s, verdict == "yes", confirm_id=pending.id):
             return error("nothing to confirm", 409)
         return stream(s)
+
+    @app.post("/api/stop")
+    async def stop_turn(request: Request):
+        """Stop the running turn (the page's Stop button). The turn's own
+        stream then gets its reply ("stopped": true) and "done"."""
+        s = session_of(request)
+        if s is None:
+            return unauthorized()
+        return {"stopped": assistant.stop(s)}
 
     @app.get("/api/events")
     def resume(request: Request):

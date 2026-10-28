@@ -68,6 +68,12 @@
     "sign-in failed": "登录失败。",
     "too many attempts; try again later": "尝试次数太多，请稍后再试。",
     "still working on the last request": "还在处理上一个请求。",
+    // typing while Kwil is thinking (app.js): queued messages and Stop
+    "Queued": "排队中",
+    "Remove queued message": "移除排队的消息",
+    "Stop": "停止",
+    "Stopped.": "已停止。",
+    "You can queue up to 3 messages.": "最多可以排队 3 条消息。",
     "Sign out on every phone and browser?": "要在所有手机和浏览器上退出登录吗？",
     "This browser can't record. It needs HTTPS (see the README's Tailscale steps).":
       "这个浏览器不能录音（需要 HTTPS 地址）。",

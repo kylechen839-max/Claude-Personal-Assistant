@@ -346,6 +346,25 @@ to that session's own conversation.
   conversation ends. PDFs are sent as they are (their own metadata, such as
   the author, included); they are not rewritten.
 
+### Typing while Kwil is thinking (queue and Stop, `app.js`, `/api/stop`)
+- **One turn at a time still holds.** The page queues messages sent during
+  a reply (at most 3, in the page's memory only, never in storage) and
+  sends each after the previous turn's "done"; the server's per-session
+  lock still refuses a second turn (409).
+- **Stop** (`POST /api/stop`, signed-in session only, its own session
+  only) sets the running page turn's cancel event, as a barge-in does:
+  `ClaudeChat` checks it before every tool dispatch and gives each
+  unrun tool_use a tool_result, so the history stays valid. It does
+  nothing while a yes/no question is open (a stop is never an answer)
+  and never touches a voice-view turn (`chat_stream`). A Stop that lands
+  while a question is still being built (a `confirm_prompt` that fetches
+  first, e.g. the calendar's delete) means no question is asked and the
+  tool doesn't run: `stop()` and `_confirm()` decide under one
+  per-session lock (`Session.stop_lock`), so either the question is
+  already open (Stop refused) or it is never asked (a no). INFO logs only
+  fixed lines with no conversation text ("Web turn stopped", "Turn
+  stopped: confirmation not asked", "Skipped <tool>").
+
 ## Cloud server (Render): on the public internet
 
 `render.yaml` runs the phone web app 24/7 at `https://<name>.onrender.com`

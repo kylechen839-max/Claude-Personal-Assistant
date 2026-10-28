@@ -442,6 +442,15 @@ test('Chinese page: the new attachment errors are translated', () => {
   assert.equal(t("Claude couldn't read that file."), 'Claude 读不了这个文件。');
 });
 
+test('Chinese page: queued messages and Stop are translated', () => {
+  const t = (s) => page('zh-CN').win.KwilI18n.translate(s);
+  assert.equal(t('Queued'), '排队中');
+  assert.equal(t('Remove queued message'), '移除排队的消息');
+  assert.equal(t('Stop'), '停止');
+  assert.equal(t('Stopped.'), '已停止。');
+  assert.equal(t('You can queue up to 3 messages.'), '最多可以排队 3 条消息。');
+});
+
 test('a beta tester (gmail false) never sees mail wording', async () => {
   const gs = { enabled: true, connected: false, disconnect: true, gmail: false, note: null };
   for (const lang of ['en', 'zh-CN']) {

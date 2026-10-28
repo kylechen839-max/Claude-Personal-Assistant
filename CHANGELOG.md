@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Phone app: you can keep typing while Kwil is answering. Send queues the
+  message (up to 3, each with an × to remove it) and it goes as soon as the
+  reply is done. A new Stop button ends a reply early and sends the queue. A
+  yes/no question still takes your typed answer.
 - School deadlines: Kwil now knows 10 schools whose Canvas blocks students'
   access tokens (UW–Madison, Washington, Penn State, Georgia Tech, St.
   Edward's, Cornell, BYU-Idaho, Green River, UC Davis, Missouri), each read
