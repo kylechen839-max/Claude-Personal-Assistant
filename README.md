@@ -1503,13 +1503,48 @@ Connecting Canvas never uses a school password. Either:
   dates.
 
 Everyone, you (the owner) included, connects in the card: type your
-school's name and tap **Find my school**, pick it, tap **Open my Canvas
-calendar** (Canvas opens in a new tab), tap **Calendar Feed** (bottom
-right) and copy the link, come back and tap **Paste** (or paste it by
-hand), then **Connect Canvas**. Paste only fills the field (the phone may
-ask to allow it; if you say no, paste by hand); nothing connects until
-you tap Connect. **Use an access token instead** takes the school address
-and a token. The link is stored encrypted with `USER_DATA_KEY` (without it
+school's name and tap **Find my school**, and pick it. **Kwil then picks
+the way in by itself** and shows only that one step:
+
+| Your school's students' tokens | Desktop Chrome or Edge | Phone, tablet, other browsers |
+| --- | --- | --- |
+| allowed | access token | access token |
+| blocked | Canvas helper | calendar feed (plus a pointer to the helper on a computer) |
+| not known yet | Canvas helper | calendar feed, with **Get course files too** (the token step) |
+
+- **Calendar feed:** tap **Open my Canvas calendar** (Canvas opens in a
+  new tab), tap **Calendar Feed** (bottom right) and copy the link, come
+  back and tap **Paste** (or paste it by hand), then **Connect Canvas**.
+  Paste only fills the field (the phone may ask to allow it; if you say
+  no, paste by hand); nothing connects until you tap Connect.
+- **Access token:** tap **Open my Canvas settings** (your Canvas's
+  settings page opens in a new tab), tap **New access token**, pick an
+  expiry date, copy the token, paste it and tap **Connect with token**.
+  Since 2025 a student's token lasts at most 120 days; when it runs out the
+  sync says to reconnect. If your Canvas has no **New access token**
+  button, tap **My Canvas has no New access token button**: Kwil notes
+  that your school blocks them and shows the other way at once.
+- **Canvas helper:** see below. **Use the calendar feed instead** is
+  always one tap away under the token and helper steps.
+
+Kwil knows a school's policy from `kwil/data/canvas_schools.json` (schools
+whose own page says so, each with its source and the date it was checked;
+empty until entries are verified, and adding one is a data change only)
+and from what this server learned (`canvas_policy.json` in `[student]
+dir`: per Canvas host, counts and dates only, at most 1000 hosts): the
+first sync of a token just connected in the app, the helper reading your
+Canvas settings page, or someone's "no New access token button", each
+person's word counted once. The newest day's outcome wins (a same-day tie
+is "blocked"), and something learned after the school's entry was checked
+beats the entry (policies change); an older one never does. Until two
+separate events back a learned result, only the person whose own Canvas
+it is sees it (so nobody can tell from the card which school another
+person on your server uses). Kwil never makes a token for you. `[canvas] tokens_for` (default
+`"everyone"`) decides who may use a token at all: with `"owner"`, invited
+people are only ever offered the helper or the feed, and connecting with a
+token answers them 403 (Canvas's API policy asks apps used by many people
+to use OAuth rather than their personal tokens); a member already
+connected with a token keeps working until they disconnect. The link is stored encrypted with `USER_DATA_KEY` (without it
 the server says it can't store sign-ins): yours in `[student] dir` as
 `canvas.enc`, an invited person's in their own folder. It is deleted on
 **Disconnect Canvas** (which can also delete what came from Canvas) and,
@@ -1608,7 +1643,10 @@ Canvas** (Chrome asks for that one site; a Kwil on its own domain is
 first, and a second Kwil needs **Switch to <host>**). It syncs about half a minute after
 pairing, then every 6 hours while the browser is open and you are signed
 in to Canvas, pushing as it reads, and pushes only the files Kwil asks
-for (at most 40 a run).
+for (at most 40 a run). Each run it also reads your Canvas settings page
+once (a GET, the page with Canvas's **New access token** button) to see
+whether your account may make a token, and tells Kwil yes, no or nothing
+(so Kwil learns your school's policy); it never makes a token.
 Its popup shows only status (paired, the Kwil and Canvas it uses, the
 last sync) with **Unpair this browser** and **Revoke in Kwil**. It asks
 for `storage`, `alarms`, `activeTab`, `scripting` and the hosts

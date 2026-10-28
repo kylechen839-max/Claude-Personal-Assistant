@@ -148,12 +148,17 @@
     "I couldn't find that school. Type its Canvas address, e.g. canvas.school.edu.":
       "没有找到这所学校。请输入它的 Canvas 地址，例如 canvas.school.edu。",
     "Copy the Calendar Feed link in Canvas first.": "请先在 Canvas 里复制“日历订阅”链接。",
-    "Use an access token instead": "改用访问令牌",
-    "Your school's Canvas, e.g. canvas.school.edu": "你学校的 Canvas 地址，例如 canvas.school.edu",
-    "School": "学校",
     "Canvas access token": "Canvas 访问令牌",
-    "In Canvas: Account, Settings, New access token.": "在 Canvas 里：账户 → 设置 → 新建访问令牌。",
     "Connect with token": "用令牌连接",
+    "Open my Canvas settings": "打开我的 Canvas 设置",
+    "Tap New access token, pick an expiry date (a student's token lasts at most 120 days), copy the token, come back.":
+      "点“新建访问令牌”，选一个过期日期（学生的令牌最长有效 120 天），复制令牌，再回到这里。",
+    "My Canvas has no New access token button": "我的 Canvas 没有“新建访问令牌”按钮",
+    "Use the calendar feed instead": "改用日历订阅链接",
+    "For course files too, set up the Kwil Canvas helper in Chrome or Edge on a computer.":
+      "如果还想要课程文件，请在电脑上的 Chrome 或 Edge 里设置 Kwil Canvas 助手。",
+    "Get course files too": "也获取课程文件",
+    "Thanks. Here is another way in for your school.": "谢谢。这是适合你学校的另一种连接方式。",
     "Sync now": "立即同步",
     "Disconnect Canvas": "断开 Canvas",
     "What I captured": "我记下的内容",

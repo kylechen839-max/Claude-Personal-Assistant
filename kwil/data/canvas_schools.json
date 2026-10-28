@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "about": "Schools whose Canvas policy on students' access tokens someone has checked on the school's own page (kwil/canvas_schools.py). Add an entry only after opening its source. Fields: name, hosts (exact Canvas hosts; *.instructure.com hosts go here only), domains (the school's own domains: any host ending in .<domain>), student_tokens (blocked | allowed), since (YYYY-MM-DD or null), source (https URL), checked (YYYY-MM-DD, when the source was read), note.",
+  "schools": []
+}
