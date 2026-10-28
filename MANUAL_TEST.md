@@ -1070,28 +1070,37 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 - [ ] As a family member (phone app invite), ask to turn on a light.
   - Should: it has no smart home control.
 
-## Connected services on the cloud (optional, ~15 min)
+## Connections on the cloud (optional, ~15 min)
 On the iPhone Home Screen app signed in to the cloud (README "Connect your
 services in the app"). Needs `USER_DATA_KEY`, `PUBLIC_ORIGIN` and the
 public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
-- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connected services.
-  - Should: Notion says "Set on the server." with no buttons.
+- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connections.
+  - Should: Notion is among the first rows with a green dot and "Set on
+    the server" on the right; tapping it opens its sheet, which says "Set
+    on the server." and has no buttons.
 - [ ] Delete `NOTION_TOKEN` in Render (Environment -> Save, it restarts),
-      open ⚙ again and tap Notion's **Connect**.
+      open ⚙ again, tap the Notion row and its **Connect**.
   - Should: Notion's consent page opens in the app itself (not Safari).
     Tick your Assignments database and the pages for Lecture Notes, Chat
-    Digests and the coordinator inbox, Allow; you land back in the app and
-    the row says "Connected." with your workspace name.
+    Digests and the coordinator inbox, Allow; you land back in the app.
+    Open ⚙: Notion's row is now with the connected ones at the top, with
+    your workspace's name under "Notion" and a green "Connected" on the
+    right.
 - [ ] Ask "what assignments do I have this week?", start a lecture
       recording for a few seconds and stop it.
   - Should: the right assignments; the lecture is filed in Notion.
-- [ ] Tap Notion's **Disconnect**, say Cancel, then again and OK.
-  - Should: Cancel changes nothing; OK says "Disconnected.", Notion's
+- [ ] Tap the Notion row, then **Disconnect** in its sheet; say Cancel,
+      then again and OK.
+  - Should: Cancel changes nothing; OK says "Disconnected." in the sheet,
+    which stays open (the row moves down to the rows to connect only after
+    you close it, then shows a blue "Connect"); Notion's
     Settings -> Connections no longer lists Kwil, and "what assignments do
     I have?" no longer reaches Notion.
-- [ ] Home Assistant: type your Nabu Casa (or tunnel) address, tap
-      **Connect**, sign in as the dedicated non-admin user.
-  - Should: back in the app, "Connected." with your Home Assistant's host;
+- [ ] Home Assistant: tap its row, type your Nabu Casa (or tunnel)
+      address in the sheet, tap **Connect**, sign in as the dedicated
+      non-admin user.
+  - Should: back in the app, the Home Assistant row has your Home
+    Assistant's host under its name and a green "Connected" on the right;
     "turn off the bedroom lights" works; an hour later it still works
     (the 30-minute token was renewed).
 - [ ] Type `http://homeassistant.local:8123` or `192.168.1.10` instead.
@@ -1100,7 +1109,53 @@ public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
   - Should: in Home Assistant, your profile -> Security -> Refresh tokens
     no longer lists Kwil's address; light commands stop working.
 - [ ] As a family member, open ⚙.
-  - Should: no Connected services section.
+  - Should: no Home Assistant or Spotify row, and Notion's row is their
+    own (an invited person's "Connect Notion").
+
+## Settings: the Connections list (~5 min)
+On the iPhone Home Screen app, as the owner and once as an invited beta
+tester, in light and dark mode (Settings -> Display -> Light/Dark).
+- [ ] Open ⚙ and look at "Connections".
+  - Should: one calm row per service with its real icon (Google, Notion,
+    Canvas, Home Assistant, Spotify; Anthropic for a beta tester), its name,
+    a subtitle, and a green "Connected" or a blue "Connect" on the right;
+    connected ones first; nothing cut off or overlapping, also with the
+    largest text size (Settings -> Display & Brightness -> Text Size).
+- [ ] Tap a row; then close the sheet with X, with a tap above it, and
+      (with a keyboard) with Esc.
+  - Should: a sheet slides up from the bottom with the service's icon,
+    name, one paragraph and its buttons; each way closes only the sheet
+    (the menu stays open); each tap lands on the first try.
+- [ ] With a sheet open, swipe up and down on it and on the dimmed page
+      above it.
+  - Should: only the sheet scrolls (when it is taller than the screen);
+    the chat and the menu behind it stay still.
+- [ ] On an iPhone on iOS 17.3 or older (or an iPad that is), open a sheet.
+  - Should: the page behind is dimmed (the scrim shows), as on newer
+    iOS.
+- [ ] Connect or disconnect one service from its row.
+  - Should: the row moves between "Connected" and "Available" after you
+    come back, with the right status.
+- [ ] With VoiceOver on, swipe through the list.
+  - Should: each row is read as a button with its name, subtitle and
+    status or action; opening it moves VoiceOver into the sheet, and
+    closing returns to the row.
+- [ ] As the beta tester before adding a key.
+  - Should: "Anthropic" says "Key needed" in red; its sheet has the key
+    field.
+- [ ] Canvas helper (Chrome on the PC): Canvas -> Set up Canvas helper,
+      then open the helper extension.
+  - Should: it pairs by itself from the sheet, as before.
+- [ ] Revoke Kwil's access at myaccount.google.com -> Security ->
+      Third-party apps, ask "what's on my calendar today?", then open ⚙.
+  - Should: Google is first, with a red "Sign-in expired"; its sheet says
+    "Google sign-in expired. Reconnect to keep using it." and **Reconnect
+    Google account** signs you in again; the row then says "Connected".
+- [ ] Canvas, as a beta tester on the iPhone and on the PC in Chrome: open
+      the Canvas row and find your school.
+  - Should: one step in a white card (the token, the helper or the
+    calendar feed), with the one main button in blue and "Use the calendar
+    feed instead" under the token and helper steps.
 
 ## Team chat (optional, ~10 min)
 Needs at least one of `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`

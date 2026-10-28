@@ -17,12 +17,15 @@
     if (!btn) return null;
     let owner = false;
 
+    // the Spotify row in Connections (connections.js)
+    const mark = (info) => win.KwilConnections?.set("spotify", info);
+
     async function refresh() {
-      if (!owner) { btn.hidden = true; if (hint) hint.hidden = true; return; }
+      if (!owner) { btn.hidden = true; if (hint) hint.hidden = true; mark({ state: "off" }); return; }
       try {
         const res = await win.fetch("/api/spotify/status",
                                     { credentials: "same-origin", cache: "no-store" });
-        if (!res.ok) { btn.hidden = true; return; }  // off, or not the owner
+        if (!res.ok) { btn.hidden = true; mark({ state: "off" }); return; }  // off, or not the owner
         const st = await res.json();
         btn.hidden = !st.enabled;
         btn.textContent = st.connected ? "Reconnect Spotify" : "Connect Spotify";
@@ -30,6 +33,9 @@
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = "Spotify connected.";
         }
+        mark(!st.enabled ? { state: "off" }
+          : st.connected ? { state: "connected", status: "Connected", action: "Manage" }
+            : { state: "available", status: "Not connected", action: "Connect" });
       } catch (e) { /* offline: leave it as it is */ }
     }
 

@@ -99,7 +99,8 @@ EN = {
     "ha_auth": "Home Assistant didn't accept my access token. "
                "It needs a new long-lived token.",
     "ha_reconnect": "The Home Assistant sign-in stopped working. Connect it again "
-                    "in the app's settings: tap the gear, then Connected services.",
+                    "in the app's settings: tap the gear, then Home Assistant "
+                    "under Connections.",
     "ha_not_found": "Home Assistant doesn't know that device.",
     "ha_rejected": "Home Assistant couldn't do that.",
     "ha_no_match": "I couldn't find a device called {name}.",
@@ -209,7 +210,7 @@ ZH = {
     "ha_not_set_up": "Home Assistant 还没有设置好：缺少 HA_URL 和 HA_TOKEN。",
     "ha_down": "现在连不上 Home Assistant，它在运行吗？",
     "ha_auth": "Home Assistant 不接受我的访问令牌，需要一个新的长期令牌。",
-    "ha_reconnect": "Home Assistant 的登录已失效。请在应用的设置里重新连接：点齿轮，再点“已连接的服务”。",
+    "ha_reconnect": "Home Assistant 的登录已失效。请在应用的设置里重新连接：点齿轮，再在“服务连接”里点“Home Assistant”。",
     "ha_not_found": "Home Assistant 里没有这个设备。",
     "ha_rejected": "Home Assistant 没能完成这个操作。",
     "ha_no_match": "我找不到叫“{name}”的设备。",

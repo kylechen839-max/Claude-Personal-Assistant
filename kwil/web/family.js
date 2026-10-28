@@ -278,6 +278,19 @@
 
   // --- a family member's own Anthropic key ---
   const KEY_URL = "/api/me/anthropic-key";
+
+  // The key's row in Connections (connections.js): a beta tester needs one
+  // to talk at all, so a missing or unreadable key there is flagged.
+  function keyRow(st, mode) {
+    if (!mode) return { state: "off" };
+    if (st.set) return { state: "connected", status: "Key saved", action: "Manage",
+                         detail: `•••• ${String(st.last4 || "").slice(0, 4)}` };
+    if (st.available === false) return { state: "available", status: "Not available" };
+    if (st.unreadable || mode === "required") {
+      return { state: "available", status: "Key needed", action: "Add key", alert: true };
+    }
+    return { state: "available", status: "Optional", action: "Add key" };
+  }
   function setupKey(win, doc) {
     const $ = (id) => doc.getElementById(id);
     const box = $("api-key");
@@ -298,6 +311,7 @@
       const usd = Number(st.month_usd);
       cost.hidden = !(set && st.month_usd != null && Number.isFinite(usd));
       cost.textContent = cost.hidden ? "" : `About $${usd.toFixed(2)} this month on your key.`;
+      win.KwilConnections?.set("anthropic", keyRow(st, mode));  // connections.js
     }
 
     async function refresh() {
@@ -341,6 +355,7 @@
         const changed = next !== mode;
         mode = next;
         box.hidden = !mode;
+        if (!mode) win.KwilConnections?.set("anthropic", { state: "off" });
         if (changed) refresh();
       },
       refresh,

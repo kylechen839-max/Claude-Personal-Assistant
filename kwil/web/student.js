@@ -50,6 +50,21 @@
     return host;
   }
 
+  // The Canvas row in Connections (connections.js), from the card's status:
+  // connected by a link or the helper; the school's host as the detail.
+  function canvasRow(st) {
+    const helper = st.helper || {};
+    if (st.connected || helper.paired) {
+      return { state: "connected", status: "Connected", action: "Manage",
+               detail: st.school ? String(st.school) : helper.paired ? "Canvas helper" : "" };
+    }
+    // the owner's Canvas comes from the server's .env: there is nothing to
+    // connect here (the card says so), as connect.js says for Notion
+    if (st.managed === "env") return { state: "available", status: "Set on the server" };
+    if (st.can_store === false) return { state: "available", status: "Not available" };
+    return { state: "available", status: "Not connected", action: "Connect" };
+  }
+
   // A phone or tablet: userAgentData.mobile where the browser has it
   // (Chromium), else the user agent; iPadOS says it is a Mac, so a Mac
   // with a touch screen counts too.
@@ -135,7 +150,7 @@
     // connect: find the school, then only the step Kwil picked for it
     const connectBox = el("div");
     const find = input("text", "Your school's name or Canvas address", "Find your school");
-    const findBtn = button("Find my school", findSchool);
+    const findBtn = button("Find my school", findSchool, "btn secondary");
     const findRow = el("div", undefined, "api-key-row");
     findRow.append(findBtn);
     const results = el("div", undefined, "api-key-row");  // a button per school, names as text
@@ -147,41 +162,44 @@
     let feedChosen = false;   // "Use the calendar feed instead" was tapped
     let current = {};         // the last status from the server
     // the feed: open its Canvas calendar, paste the link back
-    const feedBox = el("div");
+    const feedBox = el("div", undefined, "conn-step");
     feedBox.hidden = true;
-    const openCal = button("Open my Canvas calendar", openCalendar);
+    const openCal = button("Open my Canvas calendar", openCalendar, "btn secondary");
     const openHelp = el("p", "Tap Calendar Feed (bottom right), copy the link, come back.",
                         "hint");
     const feed = input("url", "https://…/feeds/calendars/user_….ics", "Canvas calendar feed link");
     const clip = win.navigator && win.navigator.clipboard;
-    const paste = button("Paste", pasteFeed);
+    const paste = button("Paste", pasteFeed, "btn secondary");
     paste.hidden = !(clip && typeof clip.readText === "function");
     const feedHelp = el("p", "In Canvas, open Calendar, tap Calendar Feed and copy the " +
                         "link. I never ask for your school password.", "hint");
-    const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }));
+    const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }),
+                               "btn primary");
     const connectRow = el("div", undefined, "api-key-row");
     connectRow.append(paste, connectFeed);
     const helperElsewhere = el("p", "For course files too, set up the Kwil Canvas helper in " +
                                "Chrome or Edge on a computer.", "hint");
-    const moreBtn = button("Get course files too", () => { filesToo = true; showStep(); });
+    const moreBtn = button("Get course files too", () => { filesToo = true; showStep(); },
+                           "btn plain");
     feedBox.append(openCal, openHelp, feed, feedHelp, connectRow, helperElsewhere, moreBtn);
     // the access token: open their Canvas settings, make one, paste it back
-    const tokenBox = el("div");
+    const tokenBox = el("div", undefined, "conn-step");
     tokenBox.hidden = true;
-    const openSettings = button("Open my Canvas settings", openTokenPage);
+    const openSettings = button("Open my Canvas settings", openTokenPage, "btn secondary");
     const tokenHelp = el("p", "Tap New access token, pick an expiry date (a student's " +
                          "token lasts at most 120 days), copy the token, come back.", "hint");
     const token = input("password", "Access token", "Canvas access token");
     const connectToken = button("Connect with token", () =>
-      connect({ base_url: chosen || "", token: token.value.trim() }));
-    const noToken = button("My Canvas has no New access token button", reportBlocked);
+      connect({ base_url: chosen || "", token: token.value.trim() }), "btn primary");
+    const noToken = button("My Canvas has no New access token button", reportBlocked,
+                           "btn plain");
     tokenBox.append(openSettings, tokenHelp, token, connectToken, noToken);
     const useFeed = button("Use the calendar feed instead", () => {
       feedChosen = true;  // kept through refreshes until another school is picked
       filesToo = false;
       picked = pick();
       showStep();
-    });
+    }, "btn plain");
     useFeed.hidden = true;
     connectBox.append(find, findRow, results, chosenHost, feedBox, tokenBox, useFeed);
 
@@ -191,7 +209,7 @@
     actions.append(syncBtn, unlink);
 
     // the Canvas helper: pair it with a one-time code, or revoke it
-    const helperBox = el("div");
+    const helperBox = el("div", undefined, "conn-step");
     helperBox.hidden = true;
     const helperTitle = el("p", "Canvas helper", "api-key-title");
     const helperState = el("p", "", "hint");
@@ -204,7 +222,7 @@
     const pairHelp = el("p", "Open the Kwil Canvas helper in this browser: it picks this code " +
                         "up by itself. It works once, for 10 minutes.", "hint");
     pairHelp.hidden = true;
-    const setupHelper = button("Set up Canvas helper", startPairing);
+    const setupHelper = button("Set up Canvas helper", startPairing, "btn primary");
     const revokeHelper = button("Revoke helper", revoke, "danger");
     const helperRow = el("div", undefined, "api-key-row");
     helperRow.append(setupHelper, revokeHelper);
@@ -308,6 +326,7 @@
       current = st;
       if (chosen) picked = pick();  // the helper or tokens_offered may have changed
       showStep();
+      win.KwilConnections?.set("canvas", canvasRow(st));  // connections.js
       const items = Array.isArray(body.items) ? body.items : [];
       list.replaceChildren(...items.map(row));
       empty.hidden = items.length > 0;
@@ -393,7 +412,7 @@
     async function refresh() {
       try {
         const r = await call("/api/student/items");
-        if (!r.ok) { card.hidden = true; return; }
+        if (!r.ok) { card.hidden = true; win.KwilConnections?.set("canvas", { state: "off" }); return; }
         card.hidden = false;
         render(r.body);
       } catch (e) { /* offline: leave it as it is */ }
@@ -580,7 +599,7 @@
     return setup;
   }
 
-  root.KwilStudent = { start, create, pickMethod, isMobile, helperBrowser };
+  root.KwilStudent = { start, create, pickMethod, isMobile, helperBrowser, canvasRow };
   if (root.document && root.document.readyState !== "loading") start();
   else if (root.document) root.document.addEventListener("DOMContentLoaded", () => start());
 })(typeof window !== "undefined" ? window : globalThis);

@@ -152,6 +152,63 @@ def test_accent_graphic_meets_3_to_1_in_both_modes():
             assert contrast(t[ref], t[bg]) >= 3, (i, bg)
 
 
+def test_connections_rows_keep_wcag_contrast_in_both_modes():
+    """The menu's Connections rows (connections.js): each service's white
+    mark on its brand tile (a graphic: 3:1, the same tile in both modes), and
+    the subtitle, status words and "Connect" on the row, its pressed state
+    and the sheet (--surface, --surface-2, --bg)."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    tiles = re.findall(r"\.conn-row\[data-conn=(\w+)\]\s*\{\s*--conn-tile:\s*var\(--([\w-]+)\);"
+                       r"\s*--conn-mark:\s*var\(--on-brand\);\s*\}", css)
+    services = {"google", "notion", "canvas", "home_assistant", "spotify", "anthropic"}
+    assert {s for s, _ in tiles} == services and len(tiles) == len(services)
+    light = tokens(css, False)
+    assert light["on-brand"] == "#ffffff"
+    for name, token in tiles:
+        assert token == "brand-" + name.replace("_", "-"), name
+        assert contrast(light["on-brand"], light[token]) >= 3, name
+    for is_dark in (False, True):
+        t = {**tokens(css, False), **tokens(css, is_dark)}
+        for fg in ("muted", "accent-ink", "bad-ink", "text"):
+            for bg in ("surface", "surface-2", "bg"):
+                assert contrast(t[fg], t[bg]) >= 4.5, (is_dark, fg, bg)
+        # "Connected" (.state.on) only ever sits on a row; light mode's green
+        # on the pressed row's --surface-2 is 4.2:1 for that moment
+        assert contrast(t["ok"], t["surface"]) >= 4.5, is_dark
+
+
+def test_connections_css_uses_tokens_motion_and_no_soft_shadow():
+    """The designer's review: the primitives and the Connections component
+    take every colour from a token (brand tiles and the scrim included);
+    a group is a tone step, not a shadowed card (only the sheet has one);
+    the sheet slides 240ms on the agreed curve over a 200ms scrim fade; a
+    focus ring from --ring; and a reduced-motion path."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    block = css[css.index("/* ---------- design-system primitives"):
+                css.index("/* reply-voice picker (voice-picker.js) */")]
+    # the one literal: --scrim's fallback on ::backdrop, which inherits no
+    # custom properties before Safari 17.4; it must be the light token
+    fallback = re.search(r"::backdrop \{ background: var\(--scrim, (#[0-9a-f]+)\);", block)
+    assert fallback and fallback.group(1) == tokens(css, False)["scrim"]
+    rest = block.replace(fallback.group(0), "")
+    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", rest) == []
+    assert "html.conn-sheet-open, html.conn-sheet-open body" in block and "overflow: hidden" in block
+    assert "rgb(" not in block and "rgba(" not in block
+    rules = dict(re.findall(r"\n([^{}\n]+)\{([^{}]*)\}", block))
+    assert "shadow" not in rules[".group "]
+    shadows = [sel.strip() for sel, body in rules.items() if "--shadow" in body]
+    assert shadows == [".conn-sheet"]
+    light = tokens(css, False)
+    assert {"scrim", "on-brand"} <= set(light) and "scrim" in tokens(css, True)
+    assert "--t-sheet: 240ms; --ease-sheet: cubic-bezier(.32,.72,0,1); --t-scrim: 200ms;" in css
+    assert "animation: sheet-up var(--t-sheet) var(--ease-sheet)" in block
+    assert "animation: scrim-in 200ms ease-out" in block  # --t-scrim, literal for old Safari
+    assert "box-shadow: var(--ring)" in block and "box-shadow: var(--ring-inset)" in block
+    assert ".group .row:active:not(:disabled) { transform: none; background: var(--surface-2); }" in block
+    reduced = block[block.index("@media (prefers-reduced-motion: reduce)"):]
+    assert ".conn-sheet[open], .conn-sheet::backdrop { animation: none; }" in reduced
+
+
 def test_maskable_icon_keeps_the_quill_in_the_safe_zone():
     entries = {e["src"]: e for e in webapp.MANIFEST["icons"]}
     assert entries["/icon-maskable.png"]["purpose"] == "maskable"

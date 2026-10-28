@@ -479,6 +479,77 @@ test('a beta tester without the public client sees why Google is off', async () 
   }
 });
 
+test('the Google row in Connections: its status, action word and subtitle', async () => {
+  for (const [gstatus, want] of [
+    [{ enabled: true, connected: false },
+     { state: 'available', status: 'Not connected', action: 'Connect', sub: 'Calendar and email' }],
+    [{ enabled: true, connected: true },
+     { state: 'connected', status: 'Connected', action: 'Manage', sub: 'Calendar and email' }],
+    [{ enabled: true, connected: false, gmail: false },  // a beta tester: Calendar only
+     { state: 'available', status: 'Not connected', action: 'Connect', sub: 'Calendar' }],
+    [{ enabled: false, connected: false, gmail: false, note: "Google isn't set up for beta accounts yet." },
+     { state: 'available', status: 'Not available', sub: 'Calendar' }],
+    [{ enabled: false, connected: false }, { state: 'off' }]]) {
+    const p = page('en', { gstatus });
+    const marks = [];
+    p.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    await p.flush();
+    assert.deepEqual(marks.at(-1), ['google', want]);
+  }
+  // signed out (401): the row is left as it is
+  const out = page('en', { gstatus: null });
+  const kept = [];
+  out.win.KwilConnections = { set: (id) => { kept.push(id); } };
+  await out.flush();
+  assert.deepEqual(kept, []);
+});
+
+test('the Google row: a sign-in Google refused says so and asks to Reconnect, in Chinese too', async () => {
+  const expired = { enabled: true, connected: true, disconnect: true, needs_reconnect: true };
+  const p = page('en', { gstatus: expired });
+  const marks = [];
+  p.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+  await p.flush();
+  assert.deepEqual(marks.at(-1), ['google', { state: 'attention', status: 'Sign-in expired',
+                                              sub: 'Calendar and email', action: 'Reconnect' }]);
+  // no way to connect here: still flagged, with no action word
+  const off = page('en', { gstatus: { ...expired, enabled: false } });
+  const offMarks = [];
+  off.win.KwilConnections = { set: (id, info) => { offMarks.push(JSON.parse(JSON.stringify(info))); } };
+  await off.flush();
+  assert.deepEqual(offMarks.at(-1), { state: 'attention', status: 'Sign-in expired', sub: 'Calendar and email' });
+  // reconnected: back to Connected
+  p.setStatus({ ...expired, needs_reconnect: false });
+  p.menu.open = true;
+  for (const fn of p.menu.listeners.toggle) fn();
+  await p.flush();
+  assert.equal(marks.at(-1)[1].state, 'connected');
+  const t = p.win.KwilI18n.translate;
+  assert.equal(t('Sign-in expired'), '登录已过期');
+  assert.equal(t('Reconnect'), '重新连接');
+});
+
+test('a signed-out page never marks the Google row', async () => {
+  const out = page('en', { gstatus: null });
+  const marks = [];
+  out.win.KwilConnections = { set: (id, info) => { marks.push(id); } };
+  await out.flush();
+  assert.deepEqual(marks, []);
+});
+
+test('the first-run guide says where Google is in the menu now', () => {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(SCRIPT, ctx);
+  const steps = Object.keys(ctx.KwilI18n.ZH).filter((k) => k.startsWith('Connect your own Google account'));
+  assert.equal(steps.length, 2);
+  for (const en of steps) {
+    assert.ok(en.includes('then "Google" under Connections and "Connect Google account"'), en);
+    assert.ok(SCRIPT.includes(en.slice(0, 60)), en);
+    assert.ok(ctx.KwilI18n.ZH[en].includes('在“服务连接”里点“Google”'), en);
+  }
+});
+
 test('the invite form\'s tier labels are translated', () => {
   const { win } = page('zh-CN');
   const t = (s) => win.KwilI18n.translate(s);

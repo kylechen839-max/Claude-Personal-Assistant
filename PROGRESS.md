@@ -6395,3 +6395,140 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 `-k "not live_pinecone"` (the Pinecone quota is used up): 3464 passed, 37
 skipped, 1 deselected (round 1: 3452 passed); JavaScript 238 passed
 (round 1: 237).
+
+## Settings: the Connections list redesign (2026-10-28)
+Kyle: "fix the UI for the dropdown menu with all the connectors... right
+now its way too clunky." Each service was its own stacked card with its own
+explanation and forms (Google buttons, the owner's "Connected services",
+Notion's buttons, Spotify's button, the "School deadlines" card, the API
+key section). Now, following the approved design direction
+(`.claude/DESIGN_SYSTEM.md`, new):
+- **One grouped list, "Connections".** One 52px row per service (Google,
+  Notion, Canvas, Home Assistant, Spotify, an invited person's Anthropic
+  key): the service's real icon (Simple Icons, CC0, vendored in
+  `web/static/icons/` with a README and drawn from an inline `<symbol>`
+  sprite; white on a brand-colour tile), the name, a subtitle (their
+  workspace or school, else what it is), and on the right a status dot and
+  word (`.state.on` "Connected", `.state.warn` "Sign-in expired" / "Key
+  needed", `.state.off`) or the plain action "Connect", plus a chevron.
+  Connected rows first (needing attention first), then the rest; services
+  not enabled for that person have no row.
+- **A bottom sheet per service.** Tapping a row opens a modal `<dialog>`
+  (grab handle, 44px icon, title, Close, one-paragraph explanation, then
+  that service's own controls and Disconnect in red text). One at a time;
+  Close, Esc, a tap outside and closing the menu shut it, focus returns to
+  the row; Esc no longer closes the whole menu while a sheet is open
+  (`ui.js`).
+- **Shared component** `web/connections.js` (new; static route, `sw.js`
+  SHELL, `cloud.PUBLIC_GET`): each service script keeps its own controls
+  and ids and just reports `set(id, {state, status, action, detail, sub,
+  alert})` (`i18n.js` Google, `notion.js`, `student.js`, `spotify.js`,
+  `family.js` key); `connect.js` (the owner's Notion and Home Assistant)
+  now fills those rows' sheets instead of its own "Connected services"
+  section (`#connector-list` and `#connectors-status` are gone; a message
+  goes in that service's sheet). The Google `needs_reconnect` and Canvas
+  step-picking work in flight drop in as a `set()` status and action.
+- **Design primitives** in `app.css`: type, spacing and row-height tokens
+  (`--t-*`, `--s1`..`--s6`, `--row-h`), `.btn.primary/.secondary/.plain/
+  .destructive`, `.group`, `.group-head`, `.state`. `sw.js` cache
+  `kwil-shell-v8`.
+- Every id, route and hook kept: `google-connect/-disconnect/-status`,
+  `notion-*`, `spotify-*`, `#student` (and `data-kwil-pair`), `api-key-*`.
+  The guide's Google step and `ha_reconnect` now point at "Connections".
+
+Tested: `tests/js/connections.test.mjs` (new, 12: the page's rows parsed
+from index.html, grouping and order, the right side's status or action,
+the subtitle as text, one sheet at a time with showModal, Close, backdrop,
+Esc, menu close, focus kept when a row moves, a built row for an unknown
+service); `connect.test.mjs` rewritten for rows (16, was 13); a Connections-row
+test each in `notion`, `spotify`, `student`, `family`, `i18n` (plus the
+guide step) and `ui` (Esc); `tests/test_connection_icons.py` (new, 3:
+every row has an icon file drawn by the sprite, every file in the README
+with the pinned SHA and CC0, nothing fetched); `test_theme.py`: each white
+mark 3:1 on its tile, status and row text 4.5:1 in both modes. Each source
+change was reverted on its own and its test failed (18 reverts). A
+Playwright run against the real page with fake API answers (no server, no
+keys) checked grouping, 52px rows, icons drawing, the modal sheet, Esc and
+backdrop closing only the sheet, keyboard order, the Google connect POST,
+and the Chinese page; before/after screenshots at 390x844 and desktop in
+light and dark, as the owner and as an invited beta tester.
+Tests updated because the markup legitimately changed: `connect.test.mjs`
+(rows instead of `#connector-list`), `test_owner_connect.py` (page ids,
+script order), `test_webapp.py` (public list), the `kwil-shell-v8` pins.
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware): 3393
+passed, 37 skipped (master 4c8775d: 3388 passed, 38 skipped from a git
+archive, which skips one git test); JavaScript 242 passed (220 before).
+
+### Round 2: master merged, the expired Google row, the design review (2026-10-28)
+- **Merged master** (b4fc523: the Canvas auto-method picker, #74, and
+  Google's "sign-in expired", #76), keeping both sides; `sw.js` cache
+  `kwil-shell-v10` (master was at v9) and its pins.
+- **Google `needs_reconnect`** now drives the row: an attention row at the
+  top, a red "Sign-in expired" (Chinese "登录已过期"), the action
+  "Reconnect" (none when the server can't connect), and the sheet's
+  **Reconnect Google account**. Test in `i18n.test.mjs` (fails with the
+  branch removed).
+- **The Canvas picker in its sheet:** the step Kwil picked (token, helper or
+  feed) is a white card (`.conn-step`); its one way forward is
+  `.btn.primary` (Connect Canvas, Connect with token, Set up Canvas helper),
+  the first step is `.btn.secondary` (Find my school, Open my Canvas
+  calendar/settings, Paste), the alternatives are `.btn.plain` (Get course
+  files too, My Canvas has no New access token button, Use the calendar
+  feed instead). Classes only: every id, text and behaviour unchanged; all
+  `student.test.mjs` tests pass.
+- **The designer's review:** `.group` and the cards in sheets are a tone
+  step with no shadow (only the sheet keeps `--shadow-2`); the sheet slides
+  in over `--t-sheet` 240ms on `--ease-sheet` `cubic-bezier(.32,.72,0,1)`
+  over a `--scrim` fade of `--t-scrim` 200ms; a pressed row turns
+  `--surface-2`, buttons keep the .97 press; a reduced-motion path;
+  `:focus-visible` rings from `--ring` / `--ring-inset`; no raw hex or rgb()
+  in the primitives or the component (`--brand-*`, `--on-brand`, `--scrim`
+  tokens). `test_theme.py` checks all of it (it fails on the round-1 CSS).
+  DESIGN_SYSTEM.md gained depth, motion and focus.
+- Screenshots retaken: the list, the Google expired row and sheet, and the
+  Canvas sheet in each picker state (token on a phone, helper in desktop
+  Chrome, feed with "Get course files too", feed pointing at the helper on
+  a computer), light and dark; every button in those sheets is 44px+.
+
+Counts (Linux sandbox, not real hardware, `-k "not live_pinecone"`): 3480
+passed, 37 skipped; JavaScript 263 passed (master b4fc523: 239). After
+merging master again (641f1a5): 3499 passed, 37 skipped; JavaScript 263.
+
+### Round 3: the judge's findings (2026-10-28)
+1. MED, a row changing group while its sheet was open broke the modal:
+   `arrange()` re-appended every row, and moving an open `<dialog>` takes
+   it out of the top layer (still open, no backdrop, focus trap or Esc).
+   That happened on every in-sheet change (Disconnect, saving the key,
+   Canvas connect, the helper's pairing poll) and whenever another row's
+   status arrived. Now `arrange()` waits while any sheet is open and runs
+   when it closes (the row's status line still updates at once), and moves
+   only the rows that are out of place (`insertBefore`). Tests: the fake DOM
+   clears `modal` when an open dialog is moved and counts moves; an
+   in-sheet disconnect keeps the sheet modal with nothing moved, then
+   regroups on close with focus on the row; another row's status arriving
+   while a sheet is open moves nothing; only out-of-place rows move. All
+   three fail on the old `connections.js`. In real Chromium the judge's
+   probes now show the sheet still `:modal` after Disconnect and after
+   another row's status, and the row regrouped after Esc.
+2. LOW, the env-managed owner's Canvas row said "Connect" with no way to
+   connect in its sheet: `canvasRow` now says "Set on the server" with no
+   action, as `connect.js` does for Notion. Tests: the row cases, and
+   "Connect" exactly when the sheet shows the find step (both fail on the
+   old `student.js`).
+3. LOW, wording: PRIVACY ("Settings → Connections", "⚙ → Connections →
+   Google"), the dev-team console line in `cli.py`, BLOCKERS, and the
+   MANUAL_TEST cloud section, which now says what the rows and sheets
+   show. (`cli.py`'s "Connected services off: a separate instance" log
+   line stays: `test_config_cli.py` pins it and it names the feature.)
+4. iOS: `::backdrop` gets `var(--scrim, <the light scrim>)` and a literal
+   200ms (it inherits no custom properties before Safari 17.4); while a
+   sheet is open `connections.js` sets `conn-sheet-open` on `<html>`, which
+   stops the page and the menu behind it scrolling (CSS, no inline style).
+   `test_theme.py` allows only that one fallback literal and checks the
+   lock rule; the fake DOM test and a Playwright run check the class and
+   the computed `overflow: hidden`. MANUAL_TEST: the scroll check and the
+   scrim on iOS 17.3 or older.
+
+Counts (Linux sandbox, not real hardware, `-k "not live_pinecone"`): 3499
+passed, 37 skipped (Python test count unchanged: the round's checks went
+into existing tests); JavaScript 266 passed (263 before).
