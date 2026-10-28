@@ -521,6 +521,7 @@ class Family:
         tools = GoogleCalendar(credentials_path="", token_path=token,
                                calendar_id="primary", timezone=tz,
                                save_token=False, environ={}, in_app=True,
+                               account=user["id"],
                                extras=set(CALENDAR_EXTRA_SCOPES) <= granted_scopes(info)
                                ).tools()
         inbox = self.gmail_inbox(user, info)
@@ -548,7 +549,8 @@ class Family:
         return GmailInbox(credentials_path="", token_path=self.google_token(user["id"]),
                           timezone=user.get("timezone") or None,
                           max_summary=self.config["gmail"]["max_summary"],
-                          save_token=False, environ={}, in_app=True)
+                          save_token=False, environ={}, in_app=True,
+                          account=user["id"])
 
     def _deadline_tools(self, user: dict) -> list:
         """Their own deadlines (deadlines.py), in their own time zone, and
@@ -568,7 +570,7 @@ class Family:
         """Store their token (privately, atomically) and add their Google
         tools to their open conversations. False if they were removed
         meanwhile (nothing written: their folder is going away)."""
-        from kwil.tools.google_auth import write_private
+        from kwil.tools.google_auth import clear_reconnect, write_private
 
         with self.lock:
             user = self.users.get(uid)
@@ -577,6 +579,7 @@ class Family:
             path = self.google_token(uid)
             path.parent.mkdir(parents=True, exist_ok=True)
             write_private(path, token_text)
+            clear_reconnect(uid)  # the new sign-in replaces the refused one
             self._refresh_tools(uid)
         log.info("Family: %s connected their Google account", uid)
         return True
@@ -588,6 +591,7 @@ class Family:
         account" and Remove): a failure is logged by type and never blocks
         the delete. Either tier: the revoke needs only the token."""
         from kwil.account import revoke_google_grant
+        from kwil.tools.google_auth import clear_reconnect
 
         with self.lock:
             if uid not in self.users or not valid_id(uid):
@@ -601,6 +605,7 @@ class Family:
             path = self.google_token(uid)
             had = path.exists()
             _unlink(path)
+            clear_reconnect(uid)
             self._refresh_tools(uid)
         log.info("Family: %s disconnected their Google account", uid)
         return had

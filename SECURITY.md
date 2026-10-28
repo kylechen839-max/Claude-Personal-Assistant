@@ -979,6 +979,22 @@ a PKCE challenge, `access_type=offline` and the redirect
   `google_connect` (that refusal of inherited secrets is for separate
   instances, and Render sets `GOOGLE_TOKEN_JSON` in the process
   environment on purpose).
+- **"Sign-in expired" status** (`google_auth.needs_reconnect`). When
+  Google refuses a refresh (a non-retryable `RefreshError`, e.g.
+  `invalid_grant`), or the saved token is unusable, the server remembers
+  only who (the owner, or a family member's id) and when, in memory,
+  bounded (`MAX_RECONNECT`, oldest first); never the token or Google's
+  error body. `/api/google/status` then adds `needs_reconnect: true` for
+  that caller's own account only, and the app offers Reconnect (the same
+  state/PKCE/binding-cookie flow). A later successful refresh, a connect
+  or a disconnect clears it. Logs: INFO says "needs reconnecting for
+  <id>" / "works again for <id>"; the WARNING keeps only the OAuth error
+  code. Status requests never call Google. `python -m kwil --check` (and
+  so the updater's smoke run) does one token refresh with a 10 s timeout
+  to tell whether the sign-in still works, reporting the error code or
+  the exception's type, never its text. Not fixed: the flag is per
+  process, so after a restart it shows again only after the next refused
+  call (deliberate: no Google call per status request).
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.

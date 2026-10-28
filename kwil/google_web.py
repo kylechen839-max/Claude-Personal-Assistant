@@ -23,10 +23,13 @@ Two kinds of account, one sign-in flow:
   family client: its consent screen lists Gmail).
 
   GET  /api/google/status      {"enabled", "connected", "disconnect",
-                               "gmail", "note", "server_owner"}: the
-                               caller's own account (gmail false: no mail
-                               wording in the app; note: why it is off, or
-                               null; server_owner: the cloud owner's, no
+                               "gmail", "note", "needs_reconnect",
+                               "server_owner"}: the caller's own account
+                               (gmail false: no mail wording in the app;
+                               note: why it is off, or null;
+                               needs_reconnect: Google refused the saved
+                               sign-in, google_auth.needs_reconnect;
+                               server_owner: the cloud owner's, no
                                first-run guide)
   POST /api/google/connect     {"url": Google's consent page}
   POST /api/google/disconnect  a family member's token and tools deleted, or
@@ -69,10 +72,11 @@ from pathlib import Path
 from typing import Callable
 
 from kwil import i18n
-from kwil.tools.google_auth import (_relax_scope_check, client_config,
-                                         load_token_info, owner_environ,
-                                         sign_in_scopes, token_json,
-                                         web_client_config, write_private)
+from kwil.tools.google_auth import (OWNER, _relax_scope_check, clear_reconnect,
+                                    client_config, load_token_info,
+                                    needs_reconnect, owner_environ,
+                                    sign_in_scopes, token_json,
+                                    web_client_config, write_private)
 
 log = logging.getLogger(__name__)
 
@@ -132,13 +136,18 @@ class GoogleConnect:
         return self._redirect(None)
 
     def _redirect(self, user: str | None) -> str:
-        if user is None:
-            origin = self.config["webapp"]["public_origin"]
-        else:
-            from kwil.family import own_origin
+        return self._origin(user).rstrip("/") + CALLBACK
 
-            origin = own_origin(self.config)
-        return origin.rstrip("/") + CALLBACK
+    def _origin(self, user: str | None) -> str:
+        """The address Google sends `user` back to: [webapp] public_origin;
+        family members and the cloud owner (owner_google) also the
+        server's own (APP_ORIGIN, family.own_origin), so the owner can
+        Connect wherever a family member can. "" = unknown."""
+        if user is None and not self.owner_google:
+            return self.config["webapp"]["public_origin"] or ""
+        from kwil.family import own_origin
+
+        return own_origin(self.config)
 
     def _client(self, user: str | None = None) -> dict | None:
         if user is not None:  # theirs: the family or the public client by tier
@@ -166,7 +175,7 @@ class GoogleConnect:
         """Can `user` (None: the owner) connect a Google account here?"""
         if user is not None:
             return self.family is not None and self.family.google_enabled(user)
-        return bool(self.owner and self.config["webapp"]["public_origin"]
+        return bool(self.owner and self._origin(None)
                     and self._cal["enabled"] and self._client())
 
     def connected(self, user: str | None = None) -> bool:
@@ -178,6 +187,13 @@ class GoogleConnect:
             return load_token_info(self._cal["token"], owner_environ(self.config)) is not None
         except (OSError, ValueError, AttributeError, TypeError):
             return False
+
+    def needs_reconnect(self, user: str | None = None) -> bool:
+        """Did Google refuse `user`'s saved sign-in (revoked, or expired)
+        since this server started (google_auth.needs_reconnect)? Only while
+        a token is saved: without one the app offers Connect anyway. Known
+        from the last refresh the tools made; no call to Google here."""
+        return self.connected(user) and needs_reconnect(user)
 
     def owner_file(self) -> bool:
         """Has the cloud owner a connected token file to disconnect?"""
@@ -272,6 +288,7 @@ class GoogleConnect:
         with self.owner_lock:
             token.parent.mkdir(parents=True, exist_ok=True)
             write_private(token, text)
+            clear_reconnect(OWNER)  # the new sign-in replaces the refused one
             self._register_tools()
         log.info("Google account connected; token saved to %s", token)
         return True, None
@@ -308,6 +325,7 @@ class GoogleConnect:
                 log.info("Google disconnect skipped: the owner connected again meanwhile")
                 return False
             _unlink(token)
+            clear_reconnect(OWNER)
             self._register_tools()
         log.info("Google account disconnected (the owner's)")
         return True
@@ -400,6 +418,9 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
                 # token.json, is managed where it was made)
                 "disconnect": s.user is not None or connect.owner_file(),
                 "gmail": connect.gmail(s.user), "note": connect.note(s.user),
+                # Google refused the saved sign-in: the app says "expired,
+                # reconnect" instead of "connected"
+                "needs_reconnect": connect.needs_reconnect(s.user),
                 # the cloud owner: no first-run guide (it's for invitees)
                 "server_owner": server_owner}
 

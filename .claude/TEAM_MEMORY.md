@@ -123,6 +123,12 @@ as the work. Never put secrets, tokens or personal data in this file.
   `Credentials.valid` is false and google-auth makes a real refresh call.
   Patch `Credentials.refresh` to fail the test as a guard
   (`tests/test_family_google.py`).
+- Lesson (2026-10-28, live bug): "connected" must mean Google still
+  accepts the sign-in, not that a token file exists. A refused refresh
+  marks the account (`google_auth.needs_reconnect`, per process; a
+  conftest fixture clears it around every test), and status routes read
+  that flag instead of calling Google. New Google credential code passes
+  `account=` (None the owner, else the family id).
 - JS tests: `node --test tests/js/*.test.mjs`. Give explicit files; the
   directory form fails on Node 22.
 - The Canvas helper extension (`tools/canvas-helper/`) is ES modules in

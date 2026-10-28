@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed: when Google ends a sign-in (revoked, or expired), ⚙ now says
+  "Google sign-in expired. Reconnect to keep using it." with a Reconnect
+  button, for the owner on the server (even with GOOGLE_TOKEN_JSON) and for
+  family members, instead of "Google account connected". `python -m kwil
+  --check` asks Google whether the sign-in still works. The owner's Connect
+  on the server also works without PUBLIC_ORIGIN when the server knows its
+  own address.
 - The Kwil Canvas helper, a Chrome/Edge extension (`tools/canvas-helper/`,
   load unpacked) for schools that block Canvas tokens. Tap Set up Canvas
   helper in Kwil and it pairs by itself, finds your Canvas, and syncs your

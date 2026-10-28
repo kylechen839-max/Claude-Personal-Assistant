@@ -604,8 +604,21 @@ for all of this except the Google sign-in.
     `python -m kwil.tools.google_auth` there, and connect again on the
     server. `GOOGLE_TOKEN_JSON` is that same PC token, so if Google ended
     it, also paste the new `token.json` into `GOOGLE_TOKEN_JSON` in Render.
+- [ ] Expired sign-in: at myaccount.google.com/permissions remove Kwil's
+      access (or wait out a Testing-mode token), then ask "What's on my
+      calendar today?" and open ⚙.
+  - Should: Kwil says the Google sign-in expired or was revoked; ⚙ says
+    "Google sign-in expired. Reconnect to keep using it." (in Chinese on a
+    Chinese account) with **Reconnect Google account**, not "Google
+    account connected."; tapping it runs the usual Google sign-in, after
+    which ⚙ says "Google account connected." and the calendar question
+    works. Do the same once on a family member's phone. Render's log has
+    "needs reconnecting" and no token or Google error text.
 - [ ] Render Shell: `python -m kwil --check`.
-  - Should: no mic or speaker lines; `WEB_TOKEN`, "Google account:
+  - Should: a "Google sign-in" line, OK while Google accepts the sign-in
+    (run between removing access and reconnecting in the step above, it
+    warns "Google refused it (invalid_grant): the sign-in expired or was
+    revoked"); no mic or speaker lines; `WEB_TOKEN`, "Google account:
     connected in the app" (or `GOOGLE_TOKEN_JSON`), the time zone,
     Whisper model and Piper voice OK.
 - [ ] In Safari on the iPhone (Wi-Fi off), open

@@ -197,6 +197,17 @@ def english_by_default(monkeypatch):
     monkeypatch.setattr(i18n, "LANG", "en")
 
 
+@pytest.fixture(autouse=True)
+def no_google_reconnect_flags():
+    """google_auth's "must reconnect" flags are process-wide (in memory):
+    every test starts without any, so none leaks into the next."""
+    from kwil.tools import google_auth
+
+    google_auth._reconnect.clear()
+    yield
+    google_auth._reconnect.clear()
+
+
 @pytest.fixture
 def fake_client():
     """A mocked anthropic.Anthropic() whose messages.create returns queued

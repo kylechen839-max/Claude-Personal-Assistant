@@ -191,7 +191,8 @@ def test_each_member_has_their_own_token_never_kyles(g):
     dad, dad_id = g.member("Dad", "en")
     assert mom.get("/api/google/status").json() == {
         "enabled": True, "connected": False, "disconnect": True, "gmail": True,
-        "note": None, "server_owner": False}
+        "note": None,
+        "needs_reconnect": False, "server_owner": False}
     assert connected(g, mom, mom_id, "mom")["refresh_token"] == "1//mom-refresh-secret"
     assert dad.get("/api/google/status").json()["connected"] is False  # not Mom's
     assert connected(g, dad, dad_id, "dad")["refresh_token"] == "1//dad-refresh-secret"
@@ -849,7 +850,8 @@ def test_a_beta_consent_screen_asks_for_calendar_only_on_the_public_client(g, mo
     mom, _ = g.member("Mom", "zh")  # family
     assert tester.get("/api/google/status").json() == {
         "enabled": True, "connected": False, "disconnect": True, "gmail": False,
-        "note": None, "server_owner": False}
+        "note": None,
+        "needs_reconnect": False, "server_owner": False}
     q = consent(tester)
     scopes = q["scope"][0].split()
     assert sorted(scopes) == sorted([CALENDAR_SCOPE, *CALENDAR_EXTRA_SCOPES])

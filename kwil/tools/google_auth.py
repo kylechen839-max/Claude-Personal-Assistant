@@ -20,6 +20,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -112,7 +113,10 @@ def _relax_scope_check() -> None:
 
 class GoogleSignInError(RuntimeError):
     """Google refused to refresh the sign-in (revoked, or expired: in the
-    consent screen's Testing mode refresh tokens last only 7 days)."""
+    consent screen's Testing mode refresh tokens last only 7 days).
+    `reason`: Google's error code (e.g. invalid_grant) when it refused."""
+
+    reason = ""
 
 
 REFRESH_FAILED = ("Google sign-in could not be refreshed (%s). Sign in "
@@ -204,6 +208,43 @@ def has_credentials(credentials_path="credentials.json", token_path="token.json"
                 or Path(credentials_path).exists() or Path(token_path).exists())
 
 
+# Whose Google sign-in Google refused to refresh (revoked, or expired), so
+# the app shows "Reconnect" (google_web.py status) instead of "connected":
+# OWNER (None) for the owner, else a family member's id. In memory only,
+# per process, and only who and when: never a token or Google's message.
+# Set by a failed refresh, cleared by a later successful one, a connect or
+# a disconnect. Bounded: the oldest entries go first.
+OWNER = None
+MAX_RECONNECT = 1024
+_reconnect: OrderedDict = OrderedDict()
+_reconnect_lock = threading.Lock()
+
+
+def mark_refresh_failed(account: str | None = OWNER) -> None:
+    """Remember that `account` must sign in to Google again."""
+    with _reconnect_lock:
+        new = account not in _reconnect
+        _reconnect.pop(account, None)
+        _reconnect[account] = time.time()
+        while len(_reconnect) > MAX_RECONNECT:
+            _reconnect.popitem(last=False)
+    if new:
+        log.info("Google sign-in needs reconnecting for %s", account or "the owner")
+
+
+def clear_reconnect(account: str | None = OWNER) -> None:
+    """`account`'s sign-in works again (refreshed, connected or removed)."""
+    with _reconnect_lock:
+        gone = _reconnect.pop(account, None) is not None
+    if gone:
+        log.info("Google sign-in works again for %s", account or "the owner")
+
+
+def needs_reconnect(account: str | None = OWNER) -> bool:
+    with _reconnect_lock:
+        return account in _reconnect
+
+
 # A family member's token (family.py): they fix it themselves in the app,
 # so their errors say that, never Kyle's PC sign-in or GOOGLE_TOKEN_JSON.
 REFRESH_FAILED_IN_APP = ("Google sign-in of an in-app account could not be "
@@ -217,10 +258,13 @@ def reconnect_hint() -> str:
     return i18n.t("google_reconnect")
 
 
-def _warn_on_refresh_failure(creds, in_app: bool = False):
+def _warn_on_refresh_failure(creds, in_app: bool = False,
+                             account: str | None = OWNER):
     """Make every later refresh (google-auth refreshes inside API calls)
-    log a clear warning, with the error code only, if Google refuses.
-    `in_app`: a family member's token (reconnect in the app)."""
+    log a clear warning, with the error code only, if Google refuses, and
+    record whether `account` (OWNER, or a family member's id) must
+    reconnect (needs_reconnect). `in_app`: the token was connected in the
+    app (reconnect there)."""
     from google.auth.exceptions import RefreshError
 
     original = creds.refresh
@@ -230,15 +274,21 @@ def _warn_on_refresh_failure(creds, in_app: bool = False):
             original(request)
         except RefreshError as e:
             reason = _refresh_reason(e)
+            if not getattr(e, "retryable", False):  # Google's side, not the grant
+                mark_refresh_failed(account)
             if in_app:
                 log.warning(REFRESH_FAILED_IN_APP, reason)
-                raise GoogleSignInError(
+                error = GoogleSignInError(
                     f"Google sign-in expired or was revoked ({reason}). "
-                    f"{reconnect_hint()}") from None
-            log.warning(REFRESH_FAILED, reason)
-            raise GoogleSignInError(
-                f"Google sign-in expired or was revoked ({reason}); "
-                "Kyle needs to sign in again.") from None
+                    f"{reconnect_hint()}")
+            else:
+                log.warning(REFRESH_FAILED, reason)
+                error = GoogleSignInError(
+                    f"Google sign-in expired or was revoked ({reason}); "
+                    "Kyle needs to sign in again.")
+            error.reason = reason
+            raise error from None
+        clear_reconnect(account)
 
     creds.refresh = refresh
     return creds
@@ -294,7 +344,7 @@ def missing_scopes(needed, token_path: str | Path = "token.json",
 def get_credentials(credentials_path="credentials.json", token_path="token.json",
                     open_browser: bool = True, save_token: bool = True,
                     environ=os.environ, scopes=CALENDAR_SCOPES,
-                    in_app: bool = False):
+                    in_app: bool = False, account: str | None = OWNER):
     """Credentials covering `scopes`, refreshed as needed.
 
     GOOGLE_TOKEN_JSON / GOOGLE_CLIENT_JSON, when set, replace token.json /
@@ -304,7 +354,9 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
     with no token at all, the first run opens a browser to sign in (for
     `scopes`). A token lacking one of `scopes` raises MissingScopes instead
     of silently signing in again. `in_app`: a family member's token
-    (family.py), whose errors say to reconnect Google in the app."""
+    (family.py), whose errors say to reconnect Google in the app.
+    `account`: whose sign-in it is (OWNER, or a family member's id), for
+    needs_reconnect."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
@@ -321,28 +373,68 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
             creds = Credentials.from_authorized_user_info(
                 info, None if info.get("scopes") else CALENDAR_SCOPES)
         except ValueError as e:  # names the missing fields, not values
+            mark_refresh_failed(account)
             raise GoogleSignInError(f"Unusable Google token "
                                     f"({TOKEN_ENV if from_env else token_path}): "
                                     f"{e}") from None
-        _warn_on_refresh_failure(creds, in_app)
+        _warn_on_refresh_failure(creds, in_app, account)
     if creds and creds.valid:
         return creds
     if creds and creds.refresh_token:
         creds.refresh(Request())  # GoogleSignInError (logged) if refused
     elif in_app:
+        if info:  # a token without a refresh token, expired
+            mark_refresh_failed(account)
         raise GoogleSignInError(f"No usable Google sign-in. {reconnect_hint()}")
     elif from_env or not save_token:
+        if info:  # a token without a refresh token, expired
+            mark_refresh_failed(account)
         raise GoogleSignInError(
             f"No usable Google sign-in: set {TOKEN_ENV} to the contents of a "
             f"token.json made on your PC ({SIGN_IN_COMMAND})")
     else:
         creds = _warn_on_refresh_failure(sign_in(
             credentials_path, token_path, open_browser,
-            scopes=sorted(set(CALENDAR_SCOPES) | set(scopes)), environ=environ))
+            scopes=sorted(set(CALENDAR_SCOPES) | set(scopes)), environ=environ),
+            account=account)
         return creds
     if persist:
         write_private(token_path, creds.to_json())
     return creds
+
+
+CHECK_TIMEOUT = 10  # seconds for verify_sign_in's one call to Google
+
+
+def verify_sign_in(credentials_path="credentials.json", token_path="token.json",
+                   environ=os.environ, in_app: bool = False,
+                   account: str | None = OWNER) -> str | None:
+    """Ask Google once whether the saved sign-in still works (python -m
+    kwil doctor; one token refresh, at most CHECK_TIMEOUT seconds, nothing
+    written). None if it does, else what is wrong in plain words, with
+    Google's error code only."""
+    from google.auth.transport.requests import Request
+
+    request = Request()
+
+    def bounded(*args, **kwargs):
+        kwargs.setdefault("timeout", CHECK_TIMEOUT)
+        return request(*args, **kwargs)
+
+    try:
+        creds = get_credentials(credentials_path, token_path, save_token=False,
+                                environ=environ, scopes=(), in_app=in_app,
+                                account=account)
+        if creds.refresh_token:  # still valid or not: really ask Google
+            creds.refresh(bounded)
+    except GoogleSignInError as e:
+        if e.reason:
+            return (f"Google refused it ({e.reason}): the sign-in expired or "
+                    "was revoked, so sign in to Google again")
+        return str(e)
+    except Exception as e:  # e.g. offline: say so, without the message
+        return f"couldn't check with Google ({type(e).__name__})"
+    return None
 
 
 def sign_in(credentials_path="credentials.json", token_path="token.json",

@@ -6,7 +6,9 @@
 // Also: the "Connect Google account" menu button ([webapp] google_connect,
 // or a family member's own account: the server marks <html data-google>),
 // shown only when /api/google/status says it is set up, and "Disconnect
-// Google account" when the status allows it (family members).
+// Google account" when the status allows it (family members). When Google
+// refused the saved sign-in (needs_reconnect) the row says it expired and
+// the button reconnects.
 "use strict";
 
 (function (root) {
@@ -85,6 +87,9 @@
     "Connect Google account": "连接 Google 账户",
     "Reconnect Google account": "重新连接 Google 账户",
     "Google account connected.": "Google 账户已连接。",
+    // Google refused the saved sign-in (google_web.py needs_reconnect)
+    "Google sign-in expired. Reconnect to keep using it.": "Google 登录已过期。请重新连接后继续使用。",
+    "Google sign-in expired.": "Google 登录已过期。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
     "Connect Spotify": "连接 Spotify",
@@ -684,7 +689,13 @@
         btn.hidden = !st.enabled;
         btn.textContent = say(st.connected ? "Reconnect Google account" : "Connect Google account");
         if (unlink) unlink.hidden = !(st.enabled && st.connected && st.disconnect);
-        if (hint && !st.enabled && st.note) {  // e.g. not set up for beta accounts yet
+        if (hint && st.connected && st.needs_reconnect === true) {
+          // Google refused the saved sign-in: never "connected"; the
+          // button above runs the same connect flow
+          hint.hidden = false;
+          hint.textContent = say(st.enabled ? "Google sign-in expired. Reconnect to keep using it."
+                                            : "Google sign-in expired.");
+        } else if (hint && !st.enabled && st.note) {  // e.g. not set up for beta accounts yet
           hint.hidden = false;
           hint.textContent = say(String(st.note));
         } else if (hint) {
