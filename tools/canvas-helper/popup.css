@@ -1,0 +1,8 @@
+body { font: 14px/1.4 system-ui, sans-serif; width: 320px; margin: 12px; color: #1b2a3a; }
+h1 { font-size: 16px; margin: 0 0 8px; }
+.title { font-weight: 600; margin: 0 0 4px; }
+ul { padding-left: 18px; margin: 4px 0 10px; }
+.hint { color: #5a6b7c; font-size: 12px; }
+button { font: inherit; padding: 4px 10px; margin: 2px 4px 2px 0; border-radius: 6px;
+         border: 1px solid #2f6fd6; background: #2f6fd6; color: #fff; cursor: pointer; }
+button.danger { background: #fff; color: #b3261e; border-color: #b3261e; }

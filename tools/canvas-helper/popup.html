@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kwil Canvas helper</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <h1>Kwil Canvas helper</h1>
+  <p id="title" class="title">…</p>
+  <ul id="lines"></ul>
+  <p id="enable-box" hidden>
+    <button id="enable" type="button">Enable on this site</button>
+    <span class="hint">For a school Canvas (or a Kwil) on its own domain.</span>
+  </p>
+  <p id="paired-box" hidden>
+    <button id="unpair" type="button" class="danger">Unpair this browser</button>
+    <button id="revoke" type="button">Revoke in Kwil</button>
+  </p>
+  <p class="hint">Reads only your own courses, with your own sign-in, like opening the pages
+    yourself. Some schools' rules limit automated access; check yours. Read-only and
+    rate-limited.</p>
+</body>
+</html>

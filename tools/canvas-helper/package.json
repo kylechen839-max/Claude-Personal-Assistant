@@ -1,0 +1,6 @@
+{
+  "name": "kwil-canvas-helper",
+  "private": true,
+  "description": "Only so node --test loads lib/*.js as ES modules (tests/js/canvas-helper*.test.mjs). The extension has no build step and no dependencies.",
+  "type": "module"
+}

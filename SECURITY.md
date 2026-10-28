@@ -1412,6 +1412,75 @@ by default, needs `[canvas] content`). Kwil fetches nothing for it.
   or text. `config._SECRET_PATTERNS` masks `kcs1.`/`kcp1.` values in any
   log line.
 
+### The helper extension (`tools/canvas-helper/`)
+
+A Manifest V3 extension for Chrome and Edge, plain JavaScript with no
+build step and no dependencies (loaded unpacked for now).
+
+- **Permissions.** `storage`, `alarms`, `activeTab` (the popup reads the
+  current tab's address only when clicked), `scripting` (the two page
+  scripts on a site the person enabled); hosts `https://heykwil.com/*`,
+  `https://*.instructure.com/*` and `https://*.inscloudgate.net/*`
+  (Canvas's file store, where downloads redirect); optional `https://*/*`,
+  requested for one origin at a time from the popup's **Enable on this
+  site** click (a school's own Canvas domain or a Kwil on its own domain).
+  No `<all_urls>`, `cookies`, `tabs`, `webRequest`,
+  `externally_connectable` or web-accessible resources;
+  `tests/test_canvas_helper_extension.py` pins the list. The extension
+  pages' CSP is `default-src 'none'; script-src 'self'; object-src
+  'none'` (plus `connect-src https:` for the worker's requests); no
+  remote code, `eval` or HTML injection (also checked by the test).
+- **Pairing.** The content script on the Kwil page reads the code from
+  `data-kwil-pair` and POSTs it same-origin (no cookies) to
+  `/api/student/canvas/pair`; the key comes back into the content
+  script's isolated world (page scripts can't read it) and goes to the
+  service worker by `chrome.runtime.sendMessage`. The worker accepts it
+  only from a tab of this extension whose origin, as Chrome reports it
+  (`sender.origin`, never the message), is `https://heykwil.com` or a site
+  the person enabled, and never from a Canvas origin; it pins that origin.
+  The key is kept in `chrome.storage.local` (set to trusted contexts where
+  Chrome allows it; the content scripts never read storage), never in a
+  URL, the DOM, the popup's status or a log.
+- **The two sides never mix.** Canvas is read with `fetch(...,
+  {credentials: "include"})`, GET only, never an Authorization header,
+  only on the one Canvas origin (a `next` link or file link elsewhere is
+  not followed). Kwil gets POSTs to the pinned origin's two push routes
+  only, the key as a Bearer header, `credentials: "omit"` and
+  `redirect: "error"` (a redirect can't carry the key away). The extension
+  has no `cookies` permission and never reads a cookie; the browser
+  attaches Canvas's own session to Canvas's own requests.
+- **What is sent.** Only the fields the pipeline reads: a course's id,
+  name, code and syllabus; pages (id, slug, title, dates, body);
+  assignments (id, name, due and updated dates, description); module
+  names and item titles/types; file metadata (no `url`: it carries a
+  `verifier=` capability); announcements (id, title, message, date,
+  course). Never grades, scores, submissions, enrollments, people,
+  passwords or cookies (the node tests feed Canvas's real shapes with
+  scores and submissions in them and check none leave). Files: only those
+  a manifest answer asked for, downloaded from a URL on the Canvas origin
+  that this run's listing gave, read up to Kwil's `max_file_bytes` + 1
+  (one byte over: Kwil keeps it as "too large", unread), at most 40 a run.
+- **Rate and back-off.** Link pagination, 100 a page, at most 10 pages and
+  1000 items a listing (Kwil's limits); Canvas's rate limit (429, or 403
+  "Rate Limit Exceeded" / no quota left) waited out 1, 2, 4 s, then the run
+  stops; a rate limit, Kwil's 429/409 or an unreachable side backs off 15
+  minutes doubling to 6 hours (Kwil's `Retry-After` honoured). A Canvas
+  401 that means "signed out" stops the run until the person visits
+  Canvas again; a 401 "unauthorized" (a hidden tab) only skips that
+  listing (sent as null, so Kwil keeps what it has). Kwil's 401 drops the
+  key (revoked or replaced: pair again). One run at a time; a run stops
+  after 4 minutes.
+- **Deliberate non-fixes.** (1) **Unpair** in the popup only forgets the
+  key in this browser: the server has no key-authenticated revoke route,
+  so the popup's **Revoke in Kwil** opens Kwil, where **Revoke helper**
+  ends it. (2) A script injected into the Kwil page itself (an XSS on
+  Kwil) could show a code from another account and so pair the helper to
+  that account; Kwil's strict self-only CSP is the defence, and the popup
+  shows which Kwil it is paired with. (3) A compromised renderer of a
+  page the content scripts run on could read `chrome.storage.local` on
+  Chrome versions that don't support restricting it; the key opens only
+  the person's own push routes.
+
 ## Smart home (`tools/home_assistant.py`)
 
 Home Assistant controls physical things, including the front door, so its

@@ -6038,3 +6038,96 @@ server side and the card.
 
 Counts (Linux sandbox, Python 3.13, not real hardware): 3386 passed, 37
 skipped; JavaScript 173 passed.
+
+## Canvas course content, PR (c): the Kwil Canvas helper extension (2026-10-27)
+
+For schools that block Canvas tokens: a Manifest V3 extension for Chrome
+and Edge in `tools/canvas-helper/` (plain JS, no build step, Load
+unpacked) that reads the student's own Canvas with their signed-in
+browser session and pushes to PR (b)'s routes. No server change.
+
+- **Pairing, one tap.** `content/kwil-pair.js` on `https://heykwil.com`
+  watches for the card's `data-kwil-pair` code (MutationObserver), POSTs
+  it same-origin (no cookies) to `/api/student/canvas/pair`, and hands the
+  `kcs1.` key to the service worker, which accepts it only from a tab of
+  this extension on heykwil.com or a site the person enabled (origin from
+  Chrome's `sender.origin`, never a Canvas origin), stores it in
+  `chrome.storage.local` with that origin pinned, and schedules a sync in
+  30 s plus the 6-hourly `chrome.alarms` one.
+- **Canvas found from browsing.** `content/canvas-seen.js` on
+  `*.instructure.com` tells the worker; it probes
+  `/api/v1/courses?per_page=1` with the session and remembers the origin.
+  A school domain of its own: the popup's **Enable on this site** asks
+  Chrome for that one origin (`optional_host_permissions`), registers the
+  two page scripts there (`chrome.scripting`) and injects them once.
+- **Sync** (`lib/sync.js`, `lib/canvas.js`, `lib/manifest.js`,
+  `lib/kwil.js`): active courses with the syllabus, pages (bodies; up to
+  30 read one by one when the listing has none), assignments, modules
+  with items, files, and 120 days of announcements; Link pagination
+  (100 a page, 10 pages, 1000 items, as canvas.py), `while(1);` stripped,
+  Canvas's rate limit waited out 1/2/4 s then the run stops. Canvas's 401
+  "unauthenticated" ends the run (signed out; resumes after a Canvas
+  visit), a 401 "unauthorized" or 403/404 sends that listing as null
+  (Kwil keeps what it has). Only the fields Kwil reads are sent; no grades,
+  submissions, enrollments, people or file URLs. Big manifests split by
+  course under Kwil's size limit. Then only the files Kwil's answers asked
+  for, from this run's listing on the Canvas origin, at most 40 a run,
+  read to `max_file_bytes` + 1. Kwil: the pinned origin only, Bearer key,
+  `credentials: "omit"`, `redirect: "error"`; 401 drops the key, 429/409
+  and unreachable sides back off 15 min doubling to 6 h (Retry-After
+  honoured). One run at a time, 4-minute budget; an Unpair during a run
+  stays unpaired.
+- **Popup:** status only (paired, Kwil and Canvas hosts, last sync, last
+  result), **Unpair this browser** (two clicks), **Revoke in Kwil** (opens
+  Kwil: the server has no key-authenticated revoke), and **Enable on this
+  site** on a custom https domain.
+- **Permissions:** `storage`, `alarms`, `activeTab`, `scripting`; hosts
+  heykwil.com, `*.instructure.com`, `*.inscloudgate.net`; optional
+  `https://*/*` one origin at a time. Strict extension CSP. No
+  `<all_urls>`, `cookies`, `tabs`, remote code or eval.
+- **Docs:** `tools/canvas-helper/README.md` (install on Chrome and Edge,
+  permissions table), README's Canvas helper paragraph, SECURITY.md
+  "The helper extension" (with three deliberate non-fixes), MANUAL_TEST.md
+  "Canvas helper extension" (real-school run), BLOCKERS.md (load it,
+  real-school run; a store listing costs money, not done).
+- **Tests.** New `tests/js/canvas-helper.test.mjs` (28) and
+  `tests/js/canvas-helper-ui.test.mjs` (4), with fakes in
+  `tests/js/canvas-helper-fakes.mjs` (Canvas's own shapes with scores and
+  submissions in them, Link pagination, `while(1);`, rate limits, the file
+  store redirect; a fake Kwil and `chrome`): the whole run; the key only
+  to Kwil and the session only to Canvas; only wanted files, max_files,
+  the +1-byte cut, an unreachable file, an off-host file link; pagination
+  and the page cap; retries and a lasting limit; signed out; Kwil's
+  401/429/409; origin pinning; pairing acceptance and the content script
+  (in node:vm); back-off between alarms; Canvas detection; enabling a
+  site; missing permissions; unpair mid-run; one run at a time; batching;
+  logs; the popup and background wiring. New
+  `tests/test_canvas_helper_extension.py` (4): the manifest's permissions
+  and CSP pinned, every named file exists, no eval/remote code/HTML
+  injection or text in log calls, and a round trip: the extension's real
+  sync in node (`tests/js/canvas-helper-roundtrip.mjs`, with the fixture
+  PDF) produces a manifest that `clean_manifest` keeps whole and the real
+  routes store, and a multipart body that the real file route reads
+  ("late policy" found). Skips without node.
+- **Failing first:** the files are new, so against the base every new
+  test fails to import. Then 26 single reverts in the extension, each
+  making its test fail (e.g. assignments sent whole, the file url sent,
+  cookies on Kwil pushes, redirects followed, off-origin downloads (two
+  guards: `download`'s and every request's; removing one alone is caught
+  by the other), next links on any host, no retry, no page cap, unwanted files
+  pushed, max_files ignored, one unreachable file stopping the run,
+  pairing from any page, the key in the popup's status, no back-off,
+  signed-out not marked, a site enabled without permission, a sync without
+  permission, the pairing POST cross-origin, pairing on Canvas pages,
+  batches over budget, a 401 "unauthorized" ending the run, unpair undone
+  mid-run, a looser CSP, a cookies permission, module items renamed).
+- **Not verified from the sandbox** (MANUAL_TEST/BLOCKERS): Canvas's file
+  store hosts and CORS for extension downloads (inst-fs on
+  `*.inscloudgate.net` is in host_permissions; an S3-served file would be
+  skipped, not stop the run), that Chrome sends the Canvas session with a
+  service worker's credentialed fetch to a host it has permission for,
+  and the `while(1);` prefix (stripped when present).
+- **Counts** (Linux sandbox, Python 3.13, Node 22, not real hardware):
+  3390 passed, 37 skipped (baseline 61c409f from a `git archive` copy:
+  3385 passed, 38 skipped, where `test_rebrand`'s git-history test skips;
+  it runs here). JavaScript 205 passed (173 before).

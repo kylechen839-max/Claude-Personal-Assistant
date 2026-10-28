@@ -125,6 +125,11 @@ as the work. Never put secrets, tokens or personal data in this file.
   (`tests/test_family_google.py`).
 - JS tests: `node --test tests/js/*.test.mjs`. Give explicit files; the
   directory form fails on Node 22.
+- The Canvas helper extension (`tools/canvas-helper/`) is ES modules in
+  plain `.js`; its `package.json` (`"type": "module"`) exists only so node
+  imports them in tests. Its logic takes `chrome`/`fetch` as arguments
+  (`lib/helper.js`), so tests pass fakes; content scripts are classic
+  scripts, run in node:vm.
 - Report counts as "N passed, M skipped" against the baseline.
 - Lesson (2026-10-20): mocked clients passed every test while a real
   multi-turn conversation failed (thinking-block signatures). Conversation
