@@ -362,7 +362,8 @@ to that session's own conversation.
   tool doesn't run: `stop()` and `_confirm()` decide under one
   per-session lock (`Session.stop_lock`), so either the question is
   already open (Stop refused) or it is never asked (a no). INFO logs only
-  "Web turn stopped".
+  fixed lines with no conversation text ("Web turn stopped", "Turn
+  stopped: confirmation not asked", "Skipped <tool>").
 
 ## Cloud server (Render): on the public internet
 
