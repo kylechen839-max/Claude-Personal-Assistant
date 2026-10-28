@@ -6491,4 +6491,44 @@ archive, which skips one git test); JavaScript 242 passed (220 before).
   a computer), light and dark; every button in those sheets is 44px+.
 
 Counts (Linux sandbox, not real hardware, `-k "not live_pinecone"`): 3480
-passed, 37 skipped; JavaScript 263 passed (master b4fc523: 239).
+passed, 37 skipped; JavaScript 263 passed (master b4fc523: 239). After
+merging master again (641f1a5): 3499 passed, 37 skipped; JavaScript 263.
+
+### Round 3: the judge's findings (2026-10-28)
+1. MED, a row changing group while its sheet was open broke the modal:
+   `arrange()` re-appended every row, and moving an open `<dialog>` takes
+   it out of the top layer (still open, no backdrop, focus trap or Esc).
+   That happened on every in-sheet change (Disconnect, saving the key,
+   Canvas connect, the helper's pairing poll) and whenever another row's
+   status arrived. Now `arrange()` waits while any sheet is open and runs
+   when it closes (the row's status line still updates at once), and moves
+   only the rows that are out of place (`insertBefore`). Tests: the fake DOM
+   clears `modal` when an open dialog is moved and counts moves; an
+   in-sheet disconnect keeps the sheet modal with nothing moved, then
+   regroups on close with focus on the row; another row's status arriving
+   while a sheet is open moves nothing; only out-of-place rows move. All
+   three fail on the old `connections.js`. In real Chromium the judge's
+   probes now show the sheet still `:modal` after Disconnect and after
+   another row's status, and the row regrouped after Esc.
+2. LOW, the env-managed owner's Canvas row said "Connect" with no way to
+   connect in its sheet: `canvasRow` now says "Set on the server" with no
+   action, as `connect.js` does for Notion. Tests: the row cases, and
+   "Connect" exactly when the sheet shows the find step (both fail on the
+   old `student.js`).
+3. LOW, wording: PRIVACY ("Settings → Connections", "⚙ → Connections →
+   Google"), the dev-team console line in `cli.py`, BLOCKERS, and the
+   MANUAL_TEST cloud section, which now says what the rows and sheets
+   show. (`cli.py`'s "Connected services off: a separate instance" log
+   line stays: `test_config_cli.py` pins it and it names the feature.)
+4. iOS: `::backdrop` gets `var(--scrim, <the light scrim>)` and a literal
+   200ms (it inherits no custom properties before Safari 17.4); while a
+   sheet is open `connections.js` sets `conn-sheet-open` on `<html>`, which
+   stops the page and the menu behind it scrolling (CSS, no inline style).
+   `test_theme.py` allows only that one fallback literal and checks the
+   lock rule; the fake DOM test and a Playwright run check the class and
+   the computed `overflow: hidden`. MANUAL_TEST: the scroll check and the
+   scrim on iOS 17.3 or older.
+
+Counts (Linux sandbox, not real hardware, `-k "not live_pinecone"`): 3499
+passed, 37 skipped (Python test count unchanged: the round's checks went
+into existing tests); JavaScript 266 passed (263 before).

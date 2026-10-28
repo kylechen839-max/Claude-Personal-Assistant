@@ -186,7 +186,13 @@ def test_connections_css_uses_tokens_motion_and_no_soft_shadow():
     css = (WEB / "app.css").read_text(encoding="utf-8")
     block = css[css.index("/* ---------- design-system primitives"):
                 css.index("/* reply-voice picker (voice-picker.js) */")]
-    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", block) == []
+    # the one literal: --scrim's fallback on ::backdrop, which inherits no
+    # custom properties before Safari 17.4; it must be the light token
+    fallback = re.search(r"::backdrop \{ background: var\(--scrim, (#[0-9a-f]+)\);", block)
+    assert fallback and fallback.group(1) == tokens(css, False)["scrim"]
+    rest = block.replace(fallback.group(0), "")
+    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", rest) == []
+    assert "html.conn-sheet-open, html.conn-sheet-open body" in block and "overflow: hidden" in block
     assert "rgb(" not in block and "rgba(" not in block
     rules = dict(re.findall(r"\n([^{}\n]+)\{([^{}]*)\}", block))
     assert "shadow" not in rules[".group "]
@@ -196,7 +202,7 @@ def test_connections_css_uses_tokens_motion_and_no_soft_shadow():
     assert {"scrim", "on-brand"} <= set(light) and "scrim" in tokens(css, True)
     assert "--t-sheet: 240ms; --ease-sheet: cubic-bezier(.32,.72,0,1); --t-scrim: 200ms;" in css
     assert "animation: sheet-up var(--t-sheet) var(--ease-sheet)" in block
-    assert "animation: scrim-in var(--t-scrim) ease-out" in block
+    assert "animation: scrim-in 200ms ease-out" in block  # --t-scrim, literal for old Safari
     assert "box-shadow: var(--ring)" in block and "box-shadow: var(--ring-inset)" in block
     assert ".group .row:active:not(:disabled) { transform: none; background: var(--surface-2); }" in block
     reduced = block[block.index("@media (prefers-reduced-motion: reduce)"):]

@@ -1070,29 +1070,37 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 - [ ] As a family member (phone app invite), ask to turn on a light.
   - Should: it has no smart home control.
 
-## Connected services on the cloud (optional, ~15 min)
+## Connections on the cloud (optional, ~15 min)
 On the iPhone Home Screen app signed in to the cloud (README "Connect your
 services in the app"). Needs `USER_DATA_KEY`, `PUBLIC_ORIGIN` and the
 public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
-- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connections -> Notion.
-  - Should: the row says "Set on the server"; opened, "Set on the
-    server." with no buttons.
+- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connections.
+  - Should: Notion is among the first rows with a green dot and "Set on
+    the server" on the right; tapping it opens its sheet, which says "Set
+    on the server." and has no buttons.
 - [ ] Delete `NOTION_TOKEN` in Render (Environment -> Save, it restarts),
       open ⚙ again, tap the Notion row and its **Connect**.
   - Should: Notion's consent page opens in the app itself (not Safari).
     Tick your Assignments database and the pages for Lecture Notes, Chat
-    Digests and the coordinator inbox, Allow; you land back in the app and
-    the row is under "Connected" and says "Connected · <your workspace>".
+    Digests and the coordinator inbox, Allow; you land back in the app.
+    Open ⚙: Notion's row is now with the connected ones at the top, with
+    your workspace's name under "Notion" and a green "Connected" on the
+    right.
 - [ ] Ask "what assignments do I have this week?", start a lecture
       recording for a few seconds and stop it.
   - Should: the right assignments; the lecture is filed in Notion.
-- [ ] Tap Notion's **Disconnect**, say Cancel, then again and OK.
-  - Should: Cancel changes nothing; OK says "Disconnected.", Notion's
+- [ ] Tap the Notion row, then **Disconnect** in its sheet; say Cancel,
+      then again and OK.
+  - Should: Cancel changes nothing; OK says "Disconnected." in the sheet,
+    which stays open (the row moves down to the rows to connect only after
+    you close it, then shows a blue "Connect"); Notion's
     Settings -> Connections no longer lists Kwil, and "what assignments do
     I have?" no longer reaches Notion.
-- [ ] Home Assistant: type your Nabu Casa (or tunnel) address, tap
-      **Connect**, sign in as the dedicated non-admin user.
-  - Should: back in the app, "Connected · <your Home Assistant's host>";
+- [ ] Home Assistant: tap its row, type your Nabu Casa (or tunnel)
+      address in the sheet, tap **Connect**, sign in as the dedicated
+      non-admin user.
+  - Should: back in the app, the Home Assistant row has your Home
+    Assistant's host under its name and a green "Connected" on the right;
     "turn off the bedroom lights" works; an hour later it still works
     (the 30-minute token was renewed).
 - [ ] Type `http://homeassistant.local:8123` or `192.168.1.10` instead.
@@ -1118,6 +1126,13 @@ tester, in light and dark mode (Settings -> Display -> Light/Dark).
   - Should: a sheet slides up from the bottom with the service's icon,
     name, one paragraph and its buttons; each way closes only the sheet
     (the menu stays open); each tap lands on the first try.
+- [ ] With a sheet open, swipe up and down on it and on the dimmed page
+      above it.
+  - Should: only the sheet scrolls (when it is taller than the screen);
+    the chat and the menu behind it stay still.
+- [ ] On an iPhone on iOS 17.3 or older (or an iPad that is), open a sheet.
+  - Should: the page behind is dimmed (the scrim shows), as on newer
+    iOS.
 - [ ] Connect or disconnect one service from its row.
   - Should: the row moves between "Connected" and "Available" after you
     come back, with the right status.

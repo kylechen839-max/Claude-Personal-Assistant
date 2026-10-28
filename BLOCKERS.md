@@ -29,7 +29,7 @@ Only what is still open for Kyle. None of it blocks the code.
          Lecture Notes, Chat Digests and the "Hey Claude coordinator
          inbox". Then Home Assistant: type its Nabu Casa (or tunnel) https
          address -> **Connect** -> sign in as the non-admin Kwil user.
-      4. Run the "Connected services on the cloud" checks in MANUAL_TEST.md.
+      4. Run the "Connections on the cloud" checks in MANUAL_TEST.md.
 - [ ] **Kwil rebrand: the steps only Kyle can do (2026-10-22).** The code
       and docs say Kwil and run under both names; these are UI clicks.
       1. **Rename the GitHub repo** to `Kwil` (Settings -> General ->

@@ -8,7 +8,8 @@
 // status dot and word; the subtitle is someone's detail (text only) or the
 // row's own line; a tap opens that row's sheet (a modal dialog, one at a
 // time, aria-expanded), and Close, Esc, a tap outside it or closing the
-// menu shuts it; a moved row keeps focus; a row the page doesn't have is
+// menu shuts it; nothing moves while a sheet is open (that would take the
+// dialog out of the top layer), only out-of-place rows move, focus is kept; a row the page doesn't have is
 // built like index.html's with a letter icon; and i18n.js has the Chinese
 // for every heading, subtitle, status and action word.
 
@@ -40,12 +41,28 @@ class El {
   set innerHTML(v) { this.usedHTML = true; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  // as a browser does when a node is moved: it loses focus, and an open
+  // modal dialog inside it leaves the top layer (still open, not modal)
+  detach(c) {
+    if (!c.parentNode) return;
+    c.parentNode.children = c.parentNode.children.filter((x) => x !== c);
+    if (this.doc.activeElement && c.contains(this.doc.activeElement)) this.doc.activeElement = null;
+    for (const d of c.all()) if (d.tagName === 'DIALOG' && d.open) d.modal = false;
+    this.doc.moves = (this.doc.moves || 0) + 1;
+  }
   appendChild(c) {
-    if (c.parentNode) {
-      c.parentNode.children = c.parentNode.children.filter((x) => x !== c);
-      if (this.doc.activeElement && c.contains(this.doc.activeElement)) this.doc.activeElement = null;  // as a browser blurs
-    }
+    this.detach(c);
     c.parentNode = this; this.children.push(c); return c;
+  }
+  insertBefore(c, ref) {
+    if (ref === null || ref === undefined) return this.appendChild(c);
+    this.detach(c);
+    c.parentNode = this; this.children.splice(this.children.indexOf(ref), 0, c); return c;
+  }
+  get firstElementChild() { return this.children[0] || null; }
+  get nextElementSibling() {
+    const sibs = this.parentNode ? this.parentNode.children : [];
+    return sibs[sibs.indexOf(this) + 1] || null;
   }
   append(...cs) { cs.forEach((c) => this.appendChild(c)); }
   contains(x) { return x === this || this.children.some((c) => c.contains(x)); }
@@ -61,7 +78,10 @@ class El {
 // The Connections section, its rows parsed from index.html (so a markup
 // change shows up here, and the page's rows match what build() makes).
 function load() {
-  const doc = { activeElement: null, roots: [] };
+  const htmlClasses = new Set();
+  const doc = { activeElement: null, roots: [], documentElement: { classList: {
+    toggle: (c, on) => { if (on) htmlClasses.add(c); else htmlClasses.delete(c); },
+    contains: (c) => htmlClasses.has(c) } } };
   doc.createElement = (tag) => new El(doc, tag);
   doc.getElementById = (id) => doc.roots.flatMap((r) => r.all()).find((e) => e.id === id) || null;
   const menu = new El(doc, 'details');
@@ -255,21 +275,68 @@ test('a row going off closes; closing the menu closes any sheet', () => {
   assert.ok(!isOpen(doc, 'spotify'));
 });
 
-test('a row that moves to the other list keeps the focus', () => {
+test('a connect or disconnect inside an open sheet keeps it modal; the row moves once it closes', () => {
   const { doc, ctl } = load();
-  ctl.set('notion', { state: 'available', status: 'Not connected', action: 'Connect' });
+  ctl.set('google', { state: 'available', status: 'Not connected', action: 'Connect' });
+  ctl.set('notion', { state: 'connected', status: 'Connected', action: 'Manage' });
   ctl.toggle('notion', true);
   const disconnect = doc.createElement('button');
   body(doc, 'notion').appendChild(disconnect);
   disconnect.focus();
-  ctl.set('notion', { state: 'connected', status: 'Connected', action: 'Manage' });
-  assert.deepEqual(ids(doc.getElementById('conn-connected')), ['notion']);
+  doc.moves = 0;
+  // the in-sheet Disconnect worked: notion's row now belongs under the rest
+  ctl.set('notion', { state: 'available', status: 'Not connected', action: 'Connect' });
+  assert.equal(doc.moves, 0);  // nothing moved while the sheet is open
+  assert.ok(isOpen(doc, 'notion'));
+  assert.equal(body(doc, 'notion').modal, true);  // still in the top layer
   assert.equal(doc.activeElement, disconnect);
-  assert.ok(isOpen(doc, 'notion'));  // its sheet stays open
-  // and no move at all when nothing changed order
-  const before = doc.getElementById('conn-connected').children.slice();
-  ctl.set('notion', { state: 'connected', status: 'Connected', action: 'Manage', detail: 'W' });
-  assert.deepEqual(doc.getElementById('conn-connected').children, before);
+  assert.equal(part(doc, 'notion', 'conn-action').textContent, 'Connect');  // the row itself is current
+  assert.ok(doc.documentElement.classList.contains('conn-sheet-open'));  // the page behind can't scroll
+  // closed (Close, Esc or a tap outside): now it regroups, focus back on its row
+  body(doc, 'notion').close();
+  assert.ok(!doc.documentElement.classList.contains('conn-sheet-open'));
+  assert.deepEqual(ids(doc.getElementById('conn-available')), ['google', 'notion']);
+  assert.equal(doc.getElementById('conn-connected').hidden, true);
+  assert.equal(doc.activeElement, head(doc, 'notion'));
+});
+
+test("another row's status arriving while a sheet is open never moves anything", () => {
+  const { doc, ctl, section } = load();
+  ctl.set('canvas', { state: 'available', status: 'Not connected', action: 'Connect' });
+  ctl.toggle('canvas', true);
+  doc.moves = 0;
+  ctl.set('google', { state: 'connected', status: 'Connected', action: 'Manage' });
+  ctl.set('spotify', { state: 'available', status: 'Not connected', action: 'Connect' });
+  ctl.set('google', { state: 'attention', status: 'Sign-in expired', action: 'Reconnect' });
+  assert.equal(doc.moves, 0);
+  assert.equal(body(doc, 'canvas').modal, true);
+  assert.equal(section.hidden, false);
+  assert.equal(part(doc, 'google', 'conn-state').textContent, 'Sign-in expired');
+  ctl.toggle('canvas', false);
+  assert.deepEqual(ids(doc.getElementById('conn-connected')), ['google']);
+  assert.deepEqual(ids(doc.getElementById('conn-available')), ['canvas', 'spotify']);
+});
+
+test('only rows out of place move, and a moved row keeps the focus', () => {
+  const { doc, ctl } = load();
+  for (const id of ['google', 'notion', 'canvas', 'spotify']) {
+    ctl.set(id, { state: 'available', status: 'Not connected', action: 'Connect' });
+  }
+  head(doc, 'canvas').focus();
+  doc.moves = 0;
+  ctl.set('canvas', { state: 'connected', status: 'Connected', action: 'Manage' });
+  assert.equal(doc.moves, 1);  // just canvas
+  assert.deepEqual(ids(doc.getElementById('conn-connected')), ['canvas']);
+  assert.deepEqual(ids(doc.getElementById('conn-available')), ['google', 'notion', 'spotify']);
+  assert.equal(doc.activeElement, head(doc, 'canvas'));
+  doc.moves = 0;
+  ctl.set('canvas', { state: 'connected', status: 'Connected', action: 'Manage', detail: 'W' });
+  ctl.set('google', { state: 'available', status: 'Not connected', action: 'Connect', sub: 'Calendar' });
+  assert.equal(doc.moves, 0);  // nothing changed order
+  doc.moves = 0;
+  ctl.set('google', { state: 'connected', status: 'Connected', action: 'Manage' });
+  assert.equal(doc.moves, 1);
+  assert.deepEqual(ids(doc.getElementById('conn-connected')), ['google', 'canvas']);
 });
 
 test("a service the page doesn't have gets a row built like index.html's, text only", () => {

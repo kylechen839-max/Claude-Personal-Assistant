@@ -58,9 +58,10 @@
       return { state: "connected", status: "Connected", action: "Manage",
                detail: st.school ? String(st.school) : helper.paired ? "Canvas helper" : "" };
     }
-    if (st.managed !== "env" && st.can_store === false) {
-      return { state: "available", status: "Not available" };
-    }
+    // the owner's Canvas comes from the server's .env: there is nothing to
+    // connect here (the card says so), as connect.js says for Notion
+    if (st.managed === "env") return { state: "available", status: "Set on the server" };
+    if (st.can_store === false) return { state: "available", status: "Not available" };
     return { state: "available", status: "Not connected", action: "Connect" };
   }
 

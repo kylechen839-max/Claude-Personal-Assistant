@@ -225,7 +225,12 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
   border: 0; border-radius: 22px 22px 0 0; background: var(--bg); color: var(--text); box-shadow: var(--shadow-2);
   padding: var(--s2) var(--pad) calc(var(--s6) + env(safe-area-inset-bottom)); }
 .conn-sheet[open] { display: grid; gap: var(--s3); align-content: start; animation: sheet-up var(--t-sheet) var(--ease-sheet); }
-.conn-sheet::backdrop { background: var(--scrim); animation: scrim-in var(--t-scrim) ease-out; }
+/* ::backdrop inherits no custom properties before Safari 17.4: a literal
+   fallback (the light --scrim), and its own duration */
+.conn-sheet::backdrop { background: var(--scrim, #0f1a2a66); animation: scrim-in 200ms ease-out; }
+/* while a sheet is open the page and the menu behind it don't scroll
+   (connections.js sets the class; iOS scrolls through a modal otherwise) */
+html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body { overflow: hidden; }
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
 .conn-grab { width: 36px; height: 5px; border-radius: 3px; background: var(--line-strong); margin: 0 auto var(--s1); }

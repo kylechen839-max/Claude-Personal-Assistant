@@ -54,6 +54,7 @@
                     available: doc.getElementById("conn-available") };
     if (!section || !lists.connected || !lists.available) return null;
     const known = {};  // id -> state (a handful of services)
+    let pending = false;  // a regroup waiting for the open sheet to close
 
     function make(tag, cls, text) {
       const el = doc.createElement(tag);
@@ -146,22 +147,37 @@
           if (was && !li.hidden && typeof head.focus === "function") head.focus();  // back to its row
         }
       }
+      const anyOpen = sheetOpen();
+      // no scrolling the page behind an open sheet (iOS ignores the modal)
+      const html = doc.documentElement;
+      if (html && html.classList) html.classList.toggle("conn-sheet-open", anyOpen);
+      if (!anyOpen && pending) arrange();
     }
 
-    // the rows into their groups, in order; moves a row only when the order
-    // changed, and gives focus back if a moved row had it
+    function sheetOpen() {
+      return rows().some((li) => { const b = part(li, "conn-body"); return Boolean(b && b.open); });
+    }
+
+    // the rows into their groups, in order. Never while a sheet is open:
+    // moving an open <dialog> takes it out of the top layer (no backdrop,
+    // focus trap or Esc), so the regroup waits for it to close. Moves only
+    // the rows that are out of place, and gives focus back if one had it.
     function arrange() {
+      if (sheetOpen()) { pending = true; section.hidden = false; return; }
+      pending = false;
       const groups = group(Object.keys(known).map((id) => ({ id, state: known[id] })));
       const active = doc.activeElement;
       for (const key of ["connected", "available"]) {
         const want = groups[key];
-        const have = [...lists[key].children].filter((li) => want.includes(li.dataset.conn))
-          .map((li) => li.dataset.conn);
-        const inPlace = have.length === want.length && have.every((id, i) => id === want[i]);
-        if (!inPlace) {
-          for (const id of want) lists[key].appendChild(row(id));
-        }
-        lists[key].hidden = want.length === 0;
+        const list = lists[key];
+        want.forEach((id, i) => {
+          const li = row(id);
+          const placed = [...list.children].filter((c) => want.includes(c.dataset.conn));
+          if (li.parentNode === list && placed.indexOf(li) === i) return;  // already right
+          const ref = i === 0 ? list.firstElementChild : row(want[i - 1]).nextElementSibling;
+          if (ref !== li) list.insertBefore(li, ref);
+        });
+        list.hidden = want.length === 0;
         const label = doc.getElementById(`conn-${key}-label`);  // for screen readers
         if (label) label.hidden = want.length === 0;
       }
