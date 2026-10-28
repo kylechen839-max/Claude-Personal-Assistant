@@ -194,8 +194,11 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
 2. **UI pass (when the piece changes UI).** If the diff touches
    `kwil/web/**`, the public site pages or `tools/canvas-helper/popup*`,
    start the **designer** on the builder's tree once the builder is done
-   (never at the same time). Pass it the request and the screens touched.
-   It screenshots, polishes and returns before/after shots. Send its
+   (never at the same time). Pass it the request, the screens touched,
+   and whether the piece adds motion or a new colour, type or style
+   choice; it loads the matching design skills itself (see
+   `.claude/skills/DESIGN_SKILLS.md`). It screenshots, polishes and
+   returns before/after shots. Send its
    proposals that are too big for polish to Kyle with the shots, and put
    the after shots in the PR description.
 3. Write `phase: "judging"`, `round: N` to the dashboard row, and the
