@@ -356,7 +356,12 @@ to that session's own conversation.
   `ClaudeChat` checks it before every tool dispatch and gives each
   unrun tool_use a tool_result, so the history stays valid. It does
   nothing while a yes/no question is open (a stop is never an answer)
-  and never touches a voice-view turn (`chat_stream`). INFO logs only
+  and never touches a voice-view turn (`chat_stream`). A Stop that lands
+  while a question is still being built (a `confirm_prompt` that fetches
+  first, e.g. the calendar's delete) means no question is asked and the
+  tool doesn't run: `stop()` and `_confirm()` decide under one
+  per-session lock (`Session.stop_lock`), so either the question is
+  already open (Stop refused) or it is never asked (a no). INFO logs only
   "Web turn stopped".
 
 ## Cloud server (Render): on the public internet

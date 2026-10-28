@@ -6450,3 +6450,27 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 8ae6c41 extracted with `git archive`: 3492 passed, 38 skipped, and
 `test_design_skills` failing only because an extract isn't a checkout;
 3 new tests); JavaScript 248 passed (master: 239).
+
+### Round 2: the judge's findings (2026-10-28)
+1. MED, a Stop landing while the yes/no question was being built (a
+   `confirm_prompt` that fetches first, e.g. the calendar's delete) still
+   asked it, and a "yes" ran the tool. `_confirm` now asks nothing in a
+   stopped turn (the answer is no), and `stop()` and `_confirm()` decide
+   under one per-session lock (`Session.stop_lock`): Stop either finds the
+   question open (refused) or lands before it is asked. Test: Stop while
+   a gated `confirm_prompt` runs gives no "confirm" event, a later yes is
+   a 409 and nothing is deleted.
+2. LOW, Stop after a tool round showed the first round's words twice
+   (the stopped reply carries text that was already streamed). A stopped
+   reply now only removes an empty bubble and never adds one. Test.
+3. LOW, an answer to an expired question (409 "nothing to confirm")
+   brought the dead question back and blocked the queue. The question
+   comes back only for other failures (network, 429 speech limit, 5xx),
+   and `refreshState` sends the queue when the server says nothing is
+   running or asked. Tests for the 409, the 429 and coming back to the app.
+
+Failing first (source files back at 6f2b27c): the new webapp test fails
+(it gets "confirm"); the new JS tests for 2, 3 (409) and the return to
+the app fail; the 429 test passes there too (it guards the kept
+behaviour). Counts: 3498 passed, 37 skipped, 1 deselected; JavaScript
+252 passed.

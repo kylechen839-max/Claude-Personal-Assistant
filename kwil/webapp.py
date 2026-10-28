@@ -746,6 +746,9 @@ class Session:
         # Set while a page turn (start_turn) runs: the Stop button sets it
         # (stop()). None between turns and during the voice view's turns.
         self.cancel: threading.Event | None = None
+        # stop() and _confirm() decide under it: a Stop either lands before
+        # a question is asked (none is) or finds it open (refused).
+        self.stop_lock = threading.Lock()
 
     def emit(self, event: dict) -> None:
         (self.listener or self.events.put)(event)
@@ -1196,10 +1199,11 @@ class WebAssistant:
         so the next one (the page's queued message) can start. False if no
         page turn is running, or it is waiting on a yes/no question (that
         is answered, not stopped)."""
-        cancel = s.cancel
-        if cancel is None or s.pending is not None:
-            return False
-        cancel.set()
+        with s.stop_lock:
+            cancel = s.cancel
+            if cancel is None or s.pending is not None:
+                return False
+            cancel.set()
         if s.cancel is cancel:  # still that turn: close its open stream now
             abort = getattr(s.chat, "abort", None)
             if abort is not None:
@@ -1208,9 +1212,14 @@ class WebAssistant:
         return True
 
     def _confirm(self, s: Session, question: str) -> bool:
-        """Called in the turn's thread: ask the page and wait for the answer."""
+        """Called in the turn's thread: ask the page and wait for the answer.
+        A turn the Stop button ended asks nothing: the answer is no."""
         pending = PendingConfirm(question, stream=s.listener is not None)
-        s.pending = pending
+        with s.stop_lock:
+            if s.cancel is not None and s.cancel.is_set():
+                log.info("Turn stopped: confirmation not asked")
+                return False
+            s.pending = pending
         s.emit({"type": "confirm", "question": question, "id": pending.id,
                 "audio": f"/api/audio/{self.remember(question, s)}"})
         answered = pending.answered.wait(self.confirm_timeout)

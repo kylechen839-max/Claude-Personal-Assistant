@@ -318,7 +318,9 @@ async function readEvents(res) {
   if (!res.ok) {
     let message = `Error ${res.status}`;
     try { message = (await res.json()).error || message; } catch (e) { /* not JSON */ }
-    throw new Error(message);
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -363,8 +365,9 @@ function handleEvent(ev) {
     case "reply":
       setConfirm(null);
       if (ev.stopped) {  // the Stop button: what came so far, not spoken
-        if (live && !ev.text) live.remove(); else if (live) live.textContent = ev.text;
-        else if (ev.text) addMessage("claude", ev.text);
+        // Its words were all streamed already (an earlier tool round's
+        // too, into their own bubble): keep them, add none.
+        if (live && !live.textContent) live.remove();
         live = null;
         addMessage("note", "Stopped.");
         setStatus("");
@@ -413,7 +416,9 @@ async function send(body, sentFiles) {
   } catch (e) {
     addMessage("note", e.message || String(e));
     setStatus("");
-    if (answering && !confirming) setConfirm(question);
+    // the question is gone on the server (409: expired or answered
+    // elsewhere): don't bring it back, the queue may go
+    if (answering && !confirming && e.status !== 409) setConfirm(question);
   } finally {
     if (router) router.endTurn();
     setBusy(false);
@@ -439,6 +444,7 @@ async function refreshState() {
     if (window.KwilBrief) window.KwilBrief.onState(state);  // brief.js
     if (window.KwilUI) window.KwilUI.renderHealth(document, state.health);  // ui.js
     setConfirm(state.confirm);
+    if (!state.busy && !state.confirm) sendQueued();  // e.g. the question expired
     if (state.busy && !state.confirm) {
       setBusy(true);
       setStatus("Thinking…");

@@ -752,6 +752,43 @@ def test_stop_needs_a_running_page_turn_and_never_answers_a_question(make_app, f
     assert [e["type"] for e in rest] == ["reply", "done"] and "stopped" not in rest[0]
 
 
+def test_stop_while_the_question_is_being_built_asks_nothing_and_runs_nothing(
+        make_app, fake_client):
+    """Judge round 1: a Stop landing while confirm_prompt runs (e.g. the
+    calendar's describe_for_delete fetching the event) must not let the
+    question be asked afterwards, or a "yes" would still run the delete."""
+    deleted = []
+    building, gate = threading.Event(), threading.Event()
+    reg = ToolRegistry()
+    reg.register(Tool(
+        name="delete_event", description="Delete an event.",
+        input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+        handler=lambda title: deleted.append(title) or {"deleted": title},
+        confirm_prompt=lambda i: (building.set(), gate.wait(5))
+        and f"Delete {i['title']}?"))
+    fake_client.queue = [make_response(tool_use_block("delete_event", {"title": "Dentist"}),
+                                       stop_reason="tool_use"),
+                         make_response(text_block("Next."))]
+    assistant, client = make_app(tools=reg)
+    login(client)
+    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE],
+                             client.app.state.web.store.epoch)
+    s = assistant.session(sid)
+    assert assistant.start_turn(s, text="delete the dentist")
+    assert building.wait(5)
+    assert client.post("/api/stop", headers={"Content-Length": "0"}).json() == {"stopped": True}
+    gate.set()
+    evs = events(client.get("/api/events"))
+    assert [e["type"] for e in evs] == ["tool", "reply", "done"]  # no "confirm"
+    assert evs[1]["stopped"] is True
+    assert deleted == [] and s.pending is None
+    assert client.post("/api/confirm", json={"answer": "yes"}).status_code == 409
+    assert deleted == []
+    assert len(fake_client.calls) == 1
+    nxt = events(client.post("/api/turn", json={"text": "ok"}))  # valid history
+    assert nxt[0]["text"] == "Next."
+
+
 def test_stop_leaves_a_voice_view_turn_alone(make_app, fake_client):
     started, gate = threading.Event(), threading.Event()
     fake_client.queue = [make_response(tool_use_block("slow", {}), stop_reason="tool_use"),
