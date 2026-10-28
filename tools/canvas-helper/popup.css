@@ -1,8 +1,57 @@
-body { font: 14px/1.4 system-ui, sans-serif; width: 320px; margin: 12px; color: #1b2a3a; }
-h1 { font-size: 16px; margin: 0 0 8px; }
-.title { font-weight: 600; margin: 0 0 4px; }
-ul { padding-left: 18px; margin: 4px 0 10px; }
-.hint { color: #5a6b7c; font-size: 12px; }
-button { font: inherit; padding: 4px 10px; margin: 2px 4px 2px 0; border-radius: 6px;
-         border: 1px solid #2f6fd6; background: #2f6fd6; color: #fff; cursor: pointer; }
-button.danger { background: #fff; color: #b3261e; border-color: #b3261e; }
+/* Kwil Canvas helper popup. Kwil's own tokens (kwil/web/app.css), light and
+   dark; the system font; nothing from another site. */
+:root {
+  --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eaeef3; --surface-3: #dde3ea;
+  --text: #1a2330; --muted: #5d6878;
+  --accent: #2f5d8a; --accent-strong: #244a70; --on-accent: #fff;
+  --bad-ink: #a33a2e;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121a24; --surface: #1b2532; --surface-2: #233042; --surface-3: #2c3a4e;
+    --text: #e8edf3; --muted: #8d9aab;
+    --accent: #3f74b3; --accent-strong: #335f94;
+    --bad-ink: #f08a7e;
+    color-scheme: dark;
+  }
+}
+
+body { font: 14px/1.45 var(--font); width: 320px; margin: 0; padding: 14px 16px 16px;
+       background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+
+/* the extension's name is the quiet line; the status is the headline */
+h1 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
+.title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 8px; }
+
+/* status lines: one filled panel, no bullets */
+ul { list-style: none; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+     background: var(--surface); font-variant-numeric: tabular-nums; }
+li + li { margin-top: 2px; }
+
+#access-box, #canvas-box, #kwil-box, #switch-box { margin: 0 0 10px; }
+#access-box .hint, #kwil-box .hint, #switch-box .hint { margin: 0 0 6px; }
+.hint { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+
+/* buttons: one style per role. Primary (the state's action) is filled;
+   Revoke is secondary; Unpair is destructive text on a tone step. */
+button { font: inherit; font-weight: 600; min-height: 34px; padding: 6px 12px;
+         margin: 2px 6px 2px 0; border: 0; border-radius: 10px;
+         background: var(--accent); color: var(--on-accent); cursor: pointer;
+         transition: transform .12s ease-out, background-color .15s ease; }
+button.secondary { background: var(--surface-2); color: var(--text); }
+button.danger { background: var(--surface-2); color: var(--bad-ink); }
+@media (hover: hover) and (pointer: fine) {
+  button:hover { background: var(--accent-strong); }
+  button.secondary:hover, button.danger:hover { background: var(--surface-3); }
+}
+button:active { transform: scale(.97); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#paired-box { display: flex; flex-wrap: wrap; margin: 4px 0 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  button:active { transform: none; }
+}
