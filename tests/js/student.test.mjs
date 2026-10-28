@@ -771,3 +771,16 @@ test("the Canvas row offers Connect only when its sheet has a way to connect", a
     assert.equal(marks.at(-1).action === 'Connect', shown, JSON.stringify(over));
   }
 });
+
+test('a deadline from a source the page does not name has no stray " · "', async () => {
+  const { card } = load({ items: { status: 200, body: { items: [
+    { id: 9, title: 'Essay', course: 'ENG 101', kind: 'assignment', due: '2026-11-04',
+      status: 'ok', source: 'unknown' }],
+    canvas: { connected: true, school: 'canvas.example.edu', managed: 'app' } } } });
+  await tick();
+  const meta = card.find((e) => e.tagName === 'p' && e.className === 'hint'
+    && e.children.length && e.parentNode?.find((x) => x.textContent === 'Essay · ENG 101'));
+  assert.ok(meta, 'the deadline has a meta line');
+  assert.equal(meta.children.length, 1);
+  assert.ok(!card.all().some((e) => e.textContent === ' · '));
+});

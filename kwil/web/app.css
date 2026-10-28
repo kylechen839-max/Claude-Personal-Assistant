@@ -560,7 +560,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .transcript .summary::before { content: "Summary"; display: block; font-size: var(--t-cap); font-weight: 600;
   color: var(--accent-ink); margin-bottom: var(--s1); }
 /* CSS-drawn words i18n.js can't reach: Chinese for a zh-CN page */
-:root:lang(zh) .transcript .summary::before { content: "摘要"; }
+:root:lang(zh) .transcript .summary::before { content: "对话摘要"; }
 .transcript .log { flex: none; overflow: visible; padding-top: 1.25rem; }
 .msg .tools { display: block; font-size: .75rem; color: var(--muted); margin-bottom: .3rem; white-space: normal; }
 .msg .tag { color: var(--muted); font-size: .8125rem; }
