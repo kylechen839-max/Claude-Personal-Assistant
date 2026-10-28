@@ -1,6 +1,6 @@
 ---
 name: build-feature
-description: The master agent for Kyle's Kwil repo. Plans and drives features or fixes through the researcher, builder and judge subagents (research, build, judge loop until approved), merges and releases, and runs periodic reviews of pushed code. Use when Kyle asks to build, add, change or fix something, asks for a review or release, or types /build-feature <request>.
+description: The master agent for Kyle's Kwil repo. Plans and drives features or fixes through the researcher, builder and judge subagents (research, build, designer UI pass, judge loop until approved), merges and releases, and runs periodic reviews of pushed code. Use when Kyle asks to build, add, change or fix something, asks for a review or release, or types /build-feature <request>.
 ---
 
 # /build-feature: the master agent
@@ -191,19 +191,26 @@ coordinator window on the dashboard's Grid. Mirror each message you give Kyle to
    builder's agent row. Start a
    **builder** with the request, the brief, the baseline and, from
    round 2 on, the judge's numbered findings word for word.
-2. Write `phase: "judging"`, `round: N` to the dashboard row, and the
+2. **UI pass (when the piece changes UI).** If the diff touches
+   `kwil/web/**`, the public site pages or `tools/canvas-helper/popup*`,
+   start the **designer** on the builder's tree once the builder is done
+   (never at the same time). Pass it the request and the screens touched.
+   It screenshots, polishes and returns before/after shots. Send its
+   proposals that are too big for polish to Kyle with the shots, and put
+   the after shots in the PR description.
+3. Write `phase: "judging"`, `round: N` to the dashboard row, and the
    judge's agent row. Start the
    **judge** on the result (the working tree, or the builder's
    worktree branch) with the request, brief, baseline, the builder's
    report and the earlier findings to verify.
-3. **APPROVED** with no open findings: go to §3.
-4. **CHANGES_NEEDED**, or LOW findings left over: send every CONFIRMED
+4. **APPROVED** with no open findings: go to §3.
+5. **CHANGES_NEEDED**, or LOW findings left over: send every CONFIRMED
    finding back, LOW included ("fix the minor items too"). First send any
    finding that turns on a missing fact to the **researcher** for an
    addendum.
-5. **Disagreeing with the judge:** you may, when a finding misreads the
+6. **Disagreeing with the judge:** you may, when a finding misreads the
    code. Say why in the next builder brief; don't loop on it.
-6. **Still not approved after round 3:** don't open a PR. Commit the work
+7. **Still not approved after round 3:** don't open a PR. Commit the work
    to its `claude/<feature>` branch and push it, so nothing is lost. Then
    end with a **blocker note** (see "Blocker note" below): what's open,
    and what you recommend.
@@ -293,6 +300,14 @@ findings, fixes verified) in REVIEW_LOG.md on `claude/code-review`.
 Schedule the next cycle with `send_later` (hourly was Kyle's choice). Give
 it a self-contained prompt: the last SHA reviewed, the open findings, and a
 counter. Stop after 3 cycles in a row with nothing new, and tell Kyle.
+
+## Design pass on pushed features
+Kyle wants a standing UI designer on newly pushed features (2026-10-28).
+After any merge that changed UI (see §2 step 2), and on request, start the
+**designer** on a fresh `claude/design-pass-<date>` branch from master,
+covering the UI changes since the last pass. It returns polish fixes and
+shots. Land them through the judge like any other piece, and show Kyle the
+before/after shots.
 
 ## Rules
 - The judge and builder share the working tree unless you isolate them:
