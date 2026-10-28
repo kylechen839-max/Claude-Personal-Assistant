@@ -193,13 +193,17 @@ def test_cli_check_runs_without_api_key(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # no .env / config.toml here
     seen = {}
 
-    def fake_run_checks(cfg, keyword_path):
+    def fake_run_checks(cfg, keyword_path, verify=None):
         seen["keyword_path"] = keyword_path
+        seen["verify"] = verify
         return [doctor.Check("thing", True, "fine")]
 
     monkeypatch.setattr(doctor, "run_checks", fake_run_checks)
     assert cli.main(["--check", "--keyword-path", "k.onnx"]) == 0
     assert seen["keyword_path"] == "k.onnx"
+    # the CLI (only) asks Google whether the saved sign-in still works
+    from kwil.tools.google_auth import verify_sign_in
+    assert seen["verify"] is verify_sign_in
 
 
 # ---------- mic_device = 0 is device 0, not "the default" ----------

@@ -850,6 +850,9 @@ def serve(config: dict, port: int | None = None, tts_name: str | None = None,
     warm_up(web_assistant)
     logging.getLogger("uvicorn.access").addFilter(
         lambda record: HEALTH not in record.getMessage())  # every few seconds
+    from kwil.config import quiet_access_log
+
+    quiet_access_log()  # no school name or host from a query string in the log
     log.info("Cloud web app listening on %s:%s", host, port)
     # proxy_headers off: CloudGuard decides which forwarded headers to trust.
     uvicorn.run(app, host=host, port=port, log_config=None, **UVICORN_OPTIONS)

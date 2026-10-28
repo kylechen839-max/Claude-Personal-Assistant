@@ -81,3 +81,6 @@ def test_backends_from_the_environment(monkeypatch):
     assert [(b.role, b.url) for b in s.backends] == [
         ("pi", "https://pi.t.ts.net"), ("pc", "https://pc.t.ts.net"),
         ("cloud", "https://hc.onrender.com")]
+    # this machine stays the cloud (the list once overwrote it with "pc")
+    assert s.role == "cloud"
+    assert [b.role for b in s.peers] == ["pi", "pc"]

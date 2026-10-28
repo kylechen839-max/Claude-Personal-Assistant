@@ -604,8 +604,21 @@ for all of this except the Google sign-in.
     `python -m kwil.tools.google_auth` there, and connect again on the
     server. `GOOGLE_TOKEN_JSON` is that same PC token, so if Google ended
     it, also paste the new `token.json` into `GOOGLE_TOKEN_JSON` in Render.
+- [ ] Expired sign-in: at myaccount.google.com/permissions remove Kwil's
+      access (or wait out a Testing-mode token), then ask "What's on my
+      calendar today?" and open ⚙.
+  - Should: Kwil says the Google sign-in expired or was revoked; ⚙ says
+    "Google sign-in expired. Reconnect to keep using it." (in Chinese on a
+    Chinese account) with **Reconnect Google account**, not "Google
+    account connected."; tapping it runs the usual Google sign-in, after
+    which ⚙ says "Google account connected." and the calendar question
+    works. Do the same once on a family member's phone. Render's log has
+    "needs reconnecting" and no token or Google error text.
 - [ ] Render Shell: `python -m kwil --check`.
-  - Should: no mic or speaker lines; `WEB_TOKEN`, "Google account:
+  - Should: a "Google sign-in" line, OK while Google accepts the sign-in
+    (run between removing access and reconnecting in the step above, it
+    warns "Google refused it (invalid_grant): the sign-in expired or was
+    revoked"); no mic or speaker lines; `WEB_TOKEN`, "Google account:
     connected in the app" (or `GOOGLE_TOKEN_JSON`), the time zone,
     Whisper model and Piper voice OK.
 - [ ] In Safari on the iPhone (Wi-Fi off), open
@@ -914,12 +927,41 @@ phone app's menu.
       `user_` and an assignment title.
   - Should: not found.
 
+### The way in, picked for your school (optional, ~10 min; a real school)
+- [ ] On the iPhone app, disconnected: find your school and pick it.
+  - Should: one step only. A school not known yet shows the calendar feed
+    with **Get course files too**; nothing asks you to choose between
+    feed, token and helper.
+- [ ] If the card shows the token step, tap **Open my Canvas settings**.
+  - Should: your Canvas's settings page opens in a new tab (not blocked),
+    showing **New access token** (or, if your school blocks them, no such
+    button). Note whether iOS opened the Canvas Student app instead: that
+    app has no token button, so tell the team if it did.
+- [ ] If there is no **New access token** button, go back and tap **My
+      Canvas has no New access token button**.
+  - Should: "Thanks. Here is another way in for your school." and the
+    feed step at once.
+- [ ] On the computer, Chrome or Edge, the same school (a fresh browser
+      profile or after disconnecting).
+  - Should: a school that blocks tokens, or one not known yet, shows only
+    the Canvas helper step, with **Use the calendar feed instead** under
+    it.
+- [ ] With the helper paired and synced once (next sections), open the
+      card's status on the server
+      (`GET /api/student/items` in the browser's address bar while signed
+      in) and look at `canvas.policy`.
+  - Should: your school's host with `"blocked"` or `"allowed"` matching
+    whether your Canvas settings page has **New access token** (this
+    checks the helper's read of the page on real Canvas; `null` means the
+    page didn't say, which is safe but tell the team).
+
 ### Course files (optional, ~15 min; needs a Canvas access token)
 Deploy first with `--requirements` (it adds `pypdf`).
-- [ ] In the card tap **Use an access token instead**, enter your school's
-      address and a new token (Canvas -> **Account** -> **Settings** ->
-      **New access token**), tap **Connect Canvas**, then leave the app
-      alone for 10 minutes.
+- [ ] In the card find your school. If the card shows the token step, use
+      it; if it shows the feed, tap **Get course files too**. Tap **Open my
+      Canvas settings**, make a new token there (**New access token**,
+      with an expiry date), paste it, tap **Connect with token**, then
+      leave the app alone for 10 minutes.
   - Should: no other tap needed. Afterwards new drafts marked "Course
     files" may appear in "What I captured" (dates from a syllabus or
     announcement), none of them confirmed.

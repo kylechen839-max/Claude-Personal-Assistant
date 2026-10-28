@@ -152,7 +152,7 @@ class GmailInbox:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", timezone: str | None = None,
                  max_summary: int = MAX_SUMMARY, save_token: bool = True,
-                 environ=None, in_app: bool = False):
+                 environ=None, in_app: bool = False, account: str | None = None):
         self._service = NoSendGmail(service) if service is not None else None
         self.credentials_path = credentials_path
         self.token_path = token_path
@@ -161,6 +161,7 @@ class GmailInbox:
         self.save_token = save_token
         self.environ = os.environ if environ is None else environ
         self.in_app = in_app
+        self.account = account  # whose: None the owner, else a family id
         self.tz = local_zone(timezone)
         self.max_summary = max_summary
 
@@ -172,7 +173,8 @@ class GmailInbox:
             # Raises MissingScopes (with the sign-in command) for an old token.
             creds = get_credentials(self.credentials_path, self.token_path,
                                     scopes=GMAIL_SCOPES, save_token=self.save_token,
-                                    environ=self.environ, in_app=self.in_app)
+                                    environ=self.environ, in_app=self.in_app,
+                                    account=self.account)
             self._service = NoSendGmail(build("gmail", "v1", credentials=creds,
                                               cache_discovery=False))
         return self._service

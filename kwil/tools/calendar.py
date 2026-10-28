@@ -251,7 +251,7 @@ class GoogleCalendar:
     def __init__(self, service=None, credentials_path="credentials.json",
                  token_path="token.json", calendar_id="primary",
                  timezone: str | None = None, save_token: bool = True,
-                 environ=None, in_app: bool = False,
+                 environ=None, in_app: bool = False, account: str | None = None,
                  color_labels: dict | None = None, extras: bool = False,
                  clock=_time.monotonic):
         self._service = service
@@ -262,6 +262,9 @@ class GoogleCalendar:
         # process environment); a family member's is empty (family.py)
         self.environ = os.environ if environ is None else environ
         self.in_app = in_app  # errors say "reconnect Google in the app"
+        # whose sign-in (None the owner, else a family member's id): a
+        # refused refresh marks it google_auth.needs_reconnect
+        self.account = account
         self.calendar_id = calendar_id
         self.tz = local_zone(timezone)
         # Kyle's own names for colors ([calendar] color_labels), e.g.
@@ -283,7 +286,8 @@ class GoogleCalendar:
 
             creds = get_credentials(self.credentials_path, self.token_path,
                                     save_token=self.save_token,
-                                    environ=self.environ, in_app=self.in_app)
+                                    environ=self.environ, in_app=self.in_app,
+                                    account=self.account)
             self._service = build("calendar", "v3", credentials=creds,
                                   cache_discovery=False)
         return self._service

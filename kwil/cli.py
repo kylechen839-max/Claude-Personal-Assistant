@@ -1207,8 +1207,10 @@ def main(argv=None) -> int:
     server = config["profile"] == "server"
     if args.check:
         from kwil import doctor
+        from kwil.tools.google_auth import verify_sign_in
 
-        return doctor.report(doctor.run_checks(config, args.keyword_path))
+        return doctor.report(doctor.run_checks(config, args.keyword_path,
+                                               verify=verify_sign_in))
     if args.update:
         from kwil import updater
 

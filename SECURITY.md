@@ -979,6 +979,24 @@ a PKCE challenge, `access_type=offline` and the redirect
   `google_connect` (that refusal of inherited secrets is for separate
   instances, and Render sets `GOOGLE_TOKEN_JSON` in the process
   environment on purpose).
+- **"Sign-in expired" status** (`google_auth.needs_reconnect`). When
+  Google refuses a refresh (a non-retryable `RefreshError`, e.g.
+  `invalid_grant`), or the saved token is unusable, the server remembers
+  only who (the owner, or a family member's id), which token
+  (`GOOGLE_TOKEN_JSON` or a token file, kept apart so the owner's
+  Disconnect falls back to a refused env token as refused) and when, in memory,
+  bounded (`MAX_RECONNECT`, oldest first); never the token or Google's
+  error body. `/api/google/status` then adds `needs_reconnect: true` for
+  that caller's own account only, and the app offers Reconnect (the same
+  state/PKCE/binding-cookie flow). A later successful refresh of that
+  token, or a connect or disconnect of the file, clears it. Logs: INFO says "needs reconnecting for
+  <id>" / "works again for <id>"; the WARNING keeps only the OAuth error
+  code. Status requests never call Google. `python -m kwil --check` (and
+  so the updater's smoke run) does one token refresh with a 10 s timeout
+  to tell whether the sign-in still works, reporting the error code or
+  the exception's type, never its text. Not fixed: the flag is per
+  process, so after a restart it shows again only after the next refused
+  call (deliberate: no Google call per status request).
 - Not fixed: sharing the PC through Tailscale lets her reach every port it
   serves, including Kyle's own instance; that still needs Kyle's
   `WEB_TOKEN`. To narrow it, limit her in the tailnet policy to port 8443.
@@ -1192,6 +1210,75 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   with an `https://` / `webcal://` link, says nothing if permission is
   denied, and never submits: the person still taps Connect. No inline
   handlers (the CSP is unchanged).
+- **The way in, picked for the school (`canvas_schools.py`).** The card
+  shows one step (token, helper or feed) from the school's token policy
+  and the device. **Open my Canvas settings** opens
+  `https://<host>/profile/settings` with `noopener`, for the same checked
+  host, straight from the tap. The policy comes from a seed in the
+  repository (`kwil/data/canvas_schools.json`: every entry needs an
+  `https` source and a `checked` date, enforced by `check_entry` and a
+  test; `*.instructure.com` hosts only by exact listing, so no entry can
+  cover every Instructure school) and from what this server learned in
+  `<[student] dir>/canvas_policy.json` (`write_private`; per host
+  `{allowed, blocked, allowed_at, blocked_at, last, day_allowed,
+  day_blocked}`: counts and dates, never who; at most 1000 hosts, the
+  least recently seen dropped first; a tampered file is read entry by
+  entry and anything malformed dropped). Learned results are claims, each
+  person's counted once: the **first** working sync of a token connected
+  in the app ("allowed"; once per link, never the background's later
+  syncs, and never a token set in the environment), the helper's reading
+  of the settings page (counted when it is new or changed for that
+  pairing, not every run), and a person's **My Canvas has no New access
+  token button** (`POST /api/student/canvas/report`, signed in, `{host,
+  tokens: "blocked"}` only, 3 an hour per person, one counted per person
+  and host). A learned result only beats a seed entry when it is dated
+  after the entry was checked; the outcome seen on the latest day wins,
+  and on the same day the one counted more **that day** wins, a tie being
+  "blocked" (all-time counts never decide, so weeks of one link working
+  can't outvote today's report). A token that worked may be a TA's, or
+  older than the school's restriction: that is why it counts once and a
+  newer "blocked" beats it. A 401 or 403 from Canvas records nothing (an
+  expired or revoked token, a permission or a rate limit).
+  **Who uses which school.** What was learned names schools people on
+  this server use, so the policy route, the lookup's `tokens` and the
+  report's answer reveal a learned result only once it rests on at least
+  two separate events (`canvas_schools.MIN_EVENTS`), or when the host is
+  the asker's own (their link's, or the one their helper reads; the
+  status's `policy` is always their own). One person's single report or
+  link shows nothing to anyone else, but the two events are counted, not
+  the people behind them: one person can supply both, by reconnecting a
+  token (a student token lasts at most 120 days) or by reporting and then
+  pairing the helper. **Deliberate non-fix:** counting distinct people
+  would mean storing a pseudonymous person-to-school link in the file,
+  which is worse than this gap; and the per-person report memory is
+  in-process, so after a restart the same person could add a second event
+  for a host. The worst a signed-in person can
+  do with false reports is steer the card's suggestion for one school on
+  this server (everyone still gets a working way in, and the fallback
+  links stay); **deliberate non-fix:** reports are not weighted by who
+  sent them, and a person can fill the 1000-host table with made-up hosts
+  over several hours (the oldest go first; the seed is untouched). The
+  host names the person's school, so it is never logged (outcome and
+  counts only): not by Kwil's own log lines, and not by uvicorn's access
+  log either, which writes every request's path with its query string at
+  INFO (the log file and Render's log, with the client address):
+  `config.AccessQueryFilter`, installed by `setup_logging` and again by
+  both `webapp.serve` and `cloud.serve`, cuts the query of every
+  `/api/student/*` path to `?…`, so neither `?host=` nor the school
+  lookup's `?q=` (a school's name) is written (a test runs real uvicorn
+  and reads its access records). `GET /api/student/canvas/policy?host=`
+  answers from local data only (no request leaves the server) and shares
+  the school lookup's 10-a-minute budget. Nothing is shared between
+  installations.
+- **Tokens for the owner only (`[canvas] tokens_for = "owner"`).**
+  Canvas's API policy says apps used by many people must use OAuth rather
+  than ask them for personal tokens. With `"owner"` (anything but
+  `"everyone"` counts as `"owner"`), the status tells an invited person's
+  page `tokens_offered: false` (the card never offers the token step) and
+  the connect route refuses a member's token with 403 `{code:
+  "tokens_owner_only"}` before anything is resolved or stored; the owner
+  always keeps it. A member already connected with a token is left as is
+  (no silent delete); they move by disconnecting.
 - **Untrusted content.** Feed titles, planner items, module pages and
   emails are written by other people: `list_deadlines` is
   `untrusted_output` (and `private`), so once it ran, `add_deadline` and
@@ -1397,7 +1484,18 @@ by default, needs `[canvas] content`). Kwil fetches nothing for it.
   course/person bounds, excluded (deleted) courses, generation/alive
   checks and date drafts as the token sync, with origin "helper". It
   writes only the paired person's own store, so a course id naming
-  someone else's course reaches nothing of theirs. A file's `url` is
+  someone else's course reaches nothing of theirs. An optional `canvas`
+  (`{host, can_create_tokens, only_student}`, what the helper read on the
+  settings page) must be exactly that shape (a host string and booleans;
+  a wrong shape or type is a 400 for the whole manifest; a host string
+  Kwil doesn't take as a Canvas host, such as an IP, a LAN-only or
+  punycode name, drops only the reading, and the helper doesn't send one
+  for such a host either), is counted
+  only while the push is still alive (key current, no disconnect), feeds
+  the learned token policies above as a claim ("blocked" if false,
+  "allowed" only from a student-only account), and its host is kept in
+  the person's own `canvas_helper.json` (gone with revoke or
+  Disconnect). A file's `url` is
   dropped on arrival (Kwil fetches nothing, so there's no SSRF). A file
   push is accepted only if a manifest of that person asked for it within
   an hour (kept in memory, at most 200 per person), with the metadata that
@@ -1472,6 +1570,17 @@ build step and no dependencies (loaded unpacked for now).
   `redirect: "error"` (a redirect can't carry the key away). The extension
   has no `cookies` permission and never reads a cookie; the browser
   attaches Canvas's own session to Canvas's own requests.
+- **The token check never makes a token.** Once a run,
+  `CanvasReader.tokenPolicy` GETs `/profile/settings` on the pinned
+  origin (the same `_request` origin and deadline checks, at most 2 MB
+  read, no retry) and looks only for `"can_update_tokens"` and
+  `"user_is_only_student"` in the page's ENV. A non-200, a sign-in
+  redirect, an answer from another origin, a network error, a missing key
+  or a key given both ways is "unknown" and nothing is sent. It never
+  calls `POST /api/v1/users/self/tokens` (the node tests check every
+  Canvas request is a GET and none names the token API). Canvas's own
+  OAuth doc forbids apps from having people hand over tokens, so minting
+  one for them was ruled out.
 - **What is sent.** Only the fields the pipeline reads: a course's id,
   name, code and syllabus; pages (id, slug, title, dates, body);
   assignments (id, name, due and updated dates, description); module
