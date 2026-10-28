@@ -941,8 +941,8 @@ Deploy first with `--requirements` (it adds `pypdf`).
   - Should: Kwil has no course files any more.
 
 ### Canvas helper pairing (optional, ~5 min; on the cloud app)
-The helper extension itself comes in the next change; this checks the
-server side and the card.
+This checks the server side and the card; the next section checks the
+extension.
 - [ ] On a computer, open the Kwil app at its cloud address, open the menu
       and tap **Set up Canvas helper** in the School deadlines card.
   - Should: a code starting `kcp1.` and "It works once, for 10 minutes";
@@ -951,6 +951,56 @@ server side and the card.
   - Should: the code is gone and **Set up Canvas helper** is back.
 - [ ] Open the server log (Render: Logs) and search for `kcp1.` and `kcs1.`.
   - Should: not found (only "opened a pairing code" lines, no codes).
+
+### Canvas helper extension (optional, ~20 min; Chrome or Edge, a real school)
+Needs a computer with Chrome or Edge, your school's Canvas sign-in, and
+the cloud app. Install it as `tools/canvas-helper/README.md` says (Load
+unpacked).
+- [ ] At `chrome://extensions` (or `edge://extensions`), open the helper's
+      **Details**.
+  - Should: site access lists heykwil.com, instructure.com and
+    inscloudgate.net only; no "read and change all your data".
+- [ ] Open Kwil, School deadlines, **Set up Canvas helper**.
+  - Should: within a few seconds "Canvas helper connected." and the code
+    is gone; the helper's popup says Paired, Kwil: heykwil.com.
+- [ ] Open your school's Canvas (signed in). If it is not on
+      `*.instructure.com`, click the helper's icon there and **Use as my
+      school's Canvas**, and allow it.
+  - Should: Chrome asks for that one site only; within a minute the popup
+    shows Canvas: your school's address and a last sync "just now". The
+    popup offers nothing on your Canvas pages after that.
+- [ ] In Kwil, ask "what's the late policy in my syllabus?" (or something
+      in one of your course files).
+  - Should: the answer comes from your real syllabus or file.
+- [ ] With an account that has many courses (6 or more, or files in
+      each), and with every DevTools window closed (an open service-worker
+      console keeps the worker alive and hides the problem): click the
+      helper's icon, **Unpair this browser** twice, pair again from Kwil,
+      then close the popup and leave the browser alone for 5 minutes.
+  - Should: the popup then shows a last sync "just now"/"a few min ago"
+    with all your courses counted, and Kwil can answer from the last
+    course in your Canvas list too.
+- [ ] Open a Kwil page on another address while paired (e.g. the Render
+      address `https://<service>.onrender.com`, after **This is my Kwil**
+      there), tap **Set up Canvas helper**.
+  - Should: nothing pairs by itself; the popup there shows **Switch to
+    <that host>** naming both; only after clicking it does the card say
+    connected (then switch back the same way on heykwil.com).
+- [ ] Open the helper's service worker console (Details, **Inspect views:
+      service worker**) and read its log lines.
+  - Should: only counts and codes ("read 5 of 5 course(s)", "pushed ..."),
+    never a course or file name, a link or `kcs1.`.
+- [ ] In the same console's Network tab, open a request to your Canvas and
+      one to heykwil.com.
+  - Should: Canvas requests have no Authorization header; Kwil requests
+    have no Cookie header and go only to `/api/student/canvas/push/...`.
+- [ ] Sign out of Canvas, then wait for the next sync (or reload the
+      extension).
+  - Should: the popup says to sign in to Canvas; signing in and opening
+    Canvas again syncs within a minute.
+- [ ] Popup: **Unpair this browser** (twice), then **Revoke in Kwil**.
+  - Should: the popup says Not paired; Kwil opens, and after **Revoke
+    helper** the card no longer says connected.
 
 ---
 

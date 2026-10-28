@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Kwil Canvas helper, a Chrome/Edge extension (`tools/canvas-helper/`,
+  load unpacked) for schools that block Canvas tokens. Tap Set up Canvas
+  helper in Kwil and it pairs by itself, finds your Canvas, and syncs your
+  courses and the files Kwil asks for every 6 hours with your own sign-in.
+  Minimal permissions, read-only, rate-limited.
 - Canvas helper (server side): one-tap pairing (Set up Canvas helper),
   per-person `kcs1.` sync keys (stored hashed, revocable, rate-limited), and
   push routes that feed the same course-content pipeline, for schools that

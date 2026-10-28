@@ -1573,7 +1573,8 @@ and rate-limited.
 
 **Canvas helper** (for schools that block access tokens; `[canvas]
 helper`, on by default, needs `[canvas] content`). The Kwil Canvas helper,
-a Chrome/Edge extension (coming next; an iOS Shortcut after it), reads
+a Chrome/Edge extension in `tools/canvas-helper/` (load it unpacked: see
+its README; an iOS Shortcut comes later), reads
 your courses in your own signed-in Canvas tab and sends the same content
 to Kwil, which stores it exactly as the token sync does (same limits,
 same drafts, same tools, same deletes). Setup is one tap: **Set up Canvas
@@ -1591,6 +1592,19 @@ pushes an hour. Kwil never fetches anything for the helper and never sees
 your Canvas sign-in or cookies: the helper sends only the courses' JSON
 and file bytes it read. Pair it from the Kwil address the helper talks to
 (the cloud app, `heykwil.com`): what it sends is stored on that server.
+The extension finds your Canvas by itself on `*.instructure.com`; for a
+school domain of its own, click its icon there and **Use as my school's
+Canvas** (Chrome asks for that one site; a Kwil on its own domain is
+**This is my Kwil**, which asks "Send your Canvas courses to <host>?"
+first, and a second Kwil needs **Switch to <host>**). It syncs about half a minute after
+pairing, then every 6 hours while the browser is open and you are signed
+in to Canvas, pushing as it reads, and pushes only the files Kwil asks
+for (at most 40 a run).
+Its popup shows only status (paired, the Kwil and Canvas it uses, the
+last sync) with **Unpair this browser** and **Revoke in Kwil**. It asks
+for `storage`, `alarms`, `activeTab`, `scripting` and the hosts
+`heykwil.com`, `*.instructure.com` and `*.inscloudgate.net` (Canvas's
+file store); never `<all_urls>` or cookies.
 The helper reads only your own courses, with your own sign-in, like
 opening the pages yourself; some schools' rules limit automated access,
 so check yours. It is read-only and rate-limited.

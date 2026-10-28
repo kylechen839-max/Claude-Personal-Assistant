@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Kwil Canvas helper",
+  "short_name": "Kwil Canvas",
+  "version": "0.1.0",
+  "description": "Sends your own Canvas courses (syllabus, pages, assignments, announcements, course files) to your Kwil, with your own sign-in. Read-only.",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["alarms", "storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://heykwil.com/*",
+    "https://*.instructure.com/*",
+    "https://*.inscloudgate.net/*"
+  ],
+  "optional_host_permissions": ["https://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://heykwil.com/*"],
+      "js": ["content/kwil-pair.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.instructure.com/*"],
+      "js": ["content/canvas-seen.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Kwil Canvas helper",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  }
+}

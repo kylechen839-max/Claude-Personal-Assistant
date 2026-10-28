@@ -3,6 +3,17 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Canvas helper extension: the steps only Kyle can do (2026-10-27).**
+      The code is in `tools/canvas-helper/` (its README).
+      1. Load it unpacked in Chrome or Edge on your computer and run the
+         "Canvas helper extension" checks in MANUAL_TEST.md with your real
+         school (this also confirms Canvas's file store host and that
+         Chrome sends your Canvas session with the extension's requests;
+         both were unverifiable from the sandbox).
+      2. **Optional, costs money:** a Chrome Web Store listing needs a
+         developer account (a one-time registration fee) and a privacy
+         policy page; Edge Add-ons is free. Not done; nobody needs it while
+         Load unpacked works.
 - [ ] **Connected services: the steps only Kyle can do (2026-10-27).**
       The code is done (README "Connect your services in the app (cloud)").
       1. **Notion integration capabilities:** notion.so/profile/integrations
