@@ -65,6 +65,18 @@ export function rateLimited(status, headers, text) {
   return Number.isFinite(left) && left <= 0;
 }
 
+// The Canvas host as Kwil takes it for a token-policy reading
+// (kwil/canvas_schools.py normalize): lower case, no trailing dot, a dotted
+// public DNS name with a letters-only top-level domain (no IP, punycode
+// TLD or LAN-only name), else null (the reading is then not sent).
+const LOCAL_TLDS = /\.(local|localhost|internal|lan|home|arpa|test|invalid|example)$/;
+export function policyHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
+      LOCAL_TLDS.test(host)) return null;
+  return host;
+}
+
 // What Canvas's settings page says of access tokens, from the JSON of its
 // ENV ("can_update_tokens": the same check as making one;
 // "user_is_only_student"): {can_create_tokens, only_student}, each true,

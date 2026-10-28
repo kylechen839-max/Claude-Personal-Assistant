@@ -1522,11 +1522,15 @@ Kwil knows a school's policy from `kwil/data/canvas_schools.json` (schools
 whose own page says so, each with its source and the date it was checked;
 empty until entries are verified, and adding one is a data change only)
 and from what this server learned (`canvas_policy.json` in `[student]
-dir`: per Canvas host, counts and dates only, at most 1000 hosts): a
-token sync that worked, the helper reading your Canvas settings page, or
-someone's "no New access token button". Something learned after the
-school's entry was checked wins (policies change); an older one never
-does. Kwil never makes a token for you. `[canvas] tokens_for` (default
+dir`: per Canvas host, counts and dates only, at most 1000 hosts): the
+first sync of a token just connected in the app, the helper reading your
+Canvas settings page, or someone's "no New access token button", each
+person's word counted once. The newest day's outcome wins (a same-day tie
+is "blocked"), and something learned after the school's entry was checked
+beats the entry (policies change); an older one never does. Until two
+separate events back a learned result, only the person whose own Canvas
+it is sees it (so nobody can tell from the card which school another
+person on your server uses). Kwil never makes a token for you. `[canvas] tokens_for` (default
 `"everyone"`) decides who may use a token at all: with `"owner"`, invited
 people are only ever offered the helper or the feed, and connecting with a
 token answers them 403 (Canvas's API policy asks apps used by many people

@@ -750,6 +750,7 @@ def test_schools_report_token_policy(s, monkeypatch):
     token (the seed, else what was learned, else unknown); a typed
     address asks /api/student/canvas/policy."""
     _seed(s, [BLOCKS])
+    s.sync.policies.record("canvas.other.edu", "allowed")   # two events: shown to anyone
     s.sync.policies.record("canvas.other.edu", "allowed")
     monkeypatch.setattr(canvas, "find_school", lambda q, http=None: [
         {"name": "Example U", "base_url": "https://canvas.example.edu"},
@@ -785,14 +786,14 @@ def test_a_working_token_sync_records_allowed_and_a_401_nothing(s, monkeypatch):
     out = tess.post("/api/student/sync").json()
     assert "canvas_api" in out["errors"]
     assert not s.sync.policies.path.exists()
-    assert s.sync.policies.policy("canvas.example.edu") == "unknown"
+    assert s.sync.policies.policy("canvas.example.edu", own=True) == "unknown"
     # a token that works: the school lets students make them
     s.sync._last.clear()
     tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
                                            "token": CANVAS_TOKEN})
     out = tess.post("/api/student/sync").json()
     assert out["errors"] == {}
-    assert s.sync.policies.policy("canvas.example.edu") == "allowed"
+    assert s.sync.policies.policy("canvas.example.edu", own=True) == "allowed"
     assert tess.get("/api/student/items").json()["canvas"]["policy"] == {
         "host": "canvas.example.edu", "tokens": "allowed"}
     learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
@@ -810,8 +811,9 @@ def test_reporting_no_token_button_records_blocked(s):
     tess, _ = s.member()
     body = {"host": "canvas.new.edu", "tokens": "blocked"}
     r = tess.post("/api/student/canvas/report", json=body)
-    assert r.status_code == 200 and r.json() == {"host": "canvas.new.edu", "tokens": "blocked"}
-    assert s.sync.policies.policy("canvas.new.edu") == "blocked"
+    # one event: not shown back to anyone whose own host it isn't
+    assert r.status_code == 200 and r.json() == {"host": "canvas.new.edu", "tokens": "unknown"}
+    assert s.sync.policies.policy("canvas.new.edu", own=True) == "blocked"
     # only "blocked", only a Canvas host
     for bad in ({"host": "canvas.new.edu", "tokens": "allowed"},
                 {"host": "localhost", "tokens": "blocked"}, {"tokens": "blocked"}, {}):
@@ -841,10 +843,11 @@ def test_reports_are_throttled_per_person(s):
         assert tess.post("/api/student/canvas/report", json=body).status_code == 200
     assert tess.post("/api/student/canvas/report", json=body).status_code == 429
     learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
-    assert learned["canvas.new.edu"]["blocked"] == student_web.REPORTS
-    # someone else has their own budget
+    assert learned["canvas.new.edu"]["blocked"] == 1   # one person's claim counts once
+    # someone else has their own budget, and their claim is a second event
     sam, _ = s.member("Sam")
-    assert sam.post("/api/student/canvas/report", json=body).status_code == 200
+    r = sam.post("/api/student/canvas/report", json=body)
+    assert r.status_code == 200 and r.json()["tokens"] == "blocked"
 
 
 def test_policy_routes_are_404_when_student_is_off(fake_client, tmp_path, monkeypatch):
@@ -909,9 +912,153 @@ def test_policy_logs_hold_no_host(s, monkeypatch, caplog):
     tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
                                            "token": CANVAS_TOKEN})
     tess.post("/api/student/sync")
-    assert s.sync.policies.policy("canvas.example.edu") == "allowed"
+    assert s.sync.policies.policy("canvas.example.edu", own=True) == "allowed"
     ours = [r for r in caplog.records if r.name.startswith("kwil")]
     assert any("reported" in r.getMessage() for r in ours)
     for r in ours:
         assert "canvas.secret.edu" not in r.getMessage()
         assert "canvas.example.edu" not in r.getMessage()
+
+
+def _serve_once(paths):
+    """Real uvicorn (h11, log_config=None as both servers run it) on a free
+    port: GET each path once, so its own access-log records are emitted."""
+    import time
+
+    import uvicorn
+
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None,
+                                           proxy_headers=False, http="h11", lifespan="off"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(250):
+        if server.started:
+            break
+        time.sleep(0.02)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        for path in paths:
+            httpx.get(f"http://127.0.0.1:{port}{path}", timeout=5)
+    finally:
+        server.should_exit = True
+        thread.join(5)
+
+
+def test_the_access_log_never_names_the_school(monkeypatch):
+    """Judge MED 1: uvicorn logs every request's path with its query string
+    at INFO; a school's name or Canvas host in /api/student/* never reaches
+    the log (both servers install the filter, and setup_logging does)."""
+    from kwil import config as config_mod
+
+    access = logging.getLogger("uvicorn.access")
+    monkeypatch.setattr(access, "filters", [])
+    # another test may have run uvicorn with its default dictConfig (its own
+    # handler, propagate off): read the records on the logger itself
+    monkeypatch.setattr(access, "disabled", False)
+    monkeypatch.setattr(access, "level", logging.INFO)
+    seen = []
+
+    class Keep(logging.Handler):
+        def emit(self, record):
+            seen.append(record)
+
+    keep = Keep(logging.DEBUG)
+    access.addHandler(keep)
+    config_mod.quiet_access_log()
+    config_mod.quiet_access_log()
+    assert len(access.filters) == 1   # once
+    try:
+        _serve_once(["/api/student/canvas/policy?host=canvas.secretschool.edu",
+                     "/api/student/schools?q=Secret%20School%20University",
+                     "/api/other?keep=1"])
+    finally:
+        access.removeHandler(keep)
+    lines = [r.getMessage() for r in seen]
+    assert len(lines) == 3, lines
+    assert not any("secret" in line.lower() for line in lines), lines
+    assert any('"GET /api/student/canvas/policy?… HTTP/1.1" 200' in line for line in lines)
+    assert any("/api/student/schools?…" in line for line in lines)
+    assert any("/api/other?keep=1" in line for line in lines)   # other paths as they were
+
+
+def test_setup_logging_and_both_servers_quiet_the_access_log(tmp_path, monkeypatch):
+    import inspect
+
+    from kwil import cloud, config as config_mod
+
+    access = logging.getLogger("uvicorn.access")
+    monkeypatch.setattr(access, "filters", [])
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", list(root.handlers))
+    monkeypatch.setattr(root, "level", root.level)
+    config_mod.setup_logging({"logging": {"file": str(tmp_path / "a.log"), "level": "INFO",
+                                          "console_level": "WARNING"}})
+    try:
+        assert any(isinstance(f, config_mod.AccessQueryFilter) for f in access.filters)
+    finally:
+        for h in root.handlers:
+            h.close()
+    for serve in (webapp.serve, cloud.serve):   # also when started without setup_logging
+        source = inspect.getsource(serve)
+        assert source.index("quiet_access_log()") < source.index("uvicorn.run(")
+
+
+def test_one_working_token_never_pins_a_school_to_allowed(s, monkeypatch):
+    """Judge MED 2 (p2.py's shape): only the first working sync of a link
+    connected in the app counts; the background's syncs every 6 hours
+    don't, so one person's report later wins, and reconnecting counts once
+    more."""
+    from tests.test_canvas import FakeCanvas
+
+    _seed(s, [])
+    monkeypatch.setattr(canvas, "TRANSPORT", httpx.MockTransport(FakeCanvas()))
+    tess, uid = s.member()
+    tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                           "token": CANVAS_TOKEN})
+    for _ in range(30):   # "Sync now" and the background's runs over weeks
+        assert s.sync.sync(uid)["errors"] == {}
+    learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
+    assert learned["canvas.example.edu"]["allowed"] == 1
+    sam, _ = s.member("Sam")
+    sam.post("/api/student/canvas/report", json={"host": "canvas.example.edu",
+                                                 "tokens": "blocked"})
+    assert s.sync.policies.policy("canvas.example.edu") == "blocked"
+    s.sync.sync(uid)
+    assert s.sync.policies.policy("canvas.example.edu") == "blocked"
+    # a disconnect forgets the pending first sync; a new link counts once
+    tess.post("/api/student/disconnect", json={})
+    tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                           "token": CANVAS_TOKEN})
+    s.sync.sync(uid)
+    s.sync.sync(uid)
+    learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
+    assert learned["canvas.example.edu"]["allowed"] == 2
+
+
+def test_a_school_learned_once_is_shown_only_to_its_own_user(s, monkeypatch):
+    """Judge LOW 4: with one event behind it, a learned result would tell
+    other people on the server which school someone uses; it is shown to
+    the person whose own Canvas host it is, and to others from the second
+    separate event on."""
+    _seed(s, [])
+    monkeypatch.setattr(canvas, "find_school", lambda q, http=None: [
+        {"name": "Example U", "base_url": "https://canvas.example.edu"}])
+    tess, _ = s.member()
+    connect(tess)   # Tess's own link is on canvas.example.edu
+    s.sync.policies.record("canvas.example.edu", "blocked")
+    sam, _ = s.member("Sam")
+    for c, seen in ((sam, "unknown"), (tess, "blocked")):
+        r = c.get("/api/student/canvas/policy", params={"host": "canvas.example.edu"})
+        assert r.json()["tokens"] == seen
+        r = c.get("/api/student/schools", params={"q": "Example"})
+        assert r.json()["schools"][0]["tokens"] == seen
+    assert tess.get("/api/student/items").json()["canvas"]["policy"]["tokens"] == "blocked"
+    s.sync.policies.record("canvas.example.edu", "blocked")
+    r = sam.get("/api/student/canvas/policy", params={"host": "canvas.example.edu"})
+    assert r.json()["tokens"] == "blocked"

@@ -132,7 +132,7 @@ def test_what_the_extension_sends_is_what_the_push_routes_take(h):
     assert r.status_code == 200, r.text
     assert r.json()["want"] == [{"course_id": 111, "file_id": 501}]
     # ...and the school is learned as blocking students' tokens
-    assert h.app.state.student.policies.policy("school.instructure.com") == "blocked"
+    assert h.app.state.student.policies.policy("school.instructure.com", own=True) == "blocked"
     assert h.sam.get("/api/student/items").json()["canvas"]["policy"] == {
         "host": "school.instructure.com", "tokens": "blocked"}
     # the extension's own multipart body, byte for byte

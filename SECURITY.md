@@ -1202,26 +1202,52 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   test; `*.instructure.com` hosts only by exact listing, so no entry can
   cover every Instructure school) and from what this server learned in
   `<[student] dir>/canvas_policy.json` (`write_private`; per host
-  `{allowed, blocked, allowed_at, blocked_at, last}`: counts and dates,
-  never who; at most 1000 hosts, the least recently seen dropped first;
-  a tampered file is read entry by entry and anything malformed dropped).
-  Learned results are claims: a successful token sync ("allowed"), the
-  helper's reading of the settings page, and a person's **My Canvas has no
-  New access token button** (`POST /api/student/canvas/report`, signed in,
-  `{host, tokens: "blocked"}` only, 3 an hour per person). A learned
-  result only beats a seed entry when it is dated after the entry was
-  checked; on the same day the outcome seen more often wins, a tie is
-  unknown. A 401 or 403 from Canvas records nothing (an expired or revoked
-  token, a permission or a rate limit). The worst a signed-in person can
+  `{allowed, blocked, allowed_at, blocked_at, last, day_allowed,
+  day_blocked}`: counts and dates, never who; at most 1000 hosts, the
+  least recently seen dropped first; a tampered file is read entry by
+  entry and anything malformed dropped). Learned results are claims, each
+  person's counted once: the **first** working sync of a token connected
+  in the app ("allowed"; once per link, never the background's later
+  syncs, and never a token set in the environment), the helper's reading
+  of the settings page (counted when it is new or changed for that
+  pairing, not every run), and a person's **My Canvas has no New access
+  token button** (`POST /api/student/canvas/report`, signed in, `{host,
+  tokens: "blocked"}` only, 3 an hour per person, one counted per person
+  and host). A learned result only beats a seed entry when it is dated
+  after the entry was checked; the outcome seen on the latest day wins,
+  and on the same day the one counted more **that day** wins, a tie being
+  "blocked" (all-time counts never decide, so weeks of one link working
+  can't outvote today's report). A token that worked may be a TA's, or
+  older than the school's restriction: that is why it counts once and a
+  newer "blocked" beats it. A 401 or 403 from Canvas records nothing (an
+  expired or revoked token, a permission or a rate limit).
+  **Who uses which school.** What was learned names schools people on
+  this server use, so the policy route, the lookup's `tokens` and the
+  report's answer reveal a learned result only once it rests on at least
+  two separate events (`canvas_schools.MIN_EVENTS`), or when the host is
+  the asker's own (their link's, or the one their helper reads; the
+  status's `policy` is always their own). One person's single report or
+  link therefore shows nothing to anyone else. **Deliberate non-fix:**
+  the per-person report memory is in-process, so after a restart the same
+  person could add a second event for a host; two people can of course
+  confirm each other's school. The worst a signed-in person can
   do with false reports is steer the card's suggestion for one school on
   this server (everyone still gets a working way in, and the fallback
   links stay); **deliberate non-fix:** reports are not weighted by who
   sent them, and a person can fill the 1000-host table with made-up hosts
   over several hours (the oldest go first; the seed is untouched). The
   host names the person's school, so it is never logged (outcome and
-  counts only); `GET /api/student/canvas/policy?host=` answers from local
-  data only (no request leaves the server) and shares the school
-  lookup's 10-a-minute budget. Nothing is shared between installations.
+  counts only): not by Kwil's own log lines, and not by uvicorn's access
+  log either, which writes every request's path with its query string at
+  INFO (the log file and Render's log, with the client address):
+  `config.AccessQueryFilter`, installed by `setup_logging` and again by
+  both `webapp.serve` and `cloud.serve`, cuts the query of every
+  `/api/student/*` path to `?…`, so neither `?host=` nor the school
+  lookup's `?q=` (a school's name) is written (a test runs real uvicorn
+  and reads its access records). `GET /api/student/canvas/policy?host=`
+  answers from local data only (no request leaves the server) and shares
+  the school lookup's 10-a-minute budget. Nothing is shared between
+  installations.
 - **Tokens for the owner only (`[canvas] tokens_for = "owner"`).**
   Canvas's API policy says apps used by many people must use OAuth rather
   than ask them for personal tokens. With `"owner"` (anything but
@@ -1438,8 +1464,11 @@ by default, needs `[canvas] content`). Kwil fetches nothing for it.
   writes only the paired person's own store, so a course id naming
   someone else's course reaches nothing of theirs. An optional `canvas`
   (`{host, can_create_tokens, only_student}`, what the helper read on the
-  settings page) must be exactly that shape (a normalized Canvas host,
-  booleans; anything else is a 400 for the whole manifest), is counted
+  settings page) must be exactly that shape (a host string and booleans;
+  a wrong shape or type is a 400 for the whole manifest; a host string
+  Kwil doesn't take as a Canvas host, such as an IP, a LAN-only or
+  punycode name, drops only the reading, and the helper doesn't send one
+  for such a host either), is counted
   only while the push is still alive (key current, no disconnect), feeds
   the learned token policies above as a claim ("blocked" if false,
   "allowed" only from a student-only account), and its host is kept in

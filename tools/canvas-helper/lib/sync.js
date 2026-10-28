@@ -20,7 +20,7 @@
 // carry counts and codes only: never the key, a URL, a title or any
 // course text.
 
-import { CanvasError, CanvasReader } from "./canvas.js";
+import { CanvasError, CanvasReader, policyHost } from "./canvas.js";
 import { KwilClient, KwilError } from "./kwil.js";
 import { MAX_COURSES, batches, buildCourse, canvasId, size } from "./manifest.js";
 
@@ -85,11 +85,11 @@ export async function runSync({ pairing, canvasOrigin, fetch, sleep, now = Date.
   }
   const courses = all.filter((c) => c && typeof c === "object" && canvasId(c.id) !== null
                                     && !c.access_restricted_by_date);
-  // may this account make a token? (unknown: not sent)
+  // may this account make a token? (unknown, or a host Kwil wouldn't take: not sent)
   const policy = await canvas.tokenPolicy();
-  let policyNote = typeof policy.can_create_tokens === "boolean"
-    ? { host: new URL(canvas.origin).hostname, can_create_tokens: policy.can_create_tokens,
-        only_student: policy.only_student }
+  const host = policyHost(new URL(canvas.origin).hostname);
+  let policyNote = typeof policy.can_create_tokens === "boolean" && host
+    ? { host, can_create_tokens: policy.can_create_tokens, only_student: policy.only_student }
     : null;
 
   let maxFileBytes = Number(pairing.maxFileBytes) || 0;

@@ -6279,3 +6279,43 @@ live test that hit the Pinecone organisation's monthly embedding quota
 (429), failing the same way at the 17b063b baseline (3388 passed, 38
 skipped from a `git archive` copy, where `test_rebrand`'s git-history test
 skips). JavaScript 237 passed (220 before).
+
+### Round 2: the judge's findings (2026-10-28)
+1. MED, the school host in uvicorn's access log (both servers run with
+   `log_config=None`, so `?host=` and the lookup's `?q=` reached the log
+   file and Render at INFO with the client address).
+   `config.AccessQueryFilter` cuts the query of every `/api/student/*`
+   path to `?…`; `setup_logging` installs it, and so do `webapp.serve` and
+   `cloud.serve` before `uvicorn.run`. Test: real uvicorn (h11) on a free
+   port, reading its own access records for both routes (other paths
+   keep their query). The routes stay GET (the filter covers both).
+2. MED, one working token pinned a school to "allowed". Only the first
+   working sync of a token connected in the app counts (per link; the
+   background's syncs never, a disconnect forgets it); same-day outcomes
+   are compared on that day's counts (`day_allowed` / `day_blocked`), a
+   tie is "blocked". Each person's claim counts once: a report once per
+   person and host, the helper's reading when it is new or changed for the
+   pairing. Test shaped like p2.py at both levels (thirty "allowed" then a
+   report: blocked, and one more "allowed" that day doesn't flip it).
+3. LOW, a host the helper takes but the server doesn't made the manifest
+   400. `clean_canvas` now drops the reading (the courses still count)
+   for a host string that doesn't normalize, normalizes the rest (case,
+   trailing dot, an https URL), and keeps the 400 for wrong shapes and
+   types; the helper sends a reading only for a host passing the same rule
+   (`policyHost` in canvas.js). Tests on both sides (`.internal`, an IP,
+   a punycode TLD, `localhost`, `.local`).
+4. LOW, members could probe which schools others use. A learned result is
+   revealed only once it rests on `MIN_EVENTS` (2) events, or for the
+   asker's own Canvas host (their link's or their helper's), in the policy
+   route, the lookup's `tokens` and the report's answer. Test with two
+   members.
+
+Failing first: each fix's source files back at 0d6b571 with the new tests:
+1 (config/webapp/cloud) 2 of 2 fail; canvas_schools.py 5 fail;
+student_web.py 3 fail; canvas_helper.py 9 fail; sync.js the helper's
+host test fails. All pass restored.
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
+`-k "not live_pinecone"` (the Pinecone quota is used up): 3464 passed, 37
+skipped, 1 deselected (round 1: 3452 passed); JavaScript 238 passed
+(round 1: 237).

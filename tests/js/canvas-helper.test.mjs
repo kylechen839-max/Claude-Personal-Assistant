@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-import { CanvasReader, nextLink, parseTokenPolicy, rateLimited, stripGuard } from
+import { CanvasReader, nextLink, parseTokenPolicy, policyHost, rateLimited, stripGuard } from
   '../../tools/canvas-helper/lib/canvas.js';
 import { KwilClient, KwilError } from '../../tools/canvas-helper/lib/kwil.js';
 import { batches, buildCourse, size } from '../../tools/canvas-helper/lib/manifest.js';
@@ -883,4 +883,25 @@ test('the first manifest carries the token check; nothing posts to Canvas', asyn
     }
     assert.equal(canvasCalls(w).filter((c) => c.url.endsWith('/profile/settings')).length, 1);
   }
+});
+
+test('the token check is sent only for a host Kwil takes as a Canvas host', async () => {
+  // kwil/canvas_schools.py normalize's rule
+  assert.equal(policyHost('School.Instructure.com'), 'school.instructure.com');
+  assert.equal(policyHost('canvas.school.edu.'), 'canvas.school.edu');
+  for (const bad of ['canvas.uni.internal', '10.1.2.3', 'canvas.school.xn--p1ai', 'localhost',
+                     'canvas.school.local', 'intranet', '', null]) {
+    assert.equal(policyHost(bad), null, String(bad));
+  }
+  // a school Canvas on a LAN-only name: the courses go, the reading doesn't
+  // (Kwil would refuse it; it never makes the manifest a 400)
+  const odd = 'https://canvas.uni.internal';
+  const data = school();
+  data.settings = settingsPage({ canUpdate: false });
+  const w = world({ data, kwil: kwilRoutes() });
+  const out = await runSync({ pairing: PAIRING, canvasOrigin: odd, sleep: noSleep,
+    fetch: (url, opts) => w.fetch(String(url).replace(odd, CANVAS), opts) });
+  assert.equal(out.result, 'ok');
+  assert.ok(w.pushed.manifests.length >= 1);
+  for (const m of w.pushed.manifests) assert.equal(m.canvas, undefined);
 });

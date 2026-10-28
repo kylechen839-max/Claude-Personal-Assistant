@@ -145,30 +145,64 @@ def test_learned_beats_the_seed_only_when_newer(p):
     before never overrides it; one learned after does (policies change)."""
     p.clock.day = date(2026, 10, 1)
     assert p.record("canvas.example.edu", "allowed")
+    assert p.record("canvas.example.edu", "allowed")
     assert p.policy("canvas.example.edu") == "blocked"
     p.clock.day = date(2026, 10, 2)
     assert p.record("canvas.example.edu", "allowed")
     assert p.policy("canvas.example.edu") == "allowed"
-    # without a seed entry, what was learned decides at once
+    # without a seed entry, what was learned decides (for the asker's own
+    # host at once; for anyone else from MIN_EVENTS events on)
     assert p.policy("canvas.newschool.edu") == "unknown"
     p.record("canvas.newschool.edu", "blocked")
-    assert p.policy("canvas.newschool.edu") == "blocked"
+    assert p.policy("canvas.newschool.edu", own=True) == "blocked"
 
 
-def test_the_latest_outcome_wins_and_a_same_day_tie_is_unknown(p):
+def test_the_latest_outcome_wins_and_a_same_day_tie_is_blocked(p):
     host = "canvas.newschool.edu"
     p.clock.day = date(2026, 10, 2)
     p.record(host, "allowed")
     p.clock.day = date(2026, 10, 3)
     p.record(host, "blocked")
     assert p.policy(host) == "blocked"          # newer than the allowed one
-    # both on the same day: the one counted more often, a tie is no verdict
+    # both on the same day: the one counted more that day, a tie is blocked
     other = "canvas.otherschool.edu"
     p.record(other, "blocked")
     p.record(other, "allowed")
-    assert p.policy(other) == "unknown"
+    assert p.policy(other) == "blocked"
     p.record(other, "allowed")
     assert p.policy(other) == "allowed"
+
+
+def test_a_month_of_allowed_never_outvotes_todays_blocked(p):
+    """Judge MED 2 (p2.py): thirty "allowed" over four weeks, then one
+    report: blocked, and one more "allowed" that day doesn't flip it back
+    (the same day is compared on that day's counts, a tie is blocked)."""
+    host = "canvas.school.edu"
+    for i in range(30):
+        p.clock.day = date(2026, 10, 1 + i // 4)
+        p.record(host, "allowed")
+    assert p.policy(host) == "allowed"
+    p.clock.day = date(2026, 10, 28)
+    p.record(host, "blocked")
+    assert p.policy(host) == "blocked"
+    p.record(host, "allowed")
+    assert p.policy(host) == "blocked"
+    for _ in range(3):
+        p.record(host, "blocked")
+    assert p.policy(host) == "blocked"
+
+
+def test_one_event_is_revealed_only_to_its_own_host(p):
+    """Judge LOW 4: a single learned event would tell other people on the
+    server which school someone uses: it counts only for the asker's own
+    host until MIN_EVENTS events back it."""
+    host = "canvas.newschool.edu"
+    p.record(host, "blocked")
+    assert p.policy(host) == "unknown"
+    assert p.policy(host, own=True) == "blocked"
+    p.record(host, "blocked")
+    assert canvas_schools.MIN_EVENTS == 2
+    assert p.policy(host) == "blocked"
 
 
 def test_only_hosts_and_outcomes_are_recorded(p):
@@ -184,7 +218,7 @@ def test_the_file_holds_hosts_and_counts_only(p):
     data = json.loads(p.path.read_text(encoding="utf-8"))
     assert data == {"canvas.newschool.edu": {
         "allowed": 2, "blocked": 0, "allowed_at": "2026-10-28", "blocked_at": None,
-        "last": "2026-10-28"}}
+        "last": "2026-10-28", "day_allowed": 2, "day_blocked": 0}}
     if sys.platform != "win32":
         assert os.stat(p.path).st_mode & 0o777 == 0o600
 

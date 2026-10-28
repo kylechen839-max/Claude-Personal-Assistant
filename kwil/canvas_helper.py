@@ -269,14 +269,19 @@ class HelperKeys:
                 "paired_at": data.get("paired_at") if data.get("key_hash") else None,
                 "canvas_host": host if isinstance(host, str) else None}
 
-    def note_canvas(self, uid, host: str) -> None:
-        """Remember the Canvas host a paired helper reads (for the status);
-        nothing once the key is gone."""
+    def note_canvas(self, uid, host: str, outcome) -> bool:
+        """Remember the Canvas host a paired helper reads (for the status)
+        and what it last read of the token policy; True when that is new for
+        this pairing (only then is it counted: a helper re-reading the same
+        page every run is one event, not one a run). Nothing, and False,
+        once the key is gone."""
         with self.lock:
             data = self._read(uid)
-            if data.get("key_hash") and data.get("canvas_host") != host:
-                data["canvas_host"] = host
-                self._write(uid, data)
+            if not data.get("key_hash") or (data.get("canvas_host"), data.get(
+                    "canvas_outcome")) == (host, outcome):
+                return False
+            data.update(canvas_host=host, canvas_outcome=outcome)
+            return self._write(uid, data)
 
     def revoke(self, uid) -> bool:
         """Delete the person's key (and any open code). True if there was one."""
@@ -360,7 +365,10 @@ def clean_canvas(value) -> dict | None:
     """A manifest's `canvas`: {host (a Canvas host, as
     canvas_schools.normalize gives it), can_create_tokens (a bool),
     only_student (a bool, or null/missing: not read)}, or None when not
-    sent; ValueError (CANVAS_SHAPE) for anything else."""
+    sent, or when the host is a string this server doesn't take as a
+    Canvas host (an IP, a LAN-only or punycode name: the reading is dropped,
+    the courses still count); ValueError (CANVAS_SHAPE) for a wrong shape
+    or type."""
     from kwil.canvas_schools import normalize
 
     if value is None:
@@ -369,10 +377,13 @@ def clean_canvas(value) -> dict | None:
         raise ValueError(CANVAS_SHAPE)
     host, can, only = value.get("host"), value.get("can_create_tokens"), \
         value.get("only_student")
-    if not isinstance(host, str) or normalize(host) != host or not isinstance(can, bool) \
+    if not isinstance(host, str) or not isinstance(can, bool) \
             or (only is not None and not isinstance(only, bool)):
         raise ValueError(CANVAS_SHAPE)
-    return {"host": host, "can_create_tokens": can, "only_student": only}
+    name = normalize(host)
+    if name is None:
+        return None
+    return {"host": name, "can_create_tokens": can, "only_student": only}
 
 
 def canvas_outcome(found: dict | None) -> str | None:
@@ -544,9 +555,8 @@ class HelperPush:
         if not found or not alive():
             return
         outcome = canvas_outcome(found)
-        if outcome is not None:
+        if self.keys.note_canvas(uid, found["host"], outcome) and outcome is not None:
             self.sync.policies.record(found["host"], outcome)
-        self.keys.note_canvas(uid, found["host"])
         # the outcome, never the host (it names their school)
         log.info("Canvas helper: %s's helper read the token policy (%s)", _who(uid),
                  outcome or "unknown")
