@@ -14,7 +14,9 @@ and `references/colour.md` are verbatim, and `references/type.md` is
 verbatim except §5, whose web-font `<link>` and `preconnect` recipe is
 replaced by a note.
 
-Not vendored: the Node scripts (`draw.mjs`, `inspect.mjs`, `lint.mjs`,
+Not vendored: the reference files `imagery.md`, `motion.md`, `copy.md`
+and `critique.md` (the vendored ones cite them; skip those pointers, and
+use `animation-vocabulary` for motion), the Node scripts (`draw.mjs`, `inspect.mjs`, `lint.mjs`,
 `scenes.mjs`, and `assets.mjs`, which searches and downloads pictures
 from the web), the `library/` data they read, the bundled CSS/JS assets,
 and the marketing-page run built on them. Where a vendored reference

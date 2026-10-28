@@ -34,6 +34,7 @@ data/
 
 # Web app sign-in sessions (python -m kwil --mode web)
 data/
+!.claude/skills/ui-ux-pro-max/data/
 
 # LLM Council reports (.claude/skills/llm-council)
 council-report-*.html
