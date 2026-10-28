@@ -160,8 +160,13 @@ class CoordinatorLink:
         if not exe:
             raise DevTeamError("Claude Code isn't installed on this computer, "
                                "so I can't reach the dev team from here.")
-        reply_id = (f"{prefix}{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
-                    f"{secrets.token_hex(2)}")
+        with self._lock:
+            pending = set(self._state["pending"])
+        while True:  # two messages in one second must not share an id
+            reply_id = (f"{prefix}{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
+                        f"{secrets.token_hex(4)}")
+            if reply_id not in pending:
+                break
         message = (f"[{header} | reply id {reply_id}]\n{text}\n\n"
                    f"Answer per docs/COORDINATOR_LINK.md: one row in the Notion "
                    f"database \"{INBOX_TITLE}\" with {REPLY_ID} = {reply_id}.")

@@ -497,8 +497,11 @@ def test_deletes_wipe_the_index_and_log_without_fts_secure_delete(tmp_path):
                         "title": "Other", "etag": "e", "text": "wombat " * 50})
     path = tmp_path / coursefiles.FILE
     con = sqlite3.connect(str(path))
-    con.execute("INSERT INTO docs_fts(docs_fts, rank) VALUES ('secure-delete', 0)")
-    con.commit()
+    try:  # newer SQLite: switch the option off to act like an older one
+        con.execute("INSERT INTO docs_fts(docs_fts, rank) VALUES ('secure-delete', 0)")
+        con.commit()
+    except sqlite3.OperationalError:  # older SQLite (Pi OS Bookworm): no such option
+        pass
     try:
         store.upsert(None, {"course_id": 1, "course": "C", "kind": "page",
                             "source_key": "p:1:2", "title": "More", "etag": "e",

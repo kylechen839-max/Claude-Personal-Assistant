@@ -325,3 +325,17 @@ def test_old_hub_settings_still_load(tmp_path):
         'hub_state_file = "data/devhub.json"\n')
     config = load_config(tmp_path / "config.toml", env_file=None, profile="")
     assert config["devteam"]["enabled"] is False
+
+
+def test_two_messages_in_one_second_never_share_a_reply_id(tmp_path, monkeypatch):
+    """The id is the second plus random hex: a repeat of a pending id is
+    drawn again (CI once drew the same 16 bits twice in one second)."""
+    draws = iter(["aaaaaaaa", "aaaaaaaa", "bbbbbbbb"])
+    monkeypatch.setattr(devteam.secrets, "token_hex", lambda n: next(draws))
+    frozen = datetime(2026, 10, 28, 22, 16, 19, tzinfo=timezone.utc)
+    monkeypatch.setattr(devteam, "datetime",
+                        SimpleNamespace(now=lambda tz=None: frozen))
+    team = link(tmp_path)
+    a = team.send("first")["reply_id"]
+    b = team.send("second")["reply_id"]
+    assert a == "hc-20261028-221619-aaaaaaaa" and b == "hc-20261028-221619-bbbbbbbb"
