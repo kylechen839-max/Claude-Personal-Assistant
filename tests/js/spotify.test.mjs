@@ -122,3 +122,22 @@ test('every string it shows has Chinese in i18n.js', () => {
   }
   assert.equal(ZH['Connect Spotify'], '连接 Spotify');
 });
+
+test("the Connections row: the owner's status; off for anyone else or when not set up", async () => {
+  const cases = [
+    [true, { status: 200, body: { enabled: true, connected: false } },
+     { state: 'available', status: 'Not connected', action: 'Connect' }],
+    [true, { status: 200, body: { enabled: true, connected: true } },
+     { state: 'connected', status: 'Connected', action: 'Manage' }],
+    [true, { status: 200, body: { enabled: false, connected: false } }, { state: 'off' }],
+    [true, { status: 404, body: {} }, { state: 'off' }],
+    [false, undefined, { state: 'off' }]];
+  for (const [owner, status, want] of cases) {
+    const r = load(status ? { status } : {});
+    const marks = [];
+    r.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    r.api.onState({ owner });
+    await tick();
+    assert.deepEqual(marks.at(-1), ['spotify', want]);
+  }
+});

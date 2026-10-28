@@ -1032,14 +1032,15 @@ Needs Home Assistant, `HA_URL` and `HA_TOKEN` in `.env` and
 On the iPhone Home Screen app signed in to the cloud (README "Connect your
 services in the app"). Needs `USER_DATA_KEY`, `PUBLIC_ORIGIN` and the
 public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
-- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connected services.
-  - Should: Notion says "Set on the server." with no buttons.
+- [ ] With `NOTION_TOKEN` still set in Render: ⚙ -> Connections -> Notion.
+  - Should: the row says "Set on the server"; opened, "Set on the
+    server." with no buttons.
 - [ ] Delete `NOTION_TOKEN` in Render (Environment -> Save, it restarts),
-      open ⚙ again and tap Notion's **Connect**.
+      open ⚙ again, tap the Notion row and its **Connect**.
   - Should: Notion's consent page opens in the app itself (not Safari).
     Tick your Assignments database and the pages for Lecture Notes, Chat
     Digests and the coordinator inbox, Allow; you land back in the app and
-    the row says "Connected." with your workspace name.
+    the row is under "Connected" and says "Connected · <your workspace>".
 - [ ] Ask "what assignments do I have this week?", start a lecture
       recording for a few seconds and stop it.
   - Should: the right assignments; the lecture is filed in Notion.
@@ -1049,7 +1050,7 @@ public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
     I have?" no longer reaches Notion.
 - [ ] Home Assistant: type your Nabu Casa (or tunnel) address, tap
       **Connect**, sign in as the dedicated non-admin user.
-  - Should: back in the app, "Connected." with your Home Assistant's host;
+  - Should: back in the app, "Connected · <your Home Assistant's host>";
     "turn off the bedroom lights" works; an hour later it still works
     (the 30-minute token was renewed).
 - [ ] Type `http://homeassistant.local:8123` or `192.168.1.10` instead.
@@ -1058,7 +1059,36 @@ public Notion integration's `NOTION_OAUTH_CLIENT_ID` / `_SECRET` in Render.
   - Should: in Home Assistant, your profile -> Security -> Refresh tokens
     no longer lists Kwil's address; light commands stop working.
 - [ ] As a family member, open ⚙.
-  - Should: no Connected services section.
+  - Should: no Home Assistant or Spotify row, and Notion's row is their
+    own (an invited person's "Connect Notion").
+
+## Settings: the Connections list (~5 min)
+On the iPhone Home Screen app, as the owner and once as an invited beta
+tester, in light and dark mode (Settings -> Display -> Light/Dark).
+- [ ] Open ⚙ and look at "Connections".
+  - Should: one calm row per service with its real icon (Google, Notion,
+    Canvas, Home Assistant, Spotify; Anthropic for a beta tester), its name,
+    a subtitle, and a green "Connected" or a blue "Connect" on the right;
+    connected ones first; nothing cut off or overlapping, also with the
+    largest text size (Settings -> Display & Brightness -> Text Size).
+- [ ] Tap a row; then close the sheet with X, with a tap above it, and
+      (with a keyboard) with Esc.
+  - Should: a sheet slides up from the bottom with the service's icon,
+    name, one paragraph and its buttons; each way closes only the sheet
+    (the menu stays open); each tap lands on the first try.
+- [ ] Connect or disconnect one service from its row.
+  - Should: the row moves between "Connected" and "Available" after you
+    come back, with the right status.
+- [ ] With VoiceOver on, swipe through the list.
+  - Should: each row is read as a button with its name, subtitle and
+    status or action; opening it moves VoiceOver into the sheet, and
+    closing returns to the row.
+- [ ] As the beta tester before adding a key.
+  - Should: "Anthropic" says "Key needed" in red; its sheet has the key
+    field.
+- [ ] Canvas helper (Chrome on the PC): Canvas -> Set up Canvas helper,
+      then open the helper extension.
+  - Should: it pairs by itself from the sheet, as before.
 
 ## Team chat (optional, ~10 min)
 Needs at least one of `SLACK_USER_TOKEN`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`

@@ -21,7 +21,14 @@
     if (!btn) return null;
     let member = false;
 
+    // the Notion row in Connections (connections.js); the owner's own Notion
+    // row is connect.js's, so only an invited person's page marks it
+    function mark(info) {
+      if (member) win.KwilConnections?.set("notion", info);
+    }
+
     function hideAll() {
+      mark({ state: "off" });
       btn.hidden = true;
       if (unlink) unlink.hidden = true;
       if (hint) hint.hidden = true;
@@ -50,6 +57,12 @@
           detail.hidden = !(st.connected && parts.length);
           detail.textContent = parts.join(" · ");  // their own titles: text only
         }
+        mark(!st.enabled ? { state: "off" }
+          : !st.connected ? { state: "available", status: "Not connected", action: "Connect" }
+            : st.database ? { state: "connected", status: "Connected", action: "Manage",
+                              detail: typeof st.workspace === "string" ? st.workspace : "" }
+              : { state: "attention", status: "Needs attention",
+                  action: "Reconnect" });
       } catch (e) { /* offline: leave it as it is */ }
     }
 

@@ -117,6 +117,7 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               # binding cookie) and the page code (its API needs the owner)
               "/ha/callback", "/connect.js",
               "/student.js",  # the "School deadlines" card (its API needs sign-in)
+              "/connections.js",  # the menu's Connections rows (page code only)
               # the public site (public_site.py): landing, privacy, terms
               "/welcome", "/privacy", "/terms", "/site.css",
               # "Enable notifications" and the study brief's page code (its

@@ -465,3 +465,23 @@ test('the helper strings have Chinese in i18n.js', async () => {
     assert.notEqual(translate(s), s, s);
   }
 });
+
+test("the Canvas row in Connections follows the card's status", async () => {
+  const canvas = (over) => ({ status: 200, body: { items: [], canvas: { connected: false,
+    managed: 'app', can_store: true, gmail: false, ...over } } });
+  for (const [items, want] of [
+    [canvas({}), { state: 'available', status: 'Not connected', action: 'Connect' }],
+    [canvas({ connected: true, school: 'canvas.school.edu' }),
+     { state: 'connected', status: 'Connected', action: 'Manage', detail: 'canvas.school.edu' }],
+    [canvas({ helper: { enabled: true, paired: true } }),
+     { state: 'connected', status: 'Connected', action: 'Manage', detail: 'Canvas helper' }],
+    [canvas({ can_store: false }), { state: 'available', status: 'Not available' }],
+    [canvas({ managed: 'env' }), { state: 'available', status: 'Not connected', action: 'Connect' }],
+    [{ status: 404, body: {} }, { state: 'off' }]]) {
+    const { win } = load({ items });
+    const marks = [];
+    win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    await win.KwilStudent.start(win, win.document).refresh();
+    assert.deepEqual(marks.at(-1), ['canvas', want]);
+  }
+});

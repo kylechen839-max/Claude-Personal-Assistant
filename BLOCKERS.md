@@ -24,7 +24,7 @@ Only what is still open for Kyle. None of it blocks the code.
       2. **Render:** make sure `PUBLIC_ORIGIN` is the address you use
          (`https://heykwil.com`), then delete `NOTION_TOKEN` (Environment
          -> Save). While it is set, Notion says "Set on the server."
-      3. **Phone:** ⚙ -> Connected services -> Notion -> **Connect**; on
+      3. **Phone:** ⚙ -> Connections -> Notion -> **Connect**; on
          Notion's page tick the Assignments database and the pages for
          Lecture Notes, Chat Digests and the "Hey Claude coordinator
          inbox". Then Home Assistant: type its Nabu Casa (or tunnel) https

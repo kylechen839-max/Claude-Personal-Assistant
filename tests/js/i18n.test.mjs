@@ -442,6 +442,44 @@ test('a beta tester without the public client sees why Google is off', async () 
   }
 });
 
+test('the Google row in Connections: its status, action word and subtitle', async () => {
+  for (const [gstatus, want] of [
+    [{ enabled: true, connected: false },
+     { state: 'available', status: 'Not connected', action: 'Connect', sub: 'Calendar and email' }],
+    [{ enabled: true, connected: true },
+     { state: 'connected', status: 'Connected', action: 'Manage', sub: 'Calendar and email' }],
+    [{ enabled: true, connected: false, gmail: false },  // a beta tester: Calendar only
+     { state: 'available', status: 'Not connected', action: 'Connect', sub: 'Calendar' }],
+    [{ enabled: false, connected: false, gmail: false, note: "Google isn't set up for beta accounts yet." },
+     { state: 'available', status: 'Not available', sub: 'Calendar' }],
+    [{ enabled: false, connected: false }, { state: 'off' }]]) {
+    const p = page('en', { gstatus });
+    const marks = [];
+    p.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    await p.flush();
+    assert.deepEqual(marks.at(-1), ['google', want]);
+  }
+  // signed out (401): the row is left as it is
+  const out = page('en', { gstatus: null });
+  const marks = [];
+  out.win.KwilConnections = { set: (id, info) => { marks.push(id); } };
+  await out.flush();
+  assert.deepEqual(marks, []);
+});
+
+test('the first-run guide says where Google is in the menu now', () => {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(SCRIPT, ctx);
+  const steps = Object.keys(ctx.KwilI18n.ZH).filter((k) => k.startsWith('Connect your own Google account'));
+  assert.equal(steps.length, 2);
+  for (const en of steps) {
+    assert.ok(en.includes('then "Google" under Connections and "Connect Google account"'), en);
+    assert.ok(SCRIPT.includes(en.slice(0, 60)), en);
+    assert.ok(ctx.KwilI18n.ZH[en].includes('在“服务连接”里点“Google”'), en);
+  }
+});
+
 test('the invite form\'s tier labels are translated', () => {
   const { win } = page('zh-CN');
   const t = (s) => win.KwilI18n.translate(s);

@@ -43,6 +43,20 @@
     return host;
   }
 
+  // The Canvas row in Connections (connections.js), from the card's status:
+  // connected by a link or the helper; the school's host as the detail.
+  function canvasRow(st) {
+    const helper = st.helper || {};
+    if (st.connected || helper.paired) {
+      return { state: "connected", status: "Connected", action: "Manage",
+               detail: st.school ? String(st.school) : helper.paired ? "Canvas helper" : "" };
+    }
+    if (st.managed !== "env" && st.can_store === false) {
+      return { state: "available", status: "Not available" };
+    }
+    return { state: "available", status: "Not connected", action: "Connect" };
+  }
+
   function create(win, doc) {
     const menu = doc.querySelector("details.menu");
     let card = doc.getElementById("student");
@@ -113,10 +127,11 @@
     paste.hidden = !(clip && typeof clip.readText === "function");
     const feedHelp = el("p", "In Canvas, open Calendar, tap Calendar Feed and copy the " +
                         "link. I never ask for your school password.", "hint");
-    const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }));
+    const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }),
+                               "btn primary");
     const useToken = button("Use an access token instead", () => {
       tokenBox.hidden = !tokenBox.hidden;
-    });
+    }, "btn plain");
     const tokenBox = el("div");
     tokenBox.hidden = true;
     const school = input("text", "Your school's Canvas, e.g. canvas.school.edu", "School");
@@ -248,6 +263,7 @@
       unlink.hidden = owner ? !(st.app_link || helper.paired) : !(st.connected || helper.paired);
       syncBtn.hidden = !st.connected && !st.gmail;
       renderHelper(helper);
+      win.KwilConnections?.set("canvas", canvasRow(st));  // connections.js
       const items = Array.isArray(body.items) ? body.items : [];
       list.replaceChildren(...items.map(row));
       empty.hidden = items.length > 0;
@@ -309,7 +325,7 @@
     async function refresh() {
       try {
         const r = await call("/api/student/items");
-        if (!r.ok) { card.hidden = true; return; }
+        if (!r.ok) { card.hidden = true; win.KwilConnections?.set("canvas", { state: "off" }); return; }
         card.hidden = false;
         render(r.body);
       } catch (e) { /* offline: leave it as it is */ }
@@ -443,7 +459,7 @@
     return setup;
   }
 
-  root.KwilStudent = { start, create };
+  root.KwilStudent = { start, create, canvasRow };
   if (root.document && root.document.readyState !== "loading") start();
   else if (root.document) root.document.addEventListener("DOMContentLoaded", () => start());
 })(typeof window !== "undefined" ? window : globalThis);

@@ -6191,3 +6191,66 @@ a comment in kwil.js; the comment no longer matches). Counts (Linux
 sandbox, Python 3.13, Node 22, not real hardware): 3390 passed, 37
 skipped; JavaScript 220 passed (205 before; the helper's files 47, was
 32).
+
+## Settings: the Connections list redesign (2026-10-28)
+Kyle: "fix the UI for the dropdown menu with all the connectors... right
+now its way too clunky." Each service was its own stacked card with its own
+explanation and forms (Google buttons, the owner's "Connected services",
+Notion's buttons, Spotify's button, the "School deadlines" card, the API
+key section). Now, following the approved design direction
+(`.claude/DESIGN_SYSTEM.md`, new):
+- **One grouped list, "Connections".** One 52px row per service (Google,
+  Notion, Canvas, Home Assistant, Spotify, an invited person's Anthropic
+  key): the service's real icon (Simple Icons, CC0, vendored in
+  `web/static/icons/` with a README and drawn from an inline `<symbol>`
+  sprite; white on a brand-colour tile), the name, a subtitle (their
+  workspace or school, else what it is), and on the right a status dot and
+  word (`.state.on` "Connected", `.state.warn` "Sign-in expired" / "Key
+  needed", `.state.off`) or the plain action "Connect", plus a chevron.
+  Connected rows first (needing attention first), then the rest; services
+  not enabled for that person have no row.
+- **A bottom sheet per service.** Tapping a row opens a modal `<dialog>`
+  (grab handle, 44px icon, title, Close, one-paragraph explanation, then
+  that service's own controls and Disconnect in red text). One at a time;
+  Close, Esc, a tap outside and closing the menu shut it, focus returns to
+  the row; Esc no longer closes the whole menu while a sheet is open
+  (`ui.js`).
+- **Shared component** `web/connections.js` (new; static route, `sw.js`
+  SHELL, `cloud.PUBLIC_GET`): each service script keeps its own controls
+  and ids and just reports `set(id, {state, status, action, detail, sub,
+  alert})` (`i18n.js` Google, `notion.js`, `student.js`, `spotify.js`,
+  `family.js` key); `connect.js` (the owner's Notion and Home Assistant)
+  now fills those rows' sheets instead of its own "Connected services"
+  section (`#connector-list` and `#connectors-status` are gone; a message
+  goes in that service's sheet). The Google `needs_reconnect` and Canvas
+  step-picking work in flight drop in as a `set()` status and action.
+- **Design primitives** in `app.css`: type, spacing and row-height tokens
+  (`--t-*`, `--s1`..`--s6`, `--row-h`), `.btn.primary/.secondary/.plain/
+  .destructive`, `.group`, `.group-head`, `.state`. `sw.js` cache
+  `kwil-shell-v8`.
+- Every id, route and hook kept: `google-connect/-disconnect/-status`,
+  `notion-*`, `spotify-*`, `#student` (and `data-kwil-pair`), `api-key-*`.
+  The guide's Google step and `ha_reconnect` now point at "Connections".
+
+Tested: `tests/js/connections.test.mjs` (new, 12: the page's rows parsed
+from index.html, grouping and order, the right side's status or action,
+the subtitle as text, one sheet at a time with showModal, Close, backdrop,
+Esc, menu close, focus kept when a row moves, a built row for an unknown
+service); `connect.test.mjs` rewritten for rows (16, was 13); a Connections-row
+test each in `notion`, `spotify`, `student`, `family`, `i18n` (plus the
+guide step) and `ui` (Esc); `tests/test_connection_icons.py` (new, 3:
+every row has an icon file drawn by the sprite, every file in the README
+with the pinned SHA and CC0, nothing fetched); `test_theme.py`: each white
+mark 3:1 on its tile, status and row text 4.5:1 in both modes. Each source
+change was reverted on its own and its test failed (18 reverts). A
+Playwright run against the real page with fake API answers (no server, no
+keys) checked grouping, 52px rows, icons drawing, the modal sheet, Esc and
+backdrop closing only the sheet, keyboard order, the Google connect POST,
+and the Chinese page; before/after screenshots at 390x844 and desktop in
+light and dark, as the owner and as an invited beta tester.
+Tests updated because the markup legitimately changed: `connect.test.mjs`
+(rows instead of `#connector-list`), `test_owner_connect.py` (page ids,
+script order), `test_webapp.py` (public list), the `kwil-shell-v8` pins.
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware): 3393
+passed, 37 skipped (master 4c8775d: 3388 passed, 38 skipped from a git
+archive, which skips one git test); JavaScript 242 passed (220 before).

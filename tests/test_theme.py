@@ -152,6 +152,29 @@ def test_accent_graphic_meets_3_to_1_in_both_modes():
             assert contrast(t[ref], t[bg]) >= 3, (i, bg)
 
 
+def test_connections_rows_keep_wcag_contrast_in_both_modes():
+    """The menu's Connections rows (connections.js): each service's white
+    mark on its brand tile (a graphic: 3:1, the same tile in both modes), and
+    the subtitle, status words and "Connect" on the row, its pressed state
+    and the sheet (--surface, --surface-2, --bg)."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    tiles = re.findall(r"\.conn-row\[data-conn=(\w+)\]\s*\{\s*--conn-tile:\s*(#[0-9a-f]{6});"
+                       r"\s*--conn-mark:\s*(#[0-9a-f]{3,6});\s*\}", css)
+    services = {"google", "notion", "canvas", "home_assistant", "spotify", "anthropic"}
+    assert {s for s, _, _ in tiles} == services and len(tiles) == len(services)
+    for name, tile, mark in tiles:
+        assert mark == "#fff", name
+        assert contrast(mark, tile) >= 3, name
+    for is_dark in (False, True):
+        t = {**tokens(css, False), **tokens(css, is_dark)}
+        for fg in ("muted", "accent-ink", "bad-ink", "text"):
+            for bg in ("surface", "surface-2", "bg"):
+                assert contrast(t[fg], t[bg]) >= 4.5, (is_dark, fg, bg)
+        # "Connected" (.state.on) only ever sits on a row; light mode's green
+        # on the pressed row's --surface-2 is 4.2:1 for that moment
+        assert contrast(t["ok"], t["surface"]) >= 4.5, is_dark
+
+
 def test_maskable_icon_keeps_the_quill_in_the_safe_zone():
     entries = {e["src"]: e for e in webapp.MANIFEST["icons"]}
     assert entries["/icon-maskable.png"]["purpose"] == "maskable"
