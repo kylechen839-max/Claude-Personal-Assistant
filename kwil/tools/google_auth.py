@@ -210,39 +210,52 @@ def has_credentials(credentials_path="credentials.json", token_path="token.json"
 
 # Whose Google sign-in Google refused to refresh (revoked, or expired), so
 # the app shows "Reconnect" (google_web.py status) instead of "connected":
-# OWNER (None) for the owner, else a family member's id. In memory only,
-# per process, and only who and when: never a token or Google's message.
-# Set by a failed refresh, cleared by a later successful one, a connect or
-# a disconnect. Bounded: the oldest entries go first.
+# OWNER (None) for the owner, else a family member's id, and which token:
+# "env" (GOOGLE_TOKEN_JSON) or "file" (a token file). Kept apart, so the
+# owner's Disconnect of a file connected in the app, which falls back to
+# GOOGLE_TOKEN_JSON, still shows that one's refusal. In memory only, per
+# process, and only who, which and when: never a token or Google's
+# message. Set by a failed refresh, cleared by a later successful one of
+# the same token, a connect or a disconnect. Bounded: the oldest go first.
 OWNER = None
+SOURCES = ("env", "file")
 MAX_RECONNECT = 1024
-_reconnect: OrderedDict = OrderedDict()
+_reconnect: OrderedDict = OrderedDict()  # (account, source) -> when
 _reconnect_lock = threading.Lock()
 
 
-def mark_refresh_failed(account: str | None = OWNER) -> None:
-    """Remember that `account` must sign in to Google again."""
+def _who(account: str | None, source: str) -> str:
+    return f"{account or 'the owner'} ({TOKEN_ENV if source == 'env' else 'token file'})"
+
+
+def mark_refresh_failed(account: str | None = OWNER, source: str = "file") -> None:
+    """Remember that `account`'s `source` token must be signed in again."""
+    key = (account, source)
     with _reconnect_lock:
-        new = account not in _reconnect
-        _reconnect.pop(account, None)
-        _reconnect[account] = time.time()
+        new = key not in _reconnect
+        _reconnect.pop(key, None)
+        _reconnect[key] = time.time()
         while len(_reconnect) > MAX_RECONNECT:
             _reconnect.popitem(last=False)
     if new:
-        log.info("Google sign-in needs reconnecting for %s", account or "the owner")
+        log.info("Google sign-in needs reconnecting for %s", _who(account, source))
 
 
-def clear_reconnect(account: str | None = OWNER) -> None:
-    """`account`'s sign-in works again (refreshed, connected or removed)."""
+def clear_reconnect(account: str | None = OWNER, source: str | None = None) -> None:
+    """`account`'s `source` token works again (refreshed, connected or
+    removed); `source` None: both."""
     with _reconnect_lock:
-        gone = _reconnect.pop(account, None) is not None
-    if gone:
-        log.info("Google sign-in works again for %s", account or "the owner")
+        gone = [s for s in SOURCES if (source is None or s == source)
+                and _reconnect.pop((account, s), None) is not None]
+    for s in gone:
+        log.info("Google sign-in works again for %s", _who(account, s))
 
 
-def needs_reconnect(account: str | None = OWNER) -> bool:
+def needs_reconnect(account: str | None = OWNER, source: str | None = None) -> bool:
+    """Was `account`'s `source` token refused (None: either)?"""
     with _reconnect_lock:
-        return account in _reconnect
+        return any((account, s) in _reconnect for s in SOURCES
+                   if source is None or s == source)
 
 
 # A family member's token (family.py): they fix it themselves in the app,
@@ -259,12 +272,13 @@ def reconnect_hint() -> str:
 
 
 def _warn_on_refresh_failure(creds, in_app: bool = False,
-                             account: str | None = OWNER):
+                             account: str | None = OWNER, source: str = "file"):
     """Make every later refresh (google-auth refreshes inside API calls)
     log a clear warning, with the error code only, if Google refuses, and
     record whether `account` (OWNER, or a family member's id) must
-    reconnect (needs_reconnect). `in_app`: the token was connected in the
-    app (reconnect there)."""
+    reconnect (needs_reconnect; `source`: "env" for GOOGLE_TOKEN_JSON, else
+    "file"). `in_app`: the token was connected in the app (reconnect
+    there)."""
     from google.auth.exceptions import RefreshError
 
     original = creds.refresh
@@ -275,7 +289,7 @@ def _warn_on_refresh_failure(creds, in_app: bool = False,
         except RefreshError as e:
             reason = _refresh_reason(e)
             if not getattr(e, "retryable", False):  # Google's side, not the grant
-                mark_refresh_failed(account)
+                mark_refresh_failed(account, source)
             if in_app:
                 log.warning(REFRESH_FAILED_IN_APP, reason)
                 error = GoogleSignInError(
@@ -288,7 +302,7 @@ def _warn_on_refresh_failure(creds, in_app: bool = False,
                     "Kyle needs to sign in again.")
             error.reason = reason
             raise error from None
-        clear_reconnect(account)
+        clear_reconnect(account, source)
 
     creds.refresh = refresh
     return creds
@@ -362,6 +376,7 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
 
     info, from_env = token_info(token_path, credentials_path, environ)
     persist = save_token and not from_env
+    source = "env" if from_env else "file"
     creds = None
     if info:
         lacking = [s for s in scopes if s not in granted_scopes(info)]
@@ -373,22 +388,22 @@ def get_credentials(credentials_path="credentials.json", token_path="token.json"
             creds = Credentials.from_authorized_user_info(
                 info, None if info.get("scopes") else CALENDAR_SCOPES)
         except ValueError as e:  # names the missing fields, not values
-            mark_refresh_failed(account)
+            mark_refresh_failed(account, source)
             raise GoogleSignInError(f"Unusable Google token "
                                     f"({TOKEN_ENV if from_env else token_path}): "
                                     f"{e}") from None
-        _warn_on_refresh_failure(creds, in_app, account)
+        _warn_on_refresh_failure(creds, in_app, account, source)
     if creds and creds.valid:
         return creds
     if creds and creds.refresh_token:
         creds.refresh(Request())  # GoogleSignInError (logged) if refused
     elif in_app:
         if info:  # a token without a refresh token, expired
-            mark_refresh_failed(account)
+            mark_refresh_failed(account, source)
         raise GoogleSignInError(f"No usable Google sign-in. {reconnect_hint()}")
     elif from_env or not save_token:
         if info:  # a token without a refresh token, expired
-            mark_refresh_failed(account)
+            mark_refresh_failed(account, source)
         raise GoogleSignInError(
             f"No usable Google sign-in: set {TOKEN_ENV} to the contents of a "
             f"token.json made on your PC ({SIGN_IN_COMMAND})")

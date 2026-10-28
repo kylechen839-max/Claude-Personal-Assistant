@@ -6245,3 +6245,26 @@ expired-row and cache-version tests fail.
 Counts (Linux sandbox, Python 3.13, Node 22, not real hardware, `-k "not
 live_pinecone"`): 3399 passed, 37 skipped (master: 3389 passed, 37
 skipped); JavaScript 221 passed (220 before).
+
+### Round 2: the judge's findings (2026-10-28)
+
+1. HIGH, `failover/peers.py` `settings_from_config`: the
+   `FAILOVER_BACKENDS` loop reused `role`, so the last entry's role
+   overwrote this machine's: the cloud with `pi=...,pc=...` became "pc".
+   That role fed `family.own_origin` (a member's Google redirect, and now
+   the owner's fallback, went to the PC's address), the edge's role, the
+   history sync's peers, the leader check (student sync, proactive jobs).
+   Fixed with its own loop variable. Tests: `test_backends_from_the_environment`
+   now checks `role == "cloud"` and the peers; the owner's and a member's
+   redirect (and the owner's real consent URL) are `APP_ORIGIN/google/callback`
+   with `FAILOVER_BACKENDS` set.
+2. LOW, Disconnect wiped the owner's flag and fell back to a revoked
+   `GOOGLE_TOKEN_JSON` shown as "connected". The flag is now kept per
+   token source (`(account, "env"|"file")`); a connect or disconnect in
+   the app clears only the file's, a refresh only its own token's, and the
+   owner's status reads the flag of the token in use. Test: env token
+   refused -> Reconnect -> Disconnect says Reconnect again.
+
+Failing first: `peers.py` reverted fails both failover tests;
+`google_web.py` and `google_auth.py` reverted fail the Disconnect test.
+Counts: 3400 passed, 37 skipped (round 1: 3399); JavaScript 221 passed.

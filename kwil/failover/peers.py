@@ -132,9 +132,11 @@ def settings_from_config(config: dict) -> FailoverSettings:
     if env:  # e.g. on Render: "pi=https://pi.x.ts.net,pc=https://pc.x.ts.net"
         entries = []
         for item in env.split(","):
-            role, _, url = item.strip().partition("=")
-            if role:
-                entries.append({"role": role.strip(), "url": url.strip()})
+            # its own name: `role` is this machine's (it once took the
+            # last entry's, so the cloud with "pi=...,pc=..." became "pc")
+            which, _, url = item.strip().partition("=")
+            if which:
+                entries.append({"role": which.strip(), "url": url.strip()})
     if origin and not any(e.get("role") == "cloud" and e.get("url") for e in entries):
         entries = [e for e in entries if e.get("role") != "cloud"]
         entries.append({"role": "cloud", "url": origin})

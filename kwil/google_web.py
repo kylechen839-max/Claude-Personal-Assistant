@@ -75,7 +75,7 @@ from kwil import i18n
 from kwil.tools.google_auth import (OWNER, _relax_scope_check, clear_reconnect,
                                     client_config, load_token_info,
                                     needs_reconnect, owner_environ,
-                                    sign_in_scopes, token_json,
+                                    sign_in_scopes, token_info, token_json,
                                     web_client_config, write_private)
 
 log = logging.getLogger(__name__)
@@ -192,8 +192,19 @@ class GoogleConnect:
         """Did Google refuse `user`'s saved sign-in (revoked, or expired)
         since this server started (google_auth.needs_reconnect)? Only while
         a token is saved: without one the app offers Connect anyway. Known
-        from the last refresh the tools made; no call to Google here."""
-        return self.connected(user) and needs_reconnect(user)
+        from the last refresh the tools made; no call to Google here. The
+        token in use counts: after the owner's Disconnect that is
+        GOOGLE_TOKEN_JSON again, whose refusal was kept."""
+        if not self.connected(user):
+            return False
+        if user is not None:  # theirs: always their token file
+            return needs_reconnect(user, "file")
+        try:
+            _, from_env = token_info(self._cal["token"], self._cal["credentials"],
+                                     owner_environ(self.config))
+        except (OSError, ValueError, AttributeError, TypeError):
+            return False
+        return needs_reconnect(OWNER, "env" if from_env else "file")
 
     def owner_file(self) -> bool:
         """Has the cloud owner a connected token file to disconnect?"""
@@ -288,7 +299,9 @@ class GoogleConnect:
         with self.owner_lock:
             token.parent.mkdir(parents=True, exist_ok=True)
             write_private(token, text)
-            clear_reconnect(OWNER)  # the new sign-in replaces the refused one
+            # the new file replaces a refused one; GOOGLE_TOKEN_JSON's
+            # refusal stays (it is used again after a Disconnect)
+            clear_reconnect(OWNER, "file")
             self._register_tools()
         log.info("Google account connected; token saved to %s", token)
         return True, None
@@ -325,7 +338,7 @@ class GoogleConnect:
                 log.info("Google disconnect skipped: the owner connected again meanwhile")
                 return False
             _unlink(token)
-            clear_reconnect(OWNER)
+            clear_reconnect(OWNER, "file")  # gone; GOOGLE_TOKEN_JSON's stays
             self._register_tools()
         log.info("Google account disconnected (the owner's)")
         return True

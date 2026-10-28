@@ -103,15 +103,16 @@ def test_the_owner_is_marked_too_and_googles_own_trouble_marks_no_one(
     with pytest.raises(GoogleSignInError):
         get_credentials("", token, save_token=False, environ={})
     assert needs_reconnect(OWNER)
-    assert list(google_auth._reconnect) == [OWNER]
-    assert isinstance(google_auth._reconnect[OWNER], float)  # when, nothing else
+    assert list(google_auth._reconnect) == [(OWNER, "file")]  # a token file
+    assert isinstance(google_auth._reconnect[(OWNER, "file")], float)  # when, nothing else
+    assert needs_reconnect(OWNER, "file") and not needs_reconnect(OWNER, "env")
 
 
 def test_the_flags_are_bounded(monkeypatch):
     monkeypatch.setattr(google_auth, "MAX_RECONNECT", 3)
     for uid in ("a", "b", "c", "d"):
         google_auth.mark_refresh_failed(uid)
-    assert list(google_auth._reconnect) == ["b", "c", "d"]  # the oldest went
+    assert [who for who, _ in google_auth._reconnect] == ["b", "c", "d"]  # the oldest went
 
 
 # --- the status: the owner on the cloud server ---------------------------------------
@@ -163,15 +164,42 @@ def test_owner_disconnect_clears_it_too(server, monkeypatch):
 
 def test_owner_can_connect_with_only_the_servers_own_address(server, monkeypatch):
     """No PUBLIC_ORIGIN, but the cloud knows its address (APP_ORIGIN with
-    [failover]): the owner's Connect works where a family member's does."""
+    [failover]): the owner's Connect works where a family member's does,
+    and both come back to the cloud, never to a peer listed in
+    FAILOVER_BACKENDS (that list once overwrote this machine's role)."""
     s = server
-    monkeypatch.delenv("FAILOVER_BACKENDS", raising=False)
+    monkeypatch.setenv("FAILOVER_BACKENDS", "pi=https://pi.t.ts.net,pc=https://pc.t.ts.net")
     s.config["webapp"]["public_origin"] = ""
     s.config["failover"].update(role="cloud", app_origin="https://kwil.example")
     assert s.connect.enabled(None) is True
     assert s.connect.redirect_uri == "https://kwil.example/google/callback"
+    assert s.connect._redirect("a-member") == "https://kwil.example/google/callback"
+    r = owner_client(s).post("/api/google/connect", json={})
+    from urllib.parse import parse_qs, urlparse
+    q = parse_qs(urlparse(r.json()["url"]).query)
+    assert q["redirect_uri"] == ["https://kwil.example/google/callback"]
     s.config["failover"].update(role="", app_origin="")
     assert s.connect.enabled(None) is False
+
+
+def test_owner_disconnect_falls_back_to_a_refused_env_token_and_says_so(
+        server, monkeypatch):
+    """GOOGLE_TOKEN_JSON revoked -> Reconnect (a file) -> Disconnect: the
+    status is back on the env token, which Google still refuses."""
+    from google.oauth2.credentials import Credentials
+
+    s = server
+    kyle = owner_client(s)
+    owner_stale_token(monkeypatch)
+    monkeypatch.setattr(Credentials, "refresh", _refused)
+    use_calendar(s.assistant.tools)
+    assert kyle.get("/api/google/status").json()["needs_reconnect"] is True
+    owner_connects(s, kyle)  # the file wins: nothing refused it
+    assert kyle.get("/api/google/status").json()["needs_reconnect"] is False
+    assert kyle.post("/api/google/disconnect", json={}).status_code == 200
+    st = kyle.get("/api/google/status").json()
+    assert st["connected"] is True and st["needs_reconnect"] is True  # the env's again
+    assert needs_reconnect(OWNER, "env") and not needs_reconnect(OWNER, "file")
 
 
 # --- the status: a family member's own token ------------------------------------------

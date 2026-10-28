@@ -125,7 +125,7 @@ as the work. Never put secrets, tokens or personal data in this file.
   (`tests/test_family_google.py`).
 - Lesson (2026-10-28, live bug): "connected" must mean Google still
   accepts the sign-in, not that a token file exists. A refused refresh
-  marks the account (`google_auth.needs_reconnect`, per process; a
+  marks the account and token source (`google_auth.needs_reconnect`, per process; a
   conftest fixture clears it around every test), and status routes read
   that flag instead of calling Google. New Google credential code passes
   `account=` (None the owner, else the family id).

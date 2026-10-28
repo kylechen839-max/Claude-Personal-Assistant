@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed: with FAILOVER_BACKENDS set, the cloud took the last listed backend's
+  role (e.g. "pc") instead of its own. That broke Google sign-in redirects
+  for family members, history-sync peers and leader election.
 - Fixed: when Google ends a sign-in (revoked, or expired), ⚙ now says
   "Google sign-in expired. Reconnect to keep using it." with a Reconnect
   button, for the owner on the server (even with GOOGLE_TOKEN_JSON) and for
