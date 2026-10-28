@@ -33,7 +33,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .site-header, main, .site-footer { max-width: 44rem; margin: 0 auto;
   padding-left: max(1.25rem, env(safe-area-inset-left));
   padding-right: max(1.25rem, env(safe-area-inset-right)); }
-main.wide { max-width: 60rem; }
+main.wide, .site-header.wide { max-width: 60rem; }
 .site-header { display: flex; align-items: center; justify-content: space-between;
   padding-top: 1rem; padding-bottom: 1rem; }
 .brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--text);
@@ -42,25 +42,32 @@ main.wide { max-width: 60rem; }
 .sign-in { font-weight: 550; }
 
 h1 { font-size: clamp(1.9rem, 6vw, 2.6rem); line-height: 1.15; letter-spacing: -.03em;
-  margin: 1.5rem 0 .75rem; }
+  margin: 1.5rem 0 .75rem; text-wrap: balance; }
+/* the one large moment: two lines at every width, tight like display type */
+.hero h1 { font-size: clamp(1.9rem, 5.5vw + .6rem, 3.5rem); line-height: 1.04;
+  letter-spacing: -.04em; margin: 2rem 0 1rem; }
 .doc h1 { font-size: 2rem; }
-h2 { font-size: 1.3rem; letter-spacing: -.02em; margin: 2.25rem 0 .6rem; }
-.lead { font-size: 1.125rem; color: var(--text-2); }
-.badge { display: inline-block; margin: .25rem 0; padding: .2rem .75rem; border-radius: 999px;
-  background: var(--surface-2); color: var(--text-2); font-size: .9rem; font-weight: 600; }
+h2 { font-size: 1.4rem; letter-spacing: -.02em; margin: 2.75rem 0 .6rem; text-wrap: balance; }
+.lead { font-size: 1.125rem; color: var(--text-2); max-width: 38em; }
+/* the action, with the one fact about access beside it (no pill badge) */
+.cta { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; margin: 1.5rem 0 0; }
+.badge { color: var(--muted); font-size: .95rem; font-weight: 600; }
 
 .button { display: inline-block; min-height: 48px; padding: .7rem 1.4rem; border: 0;
   border-radius: var(--r-md); background: var(--accent); color: var(--on-accent);
-  font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+  font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+  transition: transform .12s ease-out, background-color .15s ease; }
 .button:hover, .button:active { background: var(--accent-strong); }
+.button:active { transform: scale(.97); }
 
 .features { padding-left: 1.2rem; }
 .features li { margin: .5rem 0; }
 .facts dt { font-weight: 650; margin-top: 1rem; }
 .facts dd { margin: .2rem 0 0; color: var(--text-2); }
 
-.card { margin: 2.5rem 0; padding: 1.25rem; border: 1px solid var(--line);
-  border-radius: var(--r-lg); background: var(--surface); }
+/* a surface one tone step from the ground, no outline */
+.card { margin: 3rem 0 2.5rem; padding: 1.5rem 1.25rem; border-radius: var(--r-lg);
+  background: var(--surface); scroll-margin-top: 1rem; }
 .card h2 { margin-top: 0; }
 .waitlist { display: grid; gap: .5rem; }
 .waitlist label { font-weight: 600; margin-top: .5rem; }
@@ -85,11 +92,11 @@ caption { text-align: left; color: var(--muted); padding-bottom: .4rem; }
 th, td { text-align: left; vertical-align: top; padding: .55rem .5rem;
   border-bottom: 1px solid var(--line); }
 td form { margin: 0; }
-td button { padding: .35rem .8rem; border: 1px solid var(--line); border-radius: 10px;
+td button { min-height: 40px; padding: .35rem .9rem; border: 1px solid var(--line); border-radius: 10px;
   background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
 
 .site-footer { padding-top: 1.5rem; padding-bottom: max(2rem, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line); margin-top: 3rem; color: var(--muted); font-size: .9rem; }
+  margin-top: 4rem; color: var(--muted); font-size: .9rem; }
 .site-footer nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
 
 /* phone width: tables become stacked rows */
@@ -99,7 +106,9 @@ td button { padding: .35rem .8rem; border: 1px solid var(--line); border-radius:
   thead { position: absolute; left: -10000px; }
   tr { padding: .5rem 0; border-bottom: 1px solid var(--line); }
   th, td { border: 0; padding: .2rem 0; }
-  tbody th { font-weight: 650; }
+  tbody th, tbody td:first-child { font-weight: 650; }
+  td:empty { display: none; }
+  td button { min-height: 44px; margin-top: .25rem; }
 }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
-html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (prefers-reduced-motion: reduce) { .button { transition: none; } .button:active { transform: none; } }
