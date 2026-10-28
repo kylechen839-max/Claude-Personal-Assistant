@@ -195,9 +195,13 @@ export function fakeChrome({ granted = true } = {}) {
   const alarms = {};
   const scripts = [];
   const injected = [];
+  const tabMessages = [];
+  const keepalive = [];
   const chrome = {
     runtime: { id: 'abcdefghijklmnopabcdefghijklmnop',
-               getURL: (p) => `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${p}` },
+               getURL: (p) => `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${p}`,
+               async getPlatformInfo() { keepalive.push(Date.now()); return { os: 'linux' }; } },
+    tabs: { async sendMessage(tabId, msg) { tabMessages.push({ tabId, msg }); } },
     storage: { local: {
       async get(keys) {
         const out = {};
@@ -227,7 +231,7 @@ export function fakeChrome({ granted = true } = {}) {
       async executeScript(opts) { injected.push(opts); return []; },
     },
   };
-  return { chrome, store, alarms, scripts, injected };
+  return { chrome, store, alarms, scripts, injected, tabMessages, keepalive };
 }
 
 export const tabSender = (origin, id = 'abcdefghijklmnopabcdefghijklmnop') =>

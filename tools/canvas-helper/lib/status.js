@@ -17,7 +17,7 @@ const RESULTS = {
   kwil_rejected: "Kwil didn't accept what was sent; the helper tries again later.",
   kwil_too_large: "Too much at once for Kwil; the helper sends less next time.",
   needs_permission: "The helper isn't allowed on your Canvas or Kwil site any more. " +
-                    "Open it and click Enable.",
+                    "Open that site and click the helper's icon there.",
 };
 
 export function hostOf(origin) {

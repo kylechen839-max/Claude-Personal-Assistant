@@ -1,13 +1,17 @@
 // Reading the school's Canvas with the person's own signed-in browser
 // session: GET only, `credentials: "include"` (the browser attaches its
 // own Canvas cookies; this code never reads or sees them), never an
-// Authorization header, so the Kwil key can't reach Canvas. Every URL is
-// on the one Canvas origin given (a "next" link or a file link elsewhere
-// is not followed). The bounds mirror kwil/canvas.py's token sync: 100
-// items a page, at most 10 pages and 1000 items a listing (10 MB an
-// answer here, not 2: the browser holds a page of 100 page bodies), Canvas's rate limit (429, or a 403 saying so) waited out three
-// times (1, 2, 4 s) and then the run stops. Canvas prefixes JSON answered
-// to a session with `while(1);`, which is stripped.
+// Authorization header, so the Kwil key can't reach Canvas. Every request
+// starts on the one Canvas origin given (a "next" link or a file link
+// elsewhere is not fetched). The browser follows redirects: a file
+// download goes on to Canvas's file store (it carries no key, only the
+// browser's own cookies for that host); an API answer that ended up on
+// another origin is an error, never read. The bounds mirror
+// kwil/canvas.py's token sync: 100 items a page, at most 10 pages and
+// 1000 items a listing (10 MB an answer here, not 2: the browser holds a
+// page of 100 page bodies), Canvas's rate limit (429, or a 403 saying so)
+// waited out three times (1, 2, 4 s) and then the run stops. Canvas
+// prefixes JSON answered to a session with `while(1);`, which is stripped.
 
 export const MAX_PAGES = 10;
 export const MAX_ITEMS = 1000;
@@ -67,6 +71,11 @@ function signedOut(response, url, origin) {
     const u = new URL(response.url || url);
     return u.origin === origin && /^\/login\b/.test(u.pathname);
   } catch (e) { return false; }
+}
+
+// Did the answer come from `origin` (after any redirect the fetch followed)?
+function sameOrigin(response, url, origin) {
+  try { return new URL(response.url || url).origin === origin; } catch (e) { return false; }
 }
 
 // Canvas answers 401 both for "not signed in" ({"status":
@@ -156,6 +165,9 @@ export class CanvasReader {
         continue;
       }
       if (signedOut(r, url, this.origin)) throw new CanvasError("signed_out");
+      if (!sameOrigin(r, url, this.origin)) {
+        throw new CanvasError("off_origin");  // an API answer redirected elsewhere: not Canvas's
+      }
       if (r.status === 401) throw new CanvasError(unauthorized(text));
       if (r.status === 403) throw new CanvasError("forbidden");
       if (r.status === 404) throw new CanvasError("not_found");

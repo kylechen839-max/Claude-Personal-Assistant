@@ -1,6 +1,6 @@
 // Talking to Kwil: only the origin the helper was paired on (https), only
 // its two push routes, the sync key as a Bearer header (never in a URL),
-// no cookies (`credentials: "omit"`: the push routes never read one, and
+// no cookies (credentials "omit": the push routes never read one, and
 // no Canvas cookie can ride along), no redirects followed (a redirect
 // could carry the key elsewhere). See kwil/canvas_helper.py.
 

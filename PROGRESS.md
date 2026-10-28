@@ -6131,3 +6131,63 @@ browser session and pushes to PR (b)'s routes. No server change.
   3390 passed, 37 skipped (baseline 61c409f from a `git archive` copy:
   3385 passed, 38 skipped, where `test_rebrand`'s git-history test skips;
   it runs here). JavaScript 205 passed (173 before).
+
+### Round 2: the judge's findings (2026-10-28)
+
+1. MED, "Enable on this site" injected the pairing script on every enabled
+   origin, and a pairing from any enabled origin silently replaced the
+   current one. The roles are split now: **Use as my school's Canvas**
+   registers and injects only `canvas-seen.js`; a Kwil on its own domain
+   needs **This is my Kwil**, whose second click answers "Send your Canvas
+   courses to <host>?", and only `kwil-pair.js` runs there (a site is one
+   or the other; the built-in hosts can't be enabled as the other kind).
+   The pairing script asks the worker first (`kwil-may-pair`); a pairing
+   from a Kwil other than the paired one is refused, the code left unused,
+   until the popup's **Switch to <host>** (shown on that Kwil's page,
+   naming both hosts) allows it for 10 minutes and pokes the page's
+   script. A visited Canvas no longer replaces a pinned, signed-in one.
+   Tests: a Canvas site never gets `kwil-pair.js` (registered or injected)
+   and can't pair; a Kwil site gets only `kwil-pair.js`, after the
+   permission; re-pairing from another Kwil is refused until the popup's
+   switch, which expires; the script leaves a refused code unused until
+   poked by this extension; an enabled Canvas site can't take over the
+   pinned one; the popup's two-step "This is my Kwil" and Switch.
+2. MED, the service worker could be stopped mid-run (no chrome.* call
+   while reading), and every read came before the first push. A run now
+   writes `status.running`/`lastRun` before its first read, calls
+   `chrome.runtime.getPlatformInfo()` every 20 s (cleared at the end) and
+   notes progress in storage after each course and push; it pushes a
+   manifest whenever a batch fills (with that batch's announcements),
+   then that batch's wanted files. Tests: keepalive (timer, call, clear,
+   running written at start, progress before the first push); courses
+   pushed before the last one is read; a rate limit part-way still pushes
+   the courses read in full. MANUAL_TEST: a many-course sync with DevTools
+   closed.
+3. LOW, the needs-permission message pointed at a hidden button. On the
+   paired Kwil or the Canvas without its permission the popup shows
+   **Allow on this site** (custom domains) or where Chrome's Site access
+   setting is (heykwil.com, instructure.com); the message says to open
+   that site and click the icon. Test for both and for a granted site.
+4. LOW, `storage.local.setAccessLevel` only works on `storage.session`.
+   The call is gone; background.js and SECURITY.md now say plainly that
+   Chrome lets the extension's own content scripts read `storage.local`
+   (ours never do; page scripts can't), as a deliberate non-fix
+   (`storage.session` would unpair at every browser restart).
+5. LOW, tests for: Kwil's 401 dropping the key through `onAlarm`; the
+   instructure/Canvas-origin refusal; `canvasSeen` ignoring the paired
+   Kwil's origin; pairing without `sender.tab`; `sender.origin` over the
+   frame URL; the request-level and `download` off-origin checks each on
+   its own (a spy shows `download` refuses before any request).
+6. LOW, redirects: `getJSON` now refuses an answer whose final URL left
+   the Canvas origin (`off_origin`; a run reading courses that way pushes
+   nothing; test). SECURITY says plainly that the browser follows Canvas's
+   redirects for file downloads (to the file store, no key), and that
+   off-origin API answers are errors.
+
+Failing first: 30 round-2 reverts, each failing its test (the
+keepalive-clear revert hangs the run), and the judge's 20-mutation script
+now fails a test for every one (its `credentials: "omit"` mutation had hit
+a comment in kwil.js; the comment no longer matches). Counts (Linux
+sandbox, Python 3.13, Node 22, not real hardware): 3390 passed, 37
+skipped; JavaScript 220 passed (205 before; the helper's files 47, was
+32).

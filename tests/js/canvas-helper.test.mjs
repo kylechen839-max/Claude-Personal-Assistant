@@ -114,8 +114,8 @@ test('a wanted id the run did not list is never fetched; files stop at max_files
   const w = world({ data, kwil: kwilRoutes({ want }) });
   const out = await sync(w, { pairing: { ...PAIRING, maxFiles: 5 } });
   assert.equal(out.result, 'ok');
-  // 999 and (222, 600) weren't in this run's listing: skipped; then 3 of 600..
-  assert.deepEqual(w.pushed.files.map((f) => Number(f.file_id)), [600, 601, 602]);
+  // 999 and (222, 600) weren't in this run's listing: skipped (not counted); 5 of 600..
+  assert.deepEqual(w.pushed.files.map((f) => Number(f.file_id)), [600, 601, 602, 603, 604]);
 });
 
 test('a file over Kwil\'s limit is cut one byte past it (Kwil notes it "too large")', async () => {
@@ -274,7 +274,7 @@ test('pairing is accepted only from a Kwil page, and the key never reaches the p
   assert.equal(store.pairing, undefined);
 });
 
-function pairPage({ origin = KWIL, answer = { status: 200, body: { key: KEY,
+function pairPage({ origin = KWIL, may = true, answer = { status: 200, body: { key: KEY,
                      manifest: '/api/student/canvas/push/manifest', max_file_bytes: 3934464,
                      max_files: 40 } } } = {}) {
   const u = new URL(origin);
@@ -282,6 +282,8 @@ function pairPage({ origin = KWIL, answer = { status: 200, body: { key: KEY,
   let observer = null;
   const sent = [];
   const fetches = [];
+  const listeners = [];
+  const state = { may };
   const ctx = {
     location: { protocol: u.protocol, hostname: u.hostname, origin: u.origin },
     document: { documentElement: {},
@@ -292,18 +294,28 @@ function pairPage({ origin = KWIL, answer = { status: 200, body: { key: KEY,
       fetches.push({ url, opts });
       return { status: answer.status, json: async () => answer.body };
     },
-    chrome: { runtime: { sendMessage: async (m) => { sent.push(m); return { ok: true }; } } },
+    chrome: { runtime: {
+      id: 'abcdefghijklmnopabcdefghijklmnop',
+      onMessage: { addListener: (fn) => listeners.push(fn) },
+      sendMessage: async (m) => {
+        if (m.type === 'kwil-may-pair') return { ok: state.may };
+        sent.push(m);
+        return { ok: true };
+      } } },
     JSON, Set, String,
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   vm.runInContext(readFileSync(new URL('../../tools/canvas-helper/content/kwil-pair.js',
                                        import.meta.url), 'utf8'), ctx);
-  return { el, sent, fetches, show: async (code) => {
+  const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); };
+  return { el, sent, fetches, state, show: async (code) => {
     el.attrs['data-kwil-pair'] = code;
     if (observer) observer();
-    await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
+  }, poke: async (id = 'abcdefghijklmnopabcdefghijklmnop') => {
+    for (const fn of listeners) fn({ type: 'kwil-pair-now' }, { id });
+    await settle();
   } };
 }
 
@@ -405,23 +417,288 @@ test('Canvas is found from where the person browses, never from Kwil or a strang
   assert.ok(!isInstructure('http://x.instructure.com'));
 });
 
-test('a school domain is enabled only with its own granted permission', async () => {
-  const school = 'https://canvas.school.edu';
+const SCHOOL = 'https://canvas.school.edu';
+const OWN_KWIL = 'https://kwil.example.org';
+
+test('a school Canvas domain gets only canvas-seen.js, and only with its permission', async () => {
   const { chrome, store, scripts, injected } = fakeChrome({ granted: false });
   const helper = createHelper({ chrome, fetch: world().fetch, sleep: noSleep });
-  assert.deepEqual(await helper.onMessage({ type: 'enable-site', origin: school, tabId: 7 },
-                                          popupSender()), { ok: false, error: 'permission' });
-  assert.deepEqual(await helper.onMessage({ type: 'enable-site', origin: school, tabId: 7 },
-                                          tabSender(school)), { ok: false });
-  chrome.permissions.granted.add(`${school}/*`);
-  assert.deepEqual(await helper.onMessage({ type: 'enable-site', origin: school, tabId: 7 },
-                                          popupSender()), { ok: true });
-  assert.deepEqual(store.sites, [school]);
-  assert.deepEqual(scripts.map((s) => s.matches), [[`${school}/*`]]);
-  assert.equal(injected[0].target.tabId, 7);
-  await helper.permissionsRemoved({ origins: [`${school}/*`] });
-  assert.deepEqual(store.sites, []);
+  const enable = { type: 'enable-canvas', origin: SCHOOL, tabId: 7 };
+  assert.deepEqual(await helper.onMessage(enable, popupSender()), { ok: false, error: 'permission' });
+  assert.deepEqual(await helper.onMessage(enable, tabSender(SCHOOL)), { ok: false });
+  chrome.permissions.granted.add(`${SCHOOL}/*`);
+  assert.deepEqual(await helper.onMessage(enable, popupSender()), { ok: true });
+  assert.deepEqual(store.canvasSites, [SCHOOL]);
+  assert.deepEqual(store.canvas, { origin: SCHOOL, signedOut: true });   // until its probe
+  assert.deepEqual(scripts.map((x) => [x.matches, x.js]),
+                   [[[`${SCHOOL}/*`], ['content/canvas-seen.js']]]);
+  assert.deepEqual(injected.map((x) => [x.target.tabId, x.files]),
+                   [[7, ['content/canvas-seen.js']]]);
+  // never the pairing script on a Canvas site, and no pairing from it
+  assert.ok(!JSON.stringify([scripts, injected]).includes('kwil-pair'));
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-may-pair' }, tabSender(SCHOOL)),
+                   { ok: false });
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY }, tabSender(SCHOOL)),
+                   { ok: false });
+  assert.equal(store.pairing, undefined);
+  await helper.permissionsRemoved({ origins: [`${SCHOOL}/*`] });
+  assert.deepEqual(store.canvasSites, []);
   assert.deepEqual(scripts, []);
+});
+
+test('a Kwil of its own gets only kwil-pair.js, after the popup named its host', async () => {
+  const { chrome, store, scripts, injected } = fakeChrome({ granted: false });
+  const helper = createHelper({ chrome, fetch: world().fetch, sleep: noSleep });
+  // not enabled: no pairing from it
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY }, tabSender(OWN_KWIL)),
+                   { ok: false });
+  const enable = { type: 'enable-kwil', origin: OWN_KWIL, tabId: 7 };
+  assert.deepEqual(await helper.onMessage(enable, popupSender()), { ok: false, error: 'permission' });
+  chrome.permissions.granted.add(`${OWN_KWIL}/*`);
+  assert.deepEqual(await helper.onMessage(enable, popupSender()), { ok: true });
+  assert.deepEqual(store.kwilSites, [OWN_KWIL]);
+  assert.deepEqual(scripts.map((x) => [x.matches, x.js]),
+                   [[[`${OWN_KWIL}/*`], ['content/kwil-pair.js']]]);
+  assert.deepEqual(injected.map((x) => x.files), [['content/kwil-pair.js']]);
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY }, tabSender(OWN_KWIL)),
+                   { ok: true });
+  assert.equal(store.pairing.origin, OWN_KWIL);
+  // the built-in hosts can't be enabled as the other kind
+  for (const [type, origin] of [['enable-canvas', KWIL], ['enable-kwil', CANVAS],
+                                ['enable-canvas', CANVAS]]) {
+    chrome.permissions.granted.add(`${origin}/*`);
+    assert.deepEqual(await helper.onMessage({ type, origin }, popupSender()), { ok: false });
+  }
+});
+
+test('re-pairing from another Kwil is refused until the popup confirms the switch', async () => {
+  const { chrome, store, tabMessages } = fakeChrome();
+  let t = Date.parse('2026-10-27T12:00:00Z');
+  const helper = createHelper({ chrome, fetch: world().fetch, sleep: noSleep, now: () => t });
+  store.kwilSites = [OWN_KWIL];   // enabled earlier
+  await helper.onMessage({ type: 'kwil-paired', key: KEY }, tabSender(OWN_KWIL));
+  const other = 'kcs1.' + 'Z'.repeat(43);
+  // heykwil.com now: the page may not pair, and a key from it is refused
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-may-pair' }, tabSender(KWIL)), { ok: false });
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: other }, tabSender(KWIL)),
+                   { ok: false });
+  assert.equal(store.pairing.key, KEY);
+  assert.equal(store.pairing.origin, OWN_KWIL);
+  // the same Kwil may pair again (a new key after a revoke)
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-may-pair' }, tabSender(OWN_KWIL)),
+                   { ok: true });
+  // a page can't confirm the switch; the popup can, and pokes that tab
+  assert.deepEqual(await helper.onMessage({ type: 'switch-kwil', origin: KWIL, tabId: 7 },
+                                          tabSender(KWIL)), { ok: false });
+  assert.deepEqual(await helper.onMessage({ type: 'switch-kwil', origin: 'https://evil.example',
+                                           tabId: 7 }, popupSender()), { ok: false });
+  assert.deepEqual(await helper.onMessage({ type: 'switch-kwil', origin: KWIL, tabId: 7 },
+                                          popupSender()), { ok: true });
+  assert.deepEqual(tabMessages, [{ tabId: 7, msg: { type: 'kwil-pair-now' } }]);
+  // only for a while
+  t += 11 * 60_000;
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: other }, tabSender(KWIL)),
+                   { ok: false });
+  await helper.onMessage({ type: 'switch-kwil', origin: KWIL, tabId: 7 }, popupSender());
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: other }, tabSender(KWIL)),
+                   { ok: true });
+  assert.equal(store.pairing.origin, KWIL);
+  assert.equal(store.switchTo, undefined);   // used up
+});
+
+test('the pairing script asks first and leaves a refused code unused until poked', async () => {
+  const p = pairPage({ may: false });
+  await p.show(CODE);
+  assert.equal(p.fetches.length, 0);       // the code stays unused
+  p.state.may = true;                      // the popup confirmed the switch
+  await p.poke('another-extension');       // not from this extension: ignored
+  assert.equal(p.fetches.length, 0);
+  await p.poke();
+  assert.equal(p.fetches.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.sent.map((m) => m.type))), ['kwil-paired']);
+});
+
+test('an enabled Canvas site can\'t take over a working Canvas by being visited', async () => {
+  const { chrome, store } = fakeChrome();
+  const w = world({ kwil: kwilRoutes() });
+  const helper = createHelper({ chrome, fetch: w.fetch, sleep: noSleep });
+  store.pairing = PAIRING;
+  store.canvas = { origin: CANVAS, signedOut: false };
+  store.canvasSites = [SCHOOL];
+  assert.deepEqual(await helper.onMessage({ type: 'canvas-seen' }, tabSender(SCHOOL)),
+                   { ok: false });
+  assert.deepEqual(await helper.onMessage({ type: 'canvas-seen' },
+                                          tabSender('https://other.instructure.com')),
+                   { ok: false });
+  assert.equal(store.canvas.origin, CANVAS);
+  await helper.sync();
+  assert.ok(w.calls.every((c) => c.url.startsWith(CANVAS) || c.url.startsWith(KWIL)));
+  assert.equal(w.pushed.manifests.length, 1);
+});
+
+test('canvas-seen from the paired Kwil\'s own origin is ignored', async () => {
+  const { chrome, store } = fakeChrome();
+  const w = world();
+  const helper = createHelper({ chrome, fetch: w.fetch, sleep: noSleep });
+  store.pairing = { ...PAIRING, origin: OWN_KWIL };
+  store.canvasSites = [OWN_KWIL];   // a stale list that names it too
+  assert.deepEqual(await helper.onMessage({ type: 'canvas-seen' }, tabSender(OWN_KWIL)),
+                   { ok: false });
+  assert.equal(w.calls.length, 0);
+  assert.equal(store.canvas, undefined);
+});
+
+test('a pairing is refused from a Canvas origin even when listed as a Kwil, and without a tab', async () => {
+  const { chrome, store } = fakeChrome();
+  const helper = createHelper({ chrome, fetch: world().fetch, sleep: noSleep });
+  const instructureKwil = 'https://kwil.instructure.com';
+  store.kwilSites = [instructureKwil, SCHOOL];
+  store.canvas = { origin: SCHOOL, signedOut: false };
+  for (const origin of [instructureKwil, SCHOOL]) {
+    assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY }, tabSender(origin)),
+                     { ok: false }, origin);
+  }
+  // heykwil.com, but not from a tab (an extension page of ours)
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY },
+                                          { id: 'abcdefghijklmnopabcdefghijklmnop', origin: KWIL,
+                                            url: `${KWIL}/` }), { ok: false });
+  // Chrome's sender.origin wins over the frame URL
+  assert.deepEqual(await helper.onMessage({ type: 'kwil-paired', key: KEY },
+                                          { ...tabSender('https://evil.example'),
+                                            url: `${KWIL}/` }), { ok: false });
+  assert.equal(store.pairing, undefined);
+});
+
+test('Kwil\'s 401 during a run drops the key (pair again)', async () => {
+  const { chrome, store } = fakeChrome();
+  const w = world({ kwil: kwilRoutes({ manifestStatus: 401 }) });
+  const helper = createHelper({ chrome, fetch: w.fetch, sleep: noSleep });
+  store.pairing = PAIRING;
+  store.canvas = { origin: CANVAS, signedOut: false };
+  assert.equal((await helper.onAlarm({ name: 'kwil-sync' })).result, 'unpaired');
+  assert.equal(store.pairing, undefined);
+  assert.equal(store.status.result, 'unpaired');
+  const st = await helper.onMessage({ type: 'status' }, popupSender());
+  assert.equal(st.paired, false);
+});
+
+test('a run keeps the worker alive and notes progress from its start', async () => {
+  const { chrome, store, keepalive } = fakeChrome();
+  const ticks = [];
+  let cleared = null;
+  const timers = { setInterval: (fn, ms) => { ticks.push({ fn, ms }); return 42; },
+                   clearInterval: (id) => { cleared = id; } };
+  const w = world({ kwil: kwilRoutes() });
+  let atStart = null;
+  let atPush = null;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const fetch = async (url, opts) => {
+    if (atStart === null) {
+      atStart = structuredClone(store.status);
+      await gate;   // a slow Canvas
+    }
+    if (url.endsWith('/push/manifest') && atPush === null) atPush = structuredClone(store.status);
+    return w.fetch(url, opts);
+  };
+  const helper = createHelper({ chrome, fetch, sleep: noSleep, timers,
+                                now: () => Date.parse('2026-10-27T12:00:00Z') });
+  store.pairing = PAIRING;
+  store.canvas = { origin: CANVAS, signedOut: false };
+  const run = helper.sync();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(atStart.running, true);                 // written before the first read
+  assert.equal(atStart.lastRun, '2026-10-27T12:00:00.000Z');
+  assert.equal(ticks.length, 1);
+  assert.ok(ticks[0].ms <= 25_000);
+  ticks[0].fn();                                       // ~20 s later
+  assert.equal(keepalive.length, 1);                   // a chrome.* call
+  release();
+  await run;
+  assert.equal(cleared, 42);
+  assert.equal(store.status.running, false);
+  assert.equal(store.status.result, 'ok');
+  assert.ok(atPush.progressAt && atPush.running);       // noted after each course read
+});
+
+test('courses are pushed as they are read, not after the last one', async () => {
+  const data = school();
+  const big = '<p>' + 'x'.repeat(90_000) + '</p>';
+  data.courses = Array.from({ length: 6 }, (_, i) => ({ id: 700 + i, name: `C${i}`,
+                                                         course_code: `C${i}`, syllabus_body: big }));
+  for (const c of data.courses) {
+    for (const k of ['pages', 'assignments', 'modules', 'files']) data[k][c.id] = [];
+  }
+  data.announcements = data.courses.map((c) => ({ id: c.id, title: 't', message: 'm',
+    posted_at: '2026-10-20T00:00:00Z', context_code: `course_${c.id}` }));
+  const w = world({ data, kwil: kwilRoutes({ want: [] }) });
+  const out = await sync(w, { pairing: { ...PAIRING, maxFileBytes: 200_000 } });
+  assert.equal(out.result, 'ok');
+  assert.ok(w.pushed.manifests.length >= 3);
+  const firstPush = w.calls.findIndex((c) => c.url.endsWith('/push/manifest'));
+  const lastRead = w.calls.findIndex((c) => c.url.includes('/courses/705/'));
+  assert.ok(firstPush < lastRead, 'the first manifest went before the last course was read');
+  assert.deepEqual(w.pushed.manifests.flatMap((m) => m.courses.map((c) => c.id)),
+                   data.courses.map((c) => c.id));
+  // each batch with its own courses' announcements, all of them once
+  for (const m of w.pushed.manifests) {
+    const ids = new Set(m.courses.map((c) => c.id));
+    assert.ok(m.announcements.every((n) => ids.has(Number(n.context_code.slice(7)))));
+  }
+  assert.equal(w.pushed.manifests.flatMap((m) => m.announcements).length, 6);
+  for (const m of w.pushed.manifests) assert.ok(JSON.stringify(m).length <= 200_000);
+});
+
+test('a lasting rate limit part-way still pushes the courses read in full', async () => {
+  const data = school();
+  const w = world({ data, kwil: kwilRoutes({ want: [] }) });
+  let reads = 0;
+  const fetch = async (url, opts) => {
+    if (url.includes('/courses/222/')) {   // Canvas starts refusing at the second course
+      reads += 1;
+      return new Response('403 Forbidden (Rate Limit Exceeded)', { status: 403 });
+    }
+    return w.fetch(url, opts);
+  };
+  const out = await runSync({ pairing: PAIRING, canvasOrigin: CANVAS, fetch, sleep: noSleep });
+  assert.equal(out.result, 'canvas_rate_limited');
+  assert.equal(reads, 4);
+  assert.deepEqual(w.pushed.manifests.map((m) => m.courses.map((c) => c.id)), [[111]]);
+  assert.equal(w.pushed.manifests[0].announcements, null);   // not read after the stop
+});
+
+test('every Canvas request is checked for the origin on its own', async () => {
+  const calls = [];
+  const fetch = async (url) => { calls.push(url); return new Response('[]'); };
+  const reader = new CanvasReader({ origin: CANVAS, fetch, sleep: noSleep });
+  // the request itself (as getJSON makes it)
+  await assert.rejects(reader.getJSON('https://evil.example/api/v1/courses'),
+                       (e) => e.code === 'off_origin');
+  assert.deepEqual(calls, []);
+  // download checks before any request is made
+  let requested = false;
+  reader._request = async () => { requested = true; return new Response('x'); };
+  await assert.rejects(reader.download(`https://evil.example/files/1/download?verifier=${VERIFIER}`, 10),
+                       (e) => e.code === 'off_origin');
+  assert.equal(requested, false);
+});
+
+test('an API answer redirected to another origin is an error, never read', async () => {
+  const w = world({ kwil: kwilRoutes() });
+  const fetch = async (url, opts) => {
+    if (url.startsWith(`${CANVAS}/api/v1/courses?`)) {
+      const r = new Response(JSON.stringify([{ id: 9, name: 'Made up', syllabus_body: 'x' }]));
+      Object.defineProperty(r, 'url', { value: 'https://evil.example/courses' });
+      Object.defineProperty(r, 'redirected', { value: true });
+      return r;
+    }
+    return w.fetch(url, opts);
+  };
+  const reader = new CanvasReader({ origin: CANVAS, fetch, sleep: noSleep });
+  await assert.rejects(reader.courses(), (e) => e.code === 'off_origin');
+  const out = await runSync({ pairing: PAIRING, canvasOrigin: CANVAS, fetch, sleep: noSleep });
+  assert.equal(out.result, 'canvas_error');
+  assert.equal(w.pushed.manifests.length, 0);
 });
 
 test('a sync without the host permissions reads nothing', async () => {

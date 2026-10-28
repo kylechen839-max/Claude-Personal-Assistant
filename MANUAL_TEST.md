@@ -964,13 +964,28 @@ unpacked).
   - Should: within a few seconds "Canvas helper connected." and the code
     is gone; the helper's popup says Paired, Kwil: heykwil.com.
 - [ ] Open your school's Canvas (signed in). If it is not on
-      `*.instructure.com`, click the helper's icon there and **Enable on
-      this site**, and allow it.
+      `*.instructure.com`, click the helper's icon there and **Use as my
+      school's Canvas**, and allow it.
   - Should: Chrome asks for that one site only; within a minute the popup
-    shows Canvas: your school's address and a last sync "just now".
+    shows Canvas: your school's address and a last sync "just now". The
+    popup offers nothing on your Canvas pages after that.
 - [ ] In Kwil, ask "what's the late policy in my syllabus?" (or something
       in one of your course files).
   - Should: the answer comes from your real syllabus or file.
+- [ ] With an account that has many courses (6 or more, or files in
+      each), and with every DevTools window closed (an open service-worker
+      console keeps the worker alive and hides the problem): click the
+      helper's icon, **Unpair this browser** twice, pair again from Kwil,
+      then close the popup and leave the browser alone for 5 minutes.
+  - Should: the popup then shows a last sync "just now"/"a few min ago"
+    with all your courses counted, and Kwil can answer from the last
+    course in your Canvas list too.
+- [ ] Open a Kwil page on another address while paired (e.g. the Render
+      address `https://<service>.onrender.com`, after **This is my Kwil**
+      there), tap **Set up Canvas helper**.
+  - Should: nothing pairs by itself; the popup there shows **Switch to
+    <that host>** naming both; only after clicking it does the card say
+    connected (then switch back the same way on heykwil.com).
 - [ ] Open the helper's service worker console (Details, **Inspect views:
       service worker**) and read its log lines.
   - Should: only counts and codes ("read 5 of 5 course(s)", "pushed ..."),

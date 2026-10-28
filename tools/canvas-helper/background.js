@@ -11,13 +11,11 @@ const helper = createHelper({
   log: (line) => console.info(line),   // counts and codes only (lib/sync.js)
 });
 
-// The key lives in chrome.storage.local: keep it out of content scripts'
-// reach (they never read storage; this is belt and braces).
-try {
-  const p = chrome.storage.local.setAccessLevel &&
-    chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-  if (p && p.catch) p.catch(() => {});
-} catch (e) { /* older Chrome: content scripts still never read it */ }
+// The key lives in chrome.storage.local, which page scripts can't reach.
+// Chrome lets this extension's own content scripts read storage.local
+// (only storage.session can be limited to trusted contexts, and it is
+// emptied when the browser closes); ours never read it. SECURITY.md
+// records this.
 
 chrome.runtime.onInstalled.addListener(() => { helper.ensureAlarms(); });
 chrome.runtime.onStartup.addListener(() => { helper.ensureAlarms(); });

@@ -44,16 +44,26 @@ start-up; that is normal for an unpacked extension.
 2. Open your school's Canvas in that browser (signed in) once.
    - On `*.instructure.com` nothing else is needed.
    - On a school domain of its own (e.g. `canvas.school.edu`): click the
-     helper's icon there and **Enable on this site**; Chrome asks to allow
-     that one site.
+     helper's icon there and **Use as my school's Canvas**; Chrome asks to
+     allow that one site.
 
 The first sync starts about half a minute later, then every 6 hours while
 the browser is open. The popup shows whether it is paired, the Kwil and
 Canvas it uses, and the last sync.
 
 If your Kwil runs on its own domain (not `heykwil.com`): open it, tap
-**Set up Canvas helper**, then click the helper's icon and **Enable on this
-site** within the 10 minutes.
+**Set up Canvas helper**, then click the helper's icon, **This is my
+Kwil**, and confirm "Send your Canvas courses to <host>?" within the 10
+minutes.
+
+Already paired with one Kwil and setting up another? On the new Kwil's
+page the popup offers **Switch to <host>** (naming both); without that
+click the helper ignores the new code.
+
+If Chrome stops letting the helper on your Canvas or Kwil (Site access in
+the extension's details), the popup says so on that site: **Allow on this
+site** for a domain you enabled, or where to find Site access for
+heykwil.com and instructure.com.
 
 ## Stop it
 - **Unpair this browser** (popup, click twice) forgets the key here.
@@ -68,12 +78,12 @@ site** within the 10 minutes.
 | --- | --- |
 | `storage` | the sync key, the Kwil and Canvas addresses, the last sync |
 | `alarms` | the sync every 6 hours, and one soon after pairing |
-| `activeTab` | the popup reads the current tab's address, only when you click the icon, to offer **Enable on this site** |
-| `scripting` | for a site you enabled: run the helper's two small page scripts there |
+| `activeTab` | the popup reads the current tab's address, only when you click the icon, to offer the buttons below |
+| `scripting` | for a site you enabled: run that role's one small page script there (Canvas: `canvas-seen.js`; Kwil: `kwil-pair.js`) |
 | `https://heykwil.com/*` | pick up the pairing code; send your courses to Kwil |
 | `https://*.instructure.com/*` | read your Canvas (most schools) |
 | `https://*.inscloudgate.net/*` | Canvas hands course files out from its file store there |
-| optional `https://*/*` | asked for one site at a time, only when you click **Enable on this site** |
+| optional `https://*/*` | asked for one site at a time, only when you click **Use as my school's Canvas** or confirm **This is my Kwil** |
 
 No `<all_urls>`, no `cookies` or `tabs` permission, no remote code, no
 `eval`; the extension pages' Content-Security-Policy allows only its own
@@ -82,8 +92,10 @@ scripts.
 ## How it works (for reviewers)
 - `content/kwil-pair.js` (on the Kwil page): reads the code from the
   `data-kwil-pair` element, POSTs it same-origin to
-  `/api/student/canvas/pair`, and hands the returned `kcs1.` key to the
-  service worker. The key never goes into the page, a URL or a log.
+  `/api/student/canvas/pair` (after asking the worker whether this page
+  may pair), and hands the returned `kcs1.` key to the service worker. The
+  key never goes into the page, a URL or a log. It never runs on a Canvas
+  site.
 - `content/canvas-seen.js` (on Canvas pages): tells the worker you are on
   Canvas; the worker takes the address from Chrome, not the page, and
   checks it is a signed-in Canvas.
@@ -95,8 +107,11 @@ scripts.
   the run until you visit Canvas again). `lib/manifest.js` keeps only the
   fields Kwil reads and splits big manifests by course under Kwil's size
   limit. `lib/kwil.js` posts to the paired Kwil origin only, with the key
-  as a Bearer header, no cookies, no redirects. `lib/sync.js` pushes the
-  manifest, then only the files Kwil's answer asked for (at most 40 a run).
+  as a Bearer header, no cookies, no redirects. `lib/sync.js` pushes as it
+  reads: a manifest whenever a batch of courses fills, then only the files
+  Kwil's answer asked for (at most 40 a run); the worker keeps itself
+  alive during a run (a `chrome.runtime` call every 20 s, a progress note
+  after each course).
 - Server side: `kwil/canvas_helper.py` (the contract) and SECURITY.md
   "The Canvas helper's pushes".
 - `package.json` only tells node to load `lib/*.js` as ES modules for the

@@ -1593,10 +1593,13 @@ your Canvas sign-in or cookies: the helper sends only the courses' JSON
 and file bytes it read. Pair it from the Kwil address the helper talks to
 (the cloud app, `heykwil.com`): what it sends is stored on that server.
 The extension finds your Canvas by itself on `*.instructure.com`; for a
-school domain of its own, click its icon there and **Enable on this site**
-(Chrome asks for that one site). It syncs about half a minute after
+school domain of its own, click its icon there and **Use as my school's
+Canvas** (Chrome asks for that one site; a Kwil on its own domain is
+**This is my Kwil**, which asks "Send your Canvas courses to <host>?"
+first, and a second Kwil needs **Switch to <host>**). It syncs about half a minute after
 pairing, then every 6 hours while the browser is open and you are signed
-in to Canvas, and pushes only the files Kwil asks for (at most 40 a run).
+in to Canvas, pushing as it reads, and pushes only the files Kwil asks
+for (at most 40 a run).
 Its popup shows only status (paired, the Kwil and Canvas it uses, the
 last sync) with **Unpair this browser** and **Revoke in Kwil**. It asks
 for `storage`, `alarms`, `activeTab`, `scripting` and the hosts

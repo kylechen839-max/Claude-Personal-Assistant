@@ -10,10 +10,21 @@
   <h1>Kwil Canvas helper</h1>
   <p id="title" class="title">…</p>
   <ul id="lines"></ul>
-  <p id="enable-box" hidden>
-    <button id="enable" type="button">Enable on this site</button>
-    <span class="hint">For a school Canvas (or a Kwil) on its own domain.</span>
-  </p>
+  <div id="access-box" hidden>
+    <p id="access-text" class="hint"></p>
+    <button id="regrant" type="button">Allow on this site</button>
+  </div>
+  <div id="canvas-box" hidden>
+    <button id="enable-canvas" type="button">Use as my school's Canvas</button>
+  </div>
+  <div id="kwil-box" hidden>
+    <p id="kwil-ask" class="hint">Or, if this is your own Kwil:</p>
+    <button id="enable-kwil" type="button">This is my Kwil</button>
+  </div>
+  <div id="switch-box" hidden>
+    <p id="switch-ask" class="hint"></p>
+    <button id="switch" type="button">Switch</button>
+  </div>
   <p id="paired-box" hidden>
     <button id="unpair" type="button" class="danger">Unpair this browser</button>
     <button id="revoke" type="button">Revoke in Kwil</button>
