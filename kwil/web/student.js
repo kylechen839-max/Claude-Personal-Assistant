@@ -6,9 +6,16 @@
 // Everything shown from the server (titles, courses, the school's host) is
 // set as text, never HTML. The feed link and token are sent once and never
 // shown back. It never asks for a school password. Loaded with defer.
-// The guided way in: find the school (/api/student/schools), open its
-// Canvas calendar in a new tab from the tap (so iOS allows it), and Paste
-// the copied feed link back into the field; the person still taps Connect.
+// The guided way in: find the school (/api/student/schools, each with its
+// token policy; a typed address asks /api/student/canvas/policy), then
+// Kwil picks the one way in and shows only that step (pickMethod): an
+// access token where the school allows them (Open my Canvas settings),
+// the Canvas helper on desktop Chrome or Edge where it blocks them or
+// nobody knows yet, else the calendar feed: open its Canvas calendar in a
+// new tab from the tap (so iOS allows it), and Paste the copied feed link
+// back into the field. The person still taps Connect. "My Canvas has no
+// New access token button" tells the server (it learns the school blocks
+// them) and falls back at once.
 // The Canvas helper (kwil/canvas_helper.py), for schools that block tokens:
 // "Set up Canvas helper" shows a one-time pairing code for 10 minutes in
 // the element with data-kwil-pair (the helper extension's content script
@@ -41,6 +48,42 @@
     if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
         LOCAL_TLDS.test(host)) return null;
     return host;
+  }
+
+  // A phone or tablet: userAgentData.mobile where the browser has it
+  // (Chromium), else the user agent; iPadOS says it is a Mac, so a Mac
+  // with a touch screen counts too.
+  function isMobile(nav) {
+    nav = nav || {};
+    const data = nav.userAgentData;
+    if (data && typeof data.mobile === "boolean") return data.mobile;
+    const ua = String(nav.userAgent || "");
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+    return /Macintosh/.test(ua) && Number(nav.maxTouchPoints) > 1;
+  }
+
+  // Desktop Chrome or Edge (or another Chromium), where the Canvas helper
+  // extension can be loaded.
+  function helperBrowser(nav) {
+    nav = nav || {};
+    if (isMobile(nav)) return false;
+    if (nav.userAgentData && Array.isArray(nav.userAgentData.brands)) return true;
+    return /\b(Chrome|Chromium|Edg)\//.test(String(nav.userAgent || ""));
+  }
+
+  // The one way in for a school: {method: "token" | "helper" | "feed",
+  // extra: "token" (offer "Get course files too") | "helper_elsewhere"
+  // (point at the helper on a computer) | null}. tokens: the school's
+  // policy ("allowed", "blocked", "unknown"); tokenOk: this person may use
+  // a token ([canvas] tokens_for); helper: the server has the helper on;
+  // chromium: helperBrowser().
+  function pickMethod({ tokens, tokenOk, helper, chromium }) {
+    if (tokens === "allowed" && tokenOk) return { method: "token", extra: null };
+    if (helper && chromium) return { method: "helper", extra: null };
+    if (tokens !== "blocked" && tokens !== "allowed" && tokenOk) {
+      return { method: "feed", extra: "token" };
+    }
+    return { method: "feed", extra: helper ? "helper_elsewhere" : null };
   }
 
   function create(win, doc) {
@@ -89,24 +132,26 @@
     const message = el("p", "", "hint");
     message.hidden = true;
 
-    // connect: the calendar feed link, or school + access token
+    // connect: find the school, then only the step Kwil picked for it
     const connectBox = el("div");
-    // guided: find the school, open its Canvas calendar, paste the link back
-    const guide = el("div");
     const find = input("text", "Your school's name or Canvas address", "Find your school");
     const findBtn = button("Find my school", findSchool);
     const findRow = el("div", undefined, "api-key-row");
     findRow.append(findBtn);
     const results = el("div", undefined, "api-key-row");  // a button per school, names as text
     const chosenHost = el("p", "", "hint");                // the chosen school's host, as text
+    let chosen = null;
+    let tokens = "unknown";   // the chosen school's token policy
+    let picked = null;        // pickMethod()'s answer for it
+    let filesToo = false;     // "Get course files too" opened the token step under the feed
+    let feedChosen = false;   // "Use the calendar feed instead" was tapped
+    let current = {};         // the last status from the server
+    // the feed: open its Canvas calendar, paste the link back
+    const feedBox = el("div");
+    feedBox.hidden = true;
     const openCal = button("Open my Canvas calendar", openCalendar);
     const openHelp = el("p", "Tap Calendar Feed (bottom right), copy the link, come back.",
                         "hint");
-    const openBox = el("div");
-    openBox.hidden = true;
-    openBox.append(chosenHost, openCal, openHelp);
-    guide.append(find, findRow, results, openBox);
-    let chosen = null;
     const feed = input("url", "https://…/feeds/calendars/user_….ics", "Canvas calendar feed link");
     const clip = win.navigator && win.navigator.clipboard;
     const paste = button("Paste", pasteFeed);
@@ -114,20 +159,31 @@
     const feedHelp = el("p", "In Canvas, open Calendar, tap Calendar Feed and copy the " +
                         "link. I never ask for your school password.", "hint");
     const connectFeed = button("Connect Canvas", () => connect({ ics_url: feed.value.trim() }));
-    const useToken = button("Use an access token instead", () => {
-      tokenBox.hidden = !tokenBox.hidden;
-    });
+    const connectRow = el("div", undefined, "api-key-row");
+    connectRow.append(paste, connectFeed);
+    const helperElsewhere = el("p", "For course files too, set up the Kwil Canvas helper in " +
+                               "Chrome or Edge on a computer.", "hint");
+    const moreBtn = button("Get course files too", () => { filesToo = true; showStep(); });
+    feedBox.append(openCal, openHelp, feed, feedHelp, connectRow, helperElsewhere, moreBtn);
+    // the access token: open their Canvas settings, make one, paste it back
     const tokenBox = el("div");
     tokenBox.hidden = true;
-    const school = input("text", "Your school's Canvas, e.g. canvas.school.edu", "School");
+    const openSettings = button("Open my Canvas settings", openTokenPage);
+    const tokenHelp = el("p", "Tap New access token, pick an expiry date (a student's " +
+                         "token lasts at most 120 days), copy the token, come back.", "hint");
     const token = input("password", "Access token", "Canvas access token");
-    const tokenHelp = el("p", "In Canvas: Account, Settings, New access token.", "hint");
     const connectToken = button("Connect with token", () =>
-      connect({ base_url: school.value.trim(), token: token.value.trim() }));
-    tokenBox.append(school, token, tokenHelp, connectToken);
-    const connectRow = el("div", undefined, "api-key-row");
-    connectRow.append(paste, connectFeed, useToken);
-    connectBox.append(guide, feed, feedHelp, connectRow, tokenBox);
+      connect({ base_url: chosen || "", token: token.value.trim() }));
+    const noToken = button("My Canvas has no New access token button", reportBlocked);
+    tokenBox.append(openSettings, tokenHelp, token, connectToken, noToken);
+    const useFeed = button("Use the calendar feed instead", () => {
+      feedChosen = true;  // kept through refreshes until another school is picked
+      filesToo = false;
+      picked = pick();
+      showStep();
+    });
+    useFeed.hidden = true;
+    connectBox.append(find, findRow, results, chosenHost, feedBox, tokenBox, useFeed);
 
     const actions = el("div", undefined, "api-key-row");
     const syncBtn = button("Sync now", sync);
@@ -241,13 +297,17 @@
           ? "This server can't store sign-ins yet."
           : "Connect Canvas and I'll keep track of your deadlines.";
       }
-      connectBox.hidden = owner || Boolean(st.connected) || st.can_store === false;
       const helper = st.helper || {};
+      // connected, or the helper paired: done, no connect step
+      connectBox.hidden = owner || Boolean(st.connected) || Boolean(helper.paired) ||
+        st.can_store === false;
       // env-managed: Disconnect only forgets an older link the app stored
       // (or the helper's key)
       unlink.hidden = owner ? !(st.app_link || helper.paired) : !(st.connected || helper.paired);
       syncBtn.hidden = !st.connected && !st.gmail;
-      renderHelper(helper);
+      current = st;
+      if (chosen) picked = pick();  // the helper or tokens_offered may have changed
+      showStep();
       const items = Array.isArray(body.items) ? body.items : [];
       list.replaceChildren(...items.map(row));
       empty.hidden = items.length > 0;
@@ -261,9 +321,33 @@
       if (pairTimer !== null) { win.clearInterval(pairTimer); pairTimer = null; }
     }
 
+    function pick() {
+      const helper = current.helper || {};
+      if (feedChosen) return { method: "feed", extra: null };
+      return pickMethod({ tokens, tokenOk: current.tokens_offered !== false,
+                          helper: Boolean(helper.enabled),
+                          chromium: helperBrowser(win.navigator) });
+    }
+
+    // Only the picked step: the feed (with its one extra), the token, or
+    // the helper; "Use the calendar feed instead" under the other two.
+    function showStep() {
+      const method = chosen && picked ? picked.method : null;
+      const extra = method === "feed" ? picked.extra : null;
+      feedBox.hidden = method !== "feed";
+      helperElsewhere.hidden = extra !== "helper_elsewhere";
+      moreBtn.hidden = extra !== "token" || filesToo;
+      tokenBox.hidden = !(method === "token" || (extra === "token" && filesToo));
+      useFeed.hidden = !method || method === "feed";
+      renderHelper(current.helper || {});
+    }
+
     function renderHelper(helper) {
-      helperBox.hidden = !helper.enabled;
+      // shown once it is the way in, set up, or next to a connected Canvas
+      // (the helper adds course files to a feed)
       if (helper.paired || Date.now() > pairUntil) clearCode();
+      helperBox.hidden = !helper.enabled || !(helper.paired || current.connected ||
+        (chosen && picked && picked.method === "helper") || !pairCode.hidden);
       helperState.textContent = helper.paired ? "Canvas helper connected." : "";
       helperState.hidden = !helper.paired;
       setupHelper.hidden = Boolean(helper.paired) || !pairCode.hidden;
@@ -319,7 +403,17 @@
       say("Connecting…");
       try {
         const r = await call("/api/student/canvas", { body });
-        if (!r.ok) { say(r.body.error || "Couldn't connect Canvas."); return; }
+        if (!r.ok) {
+          say(r.body.error || "Couldn't connect Canvas.");
+          if (r.body.code === "tokens_owner_only") {  // the server says no tokens for them
+            token.value = "";
+            current = { ...current, tokens_offered: false };
+            picked = pick();
+            filesToo = false;
+            showStep();
+          }
+          return;
+        }
         feed.value = ""; token.value = "";  // never kept on the page
         say("Connected. Syncing…");
         await sync();
@@ -337,7 +431,7 @@
       if (typed && (/:\/\//.test(q) || /(^|\.)(canvas|instructure)\./.test(typed))) {
         results.replaceChildren();
         say("");
-        choose(typed);
+        await choose(typed);
         return;
       }
       if (typed) q = typed;
@@ -347,13 +441,13 @@
         if (!r.ok) { say(r.body.error || "Couldn't look up schools. Try again."); return; }
         const schools = (Array.isArray(r.body.schools) ? r.body.schools : [])
           .map((s) => ({ name: String((s && s.name) || "").slice(0, 100),
-                         host: schoolHost(s && s.base_url) }))
+                         host: schoolHost(s && s.base_url), tokens: s && s.tokens }))
           .filter((s) => s.host).slice(0, 10);
         results.replaceChildren(...schools.map((s) =>
-          button(s.name || s.host, () => choose(s.host))));
+          button(s.name || s.host, () => choose(s.host, s.tokens))));
         say(schools.length ? "" : "I couldn't find that school. Type its Canvas address, " +
             "e.g. canvas.school.edu.");
-        if (schools.length === 1) choose(schools[0].host);
+        if (schools.length === 1) await choose(schools[0].host, schools[0].tokens);
       } catch (e) {
         say("Couldn't look up schools. Try again.");
       } finally {
@@ -361,16 +455,59 @@
       }
     }
 
-    function choose(host) {
-      chosen = schoolHost(host);
-      openBox.hidden = !chosen;
-      chosenHost.textContent = chosen || "";
+    // A school picked: its token policy (from the lookup's answer, else
+    // asked; unknown if that fails), then the one step for it.
+    async function choose(host, known) {
+      const asked = schoolHost(host);
+      chosen = asked;
+      chosenHost.textContent = asked || "";
+      filesToo = false;
+      feedChosen = false;
+      tokens = "unknown";
+      picked = null;
+      showStep();
+      if (!asked) return;
+      let found = "unknown";
+      if (["allowed", "blocked", "unknown"].includes(known)) {
+        found = known;
+      } else {
+        try {
+          const r = await call("/api/student/canvas/policy?host=" + encodeURIComponent(asked));
+          if (r.ok && ["allowed", "blocked"].includes(r.body.tokens)) found = r.body.tokens;
+        } catch (e) { /* offline: unknown */ }
+        if (chosen !== asked) return;  // another school was picked meanwhile
+      }
+      tokens = found;
+      picked = pick();
+      showStep();
     }
 
     // straight from the tap (no await before it), or iOS blocks the new tab
     function openCalendar() {
       if (!chosen || typeof win.open !== "function") return;
       win.open("https://" + chosen + "/calendar", "_blank", "noopener");
+    }
+
+    // the page with Canvas's New access token button, from the tap too
+    function openTokenPage() {
+      if (!chosen || typeof win.open !== "function") return;
+      win.open("https://" + chosen + "/profile/settings", "_blank", "noopener");
+    }
+
+    // "My Canvas has no New access token button": another way in at once,
+    // and the server learns the school blocks them
+    async function reportBlocked() {
+      const host = chosen;
+      if (!host) return;
+      tokens = "blocked";
+      token.value = "";
+      filesToo = false;
+      picked = pick();
+      showStep();
+      say("Thanks. Here is another way in for your school.");
+      try {
+        await call("/api/student/canvas/report", { body: { host, tokens: "blocked" } });
+      } catch (e) { /* offline: the fallback is shown anyway */ }
     }
 
     // only fills the field: the person still checks it and taps Connect
@@ -443,7 +580,7 @@
     return setup;
   }
 
-  root.KwilStudent = { start, create };
+  root.KwilStudent = { start, create, pickMethod, isMobile, helperBrowser };
   if (root.document && root.document.readyState !== "loading") start();
   else if (root.document) root.document.addEventListener("DOMContentLoaded", () => start());
 })(typeof window !== "undefined" ? window : globalThis);

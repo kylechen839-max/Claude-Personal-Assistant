@@ -10,12 +10,14 @@
 import { readFileSync } from 'node:fs';
 
 import { runSync } from '../../tools/canvas-helper/lib/sync.js';
-import { CANVAS, KEY, KWIL, canvasFile, school, world } from './canvas-helper-fakes.mjs';
+import { CANVAS, KEY, KWIL, canvasFile, school, settingsPage, world } from
+  './canvas-helper-fakes.mjs';
 
 const pdf = new Uint8Array(readFileSync(process.argv[2]));
 const data = school();
 data.files[111][0] = canvasFile(501, 'Syllabus.pdf', 'application/pdf', 'pdf', pdf.length);
 data.bytes[501] = pdf;
+data.settings = settingsPage({ canUpdate: false });   // this school blocks students' tokens
 const forms = [];
 const w = world({ data, kwil: {
   '/api/student/canvas/push/manifest': () => ({ body: { counts: {}, max_file_bytes: 3_934_464,

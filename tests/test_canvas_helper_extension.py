@@ -123,11 +123,18 @@ def test_what_the_extension_sends_is_what_the_push_routes_take(h):
             if sent[name] is not None:
                 assert len(kept[name]) == len(sent[name]), name
     assert len(cleaned["announcements"]) == len(manifest["announcements"])
+    # what the settings page said of tokens (read with a GET) is taken as sent
+    assert cleaned["canvas"] == manifest["canvas"] == {
+        "host": "school.instructure.com", "can_create_tokens": False, "only_student": True}
     # the real routes: the manifest stores the text and asks for the PDF
     key, _ = pair(h, h.sam)
     r = helper_client(h).post(canvas_helper.MANIFEST_PATH, json=manifest, headers=bearer(key))
     assert r.status_code == 200, r.text
     assert r.json()["want"] == [{"course_id": 111, "file_id": 501}]
+    # ...and the school is learned as blocking students' tokens
+    assert h.app.state.student.policies.policy("school.instructure.com", own=True) == "blocked"
+    assert h.sam.get("/api/student/items").json()["canvas"]["policy"] == {
+        "host": "school.instructure.com", "tokens": "blocked"}
     # the extension's own multipart body, byte for byte
     f = run["files"][0]
     body = base64.b64decode(f["body_b64"])

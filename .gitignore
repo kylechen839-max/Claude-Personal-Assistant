@@ -35,6 +35,8 @@ data/
 # Web app sign-in sessions (python -m kwil --mode web)
 data/
 !.claude/skills/ui-ux-pro-max/data/
+# ...but the package's own shipped data (the Canvas schools seed) is code
+!kwil/data/
 
 # LLM Council reports (.claude/skills/llm-council)
 council-report-*.html

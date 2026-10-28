@@ -10,7 +10,10 @@
 // deleting asks first and POSTs (the failover preflight allows only GET
 // and POST). The Canvas helper: a pairing code shown as text in the
 // data-kwil-pair element (never in a URL), taken off the page once the
-// helper paired; revoking asks first.
+// helper paired; revoking asks first. The way in is picked for the school
+// (its token policy x the device): only that step shows; the token step's
+// "Open my Canvas settings" opens from the tap; "no New access token
+// button" reports and falls back; tokens_for "owner" never offers a token.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -54,7 +57,7 @@ const ITEMS = [
 
 function load({ items = { status: 200, body: { items: [], canvas: { connected: false,
                 managed: 'app', can_store: true, gmail: false } } },
-                routes = {}, confirm = () => true, clipboard } = {}) {
+                routes = {}, confirm = () => true, clipboard, nav = {} } = {}) {
   const menu = new El('details');
   const apiKey = new El('section'); apiKey.id = 'api-key';
   menu.append(apiKey);
@@ -62,14 +65,15 @@ function load({ items = { status: 200, body: { items: [], canvas: { connected: f
   const asked = [];
   const opened = [];
   const win = {
-    navigator: clipboard ? { clipboard } : {},
+    navigator: clipboard ? { ...nav, clipboard } : { ...nav },
     open: (...args) => { opened.push(args); return null; },
     confirm: (q) => { asked.push(q); return confirm(q); },
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
       const path = url.split('?')[0];
-      const r = url === '/api/student/items' ? items
+      const found = url === '/api/student/items' ? items
         : routes[url] || routes[path] || { status: 200, body: {} };
+      const r = typeof found === 'function' ? await found(url) : found;  // a function: answer later
       return { ok: r.status < 300, status: r.status, json: async () => r.body };
     },
     document: {
@@ -111,7 +115,7 @@ test('the owner is told to use the environment, with no link form', async () => 
     connected: false, managed: 'env', can_store: true } } } });
   await tick();
   assert.match(card.find((e) => e.attrs.role === 'status').textContent, /CANVAS_ICS_URL/);
-  const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
+  const form = card.find((e) => e.attrs['aria-label'] === 'Find your school').parentNode;
   assert.equal(form.hidden, true);
 });
 
@@ -120,7 +124,8 @@ test('the owner gets the link form once the environment no longer sets it', asyn
     connected: false, managed: 'app', can_store: true } } } });
   await tick();
   assert.doesNotMatch(card.find((e) => e.attrs.role === 'status').textContent, /CANVAS_ICS_URL/);
-  const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
+  // the connect form starts at finding the school (the step for it comes after)
+  const form = card.find((e) => e.attrs['aria-label'] === 'Find your school').parentNode;
   assert.equal(form.hidden, false);
   assert.equal(card.buttons('Disconnect Canvas')[0].hidden, true);
 });
@@ -201,7 +206,7 @@ test('env-managed owner: Disconnect only with an older app-stored link', async (
       connected: true, managed: 'env', can_store: true, app_link: appLink } } } });
     await tick();
     assert.equal(card.buttons('Disconnect Canvas')[0].hidden, hidden);
-    const form = card.find((e) => e.attrs['aria-label'] === 'Canvas calendar feed link').parentNode;
+    const form = card.find((e) => e.attrs['aria-label'] === 'Find your school').parentNode;
     assert.equal(form.hidden, true);
   }
 });
@@ -464,4 +469,268 @@ test('the helper strings have Chinese in i18n.js', async () => {
                    "Couldn't start pairing. Try again.", "Couldn't revoke the helper. Try again."]) {
     assert.notEqual(translate(s), s, s);
   }
+});
+
+// --- the way in, picked for the school (kwil/canvas_schools.py) --------------------
+
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, ' +
+  'like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const SAFARI_MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 ' +
+  '(KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const DEVICES = {
+  desktopChrome: { userAgentData: { mobile: false, brands: [{ brand: 'Google Chrome', version: '130' }] },
+                   userAgent: CHROME_UA },
+  desktopEdgeUA: { userAgent: CHROME_UA + ' Edg/130.0.0.0' },   // no userAgentData
+  iphone: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/' +
+            '605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+            maxTouchPoints: 5 },
+  ipad: { userAgent: SAFARI_MAC_UA, maxTouchPoints: 5 },          // iPadOS says it is a Mac
+  androidChrome: { userAgentData: { mobile: true, brands: [{ brand: 'Google Chrome', version: '130' }] },
+                   userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like ' +
+                   'Gecko) Chrome/130.0.0.0 Mobile Safari/537.36' },
+  macSafari: { userAgent: SAFARI_MAC_UA, maxTouchPoints: 0 },
+};
+const PHONES = new Set(['iphone', 'ipad', 'androidChrome']);
+const CHROMIUM = new Set(['desktopChrome', 'desktopEdgeUA']);
+
+const notConnected = (canvas = {}) => ({ status: 200, body: { items: [], canvas: {
+  connected: false, managed: 'app', can_store: true, tokens_offered: true,
+  helper: { enabled: true, paired: false }, ...canvas } } });
+const oneSchool = (tokens) => ({ status: 200, body: { schools: [
+  { name: 'Example University', base_url: 'https://canvas.example.edu', tokens }] } });
+
+// which step shows: the feed, the token or the helper (only one)
+function steps(card) {
+  return {
+    feed: !card.buttons('Open my Canvas calendar')[0].parentNode.hidden,
+    token: !card.buttons('Open my Canvas settings')[0].parentNode.hidden,
+    helper: !card.buttons('Set up Canvas helper')[0].parentNode.parentNode.hidden,
+    filesToo: !card.buttons('Get course files too')[0].hidden,
+    helperElsewhere: card.all().some((e) => !e.hidden && e.textContent ===
+      'For course files too, set up the Kwil Canvas helper in Chrome or Edge on a computer.'),
+    useFeed: !card.buttons('Use the calendar feed instead')[0].hidden,
+  };
+}
+
+async function findSchool(card, q = 'Example') {
+  card.find((e) => e.attrs['aria-label'] === 'Find your school').value = q;
+  await card.buttons('Find my school')[0].fire('click');
+}
+
+test('a school known to block tokens goes straight to the helper', async () => {
+  const { card } = load({ nav: DEVICES.desktopChrome, items: notConnected(),
+                          routes: { '/api/student/schools': oneSchool('blocked') } });
+  await tick();
+  // nothing but the school search before a school is picked
+  assert.deepEqual(steps(card), { feed: false, token: false, helper: false, filesToo: false,
+                                  helperElsewhere: false, useFeed: false });
+  await findSchool(card);
+  assert.deepEqual(steps(card), { feed: false, token: false, helper: true, filesToo: false,
+                                  helperElsewhere: false, useFeed: true });
+});
+
+test('one step per policy and device', async () => {
+  for (const tokens of ['allowed', 'blocked', 'unknown']) {
+    for (const device of Object.keys(DEVICES)) {
+      const { card } = load({ nav: DEVICES[device], items: notConnected(),
+                              routes: { '/api/student/schools': oneSchool(tokens) } });
+      await tick();
+      await findSchool(card);
+      const s = steps(card);
+      const want = tokens === 'allowed' ? 'token' : CHROMIUM.has(device) ? 'helper' : 'feed';
+      const label = `${tokens} on ${device}`;
+      assert.equal(s.feed, want === 'feed', label);
+      assert.equal(s.token, want === 'token', label);
+      assert.equal(s.helper, want === 'helper', label);
+      assert.equal(s.useFeed, want !== 'feed', label);
+      // under the feed: unknown offers the token for course files, blocked points
+      // at the helper on a computer
+      assert.equal(s.filesToo, want === 'feed' && tokens === 'unknown', label);
+      assert.equal(s.helperElsewhere, want === 'feed' && tokens === 'blocked', label);
+    }
+  }
+});
+
+test('device detection: userAgentData first, iPadOS as a tablet', async () => {
+  const { win } = load();
+  const { isMobile, helperBrowser, pickMethod } = win.KwilStudent;
+  for (const [name, nav] of Object.entries(DEVICES)) {
+    assert.equal(isMobile(nav), PHONES.has(name), name);
+    assert.equal(helperBrowser(nav), CHROMIUM.has(name), name);
+  }
+  assert.equal(isMobile(undefined), false);
+  // the helper off on the server: never the helper, whatever the browser
+  for (const tokens of ['blocked', 'unknown']) {
+    assert.equal(pickMethod({ tokens, tokenOk: true, helper: false, chromium: true }).method,
+                 'feed');
+  }
+  // tokens only for the owner ([canvas] tokens_for = "owner"): never the token
+  for (const tokens of ['allowed', 'blocked', 'unknown']) {
+    for (const chromium of [true, false]) {
+      const got = pickMethod({ tokens, tokenOk: false, helper: true, chromium });
+      assert.notEqual(got.method, 'token', `${tokens} ${chromium}`);
+      assert.notEqual(got.extra, 'token', `${tokens} ${chromium}`);
+    }
+  }
+});
+
+test('an invited person without tokens gets the helper or the feed, never the token', async () => {
+  for (const [device, want] of [['desktopChrome', 'helper'], ['iphone', 'feed']]) {
+    const { card } = load({ nav: DEVICES[device], items: notConnected({ tokens_offered: false }),
+                            routes: { '/api/student/schools': oneSchool('allowed') } });
+    await tick();
+    await findSchool(card);
+    const s = steps(card);
+    assert.equal(s.token, false, device);
+    assert.equal(s.filesToo, false, device);
+    assert.equal(s[want], true, device);
+  }
+});
+
+test('the token step: Open my Canvas settings opens from the tap, then Connect', async () => {
+  const { card, fetches, opened } = load({ nav: DEVICES.iphone, items: notConnected(),
+                                           routes: { '/api/student/schools': oneSchool('allowed') } });
+  await tick();
+  await findSchool(card);
+  const before = fetches.length;
+  const pending = card.buttons('Open my Canvas settings')[0].fire('click');
+  // synchronously, before anything is awaited (iOS allows a new tab only then)
+  assert.deepEqual(opened, [['https://canvas.example.edu/profile/settings', '_blank', 'noopener']]);
+  await pending;
+  assert.equal(fetches.length, before);  // nothing sent on that tap
+  const token = card.find((e) => e.attrs['aria-label'] === 'Canvas access token');
+  token.value = ' ' + 'a'.repeat(64) + ' ';
+  await card.buttons('Connect with token')[0].fire('click');
+  const post = fetches.find((f) => f.url === '/api/student/canvas');
+  assert.deepEqual(JSON.parse(post.opts.body),
+                   { base_url: 'canvas.example.edu', token: 'a'.repeat(64) });
+  assert.equal(token.value, '');
+});
+
+test('a typed Canvas address asks the server for its policy', async () => {
+  const { card, fetches } = load({ nav: DEVICES.desktopChrome, items: notConnected(), routes: {
+    '/api/student/canvas/policy': { status: 200, body: { host: 'canvas.school.edu',
+                                                         tokens: 'allowed' } } } });
+  await tick();
+  await findSchool(card, 'https://canvas.school.edu/');
+  assert.equal(fetches.at(-1).url, '/api/student/canvas/policy?host=canvas.school.edu');
+  assert.ok(!fetches.some((f) => f.url.startsWith('/api/student/schools')));
+  assert.equal(steps(card).token, true);
+  // a failed look-up is "unknown": the helper on desktop Chrome
+  const failed = load({ nav: DEVICES.desktopChrome, items: notConnected(), routes: {
+    '/api/student/canvas/policy': { status: 429, body: { error: 'too many' } } } });
+  await tick();
+  await findSchool(failed.card, 'canvas.school.edu');
+  assert.equal(steps(failed.card).helper, true);
+});
+
+test('"no New access token button" reports blocked and falls back at once', async () => {
+  for (const [device, want] of [['desktopChrome', 'helper'], ['iphone', 'feed']]) {
+    const { card, fetches } = load({ nav: DEVICES[device], items: notConnected(),
+                                     routes: { '/api/student/schools': oneSchool('allowed') } });
+    await tick();
+    await findSchool(card);
+    card.find((e) => e.attrs['aria-label'] === 'Canvas access token').value = 'half-typed';
+    await card.buttons('My Canvas has no New access token button')[0].fire('click');
+    const post = fetches.find((f) => f.url === '/api/student/canvas/report');
+    assert.equal(post.opts.method, 'POST', device);
+    assert.deepEqual(JSON.parse(post.opts.body), { host: 'canvas.example.edu', tokens: 'blocked' });
+    const s = steps(card);
+    assert.equal(s.token, false, device);
+    assert.equal(s[want], true, device);
+    assert.equal(card.find((e) => e.attrs['aria-label'] === 'Canvas access token').value, '');
+    assert.ok(card.all().some((e) => e.textContent ===
+      'Thanks. Here is another way in for your school.'), device);
+  }
+});
+
+test('unknown on a phone: the feed first, the token only on "Get course files too"', async () => {
+  const { card } = load({ nav: DEVICES.iphone, items: notConnected(),
+                          routes: { '/api/student/schools': oneSchool('unknown') } });
+  await tick();
+  await findSchool(card);
+  assert.equal(steps(card).token, false);
+  await card.buttons('Get course files too')[0].fire('click');
+  const s = steps(card);
+  assert.equal(s.feed, true);
+  assert.equal(s.token, true);
+  assert.equal(s.filesToo, false);
+});
+
+test('a token the server refuses (tokens for the owner only) switches the step', async () => {
+  const { card } = load({ nav: DEVICES.iphone, items: notConnected(), routes: {
+    '/api/student/schools': oneSchool('allowed'),
+    '/api/student/canvas': { status: 403, body: { error: 'owner only', code: 'tokens_owner_only' } } } });
+  await tick();
+  await findSchool(card);
+  card.find((e) => e.attrs['aria-label'] === 'Canvas access token').value = 'a'.repeat(40);
+  await card.buttons('Connect with token')[0].fire('click');
+  assert.equal(steps(card).token, false);
+  assert.equal(steps(card).feed, true);
+  assert.equal(card.find((e) => e.attrs['aria-label'] === 'Canvas access token').value, '');
+});
+
+test('connected or helper paired: no connect step', async () => {
+  for (const canvas of [{ connected: true }, { helper: { enabled: true, paired: true } }]) {
+    const { card } = load({ nav: DEVICES.desktopChrome, items: notConnected(canvas) });
+    await tick();
+    const form = card.find((e) => e.attrs['aria-label'] === 'Find your school').parentNode;
+    assert.equal(form.hidden, true, JSON.stringify(canvas));
+  }
+});
+
+test('the way-in strings have Chinese in i18n.js', async () => {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N, ctx);
+  const { translate } = ctx.KwilI18n;
+  for (const s of ['Open my Canvas settings', 'My Canvas has no New access token button',
+                   'Use the calendar feed instead', 'Get course files too',
+                   'Thanks. Here is another way in for your school.',
+                   'For course files too, set up the Kwil Canvas helper in Chrome or Edge on a computer.',
+                   "Tap New access token, pick an expiry date (a student's token lasts at most " +
+                   '120 days), copy the token, come back.']) {
+    assert.ok(SCRIPT.includes(s.slice(0, 30)), s);
+    assert.notEqual(translate(s), s, s);
+  }
+});
+
+test('"Use the calendar feed instead" holds through a refresh, until another school', async () => {
+  const items = notConnected();
+  const { card, menu } = load({ nav: DEVICES.desktopChrome, items,
+                                routes: { '/api/student/schools': oneSchool('blocked') } });
+  await tick();
+  await findSchool(card);
+  assert.equal(steps(card).helper, true);
+  await card.buttons('Use the calendar feed instead')[0].fire('click');
+  assert.equal(steps(card).feed, true);
+  menu.open = true;
+  await menu.fire('toggle');   // a refresh (also what the pairing poll does)
+  await tick();
+  assert.equal(steps(card).feed, true);
+  assert.equal(steps(card).helper, false);
+  await findSchool(card);      // picking a school again picks the way again
+  assert.equal(steps(card).helper, true);
+});
+
+test('a late policy answer for an earlier school never changes the step', async () => {
+  let release;
+  const late = new Promise((r) => { release = r; });
+  const { card, menu } = load({ nav: DEVICES.iphone, items: notConnected(), routes: {
+    '/api/student/canvas/policy': async () => { await late;
+      return { status: 200, body: { tokens: 'allowed' } }; },
+    '/api/student/schools': oneSchool('blocked') } });
+  await tick();
+  const first = findSchool(card, 'canvas.first.edu');   // its policy answer waits
+  await tick();
+  await findSchool(card);                                // then a school known to block
+  assert.equal(steps(card).feed, true);
+  release();
+  await first;
+  menu.open = true;
+  await menu.fire('toggle');   // a refresh re-picks from what is known
+  await tick();
+  assert.equal(steps(card).token, false);                // the first school's "allowed" is ignored
+  assert.equal(steps(card).feed, true);
+  assert.ok(card.all().some((e) => e.textContent === 'canvas.example.edu'));
 });

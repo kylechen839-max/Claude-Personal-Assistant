@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- School deadlines: Kwil now picks the way to connect Canvas for your school
+  (an access token where your school allows them, the Canvas helper on
+  desktop Chrome/Edge where it doesn't or nobody knows yet, otherwise the
+  calendar feed) and shows only that step. New `[canvas] tokens_for`
+  (`"everyone"` by default, or `"owner"`) keeps access tokens for the owner
+  only. The Canvas helper also checks your Canvas settings page to learn
+  whether your school allows tokens; it never creates one. School names and
+  Canvas addresses searched in School deadlines no longer appear in the
+  server's request log.
 - The Kwil Canvas helper, a Chrome/Edge extension (`tools/canvas-helper/`,
   load unpacked) for schools that block Canvas tokens. Tap Set up Canvas
   helper in Kwil and it pairs by itself, finds your Canvas, and syncs your

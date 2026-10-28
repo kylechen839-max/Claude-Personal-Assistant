@@ -6191,3 +6191,131 @@ a comment in kwil.js; the comment no longer matches). Counts (Linux
 sandbox, Python 3.13, Node 22, not real hardware): 3390 passed, 37
 skipped; JavaScript 220 passed (205 before; the helper's files 47, was
 32).
+
+## Canvas: Kwil picks the way in by itself (2026-10-28)
+Kyle's ask: "automate this selection process so there needs no input from
+the user side": the School deadlines card picks the calendar feed, an
+access token or the Canvas helper for the school and shows only that one
+step.
+
+- **The policy (`kwil/canvas_schools.py`).** Nothing public says whether a
+  school lets students make a token (Canvas shows the two root-account
+  settings to admins only), so per Canvas host it combines a sourced seed,
+  `kwil/data/canvas_schools.json` (schema in `check_entry`: an `https`
+  source and a `checked` date per entry; `*.instructure.com` only by exact
+  host), with what this server learned in `<[student] dir>/canvas_policy.json`
+  (`write_private`; counts and dates per host, no ids, at most 1000 hosts).
+  "allowed": a token sync that worked, or the helper reading that a
+  student-only account may make one; "blocked": the helper reading that
+  it may not, or "My Canvas has no New access token button". A 401/403
+  records nothing. A learned result beats the seed only when it is dated
+  after the entry was checked. **The seed ships with no schools:** the
+  school pages the research found couldn't be opened from the sandbox,
+  and unverified policies must not ship; adding one is a data change.
+- **The flow (`web/student.js`).** Find the school (the lookup now returns
+  each school's `tokens`; a typed address asks the new
+  `GET /api/student/canvas/policy?host=`), then `pickMethod`: allowed ->
+  the token step (**Open my Canvas settings** opens `/profile/settings`
+  from the tap, pick an expiry date, paste, Connect); blocked or unknown on
+  desktop Chrome/Edge -> the helper; blocked on a phone -> the feed plus a
+  pointer to the helper on a computer; unknown on a phone -> the feed,
+  with **Get course files too** (the token step). The device comes from
+  `userAgentData.mobile`, else the user agent, with iPadOS (a Mac UA with
+  touch points) as a tablet. **Use the calendar feed instead** sits under
+  the token and helper steps and holds through refreshes; "no New access
+  token button" posts `POST /api/student/canvas/report` and falls back at
+  once. Connected or helper paired: no connect step. "Use an access token
+  instead" and the school-address field are gone (the chosen host is
+  used).
+- **The helper's reading.** Each run the extension GETs
+  `/profile/settings` once (`CanvasReader.tokenPolicy`: same-origin,
+  2 MB, no retry) and reads `"can_update_tokens"` / `"user_is_only_student"`
+  from the page's ENV; any doubt is unknown and nothing is sent. The first
+  manifest carries `canvas: {host, can_create_tokens, only_student}`;
+  `clean_manifest` checks it strictly (`clean_canvas`, else a 400) and the
+  push records it while still alive, plus the host in the person's own
+  `canvas_helper.json` for the status (`policy`, `helper.canvas_host`).
+  Kwil never makes a token.
+- **`[canvas] tokens_for`** (`"everyone"`, the default and today's
+  behaviour, or `"owner"`): with `"owner"` invited people get
+  `tokens_offered: false`, the card never offers them the token step, and
+  connecting with a token answers 403 `{code: "tokens_owner_only"}`; the
+  owner always keeps it. Anything but `"everyone"` counts as `"owner"`.
+- **Logs:** the host is never logged at any level (it names the person's
+  school); ids, outcomes and counts only. `sw.js` cache `kwil-shell-v8`.
+
+Tests: `tests/test_canvas_schools.py` (new: the shipped seed's schema and
+a fixture seed, malformed entries refused, host/domain matching, newer
+learned beats the seed and older never does, same-day ties, the 1000-host
+bound, no ids in the file, `write_private` and a failed write keeping the
+old file, a tampered file, no host in any log line);
+`tests/test_student_web.py` (schools carry `tokens`, the policy route,
+a working token sync records allowed and a 401 nothing, the report route:
+400/429/411 and 404 when off, a report never beats a later-checked seed,
+`tokens_for = "owner"`, no host in the logs); `tests/test_canvas_helper.py`
+(the manifest's `canvas` recorded, ten wrong shapes refused, nothing after
+a revoke, no host logged); the extension round trip now carries a
+"blocked" reading through the real routes; `tests/js/student.test.mjs`
+(one step per policy x six devices, device detection, the deep link opens
+synchronously from the tap, report-and-fall-back, owner-only tokens, the
+feed choice holding through refreshes, a late policy answer for an earlier
+school ignored, Chinese for every new string);
+`tests/js/canvas-helper.test.mjs` (the ENV parse on a fixture page of
+Canvas's shape, one GET with `Accept: text/html`, unknown on 404 /
+sign-in redirect / other origin / rate limit / network / no keys / out of
+time, the first manifest only, every Canvas request a GET and none to the
+token API).
+
+Failing first: with the six source files back at 17b063b (and
+`canvas_schools.py` removed), every new pytest test fails (22, plus
+`test_canvas_schools.py` at import) and every new student.js test fails
+(11 of 11 then); with only `sync.js` reverted, the manifest test fails;
+two mutations (no feed-choice memory, the late answer written before the
+school check) each fail their test.
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware): 3452
+passed, 37 skipped, 1 failed: `test_live_pinecone_retrieve_read_only`, a
+live test that hit the Pinecone organisation's monthly embedding quota
+(429), failing the same way at the 17b063b baseline (3388 passed, 38
+skipped from a `git archive` copy, where `test_rebrand`'s git-history test
+skips). JavaScript 237 passed (220 before).
+
+### Round 2: the judge's findings (2026-10-28)
+1. MED, the school host in uvicorn's access log (both servers run with
+   `log_config=None`, so `?host=` and the lookup's `?q=` reached the log
+   file and Render at INFO with the client address).
+   `config.AccessQueryFilter` cuts the query of every `/api/student/*`
+   path to `?…`; `setup_logging` installs it, and so do `webapp.serve` and
+   `cloud.serve` before `uvicorn.run`. Test: real uvicorn (h11) on a free
+   port, reading its own access records for both routes (other paths
+   keep their query). The routes stay GET (the filter covers both).
+2. MED, one working token pinned a school to "allowed". Only the first
+   working sync of a token connected in the app counts (per link; the
+   background's syncs never, a disconnect forgets it); same-day outcomes
+   are compared on that day's counts (`day_allowed` / `day_blocked`), a
+   tie is "blocked". Each person's claim counts once: a report once per
+   person and host, the helper's reading when it is new or changed for the
+   pairing. Test shaped like p2.py at both levels (thirty "allowed" then a
+   report: blocked, and one more "allowed" that day doesn't flip it).
+3. LOW, a host the helper takes but the server doesn't made the manifest
+   400. `clean_canvas` now drops the reading (the courses still count)
+   for a host string that doesn't normalize, normalizes the rest (case,
+   trailing dot, an https URL), and keeps the 400 for wrong shapes and
+   types; the helper sends a reading only for a host passing the same rule
+   (`policyHost` in canvas.js). Tests on both sides (`.internal`, an IP,
+   a punycode TLD, `localhost`, `.local`).
+4. LOW, members could probe which schools others use. A learned result is
+   revealed only once it rests on `MIN_EVENTS` (2) events, or for the
+   asker's own Canvas host (their link's or their helper's), in the policy
+   route, the lookup's `tokens` and the report's answer. Test with two
+   members.
+
+Failing first: each fix's source files back at 0d6b571 with the new tests:
+1 (config/webapp/cloud) 2 of 2 fail; canvas_schools.py 5 fail;
+student_web.py 3 fail; canvas_helper.py 9 fail; sync.js the helper's
+host test fails. All pass restored.
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
+`-k "not live_pinecone"` (the Pinecone quota is used up): 3464 passed, 37
+skipped, 1 deselected (round 1: 3452 passed); JavaScript 238 passed
+(round 1: 237).

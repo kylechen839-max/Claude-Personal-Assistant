@@ -914,12 +914,41 @@ phone app's menu.
       `user_` and an assignment title.
   - Should: not found.
 
+### The way in, picked for your school (optional, ~10 min; a real school)
+- [ ] On the iPhone app, disconnected: find your school and pick it.
+  - Should: one step only. A school not known yet shows the calendar feed
+    with **Get course files too**; nothing asks you to choose between
+    feed, token and helper.
+- [ ] If the card shows the token step, tap **Open my Canvas settings**.
+  - Should: your Canvas's settings page opens in a new tab (not blocked),
+    showing **New access token** (or, if your school blocks them, no such
+    button). Note whether iOS opened the Canvas Student app instead: that
+    app has no token button, so tell the team if it did.
+- [ ] If there is no **New access token** button, go back and tap **My
+      Canvas has no New access token button**.
+  - Should: "Thanks. Here is another way in for your school." and the
+    feed step at once.
+- [ ] On the computer, Chrome or Edge, the same school (a fresh browser
+      profile or after disconnecting).
+  - Should: a school that blocks tokens, or one not known yet, shows only
+    the Canvas helper step, with **Use the calendar feed instead** under
+    it.
+- [ ] With the helper paired and synced once (next sections), open the
+      card's status on the server
+      (`GET /api/student/items` in the browser's address bar while signed
+      in) and look at `canvas.policy`.
+  - Should: your school's host with `"blocked"` or `"allowed"` matching
+    whether your Canvas settings page has **New access token** (this
+    checks the helper's read of the page on real Canvas; `null` means the
+    page didn't say, which is safe but tell the team).
+
 ### Course files (optional, ~15 min; needs a Canvas access token)
 Deploy first with `--requirements` (it adds `pypdf`).
-- [ ] In the card tap **Use an access token instead**, enter your school's
-      address and a new token (Canvas -> **Account** -> **Settings** ->
-      **New access token**), tap **Connect Canvas**, then leave the app
-      alone for 10 minutes.
+- [ ] In the card find your school. If the card shows the token step, use
+      it; if it shows the feed, tap **Get course files too**. Tap **Open my
+      Canvas settings**, make a new token there (**New access token**,
+      with an expiry date), paste it, tap **Connect with token**, then
+      leave the app alone for 10 minutes.
   - Should: no other tap needed. Afterwards new drafts marked "Course
     files" may appear in "What I captured" (dates from a syllabus or
     announcement), none of them confirmed.
