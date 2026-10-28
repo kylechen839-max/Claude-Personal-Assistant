@@ -196,6 +196,43 @@ test('Google button: hidden unless set up; connected; click goes to Google', asy
   assert.equal(p.win.location.href, url);
 });
 
+test('Google refused the sign-in: "expired, reconnect", never "connected"', async () => {
+  // the owner on the cloud server: GOOGLE_TOKEN_JSON revoked (needs_reconnect)
+  const expired = { enabled: true, connected: true, disconnect: false, server_owner: true,
+                    needs_reconnect: true };
+  const url = 'https://accounts.google.com/o/oauth2/auth?state=r';
+  const en = page('en', { gstatus: expired, connect: { url } });
+  await en.flush();
+  assert.equal(en.google.hidden, false);
+  assert.equal(en.google.textContent, 'Reconnect Google account');
+  assert.equal(en.hint.hidden, false);
+  assert.equal(en.hint.textContent, 'Google sign-in expired. Reconnect to keep using it.');
+  for (const fn of en.google.listeners.click) await fn();  // the same connect flow
+  assert.equal(en.fetches.find((f) => f.url === '/api/google/connect').opts.method, 'POST');
+  assert.equal(en.win.location.href, url);
+
+  const zh = page('zh-CN', { gstatus: expired });
+  await zh.flush();
+  assert.equal(zh.google.textContent, '重新连接 Google 账户');
+  assert.equal(zh.hint.textContent, 'Google 登录已过期。请重新连接后继续使用。');
+
+  // nothing to connect with here: still says it expired, no button
+  const off = page('zh-CN', { gstatus: { ...expired, enabled: false } });
+  await off.flush();
+  assert.equal(off.google.hidden, true);
+  assert.equal(off.hint.hidden, false);
+  assert.equal(off.hint.textContent, 'Google 登录已过期。');
+
+  // once reconnected the next status clears it
+  const p = page('en', { gstatus: expired });
+  await p.flush();
+  p.setStatus({ ...expired, needs_reconnect: false });
+  p.menu.open = true;
+  for (const fn of p.menu.listeners.toggle) fn();
+  await p.flush();
+  assert.equal(p.hint.textContent, 'Google account connected.');
+});
+
 test('Google button: a failed or non-https answer never navigates', async () => {
   for (const connect of [undefined, { url: 'javascript:alert(1)' }]) {
     const p = page('zh-CN', { connect });

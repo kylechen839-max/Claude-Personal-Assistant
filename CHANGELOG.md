@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fixed: with FAILOVER_BACKENDS set, the cloud took the last listed backend's
+  role (e.g. "pc") instead of its own. That broke Google sign-in redirects
+  for family members, history-sync peers and leader election.
+- Fixed: when Google ends a sign-in (revoked, or expired), ⚙ now says
+  "Google sign-in expired. Reconnect to keep using it." with a Reconnect
+  button, for the owner on the server (even with GOOGLE_TOKEN_JSON) and for
+  family members, instead of "Google account connected". `python -m kwil
+  --check` asks Google whether the sign-in still works. The owner's Connect
+  on the server also works without PUBLIC_ORIGIN when the server knows its
+  own address.
 - School deadlines: Kwil now picks the way to connect Canvas for your school
   (an access token where your school allows them, the Canvas helper on
   desktop Chrome/Edge where it doesn't or nobody knows yet, otherwise the

@@ -1166,6 +1166,15 @@ one instance and a deploy has a short gap of downtime.
    sign in once more on the PC, delete `token.json`, run
    `python -m kwil.tools.calendar`, and paste the new `token.json` into
    `GOOGLE_TOKEN_JSON` in Render (Environment -> Save; it restarts).
+   **If Google ends the sign-in** (revoked, or 7 days in Testing mode),
+   the server notices at the next Calendar or Gmail call ("could not be
+   refreshed (invalid_grant)" in the log) and ⚙ then says **Google sign-in
+   expired. Reconnect to keep using it.** instead of "connected", with the
+   **Reconnect Google account** button: the same sign-in as above, whose
+   token then wins over `GOOGLE_TOKEN_JSON`. Family members see the same
+   for their own account. The flag lives in memory, so after a restart it
+   shows again at the first refused call; `python -m kwil --check` asks
+   Google directly ("Google sign-in" line).
 4. **Check it.** In Render -> hey-claude -> Shell, run
    `python -m kwil --check` (no mic or speaker checks on a server).
    The Logs tab should show "Speech models loaded".

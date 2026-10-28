@@ -36,7 +36,8 @@ def check_keys(environ=os.environ) -> list[Check]:
     return checks
 
 
-def check_google_files(config: dict) -> list[Check]:
+def check_google_files(config: dict, verify=None,
+                       environ=os.environ) -> list[Check]:
     cal = config["calendar"]
     if not cal["enabled"]:
         return [Check("Google Calendar", True, "disabled in config.toml",
@@ -48,7 +49,27 @@ def check_google_files(config: dict) -> list[Check]:
         Check(str(token), token.exists(), "found" if token.exists() else
               "missing (copy it from your PC, or run "
               "`python -m kwil.tools.calendar --headless`)", required=False),
-    ] + check_calendar_scopes(config) + check_gmail_scopes(config)
+    ] + check_calendar_scopes(config) + check_gmail_scopes(config) + (
+        check_google_sign_in(config, verify, environ) if token.exists() else [])
+
+
+def check_google_sign_in(config: dict, verify=None,
+                         environ=os.environ) -> list[Check]:
+    """Does Google still accept the saved sign-in? `verify`
+    (google_auth.verify_sign_in, one token refresh) is passed only by
+    `python -m kwil --check`; None (tests, other callers): no network, no
+    line. A revoked or expired sign-in is said in plain words."""
+    if verify is None:
+        return []
+    from kwil.tools.google_auth import owner_connected, owner_environ
+
+    cal = config["calendar"]
+    problem = verify(cal["credentials"], cal["token"],
+                     environ=owner_environ(config, environ),
+                     in_app=owner_connected(config))
+    return [Check("Google sign-in", problem is None,
+                  "works (Google accepted it just now)" if problem is None
+                  else problem, required=False)]
 
 
 def check_calendar_scopes(config: dict) -> list[Check]:
@@ -258,7 +279,7 @@ def check_web(environ=os.environ, find_spec=None) -> list[Check]:
                        "requirements.txt)", required=False)]
 
 
-def check_google_env(config: dict, environ=os.environ) -> list[Check]:
+def check_google_env(config: dict, environ=os.environ, verify=None) -> list[Check]:
     """Server variant: the OAuth files come from GOOGLE_*_JSON secrets, or
     the owner connected Google in the app ([webapp] owner_google), which
     then wins (google_auth.owner_environ)."""
@@ -270,7 +291,8 @@ def check_google_env(config: dict, environ=os.environ) -> list[Check]:
                       required=False)]
     if owner_connected(config):
         return [Check("Google account", True, "connected in the app (token on "
-                      "the server's disk, refreshed in memory)")]
+                      "the server's disk, refreshed in memory)"),
+                *check_google_sign_in(config, verify, environ)]
     try:
         info, from_env = token_info(config["calendar"]["token"],
                                     config["calendar"]["credentials"],
@@ -290,7 +312,8 @@ def check_google_env(config: dict, environ=os.environ) -> list[Check]:
                 or "client_id" in missing else "")
         return [Check(TOKEN_ENV, False, f"set, but has no {', '.join(missing)}"
                       f"{hint}", required=False)]
-    return [Check(TOKEN_ENV, True, "set (refreshed in memory, never saved)")]
+    return [Check(TOKEN_ENV, True, "set (refreshed in memory, never saved)"),
+            *check_google_sign_in(config, verify, environ)]
 
 
 def check_server(config: dict, environ=os.environ) -> list[Check]:
@@ -318,15 +341,17 @@ def check_server_tts(config: dict, which=shutil.which) -> list[Check]:
 
 def run_checks(config: dict, keyword_path: str | None = None,
                environ=os.environ, sd=None, download_model=None,
-               which=shutil.which) -> list[Check]:
+               which=shutil.which, verify=None) -> list[Check]:
+    """`verify`: google_auth.verify_sign_in to ask Google whether the
+    saved sign-in still works (the CLI passes it); None: offline."""
     if config.get("profile") == "server":
         # No microphone, speakers or wake word on a server.
         return [*check_keys(environ), *check_server(config, environ),
-                *check_google_env(config, environ),
+                *check_google_env(config, environ, verify),
                 check_whisper_model(config, download_model),
                 *check_cloud_stt(config, environ),
                 *check_server_tts(config, which), *check_web(environ)[1:]]
-    return [*check_keys(environ), *check_google_files(config),
+    return [*check_keys(environ), *check_google_files(config, verify, environ),
             check_wake_model(config, keyword_path),
             *check_audio_devices(config, sd),
             check_whisper_model(config, download_model),

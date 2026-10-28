@@ -6192,6 +6192,82 @@ sandbox, Python 3.13, Node 22, not real hardware): 3390 passed, 37
 skipped; JavaScript 220 passed (205 before; the helper's files 47, was
 32).
 
+## Google sign-in status tells the truth: "expired, reconnect" (2026-10-28)
+
+Live bug on heykwil.com: the owner's `GOOGLE_TOKEN_JSON` was revoked
+(Calendar logged "could not be refreshed (invalid_grant)"), yet ⚙ still
+said "Google account connected" and offered nothing to fix it:
+`/api/google/status` only checked that a token existed. A family member
+whose own token was revoked got the same.
+
+- **Who must reconnect** (`google_auth.needs_reconnect`): the refresh
+  wrapper every Google credential gets (`_warn_on_refresh_failure`) now
+  records the account when Google refuses (a non-retryable
+  `RefreshError`, e.g. `invalid_grant`), and when a saved token is
+  unusable; a later successful refresh clears it. In memory only: who
+  (`OWNER` = None, or the family member's id) and when, bounded
+  (`MAX_RECONNECT` 1024, oldest first); no token, no Google message.
+  `GoogleCalendar`/`GmailInbox`/`get_credentials` take `account=`;
+  `family.py` passes the member's id (their tools and the student sync's
+  Gmail). Connect (owner or member) and Disconnect clear it.
+- **Status** (`google_web.py`): `needs_reconnect` (true only while a token
+  is saved and Google refused it). No Google call per status request: the
+  flag comes from the tools' own refreshes. The cloud owner's Connect also
+  works with only the server's own address (`family.own_origin`, as family
+  members already did), so the button isn't hidden for want of
+  `PUBLIC_ORIGIN` when `APP_ORIGIN` is known.
+- **App** (`i18n.js`): with `needs_reconnect` the Google row says "Google
+  sign-in expired. Reconnect to keep using it." (Chinese too) and the
+  button reads **Reconnect Google account** and runs the same connect
+  flow; without a way to connect it says "Google sign-in expired.".
+  `sw.js` cache `kwil-shell-v8`.
+- **Doctor**: `python -m kwil --check` adds a "Google sign-in" line: one
+  token refresh with a 10 s timeout (`google_auth.verify_sign_in`), "works"
+  or "Google refused it (invalid_grant): the sign-in expired or was
+  revoked, so sign in to Google again" (or "couldn't check with Google
+  (<type>)"). Only the CLI passes `verify`; `run_checks` stays offline for
+  every other caller and test.
+
+Tests: `tests/test_google_reconnect.py` (10: per-account flag set and
+cleared, retryable errors mark no one, bounded, INFO logs without token
+or Google text; the owner's status on the server after a refused refresh
+of `GOOGLE_TOKEN_JSON`, cleared by Connect and by Disconnect; Connect
+without `PUBLIC_ORIGIN`; a member's status and Reconnect, another member
+unaffected; `verify_sign_in` wording, timeout and offline; doctor on the
+server and on a PC), a JS test for the expired row (English, Chinese, no
+button, cleared), the CLI passing `verify`, and the status dicts in five
+tests gained `needs_reconnect: false`. A conftest fixture clears the
+process-wide flags around every test. Failing first: with `google_web.py`
+and `family.py` reverted 4 of the new tests fail; with the wrapper's
+mark/clear calls removed and `doctor.py` reverted 7 fail; with `cli.py`
+reverted the CLI test fails; with `i18n.js`/`sw.js` reverted the JS
+expired-row and cache-version tests fail.
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware, `-k "not
+live_pinecone"`): 3399 passed, 37 skipped (master: 3389 passed, 37
+skipped); JavaScript 221 passed (220 before).
+
+### Round 2: the judge's findings (2026-10-28)
+
+1. HIGH, `failover/peers.py` `settings_from_config`: the
+   `FAILOVER_BACKENDS` loop reused `role`, so the last entry's role
+   overwrote this machine's: the cloud with `pi=...,pc=...` became "pc".
+   That role fed `family.own_origin` (a member's Google redirect, and now
+   the owner's fallback, went to the PC's address), the edge's role, the
+   history sync's peers, the leader check (student sync, proactive jobs).
+   Fixed with its own loop variable. Tests: `test_backends_from_the_environment`
+   now checks `role == "cloud"` and the peers; the owner's and a member's
+   redirect (and the owner's real consent URL) are `APP_ORIGIN/google/callback`
+   with `FAILOVER_BACKENDS` set.
+2. LOW, Disconnect wiped the owner's flag and fell back to a revoked
+   `GOOGLE_TOKEN_JSON` shown as "connected". The flag is now kept per
+   token source (`(account, "env"|"file")`); a connect or disconnect in
+   the app clears only the file's, a refresh only its own token's, and the
+   owner's status reads the flag of the token in use. Test: env token
+   refused -> Reconnect -> Disconnect says Reconnect again.
+
+Failing first: `peers.py` reverted fails both failover tests;
+`google_web.py` and `google_auth.py` reverted fail the Disconnect test.
+Counts: 3400 passed, 37 skipped (round 1: 3399); JavaScript 221 passed.
 ## Canvas: Kwil picks the way in by itself (2026-10-28)
 Kyle's ask: "automate this selection process so there needs no input from
 the user side": the School deadlines card picks the calendar feed, an
