@@ -1227,10 +1227,14 @@ captured from their Canvas, Canvas's notification emails or said by hand.
   two separate events (`canvas_schools.MIN_EVENTS`), or when the host is
   the asker's own (their link's, or the one their helper reads; the
   status's `policy` is always their own). One person's single report or
-  link therefore shows nothing to anyone else. **Deliberate non-fix:**
-  the per-person report memory is in-process, so after a restart the same
-  person could add a second event for a host; two people can of course
-  confirm each other's school. The worst a signed-in person can
+  link shows nothing to anyone else, but the two events are counted, not
+  the people behind them: one person can supply both, by reconnecting a
+  token (a student token lasts at most 120 days) or by reporting and then
+  pairing the helper. **Deliberate non-fix:** counting distinct people
+  would mean storing a pseudonymous person-to-school link in the file,
+  which is worse than this gap; and the per-person report memory is
+  in-process, so after a restart the same person could add a second event
+  for a host. The worst a signed-in person can
   do with false reports is steer the card's suggestion for one school on
   this server (everyone still gets a working way in, and the fallback
   links stay); **deliberate non-fix:** reports are not weighted by who
