@@ -11,8 +11,18 @@
   --shadow-1: 0 1px 2px #0f1a2a14, 0 1px 1px #0f1a2a0a;
   --shadow-2: 0 10px 30px -8px #0f1a2a33, 0 2px 6px #0f1a2a14;
   --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  --ring-inset: inset 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  --scrim: #0f1a2a66;
   --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-pill: 999px;
   --pad: 1.25rem;
+  /* type, spacing and row height (.claude/DESIGN_SYSTEM.md) */
+  --t-title: 1.75rem; --t-head: 1.25rem; --t-body: 1.0625rem; --t-sub: .9375rem; --t-cap: .8125rem;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --row-h: 52px;
+  /* motion: the sheet's slide, the scrim's fade, a press */
+  --t-sheet: 240ms; --ease-sheet: cubic-bezier(.32,.72,0,1); --t-scrim: 200ms; --t-press: .15s;
+  /* service tiles (static/icons/README.md): white marks at >= 3:1 */
+  --brand-google: #4285f4; --brand-notion: #000000; --brand-canvas: #e72429;
+  --brand-home-assistant: #0f86c2; --brand-spotify: #179443; --brand-anthropic: #191919; --on-brand: #ffffff;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   color-scheme: light;
 }
@@ -27,6 +37,7 @@
     --warn: #3b3124; --warn-ink: #f1d9b3; --warn-line: #574630;
     --shadow-1: 0 1px 2px #0006;
     --shadow-2: 0 14px 40px -8px #000a, 0 2px 8px #0006;
+    --scrim: #000000a6;
     color-scheme: dark;
   }
 }
@@ -105,7 +116,7 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .menu summary svg, .icon-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
 .menu[open] summary { background: var(--surface-2); color: var(--text); }
-.menu-body { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 5; width: min(19rem, calc(100vw - 1.5rem));
+.menu-body { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 5; width: min(23rem, calc(100vw - 1.5rem));
   max-height: calc(100vh - 6rem - env(safe-area-inset-top)); overflow-y: auto;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
   box-shadow: var(--shadow-2); padding: .4rem 0; display: grid; animation: pop .16s ease-out; transform-origin: top right; }
@@ -141,6 +152,143 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .api-key-row button { min-height: 36px; padding: 0 .7rem; font-weight: 400; }
 .api-key-row .danger { color: var(--bad-ink); }
 .api-key-link { user-select: all; -webkit-user-select: all; }
+/* ---------- design-system primitives (.claude/DESIGN_SYSTEM.md) ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); min-height: 44px;
+  padding: 0 var(--s4); border-radius: var(--r-md); font-size: var(--t-sub); font-weight: 600; box-shadow: none; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.secondary { background: var(--surface-2); color: var(--text); }
+.btn.plain { background: none; color: var(--accent-ink); padding: 0 var(--s2); font-weight: 500; }
+.btn.destructive { background: none; color: var(--bad-ink); }
+.btn.wide { width: 100%; min-height: 50px; font-size: var(--t-body); }
+.btn:focus-visible { box-shadow: var(--ring); }
+.group-head { margin: var(--s5) var(--s4) var(--s2); font-size: var(--t-cap); font-weight: 500; color: var(--muted);
+  letter-spacing: 0; }
+/* a tone step from the page, never a soft shadow */
+.group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; }
+.group .row { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: var(--row-h);
+  padding: var(--s2) var(--s4); border-radius: 0; background: none; text-align: left; font-weight: 400;
+  transition: background-color var(--t-press); }
+.group .row:active:not(:disabled) { transform: none; background: var(--surface-2); }
+.group .row:focus-visible { box-shadow: var(--ring-inset); }
+.state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sub); color: var(--muted);
+  white-space: nowrap; }
+.state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.state.on { color: var(--ok); }
+.state.warn { color: var(--bad-ink); }
+.state.off::before { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.value { color: var(--muted); font-size: var(--t-sub); white-space: nowrap; }
+.value.connect { color: var(--accent-ink); font-weight: 500; }
+
+/* ---------- Connections (connections.js): rows that open a sheet ---------- */
+/* a band of the page colour inside the menu, so the grouped card reads */
+.conns { border-top: 1px solid var(--line); background: var(--bg); padding: 0 var(--s3) var(--s3); }
+.conns .group-head { margin: var(--s3) var(--s2) var(--s2); }
+.conn-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.conn-list { list-style: none; margin: 0; padding: 0; }
+.conn-row { position: relative; }
+/* a hairline above every row but the card's first, inset past the icon */
+.conn-row:not([hidden]) ~ .conn-row:not([hidden])::before,
+#conn-connected:not([hidden]) ~ #conn-available > .conn-row:not([hidden])::before {
+  content: ""; position: absolute; top: 0; left: calc(var(--s4) + 30px + var(--s3)); right: 0;
+  border-top: 1px solid var(--line); }
+.conn-head { padding-right: var(--s3); }
+.conn-head::after { content: ""; flex: none; width: 7px; height: 7px; margin: 0 var(--s1) 0 0;
+  border: solid color-mix(in srgb, var(--muted) 70%, transparent); border-width: 0 2px 2px 0; transform: rotate(-45deg); }
+.conn-text { flex: 1; min-width: 0; display: grid; }
+.conn-name { font-size: var(--t-body); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-sub { font-size: var(--t-cap); line-height: 1.35; color: var(--muted); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-sub:empty { display: none; }
+/* the service's mark: white on a tile of its brand colour (static/icons/README.md) */
+.conn-icon { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+  font-size: 14px; font-weight: 700; line-height: 1;
+  background: var(--conn-tile, var(--surface-2)); color: var(--conn-mark, var(--text-2)); }
+.conn-icon svg { width: 18px; height: 18px; fill: currentColor; }
+.conn-icon.lg { width: 44px; height: 44px; border-radius: 11px; font-size: 18px; }
+.conn-icon.lg svg { width: 26px; height: 26px; }
+.conn-row[data-conn=google] { --conn-tile: var(--brand-google); --conn-mark: var(--on-brand); }
+.conn-row[data-conn=notion] { --conn-tile: var(--brand-notion); --conn-mark: var(--on-brand); }
+.conn-row[data-conn=canvas] { --conn-tile: var(--brand-canvas); --conn-mark: var(--on-brand); }
+.conn-row[data-conn=home_assistant] { --conn-tile: var(--brand-home-assistant); --conn-mark: var(--on-brand); }
+.conn-row[data-conn=spotify] { --conn-tile: var(--brand-spotify); --conn-mark: var(--on-brand); }
+.conn-row[data-conn=anthropic] { --conn-tile: var(--brand-anthropic); --conn-mark: var(--on-brand); }
+@media (prefers-color-scheme: dark) {
+  /* near-black tiles keep an edge on the dark surface */
+  .conn-row:is([data-conn=notion], [data-conn=anthropic]) .conn-icon { box-shadow: inset 0 0 0 1px var(--line-strong); }
+}
+
+/* the sheet: a modal dialog sliding up from the bottom; the only shadow here */
+.conn-sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: min(32rem, 100%); max-width: none;
+  max-height: calc(100% - 2.5rem - env(safe-area-inset-top)); overflow-y: auto; overscroll-behavior: contain;
+  border: 0; border-radius: 22px 22px 0 0; background: var(--bg); color: var(--text); box-shadow: var(--shadow-2);
+  padding: var(--s2) var(--pad) calc(var(--s6) + env(safe-area-inset-bottom)); }
+.conn-sheet[open] { display: grid; gap: var(--s3); align-content: start; animation: sheet-up var(--t-sheet) var(--ease-sheet); }
+/* ::backdrop inherits no custom properties before Safari 17.4: a literal
+   fallback (the light --scrim), and its own duration */
+.conn-sheet::backdrop { background: var(--scrim, #0f1a2a66); animation: scrim-in 200ms ease-out; }
+/* while a sheet is open the page and the menu behind it don't scroll
+   (connections.js sets the class; iOS scrolls through a modal otherwise) */
+html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body { overflow: hidden; }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+.conn-grab { width: 36px; height: 5px; border-radius: 3px; background: var(--line-strong); margin: 0 auto var(--s1); }
+.conn-sheet-head { display: flex; align-items: center; gap: var(--s3); }
+.conn-sheet-head h2 { flex: 1; margin: 0; font-size: var(--t-head); font-weight: 700; letter-spacing: -.02em; }
+.conn-close { position: relative; color: var(--text-2); }
+.conn-close::before, .conn-close::after { content: ""; position: absolute; left: 50%; top: 50%; width: 18px; height: 2px;
+  margin: -1px 0 0 -9px; border-radius: 1px; background: currentColor; transform: rotate(45deg); }
+.conn-close::after { transform: rotate(-45deg); }
+.conn-about { margin: 0; color: var(--muted); font-size: var(--t-sub); line-height: 1.45; }
+.conn-sheet .hint, .conn-sheet p { margin: 0; }
+.conn-sheet .hint { font-size: var(--t-cap); }
+.conn-sheet input { min-height: 48px; font-size: var(--t-sub); }
+/* buttons in a sheet: secondary by default; the one way in is primary
+   (until connected); plain for the quiet alternatives; destructive is red
+   text, never a fill */
+.conn-sheet button:not(.conn-close) { justify-self: stretch; min-height: 44px; padding: 0 var(--s4);
+  border-radius: var(--r-md); background: var(--surface-2); color: var(--text); font-size: var(--t-sub);
+  font-weight: 600; }
+.conn-sheet button:not(.conn-close):focus-visible { box-shadow: var(--ring); }
+.conn-sheet :is(.btn.primary, .primary) { min-height: 50px; font-size: var(--t-body); background: var(--accent);
+  color: var(--on-accent); }
+.conn-row[data-state="connected"] .conn-sheet .btn.primary { min-height: 44px; font-size: var(--t-sub);
+  background: var(--surface-2); color: var(--accent-ink); }
+.conn-sheet button.plain { background: none; color: var(--accent-ink); font-weight: 500; }
+.conn-sheet button.danger { background: none; color: var(--bad-ink); justify-self: start; padding: 0 var(--s1); }
+.conn-actions, .conn-sheet .api-key-row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.conn-actions > button, .conn-sheet .api-key-row > button { flex: 1 1 auto; }
+.conn-actions > .danger, .conn-sheet .api-key-row > .danger { flex: 0 0 auto; }
+.conn-sheet .api-key-row:empty { display: none; }
+.conn-sheet .connector { display: grid; gap: var(--s3); }
+.conn-sheet .connector:empty { display: none; }
+.conn-sheet .api-key { border-top: 0; padding: 0; gap: var(--s3); }
+.conn-sheet .api-key-title { margin: var(--s2) 0 0; font-size: var(--t-sub); font-weight: 600; }
+/* the row and the sheet's title already name it */
+.conn-sheet :is(#student, #api-key) > .api-key-title:first-child { display: none; }
+.conn-sheet .student div:not(.api-key-row) { display: grid; gap: var(--s3); }
+/* Canvas: the one step Kwil picked (feed, token or helper) as a card */
+.conn-sheet .student .conn-step { padding: var(--s4); border-radius: var(--r-lg); background: var(--surface); }
+.conn-sheet .student .conn-step input { background: var(--bg); }
+.conn-sheet .student .conn-step .api-key-title { margin: 0; }
+.conn-sheet .student-items { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--s2); }
+.conn-sheet .student-item { padding: var(--s3) var(--s4); border-radius: var(--r-lg); background: var(--surface); }
+/* Canvas: Sync now and Disconnect as one grouped card of rows */
+.conn-sheet #student > .api-key-row { display: grid; gap: 0; border-radius: var(--r-lg); background: var(--surface);
+  overflow: hidden; }
+.conn-sheet #student > .api-key-row > button { justify-self: stretch; min-height: var(--row-h); border-radius: 0;
+  background: none; text-align: left; justify-content: flex-start; padding: 0 var(--s4);
+  color: var(--accent-ink); font-size: var(--t-body); font-weight: 500; }
+.conn-sheet #student > .api-key-row > button:active:not(:disabled) { transform: none; background: var(--surface-2); }
+.conn-sheet #student > .api-key-row > button:focus-visible { box-shadow: var(--ring-inset); }
+.conn-sheet #student > .api-key-row > button.danger { color: var(--bad-ink); }
+.conn-sheet #student > .api-key-row > button:not([hidden]) ~ button:not([hidden]) { border-top: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  .conn-sheet[open], .conn-sheet::backdrop { animation: none; }
+  .group .row, .conn-sheet button { transition: none; }
+  .conn-sheet button:active:not(:disabled) { transform: none; }
+}
 /* reply-voice picker (voice-picker.js) */
 .voice-picker { border-top: 1px solid var(--line); padding: .35rem 1rem .5rem; display: grid; gap: .45rem; }
 .voice-picker > label { display: grid; gap: .3rem; font-size: 1rem; }

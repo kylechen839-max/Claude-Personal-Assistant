@@ -464,3 +464,32 @@ test('remove asks first, then DELETEs; a key that no longer opens asks for it ag
   await off.flush();
   assert.equal(off.els['api-key-state'].textContent, "This server can't store keys yet.");
 });
+
+test("the key's Connections row: flagged while a beta tester has none, the last four once saved", async () => {
+  const run = async (state, status) => {
+    const t = loadKey(status ? { status } : {});
+    const marks = [];
+    t.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    t.api.onState(state, t.win, t.win.document);
+    await t.flush();
+    return { t, marks };
+  };
+  let { t, marks } = await run({ owner: false, api_key: 'required' });
+  assert.deepEqual(marks.at(-1), ['anthropic', { state: 'available', status: 'Key needed',
+                                                 action: 'Add key', alert: true }]);
+  // saved: the row moves to Connected with only the last four
+  t.els['api-key-input'].value = 'sk-ant-api03-secret-wxyz';
+  await t.els['api-key-form'].fire('submit');
+  await t.flush();
+  assert.deepEqual(marks.at(-1), ['anthropic', { state: 'connected', status: 'Key saved',
+                                                 action: 'Manage', detail: '•••• wxyz' }]);
+  assert.ok(!JSON.stringify(marks).includes('secret'));
+  ({ marks } = await run({ owner: false, api_key: 'optional' }, { set: false, available: true }));
+  assert.deepEqual(marks.at(-1), ['anthropic', { state: 'available', status: 'Optional', action: 'Add key' }]);
+  ({ marks } = await run({ owner: false, api_key: 'optional' }, { set: false, unreadable: true, available: true }));
+  assert.equal(marks.at(-1)[1].alert, true);
+  ({ marks } = await run({ owner: false, api_key: 'required' }, { set: false, available: false }));
+  assert.deepEqual(marks.at(-1), ['anthropic', { state: 'available', status: 'Not available' }]);
+  ({ marks } = await run({ owner: true, family: true }));  // the owner: no key row
+  assert.deepEqual(marks, [['anthropic', { state: 'off' }]]);
+});

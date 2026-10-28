@@ -727,13 +727,16 @@ def test_config_docs_and_deploy_know_the_new_settings():
     with open(root / "config.toml", "rb") as f:
         assert tomllib.load(f)["connect"] == DEFAULTS["connect"]
     assert load_config(None, None, profile="server")["connect"]["dir"] == "/data/owner"
-    assert {"/ha/callback", "/connect.js", "/notion/callback"} <= cloud.PUBLIC_GET
+    assert {"/ha/callback", "/connect.js", "/connections.js",
+            "/notion/callback"} <= cloud.PUBLIC_GET
     web = root / "kwil" / "web"
     page = (web / "index.html").read_text(encoding="utf-8")
-    assert 'id="connectors"' in page and 'id="connector-list"' in page
-    assert page.index("/connect.js") < page.index("/app.js")
+    # its rows live in the menu's Connections list (connections.js)
+    assert 'id="connections"' in page and 'id="conn-available"' in page
+    assert page.index("/connections.js") < page.index("/i18n.js") \
+        < page.index("/connect.js") < page.index("/app.js")
     sw = (web / "sw.js").read_text(encoding="utf-8")
-    assert '"/connect.js"' in sw and "kwil-shell-v10" in sw
+    assert '"/connect.js"' in sw and '"/connections.js"' in sw and "kwil-shell-v11" in sw
     assert "KwilConnect.onState" in (web / "app.js").read_text(encoding="utf-8")
     for table in (i18n.EN, i18n.ZH):
         assert table["connect_failed"] and table["ha_reconnect"]

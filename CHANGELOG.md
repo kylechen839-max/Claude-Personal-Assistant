@@ -25,6 +25,12 @@
   whether your school allows tokens; it never creates one. School names and
   Canvas addresses searched in School deadlines no longer appear in the
   server's request log.
+- Settings: connectors are now one calm "Connections" list. Each service
+  (Google, Notion, Canvas, Home Assistant, Spotify, and an invited person's
+  Anthropic key) has one row with its icon and a one-line status
+  ("Connected", "Sign-in expired", "Key needed") or "Connect". Tapping a row
+  opens a sheet with its explanation, buttons and Disconnect. Esc now closes
+  only an open sheet, not the whole menu. Brand marks from Simple Icons (CC0).
 - The Kwil Canvas helper, a Chrome/Edge extension (`tools/canvas-helper/`,
   load unpacked) for schools that block Canvas tokens. Tap Set up Canvas
   helper in Kwil and it pairs by itself, finds your Canvas, and syncs your

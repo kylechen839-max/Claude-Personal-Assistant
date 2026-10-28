@@ -115,11 +115,40 @@
     "Disconnect Notion? I won't see your assignments any more.":
       "要断开 Notion 吗？之后我就看不到你的作业了。",
     "Notion disconnected.": "Notion 已断开。",
-    // the owner's Connected services (connect.js, owner_connect.py)
-    "Connected services": "已连接的服务",
+    // the menu's Connections rows and sheets (connections.js, index.html):
+    // headings, subtitles, status words, action words and explanations
+    "Connections": "服务连接",
+    "Connected": "已连接",
+    "Available": "可连接",
+    "Not connected": "未连接",
+    "Manage": "管理",
+    "Reconnect": "重新连接",
+    "Sign-in expired": "登录已过期",
+    "Set on the server": "已在服务器上设置",
+    "Not available": "不可用",
+    "Needs attention": "需要处理",
+    "Key saved": "密钥已保存",
+    "Key needed": "需要密钥",
+    "Add key": "添加密钥",
+    "Optional": "可选",
+    "Close": "关闭",
+    "Calendar and email": "日历和邮件",
+    "Calendar": "日历",
+    "Assignments and notes": "作业和笔记",
+    "Lights and devices": "灯和设备",
+    "Music": "音乐",
+    "Your API key": "你的 API 密钥",
+    "Your calendar, and your email if your account includes it. I only ever write drafts; you send them.":
+      "你的日历，以及账户里有的邮件。我只写草稿，由你自己发送。",
+    "Your Notion assignments and notes, so I can list what's due and file your notes.":
+      "你的 Notion 作业和笔记，这样我能列出要交的作业、整理你的笔记。",
+    "Your school deadlines from Canvas. I never ask for your school password.":
+      "来自 Canvas 的学校截止日期。我从不索要你的学校密码。",
+    "Your lights and devices. Locks, garage doors and alarms always ask you first.":
+      "你的灯和设备。门锁、车库门和警报总会先问你。",
+    "Play music and control playback on your devices.": "在你的设备上播放音乐、控制播放。",
+    // the owner's own sign-ins (connect.js, owner_connect.py)
     "Set on the server.": "已在服务器上设置。",
-    "Connected.": "已连接。",
-    "Not connected.": "未连接。",
     "Not set up on this server.": "这台服务器还没有设置好。",
     "This server can't store sign-ins yet (USER_DATA_KEY).": "这台服务器暂时还不能保存登录（缺少 USER_DATA_KEY）。",
     "The sign-in stopped working. Connect again.": "登录已失效，请重新连接。",
@@ -469,19 +498,19 @@
       "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
       "再点“添加到主屏幕”，以后从主屏幕打开。",
     ["Connect your own Google account so I can see your calendar and email: tap the gear at " +
-      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
       "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
       "app was made by your family, not a company."]:
-      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
     ["Connect your own Google account so I can see your calendar: tap the gear at " +
-      "the top right, then \"Connect Google account\", and sign in with your own Google " +
+      "the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
       "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\"."]:
-      "连接你的 Google 账户，我就能看你的日历：点右上角的齿轮，再点“连接 Google 账户”，" +
+      "连接你的 Google 账户，我就能看你的日历：点右上角的齿轮，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
@@ -598,13 +627,13 @@
     "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
   // (a family member's own account on the shared server, google_web.py)
   const STEP_GOOGLE = "Connect your own Google account so I can see your calendar and email: tap " +
-    "the gear at the top right, then \"Connect Google account\", and sign in with your own " +
+    "the gear at the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own " +
     "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
   // a beta tester's (status "gmail": false): Calendar only, no mail wording
   const STEP_GOOGLE_CALENDAR = "Connect your own Google account so I can see your calendar: " +
-    "tap the gear at the top right, then \"Connect Google account\", and sign in with your " +
+    "tap the gear at the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your " +
     "own Google account. If Google says it hasn't verified this app, tap \"Advanced\", " +
     "then \"Go to … (unsafe)\".";
 
@@ -679,6 +708,19 @@
       });
     }
 
+    // the Google row in Connections: its status, action word and subtitle
+    // (a beta tester's is Calendar only); a sign-in Google refused needs you
+    function rowOf(st) {
+      const sub = st.gmail === false ? "Calendar" : "Calendar and email";
+      if (st.connected && st.needs_reconnect === true) {
+        return { state: "attention", status: "Sign-in expired", sub,
+                 ...(st.enabled ? { action: "Reconnect" } : {}) };
+      }
+      if (st.enabled && st.connected) return { state: "connected", status: "Connected", action: "Manage", sub };
+      if (st.enabled) return { state: "available", status: "Not connected", action: "Connect", sub };
+      return st.note ? { state: "available", status: "Not available", sub } : { state: "off" };
+    }
+
     let signedIn = false;
     let mail = true;  // the last status's "gmail" (false: no mail wording)
     let owner = false;  // the last status's "server_owner": the cloud owner's own
@@ -713,6 +755,7 @@
           hint.hidden = !(st.enabled && st.connected);
           hint.textContent = say("Google account connected.");
         }
+        win.KwilConnections?.set("google", rowOf(st));  // connections.js
       } catch (e) { /* offline: leave it as it is */ }
     }
 

@@ -737,7 +737,7 @@ def register_devteam(registry: ToolRegistry, config: dict, output_fn=print) -> b
     if not (owner_connect.managed(config, "notion") != "none"
             and config["notion"]["database_id"]):
         output_fn("(Dev team replies off until Notion is set: NOTION_TOKEN, or "
-                  "Connected services in the app; messages still go out)")
+                  "Connections in the app; messages still go out)")
     link = link_from_config(config, team["state_file"])
     registry.register(*link.tools())
     return True

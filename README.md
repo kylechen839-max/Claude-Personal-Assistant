@@ -937,7 +937,7 @@ One-time setup for you:
 
 Without step 2 (or with `[family] notion = false`) the button stays hidden.
 The same integration also lets you connect your own Notion on the cloud
-(⚙ -> Connected services; "Connect your services in the app (cloud)").
+(⚙ -> Connections -> Notion; "Connect your services in the app (cloud)").
 A custom domain later changes the redirect URI: update it in the
 integration too.
 
@@ -1265,18 +1265,26 @@ the file back to `/data` (Render Shell), or open it with any SQLite tool.
 
 On the cloud app you can sign in to your own services from the phone
 instead of pasting their secrets into Render's environment: ⚙ ->
-**Connected services**. Each row says how that service is set up now:
+**Connections**. That list has one row per service (Google, Notion,
+Canvas, Home Assistant, Spotify; an invited person also sees their own
+Anthropic key there) with the service's icon, connected ones first. Each
+row shows a status ("Connected", "Sign-in expired") or **Connect**; tap it
+to open that service's sheet with its explanation, buttons and
+**Disconnect**. A service this server can't offer isn't listed. Notion's and Home Assistant's rows say how they are set
+up now:
 
 - **Set on the server.** Its token is in the environment (`NOTION_TOKEN`,
   `HA_TOKEN`). That always wins, exactly as before, and there is nothing
   to tap. To switch to signing in from the app, delete that variable in
   Render (Environment -> Save), then come back here.
-- **Not connected.** Tap **Connect** and sign in on the service's own page
-  (in the same tab; you come back to the app). Its tools appear at once,
-  no restart.
-- **Connected.** Tap **Disconnect** (it asks first): Kwil revokes the
-  sign-in at the service, deletes it from the server's disk, and the tools
-  go away at once.
+- **Not connected.** Open the row, tap **Connect** and sign in on the
+  service's own page (in the same tab; you come back to the app). Its
+  tools appear at once, no restart.
+- **Connected.** Open the row and tap **Disconnect** (it asks first): Kwil
+  revokes the sign-in at the service, deletes it from the server's disk,
+  and the tools go away at once.
+- **Sign-in expired.** The service stopped accepting the sign-in; open
+  the row and connect again.
 
 Only you (the `WEB_TOKEN` owner) see this; invited people get "not found".
 Sign-ins are stored encrypted with `USER_DATA_KEY` in `[connect] dir`
