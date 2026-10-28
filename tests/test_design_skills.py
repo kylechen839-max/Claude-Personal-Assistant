@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 SKILLS = Path(__file__).resolve().parent.parent / ".claude" / "skills"
-DESIGN = ("frontend-design", "web-design-guidelines", "accessibility")
+DESIGN = (
+    "frontend-design",
+    "web-design-guidelines",
+    "accessibility",
+    "ui-ux-pro-max",
+    "taste-skill",
+    "animation-vocabulary",
+)
 
 
 @pytest.mark.parametrize("name", DESIGN)
@@ -39,3 +46,22 @@ def test_design_skills_note_pins_every_source():
     for name in DESIGN:
         assert f"`{name}`" in note, name
     assert len(re.findall(r"@ [0-9a-f]{40}", note)) == len(DESIGN)
+
+
+@pytest.mark.parametrize("name", DESIGN)
+def test_design_skill_ships_no_scripts(name):
+    # Upstream bundles search and inspection scripts (search.py, draw.mjs,
+    # assets.mjs); only reference text and data are vendored here.
+    for path in (SKILLS / name).rglob("*"):
+        assert path.suffix not in {".py", ".js", ".mjs", ".cjs", ".sh", ".ts"}, path
+
+
+@pytest.mark.parametrize("name", DESIGN)
+def test_design_skill_loads_no_outside_fonts_or_installs(name):
+    for path in (SKILLS / name).rglob("*"):
+        if path.suffix not in {".md", ".csv"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "fonts.googleapis.com" not in text, path
+        assert "allowed-tools" not in text, path
+        assert "npx skills" not in text and "shadcn@latest" not in text, path
