@@ -16,11 +16,13 @@ const hist = {
   incognito: $("incognito"), incognitoRow: $("incognito-row"), badge: $("incognito-badge"),
 };
 
+// Each source's glyph is a line icon in app.css (.conv-icon[data-source]),
+// never an emoji.
 const SOURCES = {
-  wake: { icon: "🖥️", label: "Spoken to the PC" },
-  text: { icon: "⌨️", label: "Typed" },
-  web: { icon: "📱", label: "Phone" },
-  voice: { icon: "🎙️", label: "Phone voice mode" },
+  wake: { label: "Spoken to the PC" },
+  text: { label: "Typed" },
+  web: { label: "Phone" },
+  voice: { label: "Phone voice mode" },
 };
 const PAGE = 20;
 let filter = "";
@@ -106,11 +108,12 @@ function convNode(c) {
   const row = el("div", "conv");
   row.dataset.id = c.id;
   row.setAttribute("role", "listitem");
-  const src = SOURCES[c.source] || { icon: "💬", label: c.source };
+  const src = SOURCES[c.source] || { label: c.source };
 
   const main = el("button", "conv-main");
   main.type = "button";
-  const icon = el("span", "conv-icon", src.icon);
+  const icon = el("span", "conv-icon");
+  icon.dataset.source = SOURCES[c.source] ? c.source : "other";
   icon.setAttribute("role", "img");
   icon.setAttribute("aria-label", src.label);
   const body = el("span", "conv-body");
@@ -118,7 +121,8 @@ function convNode(c) {
   const title = el("span", "conv-title", c.title);
   top.appendChild(title);
   if (c.pinned) {
-    const pin = el("span", "conv-pin", "📌");
+    const pin = el("span", "conv-pin");
+    pin.setAttribute("role", "img");
     pin.setAttribute("aria-label", "Pinned");
     top.appendChild(pin);
   }

@@ -287,6 +287,7 @@
     "Deleting…": "正在删除…",
     "Couldn't delete your account. Try again.": "没能删除你的账户，请再试一次。",
     "Invite someone": "邀请家人",
+    "People": "家人",
     "Name": "名字",
     "Language": "语言",
     "Time zone": "时区",

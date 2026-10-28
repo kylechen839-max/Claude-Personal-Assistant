@@ -86,6 +86,34 @@ CSP forbids them).
   dates on Today. Everything else stays regular or medium weight; titles
   use size, not weight, to lead.
 
+## Chat screen (added in design pass 2, 2026-10-28)
+- **The composer never leaves the screen.** Anything stacked above it (the
+  first-run guide, the health banner, the queue) is `flex: none` with a
+  capped height and scrolls inside itself; only the log flexes.
+- **Queued messages** (typed while Kwil answers) are right-aligned bubbles
+  on `--surface` with a dashed `--line-strong` edge, `--t-sub` text clamped
+  to two lines, a `--t-cap` "Queued" under it and a 44px remove button. The
+  queue holds at most about two bubbles of height before it scrolls.
+- **Stop** sits in the composer, left of Send: the same 44px circle on
+  `--surface-2` with a filled square glyph.
+
+## Settings menu sections
+- Below the plain switch rows, each section is a band of `--bg` holding a
+  `.group-head` and one `.group` card (Connections, People). A person is a
+  row: name (`--t-body`) over status (`--t-cap`), plain actions on the
+  right ("New link" accent, "Remove" red); "Invite someone" is the card's
+  last row. A menu row that opens another page (Memory) gets the chevron.
+- Group headers are sentence case at `--t-cap` everywhere, including
+  `<legend>`s: never tracked capitals.
+
+## Glyphs drawn in CSS
+- A small glyph that depends on data (a conversation's source, the pin)
+  is a CSS mask of an inline SVG data URI on `currentColor`, chosen by a
+  data attribute (`.conv-icon[data-source=voice]`), never an emoji or a
+  text symbol. Keep `role="img"` and the `aria-label` on the element.
+- Words drawn with CSS `content` (the empty chat, "Summary") can't be
+  reached by `i18n.js`: give each a `:root:lang(zh)` rule beside it.
+
 ## Every change
 - Light and dark, phone (390x844) and desktop screenshots, English and
   Chinese (every new string in `i18n.js`); keep ids and hooks the scripts
