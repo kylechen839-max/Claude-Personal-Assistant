@@ -182,6 +182,7 @@
   </section>
 
   <section id="log" class="log" aria-live="polite"></section>
+  <section id="queue" class="queue" aria-live="polite" hidden></section>
   <p id="status" class="status" aria-live="polite"></p>
 
   <section id="confirm" class="confirm" hidden>
@@ -200,6 +201,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
+      <button id="stop" class="stop-btn" type="button" aria-label="Stop" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+      </button>
       <button type="submit" aria-label="Send">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
       </button>

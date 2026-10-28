@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Phone app: you can keep typing while Kwil is answering. Send queues the
+  message (up to 3, each with an × to remove it) and it goes as soon as the
+  reply is done. A new Stop button ends a reply early and sends the queue. A
+  yes/no question still takes your typed answer.
 - Fixed: with FAILOVER_BACKENDS set, the cloud took the last listed backend's
   role (e.g. "pc") instead of its own. That broke Google sign-in redirects
   for family members, history-sync peers and leader election.

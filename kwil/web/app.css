@@ -231,6 +231,20 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
   display: grid; place-items: start end; padding: 4px 6px 0 0; background: none; color: var(--text);
   font-size: 1.1rem; line-height: 1; }
 .attach-chip img + .attach-remove { color: #fff; text-shadow: 0 0 3px #000a; }
+/* Typing while Kwil answers (app.js): Stop, and "Queued" bubbles under the log */
+#text-form .stop-btn { background: var(--surface-2); color: var(--text); }
+#text-form .stop-btn[hidden] { display: none; }
+#text-form .stop-btn svg rect { fill: currentColor; stroke: none; }
+#text-form .stop-btn:disabled { opacity: .45; }
+.queue { display: flex; flex-direction: column; gap: .5rem; max-height: 30vh; overflow-y: auto;
+  padding: 0 var(--pad) .5rem; }
+.queue[hidden] { display: none; }
+.msg.me.queued { position: relative; padding-right: 2.6rem; background: var(--surface);
+  border: 1px dashed var(--line-strong); color: var(--text-2); }
+.queued-tag { display: block; margin-top: .15rem; font-size: .75rem; color: var(--muted); }
+.queued-remove { position: absolute; top: 0; right: 0; width: 44px; height: 44px; min-height: 0; padding: 0;
+  display: grid; place-items: center; background: none; color: var(--text-2); font-size: 1.1rem; line-height: 1; }
+.queued-remove:focus-visible { box-shadow: var(--ring); border-radius: var(--r-pill); }
 @keyframes ripple { from { opacity: .35; transform: scale(1); } to { opacity: 0; transform: scale(1.75); } }
 #mic-hint { margin-top: .6rem; }
 @media (max-height: 700px) {

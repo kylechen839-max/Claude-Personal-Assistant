@@ -6395,3 +6395,58 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 `-k "not live_pinecone"` (the Pinecone quota is used up): 3464 passed, 37
 skipped, 1 deselected (round 1: 3452 passed); JavaScript 238 passed
 (round 1: 237).
+
+## Type while Kwil is thinking: queued messages and Stop (2026-10-28)
+Kyle's ask: "let me type to the assistant when its thinking."
+
+Before: `setBusy` disabled the text box (and the mic) for the whole turn,
+the submit handler dropped a Send while busy, and the server answers a
+second `/api/turn` with 409 ("still working on the last request"). There
+was no way to stop a page turn (only the voice view's barge-in).
+
+- **Typing (`app.js`).** The text box is never disabled or cleared
+  mid-turn; the mic keeps today's rule (off while a turn runs, on for a
+  yes/no answer).
+- **Queue.** Send while a reply runs puts the message in a "Queued"
+  bubble with an × (`#queue`, under the chat, `aria-live="polite"`), at
+  most 3 (a 4th gets "You can queue up to 3 messages." and stays in the
+  box). Kept in the page's memory only, cleared on sign-out. After each
+  turn's end (`send`'s and the resume path's `finally`) the next one goes
+  as a normal turn, one at a time, through the same path as a typed
+  message (picked files still go with the next message sent). Nothing goes
+  while a yes/no question is open, or once the page shows the sign-in.
+- **Stop.** A Stop button next to Send, shown while a turn runs (not
+  during a question), posts `/api/stop`. The server (`WebAssistant.stop`)
+  sets the page turn's new cancel event (`Session.cancel`, set per
+  `start_turn`, cleared before the lock is released) and closes the open
+  stream (`ClaudeChat.abort`): the same barge-in path as the voice view, so
+  no tool runs after it and history stays valid; a tool already running
+  finishes first. The turn's stream ends with its reply marked
+  `"stopped": true` (shown, not spoken, with a "Stopped." note) and
+  "done", and the queue goes. Stop is refused (`{"stopped": false}`) with
+  no page turn running, during a question, and for a voice-view turn. If
+  the stop request fails (e.g. an older backend), the reply runs to its
+  end and the queue goes then; the server never runs two turns.
+- **Questions.** Typed text while asked answers the question as before.
+  Once the answer is sent, the page drops the question at once (it used to
+  stay "confirming" until the reply), so text typed during the rest of
+  that turn is queued instead of going to `/api/confirm` (409); a failed
+  answer brings the question back.
+- Strings in `i18n.js` (English and Chinese); `sw.js` cache `kwil-shell-v10`.
+
+Tests: `tests/js/app-queue.test.mjs` (8: typing stays enabled and Send
+queues, order one at a time, × removes, the limit, Stop then the queue, a
+question takes the typed answer and the queue waits, a failed answer, the
+page markup), an i18n test, and in `tests/test_webapp.py` three Stop tests
+(the turn ends after the running tool with no further API call and the
+next turn runs on valid history, caplog: one INFO line, no conversation
+text; refused when idle, during a question and for a voice-view turn).
+Failing first: with the source files back at 8ae6c41, 7 of the 8 queue
+tests, the i18n test, the sw pin and all 3 Stop tests fail (the "failed
+answer" test passes there too: it guards today's behaviour).
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
+`-k "not live_pinecone"`: 3497 passed, 37 skipped, 1 deselected (master
+8ae6c41 extracted with `git archive`: 3492 passed, 38 skipped, and
+`test_design_skills` failing only because an extract isn't a checkout;
+3 new tests); JavaScript 248 passed (master: 239).

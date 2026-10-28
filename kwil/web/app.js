@@ -7,7 +7,7 @@ const els = {
   login: $("login"), app: $("app"), loginForm: $("login-form"), token: $("token"),
   loginError: $("login-error"), log: $("log"), status: $("status"),
   confirm: $("confirm"), question: $("confirm-question"), yes: $("yes"), no: $("no"),
-  textForm: $("text-form"), text: $("text"), mic: $("mic"), micHint: $("mic-hint"), micMeter: $("mic-meter"),
+  textForm: $("text-form"), text: $("text"), stop: $("stop"), queue: $("queue"), mic: $("mic"), micHint: $("mic-hint"), micMeter: $("mic-meter"),
   phoneVoice: $("phone-voice"), mute: $("mute"), logout: $("logout"),
   badge: $("badge"), backends: $("backends"), backendMode: $("backend-mode"),
   urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
@@ -16,7 +16,13 @@ const els = {
 
 let busy = false;
 let confirming = false;
+let stopping = false;  // Stop was pressed; the turn is ending
 let live = null;  // the reply bubble that streamed text is going into
+// Messages sent while Kwil is still answering: shown as "Queued" bubbles
+// and sent in order, one turn at a time, once the reply is done. Kept in
+// this page's memory only (never stored), a few at most.
+const MAX_QUEUE = 3;
+const queue = [];  // {text, el}
 const player = new Audio();
 let audioUnlocked = false;
 
@@ -47,14 +53,67 @@ function addMessage(kind, text) {
   div.textContent = text;
   els.log.appendChild(div);
   els.log.scrollTop = els.log.scrollHeight;
+  return div;
 }
 
 function setStatus(text) { els.status.textContent = text || ""; }
 
 function setBusy(value) {
   busy = value;
-  els.text.disabled = value && !confirming;
+  // The text box stays usable while Kwil answers: Send then queues.
   els.mic.disabled = value && !confirming;
+  if (!value) stopping = false;
+  const hide = !value || confirming;
+  if (hide && !els.stop.hidden && document.activeElement === els.stop) els.text.focus();
+  els.stop.hidden = hide;
+  els.stop.disabled = stopping;
+}
+
+// --- queued messages ---
+function enqueue(text) {
+  if (queue.length >= MAX_QUEUE) {
+    addMessage("note", `You can queue up to ${MAX_QUEUE} messages.`);
+    return false;
+  }
+  const el = document.createElement("div");
+  el.className = "msg me queued";
+  const words = document.createElement("span");
+  words.textContent = text;
+  const tag = document.createElement("span");
+  tag.className = "queued-tag";
+  tag.textContent = "Queued";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "queued-remove";
+  remove.setAttribute("aria-label", "Remove queued message");
+  remove.textContent = "×";
+  const item = { text, el };
+  remove.addEventListener("click", () => { unqueue(item); els.text.focus(); });
+  el.appendChild(words);
+  el.appendChild(tag);
+  el.appendChild(remove);
+  queue.push(item);
+  els.queue.appendChild(el);
+  els.queue.hidden = false;
+  return true;
+}
+
+function unqueue(item) {
+  const i = queue.indexOf(item);
+  if (i >= 0) queue.splice(i, 1);
+  item.el.remove();
+  els.queue.hidden = queue.length === 0;
+}
+
+function clearQueue() { while (queue.length) unqueue(queue[0]); }
+
+// The next queued message, once nothing is running or being asked.
+function sendQueued() {
+  if (busy || confirming || !queue.length) return;
+  if (!els.login.hidden) { clearQueue(); return; }  // signed out: nothing goes
+  const item = queue[0];
+  unqueue(item);
+  sendMessage(item.text);
 }
 
 // Files picked with "+" (attachments.js) go with the next message, never
@@ -281,7 +340,7 @@ function handleEvent(ev) {
   if (ev.type !== "delta" && ev.type !== "reply") live = null;
   switch (ev.type) {
     case "delta":
-      if (!live) { addMessage("claude", ""); live = els.log.lastElementChild; }
+      if (!live) live = addMessage("claude", "");
       live.textContent += ev.text;
       els.log.scrollTop = els.log.scrollHeight;
       break;
@@ -303,6 +362,14 @@ function handleEvent(ev) {
       break;
     case "reply":
       setConfirm(null);
+      if (ev.stopped) {  // the Stop button: what came so far, not spoken
+        if (live && !ev.text) live.remove(); else if (live) live.textContent = ev.text;
+        else if (ev.text) addMessage("claude", ev.text);
+        live = null;
+        addMessage("note", "Stopped.");
+        setStatus("");
+        break;
+      }
       if (live) { live.textContent = ev.text; live = null; } else addMessage("claude", ev.text);
       setStatus("");
       speak(ev.text, ev.audio);
@@ -322,6 +389,7 @@ async function send(body, sentFiles) {
   // body: {text} | FormData with "audio" and/or "text" and "attachment"s.
   // sentFiles: called once the server took the turn (clears the chips).
   const answering = confirming;
+  const question = els.question.textContent;
   const url = answering ? "/api/confirm" : "/api/turn";
   let options;
   if (body instanceof FormData) {
@@ -332,7 +400,9 @@ async function send(body, sentFiles) {
                 body: JSON.stringify(payload) };
     addMessage("me", body.text);
   }
-  if (answering) els.confirm.hidden = true;
+  // Answered: text typed from now on is a new message (queued), not
+  // another answer. A failed answer brings the question back.
+  if (answering) setConfirm(null);
   setBusy(true);
   setStatus(body instanceof FormData && body.has("audio") ? "Listening back…" : "Thinking…");
   if (router) router.beginTurn();  // no backend switch until the reply is done
@@ -343,10 +413,11 @@ async function send(body, sentFiles) {
   } catch (e) {
     addMessage("note", e.message || String(e));
     setStatus("");
-    if (answering) els.confirm.hidden = false;
+    if (answering && !confirming) setConfirm(question);
   } finally {
     if (router) router.endTurn();
     setBusy(false);
+    sendQueued();
   }
 }
 
@@ -371,7 +442,7 @@ async function refreshState() {
     if (state.busy && !state.confirm) {
       setBusy(true);
       setStatus("Thinking…");
-      try { await readEvents(await request("/api/events")); } finally { setBusy(false); }
+      try { await readEvents(await request("/api/events")); } finally { setBusy(false); sendQueued(); }
     }
   } catch (e) {
     /* 401 already showed the login */
@@ -436,11 +507,13 @@ async function signOut(path) {
     try { await request(path, { method: "POST" }); } catch (e) { /* signed out anyway */ }
     await tokens.delete("token");
     els.log.textContent = "";
+    clearQueue();
     show("login");
     return;
   }
   await fetch(path, { method: "POST", credentials: "same-origin" });
   els.log.textContent = "";
+  clearQueue();
   show("login");
 }
 els.logout.addEventListener("click", () => signOut("/api/logout"));
@@ -449,27 +522,47 @@ $("logout-all").addEventListener("click", () => {
 });
 
 // --- text ---
-els.textForm.addEventListener("submit", async (e) => {
+els.textForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = els.text.value.trim();
-  const files = pendingFiles();
-  if ((!text && !files) || (busy && !confirming)) return;
+  if (busy && !confirming) {
+    // Still answering: the message waits its turn. Picked files stay in
+    // the tray and go with the next message that is sent.
+    if (text && enqueue(text)) { unlockAudio(); els.text.value = ""; }
+    return;
+  }
+  if (!text && !pendingFiles()) return;
   unlockAudio();
-  if (!files) {
-    els.text.value = "";
+  els.text.value = "";
+  sendMessage(text);
+});
+
+// A typed message (or a yes/no answer while asked), with any picked files.
+async function sendMessage(text) {
+  if (!pendingFiles()) {
     send({ text });
     return;
   }
   setBusy(true);  // no second send while photos are still being shrunk
   await tray().whenReady();
   setBusy(false);
-  if (!tray().count() && !text) return;  // the only photo couldn't be opened
-  els.text.value = "";
+  if (!tray().count() && !text) { sendQueued(); return; }  // the only photo couldn't be opened
   const form = new FormData();
   if (text) form.append("text", text);
   tray().appendTo(form);
   addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
   send(form, () => tray().clear());
+}
+
+// Stop: the server ends the turn where it is (POST /api/stop), its stream
+// ends as usual and the next queued message goes. If the stop fails, the
+// reply just runs to its end: the server never runs two turns at once.
+els.stop.addEventListener("click", async () => {
+  if (!busy || confirming || stopping) return;
+  stopping = true;
+  els.stop.disabled = true;
+  stopSpeaking();
+  try { await request("/api/stop", { method: "POST" }); } catch (e) { /* runs to its end */ }
 });
 
 els.yes.addEventListener("click", () => { unlockAudio(); send({ text: "yes" }); });

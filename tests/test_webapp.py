@@ -691,6 +691,86 @@ def test_concurrent_turns_are_refused(make_app, fake_client):
     assert evs[-2]["text"] == "Done." and evs[-1]["type"] == "done"
 
 
+def slow_registry(started, gate):
+    reg = ToolRegistry()
+    reg.register(Tool(name="slow", description="Slow.",
+                      input_schema={"type": "object", "properties": {}},
+                      handler=lambda: started.set() or (gate.wait(5) and "ok")))
+    return reg
+
+
+def test_stop_ends_the_running_turn_and_the_next_one_starts(make_app, fake_client, caplog):
+    """The page's Stop button (POST /api/stop): the turn ends after the
+    running tool, with no further API call, its stream says "stopped", and
+    the page's queued message then starts as the next turn on a valid
+    history. Only the fact is logged, never the conversation."""
+    started, gate = threading.Event(), threading.Event()
+    fake_client.queue = [make_response(tool_use_block("slow", {}), stop_reason="tool_use"),
+                         make_response(text_block("Next reply."))]
+    assistant, client = make_app(tools=slow_registry(started, gate))
+    login(client)
+    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE],
+                             client.app.state.web.store.epoch)
+    s = assistant.session(sid)
+    assert assistant.start_turn(s, text="plan my secret trip")
+    assert started.wait(5)
+    with caplog.at_level("DEBUG", logger="kwil"):
+        r = client.post("/api/stop", headers={"Content-Length": "0"})
+    assert r.status_code == 200 and r.json() == {"stopped": True}
+    gate.set()
+    evs = events(client.get("/api/events"))
+    assert [e["type"] for e in evs] == ["tool", "reply", "done"]
+    assert evs[1]["stopped"] is True
+    assert len(fake_client.calls) == 1  # nothing asked after the stop
+    assert s.cancel is None  # the next turn gets its own
+    nxt = events(client.post("/api/turn", json={"text": "and now?"}))
+    assert [e["type"] for e in nxt] == ["reply", "done"]
+    assert nxt[0]["text"] == "Next reply." and "stopped" not in nxt[0]
+    stops = [r for r in caplog.records if r.getMessage() == "Web turn stopped"]
+    assert [r.levelname for r in stops] == ["INFO"]
+    assert not any("secret trip" in r.getMessage() for r in caplog.records
+                   if r.levelno >= 20)
+
+
+def test_stop_needs_a_running_page_turn_and_never_answers_a_question(make_app, fake_client):
+    deleted = []
+    fake_client.queue = [
+        make_response(tool_use_block("delete_event", {"title": "Dentist"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Deleted.")),
+    ]
+    _, client = make_app(tools=delete_registry(deleted))
+    assert client.post("/api/stop", headers={"Content-Length": "0"}).status_code == 401
+    login(client)
+    assert client.post("/api/stop", headers={"Content-Length": "0"}).json() == {"stopped": False}
+    first = events(client.post("/api/turn", json={"text": "delete the dentist"}))
+    assert first[-1]["type"] == "confirm"
+    # a question is open: Stop doesn't touch it; the typed yes still answers it
+    assert client.post("/api/stop", headers={"Content-Length": "0"}).json() == {"stopped": False}
+    rest = events(client.post("/api/confirm", json={"answer": "yes"}))
+    assert deleted == ["Dentist"]
+    assert [e["type"] for e in rest] == ["reply", "done"] and "stopped" not in rest[0]
+
+
+def test_stop_leaves_a_voice_view_turn_alone(make_app, fake_client):
+    started, gate = threading.Event(), threading.Event()
+    fake_client.queue = [make_response(tool_use_block("slow", {}), stop_reason="tool_use"),
+                         make_response(text_block("All done."))]
+    assistant, client = make_app(tools=slow_registry(started, gate))
+    login(client)
+    sid = webapp.read_cookie(TOKEN, client.cookies[webapp.COOKIE],
+                             client.app.state.web.store.epoch)
+    s = assistant.session(sid)
+    out = []
+    t = threading.Thread(target=lambda: out.extend(assistant.chat_stream(s, "go")))
+    t.start()
+    assert started.wait(5)
+    assert client.post("/api/stop", headers={"Content-Length": "0"}).json() == {"stopped": False}
+    gate.set()
+    t.join(5)
+    assert "".join(out) == "All done."
+
+
 # --- public server hardening -------------------------------------------------------
 
 PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webmanifest",
@@ -1374,6 +1454,6 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v9" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v10" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw

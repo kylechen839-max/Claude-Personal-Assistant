@@ -451,7 +451,10 @@ memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
 asks Claude, and sends back the reply as text and audio (in the voice from
 [Voices](#voices); or tick "Use the phone's voice" in the page's settings). Hold the big mic button to talk (or tap once to start
-and again to stop), or type. When Claude wants to delete something, Yes/No
+and again to stop), or type. You can keep typing while Kwil is
+answering: Send then queues the message (up to 3, each with an × to
+remove it) and it goes as soon as the reply is done; **Stop** ends the
+reply early and sends the queue. When Claude wants to delete something, Yes/No
 buttons appear; saying "yes" into the mic works too. Each phone/browser
 gets its own conversation; after `[assistant] conversation_timeout` (5
 minutes) of quiet it ends and is summarized to memory, like the voice loop.
