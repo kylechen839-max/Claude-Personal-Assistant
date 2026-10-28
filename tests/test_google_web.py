@@ -80,7 +80,9 @@ def test_status_and_consent_url(setup):
     login(client)
     assert client.get("/api/google/status").json() == {"enabled": True, "connected": False,
                                                        "disconnect": False,
-                                                       "gmail": True, "note": None, "server_owner": False}
+                                                       "gmail": True, "note": None,
+                                                       "needs_reconnect": False,
+                                                       "server_owner": False}
     q = start(client)
     assert q["redirect_uri"] == [ORIGIN + "/google/callback"]
     assert q["access_type"] == ["offline"] and q["prompt"] == ["consent"]
@@ -132,7 +134,9 @@ def test_callback_saves_the_token_and_adds_the_tools(setup, caplog):
         assert session.registry.has(name), name
     assert client.get("/api/google/status").json() == {"enabled": True, "connected": True,
                                                        "disconnect": False,
-                                                       "gmail": True, "note": None, "server_owner": False}
+                                                       "gmail": True, "note": None,
+                                                       "needs_reconnect": False,
+                                                       "server_owner": False}
     # replaying the same callback does nothing
     with patch("google_auth_oauthlib.flow.Flow.fetch_token") as again:
         r = client.get("/google/callback", params={"state": state, "code": "4/secret-code"},
@@ -356,7 +360,8 @@ def test_without_a_connected_token_the_env_token_is_used(server):
     kyle = owner_client(s)
     st = kyle.get("/api/google/status").json()
     assert st == {"enabled": True, "connected": True, "disconnect": False,
-                  "gmail": True, "note": None, "server_owner": True}
+                  "gmail": True, "note": None,
+                  "needs_reconnect": False, "server_owner": True}
     assert kyle.post("/api/google/disconnect", json={}).status_code == 404
     assert tool_refresh_token(s) == ENV_TOKEN["refresh_token"]
     from kwil.cli import register_google

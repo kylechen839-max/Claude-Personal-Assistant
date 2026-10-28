@@ -18,7 +18,14 @@ each on their own deadlines (deadlines.py).
   DELETE /api/student/source/{source}  delete all from one source (also POST
                                        .../{source}/delete: the failover
                                        preflight allows only GET and POST)
-  GET  /api/student/schools?q=         Canvas's school lookup (canvas.find_school)
+  GET  /api/student/schools?q=         Canvas's school lookup (canvas.find_school),
+                                       each school with its `tokens` policy
+  GET  /api/student/canvas/policy?host= {host, tokens}: whether that Canvas lets
+                                       students make an access token ("allowed",
+                                       "blocked", "unknown"; canvas_schools.py)
+  POST /api/student/canvas/report      {host, tokens: "blocked"}: "my Canvas has
+                                       no New access token button" (REPORTS an
+                                       hour per person)
   GET  /api/student/courses            what course content is stored (coursefiles
                                        stats: courses, documents, bytes; no text)
   POST /api/student/courses/{id}/delete  delete one course's content (also DELETE
@@ -40,6 +47,15 @@ Without a usable USER_DATA_KEY nothing is stored (503). The feed URL is
 itself a secret (it reads their calendar without a sign-in) and is treated like the token:
 never logged, never returned (the status says only which kind and the
 school's host). A school password is never asked for or stored.
+
+The way in is picked for the person (web/student.js), from the school's
+token policy (canvas_schools.Policies: a sourced seed plus what this
+server learned: a token sync that worked records "allowed", a report or
+the Canvas helper's reading "blocked"); nobody chooses between feed,
+token and helper. `[canvas] tokens_for = "owner"` keeps the token way for
+the owner only: invited people get the helper or the feed (the status
+says `tokens_offered`), and connecting with a token answers them 403
+{code: "tokens_owner_only"}.
 
 Sync (StudentSync.sync, also callable by a scheduler): the calendar feed
 (source "ics") or the planner over the API ("canvas_api"; module pages
@@ -97,6 +113,7 @@ MAX_TOKEN = 200
 _TOKEN = re.compile(r"^[A-Za-z0-9~_.-]{20,200}$")
 MAX_BODY = 8192                 # bytes of a request body
 SCHOOL_LOOKUPS = 10             # per person per minute
+REPORTS = 3                     # token-policy reports per person per hour
 MAX_PEOPLE = 1024               # entries in the throttle and lock maps
 CANVAS_SOURCES = ("ics", "canvas_api", "modules", "course_text")
 TICK_SECONDS = 300              # the background sync looks for who is due this often
@@ -146,6 +163,17 @@ class StudentSync:
         from kwil.canvas_helper import HelperKeys
 
         self.helper = HelperKeys(config, family)
+        self._reports: OrderedDict[str, deque] = OrderedDict()
+        # links connected in the app whose first working sync is still to come:
+        # only that one counts as "allowed" for the school (a token re-used for
+        # months, a TA's or one made before a restriction says nothing new)
+        self._fresh: OrderedDict[str, bool] = OrderedDict()
+        # (person, host) reports already counted: each person's claim once
+        self._reported: OrderedDict[tuple, bool] = OrderedDict()
+        # the schools' token policies (seed + learned), for picking the way in
+        from kwil.canvas_schools import Policies
+
+        self.policies = Policies(config["student"]["dir"])
 
     @property
     def env(self):
@@ -179,6 +207,15 @@ class StudentSync:
 
     def _keys_env(self):
         return self.family.keys.environ if self.family is not None else self.environ
+
+    def tokens_offered(self, uid) -> bool:
+        """May this person connect with an access token? The owner always;
+        an invited person unless [canvas] tokens_for is "owner" (anything
+        but "everyone" counts as "owner": the stricter one)."""
+        if uid is None:
+            return True
+        return str(self.config["canvas"].get("tokens_for", "everyone")).strip().lower() \
+            == "everyone"
 
     # ---------- their Canvas link ----------
     def credentials(self, uid) -> dict | None:
@@ -217,6 +254,9 @@ class StudentSync:
         if found is not None:
             school = urlsplit(found.get("base_url") or found.get("ics_url") or "").hostname
         env = uid is None and self.env_managed()
+        helper = self.helper.status(uid)
+        # their school's token policy: the link's host, else the one the helper read
+        known = school or helper.get("canvas_host")
         return {"connected": found is not None,
                 "kind": found["kind"] if found else None, "school": school,
                 "managed": "env" if env else "app",
@@ -226,8 +266,11 @@ class StudentSync:
                 "can_store": env or userkeys.secret_problem(self._keys_env()) is None,
                 "gmail": bool(self.config["student"]["gmail"]) and self._inbox(uid) is not None,
                 "last_sync": self.store.last_sync(uid),
+                "tokens_offered": self.tokens_offered(uid),
+                "policy": {"host": known, "tokens": self.policies.policy(known, own=True)}
+                if known else None,
                 # the browser helper (canvas_helper.py): never the key or a code
-                "helper": {"enabled": self.helper_on(), **self.helper.status(uid)}}
+                "helper": {"enabled": self.helper_on(), **helper}}
 
     def helper_on(self) -> bool:
         return self.courses is not None and bool(self.config["canvas"].get("helper"))
@@ -272,6 +315,12 @@ class StudentSync:
                 write()
         with self.lock:  # a new link may sync at once
             self._last.pop(uid or "", None)
+            if record["kind"] == "api":
+                self._fresh[uid or ""] = True
+                self._fresh.move_to_end(uid or "")
+                _trim(self._fresh)
+            else:
+                self._fresh.pop(uid or "", None)
         log.info("Student: %s connected Canvas (%s)", uid or "the owner", record["kind"])
         return True
 
@@ -283,6 +332,7 @@ class StudentSync:
         _unlink(path)
         helper = self.helper.revoke(uid)  # its pushes stop too
         with self.lock:  # a content sync (or a helper's push) running now stops writing
+            self._fresh.pop(uid or "", None)
             self._generations += 1
             self._generation[uid or ""] = self._generations
             self._generation.move_to_end(uid or "")
@@ -431,6 +481,9 @@ class StudentSync:
                 return canvas.upcoming(api.deadlines(now), now)
             try:
                 run("canvas_api", planner)
+                if "canvas_api" in out and self._first_sync(uid):
+                    # a token just made in the app works: the school allows them
+                    self.policies.record(found["base_url"], "allowed")
                 if c["pages"] and api is not None and "canvas_api" not in errors:
                     run("modules", lambda: canvas.upcoming(self._extract(
                         uid, "modules", api.page_texts(int(c["max_pages"])), tz), now))
@@ -528,18 +581,62 @@ class StudentSync:
         finally:
             running.release()
 
+    def own_hosts(self, uid) -> set:
+        """The person's own Canvas hosts: their link's, and the one their
+        helper reads."""
+        from kwil.canvas_schools import normalize
+
+        found = self.credentials(uid) or {}
+        hosts = {normalize(found.get("base_url") or found.get("ics_url") or ""),
+                 self.helper.status(uid).get("canvas_host")}
+        return {h for h in hosts if h}
+
+    def policy_for(self, uid, host) -> str:
+        """A school's token policy as this person may see it: what others'
+        events taught only once there are canvas_schools.MIN_EVENTS of them,
+        unless it is their own Canvas host."""
+        from kwil.canvas_schools import normalize
+
+        name = normalize(host)
+        return self.policies.policy(name, own=name is not None and name in self.own_hosts(uid))
+
+    def report_blocked(self, uid, host: str) -> bool:
+        """Count a person's "no New access token button" for a host, once
+        per person and host (in memory, bounded); False if already counted."""
+        key = (uid or "", host)
+        with self.lock:
+            if key in self._reported:
+                return False
+            self._reported[key] = True
+            while len(self._reported) > MAX_PEOPLE:
+                self._reported.popitem(last=False)
+        return self.policies.record(host, "blocked")
+
+    def _first_sync(self, uid) -> bool:
+        """True once per link connected in the app: its first working sync."""
+        with self.lock:
+            return self._fresh.pop(uid or "", False)
+
     def lookup_allowed(self, uid) -> bool:
-        """At most SCHOOL_LOOKUPS school searches a minute per person."""
+        """At most SCHOOL_LOOKUPS school searches (or policy look-ups) a
+        minute per person."""
+        return self._allowed(self._lookups, uid, SCHOOL_LOOKUPS, 60)
+
+    def report_allowed(self, uid) -> bool:
+        """At most REPORTS token-policy reports an hour per person."""
+        return self._allowed(self._reports, uid, REPORTS, 3600)
+
+    def _allowed(self, table: OrderedDict, uid, limit: int, window: float) -> bool:
         key, now = uid or "", self.clock()
         with self.lock:
-            recent = self._lookups.setdefault(key, deque())
-            self._lookups.move_to_end(key)
-            while recent and now - recent[0] > 60:
+            recent = table.setdefault(key, deque())
+            table.move_to_end(key)
+            while recent and now - recent[0] > window:
                 recent.popleft()
-            if len(recent) >= SCHOOL_LOOKUPS:
+            if len(recent) >= limit:
                 return False
             recent.append(now)
-            _trim(self._lookups)
+            _trim(table)
             return True
 
 
@@ -778,7 +875,7 @@ def register(app, family, web, error) -> None:
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
 
-    from kwil import deadlines, userkeys, webapp
+    from kwil import canvas_schools, deadlines, userkeys, webapp
 
     store = family.deadlines if family is not None else deadlines.current()
     config = family.config if family is not None else (store.config if store else None)
@@ -839,6 +936,11 @@ def register(app, family, web, error) -> None:
             return error("this server can't store sign-ins yet (its owner needs "
                          f"to set {userkeys.ENV})", 503)
         body = await body_of(request)
+        if not body.get("ics_url") and (body.get("token") or body.get("base_url")) \
+                and not sync.tokens_offered(uid):  # [canvas] tokens_for = "owner"
+            return nostore({"error": "on this Kwil, access tokens are for its owner only; "
+                            "use the calendar feed or the Canvas helper",
+                            "code": "tokens_owner_only"}, 403)
         try:
             record = await run_in_threadpool(StudentSync.clean_link, body)
         except ValueError as e:
@@ -1003,7 +1105,43 @@ def register(app, family, web, error) -> None:
             return error("not found", 404)
         if not sync.lookup_allowed(uid):
             return error("too many searches; wait a minute", 429)
-        return nostore({"schools": await run_in_threadpool(canvas.find_school, q)})
+
+        def find():
+            return [{**s, "tokens": sync.policy_for(uid, s.get("base_url"))}
+                    for s in canvas.find_school(q)]
+        return nostore({"schools": await run_in_threadpool(find)})
+
+    @app.get("/api/student/canvas/policy")
+    async def student_policy(host: str = "", session=Depends(webapp.require_session)):
+        ok, uid = person(session)
+        if not ok:
+            return error("not found", 404)
+        name = canvas_schools.normalize(host)
+        if name is None:
+            return error("send a Canvas host, e.g. canvas.school.edu", 400)
+        if not sync.lookup_allowed(uid):
+            return error("too many searches; wait a minute", 429)
+        return nostore({"host": name,
+                        "tokens": await run_in_threadpool(sync.policy_for, uid, name)})
+
+    @app.post("/api/student/canvas/report")
+    async def student_report(request: Request, session=Depends(webapp.require_session)):
+        """A person's own word: their Canvas shows no New access token
+        button. A claim: counted, and never over a seed checked later."""
+        ok, uid = person(session)
+        if not ok:
+            return error("not found", 404)
+        body = await body_of(request)
+        name = canvas_schools.normalize(body.get("host"))
+        if name is None or body.get("tokens") != "blocked":
+            return error('send {host, tokens: "blocked"}', 400)
+        if not sync.report_allowed(uid):
+            return error("too many reports; try again later", 429)
+        counted = await run_in_threadpool(sync.report_blocked, uid, name)
+        log.info("Student: %s reported their school blocks access tokens (%s)",
+                 uid or "the owner", "counted" if counted else "already counted")
+        return nostore({"host": name,
+                        "tokens": await run_in_threadpool(sync.policy_for, uid, name)})
 
     # the Canvas helper's pairing and push routes (canvas_helper.py)
     from kwil import canvas_helper

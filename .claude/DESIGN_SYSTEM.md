@@ -10,8 +10,10 @@ CSP forbids them).
 ## Tokens
 - **Colour:** the existing `--bg`, `--surface`, `--surface-2`, `--text`,
   `--text-2`, `--muted`, `--line`, `--accent`, `--accent-ink`, `--ok`,
-  `--bad-ink`, `--warn*` in light and dark. Never a raw hex in a rule
-  except brand tiles (below). Text 4.5:1, icons and graphics 3:1.
+  `--bad-ink`, `--warn*` in light and dark, plus `--scrim` (a sheet's
+  backdrop) and `--brand-*` / `--on-brand` (service tiles). Components
+  never use a raw hex or rgb(): add a token. Text 4.5:1, icons and
+  graphics 3:1.
 - **Type** (17px base): `--t-title` 28 (large titles), `--t-head` 20
   (sheet titles), `--t-body` 17 (row titles, body), `--t-sub` 15
   (secondary lines, buttons), `--t-cap` 13 (subtitles, group headers,
@@ -21,6 +23,15 @@ CSP forbids them).
 - **Radii:** `--r-sm` 10, `--r-md` 14 (buttons, fields), `--r-lg` 20
   (cards, groups), `--r-pill`; sheets 22 at the top.
 - **Sizes:** list rows `--row-h` 52px; every tap target at least 44px.
+- **Depth:** a group is a tone step (`--surface` on `--bg`), never a soft
+  shadow. Only floating layers (sheets, the menu popover) get
+  `--shadow-2`.
+- **Motion:** sheets slide in over `--t-sheet` 240ms on `--ease-sheet`
+  `cubic-bezier(.32,.72,0,1)`; the scrim fades in over `--t-scrim` 200ms; a
+  pressed row turns `--surface-2`; a pressed button scales to .97. Every
+  animation has a `prefers-reduced-motion` path (no movement).
+- **Focus:** `:focus-visible` shows `--ring` (`--ring-inset` inside a
+  clipped group); never remove an outline without it.
 
 ## Buttons: one style per role
 - `.btn.primary`: the one way forward on a screen (accent fill). At most

@@ -396,6 +396,10 @@ DEFAULTS: dict = {
         # the browser helper (canvas_helper.py): pushes course content from
         # the person's own signed-in Canvas tab, for schools that block tokens
         "helper": True,
+        # who may connect with an access token: "everyone", or "owner" (invited
+        # people get the Canvas helper or the calendar feed instead; Canvas's API
+        # policy asks apps used by many people to use OAuth, not their tokens)
+        "tokens_for": "everyone",
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},
@@ -619,6 +623,32 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record))
 
 
+# Paths whose query string is the person's own data (a school's name or
+# Canvas host: /api/student/schools?q=, /api/student/canvas/policy?host=).
+QUIET_QUERY_PATHS = ("/api/student/",)
+
+
+class AccessQueryFilter(logging.Filter):
+    """uvicorn's access log line ('%s - "%s %s HTTP/%s" %d': client, method,
+    path with its query string, version, status) at INFO: the query of a
+    QUIET_QUERY_PATHS path is cut to "?…" (the path and status stay)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            path, _, query = args[2].partition("?")
+            if query and path.startswith(QUIET_QUERY_PATHS):
+                record.args = (*args[:2], path + "?…", *args[3:])
+        return True
+
+
+def quiet_access_log() -> None:
+    """Install AccessQueryFilter on uvicorn's access logger (once)."""
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, AccessQueryFilter) for f in access.filters):
+        access.addFilter(AccessQueryFilter())
+
+
 def setup_logging(config: dict) -> Path | None:
     """Detailed log to a rotating file; only warnings on the console.
 
@@ -649,4 +679,5 @@ def setup_logging(config: dict) -> Path | None:
     root.addHandler(console)
     for noisy in ("httpx", "httpcore", "urllib3", "googleapiclient", "faster_whisper"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    quiet_access_log()  # both web servers log requests through uvicorn.access
     return log_file

@@ -6,7 +6,8 @@
 // a fake Kwil (kwil/canvas_helper.py's answers). No network. Covers
 // pairing (the key stored, never sent to Canvas, never to the popup),
 // pagination and back-off, the manifest's fields (no grades, submissions
-// or file URLs), only wanted files pushed, and origin pinning. The
+// or file URLs), only wanted files pushed, origin pinning, and the token
+// check (one GET of /profile/settings, unknown on any doubt). The
 // pairing content script runs in node:vm with a minimal DOM.
 
 import test from 'node:test';
@@ -14,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-import { CanvasReader, nextLink, rateLimited, stripGuard } from
+import { CanvasReader, nextLink, parseTokenPolicy, policyHost, rateLimited, stripGuard } from
   '../../tools/canvas-helper/lib/canvas.js';
 import { KwilClient, KwilError } from '../../tools/canvas-helper/lib/kwil.js';
 import { batches, buildCourse, size } from '../../tools/canvas-helper/lib/manifest.js';
@@ -22,7 +23,8 @@ import { runSync } from '../../tools/canvas-helper/lib/sync.js';
 import { createHelper, isInstructure } from '../../tools/canvas-helper/lib/helper.js';
 import { describe } from '../../tools/canvas-helper/lib/status.js';
 import { CANVAS, CODE, FILESTORE, KEY, KWIL, PDF_BYTES, VERIFIER, canvasFile, fakeChrome,
-         kwilRoutes, popupSender, school, tabSender, world } from './canvas-helper-fakes.mjs';
+         kwilRoutes, popupSender, school, settingsPage, tabSender, world } from
+  './canvas-helper-fakes.mjs';
 
 const PAIRING = { key: KEY, origin: KWIL, pairedAt: '2026-10-27T00:00:00Z',
                   maxFileBytes: 3_934_464, maxFiles: 40 };
@@ -790,4 +792,116 @@ test('the popup shows status only, as text', () => {
                                 'Last sync: 1 h ago', '2 course(s), 1 file(s) sent']);
   assert.match(describe({ paired: true, kwil: KWIL, result: 'canvas_signed_out' }).lines.join(' '),
                /Sign in to Canvas/);
+});
+
+// --- may this account make a token? (GET /profile/settings, never a token made) ------
+
+test('the settings page ENV says whether this account may make a token', () => {
+  assert.deepEqual(parseTokenPolicy(settingsPage({ canUpdate: false })),
+                   { can_create_tokens: false, only_student: true });
+  assert.deepEqual(parseTokenPolicy(settingsPage({ canUpdate: true, onlyStudent: false })),
+                   { can_create_tokens: true, only_student: false });
+  // a key missing, or said both ways: unknown (null)
+  assert.deepEqual(parseTokenPolicy(settingsPage({ missing: true })),
+                   { can_create_tokens: null, only_student: true });
+  assert.deepEqual(parseTokenPolicy('"can_update_tokens":true ... "can_update_tokens": false'),
+                   { can_create_tokens: null, only_student: null });
+  assert.deepEqual(parseTokenPolicy(''), { can_create_tokens: null, only_student: null });
+  assert.deepEqual(parseTokenPolicy(null), { can_create_tokens: null, only_student: null });
+});
+
+test('the token check is one GET of the settings page, on the Canvas origin only', async () => {
+  const data = school();
+  data.settings = settingsPage({ canUpdate: false });
+  const w = world({ data });
+  const reader = new CanvasReader({ origin: CANVAS, fetch: w.fetch, sleep: noSleep });
+  assert.deepEqual(await reader.tokenPolicy(), { can_create_tokens: false, only_student: true });
+  assert.equal(w.calls.length, 1);
+  const [call] = w.calls;
+  assert.equal(call.url, `${CANVAS}/profile/settings`);
+  assert.equal(call.opts.method, 'GET');
+  assert.equal(call.opts.credentials, 'include');
+  assert.equal(call.opts.headers.Accept, 'text/html');
+  assert.equal(call.opts.body, undefined);
+});
+
+test('the token check fails to unknown, never throws', async () => {
+  const unknown = { can_create_tokens: null, only_student: null };
+  const page = settingsPage({ canUpdate: true });
+  const answers = {
+    missing: async () => new Response('', { status: 404 }),
+    signedOut: async () => {
+      const r = new Response(page, { status: 200 });
+      Object.defineProperty(r, 'url', { value: `${CANVAS}/login/canvas` });
+      Object.defineProperty(r, 'redirected', { value: true });
+      return r;
+    },
+    elsewhere: async () => {
+      const r = new Response(page, { status: 200 });
+      Object.defineProperty(r, 'url', { value: 'https://evil.example.org/profile/settings' });
+      Object.defineProperty(r, 'redirected', { value: true });
+      return r;
+    },
+    rateLimited: async () => new Response('Rate Limit Exceeded', { status: 429 }),
+    network: async () => { throw new TypeError('Failed to fetch'); },
+    noKeys: async () => new Response('<html>no ENV here</html>', { status: 200 }),
+  };
+  for (const [name, fetch] of Object.entries(answers)) {
+    const calls = [];
+    const reader = new CanvasReader({ origin: CANVAS, sleep: noSleep,
+      fetch: async (url, opts) => { calls.push({ url, opts }); return fetch(url, opts); } });
+    assert.deepEqual(await reader.tokenPolicy(), unknown, name);
+    assert.ok(calls.every((c) => c.opts.method === 'GET'), name);
+    assert.equal(calls.length, 1, name);   // no retries, no other request
+  }
+  // out of time: nothing fetched
+  const late = new CanvasReader({ origin: CANVAS, sleep: noSleep, now: () => 10, deadline: 5,
+    fetch: async () => { throw new Error('fetched'); } });
+  assert.deepEqual(await late.tokenPolicy(), unknown);
+});
+
+test('the first manifest carries the token check; nothing posts to Canvas', async () => {
+  for (const [settings, expected] of [
+    [settingsPage({ canUpdate: false }),
+     { host: 'school.instructure.com', can_create_tokens: false, only_student: true }],
+    [settingsPage({ canUpdate: true, onlyStudent: true }),
+     { host: 'school.instructure.com', can_create_tokens: true, only_student: true }],
+    [settingsPage({ missing: true }), undefined],   // unknown: not sent
+    [undefined, undefined],                         // no page (404): not sent
+  ]) {
+    const data = school();
+    data.settings = settings;
+    // the check rides on the first manifest only
+    const w = world({ data, kwil: kwilRoutes() });
+    const out = await sync(w);
+    assert.equal(out.result, 'ok');
+    assert.deepEqual(w.pushed.manifests[0].canvas, expected);
+    for (const m of w.pushed.manifests.slice(1)) assert.equal(m.canvas, undefined);
+    for (const c of canvasCalls(w)) {
+      assert.equal(c.opts.method, 'GET');
+      assert.ok(!/\/tokens\b/.test(c.url), c.url);   // never the token API
+    }
+    assert.equal(canvasCalls(w).filter((c) => c.url.endsWith('/profile/settings')).length, 1);
+  }
+});
+
+test('the token check is sent only for a host Kwil takes as a Canvas host', async () => {
+  // kwil/canvas_schools.py normalize's rule
+  assert.equal(policyHost('School.Instructure.com'), 'school.instructure.com');
+  assert.equal(policyHost('canvas.school.edu.'), 'canvas.school.edu');
+  for (const bad of ['canvas.uni.internal', '10.1.2.3', 'canvas.school.xn--p1ai', 'localhost',
+                     'canvas.school.local', 'intranet', '', null]) {
+    assert.equal(policyHost(bad), null, String(bad));
+  }
+  // a school Canvas on a LAN-only name: the courses go, the reading doesn't
+  // (Kwil would refuse it; it never makes the manifest a 400)
+  const odd = 'https://canvas.uni.internal';
+  const data = school();
+  data.settings = settingsPage({ canUpdate: false });
+  const w = world({ data, kwil: kwilRoutes() });
+  const out = await runSync({ pairing: PAIRING, canvasOrigin: odd, sleep: noSleep,
+    fetch: (url, opts) => w.fetch(String(url).replace(odd, CANVAS), opts) });
+  assert.equal(out.result, 'ok');
+  assert.ok(w.pushed.manifests.length >= 1);
+  for (const m of w.pushed.manifests) assert.equal(m.canvas, undefined);
 });

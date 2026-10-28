@@ -158,13 +158,15 @@ def test_connections_rows_keep_wcag_contrast_in_both_modes():
     the subtitle, status words and "Connect" on the row, its pressed state
     and the sheet (--surface, --surface-2, --bg)."""
     css = (WEB / "app.css").read_text(encoding="utf-8")
-    tiles = re.findall(r"\.conn-row\[data-conn=(\w+)\]\s*\{\s*--conn-tile:\s*(#[0-9a-f]{6});"
-                       r"\s*--conn-mark:\s*(#[0-9a-f]{3,6});\s*\}", css)
+    tiles = re.findall(r"\.conn-row\[data-conn=(\w+)\]\s*\{\s*--conn-tile:\s*var\(--([\w-]+)\);"
+                       r"\s*--conn-mark:\s*var\(--on-brand\);\s*\}", css)
     services = {"google", "notion", "canvas", "home_assistant", "spotify", "anthropic"}
-    assert {s for s, _, _ in tiles} == services and len(tiles) == len(services)
-    for name, tile, mark in tiles:
-        assert mark == "#fff", name
-        assert contrast(mark, tile) >= 3, name
+    assert {s for s, _ in tiles} == services and len(tiles) == len(services)
+    light = tokens(css, False)
+    assert light["on-brand"] == "#ffffff"
+    for name, token in tiles:
+        assert token == "brand-" + name.replace("_", "-"), name
+        assert contrast(light["on-brand"], light[token]) >= 3, name
     for is_dark in (False, True):
         t = {**tokens(css, False), **tokens(css, is_dark)}
         for fg in ("muted", "accent-ink", "bad-ink", "text"):
@@ -173,6 +175,32 @@ def test_connections_rows_keep_wcag_contrast_in_both_modes():
         # "Connected" (.state.on) only ever sits on a row; light mode's green
         # on the pressed row's --surface-2 is 4.2:1 for that moment
         assert contrast(t["ok"], t["surface"]) >= 4.5, is_dark
+
+
+def test_connections_css_uses_tokens_motion_and_no_soft_shadow():
+    """The designer's review: the primitives and the Connections component
+    take every colour from a token (brand tiles and the scrim included);
+    a group is a tone step, not a shadowed card (only the sheet has one);
+    the sheet slides 240ms on the agreed curve over a 200ms scrim fade; a
+    focus ring from --ring; and a reduced-motion path."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    block = css[css.index("/* ---------- design-system primitives"):
+                css.index("/* reply-voice picker (voice-picker.js) */")]
+    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", block) == []
+    assert "rgb(" not in block and "rgba(" not in block
+    rules = dict(re.findall(r"\n([^{}\n]+)\{([^{}]*)\}", block))
+    assert "shadow" not in rules[".group "]
+    shadows = [sel.strip() for sel, body in rules.items() if "--shadow" in body]
+    assert shadows == [".conn-sheet"]
+    light = tokens(css, False)
+    assert {"scrim", "on-brand"} <= set(light) and "scrim" in tokens(css, True)
+    assert "--t-sheet: 240ms; --ease-sheet: cubic-bezier(.32,.72,0,1); --t-scrim: 200ms;" in css
+    assert "animation: sheet-up var(--t-sheet) var(--ease-sheet)" in block
+    assert "animation: scrim-in var(--t-scrim) ease-out" in block
+    assert "box-shadow: var(--ring)" in block and "box-shadow: var(--ring-inset)" in block
+    assert ".group .row:active:not(:disabled) { transform: none; background: var(--surface-2); }" in block
+    reduced = block[block.index("@media (prefers-reduced-motion: reduce)"):]
+    assert ".conn-sheet[open], .conn-sheet::backdrop { animation: none; }" in reduced
 
 
 def test_maskable_icon_keeps_the_quill_in_the_safe_zone():
