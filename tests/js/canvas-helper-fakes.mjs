@@ -79,6 +79,21 @@ export function school() {
   };
 }
 
+// GET /profile/settings as Canvas renders it for a signed-in person: the
+// page's ENV (ProfileController#settings js_env) holds PERMISSIONS
+// {can_update_tokens} and user_is_only_student among many other keys.
+export function settingsPage({ canUpdate = false, onlyStudent = true, missing = false } = {}) {
+  const env = { ASSET_HOST: 'https://du11hjcvx0uqb.cloudfront.net', current_user_id: '4242',
+                current_user_roles: ['user', 'student'], DOMAIN_ROOT_ACCOUNT_ID: '1',
+                PERMISSIONS: { can_update_name: false, can_update_tokens: canUpdate,
+                               can_add_pronouns: false },
+                user_is_only_student: onlyStudent, LOCALE: 'en' };
+  if (missing) delete env.PERMISSIONS.can_update_tokens;
+  return '<!DOCTYPE html><html><head><title>User Settings</title>\n<script>\n//<![CDATA[\n' +
+    `window.ENV = ${JSON.stringify(env)};\n//]]>\n</script></head>` +
+    '<body><h2>Approved Integrations</h2></body></html>';
+}
+
 function response(body, { status = 200, headers = {}, url, redirected = false } = {}) {
   const r = new Response(body, { status, headers });
   if (url) Object.defineProperty(r, 'url', { value: url });
@@ -137,6 +152,9 @@ export function world({ data = school(), limitTimes = 0, signedOut = false, kwil
           { status: 401 });
         }
         return answerList(u, items);
+      }
+      if (p === '/profile/settings' && data.settings) {   // an HTML page, with ENV in it
+        return response(data.settings, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       }
       if (p === '/api/v1/announcements') {
         const codes = u.searchParams.getAll('context_codes[]');
