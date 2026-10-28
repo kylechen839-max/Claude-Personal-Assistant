@@ -47,6 +47,17 @@ test('menu: Escape closes it', () => {
   assert.equal(t.menu.open, false);
 });
 
+test('menu: Escape with a Connections sheet open closes only the sheet', () => {
+  const t = setup();
+  let sheet = { open: true };
+  t.menu.querySelector = (sel) => (sel === 'dialog[open]' ? sheet : null);
+  t.fire('keydown', { key: 'Escape' });  // the dialog closes itself
+  assert.equal(t.menu.open, true);
+  sheet = null;
+  t.fire('keydown', { key: 'Escape' });
+  assert.equal(t.menu.open, false);
+});
+
 const touch = (y) => ({ touches: [{ clientY: y }] });
 
 test('keyboard: a swipe down while typing hides it; a small move does not', () => {

@@ -330,6 +330,11 @@ as the work. Never put secrets, tokens or personal data in this file.
     `webapp.py` reuses.
 - **Phone app and voice:**
   - `webapp.py`: WebAuth, strict self-only CSP.
+  - UI work follows `.claude/DESIGN_SYSTEM.md` (tokens, `.btn` roles,
+    `.group > .row`, `.state`, bottom sheets, brand icons). The Settings
+    menu's Connections rows are one shared component (`web/connections.js`):
+    a service script reports `set(id, {state, status, action, detail})` and
+    keeps its own controls inside that row's sheet.
   - `web/` is the PWA. Bump the `sw.js` cache version when assets change,
     and keep element ids and data attributes.
   - A new page script needs three entries: `webapp.py`'s static route

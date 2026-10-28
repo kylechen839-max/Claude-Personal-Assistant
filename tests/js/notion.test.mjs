@@ -171,3 +171,37 @@ test('every string it shows has Chinese in i18n.js', () => {
   assert.ok(ZH[long]);
   assert.equal(ZH['Connect Notion'], '连接 Notion');
 });
+
+// connections.js, recorded: every set() of the Notion row
+function recordRows(win) {
+  const marks = [];
+  win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); return {}; } };
+  return marks;
+}
+
+test("the Connections row: an invited person's status, never the owner's", async () => {
+  const body = (over) => ({ status: 200, body: { enabled: true, connected: false, workspace: null,
+                                                  database: null, ...over } });
+  for (const [status, want] of [
+    [body({}), { state: 'available', status: 'Not connected', action: 'Connect' }],
+    [body({ connected: true, workspace: 'Tess <b>', database: 'D' }),
+     { state: 'connected', status: 'Connected', action: 'Manage', detail: 'Tess <b>' }],
+    [body({ connected: true, workspace: 'Tess', database: null }),
+     { state: 'attention', status: 'Needs attention', action: 'Reconnect' }],
+    [body({ enabled: false }), { state: 'off' }],
+    [{ status: 404, body: {} }, { state: 'off' }]]) {
+    const r = load({ status });
+    const marks = recordRows(r.win);
+    r.api.onState({ owner: false });
+    await tick();
+    assert.deepEqual(marks.at(-1), ['notion', want]);
+  }
+  // the owner's Notion row is connect.js's: notion.js never touches it
+  const r = load();
+  const marks = recordRows(r.win);
+  r.api.onState({ owner: true });
+  await tick();
+  r.menu.open = true;
+  await r.menu.fire('toggle');
+  assert.deepEqual(marks, []);
+});

@@ -734,3 +734,40 @@ test('a late policy answer for an earlier school never changes the step', async 
   assert.equal(steps(card).feed, true);
   assert.ok(card.all().some((e) => e.textContent === 'canvas.example.edu'));
 });
+
+test("the Canvas row in Connections follows the card's status", async () => {
+  const canvas = (over) => ({ status: 200, body: { items: [], canvas: { connected: false,
+    managed: 'app', can_store: true, gmail: false, ...over } } });
+  for (const [items, want] of [
+    [canvas({}), { state: 'available', status: 'Not connected', action: 'Connect' }],
+    [canvas({ connected: true, school: 'canvas.school.edu' }),
+     { state: 'connected', status: 'Connected', action: 'Manage', detail: 'canvas.school.edu' }],
+    [canvas({ helper: { enabled: true, paired: true } }),
+     { state: 'connected', status: 'Connected', action: 'Manage', detail: 'Canvas helper' }],
+    [canvas({ can_store: false }), { state: 'available', status: 'Not available' }],
+    // the owner with Canvas in the server's .env: nothing to connect here
+    [canvas({ managed: 'env' }), { state: 'available', status: 'Set on the server' }],
+    [canvas({ managed: 'env', can_store: false }), { state: 'available', status: 'Set on the server' }],
+    [{ status: 404, body: {} }, { state: 'off' }]]) {
+    const { win } = load({ items });
+    const marks = [];
+    win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+    await win.KwilStudent.start(win, win.document).refresh();
+    assert.deepEqual(marks.at(-1), ['canvas', want]);
+  }
+});
+
+test("the Canvas row offers Connect only when its sheet has a way to connect", async () => {
+  const canvas = (over) => ({ status: 200, body: { items: [], canvas: { connected: false,
+    managed: 'app', can_store: true, gmail: false, helper: { enabled: false }, ...over } } });
+  for (const over of [{}, { managed: 'env' }, { can_store: false }, { managed: 'env', app_link: true }]) {
+    const { win, card } = load({ items: canvas(over) });
+    const marks = [];
+    win.KwilConnections = { set: (id, info) => { marks.push(JSON.parse(JSON.stringify(info))); } };
+    await win.KwilStudent.start(win, win.document).refresh();
+    const find = card.find((e) => e.attrs && e.attrs['aria-label'] === 'Find your school');
+    let shown = true;  // the find field and everything around it
+    for (let e = find; e && e !== card; e = e.parentNode) if (e.hidden) shown = false;
+    assert.equal(marks.at(-1).action === 'Connect', shown, JSON.stringify(over));
+  }
+});

@@ -13,7 +13,9 @@
       if (menu.open && !menu.contains(e.target)) menu.open = false;
     };
     const onKey = (e) => {
-      if (e.key === "Escape" && menu.open) menu.open = false;
+      // with a Connections sheet open (connections.js), Escape closes only it
+      const sheet = typeof menu.querySelector === "function" && menu.querySelector("dialog[open]");
+      if (e.key === "Escape" && menu.open && !sheet) menu.open = false;
     };
     doc.addEventListener("pointerdown", onDown, true);
     doc.addEventListener("keydown", onKey);
