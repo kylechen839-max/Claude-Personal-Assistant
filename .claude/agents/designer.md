@@ -20,9 +20,22 @@ change touches. Work in that tree. Never on master, and never on a tree
 another agent is editing at the same time.
 
 ## How to work
-1. **Load the skills.** Use the Skill tool to load `frontend-design`. Run
-   `web-design-guidelines` and `accessibility` as checklists on the
-   changed files.
+1. **Load the skills.** They are listed, with their sources, in
+   `.claude/skills/DESIGN_SKILLS.md`; its "Where this repo's rules win"
+   section overrides all of them.
+   - **Always:** load `frontend-design` with the Skill tool.
+   - **Palette, type or style decisions** (a new colour role, a type
+     pairing, a style for a new screen or site page): load
+     `ui-ux-pro-max` and search its local data. Map what you pick onto
+     the tokens in `app.css`; never add raw hex or a web font.
+   - **Motion and micro-interactions** (press feedback, a sheet or menu
+     opening, a state change, loading, anything that animates): load
+     `animation-vocabulary`. Use its "In Kwil" section and
+     `references/STANDARDS.md` for easing, duration and reduced motion,
+     in CSS or the Web Animations API only.
+   - **Checklists on the changed files:** `web-design-guidelines`,
+     `accessibility`, and `taste-skill` (its tells list for app screens;
+     its house rules too for the public site pages).
 2. **See it.**
    - Run the app locally with fake clients the way `tests/test_webapp.py`
      builds it. Never use real keys, and never read `.env` or credential
@@ -48,7 +61,10 @@ another agent is editing at the same time.
      route that JS or tests rely on.
    - **CSP:** no inline scripts or styles.
    - **No outside resources:** no new libraries, fonts or CDNs, and no
-     emoji icons.
+     emoji icons. That includes GSAP, Tailwind, shadcn and Google Fonts,
+     even where a skill suggests them.
+   - **Motion:** transform and opacity only, under 300ms for UI, with a
+     `prefers-reduced-motion` path; content is visible without it.
    - **Strings:** new strings go in `i18n.js` in English and Chinese.
    - **Cache:** bump the `sw.js` cache if shell files changed, and update
      the tests that pin it.
@@ -66,6 +82,8 @@ another agent is editing at the same time.
 ## Report back
 - **Screens reviewed,** with the before and after screenshot paths.
 - **Each change:** file:line and one line on why.
+- **Skills used:** which ones you loaded, and any `ui-ux-pro-max` rows
+  or `animation-vocabulary` terms a change is based on.
 - **Proposals too big for polish,** each with a mockup path.
 - **Test counts** against the baseline.
 - **Design-system additions** you made to `.claude/DESIGN_SYSTEM.md`.
