@@ -1,5 +1,124 @@
 {
   "version": 1,
   "about": "Schools whose Canvas policy on students' access tokens someone has checked on the school's own page (kwil/canvas_schools.py). Add an entry only after opening its source. Fields: name, hosts (exact Canvas hosts; *.instructure.com hosts go here only), domains (the school's own domains: any host ending in .<domain>), student_tokens (blocked | allowed), since (YYYY-MM-DD or null), source (https URL), checked (YYYY-MM-DD, when the source was read), note.",
-  "schools": []
+  "schools": [
+    {
+      "name": "University of Wisconsin–Madison",
+      "hosts": [],
+      "domains": [
+        "wisc.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": "2025-11-14",
+      "source": "https://kb.wisc.edu/luwmad/156712",
+      "checked": "2026-10-28",
+      "note": "Students may request an admin-issued token (30 days at most)."
+    },
+    {
+      "name": "University of Washington",
+      "hosts": [],
+      "domains": [
+        "uw.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://uwconnect.uw.edu/it?id=kb_article_view&sysparm_article=KB0034590",
+      "checked": "2026-10-28"
+    },
+    {
+      "name": "Penn State",
+      "hosts": [
+        "psu.instructure.com"
+      ],
+      "domains": [
+        "psu.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://www.it.psu.edu/news/canvas/canvas-personal-access-tokens/",
+      "checked": "2026-10-28",
+      "note": "Disabled for all users (post of 2026-05-20); faculty and staff may request one."
+    },
+    {
+      "name": "Georgia Tech",
+      "hosts": [],
+      "domains": [
+        "gatech.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://sites.gatech.edu/dlt-blog/2026/08/19/prepare-for-a-new-term-your-canvas-kickstart-guide/",
+      "checked": "2026-10-28"
+    },
+    {
+      "name": "St. Edward's University",
+      "hosts": [],
+      "domains": [
+        "stedwards.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://support.stedwards.edu/TDClient/96/Portal/KB/Article/6479/Canvas-API-Access-Tokens",
+      "checked": "2026-10-28"
+    },
+    {
+      "name": "Cornell University",
+      "hosts": [],
+      "domains": [
+        "cornell.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": "2024-04-02",
+      "source": "https://learn.canvas.cornell.edu/canvas-api-access-tokens",
+      "checked": "2026-10-28",
+      "note": "A student token needs a faculty sponsor."
+    },
+    {
+      "name": "BYU-Idaho",
+      "hosts": [],
+      "domains": [
+        "byui.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://td.byui.edu/TDClient/79/ITHelpCenter/KB/Article/18367/Canvas-API-Token-Request-Process",
+      "checked": "2026-10-28",
+      "note": "Existing tokens were removed 2026-07-31; read-only tokens by request."
+    },
+    {
+      "name": "Green River College",
+      "hosts": [],
+      "domains": [
+        "greenriver.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": "2025-11-14",
+      "source": "https://libguides.greenriver.edu/c.php?g=1172515&p=11238158",
+      "checked": "2026-10-28"
+    },
+    {
+      "name": "UC Davis",
+      "hosts": [],
+      "domains": [
+        "ucdavis.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": "2026-05-09",
+      "source": "https://www.ucdavis.edu/news/uc-davis-statement-canvas-security-breach",
+      "checked": "2026-10-28",
+      "note": "Disabled for everyone; instructors may request one."
+    },
+    {
+      "name": "University of Missouri System",
+      "hosts": [],
+      "domains": [
+        "umsystem.edu"
+      ],
+      "student_tokens": "blocked",
+      "since": null,
+      "source": "https://tdx.umsystem.edu/TDClient/66/MOOnline/KB/Article/2193/Canvas-user-API-token-policy",
+      "checked": "2026-10-28",
+      "note": "Tokens are by approval; students are not approved."
+    }
+  ]
 }
