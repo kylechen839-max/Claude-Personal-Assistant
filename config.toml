@@ -343,6 +343,7 @@ max_course_mb = 20            # text kept per course, at most
 max_person_mb = 100           # text kept per person, at most
 content_seconds = 300         # time for one person's content step
 helper = true                 # accept course content from the Kwil Canvas helper (a browser extension) in each person's own Canvas tab
+tokens_for = "everyone"       # who may connect with an access token: "everyone", or "owner" (invited people get the helper or the feed)
 
 [logging]
 file = "logs/assistant.log"

@@ -11,7 +11,11 @@
 // rate limit or the time budget cut the reading; what was read in full
 // was pushed), "canvas_signed_out", "canvas_rate_limited", "unpaired",
 // "kwil_off", "kwil_busy", "kwil_rate_limited", "kwil_unreachable",
-// "kwil_rejected". `progress()` is awaited after each course read and each
+// "kwil_rejected". The first manifest also carries what the person's
+// Canvas settings page says of access tokens (`canvas`: {host,
+// can_create_tokens, only_student}; CanvasReader.tokenPolicy, one GET,
+// never a token made), when it said anything, so Kwil can pick the way in
+// for that school. `progress()` is awaited after each course read and each
 // push (the worker keeps itself alive and notes progress there). Logs
 // carry counts and codes only: never the key, a URL, a title or any
 // course text.
@@ -81,6 +85,12 @@ export async function runSync({ pairing, canvasOrigin, fetch, sleep, now = Date.
   }
   const courses = all.filter((c) => c && typeof c === "object" && canvasId(c.id) !== null
                                     && !c.access_restricted_by_date);
+  // may this account make a token? (unknown: not sent)
+  const policy = await canvas.tokenPolicy();
+  let policyNote = typeof policy.can_create_tokens === "boolean"
+    ? { host: new URL(canvas.origin).hostname, can_create_tokens: policy.can_create_tokens,
+        only_student: policy.only_student }
+    : null;
 
   let maxFileBytes = Number(pairing.maxFileBytes) || 0;
   const budgetBytes = manifestBudget(maxFileBytes);
@@ -160,6 +170,7 @@ export async function runSync({ pairing, canvasOrigin, fetch, sleep, now = Date.
       }
     }
     for (const batch of batches(pending, news, budgetBytes)) {
+      if (policyNote) { batch.canvas = policyNote; policyNote = null; }
       const answer = await kwil.pushManifest(batch);
       counts.courses += batch.courses.length;
       for (const k of ["added", "updated", "unchanged", "removed"]) {

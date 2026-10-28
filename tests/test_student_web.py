@@ -729,3 +729,189 @@ def test_the_card_is_on_the_page(s):
 def test_canvas_secrets_are_listed_as_secret_and_isolated():
     for var in ("CANVAS_TOKEN", "CANVAS_ICS_URL"):
         assert var in SECRET_ENV_VARS and var in ISOLATED_ENV_VARS
+
+
+# --- the way in, picked for the school (canvas_schools.py) ----------------------------
+
+def _seed(s, schools):
+    """A fixture seed (the shipped one has no schools yet)."""
+    path = s.tmp / "seed.json"
+    path.write_text(json.dumps({"version": 1, "schools": schools}), encoding="utf-8")
+    s.sync.policies.seed_path, s.sync.policies._seed = path, None
+
+
+BLOCKS = {"name": "Example U", "hosts": ["canvas.example.edu"], "domains": [],
+          "student_tokens": "blocked", "since": None, "source": "https://it.example.edu/t",
+          "checked": "2026-10-01", "note": ""}
+
+
+def test_schools_report_token_policy(s, monkeypatch):
+    """Each school the lookup finds says whether it lets students make a
+    token (the seed, else what was learned, else unknown); a typed
+    address asks /api/student/canvas/policy."""
+    _seed(s, [BLOCKS])
+    s.sync.policies.record("canvas.other.edu", "allowed")
+    monkeypatch.setattr(canvas, "find_school", lambda q, http=None: [
+        {"name": "Example U", "base_url": "https://canvas.example.edu"},
+        {"name": "Other U", "base_url": "https://canvas.other.edu"},
+        {"name": "New U", "base_url": "https://canvas.new.edu"}])
+    tess, _ = s.member()
+    r = tess.get("/api/student/schools", params={"q": "Example"})
+    assert r.status_code == 200
+    assert [(x["name"], x["tokens"]) for x in r.json()["schools"]] == [
+        ("Example U", "blocked"), ("Other U", "allowed"), ("New U", "unknown")]
+    r = tess.get("/api/student/canvas/policy", params={"host": "https://canvas.example.edu/x"})
+    assert r.json() == {"host": "canvas.example.edu", "tokens": "blocked"}
+    assert r.headers["cache-control"] == "no-store"
+    for bad in ("localhost", "10.0.0.1", "http://canvas.example.edu", ""):
+        assert tess.get("/api/student/canvas/policy", params={"host": bad}).status_code == 400
+    # the lookups share one budget
+    for _ in range(student_web.SCHOOL_LOOKUPS - 2):
+        tess.get("/api/student/canvas/policy", params={"host": "canvas.new.edu"})
+    assert tess.get("/api/student/canvas/policy",
+                    params={"host": "canvas.new.edu"}).status_code == 429
+
+
+def test_a_working_token_sync_records_allowed_and_a_401_nothing(s, monkeypatch):
+    from tests.test_canvas import FakeCanvas
+
+    _seed(s, [])
+    monkeypatch.setattr(canvas, "TRANSPORT", httpx.MockTransport(FakeCanvas()))
+    tess, _ = s.member()
+    # a token Canvas refuses (expired, revoked): says nothing about the policy
+    r = tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                               "token": "1234~" + "X" * 64})
+    assert r.status_code == 200
+    out = tess.post("/api/student/sync").json()
+    assert "canvas_api" in out["errors"]
+    assert not s.sync.policies.path.exists()
+    assert s.sync.policies.policy("canvas.example.edu") == "unknown"
+    # a token that works: the school lets students make them
+    s.sync._last.clear()
+    tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                           "token": CANVAS_TOKEN})
+    out = tess.post("/api/student/sync").json()
+    assert out["errors"] == {}
+    assert s.sync.policies.policy("canvas.example.edu") == "allowed"
+    assert tess.get("/api/student/items").json()["canvas"]["policy"] == {
+        "host": "canvas.example.edu", "tokens": "allowed"}
+    learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
+    assert list(learned) == ["canvas.example.edu"]
+    assert _uid_free(learned, s)
+
+
+def _uid_free(data, s) -> bool:
+    blob = json.dumps(data)
+    return all(u["id"] not in blob and u["name"] not in blob for u in s.fam.members())
+
+
+def test_reporting_no_token_button_records_blocked(s):
+    _seed(s, [])
+    tess, _ = s.member()
+    body = {"host": "canvas.new.edu", "tokens": "blocked"}
+    r = tess.post("/api/student/canvas/report", json=body)
+    assert r.status_code == 200 and r.json() == {"host": "canvas.new.edu", "tokens": "blocked"}
+    assert s.sync.policies.policy("canvas.new.edu") == "blocked"
+    # only "blocked", only a Canvas host
+    for bad in ({"host": "canvas.new.edu", "tokens": "allowed"},
+                {"host": "localhost", "tokens": "blocked"}, {"tokens": "blocked"}, {}):
+        assert tess.post("/api/student/canvas/report", json=bad).status_code == 400
+    # a POST needs its Content-Length (create_app's 411)
+    r = tess.request("POST", "/api/student/canvas/report",
+                     headers={"Transfer-Encoding": "chunked"}, content=iter([b"{}"]))
+    assert r.status_code == 411
+    assert _uid_free(json.loads(s.sync.policies.path.read_text(encoding="utf-8")), s)
+
+
+def test_a_report_never_overrides_a_seed_checked_later(s):
+    """A person's report is a claim: dated today, it only beats a seed
+    checked before today."""
+    _seed(s, [{**BLOCKS, "student_tokens": "allowed", "checked": "2999-01-01"}])
+    tess, _ = s.member()
+    r = tess.post("/api/student/canvas/report",
+                  json={"host": "canvas.example.edu", "tokens": "blocked"})
+    assert r.status_code == 200 and r.json()["tokens"] == "allowed"
+
+
+def test_reports_are_throttled_per_person(s):
+    _seed(s, [])
+    tess, _ = s.member()
+    body = {"host": "canvas.new.edu", "tokens": "blocked"}
+    for _ in range(student_web.REPORTS):
+        assert tess.post("/api/student/canvas/report", json=body).status_code == 200
+    assert tess.post("/api/student/canvas/report", json=body).status_code == 429
+    learned = json.loads(s.sync.policies.path.read_text(encoding="utf-8"))
+    assert learned["canvas.new.edu"]["blocked"] == student_web.REPORTS
+    # someone else has their own budget
+    sam, _ = s.member("Sam")
+    assert sam.post("/api/student/canvas/report", json=body).status_code == 200
+
+
+def test_policy_routes_are_404_when_student_is_off(fake_client, tmp_path, monkeypatch):
+    monkeypatch.setenv("USER_DATA_KEY", SECRET)
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    config["student"].update(enabled=False, dir=str(tmp_path / "student"))
+    fam = family_mod.Family(config, client=fake_client)
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber(), PrintTTS(), tools=ToolRegistry(), clock=Clock(), family=fam)
+    app = webapp.create_app(assistant, TOKEN, reap_interval=3600,
+                            sessions_file=tmp_path / "sessions.json")
+    c = TestClient(app, base_url=BASE)
+    login(c)
+    assert c.get("/api/student/canvas/policy", params={"host": "canvas.x.edu"}).status_code == 404
+    assert c.post("/api/student/canvas/report",
+                  json={"host": "canvas.x.edu", "tokens": "blocked"}).status_code == 404
+    assert not (tmp_path / "student").exists()
+    fam.close()
+
+
+def test_tokens_for_owner_keeps_tokens_from_invited_people(s, monkeypatch):
+    """[canvas] tokens_for = "owner": a member's token is refused with a
+    clear code (their feed still works), the owner's is taken, and the
+    status tells the page; "everyone" (the default) is today's way."""
+    from tests.test_canvas import FakeCanvas
+
+    monkeypatch.setattr(canvas, "TRANSPORT", httpx.MockTransport(FakeCanvas()))
+    assert s.config["canvas"]["tokens_for"] == "everyone"
+    tess, uid = s.member()
+    assert tess.get("/api/student/items").json()["canvas"]["tokens_offered"] is True
+    s.config["canvas"]["tokens_for"] = "owner"
+    assert tess.get("/api/student/items").json()["canvas"]["tokens_offered"] is False
+    r = tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                               "token": CANVAS_TOKEN})
+    assert r.status_code == 403 and r.json()["code"] == "tokens_owner_only"
+    assert CANVAS_TOKEN not in r.text
+    assert not (s.tmp / "users" / uid / "canvas.enc").exists()
+    owner = s.owner()
+    assert owner.get("/api/student/items").json()["canvas"]["tokens_offered"] is True
+    r = owner.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                                "token": CANVAS_TOKEN})
+    assert r.status_code == 200 and r.json()["kind"] == "api"
+    # anything but "everyone" is the stricter "owner"
+    s.config["canvas"]["tokens_for"] = "owners"
+    assert tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                                  "token": CANVAS_TOKEN}).status_code == 403
+    connect(tess)   # the feed still works for them
+
+
+def test_policy_logs_hold_no_host(s, monkeypatch, caplog):
+    from tests.test_canvas import FakeCanvas
+
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(canvas, "TRANSPORT", httpx.MockTransport(FakeCanvas()))
+    _seed(s, [])
+    tess, uid = s.member()
+    tess.post("/api/student/canvas/report", json={"host": "canvas.secret.edu",
+                                                  "tokens": "blocked"})
+    tess.get("/api/student/canvas/policy", params={"host": "canvas.secret.edu"})
+    tess.post("/api/student/canvas", json={"base_url": "canvas.example.edu",
+                                           "token": CANVAS_TOKEN})
+    tess.post("/api/student/sync")
+    assert s.sync.policies.policy("canvas.example.edu") == "allowed"
+    ours = [r for r in caplog.records if r.name.startswith("kwil")]
+    assert any("reported" in r.getMessage() for r in ours)
+    for r in ours:
+        assert "canvas.secret.edu" not in r.getMessage()
+        assert "canvas.example.edu" not in r.getMessage()

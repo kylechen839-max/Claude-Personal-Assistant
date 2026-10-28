@@ -651,3 +651,97 @@ def test_cloud_guard_reads_no_body_for_a_malformed_or_wrong_key(h):
     assert status == 400 and reads
     h.config["canvas"]["helper"] = False
     assert call(key) == (404, 0)
+
+
+# --- what the helper read of the token policy (canvas_schools.py) ----------------------
+
+READ = {"host": "school.instructure.com", "can_create_tokens": False, "only_student": True}
+
+
+def test_a_manifest_may_say_whether_tokens_are_allowed(h):
+    """The helper's reading of /profile/settings rides on a manifest:
+    false is "blocked", true from a student-only account "allowed",
+    true from a TA (not only a student) nothing; the person's Canvas host
+    is kept for the status, and goes with a revoke."""
+    key, _ = pair(h, h.sam)
+    policies = h.app.state.student.policies
+    assert push(h, key, {**manifest(), "canvas": READ}).status_code == 200
+    assert policies.policy("school.instructure.com") == "blocked"
+    status = h.sam.get("/api/student/items").json()["canvas"]
+    assert status["helper"]["canvas_host"] == "school.instructure.com"
+    assert status["policy"] == {"host": "school.instructure.com", "tokens": "blocked"}
+    # a TA may make one even where students can't: no verdict from that
+    ta = {"host": "ta.instructure.com", "can_create_tokens": True, "only_student": False}
+    assert push(h, key, {**manifest(), "canvas": ta}).status_code == 200
+    assert policies.policy("ta.instructure.com") == "unknown"
+    # a student-only account that may: allowed
+    ok = {"host": "open.instructure.com", "can_create_tokens": True, "only_student": True}
+    assert push(h, key, {**manifest(), "canvas": ok}).status_code == 200
+    assert policies.policy("open.instructure.com") == "allowed"
+    # without `canvas`, nothing changes
+    assert push(h, key).status_code == 200
+    assert h.sam.get("/api/student/items").json()["canvas"]["helper"]["canvas_host"] == \
+        "open.instructure.com"
+    learned = json.loads(policies.path.read_text(encoding="utf-8"))
+    assert h.uid not in json.dumps(learned) and "Sam" not in json.dumps(learned)
+    h.sam.post("/api/student/canvas/helper/revoke")
+    status = h.sam.get("/api/student/items").json()["canvas"]
+    assert status["helper"]["canvas_host"] is None and status["policy"] is None
+
+
+@pytest.mark.parametrize("bad", [
+    "school.instructure.com",
+    {"host": "school.instructure.com", "can_create_tokens": "false", "only_student": True},
+    {"host": "school.instructure.com", "can_create_tokens": 0, "only_student": True},
+    {"host": "school.instructure.com", "can_create_tokens": False, "only_student": "yes"},
+    {"host": "School.Instructure.com", "can_create_tokens": False},
+    {"host": "https://school.instructure.com", "can_create_tokens": False},
+    {"host": "localhost", "can_create_tokens": False},
+    {"host": "10.0.0.1", "can_create_tokens": False},
+    {"can_create_tokens": False},
+    {**READ, "token": "1234~abc"},
+])
+def test_a_canvas_reading_of_the_wrong_shape_is_refused(h, bad):
+    key, _ = pair(h, h.sam)
+    r = push(h, key, {**manifest(), "canvas": bad})
+    assert r.status_code == 400 and r.json()["error"].startswith("send canvas as")
+    assert not h.app.state.student.policies.path.exists()
+    assert h.fam.coursefiles.export(h.uid) == []   # nothing of it stored
+    with pytest.raises(ValueError):
+        canvas_helper.clean_canvas(bad)
+
+
+def test_clean_canvas_keeps_a_good_reading():
+    assert canvas_helper.clean_canvas(None) is None
+    assert canvas_helper.clean_canvas(READ) == READ
+    assert canvas_helper.clean_canvas({"host": "x.instructure.com",
+                                       "can_create_tokens": True}) == {
+        "host": "x.instructure.com", "can_create_tokens": True, "only_student": None}
+    assert canvas_helper.canvas_outcome({**READ, "only_student": None}) == "blocked"
+    assert canvas_helper.canvas_outcome({**READ, "can_create_tokens": True,
+                                         "only_student": None}) is None
+    assert canvas_helper.canvas_outcome(None) is None
+
+
+def test_a_reading_after_a_revoke_records_nothing(h, monkeypatch):
+    """The push's alive() check (the key still theirs) guards the reading
+    as it guards the content."""
+    key, _ = pair(h, h.sam)
+    real = canvas_helper.HelperPush.manifest
+
+    def revoke_first(self, uid, digest, body):
+        h.app.state.student.helper.revoke(uid)
+        return real(self, uid, digest, body)
+
+    monkeypatch.setattr(canvas_helper.HelperPush, "manifest", revoke_first)
+    push(h, key, {**manifest(), "canvas": READ})
+    assert h.app.state.student.policies.policy("school.instructure.com") == "unknown"
+
+
+def test_the_reading_logs_no_host(h, caplog):
+    caplog.set_level(logging.DEBUG)
+    key, _ = pair(h, h.sam)
+    push(h, key, {**manifest(), "canvas": {**READ, "host": "secretu.instructure.com"}})
+    ours = [r for r in caplog.records if r.name.startswith("kwil")]
+    assert any("token policy (blocked)" in r.getMessage() for r in ours)
+    assert not any("secretu" in r.getMessage() for r in ours)

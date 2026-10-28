@@ -52,6 +52,15 @@ manifest of that person asked for it within WANTED_SECONDS, with the
 metadata that manifest sent; a Disconnect or revoke after the manifest
 (generation or key changed) makes it write nothing. Logs: ids, counts and
 codes, never a title, text, key or code.
+
+A manifest may also say what the helper read on the person's Canvas
+settings page (`canvas`: {host, can_create_tokens, only_student}, read with
+a GET; the helper never makes a token): may this account make an access
+token? It is the helper's claim, checked strictly, and goes to the
+schools' learned policies (canvas_schools.Policies: false is "blocked",
+true from a student-only account "allowed", anything else nothing) and,
+as the person's Canvas host, into their own canvas_helper.json (the
+status shows it; the host is never logged).
 """
 
 # No `from __future__ import annotations` here: FastAPI must see the real
@@ -92,6 +101,8 @@ LISTINGS = ("pages", "assignments", "modules", "files")
 # each listing's HTML field, which sync_content reads as text (else None)
 _HTML = {"pages": "body", "assignments": "description", "announcements": "message"}
 UPLOAD_MARGIN = 65_536          # multipart overhead under [webapp] max_upload_mb
+CANVAS_KEYS = frozenset({"host", "can_create_tokens", "only_student"})
+CANVAS_SHAPE = "send canvas as {host, can_create_tokens: true|false, only_student}"
 _NOBODY = object()
 
 
@@ -253,8 +264,19 @@ class HelperKeys:
                 float(data.get("pair_expires") or 0) > self.clock()
         except (TypeError, ValueError):
             pairing = False
+        host = data.get("canvas_host") if data.get("key_hash") else None
         return {"paired": bool(data.get("key_hash")), "pairing": pairing,
-                "paired_at": data.get("paired_at") if data.get("key_hash") else None}
+                "paired_at": data.get("paired_at") if data.get("key_hash") else None,
+                "canvas_host": host if isinstance(host, str) else None}
+
+    def note_canvas(self, uid, host: str) -> None:
+        """Remember the Canvas host a paired helper reads (for the status);
+        nothing once the key is gone."""
+        with self.lock:
+            data = self._read(uid)
+            if data.get("key_hash") and data.get("canvas_host") != host:
+                data["canvas_host"] = host
+                self._write(uid, data)
 
     def revoke(self, uid) -> bool:
         """Delete the person's key (and any open code). True if there was one."""
@@ -282,9 +304,12 @@ def clean_manifest(body) -> dict:
 
     A listing missing or null couldn't be read (nothing of it is dropped);
     a list is all of it (what it no longer has is dropped). A file's `url`
-    is never kept: Kwil fetches nothing, the helper pushes the bytes."""
+    is never kept: Kwil fetches nothing, the helper pushes the bytes. An
+    optional `canvas` is what the helper read of the token policy
+    (clean_canvas)."""
     if not isinstance(body, dict) or not isinstance(body.get("courses"), list):
         raise ValueError("send {courses: [...]}")
+    canvas = clean_canvas(body.get("canvas"))
     if len(body["courses"]) > MAX_COURSES:
         raise ValueError(f"at most {MAX_COURSES} courses at a time")
 
@@ -327,7 +352,38 @@ def clean_manifest(body) -> dict:
                                if _id(f.get("id")) is not None]
         courses.append(course)
     return {"courses": courses,
-            "announcements": listing(body.get("announcements"), "announcements")}
+            "announcements": listing(body.get("announcements"), "announcements"),
+            "canvas": canvas}
+
+
+def clean_canvas(value) -> dict | None:
+    """A manifest's `canvas`: {host (a Canvas host, as
+    canvas_schools.normalize gives it), can_create_tokens (a bool),
+    only_student (a bool, or null/missing: not read)}, or None when not
+    sent; ValueError (CANVAS_SHAPE) for anything else."""
+    from kwil.canvas_schools import normalize
+
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - CANVAS_KEYS:
+        raise ValueError(CANVAS_SHAPE)
+    host, can, only = value.get("host"), value.get("can_create_tokens"), \
+        value.get("only_student")
+    if not isinstance(host, str) or normalize(host) != host or not isinstance(can, bool) \
+            or (only is not None and not isinstance(only, bool)):
+        raise ValueError(CANVAS_SHAPE)
+    return {"host": host, "can_create_tokens": can, "only_student": only}
+
+
+def canvas_outcome(found: dict | None) -> str | None:
+    """What a helper's reading says of the school's policy: "blocked" when
+    this account may not make a token (a TA who may not: nobody may);
+    "allowed" only from a student-only account that may; else None."""
+    if not found:
+        return None
+    if found["can_create_tokens"] is False:
+        return "blocked"
+    return "allowed" if found["only_student"] is True else None
 
 
 class PushedCanvas:
@@ -482,6 +538,19 @@ class HelperPush:
         if self.course_sync is not None:
             self.course_sync.request_dates(uid)
 
+    def _policy(self, uid, found, alive) -> None:
+        """Count what the helper read of the token policy (a claim: the
+        schools' policies weigh it), and remember the person's Canvas host."""
+        if not found or not alive():
+            return
+        outcome = canvas_outcome(found)
+        if outcome is not None:
+            self.sync.policies.record(found["host"], outcome)
+        self.keys.note_canvas(uid, found["host"])
+        # the outcome, never the host (it names their school)
+        log.info("Canvas helper: %s's helper read the token policy (%s)", _who(uid),
+                 outcome or "unknown")
+
     def manifest(self, uid, digest: str, manifest: dict) -> dict:
         """Store a manifest's content; {counts, want: [{course_id, file_id}],
         max_file_bytes}. KeyError: `uid` was removed; SyncBusy: another
@@ -511,6 +580,7 @@ class HelperPush:
                 while len(table) > MAX_WANTED:
                     table.popitem(last=False)
                 self._trim(self._wanted)
+        self._policy(uid, manifest.get("canvas"), alive)
         self._dates(uid)
         log.info("Canvas helper: %s pushed %d course(s): %d added, %d updated, "
                  "%d unchanged, %d removed, %d file(s) wanted", _who(uid), counts["courses"],

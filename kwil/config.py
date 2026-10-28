@@ -396,6 +396,10 @@ DEFAULTS: dict = {
         # the browser helper (canvas_helper.py): pushes course content from
         # the person's own signed-in Canvas tab, for schools that block tokens
         "helper": True,
+        # who may connect with an access token: "everyone", or "owner" (invited
+        # people get the Canvas helper or the calendar feed instead; Canvas's API
+        # policy asks apps used by many people to use OAuth, not their tokens)
+        "tokens_for": "everyone",
     },
     "logging": {"file": "logs/assistant.log", "level": "INFO",
                 "console_level": "WARNING"},

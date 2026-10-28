@@ -18,6 +18,7 @@ export const MAX_ITEMS = 1000;
 export const MAX_API_BYTES = 10_000_000;  // a page of 100 page bodies can be big
 export const MAX_RETRIES = 3;
 export const PER_PAGE = 100;
+export const MAX_SETTINGS_BYTES = 2_000_000;  // the settings page, read once a run
 const SLUG = /^[\w.-]{1,200}$/;
 
 export class CanvasError extends Error {
@@ -62,6 +63,22 @@ export function rateLimited(status, headers, text) {
   if (String(text || "").slice(0, 500).includes("Rate Limit Exceeded")) return true;
   const left = Number(headers && headers.get ? headers.get("x-rate-limit-remaining") : NaN);
   return Number.isFinite(left) && left <= 0;
+}
+
+// What Canvas's settings page says of access tokens, from the JSON of its
+// ENV ("can_update_tokens": the same check as making one;
+// "user_is_only_student"): {can_create_tokens, only_student}, each true,
+// false, or null when the key is missing or appears with both values.
+export function parseTokenPolicy(html) {
+  const text = String(html || "");
+  const one = (key) => {
+    const seen = new Set();
+    for (const m of text.matchAll(new RegExp(`"${key}"\\s*:\\s*(true|false)\\b`, "g"))) {
+      seen.add(m[1]);
+    }
+    return seen.size === 1 ? seen.has("true") : null;
+  };
+  return { can_create_tokens: one("can_update_tokens"), only_student: one("user_is_only_student") };
 }
 
 // Sent on to Canvas's sign-in page (a session that ended)?
@@ -137,14 +154,14 @@ export class CanvasReader {
     return u.href;
   }
 
-  async _request(url) {
+  async _request(url, accept = "application/json") {
     if (new URL(url).origin !== this.origin) throw new CanvasError("off_origin");
     if (this.now() >= this.deadline) throw new CanvasError("timed_out");
     this.requests += 1;
     try {
       // the browser's own Canvas session; no Authorization header, ever
       return await this.fetch(url, { method: "GET", credentials: "include",
-                                     headers: { Accept: "application/json" },
+                                     headers: { Accept: accept },
                                      redirect: "follow", cache: "no-store" });
     } catch (e) {
       throw new CanvasError("network");
@@ -234,6 +251,26 @@ export class CanvasReader {
         start_date: start }));
     }
     return out.slice(0, MAX_ITEMS);
+  }
+
+  // May this account make an access token? One GET of the person's own
+  // Canvas settings page (/profile/settings, this origin only, at most
+  // MAX_SETTINGS_BYTES), reading what Canvas puts in the page's ENV for
+  // its own "New access token" button: {can_create_tokens, only_student},
+  // each true, false or null (not found). Never throws: a sign-out, a rate
+  // limit, a redirect elsewhere, an error or a page without the keys is
+  // all null ("unknown"). It never makes a token and posts nothing.
+  async tokenPolicy() {
+    const unknown = { can_create_tokens: null, only_student: null };
+    const url = this._url("/profile/settings");
+    let r;
+    try { r = await this._request(url, "text/html"); } catch (e) { return unknown; }
+    if (r.status !== 200 || signedOut(r, url, this.origin) || !sameOrigin(r, url, this.origin)) {
+      return unknown;
+    }
+    let read;
+    try { read = await readBounded(r, MAX_SETTINGS_BYTES); } catch (e) { return unknown; }
+    return parseTokenPolicy(new TextDecoder().decode(read.bytes));
   }
 
   // A file's bytes from its Canvas `url` (on this origin only; Canvas

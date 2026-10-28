@@ -13,6 +13,13 @@ HTML, text; Kwil skips images, video, audio, spreadsheets and zips). It
 never reads or sends grades, scores, submissions, classmates, your
 password or your cookies, and never posts anything to Canvas.
 
+It also checks whether your Canvas lets you make an access token, and
+never makes one: once a sync it reads your Canvas settings page (one GET
+of `/profile/settings`, the page with the **New access token** button)
+and tells Kwil yes, no, or nothing if the page didn't say. Kwil uses that
+to pick the way in for your school (see "School deadlines" in Kwil's
+README).
+
 The helper reads only your own courses, with your own sign-in, like
 opening the pages yourself. Some schools' rules limit automated access;
 check yours. It is read-only and rate-limited.
@@ -106,7 +113,10 @@ scripts.
   and backs off 15 min doubling to 6 h; a 401 that means signed out stops
   the run until you visit Canvas again). `lib/manifest.js` keeps only the
   fields Kwil reads and splits big manifests by course under Kwil's size
-  limit. `lib/kwil.js` posts to the paired Kwil origin only, with the key
+  limit. `CanvasReader.tokenPolicy` reads `"can_update_tokens"` and
+  `"user_is_only_student"` from the settings page's ENV (any doubt:
+  unknown, not sent); the first manifest of a run carries it as
+  `canvas: {host, can_create_tokens, only_student}`. `lib/kwil.js` posts to the paired Kwil origin only, with the key
   as a Bearer header, no cookies, no redirects. `lib/sync.js` pushes as it
   reads: a manifest whenever a batch of courses fills, then only the files
   Kwil's answer asked for (at most 40 a run); the worker keeps itself
