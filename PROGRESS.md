@@ -6458,3 +6458,37 @@ script order), `test_webapp.py` (public list), the `kwil-shell-v8` pins.
 Counts (Linux sandbox, Python 3.13, Node 22, not real hardware): 3393
 passed, 37 skipped (master 4c8775d: 3388 passed, 38 skipped from a git
 archive, which skips one git test); JavaScript 242 passed (220 before).
+
+### Round 2: master merged, the expired Google row, the design review (2026-10-28)
+- **Merged master** (b4fc523: the Canvas auto-method picker, #74, and
+  Google's "sign-in expired", #76), keeping both sides; `sw.js` cache
+  `kwil-shell-v10` (master was at v9) and its pins.
+- **Google `needs_reconnect`** now drives the row: an attention row at the
+  top, a red "Sign-in expired" (Chinese "登录已过期"), the action
+  "Reconnect" (none when the server can't connect), and the sheet's
+  **Reconnect Google account**. Test in `i18n.test.mjs` (fails with the
+  branch removed).
+- **The Canvas picker in its sheet:** the step Kwil picked (token, helper or
+  feed) is a white card (`.conn-step`); its one way forward is
+  `.btn.primary` (Connect Canvas, Connect with token, Set up Canvas helper),
+  the first step is `.btn.secondary` (Find my school, Open my Canvas
+  calendar/settings, Paste), the alternatives are `.btn.plain` (Get course
+  files too, My Canvas has no New access token button, Use the calendar
+  feed instead). Classes only: every id, text and behaviour unchanged; all
+  `student.test.mjs` tests pass.
+- **The designer's review:** `.group` and the cards in sheets are a tone
+  step with no shadow (only the sheet keeps `--shadow-2`); the sheet slides
+  in over `--t-sheet` 240ms on `--ease-sheet` `cubic-bezier(.32,.72,0,1)`
+  over a `--scrim` fade of `--t-scrim` 200ms; a pressed row turns
+  `--surface-2`, buttons keep the .97 press; a reduced-motion path;
+  `:focus-visible` rings from `--ring` / `--ring-inset`; no raw hex or rgb()
+  in the primitives or the component (`--brand-*`, `--on-brand`, `--scrim`
+  tokens). `test_theme.py` checks all of it (it fails on the round-1 CSS).
+  DESIGN_SYSTEM.md gained depth, motion and focus.
+- Screenshots retaken: the list, the Google expired row and sheet, and the
+  Canvas sheet in each picker state (token on a phone, helper in desktop
+  Chrome, feed with "Get course files too", feed pointing at the helper on
+  a computer), light and dark; every button in those sheets is 44px+.
+
+Counts (Linux sandbox, not real hardware, `-k "not live_pinecone"`): 3480
+passed, 37 skipped; JavaScript 263 passed (master b4fc523: 239).
