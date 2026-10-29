@@ -805,6 +805,7 @@ class ClaudeChat:
         system = [{"type": "text", "text": self.stable_system(),
                    "cache_control": {"type": "ephemeral"}}]
         retried = shortened = False
+        before_shorten = None  # (history, thinking epoch) until a retry works
         for _ in range(self.max_tool_rounds + 1):
             while True:
                 tag = self._thinking_tag(model)
@@ -816,11 +817,24 @@ class ClaudeChat:
                     kwargs["tools"] = self.tools.schemas(model)
                 try:
                     response = self._create(kwargs, on_text, cancel)
+                    before_shorten = None
                     break
                 except Exception as e:
-                    if not shortened and _prompt_too_long(e) and self._shorten():
-                        shortened = True  # once: the history is now smaller
-                        continue
+                    if before_shorten is not None:
+                        # Shorter didn't help: the earlier turns weren't the
+                        # cause, so they come back (ask() then undoes only
+                        # this turn).
+                        self._history, self._thinking_epoch = before_shorten
+                        raise
+                    # An attached file is the likely cause of "too long";
+                    # dropping earlier turns wouldn't help, so it isn't tried.
+                    if not shortened and _prompt_too_long(e) \
+                            and not self._turn_has_attachments():
+                        before_shorten = (self._history[:], self._thinking_epoch)
+                        if self._shorten():
+                            shortened = True  # once: the history is now smaller
+                            continue
+                        before_shorten = None
                     # The API refused an earlier turn's thinking: send the
                     # conversation once more without any (the old behavior).
                     if retried or not _signature_refused(e) \
@@ -991,6 +1005,12 @@ class ClaudeChat:
                 return dropped
             self._history = self.history[starts[1]:]
             dropped += 1
+
+    def _turn_has_attachments(self) -> bool:
+        """Does Kyle's latest message carry a photo or file?"""
+        turn = next((m for m in reversed(self.history) if is_user_turn(m)), None)
+        return bool(turn) and isinstance(turn["content"], list) and any(
+            _is_attachment(b) for b in turn["content"])
 
     def _shorten(self) -> bool:
         """After "prompt is too long": drop the oldest half of the earlier

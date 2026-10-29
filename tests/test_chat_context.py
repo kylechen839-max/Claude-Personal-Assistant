@@ -384,9 +384,10 @@ def test_a_second_prompt_too_long_raises_and_leaves_a_valid_history(fake_client)
     with pytest.raises(Exception, match="too long"):
         chat.ask("q3")
     assert seen[3:] == [4, 3]  # exactly one retry
-    # the failed turn is undone, even though the retry trimmed earlier turns
+    # shorter didn't help: the earlier turns come back, and only the failed
+    # turn is undone (found by identity)
     assert chat.history[-1]["role"] == "assistant"
-    assert [m["content"] for m in chat.history if is_user_turn(m)] == ["q1", "q2"]
+    assert [m["content"] for m in chat.history if is_user_turn(m)] == ["q0", "q1", "q2"]
 
 
 def thinking_reply(text, stop_reason="end_turn", thought="cut-off plan"):
@@ -458,3 +459,70 @@ def test_a_family_members_main_model_tool_turn_has_room_to_plan(fake_client, tmp
         assert fake_client.calls[-1]["max_tokens"] == 4321
     finally:
         fam.close()
+
+
+class TooLongWithAFile(ContractClient):
+    """"prompt is too long" for any request holding a document (one PDF
+    over the context window, the judge's probe)."""
+
+    def __init__(self):
+        super().__init__()
+        self.tries = 0
+
+    def respond(self, kwargs):
+        self.tries += 1
+        if any(isinstance(m["content"], list) and any(
+                b.get("type") == "document" for b in m["content"])
+               for m in kwargs["messages"]):
+            raise api_bad_request("prompt is too long: 250000 tokens > 200000 maximum")
+        return super().respond(kwargs)
+
+
+def test_an_oversize_file_keeps_every_earlier_turn_and_its_thinking():
+    """Round 3: a PDF over the context window used to cost the two oldest
+    turns (dropped by the too-long retry, which failed anyway). With a
+    file in the turn the file is the cause: no shortening, nothing lost."""
+    from kwil.chat import has_earlier_thinking
+
+    client = TooLongWithAFile()
+    chat = ClaudeChat(client=client, model=MAIN)
+    for n in range(4):
+        chat.ask(f"turn {n}")
+    pdf = {"type": "document", "title": "big.pdf", "source": {
+        "type": "base64", "media_type": "application/pdf", "data": "JVBER"}}
+    tries = client.tries
+    with pytest.raises(Exception, match="too long"):
+        chat.ask("summarize this", attachments=[pdf])
+    assert client.tries == tries + 1  # not retried shorter
+    assert [m["content"] for m in chat.history if is_user_turn(m)] == [
+        f"turn {n}" for n in range(4)]
+    assert has_earlier_thinking(chat.history + [{"role": "user", "content": "x"}],
+                                chat._thinking_tag(MAIN), chat.thinking_turns)
+    chat.ask("never mind, what was turn 1 about")
+    assert thinking_before_last_turn(client.requests[-1]["messages"]) == [
+        f"Planning reply {n}." for n in range(1, 5)]
+
+
+def test_a_failed_shorter_retry_restores_earlier_thinking():
+    """Without a file: the shortened retry fails too, so the history and
+    which thinking may be re-sent are as before the first 400."""
+    client = ContractClient()
+    chat = ClaudeChat(client=client, model=MAIN)
+    for n in range(4):
+        chat.ask(f"turn {n}")
+    respond, tries = client.respond, []
+
+    def too_long(kwargs):
+        tries.append(1)
+        raise api_bad_request("prompt is too long: 250000 tokens > 200000 maximum")
+
+    client.respond = too_long
+    with pytest.raises(Exception, match="too long"):
+        chat.ask("one more")
+    assert len(tries) == 2  # one shorter retry
+    client.respond = respond
+    chat.ask("and again")
+    assert [m["content"] for m in chat.history if is_user_turn(m)] == [
+        "turn 0", "turn 1", "turn 2", "turn 3", "and again"]
+    assert thinking_before_last_turn(client.requests[-1]["messages"]) == [
+        f"Planning reply {n}." for n in range(1, 5)]

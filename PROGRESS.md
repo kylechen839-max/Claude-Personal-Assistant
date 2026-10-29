@@ -6875,3 +6875,28 @@ their tests.
 Counts after round 2 (Linux sandbox, not real hardware), `-k "not
 live_pinecone"`: 3555 passed, 41 skipped, 1 deselected (bfbc62d: 3545 /
 41); JavaScript 294 passed.
+
+### Round 3 (judge R1)
+
+- **R1.** A "prompt is too long" 400 caused by one oversize PDF used to cost
+  the two oldest turns: the shortened retry dropped them and then failed
+  anyway. Now `_run` snapshots the history and the thinking epoch before
+  `_shorten`; if the shorter retry fails too, both are put back before the
+  error is raised (so `ask()` undoes only the failed turn). A turn whose
+  message carries a photo or file isn't shortened at all.
+- SECURITY.md: thinking is re-sent for "at least" the last
+  `thinking_turns` turns (the floor moves in steps).
+
+Tests: `tests/test_chat_context.py` +2 (27): four turns, then an oversize
+document turn raises after one request, all four turns stay and turn 5
+re-sends their thinking; without a file, a failed shorter retry leaves all
+four turns and their thinking eligible. The round-2 second-too-long test
+now expects the earlier turns back (q0-q2). Failing first: with
+`kwil/chat.py` back at dfeb817 all 3 fail; without only the attachment
+check the PDF test fails; without only the restore the other two fail.
+The judge's probe (`probe_pdf.py`) now prints the same four turns before
+and after.
+
+Counts after round 3 (Linux sandbox, not real hardware), `-k "not
+live_pinecone"`: 3557 passed, 41 skipped, 1 deselected (dfeb817: 3555 /
+41); JavaScript 294 passed.
