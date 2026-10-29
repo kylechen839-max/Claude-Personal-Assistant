@@ -270,8 +270,11 @@ needed (`kwil/recall.py`):
   fusion. Existing conversations are indexed in the background at startup
   and on the first search (500 per run, resuming where it stopped; a
   search never waits for it); `python -m kwil.recall --backfill` does it
-  all at once. Deleting a conversation deletes its vector with it. If
-  fastembed is missing or fails, search stays keyword-only.
+  all at once. Deleting a conversation deletes its vector with it.
+  Meaning search starts only once the model is downloaded: until then (or
+  if fastembed is missing or fails) search is keyword-only, and Kwil tries
+  the model again after 10 minutes, or at once when the model folder
+  changes (e.g. right after `--download`), without a restart.
 - **With `[memory] backend = "pinecone"`:** keyword search plus the
   Pinecone conversation summaries, which carry the conversation id, so a
   semantic match ("that thing about uncertainty in graphs") also links

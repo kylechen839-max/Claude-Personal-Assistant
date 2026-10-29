@@ -1740,7 +1740,7 @@ def open_store(config: dict) -> HistoryStore | None:
 
 # ---------- search across keyword + semantic, delete with memory ----------
 def search_conversations(store: HistoryStore, query: str, memory=None, *,
-                         limit: int = 20, offset: int = 0,
+                         limit: int = 20, offset: int = 0, snippet_tokens: int = 12,
                          **filters) -> list[dict]:
     """Past conversations matching `query`. Each hit has `match` =
     "keyword" or "semantic".
@@ -1749,13 +1749,16 @@ def search_conversations(store: HistoryStore, query: str, memory=None, *,
     (recall.py: FTS5, plus summary vectors when [memory] embeddings is on;
     no Pinecone). Otherwise ("pinecone"): keyword hits (FTS, ranked) first,
     then semantic hits from Pinecone conversation summaries that keyword
-    search missed."""
+    search missed. `snippet_tokens`: words around a keyword match (12 for
+    the phone's History, more for search_conversations)."""
     if memory is None:
         from kwil import recall
 
         return recall.retriever_for(store).search(query, k=limit, offset=offset,
-                                                  filters=filters)
-    hits = store.search(query, limit=limit, offset=offset, **filters)
+                                                  filters=filters,
+                                                  snippet_tokens=snippet_tokens)
+    hits = store.search(query, limit=limit, offset=offset,
+                        snippet_tokens=snippet_tokens, **filters)
     for h in hits:
         h["match"] = "keyword"
     if memory is None or offset or not query_terms(query) or len(hits) >= limit:

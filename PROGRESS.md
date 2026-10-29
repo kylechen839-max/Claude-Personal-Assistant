@@ -7195,7 +7195,8 @@ the default `[memory] backend = "local"`.
     words in a message (`_rank`'s `topical` tier, FTS and LIKE alike),
     then bm25 (titles 4.0, summaries 1.5, plus the best message), then the
     newest. Hits are conversation-level: title, date, summary and the best
-    snippet (24 words for recall; the phone keeps 12).
+    snippet (24 words for `search_conversations`; the phone's History
+    search keeps 12: `snippet_tokens`, judge round 2).
   - `HybridRetriever` (`[memory] embeddings = "fastembed"`, off by
     default): one unit float32 vector per conversation (title + summary,
     or the first thing said before there is a summary) in the person's own
@@ -7282,3 +7283,38 @@ Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3656 passed, 42 skipped, 1 deselected (62ed940: about 3628 / 41; +28
 passed, +1 skipped: the fastembed model test). JavaScript 303 passed
 (unchanged; no JS in this change).
+
+### Memory layer 2, judge round 2 (2026-10-29)
+1. **Health checks can't read past chats.** `read_conversation` left
+   `tools.READ_ONLY_TOOLS` (that list is for tools that read nothing
+   private); it stays in `router.READ_ONLY_TOOLS`. Test: in the router set,
+   not the check set, and a `SessionTools` check session neither offers
+   nor runs it.
+2. **Phone snippets stay at 12 words.** `history.search_conversations`,
+   `Retriever.search` and `HybridRetriever.search` take `snippet_tokens`
+   (default 12, what history_web and the CLI get); only
+   `search_conversations` the tool asks for `recall.TOOL_SNIPPET_TOKENS`
+   (24). Test with embeddings off and on.
+3. **Deep pages with embeddings on.** Fused results stop at `FUSE_MAX`
+   (200); when `offset + k` is past it, the page is keyword search with the
+   offset (meaning hits are on the first pages). Test: 230 matching
+   conversations, limit 20, offset 210 returns 20 (the same as keyword
+   paging), and paging through all of them sees 220+ distinct ones.
+4. **A failed embedder is retried.** The `_broken` flag is now a time
+   (injectable `clock`): cleared after `RETRY_AFTER` (600 s), or at once
+   when the model folder's modification time changes (`--download` ran).
+   README and MANUAL_TEST say meaning search starts after `--download`.
+   Test with a fake clock: not retried at 599 s, retried at 601 s, and
+   retried at once when the folder appears.
+
+Failing first (scratch copies, restored after each): with the four source
+files back at 6c8513e all four new tests fail. One change at a time: the
+tool back in `tools.READ_ONLY_TOOLS`, the phone default back at 24, and
+never clearing the failure (by time or by folder) each fail their test.
+Removing only the deep-page fallback while keeping the uncapped candidate
+list still passes (vectors then cover the deep pages), so the 6c8513e run is
+that test's evidence.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3659 passed, 42 skipped, 1 deselected (6c8513e: 3656 / 42; +3). JavaScript
+303 passed (unchanged).

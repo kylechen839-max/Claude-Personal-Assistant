@@ -50,6 +50,7 @@ def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Too
         # archived=None: an archived conversation is still Kyle's to recall
         hits = history.search_conversations(
             store, query, memory, limit=MAX_RESULTS + 1,
+            snippet_tokens=recall.TOOL_SNIPPET_TOKENS,
             source=source or None, pinned=pinned, archived=None,
             since=history.parse_day(since, tz=tz),
             until=history.parse_day(until, end=True, tz=tz))

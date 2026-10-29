@@ -45,6 +45,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
+from pathlib import Path
 from typing import Protocol, Sequence
 
 from kwil import history
@@ -55,7 +57,10 @@ RRF_K = 60            # reciprocal rank fusion constant (the usual 60)
 CANDIDATES = 50       # hits taken from each list before fusing
 BACKFILL_BATCH = 16   # conversations embedded per call
 BACKFILL_MAX = 500    # per run; the next run (search, finish) goes on
-SNIPPET_TOKENS = 24   # words around a keyword match
+SNIPPET_TOKENS = 12   # words around a keyword match (the phone's History)
+TOOL_SNIPPET_TOKENS = 24  # what search_conversations asks for (tools/history.py)
+FUSE_MAX = 200        # past this many results, paging is keyword-only
+RETRY_AFTER = 600     # seconds before a failed embedder is tried again
 SUMMARY_SNIPPET = 160  # characters of the summary for a vector-only hit
 EMBED_CHARS = 1000    # text per conversation given to the embedder
 
@@ -68,10 +73,11 @@ class Retriever(Protocol):
         nothing was stored (e.g. it was deleted meanwhile)."""
 
     def search(self, query: str, k: int = 10, filters: dict | None = None,
-               offset: int = 0) -> list[dict]:
+               offset: int = 0, snippet_tokens: int = SNIPPET_TOKENS) -> list[dict]:
         """Best first: conversation dicts (HistoryStore.list's shape) with
         `snippet`, `score` and `match` ("keyword" or "semantic").
-        `filters`: source, pinned, archived, since, until."""
+        `filters`: source, pinned, archived, since, until.
+        `snippet_tokens`: words around a keyword match."""
 
     def delete(self, conversation_id: str) -> None:
         """Forget a conversation's index entries."""
@@ -108,9 +114,9 @@ class FtsRetriever:
         pass  # the FTS rows go with the conversation's own rows
 
     def search(self, query: str, k: int = 10, filters: dict | None = None,
-               offset: int = 0) -> list[dict]:
+               offset: int = 0, snippet_tokens: int = SNIPPET_TOKENS) -> list[dict]:
         hits = self.store.search(query, limit=k, offset=offset,
-                                 snippet_tokens=SNIPPET_TOKENS,
+                                 snippet_tokens=snippet_tokens,
                                  **_store_filters(filters))
         for h in hits:
             h["match"] = "keyword"
@@ -147,8 +153,10 @@ class HybridRetriever:
     """FtsRetriever plus summary vectors, fused by reciprocal rank."""
 
     def __init__(self, store: history.HistoryStore, embedder: Embedder, *,
-                 min_score: float = 0.5, run_async: bool = True):
+                 min_score: float = 0.5, run_async: bool = True,
+                 clock=time.monotonic):
         self.store = store
+        self.clock = clock
         self.embedder = embedder
         self.min_score = float(min_score)
         self.run_async = run_async
@@ -156,7 +164,38 @@ class HybridRetriever:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._again = False
-        self._broken = False  # the embedder failed: keyword search only
+        # The embedder failed at this time (clock): keyword search only,
+        # until RETRY_AFTER has passed or its model folder changed (e.g.
+        # `python -m kwil.recall --download` ran meanwhile).
+        self._failed_at: float | None = None
+        self._failed_dir = None
+
+    def _model_dir_state(self):
+        """The model folder's modification time (None if there is none)."""
+        folder = getattr(self.embedder, "cache_dir", None)
+        try:
+            return Path(folder).stat().st_mtime_ns if folder else None
+        except OSError:
+            return None
+
+    def _fail(self, e: Exception) -> None:
+        self._failed_at = self.clock()
+        self._failed_dir = self._model_dir_state()
+        log.warning("Recall: embeddings unavailable (%s); keyword search only "
+                    "for now", type(e).__name__)
+
+    @property
+    def _broken(self) -> bool:
+        """The embedder failed lately; cleared after a cool-down, or as
+        soon as its model folder changed."""
+        if self._failed_at is None:
+            return False
+        if self.clock() - self._failed_at >= RETRY_AFTER or \
+                self._model_dir_state() != self._failed_dir:
+            self._failed_at = None
+            log.info("Recall: trying embeddings again")
+            return False
+        return True
 
     @property
     def model(self) -> str:
@@ -200,9 +239,7 @@ class HybridRetriever:
                 if n == 0:
                     break  # all deleted meanwhile, or unusable vectors
         except Exception as e:  # keyword search still works
-            self._broken = True
-            log.warning("Recall: embeddings unavailable (%s); keyword search only",
-                        type(e).__name__)
+            self._fail(e)
         if done:
             log.info("Recall: indexed %d conversation(s), %d left", done,
                      self.store.recall_pending_count(self.model))
@@ -250,11 +287,16 @@ class HybridRetriever:
 
     # --- searching ---
     def search(self, query: str, k: int = 10, filters: dict | None = None,
-               offset: int = 0) -> list[dict]:
-        if not history.query_terms(query):  # no words: newest first
-            return self.fts.search(query, k=k, filters=filters, offset=offset)
-        want = max(1, min(int(k) + max(0, int(offset)), 200))
-        keyword = self.fts.search(query, k=max(want, CANDIDATES), filters=filters)
+               offset: int = 0, snippet_tokens: int = SNIPPET_TOKENS) -> list[dict]:
+        k, offset = max(1, int(k)), max(0, int(offset))
+        if not history.query_terms(query) or offset + k > FUSE_MAX:
+            # no words: newest first; deep pages: keyword hits only (the
+            # fused list stops at FUSE_MAX; meaning hits are on page one)
+            return self.fts.search(query, k=k, filters=filters, offset=offset,
+                                   snippet_tokens=snippet_tokens)
+        want = offset + k
+        keyword = self.fts.search(query, k=max(want, CANDIDATES), filters=filters,
+                                  snippet_tokens=snippet_tokens)
         semantic = self._vector_search(query, max(want, CANDIDATES), filters)
         if self.store.recall_pending_count(self.model):
             self.start_backfill()  # never waited for: this search uses what's there
@@ -298,9 +340,7 @@ class HybridRetriever:
         try:
             q = _unit(self.embedder.embed_query(query))
         except Exception as e:
-            self._broken = True
-            log.warning("Recall: embeddings unavailable (%s); keyword search only",
-                        type(e).__name__)
+            self._fail(e)
             return []
         if q is None:
             return []

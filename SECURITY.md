@@ -2534,9 +2534,10 @@ continued (`kwil/history.py`). What that means for privacy:
   conversation like a resume (`chat.HISTORY_TOOLS`, and the tool is
   `untrusted_output`, so trimming the turn away keeps the taint); it is
   `private` (its query and result are never logged, not even at DEBUG). It
-  is in both read-only lists: the fast model may run it, and a health
-  check session may too (as `list_memories`); the check session reads only
-  the owner's own store.
+  is in `router.READ_ONLY_TOOLS` (the fast model may run it) but not in
+  `tools.READ_ONLY_TOOLS`: that list is for tools that read nothing
+  private, and a past chat is private, so a health check session is never
+  offered it and refuses it if called (tested).
 - **Recall isolation.** Each person's Retriever reads only the
   HistoryStore it was attached to: the owner's file, or a family member's
   own `<dir>/<id>/history.sqlite`; every query is scoped to the store's

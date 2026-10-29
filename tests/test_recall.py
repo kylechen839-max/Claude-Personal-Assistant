@@ -141,6 +141,39 @@ def test_archived_conversations_are_searchable_by_the_tool(store):
     assert [c["id"] for c in search.handler(query="physics")["conversations"]] == [cid]
 
 
+def test_phone_snippets_stay_short_the_tool_gets_longer_ones(store):
+    """The phone's History search keeps 12-word snippets; only
+    search_conversations (for Claude) asks for 24."""
+    words = [f"w{i}" for i in range(60)]
+    words[30] = "physics"
+    cid = add_conv(store, turns=[" ".join(words), "ok"], title="t")
+    for embedder in (None, FakeEmbedder()):
+        if embedder:
+            hybrid(store, embedder).backfill()
+        [hit] = history.search_conversations(store, "physics", None)  # history_web's call
+        phone = history.plain_snippet(hit["snippet"]).replace(history.ELLIPSIS, " ").split()
+        assert hit["id"] == cid and len(phone) == 12
+        [found] = history_tools(store)[0].handler(query="physics")["conversations"]
+        tool = found["snippet"].replace(history.ELLIPSIS, " ").split()
+        assert len(tool) == recall.TOOL_SNIPPET_TOKENS == 24
+
+
+def test_hybrid_paging_past_the_fused_list(store):
+    """With embeddings on, deep pages still fill (keyword-only there)."""
+    many = [add_conv(store, turns=[f"physics question {i}", "ok"], title=f"Q {i}",
+                     at=NOW - i * 60) for i in range(230)]
+    hybrid(store).backfill(limit=1000)
+    page = history.search_conversations(store, "physics", None, limit=20, offset=210)
+    assert len(page) == 20 and len(set(ids(page))) == 20
+    assert ids(page) == ids(recall.FtsRetriever(store).search("physics", k=20,
+                                                               offset=210))
+    seen = set()
+    for offset in range(0, 240, 20):
+        seen |= set(ids(history.search_conversations(store, "physics", None,
+                                                     limit=20, offset=offset)))
+    assert len(seen) >= 220 and seen <= set(many)
+
+
 # ---------- read_conversation ----------
 def read_tool(store, tz=None):
     return next(t for t in history_tools(store, tz=tz) if t.name == "read_conversation")
@@ -240,11 +273,25 @@ def test_read_conversation_unknown_or_bad_id(store):
         assert tool.handler(conversation_id=bad)["status"] == "error"
 
 
-def test_read_tool_is_in_both_read_only_lists():
-    assert "read_conversation" in READ_ONLY_TOOLS
+def test_read_tool_is_read_only_for_the_router_but_not_for_health_checks(store):
+    """The fast model may read a past chat; a health check may not (its
+    list holds only tools that read nothing private, and this one is)."""
     assert "read_conversation" in router.READ_ONLY_TOOLS
     assert not router.needs_main_for(["search_conversations", "read_conversation"])
     assert "read_conversation" in chat_mod.HISTORY_TOOLS
+    assert "read_conversation" not in READ_ONLY_TOOLS
+    pytest.importorskip("fastapi")
+    from kwil import webapp
+
+    cid = add_conv(store, **PHYSICS)
+    shared = ToolRegistry()
+    shared.register(*history_tools(store))
+    check = webapp.SessionTools(shared, confirm=lambda q: True, emit=lambda e: None)
+    check.check_mode = True
+    assert "read_conversation" not in {t["name"] for t in check.schemas()}
+    text, is_error = check.dispatch("read_conversation", {"conversation_id": cid})
+    assert is_error and "Not available in a health check" in text
+    assert "Mondays" not in text
 
 
 def test_recall_prompt_only_with_the_tool_and_byte_stable(store, fake_client):
@@ -362,6 +409,30 @@ def test_embedder_failure_falls_back_to_keywords(store, caplog):
     assert r.backfill() == 0
     assert ids(r.search("physics")) == [cid]
     assert any("keyword search only" in rec.getMessage() for rec in caplog.records)
+
+
+def test_a_failed_embedder_is_tried_again_after_a_cool_down(store, tmp_path):
+    cid = add_conv(store, **PHYSICS)
+    clock = Clock(1000.0)
+    embedder = FakeEmbedder()
+    embedder.cache_dir = str(tmp_path / "models")
+    embedder.fail_after = 0  # the model isn't there yet
+    r = recall.HybridRetriever(store, embedder, run_async=False, clock=clock)
+    store.recall = r
+    assert r.backfill() == 0 and r._broken
+    calls = embedder.calls
+    clock.t += recall.RETRY_AFTER - 1
+    assert r.backfill() == 0 and embedder.calls == calls  # not tried meanwhile
+    embedder.fail_after = None  # it works now
+    clock.t += 2
+    assert r.backfill() == 1 and vectors_of(store, cid) == 1 and not r._broken
+    # the model folder changes (--download ran): tried at once
+    embedder.fail_after = embedder.calls
+    store.finish(cid, None, "A new summary about mechanics.")
+    assert r.backfill() == 0 and r._broken
+    embedder.fail_after = None
+    (tmp_path / "models").mkdir()
+    assert r.backfill() == 1 and not r._broken
 
 
 def test_fastembed_is_optional(store, monkeypatch):
