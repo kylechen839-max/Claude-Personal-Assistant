@@ -147,6 +147,11 @@ as the work. Never put secrets, tokens or personal data in this file.
   `ClaudeChat.ask`). Tests about "today"/"tomorrow" pin that clock
   (`chat._now`) instead of reading the clock beside the product; one that
   did failed whenever CI crossed midnight in New York.
+- Lesson (2026-10-29, live bug): the cloud's owner chat was built without
+  `timezone=`, so on Render (UTC) Kwil's "now" was 4 hours ahead of the
+  calendar tools'. Every owner chat goes through `cli.build_chat` (webapp's
+  `chat_factory` passes its `client=`); a fake `chat._now` in a test should
+  honour its `timezone` argument so a missing zone shows.
 
 ## Environment (Linux cloud sandbox)
 - Setup:

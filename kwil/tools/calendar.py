@@ -845,6 +845,10 @@ class GoogleCalendar:
         earliest += timedelta(minutes=-earliest.minute % 5)
         if earliest < now_utc:
             earliest += timedelta(minutes=5)
+        # where the search began, in Kyle's zone: it tells the model "now"
+        # too, so it can't mix this tool's times with another clock
+        began = max(utc(datetime.combine(first, time(int(from_hour)), self.tz)),
+                    earliest).astimezone(self.tz)
         slots = []
         for i in range(days):
             d = first + timedelta(days=i)
@@ -872,6 +876,7 @@ class GoogleCalendar:
         log.info("Calendar: found %d free slots in %d days", len(slots), days)
         out = {"range": spoken_date(first) + (f" plus {days - 1} more days"
                                               if days > 1 else ""),
+               "searched_from": f"{spoken_date(began.date())}, {spoken_time(began)}",
                "duration_minutes": duration, "count": len(slots), "free": free}
         if len(slots) > MAX_FREE_SLOTS:
             out["more"] = len(slots) - MAX_FREE_SLOTS

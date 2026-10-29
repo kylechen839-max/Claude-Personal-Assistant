@@ -324,9 +324,10 @@ def check_server(config: dict, environ=os.environ) -> list[Check]:
                     ("too short (32+ random characters)" if token else
                      "not set (the Render Blueprint generates it)"))]
     tz = config["assistant"]["timezone"]
-    checks.append(Check("Time zone", bool(tz), tz or "not set: \"today\" and "
-                        "\"tomorrow\" would be in UTC (set ASSISTANT_TIMEZONE, "
-                        "e.g. America/New_York)", required=False))
+    checks.append(Check("Time zone", bool(tz), tz or "not set: the time Kwil "
+                        "tells, \"today\" and \"tomorrow\" would be in UTC "
+                        "(set ASSISTANT_TIMEZONE, e.g. America/New_York)",
+                        required=False))
     return checks
 
 

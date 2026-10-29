@@ -659,6 +659,9 @@ for all of this except the Google sign-in.
       "What's on my calendar tomorrow?"
   - Should: full screen, your words appear, then the answer spoken within a
     few seconds, with tomorrow in your time zone.
+- [ ] Ask "What time is it?", then "Find me an hour of free time today".
+  - Should: your own clock's time (not 4 or 5 hours later), and free time
+    only from now on, in your time zone.
 - [ ] Ask "Delete the test event tomorrow" (after creating one) and answer
       by voice.
   - Should: Yes/No buttons and a spoken question, as on the PC.

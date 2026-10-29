@@ -1,3 +1,8 @@
+from datetime import datetime
+from datetime import timezone as dt_timezone
+from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from kwil.chat import DEFAULT_MODEL, ClaudeChat, default_model
@@ -134,6 +139,54 @@ def test_build_chat_passes_the_language(monkeypatch):
     assert cli.build_chat(cfg).language == "en"
     cfg["assistant"]["language"] = "zh"
     assert cli.build_chat(cfg).language == "zh"
+
+
+# 11:30 AM in New York on the day of the Render bug (EDT, UTC-4)
+SERVER_NOW = datetime(2026, 10, 29, 15, 30, tzinfo=dt_timezone.utc)
+
+
+def server_clock(timezone=None):
+    """chat._now on a server whose clock is UTC: honours the zone asked for."""
+    return SERVER_NOW.astimezone(ZoneInfo(timezone)) if timezone else SERVER_NOW
+
+
+def test_owner_chat_reads_the_time_in_the_configured_zone(fake_client, monkeypatch):
+    """On Render (UTC) the owner's chat said 3:30 PM at 11:30 EDT: build_chat
+    never passed [assistant] timezone, while the calendar tools used it."""
+    from kwil import chat as chat_module
+    from kwil import cli
+    from kwil.config import load_config
+
+    monkeypatch.setattr(chat_module, "_now", server_clock)
+    cfg = load_config(None, None)
+    cfg["assistant"]["timezone"] = "America/New_York"
+    fake_client.queue = [make_response(text_block("Sure."))]
+    chat = cli.build_chat(cfg, client=fake_client)
+    assert chat.client is fake_client and chat.timezone == "America/New_York"
+    chat.ask("when am I free today?")
+    sent = request_text(fake_client.calls[-1])
+    assert ("Current local date and time: Thursday, October 29, 2026, 11:30 AM "
+            "(EDT, America/New_York, UTC-0400). Calendar times are in this "
+            "zone.") in sent
+    assert "03:30 PM" not in sent
+    cfg["assistant"]["timezone"] = ""  # unset: this machine's zone, as before
+    assert cli.build_chat(cfg, client=fake_client).timezone is None
+
+
+def test_summary_date_is_the_chats_own(fake_client, monkeypatch):
+    """At 9 PM in New York on New Year's Day the UTC server is on Jan 2."""
+    from kwil import chat as chat_module
+
+    late = datetime(2027, 1, 2, 2, 0, tzinfo=dt_timezone.utc)
+    monkeypatch.setattr(chat_module, "_now", lambda timezone=None: (
+        late.astimezone(ZoneInfo(timezone)) if timezone else late))
+    memory = MagicMock()
+    chat = ClaudeChat(client=fake_client, memory=memory,
+                      timezone="America/New_York")
+    chat.history = [{"role": "user", "content": "I moved my lab to Friday"},
+                    {"role": "assistant", "content": "Noted."}]
+    fake_client.queue = [make_response(text_block("Lab moved to Friday."))]
+    assert chat.end_conversation() == "2027-01-01: Lab moved to Friday."
 
 
 def test_chinese_prompt_says_what_it_can_do(fake_client):

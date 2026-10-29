@@ -25,7 +25,7 @@ import shutil
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -816,10 +816,21 @@ class LecturePipeline:
         return job
 
     def _date(self, job: LectureJob) -> str:
+        """The lecture's date in Kyle's zone (the phone sends UTC: a 9 PM
+        class in New York is already tomorrow there)."""
+        from kwil.tools.timeutil import local_zone
+
         try:
-            return datetime.fromisoformat(job.started_at).date().isoformat()
+            tz = local_zone(self.tz)
+        except Exception:
+            tz = None  # an unknown zone: this machine's
+        try:
+            started = datetime.fromisoformat(job.started_at.replace("Z", "+00:00"))
         except ValueError:
-            return datetime.now().date().isoformat()
+            started = datetime.now(timezone.utc)
+        if started.tzinfo is not None:
+            started = started.astimezone(tz)
+        return started.date().isoformat()
 
     def _transcribe(self, job: LectureJob, d: Path, transcript_file: Path) -> None:
         from kwil.stt import is_degenerate, redecode
