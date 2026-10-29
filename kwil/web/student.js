@@ -280,8 +280,9 @@
       li.append(el("span", head, "student-title"));
       // each piece its own element, so i18n.js can translate the fixed ones
       const meta = el("p", undefined, "hint");
-      meta.append(el("span", when(item.due)), el("span", " · "),
-                  el("span", SOURCES[item.source] || ""));
+      meta.append(el("span", when(item.due)));
+      // no dangling " · " when the source is one this page doesn't name
+      if (SOURCES[item.source]) meta.append(el("span", " · "), el("span", SOURCES[item.source]));
       const tag = item.status === "conflict" ? "Dates disagree"
         : item.status === "draft" ? "Not checked" : "";
       if (tag) meta.append(el("span", " · "), el("span", tag));

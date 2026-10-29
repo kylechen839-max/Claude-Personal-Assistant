@@ -226,8 +226,12 @@
             </ul>
           </div>
         </section>
-        <section id="family" class="family" hidden>
-          <button id="invite-open" type="button">Invite someone</button>
+        <section id="family" class="family" aria-labelledby="family-title" hidden>
+          <h2 id="family-title" class="group-head">People</h2>
+          <div class="group family-group">
+            <ul id="family-list" class="family-list"></ul>
+            <button id="invite-open" type="button" class="row">Invite someone</button>
+          </div>
           <form id="invite-form" class="invite-form" autocomplete="off" hidden>
             <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
             <label>Language
@@ -244,11 +248,10 @@
             </label>
             <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
                    spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
-            <button type="submit">Create invite link</button>
+            <button type="submit" class="btn primary">Create invite link</button>
           </form>
           <p id="invite-status" class="hint" role="status"></p>
           <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
-          <ul id="family-list" class="family-list"></ul>
         </section>
         <section id="account-self" class="family account-self" hidden>
           <button id="account-export" type="button">Download my data</button>
@@ -294,7 +297,7 @@
       </button>
       <input id="text" type="text" placeholder="Type a message" enterkeyhint="send">
       <button id="stop" class="stop-btn" type="button" aria-label="Stop" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg>
       </button>
       <button type="submit" aria-label="Send">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -339,7 +342,9 @@
     <button id="voice-mute" type="button" aria-pressed="false">Mute</button>
     <button id="voice-end" class="voice-end" type="button">End</button>
     <button id="voice-cc" type="button" aria-pressed="true" aria-label="Captions">CC</button>
-    <button id="voice-timings" type="button" aria-pressed="false" aria-label="Latency timings">&#9201;</button>
+    <button id="voice-timings" type="button" aria-pressed="false" aria-label="Latency timings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V10M10 3h4M18.5 6.5l-1.3 1.3"/></svg>
+    </button>
   </div>
 </section>
 

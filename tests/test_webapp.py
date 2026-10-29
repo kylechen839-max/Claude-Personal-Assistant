@@ -1492,6 +1492,21 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v11" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v12" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw
+
+
+def test_history_rows_draw_source_glyphs_in_css_never_emoji():
+    """history.js tags each row's icon with data-source (an unknown source
+    is "other"), and app.css draws a line glyph for each; no emoji."""
+    from pathlib import Path
+    web = Path(__file__).resolve().parents[1] / "kwil" / "web"
+    js = (web / "history.js").read_text(encoding="utf-8")
+    css = (web / "app.css").read_text(encoding="utf-8")
+    assert 'icon.dataset.source = SOURCES[c.source] ? c.source : "other"' in js
+    assert js.count('setAttribute("role", "img")') >= 2  # the source icon and the pin
+    for source in ("voice", "web", "wake", "text", "other"):
+        assert f".conv-icon[data-source={source}]" in css
+    for emoji in ("\U0001F399", "\U0001F4F1", "\U0001F5A5", "⌨", "\U0001F4AC", "\U0001F4CC"):
+        assert emoji not in js

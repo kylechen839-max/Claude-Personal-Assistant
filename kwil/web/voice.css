@@ -79,6 +79,10 @@ body.voice-open { overflow: hidden; }
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--v-orb-b) 55%, transparent); }
 #voice-mute[aria-pressed="true"] { background: var(--v-text); color: var(--v-bg); box-shadow: none; }
 .voice-controls .voice-end { background: var(--v-end); color: #fff; min-width: 6.5rem; }
+/* CC and the timings stopwatch are round icon buttons, so all four fit one row on a phone */
+#voice-cc, #voice-timings { width: 56px; padding: 0; display: inline-grid; place-items: center; }
+#voice-timings svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
 .voice-controls .voice-end:active { background: color-mix(in srgb, var(--v-end) 85%, #000); }
 .voice-controls button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v-bg), 0 0 0 6px color-mix(in srgb, var(--v-orb-b) 70%, transparent); }
 .voice-resume { margin-bottom: 1rem; min-height: 50px; background: var(--v-orb-b); color: #fff; border-radius: 999px;
