@@ -6713,4 +6713,4 @@ Failing first: with `app.js` at 0114a71 the 3 new JS tests fail and the
 judge's probe shows "second in the lab report" and "Lab answer two." in
 the other pane and `conversation_id` on the turn after goodbye; with the
 fix both are gone. Counts: 3521 passed, 39 skipped, 1 deselected (the two
-`new` tests removed); JavaScript 293 passed.
+`new` tests removed); JavaScript 293 passed. Judge round 3 (LOW, fixed by the master): an ended conversation frees its queued messages even when its pane is no longer shown; JavaScript 294 passed.

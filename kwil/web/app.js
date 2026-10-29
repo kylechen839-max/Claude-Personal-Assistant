@@ -380,6 +380,8 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
   const here = epoch === pane.epoch;
   if (!here && ["delta", "transcript", "reply"].includes(ev.type)) {
     if (ev.type === "reply") setConfirm(null);
+    // its pane is gone, but an ended conversation still frees its queue
+    if (ev.type === "reply" && ev.ended && cid) conversationEnded(cid);
     return;
   }
   if (ev.type !== "delta" && ev.type !== "reply") live = null;
@@ -429,7 +431,7 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
     case "done":
       // A bound turn that left no conversation (it ended): unbind. A fresh
       // pane never binds to the id here, so its idle timeout still holds.
-      if (here && cid && ev.conversation === null) conversationEnded(cid);
+      if (cid && ev.conversation === null) conversationEnded(cid);  // shown or not
       setConfirm(null);
       setStatus("");
       break;

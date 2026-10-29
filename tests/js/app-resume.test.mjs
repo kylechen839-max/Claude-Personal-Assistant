@@ -372,3 +372,16 @@ test('a "done" with no conversation after a bound turn unbinds it; a fresh pane 
   await p.finish(p.streams[2], { type: 'reply', text: 'OK.' });
   assert.equal(p.win.KwilApp.pane().cid, null);
 });
+
+test('goodbye, a queued message, then another pane before the reply: the queued one starts fresh (judge round 3)', async () => {
+  const p = load();
+  await p.flush();
+  p.win.KwilApp.bindPane(CID);
+  await p.submit('goodbye');
+  await p.submit('queued after goodbye');
+  p.$('log').textContent = '';
+  p.win.KwilApp.bindPane(OTHER);
+  await p.finish(p.streams[0], { type: 'reply', text: 'Bye.', ended: true });
+  assert.deepEqual(p.turns()[1].body, { text: 'queued after goodbye' });
+  assert.equal(p.win.KwilApp.pane().cid, OTHER);  // the pane shown stays bound
+});
