@@ -4,6 +4,12 @@
 [assistant]
 model = "claude-sonnet-5-5"   # CLAUDE_MODEL in the environment overrides this
 max_tokens = 1500            # a ceiling, not a target: room for thinking and web search
+# Ceiling for turns on `model` that offer tools (calendar, notes...): room to
+# plan a schedule over several tool rounds. Only what's used is billed.
+# max_tokens_tools = 4000
+# How much of the conversation Claude still sees: the newest max_history / 2
+# turns (each with all its tool rounds); past that the older half goes.
+# max_history = 40
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)

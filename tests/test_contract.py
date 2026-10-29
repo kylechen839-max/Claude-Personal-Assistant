@@ -248,6 +248,50 @@ def test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn
     assert client.requests[-1]["model"] == FAKE_MAIN
 
 
+def test_a_follow_up_sends_back_the_earlier_turns_thinking(api):
+    """Kyle, 2026-10-29: "why did you block only 3:30 to 4?" got "I can't
+    see my reasoning". Within one live conversation (same chat, client and
+    model) turn 2 now sends turn 1's thinking again, and the API accepts
+    it. The real model may not think on an easy turn; the fake always does."""
+    from kwil.chat import has_earlier_thinking
+
+    make, model = api
+    calls = []
+    client = make()
+    chat = ClaudeChat(client=client, model=model, tools=calendar_tools(calls),
+                      max_tokens=1024)
+    assert chat.ask(REMEMBER).strip() and any(c[0] == "list" for c in calls)
+    thought = [b["thinking"] for m in chat.history if m["role"] == "assistant"
+               and isinstance(m["content"], list) for b in m["content"]
+               if b.get("type") == "thinking"]
+    chat.ask("And the second one?")  # turn 1's thinking is now earlier
+    assert has_earlier_thinking(chat.history[:-1], chat._thinking_tag(model)) \
+        == bool(thought)
+    assert "4417" in chat.ask("Thanks. " + RECALL)
+    if isinstance(client, ContractClient):
+        assert thought and all(t in str(client.requests[-1]["messages"])
+                               for t in thought)
+    assert not [c for c in calls if c[0] == "create"]
+
+
+def test_a_refused_earlier_signature_is_retried_once_without_it():
+    """The API refusing an earlier turn's signature (the 2026-10-20 bug's
+    400, here after the fake's key changed) must not break the
+    conversation: the request goes once more with no earlier thinking."""
+    client = ContractClient()
+    calls = []
+    chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=calendar_tools(calls),
+                      max_tokens=1024)
+    chat.ask(REMEMBER)
+    before, tries, respond = len(client.requests), [], client.respond
+    client.respond = lambda kwargs: tries.append(1) or respond(kwargs)
+    client.key = b"r" * 16
+    assert "4417" in chat.ask(RECALL)
+    assert len(tries) == 2  # refused once, then accepted
+    assert len(client.requests) == before + 1  # the refused request isn't recorded
+    assert "Planning reply" not in str(client.requests[-1]["messages"][:-1])
+
+
 def _request(**overrides):
     kwargs = {"model": FAKE_MAIN, "max_tokens": 64,
               "messages": [{"role": "user", "content": "hi"}]}

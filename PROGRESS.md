@@ -6764,3 +6764,72 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 788180f extracted with `git archive`: 3519 passed, 40 skipped, and
 `test_design_skills` failing only because an extract isn't a checkout).
 JavaScript 294 passed (unchanged).
+
+## Kwil keeps its reasoning across turns and plans carefully (PR 2, 2026-10-29)
+
+Kyle's report: after Kwil planned his day, "why did you block only 3:30 to
+4 for physics?" got "I can't see my reasoning from that earlier chat".
+Earlier turns' thinking was dropped from every request (the fix for the
+2026-10-20 signature 400s), and the history was trimmed by raw messages, so
+three tool-heavy scheduling turns could push turn 1 out entirely.
+
+- **Earlier thinking, while it is safe** (`kwil/chat.py`). Each assistant
+  message holding thinking gets a private `_thinking_from` tag: this chat
+  (a random id), its "thinking epoch" and the model. `request_messages`
+  re-sends an earlier turn's thinking only when its tag matches the
+  current one, and always strips the tag. The epoch moves on (nothing
+  earlier is re-sent) when `history` is assigned from outside (it is now a
+  property: resume, `_switch_to`, a view sharing another chat's history,
+  `reset`), when the turn's model differs from the last one (router
+  picks, the fast→main escalation, a changed `model`), and after a
+  refused signature. A barge-in's rewritten reply loses its tag.
+- **One retry.** A 400 that names a thinking `signature`, while earlier
+  thinking was sent, is retried once without any (one WARNING, no text);
+  a second refusal, another 400, or a 400 with nothing to strip raises as
+  before.
+- **Trim by whole turns.** `max_history` keeps its meaning in plain chat
+  (messages, two a turn): past `max_history / 2` turns, the newest half of
+  them is kept, each with all its tool rounds. A trim starts at one of
+  Kyle's messages, so no tool_result is left without its tool_use. Plain
+  conversations trim exactly as before (`test_trimming_in_chunks_keeps_the_prefix`
+  unchanged). A turn is bounded by `max_tool_rounds`, so the history still is.
+- **Room to plan.** New `[assistant] max_tokens_tools` (4000): the ceiling
+  for main-model turns that offer tools (at least `max_tokens`).
+  Fast-model and tool-less turns keep `max_tokens` (1500). Wired through
+  `cli.build_chat` and the family chat factory.
+- **Planning prompt.** `TOOLS_PROMPT` now says keep it short but reason
+  carefully; a new `SCHEDULE_PROMPT` (only with `find_free_time`) says use
+  `find_free_time` for gaps, exact edges, every free gap asked for, and say
+  the window used ("from now, eleven thirty, to five"). Both are in
+  `stable_system`, the same bytes every turn.
+- **Thinking parameter.** Not added: `tests/contract_fakes.py` doesn't
+  check a `thinking=` shape for this model family, so adaptive thinking
+  still relies on the model's default.
+- Nothing new is stored: history.sqlite still gets reply text and tool
+  names only; thinking and tool results live in memory for the
+  conversation. Taint (`has_untrusted_content`) reads the same blocks.
+
+Tests: new `tests/test_chat_context.py` (15): turn 2 re-sends turn 1's
+thinking (same chat and model) and the tag is never sent; none after a
+history set from outside, a resume (and history.sqlite has no thinking or
+tool result), a model change, or router escalation (the main model's own
+turn 2 is kept, the fast model's turn 1 never); taint holds with kept
+thinking; a barge-in's reply isn't re-sent; a refused signature is retried
+exactly once without earlier thinking (one WARNING without conversation
+text), a second refusal raises and undoes the turn, and other cases aren't
+retried; three 6-round tool turns keep turn 1's tool_result (42 messages,
+`max_history` 40); trims never orphan a tool_result; `cli.build_chat`
+sends 1500 (fast), 4000 (main with tools), 1500 (main, no tools); the
+schedule prompt is in a byte-identical system. `tests/test_contract.py`
++2: a two-turn-plus follow-up re-sends earlier thinking and the fake API
+accepts it (also `live` with a key), and a re-keyed fake refuses it once,
+then accepts the retry. Failing first: with `kwil/` and `config.toml` back
+at a016a19, 12 of the 17 fail (the other 5 are guards that hold on the old
+code because it never re-sent anything); with only the tag check loosened
+(`tag is None`) 6 fail, and with only the barge-in untagging removed 1
+fails.
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
+`-k "not live_pinecone"`: 3545 passed, 41 skipped, 1 deselected (a016a19:
+3528 passed, 39 skipped; +17 new tests, +2 skipped are the new contract
+test's `live` runs without a key). JavaScript 294 passed (unchanged).

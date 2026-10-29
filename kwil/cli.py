@@ -1074,6 +1074,7 @@ def build_chat(config: dict, tools=None, memory=None,
         client = anthropic.Anthropic(max_retries=a["api_max_retries"],
                                      timeout=a["api_timeout"])
     chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
+                      max_tokens_tools=a["max_tokens_tools"],
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
                       recorder=recorder, language=a["language"],

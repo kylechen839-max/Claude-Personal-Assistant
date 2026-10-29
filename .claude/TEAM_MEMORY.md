@@ -152,6 +152,14 @@ as the work. Never put secrets, tokens or personal data in this file.
   calendar tools'. Every owner chat goes through `cli.build_chat` (webapp's
   `chat_factory` passes its `client=`); a fake `chat._now` in a test should
   honour its `timezone` argument so a missing zone shows.
+- Lesson (2026-10-29, live report): stripping every earlier turn's
+  thinking fixed the signature 400s but left Kwil unable to say why it had
+  planned something. `ClaudeChat.history` is now a property: assigning it
+  (resume, a shared view, a test) forgets earlier thinking, and so does a
+  model change; code inside the chat that only trims assigns `_history`.
+  Earlier thinking rides on a private `_thinking_from` tag that
+  `request_messages` strips. Trim and count by whole turns
+  (`is_user_turn` starts), never raw messages.
 
 ## Environment (Linux cloud sandbox)
 - Setup:

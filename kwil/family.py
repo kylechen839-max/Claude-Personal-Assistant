@@ -940,6 +940,7 @@ class Family:
                                 title_model=h["title_model"], meter=title_api)
             return ClaudeChat(client=chat_api, meter=chat_api, model=a["model"],
                               max_tokens=a["max_tokens"],
+                              max_tokens_tools=a["max_tokens_tools"],
                               max_history=a["max_history"], tools=session_registry,
                               max_tool_rounds=a["max_tool_rounds"], memory=None,
                               recorder=recorder, language=user["language"],
