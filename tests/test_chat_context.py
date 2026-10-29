@@ -292,3 +292,169 @@ def test_request_messages_without_a_tag_drops_earlier_thinking():
     assert request_messages(history, thinking="y")[1]["content"][0]["type"] == "text"
     assert request_messages(history, thinking="x")[1] == {
         "role": "assistant", "content": [own, {"type": "text", "text": "b"}]}
+
+
+# --- round 2 (judge F1-F4) -----------------------------------------------------------
+
+def big_calendar(size: int) -> ToolRegistry:
+    tools = ToolRegistry(confirm=lambda q: True)
+    tools.register(Tool("list_calendar_events", "List Kyle's events for a day.",
+                        {"type": "object", "properties": {}},
+                        lambda **kw: {"events": [{"notes": "x" * size}]}))
+    return tools
+
+
+def test_big_tool_results_trim_whole_turns_under_the_size_budget(fake_client, caplog):
+    """F1: 20 turns of 15 messages with big results would pass the context
+    window; a size budget drops the oldest whole turns."""
+    from kwil.chat import history_chars
+
+    fake_client.queue = [r for n in range(1, 7) for r in tool_turn(n, rounds=1)]
+    chat = ClaudeChat(client=fake_client, model=MAIN, tools=big_calendar(50_000),
+                      max_history_chars=120_000)
+    with caplog.at_level(logging.INFO, logger="kwil"):
+        for n in range(1, 7):
+            chat.ask(f"turn {n}")
+            assert history_chars(chat.history) <= 120_000
+            assert_pairs_complete(chat.history)  # starts with a user turn
+    kept = [m["content"] for m in chat.history if is_user_turn(m)]
+    assert kept[-1] == "turn 6" and len(kept) < 6
+    assert any("size budget" in r.getMessage() for r in caplog.records)
+    assert not any("turn " in r.getMessage() for r in caplog.records)  # no words
+
+
+def test_the_newest_turn_stays_even_over_the_budget(fake_client):
+    fake_client.queue = tool_turn(1, rounds=1)
+    chat = ClaudeChat(client=fake_client, model=MAIN, tools=big_calendar(50_000),
+                      max_history_chars=10_000)
+    chat.ask("turn 1")
+    assert chat.history[0]["content"] == "turn 1" and len(chat.history) == 4
+
+
+def test_only_the_newest_turns_send_their_thinking_again():
+    """F1: thinking from more than thinking_turns earlier turns back is
+    stripped; the cut moves in steps of thinking_turns (the cache prefix
+    changes once every few turns, not every turn)."""
+    client = ContractClient()
+    chat = ClaudeChat(client=client, model=MAIN)  # thinking_turns 3
+    for n in range(7):
+        chat.ask(f"tell me thing {n}")
+    sent = [thinking_before_last_turn(r["messages"]) for r in client.requests]
+    assert sent[5] == [f"Planning reply {n}." for n in range(1, 6)]  # 5 earlier: all
+    assert sent[6] == [f"Planning reply {n}." for n in range(4, 7)]  # turns 4-6 only
+
+
+def refusing(fake_client, too_many_turns: int, always=False):
+    """A client that answers "prompt is too long" past `too_many_turns`
+    user turns."""
+    seen = []
+
+    def create(**kwargs):
+        turns = sum(1 for m in kwargs["messages"] if is_user_turn(m))
+        seen.append(turns)
+        if turns > too_many_turns or (always and len(seen) > too_many_turns):
+            raise api_bad_request("prompt is too long: 250000 tokens > 200000 maximum")
+        return make_response(text_block(f"reply {len(seen)}"))
+
+    fake_client.messages.create.side_effect = create
+    return seen
+
+
+def test_a_prompt_too_long_400_trims_harder_and_retries_once(fake_client, caplog):
+    seen = refusing(fake_client, too_many_turns=3)
+    chat = ClaudeChat(client=fake_client, model=MAIN, max_history_chars=0)
+    for n in range(3):
+        chat.ask(f"q{n}")
+    with caplog.at_level(logging.WARNING, logger="kwil"):
+        assert chat.ask("q3") == "reply 5"
+    assert seen == [1, 2, 3, 4, 3]  # refused once, then a shorter retry
+    assert [m["content"] for m in chat.history if is_user_turn(m)] == ["q1", "q2", "q3"]
+    [warning] = caplog.records
+    assert "dropped 1 earlier turn" in warning.getMessage()
+    assert "q0" not in warning.getMessage()
+    chat.ask("q4")  # unstuck: the next turn goes through
+    assert seen[-1] == 3
+
+
+def test_a_second_prompt_too_long_raises_and_leaves_a_valid_history(fake_client):
+    seen = refusing(fake_client, too_many_turns=3, always=True)
+    chat = ClaudeChat(client=fake_client, model=MAIN, max_history_chars=0)
+    for n in range(3):
+        chat.ask(f"q{n}")
+    with pytest.raises(Exception, match="too long"):
+        chat.ask("q3")
+    assert seen[3:] == [4, 3]  # exactly one retry
+    # the failed turn is undone, even though the retry trimmed earlier turns
+    assert chat.history[-1]["role"] == "assistant"
+    assert [m["content"] for m in chat.history if is_user_turn(m)] == ["q1", "q2"]
+
+
+def thinking_reply(text, stop_reason="end_turn", thought="cut-off plan"):
+    from types import SimpleNamespace
+
+    block = SimpleNamespace(type="thinking", thinking=thought, signature="SIG")
+    return make_response(block, *([text_block(text)] if text else []),
+                         stop_reason=stop_reason)
+
+
+@pytest.mark.parametrize("reply", [
+    thinking_reply("Your afternoon is", stop_reason="max_tokens"),
+    thinking_reply(None)])
+def test_a_cut_off_or_thinking_only_reply_is_not_sent_again(fake_client, reply):
+    """F2: unfinished reasoning (a max_tokens cut, or nothing but thinking)
+    isn't tagged, so a later turn never re-sends it."""
+    fake_client.queue = [reply, make_response(text_block("Sure."))]
+    chat = ClaudeChat(client=fake_client, model=MAIN)
+    chat.ask("plan my afternoon")
+    assert THINKING_TAG not in chat.history[1]
+    chat.ask("go on")
+    assert "cut-off plan" not in json.dumps(fake_client.calls[-1]["messages"])
+
+
+def test_a_finished_reply_is_tagged(fake_client):
+    fake_client.queue = [thinking_reply("Done."), make_response(text_block("Sure."))]
+    chat = ClaudeChat(client=fake_client, model=MAIN)
+    chat.ask("plan my afternoon")
+    chat.ask("why")
+    assert "cut-off plan" in json.dumps(fake_client.calls[-1]["messages"])
+
+
+def test_model_a_then_b_then_a_sends_none_of_the_first_turns_thinking(caplog):
+    """F4: a model change in between counts, even back to the same model
+    (the brief: the conversation wasn't switched since)."""
+    client = ContractClient()
+    chat = chat_with(client)
+    chat.ask(REMEMBER)
+    chat.model = OTHER
+    chat.ask("tell me a joke")
+    chat.model = MAIN
+    with caplog.at_level(logging.WARNING, logger="kwil"):
+        assert "4417" in chat.ask(RECALL)
+    assert thinking_before_last_turn(client.requests[-1]["messages"]) == []
+    assert not caplog.records
+
+
+def test_a_family_members_main_model_tool_turn_has_room_to_plan(fake_client, tmp_path,
+                                                                 monkeypatch):
+    """F4: family.py passes max_tokens_tools (and the history budgets)."""
+    from kwil import family as family_mod
+    from kwil.config import load_config
+
+    monkeypatch.setenv("USER_DATA_KEY", "s" * 48)
+    config = load_config(None, None)
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    config["history"]["enabled"] = False
+    config["web"]["enabled"] = False
+    config["assistant"].update(model=MAIN, router="off", max_tokens_tools=4321,
+                               max_history_chars=12_345, thinking_turns=2)
+    fam = family_mod.Family(config, client=fake_client)
+    try:
+        user, token = fam.invite("Mom", "en", tier="family")  # the owner's key
+        fam.redeem(token, lambda uid: uid)
+        chat = fam.context(user["id"]).chat_factory(calendar())
+        assert (chat.max_history_chars, chat.thinking_turns) == (12_345, 2)
+        fake_client.queue = [make_response(text_block("Done."))]
+        chat.ask("move my dentist to 3pm")
+        assert fake_client.calls[-1]["max_tokens"] == 4321
+    finally:
+        fam.close()

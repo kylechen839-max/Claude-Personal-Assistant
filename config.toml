@@ -10,6 +10,12 @@ max_tokens = 1500            # a ceiling, not a target: room for thinking and we
 # How much of the conversation Claude still sees: the newest max_history / 2
 # turns (each with all its tool rounds); past that the older half goes.
 # max_history = 40
+# ...and its size: past this many characters (about 100k tokens) the oldest
+# whole turns go, so long tool results can't fill the model's context.
+# max_history_chars = 300000
+# Claude's own reasoning (thinking) from the newest this-many earlier turns
+# is sent again, so it can explain what it did; older turns' isn't.
+# thinking_turns = 3
 conversation_timeout = 300    # seconds of quiet before a new conversation starts
 timezone = ""                 # e.g. "America/New_York"; empty = system time zone
 language = "en"               # "zh": Mandarin replies, speech and phone page (config.mom.toml)

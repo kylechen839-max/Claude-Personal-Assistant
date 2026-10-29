@@ -306,6 +306,8 @@ you are most likely to tune:
 | `[assistant] max_tokens` | 1500 | Ceiling for a reply, thinking included (only what's used is billed): fast-model turns and turns without tools |
 | `[assistant] max_tokens_tools` | 4000 | Ceiling for `model` turns that offer tools, room to plan a schedule over several tool rounds (at least `max_tokens`) |
 | `[assistant] max_history` | 40 | How much of the conversation Claude still sees, in messages of plain chat: the newest `max_history / 2` turns, each with all its tool rounds; past that the older half is dropped, whole turns at a time |
+| `[assistant] max_history_chars` | 300000 | The conversation's size budget (about 100k tokens): past it the oldest whole turns are dropped until it is under half, the newest turn always stays. If Claude still answers "prompt is too long", the older half of the earlier turns goes and the request is sent once more. 0 = no budget |
+| `[assistant] thinking_turns` | 3 | How many earlier turns' thinking (Claude's reasoning) is sent again, at least; it moves in steps of this many so the prompt cache holds |
 | `[assistant] fast_model` | "claude-haiku-5-5" | Cheaper model for short, simple questions; `CLAUDE_FAST_MODEL` overrides it |
 | `[assistant] router` | "auto" | "auto": simple turns go to `fast_model`, changes, lookups, reasoning, attachments and untrusted content stay on `model`; "off" (or `CLAUDE_ROUTER=off`): always `model` |
 | `[assistant] usage_file` | "data/usage.json" | Monthly API token totals and a rough cost estimate (the owner's phone app gets `month_usd`); "" = not kept |
@@ -331,11 +333,12 @@ the same on either model. The tools and system prompt are the same bytes on
 every request and are cached by the API (5 minutes); the date and recalled
 notes travel with each of your messages instead, and the weekly review
 offer with the first one only. Within a conversation Claude also gets its
-own earlier reasoning back (its thinking from earlier turns), so "why did
-you block only 3:30 to 4?" has an answer; that stops for the rest of the
-conversation when it was resumed, shared with another view (hands-free
-voice) or moved to another model, since the API accepts thinking only from
-the model and conversation that wrote it. Each Claude API call's token counts (chat,
+own earlier reasoning back (its thinking from the last few turns,
+`thinking_turns`), so "why did you block only 3:30 to 4?" has an answer.
+Thinking from before a resume or a model change isn't sent again (the API
+accepts thinking only from the model and conversation that wrote it);
+later turns' thinking is kept. A reply cut off by `max_tokens` never sends
+its thinking again. Each Claude API call's token counts (chat,
 summaries, history titles, tutor, lecture notes: input, output, cache
 read/write, web searches) are logged at INFO in `logs/assistant.log`,
 without any text.

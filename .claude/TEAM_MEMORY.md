@@ -155,7 +155,7 @@ as the work. Never put secrets, tokens or personal data in this file.
 - Lesson (2026-10-29, live report): stripping every earlier turn's
   thinking fixed the signature 400s but left Kwil unable to say why it had
   planned something. `ClaudeChat.history` is now a property: assigning it
-  (resume, a shared view, a test) forgets earlier thinking, and so does a
+  (resume, `_switch_to`, a test) forgets earlier thinking, and so does a
   model change; code inside the chat that only trims assigns `_history`.
   Earlier thinking rides on a private `_thinking_from` tag that
   `request_messages` strips. Trim and count by whole turns

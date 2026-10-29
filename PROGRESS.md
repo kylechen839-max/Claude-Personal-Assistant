@@ -6777,12 +6777,13 @@ three tool-heavy scheduling turns could push turn 1 out entirely.
   message holding thinking gets a private `_thinking_from` tag: this chat
   (a random id), its "thinking epoch" and the model. `request_messages`
   re-sends an earlier turn's thinking only when its tag matches the
-  current one, and always strips the tag. The epoch moves on (nothing
-  earlier is re-sent) when `history` is assigned from outside (it is now a
-  property: resume, `_switch_to`, a view sharing another chat's history,
-  `reset`), when the turn's model differs from the last one (router
-  picks, the fast→main escalation, a changed `model`), and after a
-  refused signature. A barge-in's rewritten reply loses its tag.
+  current one, and always strips the tag. Thinking from before a resume or
+  a model change isn't sent again; later turns' thinking is kept. The
+  epoch moves on when `history` is assigned (it is now a property:
+  resume, `_switch_to`, `reset`), when the turn's model differs from the
+  last one (router picks, the fast→main escalation, a changed `model`),
+  and after a refused signature. A barge-in's rewritten reply loses its
+  tag.
 - **One retry.** A 400 that names a thinking `signature`, while earlier
   thinking was sent, is retried once without any (one WARNING, no text);
   a second refusal, another 400, or a 400 with nothing to strip raises as
@@ -6833,3 +6834,44 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 `-k "not live_pinecone"`: 3545 passed, 41 skipped, 1 deselected (a016a19:
 3528 passed, 39 skipped; +17 new tests, +2 skipped are the new contract
 test's `live` runs without a key). JavaScript 294 passed (unchanged).
+
+### Round 2 (judge F1-F4)
+
+- **F1, size.** New `[assistant] max_history_chars` (300000, about 100k
+  tokens; `chat.history_chars` counts each block as JSON and a photo or
+  file as 8000): past it `_trim_history` drops the oldest whole turns until
+  the rest is under half (the newest turn always stays; INFO logs the count
+  only). New `[assistant] thinking_turns` (3): only the newest 3 to 5
+  earlier turns re-send their thinking; the cut moves in steps of 3, so the
+  cached prefix changes once every three turns, not every turn. A
+  "prompt is too long" 400 drops the older half of the earlier turns (at
+  least one) and all earlier thinking, and retries once (one WARNING,
+  counts only); if that fails too, the turn is undone by finding its
+  message by identity (the old index was wrong after the retry's trim).
+- **F2.** A reply cut off by `max_tokens`, or one that is only thinking,
+  isn't tagged, so its thinking is never sent again.
+- **F3.** README, SECURITY and this entry now say: thinking from before a
+  resume or a model change isn't sent again; later turns' thinking is
+  kept. The shared-view example is gone (voice uses the session's chat).
+- **F4.** Tests for model A→B→A and for the family chat factory's
+  `max_tokens_tools` (and the two new keys).
+
+Tests: `tests/test_chat_context.py` +10 (25): big tool results trim whole
+turns under the budget and start with a user turn; the newest turn stays
+over the budget; at turn 7 only turns 4-6 send their thinking (all 5 at
+turn 6); a "prompt is too long" 400 retries once with one turn fewer and
+the next turn goes through; a second one raises with exactly one retry and
+leaves a valid history; a `max_tokens` cut and a thinking-only reply aren't
+re-sent, a finished one is; A→B→A sends none of turn 1's thinking; a
+family member's tool turn gets the configured `max_tokens_tools`. Failing
+first: with `kwil/` and `config.toml` back at bfbc62d, 8 fail (the others
+are guards). One mutation at a time on the new code: without the
+model-change `_forget_thinking` A→B→A fails; without family's
+`max_tokens_tools` the family test fails; rolling back by the old index
+fails the second too-long test; tagging every thinking reply fails both F2
+cases; no thinking floor, no size budget and no too-long retry each fail
+their tests.
+
+Counts after round 2 (Linux sandbox, not real hardware), `-k "not
+live_pinecone"`: 3555 passed, 41 skipped, 1 deselected (bfbc62d: 3545 /
+41); JavaScript 294 passed.

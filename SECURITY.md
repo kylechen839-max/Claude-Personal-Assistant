@@ -201,12 +201,17 @@ response is dropped before dispatch, its earlier rounds (read-only calls
 only, since every fast response is checked before anything runs) are
 rewound to the user's message, and the main model answers the whole turn,
 so its request never carries thinking signed for another model. Earlier
-turns' thinking is sent again only while the conversation stays in the
-chat and model that wrote it (a private tag on the message in memory,
-never sent and never stored: history.sqlite keeps reply text and tool
-names only); a resumed or shared history, a model change or the router's
-escalation stops it, and a 400 naming a thinking `signature` is retried
-once without any earlier thinking (one WARNING, no text). Untrusted
+turns' thinking is sent again only for the chat and model that wrote it,
+for the last `thinking_turns` turns (a private tag on the message in
+memory, never sent and never stored: history.sqlite keeps reply text and
+tool names only). Thinking from before a resume or a model change (the
+router's escalation included) isn't sent again; later turns' thinking is
+kept. A reply cut off by `max_tokens`, or one that is only thinking, is
+never re-sent. A 400 naming a thinking `signature` is retried once without
+any earlier thinking (one WARNING, no text). The history has a size budget
+(`[assistant] max_history_chars`, whole turns) and a "prompt is too long"
+400 drops the older half of the earlier turns and retries once (one
+WARNING with counts only), so a long conversation can't get stuck. Untrusted
 text read in the rewound rounds keeps the conversation tainted (only
 `reset()` clears that). Deliberate non-fix: words the fast model streamed
 before its tool call may already have been shown or spoken, and the main
