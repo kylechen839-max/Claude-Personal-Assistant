@@ -501,7 +501,7 @@ def test_deletes_wipe_the_index_and_log_without_fts_secure_delete(tmp_path):
         con.execute("INSERT INTO docs_fts(docs_fts, rank) VALUES ('secure-delete', 0)")
         con.commit()
     except sqlite3.OperationalError:  # older SQLite (Pi OS Bookworm): no such option
-        pass
+        con.rollback()  # the failed INSERT left a write transaction open: the store's next write would see "database is locked"
     try:
         store.upsert(None, {"course_id": 1, "course": "C", "kind": "page",
                             "source_key": "p:1:2", "title": "More", "etag": "e",
