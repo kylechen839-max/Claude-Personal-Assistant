@@ -194,12 +194,26 @@ filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
 grouped by Today / Yesterday / This week / Older with a source icon, time
 and snippet. Swipe a row left for Pin / Rename / Delete, or long-press it
 (or tap its "..." button) for all actions including Archive and Export.
-Tap a conversation to read it; **Continue this conversation** loads it and
-returns to the chat, and the voice view continues it too (it uses the same
-conversation). Delete always asks first. **Incognito** in the settings
-menu (gear) stops saving for this phone until you turn it off; the header
-shows an "Incognito" badge meanwhile. It follows the phone's light or dark
-setting and works as a home-screen app on iOS.
+Tap a conversation to read it; **Continue this conversation** shows it in
+the chat, and the voice view continues it too (it uses the same
+conversation). Delete always asks first.
+
+Typing into an old conversation continues it. Opening one only reads it;
+the chat is then tied to that conversation, and the first message you type
+there goes on in it on the server, with its history as context. That holds
+however long ago it ended: after the 5-minute idle timeout, after a voice
+call ended it, or a day later. The reply is added to the same conversation
+in History (no second copy is started). Like any resumed conversation, its
+old text counts as untrusted, so changes (adding an event, say) ask first.
+While Incognito is on nothing is tied (the server refuses it), and deleting
+the conversation drops the tie and any message still queued for it. Saying
+"goodbye" there ends that conversation and drops the tie too: the next
+message starts a new one.
+
+**Incognito** in the settings menu (gear) stops saving for this phone
+until you turn it off; the header shows an "Incognito" badge meanwhile. It
+follows the phone's light or dark setting and works as a home-screen app on
+iOS.
 
 **From the command line:**
 

@@ -4,6 +4,10 @@
                                          &since= &until= &limit= &offset=
   GET    /api/conversations/{id}         the transcript
   POST   /api/conversations/{id}/continue  load it into this browser's chat
+                                         (the voice view, older pages; the
+                                         page's Continue is a GET, and its
+                                         turns carry the id: POST /api/turn
+                                         {"conversation_id"}, webapp.py)
   PATCH  /api/conversations/{id}         {"title"?, "pinned"?, "archived"?}
   DELETE /api/conversations/{id}         (the page asks first)
   GET    /api/conversations/{id}/export  ?format=md|json (a download)

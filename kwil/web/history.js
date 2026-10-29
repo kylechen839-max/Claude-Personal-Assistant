@@ -1,6 +1,7 @@
 // Conversation history screen: search, browse by day, open a transcript,
 // pin / rename / archive / export / delete, and continue a conversation.
-// Uses $, els, show, request, addMessage and setStatus from app.js.
+// Uses $, els, show, request, addMessage and setStatus from app.js, and
+// window.KwilApp for the chat pane's binding.
 "use strict";
 
 const hist = {
@@ -56,6 +57,7 @@ hist.incognito.addEventListener("change", async () => {
     });
     if (!res.ok) throw new Error((await res.json()).error || `Error ${res.status}`);
     setIncognito((await res.json()).on);
+    if (want) window.KwilApp.bindPane(null);  // nothing typed goes into a saved one
     els.log.textContent = "";
     addMessage("note", want ? "Incognito: nothing from now on is saved."
                             : "Incognito off: conversations are saved again.");
@@ -326,15 +328,17 @@ hist.tBack.addEventListener("click", () => {
 });
 hist.tActions.addEventListener("click", () => current && openSheet(current.id));
 
+// Continue: read-only. The chat pane shows the conversation and is bound to
+// it (app.js); the first message typed there continues it on the server
+// (POST /api/turn with its conversation_id), even after it ended.
 hist.cont.addEventListener("click", async () => {
   if (!current) return;
   hist.cont.disabled = true;
   try {
-    const res = await request(`/api/conversations/${encodeURIComponent(current.id)}/continue`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-    });
+    const res = await request(`/api/conversations/${encodeURIComponent(current.id)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+    window.KwilApp.bindPane(data.id);
     els.log.textContent = "";
     const recent = data.messages.filter((m) => m.kind === "chat").slice(-6);
     if (data.messages.length > recent.length) addMessage("note", "…");
@@ -453,6 +457,9 @@ hist.del.addEventListener("close", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
     items.delete(id);
+    const shown = window.KwilApp.pane().cid === id;
+    window.KwilApp.forgetConversation(id);  // its queued messages and binding
+    if (shown) els.log.textContent = "";
     if (current && current.id === id) {
       if (current.active) els.log.textContent = "";
       current = null;

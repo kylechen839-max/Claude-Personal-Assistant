@@ -404,6 +404,28 @@
     else keepAwake();
   });
 
+  // The chat pane shows a stored conversation (app.js, history.js): voice
+  // continues it too. After getUserMedia (iOS wants the mic asked inside
+  // the tap); the server's conversation is checked first, so a call in the
+  // conversation already open costs nothing.
+  async function continueBound() {
+    const app = window.KwilApp;
+    const cid = app && app.pane().cid;
+    if (!cid) return;
+    const state = await (await app.request("/api/state")).json();
+    if (state.conversation === cid) return;
+    const res = await app.request(`/api/conversations/${encodeURIComponent(cid)}/continue`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    if (res.ok) return;
+    if (res.status === 404) { app.forgetConversation(cid); return; }  // deleted: a new one
+    let message = `Error ${res.status}`;
+    try { message = (await res.json()).error || message; } catch (e) { /* not JSON */ }
+    const err = new Error(res.status === 409 ? "Still working on the last request." : message);
+    err.plain = res.status === 409;  // shown as it is (i18n.js translates it)
+    throw err;
+  }
+
   // --- start / stop ---
   async function start() {
     if (running) return;
@@ -468,6 +490,8 @@
           console.warn("Couldn't match the mic's sample rate:", e);
         }
       }
+      await continueBound();
+      if (cancelled()) return;
       await connect();
       if (cancelled()) return;
       if (settings.debug_panel && !debugOn && ui.debugToggle) ui.debugToggle.click();
@@ -521,7 +545,7 @@
       if (ui.mute.getAttribute("aria-pressed") === "true") toggleMute(true);
       requestAnimationFrame(animate);
     } catch (e) {
-      if (!cancelled()) finish(`Voice mode couldn't start: ${e.message || e.name}`);
+      if (!cancelled()) finish(e.plain ? e.message : `Voice mode couldn't start: ${e.message || e.name}`);
     }
   }
 

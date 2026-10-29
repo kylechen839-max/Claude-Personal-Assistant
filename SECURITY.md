@@ -2407,6 +2407,14 @@ continued (`kwil/history.py`). What that means for privacy:
   is behind the web app's sign-in (cookie or bearer token, cross-site
   requests refused); an unknown id and another owner's id both give the
   same 404. A test calls every route without the cookie and expects 401.
+  `/api/turn` takes an optional `conversation_id` (JSON or form field) to
+  type into a stored conversation: it gets the same check (a malformed id
+  400, an unknown id, another owner's or the owner's for a family member
+  404, with history off 404, while incognito 409), all before any
+  transcription or Claude call, so nothing is sent or recorded. A
+  conversation deleted after that check gives an error event in the turn,
+  and it is never created again. Resuming it taints the chat as `/continue`
+  does. INFO logs carry the id only.
   The page builds the list with `textContent` (no HTML from the server), and
   highlights come as `[text, matched]` pairs.
 - **Export** contains only the transcript, title, summary, dates and

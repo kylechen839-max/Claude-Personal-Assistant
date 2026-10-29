@@ -22,7 +22,14 @@ let live = null;  // the reply bubble that streamed text is going into
 // and sent in order, one turn at a time, once the reply is done. Kept in
 // this page's memory only (never stored), a few at most.
 const MAX_QUEUE = 3;
-const queue = [];  // {text, el}
+const queue = [];  // {text, el, cid, epoch}
+// The chat pane: `cid` is the stored conversation it shows (history.js's
+// Continue binds it; null for a new chat). Every turn typed into it carries
+// that id, so the server continues that conversation however long ago it
+// ended. `epoch` changes with every binding: a turn's late text never lands
+// in a pane opened after it was sent.
+const pane = { cid: null, epoch: 0 };
+let confirmEpoch = 0;  // the pane the open yes/no question was asked in
 const player = new Audio();
 let audioUnlocked = false;
 
@@ -70,7 +77,7 @@ function setBusy(value) {
 }
 
 // --- queued messages ---
-function enqueue(text) {
+function enqueue(text, cid = pane.cid, epoch = pane.epoch) {
   if (queue.length >= MAX_QUEUE) {
     addMessage("note", `You can queue up to ${MAX_QUEUE} messages.`);
     return false;
@@ -87,7 +94,7 @@ function enqueue(text) {
   remove.className = "queued-remove";
   remove.setAttribute("aria-label", "Remove queued message");
   remove.textContent = "×";
-  const item = { text, el };
+  const item = { text, el, cid, epoch };  // sent into, and drawn in, the pane it was typed in
   remove.addEventListener("click", () => { unqueue(item); els.text.focus(); });
   el.appendChild(words);
   el.appendChild(tag);
@@ -107,13 +114,37 @@ function unqueue(item) {
 
 function clearQueue() { while (queue.length) unqueue(queue[0]); }
 
+// Bind the chat pane to a stored conversation (or none: a new chat). Called
+// by history.js; the caller redraws #log. Queued messages keep the pane
+// they were typed in.
+function bindPane(cid) {
+  pane.cid = cid || null;
+  pane.epoch += 1;
+  live = null;
+}
+
+// The conversation ended on the server ("goodbye"): the pane stays as it
+// is (same epoch), but what is typed next, queued messages included, starts
+// a new conversation instead of resuming the ended one.
+function conversationEnded(cid) {
+  for (const item of queue) if (item.cid === cid) item.cid = null;
+  if (pane.cid === cid) pane.cid = null;
+}
+
+// A conversation was deleted (or the server says it is gone): drop its
+// queued messages, and unbind the pane if it showed it.
+function forgetConversation(cid) {
+  for (const item of queue.filter((q) => q.cid === cid)) unqueue(item);
+  if (pane.cid === cid) bindPane(null);
+}
+
 // The next queued message, once nothing is running or being asked.
 function sendQueued() {
   if (busy || confirming || !queue.length) return;
   if (!els.login.hidden) { clearQueue(); return; }  // signed out: nothing goes
   const item = queue[0];
   unqueue(item);
-  sendMessage(item.text);
+  sendMessage(item.text, item.cid, item.epoch);
 }
 
 // Files picked with "+" (attachments.js) go with the next message, never
@@ -121,8 +152,9 @@ function sendQueued() {
 const tray = () => (window.KwilAttach && window.KwilAttach.tray) || null;
 const pendingFiles = () => !confirming && tray() !== null && tray().count() > 0;
 
-function setConfirm(question) {
+function setConfirm(question, epoch = pane.epoch) {
   confirming = Boolean(question);
+  if (confirming) confirmEpoch = epoch;
   els.confirm.hidden = !confirming;
   els.question.textContent = question || "";
   els.text.placeholder = confirming ? 'Type "yes" or "no"' : "Type a message";
@@ -314,7 +346,10 @@ async function request(url, options = {}) {
   return res;
 }
 
-async function readEvents(res) {
+// Typed text answers the open question only in the pane it was asked in.
+const answersHere = () => confirming && confirmEpoch === pane.epoch;
+
+async function readEvents(res, epoch = pane.epoch, cid = null) {
   if (!res.ok) {
     let message = `Error ${res.status}`;
     try { message = (await res.json()).error || message; } catch (e) { /* not JSON */ }
@@ -333,12 +368,22 @@ async function readEvents(res) {
     while ((nl = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
-      if (line) handleEvent(JSON.parse(line));
+      if (line) handleEvent(JSON.parse(line), epoch, cid);
     }
   }
 }
 
-function handleEvent(ev) {
+// `epoch`: the pane the turn was sent from. Its text (delta, transcript,
+// reply) is drawn only while that pane is still shown; a question, errors
+// and "done" always are.
+function handleEvent(ev, epoch = pane.epoch, cid = null) {
+  const here = epoch === pane.epoch;
+  if (!here && ["delta", "transcript", "reply"].includes(ev.type)) {
+    if (ev.type === "reply") setConfirm(null);
+    // its pane is gone, but an ended conversation still frees its queue
+    if (ev.type === "reply" && ev.ended && cid) conversationEnded(cid);
+    return;
+  }
   if (ev.type !== "delta" && ev.type !== "reply") live = null;
   switch (ev.type) {
     case "delta":
@@ -358,7 +403,7 @@ function handleEvent(ev) {
       break;
     case "confirm":
       addMessage("claude", ev.question);
-      setConfirm(ev.question);
+      setConfirm(ev.question, epoch);
       setStatus("");
       speak(`${ev.question} Please say yes or no.`, ev.audio);
       break;
@@ -377,31 +422,44 @@ function handleEvent(ev) {
       setStatus("");
       speak(ev.text, ev.audio);
       if (ev.ended) addMessage("note", "Conversation ended.");
+      if (ev.ended && cid) conversationEnded(cid);
       break;
     case "error":
       addMessage("note", ev.message);
+      if (ev.gone && cid) forgetConversation(cid);  // deleted elsewhere
       break;
     case "done":
+      // A bound turn that left no conversation (it ended): unbind. A fresh
+      // pane never binds to the id here, so its idle timeout still holds.
+      if (cid && ev.conversation === null) conversationEnded(cid);  // shown or not
       setConfirm(null);
       setStatus("");
       break;
   }
 }
 
-async function send(body, sentFiles) {
+async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
   // body: {text} | FormData with "audio" and/or "text" and "attachment"s.
   // sentFiles: called once the server took the turn (clears the chips).
+  // cid: the conversation it goes into (the pane's when it was typed); a
+  // yes/no answer belongs to its question's turn and never carries one.
+  // from: the pane it was typed in (a queued message's may be gone).
   const answering = confirming;
   const question = els.question.textContent;
+  const asked = confirmEpoch;
+  const epoch = answering ? asked : from;  // an answer's turn: its question's pane
   const url = answering ? "/api/confirm" : "/api/turn";
+  const into = answering ? null : cid;
   let options;
   if (body instanceof FormData) {
+    if (into) body.append("conversation_id", into);
     options = { method: "POST", body };
   } else {
     const payload = answering ? { answer: body.text } : { text: body.text };
+    if (into) payload.conversation_id = into;
     options = { method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload) };
-    addMessage("me", body.text);
+    if (epoch === pane.epoch) addMessage("me", body.text);
   }
   // Answered: text typed from now on is a new message (queued), not
   // another answer. A failed answer brings the question back.
@@ -412,13 +470,14 @@ async function send(body, sentFiles) {
   try {
     const res = await request(url, options);
     if (res.ok && sentFiles) sentFiles();
-    await readEvents(res);
+    await readEvents(res, epoch, into);
   } catch (e) {
     addMessage("note", e.message || String(e));
     setStatus("");
+    if (into && e.status === 404) forgetConversation(into);  // deleted elsewhere
     // the question is gone on the server (409: expired or answered
     // elsewhere): don't bring it back, the queue may go
-    if (answering && !confirming && e.status !== 409) setConfirm(question);
+    if (answering && !confirming && e.status !== 409) setConfirm(question, asked);
   } finally {
     if (router) router.endTurn();
     setBusy(false);
@@ -531,7 +590,8 @@ $("logout-all").addEventListener("click", () => {
 els.textForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = els.text.value.trim();
-  if (busy && !confirming) {
+  // Still answering, or asked a yes/no question in another pane: queued.
+  if ((busy || confirming) && !answersHere()) {
     // Still answering: the message waits its turn. Picked files stay in
     // the tray and go with the next message that is sent.
     if (text && enqueue(text)) { unlockAudio(); els.text.value = ""; }
@@ -543,10 +603,11 @@ els.textForm.addEventListener("submit", (e) => {
   sendMessage(text);
 });
 
-// A typed message (or a yes/no answer while asked), with any picked files.
-async function sendMessage(text) {
+// A typed message (or a yes/no answer while asked), with any picked files,
+// into conversation `cid` (the pane's when it was typed).
+async function sendMessage(text, cid = pane.cid, epoch = pane.epoch) {
   if (!pendingFiles()) {
-    send({ text });
+    send({ text }, undefined, cid, epoch);
     return;
   }
   setBusy(true);  // no second send while photos are still being shrunk
@@ -556,8 +617,8 @@ async function sendMessage(text) {
   const form = new FormData();
   if (text) form.append("text", text);
   tray().appendTo(form);
-  addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
-  send(form, () => tray().clear());
+  if (epoch === pane.epoch) addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
+  send(form, () => tray().clear(), cid, epoch);
 }
 
 // Stop: the server ends the turn where it is (POST /api/stop), its stream
@@ -755,6 +816,15 @@ document.addEventListener("visibilitychange", async () => {
   if (router) { await router.select(); renderBackends(); }
   if (!els.app.hidden && !busy) refreshState();
 });
+
+// For history.js and voice.js: the chat pane's binding, and requests that
+// go through the failover router like the page's own.
+window.KwilApp = {
+  bindPane,
+  forgetConversation,
+  pane: () => ({ cid: pane.cid, epoch: pane.epoch }),
+  request,
+};
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
