@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- When Kwil builds your schedule, it now colors the new events the way you
+  already color yours: it looks at your own events from the last two weeks
+  (for example every PHYS 361 session under your Physics label, tennis in
+  Sage) and uses the same colors and labels. It never makes up a new label;
+  if it can't tell, it leaves the default color and tells you. If your
+  Google sign-in is older and can't read label names, Kwil says so (and how
+  to fix it) instead of guessing.
 - Kwil remembers its own reasoning for the rest of a conversation, so "why
   did you block only 3:30 to 4?" gets a real answer. A long conversation
   with lots of calendar lookups no longer forgets its first requests, it

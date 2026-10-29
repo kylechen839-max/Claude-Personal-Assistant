@@ -1,6 +1,6 @@
 """Google Calendar tools: list, search, create, move, update and delete
 events (colors, labels, repeats, reminders, guests, Meet), answer invites,
-find free time, and list Kyle's calendars."""
+find free time, read how Kyle colors his events, and list his calendars."""
 
 from __future__ import annotations
 
@@ -60,6 +60,15 @@ MAX_COMMENT = 200        # an RSVP note
 MAX_FREE_SLOTS = 30
 CACHE_SECONDS = 300      # labels and the calendar list
 CACHE_ENTRIES = 20
+# calendar_color_habits: how far back, how much it reads and hands back
+HABIT_DAYS = 14
+MAX_HABIT_DAYS = 28
+MAX_HABIT_EVENTS = 250   # one page of events.list
+MAX_HABIT_TITLES = 30
+MAX_HABIT_TITLE = 60
+# a course code anywhere in a title ("PHYS 361 lecture", "Study cs101"):
+# every session of a course groups under it
+_COURSE = re.compile(r"\b([A-Z]{2,5})[ -]?(\d{3,4}[A-Z]?)\b", re.IGNORECASE)
 GOOGLE_PUBLIC_SUFFIX = "@group.v.calendar.google.com"  # holidays, birthdays
 MAX_CALENDAR_NAME = 60   # list_calendars: another person's calendar name
 # extendedProperties.private key on events whose text the assistant wrote
@@ -326,18 +335,33 @@ class GoogleCalendar:
     def _labels(self, calendar_id: str) -> list[dict]:
         """The calendar's named event labels (Google's "event labels");
         none without the extra scope or if Google won't say."""
+        return self._label_state(calendar_id)[0]
+
+    def _label_state(self, calendar_id: str) -> tuple[list[dict], bool]:
+        """(the labels, could they be read). Without the extra scope, or
+        when Google won't say, labels are unreadable: an event's label then
+        has no name to show, and none must be guessed."""
         if not self.extras:
-            return []
+            return [], False
 
         def fetch():
             cal = self.service.calendars().get(calendarId=calendar_id).execute()
             labels = (cal.get("labelProperties") or {}).get("eventLabels") or []
             return [lb for lb in labels if lb.get("id")][:200]
         try:
-            return self._cached(("labels", calendar_id), fetch)
+            return self._cached(("labels", calendar_id), fetch), True
         except Exception as e:  # colors still work without the labels
             log.warning("Calendar: event labels unavailable (%s)", type(e).__name__)
-            return []
+            return [], False
+
+    def labels_hint(self) -> str:
+        """What the model is told when label names can't be read."""
+        if not self.extras:
+            how = str(MissingScopes(CALENDAR_EXTRA_SCOPES, self.in_app))
+        else:
+            how = "Google didn't answer; try again later."
+        return ("Kyle's event label names can't be read, so don't name, guess "
+                "or make up a label; use only the colors listed. " + how)
 
     @staticmethod
     def _calendar_name(entry: dict) -> str:
@@ -402,16 +426,24 @@ class GoogleCalendar:
             return {"colorId": _COLOR_IDS[wanted]}
         if wanted in CLASSIC_COLORS:
             return {"colorId": wanted}
-        choices = self.color_choices(calendar_id)
-        names = (choices["classic"] + choices["labels"]
-                 + list(choices["aliases"]))
-        raise ValueError("Unknown color. Choices: " + ", ".join(names))
+        # an unknown name is refused, never made into a new label or a
+        # look-alike color: the event isn't created or changed
+        labels, readable = self._label_state(calendar_id)
+        names = (list(CLASSIC_COLORS.values())
+                 + [lb["name"] for lb in labels if lb.get("name")]
+                 + list(self.color_labels))
+        message = "No color or event label by that name. Choices: " + ", ".join(names)
+        if not readable:
+            message += ". " + self.labels_hint()
+        raise ValueError(message)
 
-    def _label_name(self, event: dict, calendar_id: str) -> str:
+    def _label_name(self, event: dict, calendar_id: str) -> str | None:
+        """The name of the event's label, or None if it can't be read (or
+        the label isn't on the calendar's list any more)."""
         for label in self._labels(calendar_id):
             if label["id"] == event["eventLabelId"]:
-                return label.get("name") or "a label"
-        return "a label"
+                return label.get("name") or None
+        return None
 
     def _summarize(self, event, calendar_id: str | None = None,
                    notes: bool = False) -> dict:
@@ -425,7 +457,11 @@ class GoogleCalendar:
         if event.get("location"):
             info["location"] = event["location"]
         if event.get("eventLabelId"):  # a label overrides colorId
-            info["label"] = self._label_name(event, calendar_id or self.calendar_id)
+            name = self._label_name(event, calendar_id or self.calendar_id)
+            if name:
+                info["label"] = name
+            else:  # labelled, but the name can't be read: never guess one
+                info["label_unreadable"] = True
         elif event.get("colorId") in CLASSIC_COLORS:
             info["color"] = CLASSIC_COLORS[event["colorId"]]
         if event.get("recurringEventId") or event.get("recurrence"):
@@ -532,6 +568,9 @@ class GoogleCalendar:
             out["calendars"] = len(sources) - skipped
             if skipped:
                 out["unreadable_calendars"] = skipped
+        if any(info.get("label_unreadable") for info in events):
+            out["labels_unavailable"] = True
+            out["labels_hint"] = self.labels_hint()
         log.info("Calendar: listed %d events from %d calendars", len(events),
                  len(sources))
         if untrusted:
@@ -894,6 +933,87 @@ class GoogleCalendar:
         return {"count": len(entries), "calendars": calendars,
                 "colors": self.color_choices()}
 
+    @staticmethod
+    def habit_key(title: str) -> str:
+        """The group an event's title falls in: its course code if it has
+        one ("PHYS 361"), else the title itself, spaces and edge
+        punctuation tidied ("Tennis!" and "tennis" are one group)."""
+        course = _COURSE.search(title)
+        if course:
+            return f"{course.group(1).upper()} {course.group(2).upper()}"
+        return " ".join(title.split()).strip(" .,:;!?-_*#()[]")
+
+    def color_habits(self, days: int = HABIT_DAYS,
+                     calendar: str | None = None) -> dict:
+        """How Kyle colored his own past events, by title group: the color
+        or label he used most and how often. Only events he made himself on
+        his own calendars count (an invite's title is someone else's text),
+        so the result never taints the conversation; untitled and all-day
+        events are skipped."""
+        days = max(1, min(int(days), MAX_HABIT_DAYS))
+        cal_id, entry = self._resolve_calendar(calendar)
+        now = turn_now(self.tz)
+        start = datetime.combine(now.date() - timedelta(days=days), time.min, self.tz)
+        items = self.service.events().list(
+            calendarId=cal_id, timeMin=start.isoformat(), timeMax=now.isoformat(),
+            singleEvents=True, orderBy="startTime",
+            maxResults=MAX_HABIT_EVENTS).execute().get("items", [])
+        labels, readable = self._label_state(cal_id)
+        names = {lb["id"]: lb.get("name") for lb in labels}
+        groups: dict[str, dict] = {}  # key (casefolded) -> shown name, uses
+        skipped = {"untitled": 0, "all_day": 0, "others": 0}
+        for n, event in enumerate(items[:MAX_HABIT_EVENTS]):
+            if event.get("status") == "cancelled":
+                continue
+            if self._outside(event, cal_id, entry):
+                skipped["others"] += 1
+                continue
+            if "dateTime" not in (event.get("start") or {}):
+                skipped["all_day"] += 1  # holidays and deadlines, not blocks
+                continue
+            key = self.habit_key(str(event.get("summary") or ""))
+            if not key:
+                skipped["untitled"] += 1
+                continue
+            if event.get("eventLabelId"):  # a label overrides colorId
+                name = names.get(event["eventLabelId"])
+                use = ("label", name) if name else ("label_unreadable", True)
+            elif event.get("colorId") in CLASSIC_COLORS:
+                use = ("color", CLASSIC_COLORS[event["colorId"]])
+            else:
+                use = ("color", "default")  # the calendar's own color
+            group = groups.setdefault(key.casefold(), {"name": key, "uses": {}})
+            count, _ = group["uses"].get(use, (0, 0))
+            group["uses"][use] = (count + 1, n)  # n: the latest use wins a tie
+        ranked = sorted(groups.values(), key=lambda g: (
+            -sum(c for c, _ in g["uses"].values()), g["name"].casefold()))
+        habits = {}
+        for group in ranked[:MAX_HABIT_TITLES]:
+            (field, value), (count, _) = max(group["uses"].items(),
+                                             key=lambda kv: kv[1])
+            habit = {field: value, "count": count}
+            total = sum(c for c, _ in group["uses"].values())
+            if total != count:
+                habit["of"] = total  # colored differently some of the time
+            name = group["name"]
+            shown = name[:MAX_HABIT_TITLE] + ("..." if len(name) > MAX_HABIT_TITLE
+                                              else "")
+            habits.setdefault(shown, habit)
+        out = {"days": days, "events_read": len(items), "habits": habits,
+               "colors": {"classic": list(CLASSIC_COLORS.values()),
+                          "labels": [lb["name"] for lb in labels if lb.get("name")],
+                          "aliases": dict(self.color_labels)}}
+        if len(ranked) > MAX_HABIT_TITLES:
+            out["more_titles"] = len(ranked) - MAX_HABIT_TITLES
+        if any(skipped.values()):
+            out["skipped"] = {k: v for k, v in skipped.items() if v}
+        if not readable:
+            out["labels_unavailable"] = True
+            out["labels_hint"] = self.labels_hint()
+        log.info("Calendar: read color habits (%d events, %d groups, labels=%s)",
+                 len(items), len(habits), readable)
+        return out
+
     def _list_name(self, entry: dict) -> str:
         """A calendar's name; another person's is cut short (their text)."""
         name = self._calendar_name(entry)
@@ -1175,6 +1295,18 @@ class GoogleCalendar:
                   "required": ["day"]},
                  self.find_free_time),
         ]
+        tools.append(Tool(
+            "calendar_color_habits",
+            "How Kyle colored his own past events: for each kind of event "
+            "(by course code or title), the color or event label he used "
+            "most and how often, plus the colors and labels that exist. Use "
+            "it before creating schedule events, to color them his way.",
+            {"type": "object", "properties": {
+                "days": {"type": "integer", "minimum": 1,
+                         "maximum": MAX_HABIT_DAYS, "description":
+                         f"How many past days to look at (default {HABIT_DAYS})"},
+                "calendar": calendar}},
+            self.color_habits))
         if self.extras:  # needs the read-only calendar list scope
             tools.append(Tool(
                 "list_calendars",
