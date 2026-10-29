@@ -135,6 +135,15 @@ SCHEDULE_PROMPT = (
     "five\")."
 )
 
+# With calendar_color_habits: new events look like Kyle's own past ones.
+COLOR_PROMPT = (
+    "When you create events for a schedule, call calendar_color_habits first "
+    "and give each new event the color or event label of Kyle's similar past "
+    "events. Use only colors and labels that already exist: never invent a "
+    "new category, label or color name. If no past event is similar, or "
+    "label names can't be read, leave the default color and say so briefly."
+)
+
 MEMORY_PROMPT = (
     "You have long-term memory: Kyle's Pinecone database (his project notes "
     "and summaries of past conversations). Relevant notes are looked up "
@@ -356,6 +365,8 @@ class ClaudeChat:
             parts.append(TOOLS_PROMPT)
             if self.tools.has("find_free_time"):
                 parts.append(SCHEDULE_PROMPT)
+            if self.tools.has("calendar_color_habits"):
+                parts.append(COLOR_PROMPT)
             if self.tools.has("web_search") or self.tools.has("web_fetch"):
                 parts.append(WEB_PROMPT)
             if self.tools.has("email_summary"):

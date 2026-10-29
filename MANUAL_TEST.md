@@ -175,6 +175,13 @@ calendar permissions. Use test events only; delete them afterwards.
 - [ ] "Hey Claude, when am I free for an hour tomorrow?"
   - Should: the gaps match your calendar (events marked "Free" don't
     count).
+- [ ] Make sure the last two weeks have a few events you colored yourself
+      (e.g. classes under a label, a sport in one color). Then "Hey Claude,
+      build my schedule for today."
+  - Should: each new event uses the same color or label as your similar
+    past events (compare in Google Calendar); no new label appears in the
+    label list. Where nothing was similar it keeps the default color and
+    Kwil says so briefly. Report any new or renamed label.
 
 ## 6. Notion status (1 min)
 - [ ] "Hey Claude, what assignments are due this week?"

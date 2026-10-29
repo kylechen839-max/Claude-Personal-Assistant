@@ -47,6 +47,7 @@ MAX_CJK_CHARS = 30  # Chinese has no spaces: count characters
 # allowed on either model.
 READ_ONLY_TOOLS = frozenset({
     "list_calendar_events", "find_free_time", "list_calendars",  # calendar.py
+    "calendar_color_habits",              # calendar.py
     "list_assignments",                   # notion.py
     "email_summary", "read_email",        # gmail.py
     "recall_notes", "list_recent_notes",  # notes.py

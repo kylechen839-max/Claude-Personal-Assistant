@@ -37,6 +37,7 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
                      "list_assignments", "update_assignment_status",
                      "list_deadlines", "confirm_deadline", "add_deadline",
                      "delete_deadline", "search_course_files", "read_course_file",
+                     "calendar_color_habits",
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

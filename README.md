@@ -1358,6 +1358,16 @@ Google Calendar app does:
   from Google; create and rename them in the Google Calendar app.
   `[calendar] color_labels` in `config.toml` adds your own words, e.g.
   `color_labels = { Homework = "School", Gym = "Tangerine" }`.
+- **Your own color habits.** When Kwil builds your schedule it first looks
+  at how you colored your own events over the last two weeks
+  (`calendar_color_habits`: per course code or title, the color or label
+  you used most) and colors the new events the same way. It only uses
+  colors and labels that already exist: an unknown label name is refused,
+  never created, and if nothing similar is found it leaves the default
+  color and says so. Label names need the extra calendar permissions from
+  the newer Google sign-in; without them Kwil says it can't read your
+  labels instead of guessing one. Invites and all-day or untitled events
+  don't count.
 - **Repeating events.** "Add gym every Tuesday and Thursday at 7 AM for
   ten weeks". To move, change or delete a repeating event, say whether you
   mean just this one or all of them; deleting a whole series asks "delete
