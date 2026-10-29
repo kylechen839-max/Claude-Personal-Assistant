@@ -1628,6 +1628,12 @@ Needs a real `ANTHROPIC_API_KEY`; `[memory] backend` left at "local".
     language zh): every label is Chinese.
 - [ ] As an invited family member, open Settings -> Memory.
   - Should: their own empty memory, never yours.
+- [ ] Ask Kwil to read your latest email, then say "from now on, keep my
+      replies short" and say yes when it reads the whole sentence back.
+  - Should: Settings -> Memory shows it with an Untrusted badge and a
+    "Keep as mine" button; in a new conversation replies are short anyway.
+    Tap Keep as mine: the badge goes. Under the lists it says "Saved on
+    this server (cloud)."
 
 ## Kwil rebrand (~10 min)
 

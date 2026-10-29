@@ -106,10 +106,10 @@ function load({ answer = true, responses = {} } = {}) {
 
 const LOCAL_IDS = ['memory-local', 'memory-items', 'memory-items-empty', 'memory-instructions',
   'memory-instructions-count', 'memory-instructions-save', 'memory-pause', 'memory-export',
-  'memory-forget-all', 'memory-local-status', 'memory-notes-head'];
+  'memory-forget-all', 'memory-local-status', 'memory-notes-head', 'memory-where'];
 
 const MINE = {
-  instructions: 'Always color-code my schedule.', paused: false,
+  instructions: 'Always color-code my schedule.', paused: false, where: 'cloud',
   limits: { instructions: 4000, memory: 500, count: 200 },
   memories: [
     { id: 'mem-aaaaaaaaaaaa', text: '<b>Likes</b> jasmine tea', created: '2026-10-28T10:00:00Z', untrusted: false },
@@ -212,6 +212,24 @@ test('Delete asks; Edit saves in place; Pause and Export call their routes', asy
   assert.equal(t.anchors[0].download, 'kwil-memory.json');
 });
 
+test('Keep as mine trusts an untrusted memory; the page says where memory is kept', async () => {
+  const t = load({ responses: { '/api/memories/mem-bbbbbbbbbbbb/trust': { status: 200, body: { ok: true } } } });
+  await openMine(t);
+  assert.equal(t.els['memory-where'].hidden, false);
+  assert.equal(t.els['memory-where'].textContent, 'Saved on this server (cloud).');
+  const items = t.els['memory-items'].all('mem-item');
+  assert.equal(items[0].all('mem-keep').length, 0);  // only on untrusted ones
+  const keep = items[1].all('mem-keep')[0];
+  assert.equal(keep.textContent, 'Keep as mine');
+  await keep.fire('click');
+  assert.equal(posted(t, '/api/memories/mem-bbbbbbbbbbbb/trust').length, 1);
+  assert.equal(t.fetches.at(-1).url, '/api/memories');
+  assert.equal(t.els['memory-local-status'].textContent, 'Kept as yours.');
+  const none = load({ responses: { '/api/memories': { status: 200, body: { ...MINE, where: '' } } } });
+  await openMine(none);
+  assert.equal(none.els['memory-where'].hidden, true);
+});
+
 test('a failed pause puts the switch back', async () => {
   const t = load({ responses: { '/api/memories/pause': { status: 500, body: { error: "couldn't reach your memory; try again" } } } });
   await openMine(t);
@@ -228,7 +246,8 @@ test('every fixed string of your own memory has Chinese', () => {
   const tr = ctx.KwilI18n.translate;
   const t = load();
   const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
-  const strings = [...Object.values(t.api.LOCAL), 'Your instructions', 'Things Kwil remembered',
+  const strings = [...Object.values(t.api.LOCAL), ...Object.values(t.api.WHERE), 'Keep as mine',
+    'Your instructions', 'Things Kwil remembered',
     'For example: always color-code my schedule.', 'Kwil follows these from your next conversation.',
     'Pause memory', 'Export', 'Forget all', 'Edit', 'Save', 'Cancel', 'Edit this memory',
     'While paused, Kwil saves no new memories and uses none. Your instructions still apply.',

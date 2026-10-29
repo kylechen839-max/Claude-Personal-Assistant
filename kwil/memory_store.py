@@ -146,7 +146,12 @@ EMPTY = Snapshot()
 
 class MemoryStore:
     """The interface (see the module doc). Memories are dicts:
-    {"id", "text", "created" (ISO, UTC), "source", "untrusted"}."""
+    {"id", "text", "created" (ISO, UTC), "source", "untrusted"}.
+    `deletions` counts deletes (and cleared instructions) in this process,
+    so an open conversation can drop what was deleted elsewhere
+    (ClaudeChat._drop_deleted_memories)."""
+
+    deletions = 0
 
     def instructions(self) -> str:
         raise NotImplementedError
@@ -168,6 +173,10 @@ class MemoryStore:
         raise NotImplementedError
 
     def delete(self, memory_id: str) -> bool:
+        raise NotImplementedError
+
+    def trust(self, memory_id: str) -> dict | None:
+        """The person said "Keep as mine" (Settings): no longer untrusted."""
         raise NotImplementedError
 
     def list(self) -> list[dict]:
@@ -277,6 +286,8 @@ class SqliteMemoryStore(MemoryStore):
                 db.execute("DELETE FROM instructions")
         self._write(write)
         self._purge()  # the old text: gone
+        if not text:
+            self.deletions += 1
         log.info("Memory: instructions saved (%d chars)", len(text))
         return text
 
@@ -347,8 +358,24 @@ class SqliteMemoryStore(MemoryStore):
             "DELETE FROM memories WHERE id = ?", (memory_id,)).rowcount > 0)
         if found:
             self._purge()
+            self.deletions += 1
             log.info("Memory: deleted %s", memory_id)
         return found
+
+    def trust(self, memory_id: str) -> dict | None:
+        if not valid_id(memory_id):
+            return None
+
+        def write(db):
+            if db.execute("UPDATE memories SET untrusted = 0 WHERE id = ?",
+                          (memory_id,)).rowcount == 0:
+                return None
+            return self._row(db.execute("SELECT * FROM memories WHERE id = ?",
+                                        (memory_id,)).fetchone())
+        saved = self._write(write)
+        if saved is not None:
+            log.info("Memory: %s kept as the person's own (trusted)", memory_id)
+        return saved
 
     def list(self) -> list[dict]:
         """Every memory, newest first."""
@@ -384,6 +411,7 @@ class SqliteMemoryStore(MemoryStore):
             return n
         count = self._write(write)
         self._purge()
+        self.deletions += 1
         log.info("Memory: forgot everything (%d memories)", count)
         return count
 

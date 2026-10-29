@@ -5,6 +5,15 @@ hardware) are in BLOCKERS.md.
 
 ## Before public release
 
+### Memory across failover backends
+
+Sync memory across failover backends via the history event log: each
+backend (Pi, PC, cloud) keeps its own `memory.sqlite` today
+(`memory_store.py`), and Settings -> Memory says which machine holds it.
+Put memory changes (add, edit, delete, forget all, pause, instructions) on
+`failover/sync.py`'s event log, with the same redact-on-delete rule as
+history.
+
 ### Hybrid model
 
 Let more than one model provider answer, so the assistant keeps working (and

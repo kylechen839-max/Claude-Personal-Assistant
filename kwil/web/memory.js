@@ -72,6 +72,14 @@
     paused: "Memory paused.",
     resumed: "Memory on.",
     exported: "Export started.",
+    kept: "Kept as yours.",
+  };
+  // which machine keeps this memory (/api/memories "where"): each backend
+  // has its own file until memory is synced
+  const WHERE = {
+    cloud: "Saved on this server (cloud).",
+    pc: "Saved on this PC.",
+    pi: "Saved on this Raspberry Pi.",
   };
 
   function setup(win, doc) {
@@ -84,6 +92,7 @@
     const saveBtn = $("memory-instructions-save"), pause = $("memory-pause");
     const exportBtn = $("memory-export"), forgetBtn = $("memory-forget-all");
     const localStatus = $("memory-local-status"), notesHead = $("memory-notes-head");
+    const where = $("memory-where");
     let data = null, mine = null;
     let seq = 0, localSeq = 0;
     let localOn = false, notesOn = false;
@@ -170,6 +179,17 @@
         const flag = el("span", "badge mem-untrusted", "Untrusted");
         flag.setAttribute("title", UNTRUSTED_HINT);
         top.appendChild(flag);
+        // the person vouches for it: from now on it's theirs (trusted)
+        const keep = el("button", "mem-keep", "Keep as mine");
+        keep.type = "button";
+        keep.addEventListener("click", async () => {
+          try {
+            await post(`/api/memories/${encodeURIComponent(m.id)}/trust`);
+            await loadLocal();
+            say(LOCAL.kept);
+          } catch (e) { say(e.message || String(e)); }
+        });
+        top.appendChild(keep);
       }
       const edit = el("button", "mem-edit", "Edit");
       edit.type = "button";
@@ -218,6 +238,10 @@
         itemsEmpty.hidden = Boolean((mine.memories || []).length);
       }
       if (pause) pause.checked = Boolean(mine.paused);
+      if (where) {
+        where.textContent = WHERE[mine.where] || "";
+        where.hidden = !WHERE[mine.where];
+      }
     }
 
     async function loadLocal() {
@@ -370,5 +394,5 @@
       Boolean(state && state.owner && state.memory));
   }
 
-  root.KwilMemory = { configure, onState, setup, weekLabel, deleteWeekQuestion, KIND, LOCAL };
+  root.KwilMemory = { configure, onState, setup, weekLabel, deleteWeekQuestion, KIND, LOCAL, WHERE };
 })(typeof window !== "undefined" ? window : globalThis);

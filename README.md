@@ -1468,23 +1468,32 @@ file per person, `[memory] local_path`; no Pinecone needed):
 Both are read when a conversation starts and given to Claude for the whole
 conversation (in the cached system prompt), so a change applies from your
 next conversation. A memory saved while a web page, email or other outside
-text was in the conversation asks you first, is marked **Untrusted** and is
-shown to Claude as information, never as an instruction; while one is
-loaded, changes ask for a yes (as after reading an email).
+text was in the conversation asks you first (with the whole text) and is
+marked **Untrusted**: Kwil still follows it as your preference, but while
+one is loaded every change asks for a yes (as after reading an email). Tap
+**Keep as mine** on it in Settings to vouch for it. A memory you save in a
+conversation without outside text is never marked, even when an untrusted
+one is loaded.
 
 **Settings -> Memory** (everyone, family members too, each their own):
 edit your instructions and Save; edit or delete each memory (delete asks
 first); **Pause memory** (nothing new is saved and no memories are used;
 your instructions still apply); **Export** (a JSON file); **Forget all**
 (asks first, then deletes every memory and your instructions; the file is
-scrubbed, nothing is left to recover). Incognito conversations save
-nothing. A family member's memory is in their own folder, included in
-"Download my data" and deleted with their account. With failover, each
-backend (Pi, PC, cloud) keeps its own memory for now; it isn't synced.
+scrubbed, nothing is left to recover). Incognito conversations save or
+change nothing (forgetting still works). Forgetting by voice also takes the
+memory out of your other open conversations from their next turn. A
+family member's memory is in their own folder, included in "Download my
+data" and deleted with their account; the owner's backup zip has
+everyone's. With failover, each backend (Pi, PC, cloud) keeps its own
+memory for now; it isn't synced, and the screen says where yours is
+("Saved on this server (cloud)").
 
 `[memory] backend = "pinecone"` adds the older Pinecone memory on top:
-notes recalled before each reply, conversation summaries, quick notes and
-the weekly review below. If Pinecone answers "over quota" (429), Kwil logs
+notes recalled before each reply, conversation summaries, quick notes
+(`remember_note`) and the weekly review below. "Remember..." still saves
+to the local memory above with either backend (it is what every new
+conversation is told); Pinecone gets quick notes and summaries. If Pinecone answers "over quota" (429), Kwil logs
 "Memory: Pinecone over quota" once and leaves Pinecone alone for 10
 minutes; your local memory keeps working.
 

@@ -7,7 +7,8 @@ someone else's memories, and an id from another person's store is a 404.
 
   GET  /api/memories                {"instructions", "paused", "memories":
                                      [{"id", "text", "created", "untrusted"}],
-                                     "limits": {...}}
+                                     "limits": {...}, "where": "cloud" | "pc" |
+                                     "pi" (which machine keeps this file)}
   POST /api/memories/instructions   {"text"}: "Your instructions" (trusted:
                                      the person typed them)
   POST /api/memories/pause          {"paused": true|false}
@@ -15,6 +16,7 @@ someone else's memories, and an id from another person's store is a 404.
                                      instructions (the page asks first)
   GET  /api/memories/export         everything, as a JSON download
   POST /api/memories/{id}/update    {"text"} (keeps the untrusted flag)
+  POST /api/memories/{id}/trust     "Keep as mine": no longer untrusted
   POST /api/memories/{id}/delete
 
 Not signed in is 401; memory off is 404. Changes are POST (with failover
@@ -194,7 +196,9 @@ def register_local(app, assistant, session_of, error) -> None:
         return {"instructions": instructions, "paused": paused,
                 "memories": [public(m) for m in memories],
                 "limits": {"instructions": MAX_INSTRUCTIONS,
-                           "memory": MAX_MEMORY_CHARS, "count": MAX_MEMORIES}}
+                           "memory": MAX_MEMORY_CHARS, "count": MAX_MEMORIES},
+                # each backend keeps its own file (not synced yet): say which
+                "where": getattr(assistant, "memory_where", "") or ""}
 
     @app.post("/api/memories/instructions")
     async def memories_instructions(request: Request):
@@ -275,6 +279,21 @@ def register_local(app, assistant, session_of, error) -> None:
             return error(str(e), 400)
         except Exception:
             return failed("editing")
+        if saved is None:
+            return error("not found", 404)
+        return {"ok": True, "memory": public(saved)}
+
+    @app.post("/api/memories/{memory_id}/trust")
+    async def memories_trust(memory_id: str, request: Request):
+        s, store, err = guard(request)
+        if err:
+            return err
+        if not valid_id(memory_id):
+            return error("not found", 404)
+        try:
+            saved = await run_in_threadpool(store.trust, memory_id)
+        except Exception:
+            return failed("keeping a memory")
         if saved is None:
             return error("not found", 404)
         return {"ok": True, "memory": public(saved)}

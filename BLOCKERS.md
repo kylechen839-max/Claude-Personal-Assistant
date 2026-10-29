@@ -380,7 +380,9 @@ Only what is still open for Kyle. None of it blocks the code.
   `[memory] backend = "local"` (the default) keeps instructions and
   memories in `data/memory.sqlite` and never calls Pinecone. Set
   `backend = "pinecone"` again only once the quota is raised; the old
-  Pinecone notes were not migrated.
+  Pinecone notes were not migrated. Memory isn't synced between failover
+  backends yet (BACKLOG.md: sync memory across failover backends via the
+  history event log); cloud-only use is unaffected.
 - Whisper model downloads on first run.
 - Custom "Hey Claude" wake word trained with openWakeWord (no account or key)
   and committed as `keywords/hey_claude.onnx`. To retrain: in the

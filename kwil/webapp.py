@@ -852,6 +852,9 @@ class WebAssistant:
         # the owner's own memory store (memory_store.py; Settings, Memory),
         # or None; a family member's is in their family.UserContext
         self.local_memory = local_memory
+        # which machine keeps the memory files ("cloud", "pc", "pi"; "" =
+        # don't say): each failover backend has its own for now
+        self.memory_where = ""
         # memory_review.MemoryReview (the Memory screen); made from `memory`
         # on first use when not given
         self.memory_review = memory_review
@@ -2472,6 +2475,16 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 
 # --- startup ------------------------------------------------------------------
 
+def memory_location(config: dict) -> str:
+    """Where this backend's memory files are, for Settings, Memory: "cloud"
+    (the server profile, or [failover] role), "pi" or "pc"."""
+    from kwil.history import origin_of
+
+    if config.get("profile") == "server":
+        return "cloud"
+    return origin_of(config)
+
+
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from kwil.cli import (add_history_tools, add_memory_tools, build_chat,
@@ -2535,7 +2548,9 @@ def build_assistant(config: dict, tts_name: str | None = None,
         assistant.voices = VoicePicker(config, assistant.tts, family)
     from kwil.backup import Backup
 
-    assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
+    assistant.memory_where = memory_location(config)
+    # GET /api/backup (memory files too)
+    assistant.backup = Backup.from_config(config, store, family, memory=local)
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     from kwil import owner_connect
 

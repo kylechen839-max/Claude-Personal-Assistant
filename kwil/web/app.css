@@ -557,7 +557,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-instr textarea, .mem-edit-field { width: 100%; min-height: 7rem; resize: vertical; font-size: var(--t-body); line-height: 1.4; }
 .mem-instr-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
 .mem-count { color: var(--muted); font-size: var(--t-cap); font-variant-numeric: tabular-nums; }
-.mem-edit, .mem-edit-cancel { background: none; padding: 0 .5rem; min-height: 44px; font-size: .875rem; font-weight: 600;
+.mem-edit, .mem-edit-cancel, .mem-keep { background: none; padding: 0 .5rem; min-height: 44px; font-size: .875rem; font-weight: 600;
   color: var(--accent-ink); }
 .mem-edit-box { display: grid; grid-template-columns: 1fr auto auto; gap: var(--s2); margin-top: var(--s2); align-items: center; }
 .mem-edit-box textarea { grid-column: 1 / -1; min-height: 4rem; }

@@ -101,6 +101,23 @@ def test_remember_saves_nothing_in_an_incognito_conversation(store, fake_client)
     assert out["status"] == "incognito" and store.list() == []
 
 
+def test_update_memory_saves_nothing_in_an_incognito_conversation(store, fake_client):
+    from kwil.chat import _CURRENT_CHAT, ClaudeChat
+
+    m = store.add("Likes tea")
+    chat = ClaudeChat(client=fake_client, recorder=MagicMock(incognito=True))
+    token = _CURRENT_CHAT.set(chat)
+    try:
+        tools = registry(store, confirm=lambda q: True)
+        out = json.loads(tools.dispatch("update_memory", {"memory_id": m["id"],
+                                                          "text": "Likes coffee"})[0])
+        gone = json.loads(tools.dispatch("forget_memory", {"memory_id": m["id"]})[0])
+    finally:
+        _CURRENT_CHAT.reset(token)
+    assert out["status"] == "incognito"
+    assert gone["status"] == "forgotten" and store.list() == []  # forgetting still works
+
+
 def test_forget_memory_asks_first(store):
     """Fail-first: a delete always asks, even in a trusted conversation."""
     kept = store.add("Always color-code my schedule")
@@ -149,7 +166,7 @@ def test_list_memories_is_read_only_private_and_marks_untrusted(store):
     assert "untrusted_content" not in out
     store.add("From an email", untrusted=True)
     out = json.loads(tools.dispatch("list_memories", {})[0])
-    assert out["untrusted_content"] is True
+    assert out["untrusted_content"] is True  # no running chat: the result says so
 
 
 def test_memory_tool_text_never_reaches_the_log(store, caplog):

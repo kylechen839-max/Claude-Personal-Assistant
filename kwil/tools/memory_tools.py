@@ -46,19 +46,38 @@ def _chat():
     return current_chat()
 
 
+def _incognito(chat) -> dict | None:
+    if chat is not None and getattr(chat, "incognito", False) is True:
+        return {"status": "incognito",
+                "message": "This conversation is incognito, so nothing is "
+                           "saved. Say so in one short sentence."}
+    return None
+
+
+def _from_outside(chat) -> bool:
+    """Save what is written now as untrusted? Only when outside text (web,
+    email, an attachment...) is in this conversation: a conversation
+    tainted only by a loaded untrusted memory still asks first
+    (UNTRUSTED_CONTEXT), but what the person confirms there is theirs.
+    Without a running chat, whatever made the call untrusted counts."""
+    if not UNTRUSTED_CONTEXT.get():
+        return False
+    outside = getattr(chat, "outside_content", None)
+    return bool(outside()) if callable(outside) else True
+
+
 def memory_tools(store) -> list[Tool]:
     from kwil.memory_store import (MAX_MEMORIES, MAX_MEMORY_CHARS, MemoryFull,
                                    MemoryPaused, valid_id)
 
     def remember(note: str) -> dict:
         chat = _chat()
-        if chat is not None and getattr(chat, "incognito", False) is True:
-            return {"status": "incognito",
-                    "message": "This conversation is incognito, so nothing is "
-                               "saved. Say so in one short sentence."}
+        refused = _incognito(chat)
+        if refused:
+            return refused
         try:
             saved = store.add(note, source=getattr(chat, "conversation_id", None),
-                              untrusted=bool(UNTRUSTED_CONTEXT.get()))
+                              untrusted=_from_outside(chat))
         except MemoryPaused:
             return {"status": "paused",
                     "message": "Memory is paused in Settings, so nothing was "
@@ -75,17 +94,29 @@ def memory_tools(store) -> list[Tool]:
     def list_memories() -> dict:
         memories = [{k: m[k] for k in ("id", "text", "created", "untrusted")}
                     for m in store.list()]
-        return mark_untrusted({"memories": memories, "paused": store.paused},
-                              any(m["untrusted"] for m in memories))
+        result = {"memories": memories, "paused": store.paused}
+        if any(m["untrusted"] for m in memories):
+            chat = _chat()
+            if chat is not None and hasattr(chat, "untrusted_saved_memory"):
+                # the same sticky taint as loading one: changes ask first,
+                # but it isn't fresh outside text (see _from_outside)
+                chat.untrusted_saved_memory = True
+            else:
+                mark_untrusted(result, True)
+        return result
 
     def update_memory(memory_id: str, text: str) -> dict:
+        chat = _chat()
+        refused = _incognito(chat)
+        if refused:
+            return refused
         old = store.get(memory_id)
         if old is None:
             return {"status": "error", "message": "No memory with that id."}
         try:
             # edited with outside text in context: untrusted from now on
             store.update(memory_id, text,
-                         untrusted=old["untrusted"] or bool(UNTRUSTED_CONTEXT.get()))
+                         untrusted=old["untrusted"] or _from_outside(chat))
         except ValueError as e:
             return {"status": "error", "message": str(e)}
         return {"status": "updated", "id": memory_id}
@@ -118,7 +149,8 @@ def memory_tools(store) -> list[Tool]:
               "required": ["note"]},
              remember,
              # A web page or email must not be able to plant memories.
-             confirm_if_untrusted=lambda i: f"Save this to memory: {short(str(i.get('note', '')), 200)}?",
+             # the whole text (at most MAX_MEMORY_CHARS): a yes to all of it
+             confirm_if_untrusted=lambda i: f"Save this to memory: {short(str(i.get('note', '')), MAX_MEMORY_CHARS)}?",
              private=True),
         Tool("list_memories",
              "List everything saved in the user's memory, newest first, with "
@@ -134,7 +166,7 @@ def memory_tools(store) -> list[Tool]:
                                       "description": "The new memory text."}},
               "required": ["memory_id", "text"]},
              update_memory,
-             confirm_if_untrusted=lambda i: f"Change this memory to: {short(str(i.get('text', '')), 200)}?",
+             confirm_if_untrusted=lambda i: f"Change this memory to: {short(str(i.get('text', '')), MAX_MEMORY_CHARS)}?",
              private=True),
         Tool("forget_memory",
              "Delete one saved memory by id, e.g. when the user says 'forget "
