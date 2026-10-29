@@ -7010,4 +7010,5 @@ time: without the own-calendar check in the refusal, or without dropping
 a shared calendar's labels in the habits, the shared-calendar test fails.
 
 Counts after round 2 (Linux sandbox, not real hardware), `-k "not
-live_pinecone"`: COUNTS2 (7c07bcc: 3571 / 41); JavaScript JS2.
+live_pinecone"`: 3585 passed, 41 skipped, 1 deselected (7c07bcc: 3571 /
+41; +14 new tests); JavaScript 294 passed (unchanged).
