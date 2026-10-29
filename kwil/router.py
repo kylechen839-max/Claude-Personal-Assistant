@@ -51,7 +51,7 @@ READ_ONLY_TOOLS = frozenset({
     "list_assignments",                   # notion.py
     "email_summary", "read_email",        # gmail.py
     "recall_notes", "list_recent_notes",  # notes.py
-    "search_memory",                      # memory tools (cli.py)
+    "search_memory", "list_memories",     # tools/memory_tools.py
     "review_memory",                      # memory_review.py
     "search_conversations",               # tools/history.py
     "check_dev_team",                     # devteam.py

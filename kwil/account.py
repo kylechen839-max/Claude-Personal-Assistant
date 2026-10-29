@@ -2,9 +2,10 @@
 and "Delete my account" in their own Settings (web/family.js).
 
   GET  /api/me/export   a zip of their conversations (history.export JSON),
-                        profile, school deadlines (deadlines.json) and Canvas
-                        course content text (coursefiles.json); never
-                        tokens, keys or their Canvas link
+                        profile, school deadlines (deadlines.json), Canvas
+                        course content text (coursefiles.json) and their
+                        memory (memory.json: instructions and saved
+                        memories); never tokens, keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
                         Notion and Google grants (best effort), then
                         Family.remove
@@ -16,8 +17,9 @@ whole server, and he removes people from the invite list instead.
 
 Deleting reuses Family.remove: it drops them from users.json, signs out
 every session of theirs (cookies, live voice calls) and deletes
-`<dir>/<id>/`: history, Google token, and every other per-person file
-(their own API key, Notion token), with its retry for files locked on
+`<dir>/<id>/`: history, memory, Google token, and every other per-person
+file (their own API key, Notion token; their history and memory databases
+are closed first), with its retry for files locked on
 Windows. Notion (POST /v1/oauth/revoke, under their Notion lock) and Google
 (POST https://oauth2.googleapis.com/revoke) are told first, the token in
 the body, never the URL, so neither grant outlives the account; a failure
@@ -282,14 +284,16 @@ class Account:
                 self._busy[uid] = (slot[0], token, folder)
         try:
             path = folder / "kwil-data.zip"
-            count, size = self._write(path, user, ctx.history)
+            count, size = self._write(path, user, ctx.history,
+                                      getattr(ctx, "memory", None))
         except BaseException:
             self.finish(uid, folder)
             raise
         log.info("Account: %s exported %d conversation(s), %d bytes", uid, count, size)
         return folder, path
 
-    def _write(self, path: Path, user: dict, store) -> tuple[int, int]:
+    def _write(self, path: Path, user: dict, store,
+               memory=None) -> tuple[int, int]:
         from kwil import history
 
         cap, total = self.max_bytes, 0
@@ -316,6 +320,9 @@ class Account:
             if content is not None:  # the text of their Canvas course content
                 add(zf, "coursefiles.json", json.dumps(content.export(user["id"]), indent=2,
                                                        ensure_ascii=False))
+            if memory is not None:  # their instructions and saved memories
+                add(zf, "memory.json", json.dumps(memory.export(), indent=2,
+                                                  ensure_ascii=False))
             offset = 0
             while store is not None:
                 page = store.list(limit=PAGE, offset=offset, archived=None)

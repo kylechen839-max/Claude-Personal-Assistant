@@ -38,6 +38,8 @@ OWNER_TOOLS = ("list_assignments", "update_assignment_status", "search_memory",
 # [student] and [canvas] content are on by default)
 DEADLINE_TOOLS = {"list_deadlines", "confirm_deadline", "add_deadline", "delete_deadline",
                   "search_course_files", "read_course_file"}
+# a person's own memory (memory_store.py, in <dir>/<id>/memory.sqlite)
+MEMORY_TOOLS = {"remember", "list_memories", "update_memory", "forget_memory"}
 
 
 def owner_registry():
@@ -240,9 +242,10 @@ def test_a_family_member_has_web_tools_only(env, owner):
                           tier="family")  # the owner's key (no key of her own)
     uid = link["user"]["id"]
     ctx = env.family.context(uid)
-    # only her own deadlines ([student] on), bound to her id, never the owner's
-    assert set(ctx.registry.tools) == DEADLINE_TOOLS
-    assert {t.handler.__self__.uid for t in ctx.registry.tools.values()} == {uid}
+    # only her own deadlines ([student] on), bound to her id, never the
+    # owner's, and her own memory
+    assert set(ctx.registry.tools) == DEADLINE_TOOLS | MEMORY_TOOLS
+    assert {ctx.registry.tools[n].handler.__self__.uid for n in DEADLINE_TOOLS} == {uid}
     assert {t["name"] for t in ctx.registry.server_tools} == {"web_search", "web_fetch"}
     search = next(t for t in ctx.registry.server_tools if t["name"] == "web_search")
     # their time zone, never the owner's [web] location
@@ -252,13 +255,15 @@ def test_a_family_member_has_web_tools_only(env, owner):
     assert r.status_code == 200
     call = env.fake_client.calls[-1]
     names = {t["name"] for t in call.get("tools", [])}
-    assert names <= {"web_search", "web_fetch"} | DEADLINE_TOOLS
+    assert names <= {"web_search", "web_fetch"} | DEADLINE_TOOLS | MEMORY_TOOLS
     assert not names & set(OWNER_TOOLS)
     assert "Kyle" not in sent_text(call) and "Mom" in request_text(call)
     assert "secret project" not in sent_text(call)
     env.memory.retrieve.assert_not_called()  # no Pinecone for family
     session = next(s for s in env.assistant.sessions.values() if s.user == uid)
-    assert set(session.registry.tools) == DEADLINE_TOOLS and session.chat.memory is None
+    assert set(session.registry.tools) == DEADLINE_TOOLS | MEMORY_TOOLS
+    assert session.chat.memory is None  # no Pinecone
+    assert session.chat.local_memory is ctx.memory is not env.assistant.local_memory
     assert session.history is ctx.history and session.history is not env.owner_store
     # their own history file, not synced (no event log)
     assert (env.tmp / "users" / uid / "history.sqlite").exists()

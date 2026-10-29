@@ -157,7 +157,7 @@ def test_login_sets_a_strict_cookie(make_app):
     assert client.get("/api/state").json() == {
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
         "history": False, "conversation": None, "owner": True, "family": False,
-        "memory": False, "language": "en", "voice_picker": False,
+        "memory": False, "memories": False, "language": "en", "voice_picker": False,
         "health": None,
         "month_usd": 0}  # the owner's API cost estimate (usage.py)
     client.post("/api/logout")

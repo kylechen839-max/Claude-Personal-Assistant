@@ -866,8 +866,10 @@ def register_student(registry: ToolRegistry, config: dict) -> bool:
 
 
 def build_memory(config: dict, output_fn=print):
+    """Pinecone memory ([memory] backend = "pinecone"), or None. With the
+    default "local" backend Pinecone is never called."""
     mem = config["memory"]
-    if not mem["enabled"]:
+    if not mem["enabled"] or str(mem["backend"]).lower() != "pinecone":
         return None
     if not os.environ.get("PINECONE_API_KEY"):
         output_fn("(Memory off: PINECONE_API_KEY not set)")
@@ -881,12 +883,23 @@ def build_memory(config: dict, output_fn=print):
                           text_fields=mem["text_fields"])
 
 
-def add_memory_tools(tools: ToolRegistry, memory) -> None:
-    """Let Claude search memory and save notes on request (memory on only)."""
-    if memory is not None:
-        from kwil.tools.memory_tools import memory_tools
+def build_local_memory(config: dict):
+    """The owner's own memory store (memory_store.py): his instructions and
+    saved memories. None with [memory] enabled = false."""
+    from kwil import memory_store
 
-        tools.register(*memory_tools(memory))
+    return memory_store.open_store(config)
+
+
+def add_memory_tools(tools: ToolRegistry, memory, store=None) -> None:
+    """remember / list_memories / update_memory / forget_memory on the
+    local `store`, and search_memory with Pinecone `memory`."""
+    from kwil.tools.memory_tools import memory_tools, search_memory_tool
+
+    if store is not None:
+        tools.register(*memory_tools(store))
+    if memory is not None:
+        tools.register(search_memory_tool(memory))
 
 
 def build_memory_review(config: dict, memory):
@@ -909,14 +922,13 @@ def register_memory_review(registry: ToolRegistry, review) -> None:
 
 
 def register_notes(registry: ToolRegistry, memory, config: dict) -> bool:
-    """Quick-capture note tools; they need Pinecone memory. They replace
-    the plain `remember` memory tool (same job, plus tags, listing and
-    deleting); `search_memory` stays for searching all of memory."""
+    """Quick-capture note tools; they need Pinecone memory ([memory]
+    backend = "pinecone"). Notes are searched by meaning; `remember` (the
+    local store) keeps what every new conversation is told."""
     if memory is None or not config["notes"]["enabled"]:
         return False
     from kwil.tools.notes import QuickNotes
 
-    registry.tools.pop("remember", None)
     registry.register(*QuickNotes(memory,
                                   timezone=config["assistant"]["timezone"] or None,
                                   min_score=config["notes"]["min_score"],
@@ -1065,10 +1077,12 @@ def run_wake_mode(args, config: dict, chat: ClaudeChat, tts, transcriber,
 
 
 def build_chat(config: dict, tools=None, memory=None,
-               recorder=None, review=None, client=None) -> ClaudeChat:
+               recorder=None, review=None, client=None,
+               local_memory=None) -> ClaudeChat:
     """The owner's chat (webapp.build_assistant's chat_factory uses it too,
     passing its shared `client`). Its clock is [assistant] timezone, the
-    zone the calendar tools use; empty means this machine's."""
+    zone the calendar tools use; empty means this machine's.
+    `local_memory`: his memory store (instructions and saved memories)."""
     a = config["assistant"]
     if client is None:
         client = anthropic.Anthropic(max_retries=a["api_max_retries"],
@@ -1081,7 +1095,8 @@ def build_chat(config: dict, tools=None, memory=None,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
                       recorder=recorder, language=a["language"],
                       fast_model=a["fast_model"], router=a["router"],
-                      timezone=a["timezone"] or None)
+                      timezone=a["timezone"] or None,
+                      local_memory=local_memory)
     if review is not None:  # [memory] weekly_review (off by default)
         chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
@@ -1193,6 +1208,13 @@ def main(argv=None) -> int:
         config["student"]["enabled"] = False
         log.info("Student deadlines off: a separate instance (--env-file %s) "
                  "without its own [student] dir", args.env_file)
+    if separate and config["memory"]["enabled"] \
+            and Path(config["memory"]["local_path"]).resolve() \
+            == Path(DEFAULTS["memory"]["local_path"]).resolve():
+        # its instructions and memories would be the owner's memory.sqlite
+        config["memory"]["enabled"] = False
+        log.info("Memory off: a separate instance (--env-file %s) without "
+                 "its own [memory] local_path", args.env_file)
     if separate and config["push"]["enabled"] \
             and Path(config["push"]["owner_dir"]).resolve() \
             == Path(DEFAULTS["push"]["owner_dir"]).resolve():
@@ -1259,14 +1281,16 @@ def main(argv=None) -> int:
 
         tools = build_tools(config)
         memory = build_memory(config)
-        add_memory_tools(tools, memory)
+        local = build_local_memory(config)
+        add_memory_tools(tools, memory, local)
         register_notes(tools, memory, config)
         review = build_memory_review(config, memory)
         register_memory_review(tools, review)
         store = open_store(config)
         add_history_tools(tools, config, store, memory)
         recorder = build_recorder(config, store, args.mode, args.incognito)
-        chat = build_chat(config, tools, memory, recorder, review)
+        chat = build_chat(config, tools, memory, recorder, review,
+                          local_memory=local)
         if chat.incognito:
             print("(Incognito: this session won't be saved)")
         elif recorder:

@@ -268,15 +268,21 @@ def test_real_pinecone_memory_objects_work(notes):
     assert index.upsert.call_args.kwargs["namespace"] == "voice-assistant"
 
 
-def test_notes_replace_the_plain_remember_tool_but_keep_search():
+def test_notes_sit_beside_the_local_remember_tool_and_search(tmp_path):
+    """With [memory] backend = "pinecone": Pinecone notes (searched by
+    meaning) and the local `remember` (told to every new conversation)."""
+    from kwil.memory_store import SqliteMemoryStore
+
     cfg = load_config(None, None)
     mem, _, _ = make_memory()
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite")
     reg = ToolRegistry()
-    cli.add_memory_tools(reg, mem)
+    cli.add_memory_tools(reg, mem, store)
     assert reg.has("remember") and reg.has("search_memory")
     cli.register_notes(reg, mem, cfg)
-    assert not reg.has("remember") and reg.has("search_memory")
+    assert reg.has("remember") and reg.has("search_memory")
     assert reg.has("remember_note")
+    store.close()
 
 
 @pytest.mark.parametrize("source", ["web", "email"])
