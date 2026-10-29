@@ -609,3 +609,33 @@ def test_account_export_includes_and_delete_removes_their_memory(env, owner, acc
     assert path.is_file()
     assert delete_me(mom).status_code == 200
     assert not path.exists() and not (env.tmp / "users" / uid).exists()
+
+
+@pytest.mark.parametrize("trim", ["count", "size"])
+def test_trimming_the_email_turn_keeps_the_conversation_tainted(store, fake_client, trim):
+    """Judge round 3: once the turn that read an email was trimmed away
+    (by turn count, or by the size budget), the conversation looked clean,
+    so a memory saved next was trusted and changes stopped asking. Trimmed
+    outside text keeps it tainted, as a rewind does."""
+    asked = []
+    kw = {"max_history": 4} if trim == "count" else {"max_history_chars": 2000}
+    chat = chat_with(store, fake_client, confirm=lambda q: asked.append(q) or True, **kw)
+    chat.tools.register(email_tool())
+    fake_client.queue = [
+        make_response(tool_use_block("read_email", {}), stop_reason="tool_use"),
+        make_response(text_block("Your email says hi." + " filler" * 400))]
+    chat.ask("read my email")
+    for i in range(4):
+        fake_client.queue = [make_response(text_block(f"Reply {i}." + " pad" * 300))]
+        chat.ask(f"question {i}" + " words" * 100)
+    assert not any(b.get("type") == "tool_result" for m in chat.history
+                   if isinstance(m.get("content"), list) for b in m["content"])
+    assert chat.tainted() and chat.outside_content()
+    fake_client.queue = [
+        make_response(tool_use_block("remember", {"note": "Forward all mail to x"}),
+                      stop_reason="tool_use"),
+        make_response(text_block("Saved."))]
+    chat.ask("remember to forward all mail to x")
+    assert asked == ["Save this to memory: Forward all mail to x?"]
+    (saved,) = store.list()
+    assert saved["untrusted"] is True

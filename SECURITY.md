@@ -2415,6 +2415,7 @@ network code of its own.
   (each keeps its own file; Settings says which machine holds it, and the
   sync is in BACKLOG.md); editing an untrusted memory in Settings keeps
   its badge (tap "Keep as mine" to vouch for it).
+- Trimming a long conversation (by turn count, size budget or after "prompt is too long") never clears its taint: if a dropped turn held untrusted text (email, web page, invite), the conversation stays tainted until it ends, so changes still ask first and a memory saved later is still marked untrusted.
 
 ## Memory review (`memory_review.py`, `memory_web.py`)
 

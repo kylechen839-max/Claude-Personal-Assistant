@@ -7169,3 +7169,14 @@ at a time back at 8e9af6b in a scratch copy: `chat.py` fails 5,
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3626 passed, 41 skipped, 1 deselected (8e9af6b: 3618 / 41; +8).
 JavaScript 303 passed (was 302).
+
+### Memory layer 1, judge round 3 (2026-10-29)
+- MED, fixed by the master: trimming history (by turn count, by the size
+  budget, or `_shorten` after "prompt is too long") dropped the turn that
+  held untrusted tool output, so the conversation looked clean again and a
+  memory saved next was trusted (and changes stopped asking). `_trim_history`
+  and `_drop_oldest_turns` now call `_keep_taint` on what they drop, as
+  `_rewind_turn` already did: untrusted text read in a conversation keeps it
+  tainted until `reset()`.
+- Test: `test_trimming_the_email_turn_keeps_the_conversation_tainted`
+  (count and size); both fail without the fix.

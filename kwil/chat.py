@@ -1128,7 +1128,9 @@ class ClaudeChat:
             # The first message kept is a plain user turn, as the API
             # requires (text, or text with attachments; never tool results).
             # Assigned directly: a trim keeps the kept turns' thinking.
-            self._history = self.history[starts[-max(limit // 2, 1)]:]
+            cut = starts[-max(limit // 2, 1)]
+            self._keep_taint(self.history[:cut])
+            self._history = self.history[cut:]
         # Size, too: a few turns of big tool results (and their thinking)
         # could pass the model's context window, and then every request is
         # refused. Past max_history_chars, oldest whole turns go until the
@@ -1136,6 +1138,14 @@ class ClaudeChat:
         if self.max_history_chars and history_chars(self.history) > self.max_history_chars:
             dropped = self._drop_oldest_turns(self.max_history_chars // 2)
             log.info("History over its size budget: dropped %d earlier turn(s)", dropped)
+
+    def _keep_taint(self, dropped: list[dict]) -> None:
+        """Untrusted text in turns about to be trimmed keeps the
+        conversation tainted (as _rewind_turn): the model may still act on
+        what it read, and only reset() clears that."""
+        if dropped and self.tools and has_untrusted_content(
+                dropped, self.tools.untrusted_names()):
+            self.untrusted_context = True
 
     def _drop_oldest_turns(self, budget: int, keep: int = 1) -> int:
         """Drop the oldest whole turns until the history is within `budget`
@@ -1146,6 +1156,7 @@ class ClaudeChat:
             starts = [i for i, m in enumerate(self.history) if is_user_turn(m)]
             if len(starts) <= keep or history_chars(self.history) <= budget:
                 return dropped
+            self._keep_taint(self.history[:starts[1]])
             self._history = self.history[starts[1]:]
             dropped += 1
 
