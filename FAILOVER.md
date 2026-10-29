@@ -232,8 +232,13 @@ as text, never as HTML.
 
 ## 5. Shared state
 
-### Memory (Pinecone)
-Already shared: all backends read and write the same index.
+### Memory
+Your instructions and saved memories (`memory_store.py`, the default
+`[memory] backend = "local"`) are **not shared yet**: each backend keeps
+its own `memory.sqlite`, so something remembered on the cloud isn't known
+to the PC until synced (a follow-up: put memory changes on the event log).
+With `backend = "pinecone"` the Pinecone notes are shared as before: all
+backends read and write the same index.
 
 ### Conversation history
 Each backend keeps its own SQLite history (the history store from

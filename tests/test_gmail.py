@@ -728,18 +728,22 @@ def test_kyles_own_notes_are_not_marked(fake_client):
     assert "untrusted_content" not in out
 
 
-def test_plain_memory_tools_mark_and_stay_private(fake_client, caplog):
-    from kwil.tools.memory_tools import memory_tools
+def test_plain_memory_tools_mark_and_stay_private(fake_client, caplog, tmp_path):
+    from kwil.memory_store import SqliteMemoryStore
+    from kwil.tools.memory_tools import memory_tools, search_memory_tool
     from tests.test_memory import make_memory
 
     mem, _, index = make_memory()
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite")
     reg = ToolRegistry(confirm=lambda q: True)
-    reg.register(*memory_tools(mem))
+    reg.register(*memory_tools(store), search_memory_tool(mem))
     assert reg.is_private("remember") and reg.is_private("search_memory")
     with caplog.at_level(logging.DEBUG):
         reg.dispatch("remember", {"note": "SECRET-NOTE"}, untrusted=True)
-    assert index.upsert.call_args.kwargs["vectors"][0]["metadata"]["untrusted"] is True
+    assert store.list()[0]["untrusted"] is True
+    index.upsert.assert_not_called()  # the local store, never Pinecone
     assert "SECRET-NOTE" not in caplog.text
+    store.close()
 
 
 def test_summary_written_under_untrusted_content_is_marked(fake_client):

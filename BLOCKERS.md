@@ -375,7 +375,14 @@ Only what is still open for Kyle. None of it blocks the code.
 - Notion: integration "Hey Claude" shared with Fall 2026 Assignments ->
   Assignments; `NOTION_TOKEN` in `.env`.
 - Pinecone: `PINECONE_API_KEY` in `.env`; writes go only to the
-  `voice-assistant` namespace.
+  `voice-assistant` namespace. 2026-10-29: the free quota ran out (429s),
+  which is why a remembered rule was lost. Pinecone is now optional:
+  `[memory] backend = "local"` (the default) keeps instructions and
+  memories in `data/memory.sqlite` and never calls Pinecone. Set
+  `backend = "pinecone"` again only once the quota is raised; the old
+  Pinecone notes were not migrated. Memory isn't synced between failover
+  backends yet (BACKLOG.md: sync memory across failover backends via the
+  history event log); cloud-only use is unaffected.
 - Whisper model downloads on first run.
 - Custom "Hey Claude" wake word trained with openWakeWord (no account or key)
   and committed as `keywords/hey_claude.onnx`. To retrain: in the

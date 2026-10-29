@@ -121,6 +121,8 @@ location = { city = "", region = "", country = "", timezone = "" }
 
 [memory]
 enabled = true
+backend = "local"             # "local": Kwil's own memory on this machine (no Pinecone); "pinecone": also recall notes and save conversation summaries in Pinecone (needs PINECONE_API_KEY)
+local_path = "data/memory.sqlite"  # your instructions and saved memories (Settings, Memory)
 index = "project-context"
 namespace = "voice-assistant" # where conversation summaries are written
 search_namespaces = "*"       # "*" = read all namespaces, or a list like ["projects"]

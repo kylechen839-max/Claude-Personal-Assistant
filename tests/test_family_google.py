@@ -276,12 +276,15 @@ def test_failed_callback_page_is_in_their_language(g):
     assert r.status_code == 400 and r.text == i18n.ZH["google_failed"]
 
 
+MEMORY = {"remember", "list_memories", "update_memory", "forget_memory"}  # their own memory
+
+
 def test_tools_only_after_connecting(g):
     mom, mom_id = g.member("Mom", "en")
     g.client.queue.append(make_response(text_block("Hi.")))
     assert mom.post("/api/turn", json={"text": "hi"}).status_code == 200
     before = {t["name"] for t in g.client.calls[-1]["tools"]}
-    assert before == {"web_search", "web_fetch"}
+    assert before == {"web_search", "web_fetch"} | MEMORY
     session = next(s for s in g.assistant.sessions.values() if s.user == mom_id)
     assert not session.registry.has("list_calendar_events")
     connected(g, mom, mom_id, "mom")
@@ -637,6 +640,7 @@ def test_the_web_app_gets_family_speech_only_with_family_on(monkeypatch, tmp_pat
     monkeypatch.delenv("NOTION_TOKEN", raising=False)
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = cfg["history"]["enabled"] = False
+    cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")  # not the repo's data/
     assert webapp.build_assistant(cfg, "print", output_fn=lambda m: None).speech is None
     cfg["family"].update(enabled=True, dir=str(tmp_path / "users"))
     a = webapp.build_assistant(cfg, "print", output_fn=lambda m: None)

@@ -297,13 +297,16 @@ def test_callback_saves_encrypted_notion_token_and_adds_tools(n):
     assert not tess.cookies.get(notion_web.BIND_COOKIE)
 
 
+MEMORY = {"remember", "list_memories", "update_memory", "forget_memory"}  # their own memory
+
+
 def test_beta_registry_gets_list_assignments_only_after_connecting(n):
     tess, uid = n.member(tier="beta")
     registry = n.fam.context(uid).registry  # a conversation already open
     assert not {"list_assignments", "update_assignment_status"} & set(registry.tools)
     connect(n, tess)
     # the same (shared) registry: an open conversation sees them at once
-    assert set(registry.tools) == {"list_assignments", "update_assignment_status"}
+    assert set(registry.tools) - MEMORY == {"list_assignments", "update_assignment_status"}
     # never Kyle's other Notion tools or anything else
     assert "create_assignment" not in registry.tools
 
@@ -315,7 +318,7 @@ def test_a_turn_sees_the_tools_described_for_them_not_kyle(n):
     assert sam.post("/api/turn", json={"text": "hi"}).status_code == 200
     call = n.client.calls[-1]
     names = {t["name"] for t in call["tools"]}
-    assert names == {"list_assignments", "update_assignment_status"}
+    assert names - MEMORY == {"list_assignments", "update_assignment_status"}
     assert "Kyle" not in json.dumps(call["tools"]) and " his " not in json.dumps(call["tools"])
     assert "Sam's" in json.dumps(call["tools"])
 

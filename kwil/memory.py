@@ -1,4 +1,5 @@
-"""Long-term memory in Pinecone.
+"""Long-term memory in Pinecone ([memory] backend = "pinecone"; the
+default "local" backend never calls it: memory_store.py).
 
 Before each reply the user's words are embedded and matched against the
 existing index; good matches are added to the system prompt. After each
@@ -8,18 +9,38 @@ in the assistant's own namespace (other namespaces are only read).
 Embeddings use Pinecone's hosted `llama-text-embed-v2` at 1024 dimensions,
 the model the existing `project-context` index was built with. Note text
 is read from the first metadata field in `text_fields` that is present.
+
+Over quota (HTTP 429): one WARNING ("Memory: Pinecone over quota"), then
+no Pinecone call for QUOTA_BACKOFF seconds: recall finds nothing, a summary
+isn't saved (PineconeOverQuota) and a reply is never held up.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
 ID_PREFIX = "voice-"  # every vector store() writes (memory_review.py lists them)
+QUOTA_BACKOFF = 600.0  # seconds without Pinecone calls after a 429
+
+
+class PineconeOverQuota(RuntimeError):
+    """Pinecone said 429 (over quota) a moment ago: not called for now."""
+
+
+def over_quota(error: Exception) -> bool:
+    """Is this Pinecone's 429 / quota error (any SDK shape)?"""
+    for attr in ("status", "status_code"):
+        if getattr(error, attr, None) == 429:
+            return True
+    text = str(error)[:500].lower()
+    return any(k in text for k in ("429", "quota", "resource_exhausted",
+                                   "too many requests"))
 
 SUMMARY_PROMPT = (
     "Below is a conversation between Kyle and his voice assistant. Write a "
@@ -57,6 +78,9 @@ class PineconeMemory:
         # (vector id, text) of the notes retrieve() returned last, so a chat
         # can drop a note it was given once delete_note removes it
         self.last_matches: list[tuple[str, str]] = []
+        self.clock = time.monotonic
+        self._quiet_until = 0.0     # no calls before this (after a 429)
+        self._quota_logged = False  # the WARNING is said once
 
     @property
     def pc(self):
@@ -91,10 +115,35 @@ class PineconeMemory:
                                       | {self.namespace})
         return self._namespaces
 
+    def _guarded(self, fn, *args, **kwargs):
+        """fn(...), or PineconeOverQuota during the back-off after a 429."""
+        if self.clock() < self._quiet_until:
+            raise PineconeOverQuota("Pinecone is over quota")
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if not over_quota(e):
+                raise
+            self._quiet_until = self.clock() + QUOTA_BACKOFF
+            (log.debug if self._quota_logged else log.warning)(
+                "Memory: Pinecone over quota; not calling it for %d minutes",
+                QUOTA_BACKOFF // 60)
+            self._quota_logged = True
+            raise PineconeOverQuota("Pinecone is over quota") from None
+
     def retrieve(self, query: str) -> list[str]:
-        """Return the text of notes relevant to `query`, best first."""
+        """Return the text of notes relevant to `query`, best first (none
+        while Pinecone is over quota)."""
+        self.last_untrusted = False
+        self.last_matches = []
         if not query.strip():
             return []
+        try:
+            return self._guarded(self._retrieve, query)
+        except PineconeOverQuota:
+            return []
+
+    def _retrieve(self, query: str) -> list[str]:
         vector = self.embed(query, "query")
         namespaces = self.namespaces()
         if len(namespaces) == 1:
@@ -122,6 +171,10 @@ class PineconeMemory:
         return notes
 
     def store(self, summary: str, extra: dict | None = None) -> str:
+        """Save a note; PineconeOverQuota while Pinecone is over quota."""
+        return self._guarded(self._store, summary, extra)
+
+    def _store(self, summary: str, extra: dict | None = None) -> str:
         now = datetime.now(timezone.utc)
         vector_id = f"{ID_PREFIX}{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
         metadata = {"text": summary, "source": "voice-assistant",
@@ -139,9 +192,16 @@ class PineconeMemory:
                              min_score: float | None = None) -> list[dict]:
         """Semantic search over the assistant's own conversation summaries
         that link back to a saved conversation. Best first:
-        [{"conversation_id", "score", "text"}]."""
+        [{"conversation_id", "score", "text"}]. None while over quota."""
         if not query.strip():
             return []
+        try:
+            return self._guarded(self._search_conversations, query, top_k, min_score)
+        except PineconeOverQuota:
+            return []
+
+    def _search_conversations(self, query: str, top_k: int,
+                              min_score: float | None) -> list[dict]:
         result = self.index.query(
             vector=self.embed(query, "query"), top_k=top_k,
             namespace=self.namespace, include_metadata=True,

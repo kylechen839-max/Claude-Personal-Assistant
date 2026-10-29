@@ -251,6 +251,7 @@ def test_cli_warms_up_the_voice(monkeypatch, tmp_path, restore_root_logging):
     monkeypatch.setattr(cli, "make_tts", lambda *a, **k: Engine())
     monkeypatch.setattr(cli, "build_tools", lambda *a, **k: cli.ToolRegistry())
     monkeypatch.setattr(cli, "build_memory", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "build_local_memory", lambda *a, **k: None)
     monkeypatch.setattr(cli, "build_chat", lambda *a, **k: types.SimpleNamespace(incognito=False))
     monkeypatch.setattr(cli, "Transcriber", lambda *a, **k: object())
     monkeypatch.setattr(cli, "run_voice", lambda *a, **k: None)

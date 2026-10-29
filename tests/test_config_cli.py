@@ -88,7 +88,10 @@ def test_main_text_mode_end_to_end(tmp_path, monkeypatch, fake_client, capsys):
     assert cli.main(["--mode", "text"]) == 0
     out = capsys.readouterr().out
     assert "Kwil: Hello Kyle." in out
-    assert "Calendar tools off" in out and "Memory off" in out
+    assert "Calendar tools off" in out
+    # the local memory needs no key: no "Memory off", and its file is here
+    assert "Memory off" not in out
+    assert (tmp_path / "data" / "memory.sqlite").is_file()
     assert "Starting in text mode" in (tmp_path / "logs" / "assistant.log").read_text()
 
 
@@ -114,6 +117,8 @@ def test_build_tools_and_memory_respect_config(tmp_path, monkeypatch):
     cfg["calendar"]["enabled"] = cfg["notion"]["enabled"] = False
     cfg["web"]["enabled"] = cfg["student"]["enabled"] = False
     assert not cli.build_tools(cfg, lambda *_: None)
+    assert cli.build_memory(cfg) is None  # backend "local": never Pinecone
+    cfg["memory"]["backend"] = "pinecone"
     assert cli.build_memory(cfg).index_name == "project-context"
     cfg["memory"]["enabled"] = False
     assert cli.build_memory(cfg) is None

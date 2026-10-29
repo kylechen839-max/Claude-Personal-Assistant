@@ -9,6 +9,9 @@ on the disk is ever added):
                             (family.public: names, languages, time zones,
                             status, tier); never an invite's hash
   users/<id>/history.sqlite each listed family member's own history
+  memory.sqlite             the owner's instructions and saved memories
+                            (memory_store.py)
+  users/<id>/memory.sqlite  each listed family member's own memory
   waitlist.json             the public waitlist, if there is one
   MANIFEST.json             when it was made, the version, each file's size
 
@@ -58,8 +61,10 @@ class Backup:
     """What goes in the owner's backup zip, and making it."""
 
     def __init__(self, *, history_path=None, family=None, waitlist_path=None,
-                 max_bytes: int = 200_000_000, temp_dir=None, clock=time.time):
+                 max_bytes: int = 200_000_000, temp_dir=None, clock=time.time,
+                 memory_path=None):
         self.history_path = Path(history_path) if history_path else None
+        self.memory_path = Path(memory_path) if memory_path else None
         self.family = family
         self.waitlist_path = Path(waitlist_path) if waitlist_path else None
         self.max_bytes = int(max_bytes)
@@ -68,13 +73,18 @@ class Backup:
         self._busy = threading.Lock()
 
     @classmethod
-    def from_config(cls, config: dict, store=None, family=None) -> "Backup":
-        """`store`: the owner's HistoryStore (None when history is off)."""
+    def from_config(cls, config: dict, store=None, family=None,
+                    memory=None) -> "Backup":
+        """`store`: the owner's HistoryStore (None when history is off);
+        `memory`: his memory_store.SqliteMemoryStore (None when off)."""
         path = getattr(store, "path", None)
+        memory_path = getattr(memory, "path", None)
         # [webapp] waitlist_file (public_site.py); "" = no waitlist in the backup
         waitlist = config["webapp"].get("waitlist_file", "")
         return cls(history_path=path if path and path != ":memory:" else None,
                    family=family, waitlist_path=waitlist or None,
+                   memory_path=(memory_path if memory_path and memory_path != ":memory:"
+                                else None),
                    max_bytes=int(float(config["webapp"]["backup_max_mb"]) * 1_000_000))
 
     # ---------- what goes in ----------
@@ -82,10 +92,13 @@ class Backup:
         dbs = []
         if self.history_path is not None and self.history_path.is_file():
             dbs.append(("history.sqlite", self.history_path))
+        if self.memory_path is not None and self.memory_path.is_file():
+            dbs.append(("memory.sqlite", self.memory_path))
         for uid in self._members():
-            path = Path(self.family.dir) / uid / "history.sqlite"
-            if path.is_file():
-                dbs.append((f"users/{uid}/history.sqlite", path))
+            for name in ("history.sqlite", "memory.sqlite"):
+                path = Path(self.family.dir) / uid / name
+                if path.is_file():
+                    dbs.append((f"users/{uid}/{name}", path))
         return dbs
 
     def _members(self) -> dict:

@@ -845,10 +845,16 @@ class WebAssistant:
                  conversation_timeout: float = 300, confirm_timeout: float = 120,
                  max_sessions: int = 20, clock=time.monotonic,
                  history=None, memory=None, family=None, memory_review=None,
-                 speech: SpeechByLanguage | None = None):
+                 speech: SpeechByLanguage | None = None, local_memory=None):
         self.chat_factory = chat_factory
         self.history = history  # a HistoryStore (conversation history) or None
         self.memory = memory    # PineconeMemory, for semantic search and deletes
+        # the owner's own memory store (memory_store.py; Settings, Memory),
+        # or None; a family member's is in their family.UserContext
+        self.local_memory = local_memory
+        # which machine keeps the memory files ("cloud", "pc", "pi"; "" =
+        # don't say): each failover backend has its own for now
+        self.memory_where = ""
         # memory_review.MemoryReview (the Memory screen); made from `memory`
         # on first use when not given
         self.memory_review = memory_review
@@ -937,6 +943,24 @@ class WebAssistant:
         if s.user is not None:
             return s.history, None
         return self.history, self.memory
+
+    def memory_store_of(self, s: Session):
+        """The memory store a session may see and change: its own person's
+        (the owner's, or a family member's own file), else None."""
+        if s.user is None:
+            return self.local_memory
+        ctx = self.family.context(s.user) if self.family is not None else None
+        return getattr(ctx, "memory", None) if ctx is not None else None
+
+    def forget_memories(self, user: str | None, memory_ids=None) -> None:
+        """Memories `user` (None: the owner) deleted in Settings: out of
+        their open conversations' prompts too (None = Forget all)."""
+        with self.lock:
+            sessions = [x for x in self.sessions.values() if x.user == user]
+        for x in sessions:
+            forget = getattr(x.chat, "forget_memories", None)
+            if callable(forget):
+                forget(memory_ids)
 
     def drop_user(self, user: str) -> list[Session]:
         """Forget a removed family member's conversations without saving or
@@ -2108,6 +2132,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                "owner": s.user is None,
                "family": s.user is None and family is not None,
                "memory": s.user is None and getattr(assistant, "memory", None) is not None,
+               # Settings, Memory: this person's own instructions and memories
+               "memories": callable(getattr(assistant, "memory_store_of", None))
+                           and assistant.memory_store_of(s) is not None,
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
@@ -2289,7 +2316,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     history_web.register(app, assistant, session_of, error)
     from kwil import memory_web
 
-    memory_web.register(app, assistant, owner_of, error)  # Kyle's memory only
+    memory_web.register(app, assistant, owner_of, error)  # Kyle's Pinecone notes only
+    memory_web.register_local(app, assistant, session_of, error)  # everyone's own
     if getattr(assistant, "backup", None) is not None:
         from kwil import backup as backup_mod
 
@@ -2447,10 +2475,21 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 
 # --- startup ------------------------------------------------------------------
 
+def memory_location(config: dict) -> str:
+    """Where this backend's memory files are, for Settings, Memory: "cloud"
+    (the server profile, or [failover] role), "pi" or "pc"."""
+    from kwil.history import origin_of
+
+    if config.get("profile") == "server":
+        return "cloud"
+    return origin_of(config)
+
+
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from kwil.cli import (add_history_tools, add_memory_tools, build_chat,
-                               build_memory, build_memory_review, build_tools,
+                               build_local_memory, build_memory,
+                               build_memory_review, build_tools,
                                register_memory_review, register_notes)
     from kwil.history import Recorder, open_store
     import anthropic
@@ -2468,7 +2507,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
     memory = build_memory(config, output_fn)
-    add_memory_tools(tools, memory)
+    local = build_local_memory(config)  # his instructions and saved memories
+    add_memory_tools(tools, memory, local)
     register_notes(tools, memory, config)
     review = build_memory_review(config, memory)
     register_memory_review(tools, review)
@@ -2484,7 +2524,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
         # the same builder as the PC's, so the two can't drift (the cloud's
         # chat once missed [assistant] timezone and read the time in UTC)
         return build_chat(config, registry, memory, recorder, review,
-                          client=client)
+                          client=client, local_memory=local)
 
     family = None
     if config["family"]["enabled"]:
@@ -2500,7 +2540,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
                              conversation_timeout=a["conversation_timeout"],
                              confirm_timeout=config["webapp"]["confirm_timeout"],
                              history=store, memory=memory, family=family,
-                             memory_review=review,
+                             memory_review=review, local_memory=local,
                              speech=family_speech(config) if family is not None else None)
     if tts_cfg["picker"]:
         from kwil.voice_picker import VoicePicker
@@ -2508,7 +2548,9 @@ def build_assistant(config: dict, tts_name: str | None = None,
         assistant.voices = VoicePicker(config, assistant.tts, family)
     from kwil.backup import Backup
 
-    assistant.backup = Backup.from_config(config, store, family)  # GET /api/backup
+    assistant.memory_where = memory_location(config)
+    # GET /api/backup (memory files too)
+    assistant.backup = Backup.from_config(config, store, family, memory=local)
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     from kwil import owner_connect
 

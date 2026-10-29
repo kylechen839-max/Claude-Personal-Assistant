@@ -119,7 +119,14 @@ DEFAULTS: dict = {
         "blocked_domains": [],      # never use these (not both)
         "location": {"city": "", "region": "", "country": "", "timezone": ""},
     },
-    "memory": {"enabled": True, "index": "project-context",
+    "memory": {"enabled": True,
+               # "local": Kwil's own memory only (memory_store.py), no Pinecone;
+               # "pinecone": also recall notes and save conversation summaries
+               # in Pinecone (needs PINECONE_API_KEY)
+               "backend": "local",
+               # your instructions and saved memories (memory_store.py)
+               "local_path": "data/memory.sqlite",
+               "index": "project-context",
                "namespace": "voice-assistant", "search_namespaces": "*",
                "embed_model": "llama-text-embed-v2", "top_k": 4,
                "min_score": 0.4,
@@ -440,7 +447,8 @@ SERVER_PROFILE: dict = {
     "family": {"enabled": True, "dir": "/data/users"},  # on the disk
     "student": {"dir": "/data/student"},  # on the disk
     "canvas": {"max_file_mb": 4},  # a course file is held in RAM while it is read
-    "memory": {"review_state_file": "/data/memory_review.json"},  # on the disk
+    "memory": {"review_state_file": "/data/memory_review.json",  # on the disk
+               "local_path": "/data/memory.sqlite"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
     "connect": {"dir": "/data/owner"},  # on the disk

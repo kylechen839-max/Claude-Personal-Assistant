@@ -25,6 +25,9 @@ deadlines.py): the deadline tools on `<dir>/<id>/deadlines.sqlite`, filled
 from their own Canvas link (`<dir>/<id>/canvas.enc`, encrypted,
 canvas.CANVAS_LABEL; student_web.py), and with [canvas] content the
 course file tools on `<dir>/<id>/coursefiles.sqlite` (coursefiles.py).
+Their own memory ([memory] enabled; memory_store.py): their instructions
+and saved memories in `<dir>/<id>/memory.sqlite`, with the remember /
+list / update / forget tools and Settings, Memory (memory_web.py).
 Nothing else: no Kyle's Notion, Pinecone memory or notes, Kyle's Google,
 dev team, lecture recorder or tutor, and no way to see anyone else's
 history. Removing someone signs them out and deletes their folder, Google
@@ -175,6 +178,7 @@ class UserContext:
     registry: object                       # ToolRegistry (shared tool defs)
     history: object | None                 # HistoryStore, or None (history off)
     chat_factory: Callable = field(repr=False)
+    memory: object | None = None           # their memory_store.SqliteMemoryStore
 
     @property
     def language(self) -> str:
@@ -185,11 +189,12 @@ class UserContext:
         return tier_of(self.user)
 
     def close(self) -> None:
-        if self.history is not None:
-            try:
-                self.history.close()
-            except Exception:
-                log.exception("Family: closing a history store failed")
+        for name, store in (("history", self.history), ("memory", self.memory)):
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    log.exception("Family: closing a %s store failed", name)
 
 
 class Family:
@@ -430,13 +435,17 @@ class Family:
                 ctx = self._contexts[uid] = self._build(dict(user))
             return ctx
 
-    def _register_tools(self, user: dict, registry) -> None:
-        """Web search and fetch, their own deadlines ([student]), and their
-        own Google and Notion once connected. No browser (it would open on
-        the server), no Kyle's Notion, memory, notes, history, Kyle's Google
-        or dev team."""
+    def _register_tools(self, user: dict, registry, memory=None) -> None:
+        """Web search and fetch, their own deadlines ([student]), their own
+        memory (`memory`, their store), and their own Google and Notion
+        once connected. No browser (it would open on the server), no Kyle's
+        Notion, memory, notes, history, Kyle's Google or dev team."""
         registry.register(*self._google_tools(user), *self._notion_tools(user),
                           *self._deadline_tools(user))
+        if memory is not None:
+            from kwil.tools.memory_tools import memory_tools
+
+            registry.register(*memory_tools(memory))
         web = self.config["web"]
         if not web["enabled"]:
             return
@@ -907,7 +916,7 @@ class Family:
         from kwil.tools import ToolRegistry
 
         fresh = ToolRegistry()
-        self._register_tools(ctx.user, fresh)
+        self._register_tools(ctx.user, fresh, ctx.memory)
         ctx.registry.tools.update(fresh.tools)
         for name in set(ctx.registry.tools) - set(fresh.tools):
             ctx.registry.tools.pop(name, None)
@@ -918,8 +927,17 @@ class Family:
         from kwil.tools import ToolRegistry
 
         a, h = self.config["assistant"], self.config["history"]
+        memory = None
+        if self.config.get("memory", {}).get("enabled", True):
+            from kwil.memory_store import SqliteMemoryStore
+
+            try:  # their own file, never the owner's
+                memory = SqliteMemoryStore(self.dir / user["id"] / "memory.sqlite")
+            except Exception as e:  # they still get answers, without memory
+                log.error("Family: %s's memory couldn't be opened (%s)",
+                          user["id"], type(e).__name__)
         registry = ToolRegistry()
-        self._register_tools(user, registry)
+        self._register_tools(user, registry, memory)
         store = None
         if h["enabled"]:
             # Their own file, opened directly: history.open_store() would
@@ -948,9 +966,10 @@ class Family:
                               recorder=recorder, language=user["language"],
                               user_name=user["name"],
                               timezone=user.get("timezone") or None,
-                              fast_model=a["fast_model"], router=a["router"])
+                              fast_model=a["fast_model"], router=a["router"],
+                              local_memory=memory)
 
-        return UserContext(user, registry, store, chat_factory)
+        return UserContext(user, registry, store, chat_factory, memory)
 
     def client(self, uid: str | None = None):
         """The owner's client (uid None), else the one `uid`'s calls use:

@@ -401,6 +401,30 @@
     <h1 id="memory-title" tabindex="-1">Memory</h1>
     <span class="bar-spacer"></span>
   </header>
+  <section id="memory-local" class="mem-local" aria-label="Memory" hidden>
+    <h2 class="group-head"><label for="memory-instructions">Your instructions</label></h2>
+    <div class="group mem-instr">
+      <textarea id="memory-instructions" rows="5" maxlength="4000"
+                placeholder="For example: always color-code my schedule."></textarea>
+      <div class="mem-instr-foot">
+        <span id="memory-instructions-count" class="mem-count" aria-live="polite"></span>
+        <button id="memory-instructions-save" class="btn secondary" type="button">Save</button>
+      </div>
+    </div>
+    <p class="group-foot">Kwil follows these from your next conversation.</p>
+    <h2 class="group-head" id="memory-items-title">Things Kwil remembered</h2>
+    <div id="memory-items" class="group mem-items" role="list" aria-labelledby="memory-items-title"></div>
+    <p id="memory-items-empty" class="group-foot" hidden></p>
+    <div class="group mem-controls">
+      <label class="row"><span class="mem-row-title">Pause memory</span><input id="memory-pause" type="checkbox"></label>
+      <button id="memory-export" class="row" type="button">Export</button>
+      <button id="memory-forget-all" class="row danger" type="button">Forget all</button>
+    </div>
+    <p class="group-foot">While paused, Kwil saves no new memories and uses none. Your instructions still apply.</p>
+    <p id="memory-where" class="group-foot" hidden></p>
+    <p id="memory-local-status" class="hint mem-local-status" role="status"></p>
+    <h2 id="memory-notes-head" class="group-head" hidden>Notes in Pinecone</h2>
+  </section>
   <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
   <p id="memory-status" class="status center" role="status"></p>
 </main>
