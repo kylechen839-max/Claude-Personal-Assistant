@@ -337,6 +337,8 @@ def test_family_calendar_tools_flags_and_extra_scope_gate(g):
     assert {"update_calendar_event", "respond_to_calendar_invite",
             "find_free_time"} <= set(tools)
     assert "list_calendars" not in tools
+    assert " his " not in tools["calendar_color_habits"].description
+    assert "Mom's own past events" in tools["calendar_color_habits"].description
     assert tools["create_calendar_event"].confirm_prompt is not None  # guests
     assert tools["update_calendar_event"].confirm_prompt is not None
     assert tools["update_calendar_event"].confirm_if_untrusted is not None

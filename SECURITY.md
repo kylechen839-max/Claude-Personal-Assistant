@@ -267,9 +267,16 @@ characters (see "Calendar data from Kyle's own events" below).
 `calendar_color_habits` (read-only, in both read-only lists) reads only
 Kyle's own events by the same rule (`_outside`): invites, Gmail events,
 guest-editable or marked events and shared calendars are skipped, not
-summarized, so its result carries no one else's title and doesn't taint;
-it reads at most 250 events from at most 28 days and returns at most 30
-groups, each name cut to 60 characters. When label names can't be read
+summarized, and label names are returned only for Kyle's own calendars
+(or Google's public ones), never for a calendar he can only read or write
+(`not_own_calendar`), so its result carries no one else's titles or label
+names and doesn't taint. It reads at most 250 events from at most 28 days
+and returns at most 30 groups, each name cut to 60 characters, and at most
+50 label names, each cut to 60 characters. A refused color name lists
+label names under the same rule and caps (a shared calendar's labels are
+only mentioned, never named). Remaining risk, accepted: Kyle's own label
+names and titles are his text, so a label he named himself from pasted
+text is trusted, as with event notes. When label names can't be read
 (no extra scope, or Google didn't answer), listings and the habits say
 `labels_unavailable` instead of naming a label, and a color name that
 matches nothing is refused before anything is written (no label is ever

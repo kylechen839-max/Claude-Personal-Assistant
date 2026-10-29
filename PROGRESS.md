@@ -6922,7 +6922,8 @@ read as a bare "a label", which the model couldn't name or reuse.
   counts the rest), names cut to 60 characters, plus the classic colors,
   the label names and `[calendar] color_labels` aliases. Invites, Gmail,
   guest-editable or taint-marked events and shared calendars are skipped
-  (the `_outside` rule), so the result holds only Kyle's own text and
+  (the `_outside` rule), and label names come only from Kyle's own
+  calendars (round 2), so the result holds only Kyle's own text and
   doesn't taint; all-day and untitled events are skipped and counted.
   INFO logs counts only.
 - **Labels that can't be read.** `_label_state` says whether labels were
@@ -6968,3 +6969,45 @@ Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3571 passed, 41 skipped, 1 deselected (2317311: 3557 / 41; +14
 new tests). `tests/test_docs.py` now lists `calendar_color_habits` as a
 tool name. JavaScript 294 passed (unchanged).
+
+### Round 2 (judge findings 1-3)
+
+- **1 (high).** `calendar_color_habits(calendar=<a shared calendar>)`
+  handed the model that calendar's label names, written by its owner,
+  uncut and unmarked. Now label names are returned only for Kyle's own
+  calendars or Google's public ones (`_owned`/`is_google_public`); a
+  shared one gives `"labels": []` and `not_own_calendar: true` (its events
+  were already all skipped). Every label name handed back (habits,
+  `list_calendars`' choices, a listing's `label`, a refusal's choices) is
+  cut to 60 characters (`MAX_CALENDAR_NAME`) and at most 50 are listed
+  (`MAX_LABELS_SHOWN`). A refused color on another person's calendar names
+  no labels, only "or one of that calendar's own event labels"
+  (`_own_calendar` looks the id up in the cached calendar list; unknown
+  counts as not Kyle's).
+- **2 (low).** In lower or mixed case, a four-digit time of day (HHMM,
+  00:00-23:59) or an everyday word (Room, Call, Lunch, Bus, Gym, Mom, ...)
+  isn't a course code: "Lunch 1230", "Call Mom 2100", "Room 1234 meeting"
+  and "Bus 101" stay whole titles. "phys 361 lab" is still PHYS 361; in
+  capitals ("SAT 1500") a code counts.
+- **3 (low).** The tool's description has no pronoun ("The colors already
+  used on Kyle's own past events ... the same way"), so a family member's
+  copy reads "Mom's own past events".
+- SECURITY.md now says which label names are returned, the caps, and the
+  accepted risk (Kyle's own label names are his text).
+
+Tests: `tests/test_calendar_colors.py` +14 (28): a writer-access calendar
+with a 1,240-character injection label gives no label name, no
+`untrusted_content`, and a refusal that doesn't quote it, with no insert;
+on Kyle's own calendar a 1,240-character label and 80 more come back as
+60 characters plus "..." and 50 names (habits, listing, refusal); 11
+titles for the course-code rule; the description has no pronoun after the
+family swap. `tests/test_family_google.py`: Mom's copy of the description
+reads "Mom's own past events" with no " his ". Failing first: with
+`kwil/tools/calendar.py` back at 7c07bcc, 10 fail (the five titles that
+must not become codes, both label tests, both description tests; the
+course-code titles that already worked are guards). One mutation at a
+time: without the own-calendar check in the refusal, or without dropping
+a shared calendar's labels in the habits, the shared-calendar test fails.
+
+Counts after round 2 (Linux sandbox, not real hardware), `-k "not
+live_pinecone"`: COUNTS2 (7c07bcc: 3571 / 41); JavaScript JS2.

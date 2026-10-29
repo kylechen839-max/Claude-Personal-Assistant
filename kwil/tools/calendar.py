@@ -67,10 +67,18 @@ MAX_HABIT_EVENTS = 250   # one page of events.list
 MAX_HABIT_TITLES = 30
 MAX_HABIT_TITLE = 60
 # a course code anywhere in a title ("PHYS 361 lecture", "Study cs101"):
-# every session of a course groups under it
+# every session of a course groups under it. Written in lower or mixed case,
+# a clock-like number ("Lunch 1230") or an everyday word ("Room 101", "Call
+# Mom 2100") isn't one; in capitals ("SAT 1500") it is.
 _COURSE = re.compile(r"\b([A-Z]{2,5})[ -]?(\d{3,4}[A-Z]?)\b", re.IGNORECASE)
+_NOT_COURSE_WORDS = frozenset({
+    "room", "rm", "call", "lunch", "dinner", "brunch", "bus", "gym", "mom",
+    "dad", "flight", "apt", "suite", "route", "hwy", "exit", "gate", "unit",
+    "floor", "bldg", "dept", "order", "ticket", "table", "class", "at",
+    "by", "from", "to", "until", "till", "near", "meet", "party", "the"})
 GOOGLE_PUBLIC_SUFFIX = "@group.v.calendar.google.com"  # holidays, birthdays
 MAX_CALENDAR_NAME = 60   # list_calendars: another person's calendar name
+MAX_LABELS_SHOWN = 50    # label names handed back in one result or error
 # extendedProperties.private key on events whose text the assistant wrote
 # in a tainted conversation; never cleared (written_under_taint)
 UNTRUSTED_PROPERTY = "hc_untrusted"
@@ -400,10 +408,37 @@ class GoogleCalendar:
             return False
         return not self._owned(calendar_id, entry) or is_from_others(event)
 
+    @staticmethod
+    def _short(name: str) -> str:
+        return (name[:MAX_CALENDAR_NAME] + "..."
+                if len(name) > MAX_CALENDAR_NAME else name)
+
+    def _label_names(self, labels: list[dict]) -> list[str]:
+        """Label names to hand back: each cut to MAX_CALENDAR_NAME, at most
+        MAX_LABELS_SHOWN of them."""
+        return [self._short(str(lb["name"])) for lb in labels
+                if lb.get("name")][:MAX_LABELS_SHOWN]
+
+    def _own_calendar(self, calendar_id: str) -> bool:
+        """Are this calendar's label names Kyle's own words? Only on his own
+        calendars (or Google's public ones); a shared calendar's labels
+        were written by its owner. Unknown counts as not his."""
+        if calendar_id in ("primary", self.calendar_id):
+            return True
+        if not self.extras:
+            return False
+        try:
+            entry = next((e for e in self._calendar_list()
+                          if e.get("id") == calendar_id), None)
+        except Exception:  # the list is unreadable: don't vouch for it
+            return False
+        return (entry is not None and self._owned(calendar_id, entry)) \
+            or is_google_public(calendar_id, entry)
+
     def color_choices(self, calendar_id: str | None = None) -> dict:
         labels = self._labels(calendar_id or self.calendar_id)
         return {"classic": list(CLASSIC_COLORS.values()),
-                "labels": [lb.get("name", "") for lb in labels if lb.get("name")],
+                "labels": self._label_names(labels),
                 "aliases": dict(self.color_labels)}
 
     def resolve_color(self, color: str, calendar_id: str | None = None) -> dict:
@@ -429,10 +464,12 @@ class GoogleCalendar:
         # an unknown name is refused, never made into a new label or a
         # look-alike color: the event isn't created or changed
         labels, readable = self._label_state(calendar_id)
-        names = (list(CLASSIC_COLORS.values())
-                 + [lb["name"] for lb in labels if lb.get("name")]
-                 + list(self.color_labels))
+        # another person's calendar: its label names are their text
+        shown = self._label_names(labels) if self._own_calendar(calendar_id) else []
+        names = list(CLASSIC_COLORS.values()) + shown + list(self.color_labels)
         message = "No color or event label by that name. Choices: " + ", ".join(names)
+        if labels and not shown:
+            message += ", or one of that calendar's own event labels"
         if not readable:
             message += ". " + self.labels_hint()
         raise ValueError(message)
@@ -459,7 +496,7 @@ class GoogleCalendar:
         if event.get("eventLabelId"):  # a label overrides colorId
             name = self._label_name(event, calendar_id or self.calendar_id)
             if name:
-                info["label"] = name
+                info["label"] = self._short(name)
             else:  # labelled, but the name can't be read: never guess one
                 info["label_unreadable"] = True
         elif event.get("colorId") in CLASSIC_COLORS:
@@ -938,9 +975,15 @@ class GoogleCalendar:
         """The group an event's title falls in: its course code if it has
         one ("PHYS 361"), else the title itself, spaces and edge
         punctuation tidied ("Tennis!" and "tennis" are one group)."""
-        course = _COURSE.search(title)
-        if course:
-            return f"{course.group(1).upper()} {course.group(2).upper()}"
+        for course in _COURSE.finditer(title):
+            letters, number = course.group(1), course.group(2)
+            if not letters.isupper():  # "phys 361" yes, "Lunch 1230" no
+                if letters.lower() in _NOT_COURSE_WORDS:
+                    continue
+                if (len(number) == 4 and number.isdigit()
+                        and int(number[:2]) < 24 and int(number[2:]) < 60):
+                    continue  # a time of day (HHMM)
+            return f"{letters.upper()} {number.upper()}"
         return " ".join(title.split()).strip(" .,:;!?-_*#()[]")
 
     def color_habits(self, days: int = HABIT_DAYS,
@@ -948,8 +991,9 @@ class GoogleCalendar:
         """How Kyle colored his own past events, by title group: the color
         or label he used most and how often. Only events he made himself on
         his own calendars count (an invite's title is someone else's text),
-        so the result never taints the conversation; untitled and all-day
-        events are skipped."""
+        and label names are read only from his own calendars (each cut
+        short, a bounded number), so the result never taints the
+        conversation; untitled and all-day events are skipped."""
         days = max(1, min(int(days), MAX_HABIT_DAYS))
         cal_id, entry = self._resolve_calendar(calendar)
         now = turn_now(self.tz)
@@ -959,7 +1003,13 @@ class GoogleCalendar:
             singleEvents=True, orderBy="startTime",
             maxResults=MAX_HABIT_EVENTS).execute().get("items", [])
         labels, readable = self._label_state(cal_id)
-        names = {lb["id"]: lb.get("name") for lb in labels}
+        # a calendar Kyle doesn't own: its label names are its owner's text
+        # (and every event on it is skipped below anyway)
+        own = self._owned(cal_id, entry) or is_google_public(cal_id, entry)
+        if not own:
+            labels = []
+        names = {lb["id"]: self._short(str(lb["name"]))
+                 for lb in labels if lb.get("name")}
         groups: dict[str, dict] = {}  # key (casefolded) -> shown name, uses
         skipped = {"untitled": 0, "all_day": 0, "others": 0}
         for n, event in enumerate(items[:MAX_HABIT_EVENTS]):
@@ -1001,13 +1051,15 @@ class GoogleCalendar:
             habits.setdefault(shown, habit)
         out = {"days": days, "events_read": len(items), "habits": habits,
                "colors": {"classic": list(CLASSIC_COLORS.values()),
-                          "labels": [lb["name"] for lb in labels if lb.get("name")],
+                          "labels": self._label_names(labels),
                           "aliases": dict(self.color_labels)}}
+        if not own:
+            out["not_own_calendar"] = True  # no habits or labels read there
         if len(ranked) > MAX_HABIT_TITLES:
             out["more_titles"] = len(ranked) - MAX_HABIT_TITLES
         if any(skipped.values()):
             out["skipped"] = {k: v for k, v in skipped.items() if v}
-        if not readable:
+        if not readable and own:
             out["labels_unavailable"] = True
             out["labels_hint"] = self.labels_hint()
         log.info("Calendar: read color habits (%d events, %d groups, labels=%s)",
@@ -1019,8 +1071,7 @@ class GoogleCalendar:
         name = self._calendar_name(entry)
         if entry.get("summaryOverride") or entry.get("accessRole") == "owner":
             return name  # Kyle's own words
-        return (name[:MAX_CALENDAR_NAME] + "..."
-                if len(name) > MAX_CALENDAR_NAME else name)
+        return self._short(name)
 
     # ----- confirmation questions -----
     def describe_for_delete(self, tool_input: dict) -> str:
@@ -1297,10 +1348,11 @@ class GoogleCalendar:
         ]
         tools.append(Tool(
             "calendar_color_habits",
-            "How Kyle colored his own past events: for each kind of event "
-            "(by course code or title), the color or event label he used "
-            "most and how often, plus the colors and labels that exist. Use "
-            "it before creating schedule events, to color them his way.",
+            "The colors already used on Kyle's own past events: for each "
+            "kind of event (by course code or title), the color or event "
+            "label used most and how often, plus the colors and labels that "
+            "exist. Use it before creating schedule events, to color them "
+            "the same way.",
             {"type": "object", "properties": {
                 "days": {"type": "integer", "minimum": 1,
                          "maximum": MAX_HABIT_DAYS, "description":
