@@ -326,6 +326,12 @@ app above).
   - Should: the answer uses the old context.
 - [ ] Open the voice conversation view and ask another follow-up.
   - Should: still the same conversation (History shows it with the new turns).
+- [ ] Open History, tap an older conversation, tap **Continue this
+      conversation**, then wait more than 5 minutes without typing. Then
+      type a follow-up ("and what about the conclusion?").
+  - Should: the reply uses that conversation's context, and History shows
+    the new turns in that same conversation (no new "Phone" conversation
+    appears for it).
 - [ ] Long-press a row, choose Delete..., confirm.
   - Should: it disappears; Cancel instead keeps it.
 - [ ] Gear → Incognito on. Say something. Open History and search for it.

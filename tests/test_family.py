@@ -285,6 +285,27 @@ def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
     assert owner.get(f"/api/conversations/{mine[0]['id']}").status_code == 404
 
 
+def test_a_turn_cant_go_into_someone_elses_conversation(env, owner):
+    """/api/turn's conversation_id is checked against the person's own
+    store, like the conversations routes: the owner's id is unknown to a
+    family member (404) and theirs to the owner, and nothing is sent or
+    saved."""
+    cid = seed_owner_conversation(env.owner_store)
+    mom, _ = env.member(owner, tier="family")
+    calls = len(env.fake_client.calls)
+    r = mom.post("/api/turn", json={"text": "继续", "conversation_id": cid})
+    assert r.status_code == 404 and "Kyle" not in r.text
+    assert len(env.fake_client.calls) == calls
+    assert mom.get("/api/conversations").json()["conversations"] == []
+    assert env.owner_store.get(cid)["message_count"] == 2
+    env.fake_client.queue.append(make_response(text_block("你好")))
+    mom.post("/api/turn", json={"text": "你好"})
+    [theirs] = mom.get("/api/conversations").json()["conversations"]
+    calls = len(env.fake_client.calls)
+    r = owner.post("/api/turn", json={"text": "hi", "conversation_id": theirs["id"]})
+    assert r.status_code == 404 and len(env.fake_client.calls) == calls
+
+
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/lecture/courses"), ("POST", "/api/lecture/start"),
     ("GET", "/api/lectures"), ("POST", "/api/tutor"),

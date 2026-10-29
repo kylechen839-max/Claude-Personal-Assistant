@@ -156,6 +156,65 @@ def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
         fam.close()
 
 
+def test_typing_into_a_stored_conversation_with_a_tool_round(api, tmp_path):
+    """PR 3a: the phone's chat pane is bound to a conversation and every
+    turn carries its id. Same browser after the idle timeout: the turn goes
+    on in the history in memory (thinking blocks, a tool round). Another
+    browser after it ended: the stored conversation is resumed (rebuilt as
+    text) into a chat with its own client. Each request must be one the API
+    accepts, and the number from the first turn must carry over."""
+    import json
+
+    from kwil.history import HistoryStore, Recorder
+
+    make, model = api
+    calls = []
+    store = HistoryStore(tmp_path / "history.sqlite", eventlog=False)
+
+    class Clock:
+        now = 1000.0
+
+        def __call__(self):
+            return self.now
+
+    def chat_factory(registry):
+        return ClaudeChat(client=make(), model=model, tools=registry, max_tokens=1024,
+                          recorder=Recorder(store, "web", run_async=False))
+
+    clock = Clock()
+    assistant = webapp.WebAssistant(chat_factory, None, None, clock=clock,
+                                    tools=calendar_tools(calls), history=store)
+    app = webapp.create_app(assistant, TOKEN, reap_interval=3600)
+
+    def turn(http, text, cid=None):
+        body = {"text": text, **({"conversation_id": cid} if cid else {})}
+        r = http.post("/api/turn", json=body)
+        assert r.status_code == 200, r.text
+        evs = [json.loads(line) for line in r.text.splitlines() if line]
+        assert not [e for e in evs if e["type"] == "error"], evs
+        [reply] = [e["text"] for e in evs if e["type"] == "reply"]
+        return reply, evs[-1]["conversation"]
+
+    try:
+        with TestClient(app, base_url=BASE) as phone, \
+                TestClient(app, base_url=BASE) as laptop:
+            for http in (phone, laptop):
+                assert http.post("/api/login", json={"token": TOKEN}).status_code == 200
+            first, cid = turn(phone, REMEMBER)
+            assert first.strip() and any(c[0] == "list" for c in calls)
+            assert store.get(cid)["messages"][-1]["tool_events"]  # the stored tool round
+            clock.now += assistant.conversation_timeout + 1
+            again, same = turn(phone, RECALL, cid)
+            assert same == cid and "4417" in again
+            [s] = [x for x in assistant.sessions.values() if x.chat.history]
+            s.chat.end_conversation()
+            resumed, other = turn(laptop, "Thanks. " + RECALL, cid)
+            assert other == cid and "4417" in resumed
+        assert store.count() == 1 and not [c for c in calls if c[0] == "create"]
+    finally:
+        store.close()
+
+
 def test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn():
     """Judge B2: the fast model reads the calendar, then asks to delete. Its
     thinking is signed for it, and the API (like this fake) refuses it in

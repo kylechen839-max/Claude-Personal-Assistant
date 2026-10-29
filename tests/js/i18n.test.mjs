@@ -451,6 +451,12 @@ test('Chinese page: queued messages and Stop are translated', () => {
   assert.equal(t('You can queue up to 3 messages.'), '最多可以排队 3 条消息。');
 });
 
+test('Chinese page: typing into an old conversation: its messages are translated', () => {
+  const t = (s) => page('zh-CN').win.KwilI18n.translate(s);
+  assert.equal(t('Still working on the last request.'), '还在处理上一个请求。');
+  assert.equal(t('turn incognito off to continue a conversation'), '关闭无痕模式才能继续这个对话。');
+});
+
 test('a beta tester (gmail false) never sees mail wording', async () => {
   const gs = { enabled: true, connected: false, disconnect: true, gmail: false, note: null };
   for (const lang of ['en', 'zh-CN']) {

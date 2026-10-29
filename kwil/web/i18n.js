@@ -68,6 +68,7 @@
     "sign-in failed": "登录失败。",
     "too many attempts; try again later": "尝试次数太多，请稍后再试。",
     "still working on the last request": "还在处理上一个请求。",
+    "Still working on the last request.": "还在处理上一个请求。",
     // typing while Kwil is thinking (app.js): queued messages and Stop
     "Queued": "排队中",
     "Remove queued message": "移除排队的消息",
@@ -449,6 +450,7 @@
     "Nothing here.": "这里还没有内容。",
     "No saved conversations yet.": "还没有保存的对话。",
     "Turn incognito off to continue it.": "关闭无痕模式才能继续这个对话。",
+    "turn incognito off to continue a conversation": "关闭无痕模式才能继续这个对话。",
     "Deleted.": "已删除。",
     "Can\"t reach the Pi, the PC or the cloud right now.": "现在连不上树莓派、电脑或云端。",
     "No sound is coming from this microphone. If you\"re on CarPlay or Bluetooth, try push-to-talk.": "这个麦克风没有声音。如果在用 CarPlay 或蓝牙，请改用按住说话。",

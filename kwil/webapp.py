@@ -6,6 +6,9 @@ transcribes it with the same Whisper model as the voice loop, answers with
 the same ClaudeChat (tools, memory), and renders the reply with the same TTS
 engine. Each browser gets its own conversation, which ends (and is summarized
 to memory, as in the voice loop) after `conversation_timeout` seconds idle.
+A turn may name a stored conversation ("conversation_id": the page shows
+one opened from history): it goes on in that one, however long ago it
+ended, and "done" says which conversation the turn is in.
 
 A turn runs in a worker thread and reports what happens as NDJSON events
 (transcript, tool, confirm, reply, error, done). When a tool needs a yes
@@ -1084,9 +1087,14 @@ class WebAssistant:
     # turns
     def start_turn(self, s: Session, text: str | None = None,
                    recording: np.ndarray | None = None,
-                   attachments: list[dict] | None = None) -> bool:
+                   attachments: list[dict] | None = None,
+                   resume: str | None = None, new: bool = False) -> bool:
         """Start a turn in the background. False if one is already running.
         `attachments`: content blocks of files sent with it (attachments.py).
+        `resume`: the stored conversation the page's chat is showing (its
+        id, owned by this session's person: the route checks): the turn goes
+        on in it, even after the idle timeout or after it ended. `new`: end
+        the current conversation first.
 
         Waits briefly for the lock: a turn puts "done" just before releasing
         it, so a page that starts the next turn right away isn't refused."""
@@ -1097,11 +1105,13 @@ class WebAssistant:
         refused = self.limit_message(s, audio=recording is not None)
         if refused:  # over their limit: no turn, nothing sent, history as it was
             s.events.put({"type": "error", "message": refused})
-            s.events.put({"type": "done"})
+            s.events.put(self._done(s))
             s.busy.release()
             return True
-        if (s.chat.history
-                and self.clock() - s.last_active > self.conversation_timeout):
+        # A turn bound to a conversation never starts a new one: the same id
+        # just goes on, another is resumed in the turn thread (_resume).
+        if resume is None and s.chat.history and (
+                new or self.clock() - s.last_active > self.conversation_timeout):
             s.busy.release()
             self._end(s)  # a new conversation starts with this turn
             if not s.busy.acquire(blocking=False):
@@ -1109,23 +1119,52 @@ class WebAssistant:
         s.last_active = self.clock()
         s.cancel = threading.Event()
         s.thread = threading.Thread(target=self._run_turn,
-                                    args=(s, text, recording, attachments),
+                                    args=(s, text, recording, attachments, resume),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
         s.thread.start()
         return True
 
-    def _run_turn(self, s: Session, text, recording, attachments=None) -> None:
+    @staticmethod
+    def _done(s: Session) -> dict:
+        """A turn's last event: which conversation it is now in (None: none
+        yet, or it ended), so the page knows what it is showing."""
+        return {"type": "done", "conversation": s.chat.conversation_id}
+
+    def _run_turn(self, s: Session, text, recording, attachments=None,
+                  resume: str | None = None) -> None:
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
         with i18n.using(s.language):  # its sentences and tool questions
-            self._turn_body(s, text, recording, attachments)
+            self._turn_body(s, text, recording, attachments, resume)
 
-    def _turn_body(self, s: Session, text, recording, attachments=None) -> None:
+    @staticmethod
+    def _resume(s: Session, cid: str) -> bool:
+        """In the turn thread, with s.busy held: make `cid` this chat's
+        conversation (ClaudeChat.resume ends the current one first, a
+        Claude call for its summary, and carries the taint). False if it
+        was deleted since the route checked it: nothing is recorded, and it
+        is never created again."""
+        if cid == s.chat.conversation_id:
+            return True
+        try:
+            s.chat.resume(cid)
+        except KeyError:
+            log.info("Web: conversation %s is gone; turn not run", cid)
+            s.events.put({"type": "error", "gone": True,
+                          "message": i18n.t("conversation_gone")})
+            return False
+        log.info("Web: continuing conversation %s", cid)
+        return True
+
+    def _turn_body(self, s: Session, text, recording, attachments=None,
+                   resume: str | None = None) -> None:
         from kwil.cli import get_reply, is_exit, loggable_reply
 
         cancel = s.cancel
         try:
+            if resume is not None and not self._resume(s, resume):
+                return
             if recording is not None:
                 text = self.transcribe(recording, s.language, user=s.user)
                 s.events.put({"type": "transcript", "text": text})
@@ -1156,7 +1195,7 @@ class WebAssistant:
             s.pending = None
             s.cancel = None
             s.last_active = self.clock()
-            s.events.put({"type": "done"})  # before release: see start_turn
+            s.events.put(self._done(s))  # before release: see start_turn
             s.busy.release()
 
     @staticmethod
@@ -2115,6 +2154,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         fields, data, err = await read_upload(request, files)
         if err:
             return err
+        cid, new, err = await bound_conversation(s, fields)
+        if err:
+            return err
         blocks, err = await read_attachments(files)
         if err:
             return err
@@ -2129,9 +2171,35 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             return error("send text or audio", 400)
         if not await run_in_threadpool(
                 assistant.start_turn, s,
-                text if recording is None else None, recording, blocks):
+                text if recording is None else None, recording, blocks,
+                resume=cid, new=new):
             return error("still working on the last request", 409)
         return stream(s)
+
+    async def bound_conversation(s: Session, fields: dict):
+        """(conversation id or None, new, error response): the stored
+        conversation a turn goes into ("conversation_id", JSON or form
+        field), checked like the history routes: someone else's id is
+        unknown (404), as is any id when history is off."""
+        from kwil.history import valid_id
+
+        cid = fields.get("conversation_id")
+        new = fields.get("new") in (True, "true", "1")
+        if cid is None or cid == "":
+            return None, new, None
+        if new or not valid_id(cid):
+            return None, False, error("bad request", 400)
+        store = assistant.history_of(s)[0]
+        if store is None:
+            return None, False, error("not found", 404)
+        if s.chat.incognito:
+            return None, False, error(
+                "turn incognito off to continue a conversation", 409)
+        try:
+            await run_in_threadpool(store.get, cid, False)
+        except KeyError:
+            return None, False, error("not found", 404)
+        return cid, False, None
 
     @app.post("/api/confirm")
     async def confirm(request: Request):

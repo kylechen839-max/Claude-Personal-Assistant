@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Phone app: typing into an old conversation continues it. Opening one from
+  History only reads it; the first message you type there goes on in that
+  same conversation, even after the 5-minute idle timeout or after it ended.
 - Phone app: you can keep typing while Kwil is answering. Send queues the
   message (up to 3, each with an × to remove it) and it goes as soon as the
   reply is done. A new Stop button ends a reply early and sends the queue. A

@@ -40,6 +40,8 @@ EN = {
     "confirm_again": "Sorry, I didn't catch that.",
     "confirm_unclear": "I still didn't catch that, so I left it.",
     "not_caught": "I didn't catch that. Try again?",
+    # a turn typed into a conversation deleted meanwhile (another phone)
+    "conversation_gone": "That conversation was deleted, so I didn't send this.",
     "wont_delete": "OK, I won't delete it.",
     "wont_do": "OK, I won't do that.",
     "cal_delete": "Do you want me to delete {title} on {when}?",
@@ -159,6 +161,7 @@ ZH = {
     "confirm_again": "不好意思，我没听清。",
     "confirm_unclear": "还是没听清，所以我没有做。",
     "not_caught": "我没听清楚，请再说一遍？",
+    "conversation_gone": "那个对话已经删除了，所以这条消息没有发送。",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",
     "cal_delete": "要我删除{when}的“{title}”吗？",
