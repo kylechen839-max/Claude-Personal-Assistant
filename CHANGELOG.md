@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Memory: ask about earlier chats ("what did we decide about my physics
+  schedule last week?"). Kwil searches your history, reads the best match
+  without switching conversations, and says which chat it came from. Title
+  and summary matches rank first and archived chats are included; optional
+  on-device meaning search with `[memory] embeddings = "fastembed"`. No
+  Pinecone needed.
 - Kwil now remembers what you tell it, without Pinecone. Say "remember...",
   "always..." or "from now on..." (like "always color-code my schedule")
   and it applies from your next conversation. In Settings, Memory you can

@@ -113,6 +113,26 @@ MIGRATIONS: list[str] = [
     """,
 ]
 
+# Memory layer 2 (recall.py): one vector per conversation, made from its
+# title and summary, when [memory] embeddings is on. Created like the FTS
+# tables (IF NOT EXISTS, not a numbered migration), so an older Kwil that
+# a rollback brings back still opens the file. ON DELETE CASCADE: however a
+# conversation goes (a delete, a synced tombstone, prune), its vector goes
+# with it in the same transaction, even when an older Kwil deletes it.
+RECALL_SQL = """
+CREATE TABLE IF NOT EXISTS recall_vectors (
+    conversation_id TEXT PRIMARY KEY
+        REFERENCES conversations(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,     -- the embedder that made it
+    version TEXT NOT NULL,   -- title_order|summary_order it was made from
+    dim INTEGER NOT NULL,
+    vector BLOB NOT NULL     -- float32, unit length
+);
+"""
+# Recall reads at most this many vectors per search (brute-force cosine);
+# past that, a Postgres + pgvector Retriever is the way (recall.py).
+MAX_RECALL_SCAN = 20000
+
 FTS_SQL = """
 CREATE VIRTUAL TABLE messages_fts USING fts5(
     text, content='messages', content_rowid='id',
@@ -276,6 +296,10 @@ class HistoryStore:
     Thread-safe: one connection guarded by a lock (the web app calls in
     from several threads, titles are written from a background thread)."""
 
+    # The Retriever that finds past conversations in this store
+    # (recall.attach); None = keyword search only (recall.retriever_for).
+    recall = None
+
     def __init__(self, path: str | Path = "data/history.sqlite", *,
                  owner: str = "default", retention_days: float = 0,
                  max_mb: float = 0, use_fts: bool | None = None,
@@ -305,6 +329,8 @@ class HistoryStore:
         # Deleted rows are overwritten with zeros, not just unlinked.
         self._con.execute("PRAGMA secure_delete = ON")
         self._migrate()
+        with self._lock:
+            self._con.executescript(RECALL_SQL)
         if use_fts is None:
             use_fts = fts5_available()
         self.fts = self._ensure_fts() if use_fts else self._drop_fts_triggers()
@@ -898,6 +924,75 @@ class HistoryStore:
                 f"{_HAS_MESSAGES} ORDER BY updated_at", (self.owner,))
                 if r[0] not in skip]
 
+    # ---------- recall vectors (recall.py; local, never synced) ----------
+    def recall_pending(self, model: str, limit: int = 32,
+                       ids: list[str] | None = None) -> list[dict]:
+        """Conversations with no vector from `model`, or one made from an
+        older title or summary: newest first, at most `limit` (of `ids`
+        only, if given). Each is {id, version, title, summary, preview}."""
+        only, extra = "", []
+        if ids is not None:
+            ids = [i for i in ids if valid_id(i)] or [""]
+            only = f" AND c.id IN ({','.join('?' * len(ids))})"
+            extra = ids
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT c.id, c.title_order || '|' || c.summary_order AS version, "
+                f"c.title, c.summary, ({_FIRST_USER}) AS preview "
+                "FROM conversations c LEFT JOIN recall_vectors v "
+                "ON v.conversation_id = c.id "
+                f"WHERE c.owner = ? AND {_HAS_MESSAGES} AND (v.conversation_id "
+                "IS NULL OR v.model != ? OR v.version != "
+                f"c.title_order || '|' || c.summary_order){only} "
+                "ORDER BY c.updated_at DESC LIMIT ?",
+                (self.owner, model, *extra, max(1, int(limit)))).fetchall()
+        return [{"id": r["id"], "version": r["version"], "title": r["title"] or "",
+                 "summary": r["summary"] or "", "preview": r["preview"] or ""}
+                for r in rows]
+
+    def recall_pending_count(self, model: str) -> int:
+        with self._lock:
+            return self._con.execute(
+                "SELECT count(*) FROM conversations c LEFT JOIN recall_vectors v "
+                "ON v.conversation_id = c.id "
+                f"WHERE c.owner = ? AND {_HAS_MESSAGES} AND (v.conversation_id "
+                "IS NULL OR v.model != ? OR v.version != "
+                "c.title_order || '|' || c.summary_order)",
+                (self.owner, model)).fetchone()[0]
+
+    def put_recall_vector(self, conversation_id: str, model: str, version: str,
+                          vector: bytes, dim: int) -> bool:
+        """Store a conversation's vector (replacing an older one). False if
+        the conversation was deleted meanwhile: nothing is stored."""
+        with self._lock:
+            try:
+                self._own(conversation_id)
+                self._con.execute(
+                    "INSERT OR REPLACE INTO recall_vectors VALUES (?, ?, ?, ?, ?)",
+                    (conversation_id, model, version, int(dim), vector))
+            except (KeyError, sqlite3.IntegrityError):
+                return False
+        return True
+
+    def recall_vectors(self, model: str, *, source=None, pinned=None,
+                       archived=None, since=None, until=None) -> list[tuple]:
+        """[(conversation id, vector bytes, dim)] for `model`, newest first,
+        filtered like `search`, at most MAX_RECALL_SCAN."""
+        where, params = self._filters(source, pinned, archived, since, until)
+        with self._lock:
+            return [tuple(r) for r in self._con.execute(
+                f"SELECT c.id, v.vector, v.dim FROM recall_vectors v "
+                f"JOIN conversations c ON c.id = v.conversation_id "
+                f"WHERE v.model = ? AND {where} ORDER BY c.updated_at DESC LIMIT ?",
+                (model, *params, MAX_RECALL_SCAN))]
+
+    def delete_recall_vectors(self, conversation_id: str) -> None:
+        """Drop a conversation's vector (its delete does this by itself:
+        ON DELETE CASCADE)."""
+        with self._lock:
+            self._con.execute("DELETE FROM recall_vectors WHERE conversation_id = ?",
+                              (conversation_id,))
+
     # ---------- reading ----------
     def get(self, conversation_id: str, messages: bool = True) -> dict:
         with self._lock:
@@ -945,11 +1040,14 @@ class HistoryStore:
     def search(self, query: str, *, limit: int = 20, offset: int = 0,
                source: str | None = None, pinned: bool | None = None,
                archived: bool | None = False, since: float | None = None,
-               until: float | None = None) -> list[dict]:
+               until: float | None = None, snippet_tokens: int = 12) -> list[dict]:
         """Ranked keyword search. Each hit is a conversation (as in `list`)
         with a `snippet` whose matches are wrapped in MARK_START/MARK_END
         and a `score` (higher is better). All words must match; if nothing
-        does, any word may."""
+        does, any word may. Conversations whose title or summary match come
+        before ones that only mention the words in passing.
+        `snippet_tokens`: words around the match (at most 64)."""
+        snippet_tokens = max(4, min(int(snippet_tokens), 64))
         terms = query_terms(query)
         if not terms:
             return self.list(limit=limit, offset=offset, source=source,
@@ -966,7 +1064,7 @@ class HistoryStore:
             mids = [snip for _, _, snip in page if isinstance(snip, int)]
             snippets = dict(self._con.execute(
                 f"SELECT rowid, snippet(messages_fts, 0, char(2), char(3), "
-                f"'{ELLIPSIS}', 12) FROM messages_fts WHERE messages_fts MATCH ? "
+                f"'{ELLIPSIS}', {snippet_tokens}) FROM messages_fts WHERE messages_fts MATCH ? "
                 f"AND rowid IN ({','.join('?' * len(mids))})",
                 (_fts_query(terms, True), *mids)).fetchall()) if mids else {}
             page = [(cid, score, snippets.get(snip, "") if isinstance(snip, int)
@@ -987,6 +1085,7 @@ class HistoryStore:
         where, params = filters
         q = _fts_query(terms, any_term)
         scores: dict[str, list] = {}
+        topical: set[str] = set()
         # Messages: the best-matching message per conversation (SQLite
         # returns the bare `mid` column from the row with the MIN score).
         # Its snippet is made later, only for the page that is returned.
@@ -1003,21 +1102,23 @@ class HistoryStore:
         # every conversation and probe the index once per row.
         for cid, score, snip in self._con.execute(
                 f"SELECT c.id, conversations_fts.rank, "
-                f"snippet(conversations_fts, 1, char(2), char(3), '{ELLIPSIS}', 12) "
+                f"snippet(conversations_fts, 1, char(2), char(3), '{ELLIPSIS}', 24) "
                 f"FROM conversations_fts CROSS JOIN conversations c "
                 f"ON c.rid = conversations_fts.rowid "
                 f"WHERE conversations_fts MATCH ? AND {where}", (q, *params)):
+            topical.add(cid)
             if cid in scores:
                 scores[cid][0] += -score
             else:
                 has_mark = MARK_START in (snip or "")
                 scores[cid] = [-score, snip if has_mark else ""]
-        return self._rank(scores)
+        return self._rank(scores, topical)
 
     def _search_like(self, terms, filters, any_term):
         where, params = filters
         per_term: list[dict[str, int]] = []
         first_text: dict[str, str] = {}
+        topical: set[str] = set()
         for term in terms:
             pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%") \
                 .replace("_", "\\_") + "%"
@@ -1034,6 +1135,7 @@ class HistoryStore:
                     f"WHERE (c.title LIKE ? ESCAPE '\\' OR c.summary LIKE ? "
                     f"ESCAPE '\\') AND {where}", (pattern, pattern, *params)):
                 counts[cid] = counts.get(cid, 0) + 3
+                topical.add(cid)
                 first_text.setdefault(cid, summary or title)
             per_term.append(counts)
         ids = set.union(*map(set, per_term)) if any_term \
@@ -1041,16 +1143,21 @@ class HistoryStore:
         scores = {cid: [float(sum(c.get(cid, 0) for c in per_term)),
                         _like_snippet(first_text.get(cid, ""), terms)]
                   for cid in ids}
-        return self._rank(scores)
+        return self._rank(scores, topical)
 
-    def _rank(self, scores: dict[str, list]) -> list[tuple]:
+    def _rank(self, scores: dict[str, list], topical: set[str] = frozenset()
+              ) -> list[tuple]:
+        """Best first: a title or summary match (`topical`: what the
+        conversation was about) before a word said in passing, then by
+        score, then the newest."""
         if not scores:
             return []
         updated = dict(self._con.execute(
             f"SELECT id, updated_at FROM conversations WHERE id IN "
             f"({','.join('?' * len(scores))})", list(scores)).fetchall())
         return sorted(((cid, s, snip) for cid, (s, snip) in scores.items()),
-                      key=lambda h: (-h[1], -updated.get(h[0], 0)))
+                      key=lambda h: (h[0] not in topical, -h[1],
+                                     -updated.get(h[0], 0)))
 
     def _filters(self, source, pinned, archived, since, until, ids=None):
         where, params = ["c.owner = ?", _HAS_MESSAGES], [self.owner]
@@ -1550,6 +1657,8 @@ class Recorder:
                 title, summary = asked or fallback_title(conv["messages"])
                 self.store.finish(cid, title, summary, ended)
             log.info("History: saved %s", cid)
+            if self.store.recall is not None:  # its summary vector, if on
+                self.store.recall.index_soon(cid)
         except KeyError:
             pass  # deleted meanwhile
         except Exception:
@@ -1633,9 +1742,19 @@ def open_store(config: dict) -> HistoryStore | None:
 def search_conversations(store: HistoryStore, query: str, memory=None, *,
                          limit: int = 20, offset: int = 0,
                          **filters) -> list[dict]:
-    """Keyword hits (FTS, ranked) first, then semantic hits from Pinecone
-    conversation summaries that keyword search missed. Each hit has
-    `match` = "keyword" or "semantic"."""
+    """Past conversations matching `query`. Each hit has `match` =
+    "keyword" or "semantic".
+
+    `memory` None ([memory] backend = "local"): the store's own Retriever
+    (recall.py: FTS5, plus summary vectors when [memory] embeddings is on;
+    no Pinecone). Otherwise ("pinecone"): keyword hits (FTS, ranked) first,
+    then semantic hits from Pinecone conversation summaries that keyword
+    search missed."""
+    if memory is None:
+        from kwil import recall
+
+        return recall.retriever_for(store).search(query, k=limit, offset=offset,
+                                                  filters=filters)
     hits = store.search(query, limit=limit, offset=offset, **filters)
     for h in hits:
         h["match"] = "keyword"
@@ -1668,7 +1787,8 @@ def delete_conversation(store: HistoryStore, conversation_id: str,
                         memory=None) -> None:
     """Delete a conversation and its Pinecone summary vector(s). Pinecone
     goes first: if that fails, nothing is deleted and the error is raised,
-    so a retry can't leave an orphaned summary behind."""
+    so a retry can't leave an orphaned summary behind. So does the store's
+    Retriever (recall.py), for one with an index outside this file."""
     vectors = store.memory_vectors(conversation_id)  # KeyError if not ours
     if memory is not None:
         # Also summaries written by another backend (found by metadata).
@@ -1678,7 +1798,9 @@ def delete_conversation(store: HistoryStore, conversation_id: str,
     elif vectors:
         log.warning("History: memory is off; %d summary vector(s) of %s were "
                     "left in Pinecone", len(vectors), conversation_id)
-    store.delete(conversation_id)
+    if store.recall is not None:  # a Retriever with an index of its own
+        store.recall.delete(conversation_id)
+    store.delete(conversation_id)  # its FTS rows and local vector go with it
 
 
 # ---------- export ----------

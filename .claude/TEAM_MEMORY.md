@@ -331,6 +331,12 @@ as the work. Never put secrets, tokens or personal data in this file.
   rebrand" for the `assistant/` alias).
 - **Config:** `config.py` `DEFAULTS` is mirrored in `config.toml`; every
   key needs a default.
+- A default under `data/` is per instance (`test_config_cli` checks that
+  `config.mom.toml` moves it to `data/<name>/`); a downloaded model that
+  every instance can share goes under `models/` (Kokoro, fastembed).
+- Past chats are found through the store's Retriever (`recall.py`,
+  `store.recall`); new search features go there, not into another
+  index beside `history.py`.
 - **Chat and tools:**
   - `chat.py`: `ClaudeChat`, `tainted()`.
   - `tools/__init__.py`: `Tool` flags `confirm_prompt`,

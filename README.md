@@ -189,6 +189,18 @@ about the lab report". Claude searches your history and asks *"Continue
 is loaded, so "and what about standard deviation?" is answered in context.
 This works mid-conversation too (the current one is saved first).
 
+**Asking about an earlier chat:** "What did we decide about my physics
+schedule last week?", "Remember when we planned the lab report?" Kwil
+searches your history (`search_conversations`: title, date, a short
+summary and the best matching words for each hit), reads the best one
+(`read_conversation`: up to 20 messages of up to 500 characters, the ones
+around the matching words, or the summary and the last messages) and
+answers from it, saying where it came from ("in your chat on Tuesday").
+Reading doesn't switch conversations: you stay where you are. Archived
+conversations are found too; deleted ones never, and incognito ones were
+never saved. Like a resumed conversation, what was read counts as
+untrusted, so changes later in that conversation ask first.
+
 **On the phone:** the clock button at the top of the app opens History:
 a search bar (results update as you type, matching words highlighted),
 filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
@@ -243,10 +255,29 @@ first thing you said becomes the title.
 **Search:** keyword search uses SQLite full-text search (FTS5) over messages,
 titles and summaries, ranked by relevance, with prefix matching (typing
 "chem" finds "chemistry"); if your Python's SQLite lacks FTS5 it falls back
-to simpler matching. When Pinecone memory is on, the conversation's memory
-summary carries the conversation id, so a semantic match ("that thing about
-uncertainty in graphs") also links back to the full conversation. Searching
-5,000 conversations takes well under 100 ms.
+to simpler matching. A conversation whose title or summary matches comes
+before ones where the words were only said in passing. No Pinecone is
+needed (`kwil/recall.py`):
+
+- **By meaning, on your machine** (optional): `[memory] embeddings =
+  "fastembed"` also keeps one small vector per conversation, made from its
+  title and summary, in the same history file, so "physics revision
+  timetable" finds "Mechanics exam study plan". Install it with
+  `pip install fastembed`, then download the model once with
+  `python -m kwil.recall --download` (it is read only from
+  `[memory] embedding_dir` afterwards; nothing is downloaded during a
+  conversation). Keyword and meaning hits are merged by reciprocal rank
+  fusion. Existing conversations are indexed in the background at startup
+  and on the first search (500 per run, resuming where it stopped; a
+  search never waits for it); `python -m kwil.recall --backfill` does it
+  all at once. Deleting a conversation deletes its vector with it. If
+  fastembed is missing or fails, search stays keyword-only.
+- **With `[memory] backend = "pinecone"`:** keyword search plus the
+  Pinecone conversation summaries, which carry the conversation id, so a
+  semantic match ("that thing about uncertainty in graphs") also links
+  back to the full conversation.
+
+Searching 5,000 conversations takes well under 100 ms.
 
 **Where it lives:** one SQLite file, `data/history.sqlite` (gitignored) on
 the PC's disk or the Pi's SD card; on the Render deploy the `HISTORY_PATH`
@@ -1488,6 +1519,17 @@ data" and deleted with their account; the owner's backup zip has
 everyone's. With failover, each backend (Pi, PC, cloud) keeps its own
 memory for now; it isn't synced, and the screen says where yours is
 ("Saved on this server (cloud)").
+
+Kwil can also look things up in your past conversations ("what did we
+decide about my physics schedule?"; see [Conversation history](#conversation-history)).
+Settings for that, in `[memory]`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `[memory] embeddings` | "off" | "off" = keyword search of past chats; "fastembed" = also by meaning (optional package, vectors in your own history file) |
+| `[memory] embedding_model` | "BAAI/bge-small-en-v1.5" | The fastembed model |
+| `[memory] embedding_dir` | "models/fastembed" | Where `python -m kwil.recall --download` puts it |
+| `[memory] embedding_min_score` | 0.5 | How close a summary must be to count as a match by meaning |
 
 `[memory] backend = "pinecone"` adds the older Pinecone memory on top:
 notes recalled before each reply, conversation summaries, quick notes

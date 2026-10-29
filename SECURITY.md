@@ -2525,9 +2525,34 @@ continued (`kwil/history.py`). What that means for privacy:
   `resume_conversation` put past text into the context, every tool that
   changes something asks for a yes first, for the rest of that
   conversation (as with web content in context).
-- **Search tools.** `search_conversations` returns only titles, dates and
-  short snippets to Claude, and `resume_conversation` always asks for a
-  spoken yes first. A web page in context could ask Claude to search history;
+- **Search tools.** `search_conversations` returns titles, dates, a short
+  summary (300 characters) and a snippet (240) per hit, at most 5 hits, and
+  `resume_conversation` always asks for a spoken yes first.
+  `read_conversation` (memory layer 2, `kwil/recall.py`) is read-only: it
+  returns at most 20 messages of at most 500 characters and never switches
+  the conversation. Its result is saved history, so it taints the
+  conversation like a resume (`chat.HISTORY_TOOLS`, and the tool is
+  `untrusted_output`, so trimming the turn away keeps the taint); it is
+  `private` (its query and result are never logged, not even at DEBUG). It
+  is in both read-only lists: the fast model may run it, and a health
+  check session may too (as `list_memories`); the check session reads only
+  the owner's own store.
+- **Recall isolation.** Each person's Retriever reads only the
+  HistoryStore it was attached to: the owner's file, or a family member's
+  own `<dir>/<id>/history.sqlite`; every query is scoped to the store's
+  owner, and an id from another store is "not found". Family members get
+  no history tools in chat; their phone History search uses their own
+  index (tested both ways, with vectors on). With `[memory] embeddings`
+  on, the vectors are in the same file (`recall_vectors`, ON DELETE
+  CASCADE, so a delete, a synced tombstone or prune removes them in the
+  same transaction, with `secure_delete` on). Incognito conversations are
+  never written, so never indexed. Recall logs counts only.
+- **Not done: a checksum for the embedding model.** fastembed fetches the
+  model from Hugging Face (whose hub checks the files it downloads)
+  only when Kyle runs `python -m kwil.recall --download`; at run time it is
+  opened with `local_files_only`, so a conversation never triggers a
+  download. Pinning our own hash per file would break with every upstream
+  repack; embeddings are off by default. A web page in context could ask Claude to search history;
   the snippets then end up in the conversation, but nothing leaves the
   machine except through tools that already ask before acting.
 - **Not done: encryption at rest.** The database is a plain SQLite file.

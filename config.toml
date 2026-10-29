@@ -131,6 +131,12 @@ min_score = 0.4
 text_fields = ["text", "chunk_text", "content", "summary"]  # metadata field(s) holding a note's text
 weekly_review = false         # true: once a week, the first conversation offers to review this week's notes
 review_state_file = "data/memory_review.json"  # when the last weekly review offer was made
+embeddings = "off"            # finding past chats ("what did we decide about..."): "off" = keyword search;
+                              # "fastembed" = also by meaning (pip install fastembed, then
+                              # python -m kwil.recall --download once); vectors stay in your history file
+embedding_model = "BAAI/bge-small-en-v1.5"  # fastembed model for those vectors
+embedding_dir = "models/fastembed"     # where --download puts the model (read only from here)
+embedding_min_score = 0.5     # how close a past chat's summary must be to count as a match
 
 [webapp]                      # python -m kwil --mode web (phone page)
 host = "127.0.0.1"            # keep this: reach it through `tailscale serve`

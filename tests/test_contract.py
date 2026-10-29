@@ -156,6 +156,55 @@ def test_a_remembered_rule_reaches_the_next_conversation(tmp_path):
         store.close()
 
 
+def test_recall_searches_then_reads_a_past_chat(tmp_path):
+    """Memory layer 2: "what did we decide about my physics schedule last
+    week?" searches past chats, reads the best hit and answers from it, in
+    a multi-turn exchange (two tool rounds, then a follow-up turn on the
+    same thinking chain). Every request must be one the API accepts; the
+    current conversation stays the same and the old one is untouched. Fake
+    only: which tools a live model calls is its choice, not the contract."""
+    import time
+
+    from kwil import history
+    from kwil.history import HistoryStore, Recorder
+    from kwil.tools.history import history_tools
+
+    six_days_ago = time.time() - 6 * 86400
+    store = HistoryStore(tmp_path / "history.sqlite", eventlog=False,
+                         clock=lambda: six_days_ago)
+    try:
+        old = store.create("web")
+        for role, text in (("user", "Can you help me fit physics into my week?"),
+                           ("assistant", "Sure, what works?"),
+                           ("user", "Let's lock the physics schedule: Mondays and "
+                                    "Thursdays at 7."),
+                           ("assistant", "Done, Mondays and Thursdays at 7.")):
+            store.append(old, role, text)
+        store.finish(old, "Physics study schedule",
+                     "Decided on the physics schedule: Mondays and Thursdays at 7.")
+        store.clock = time.time
+        client = ContractClient()
+        tools = calendar_tools([])
+        tools.register(*history_tools(store))
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools, max_tokens=1024,
+                          recorder=Recorder(store, "web", run_async=False))
+        answer = chat.ask("What did we decide about my physics schedule last week?")
+        assert "Mondays and Thursdays" in answer
+        assert history.local_dt(six_days_ago).strftime("%A") in answer  # cites the chat
+        names = [b["name"] for r in client.requests for m in r["messages"]
+                 if isinstance(m["content"], list) for b in m["content"]
+                 if b.get("type") == "tool_use"]
+        assert "search_conversations" in names and "read_conversation" in names
+        current = chat.conversation_id
+        assert current and current != old and chat.tainted()
+        assert chat.ask("Thanks. What's on my calendar tomorrow?").strip()
+        assert chat.conversation_id == current
+        assert store.get(old)["message_count"] == 4
+        assert len({str(r["system"]) for r in client.requests}) == 1
+    finally:
+        store.close()
+
+
 def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
     """Bring your own key (family.UserApi): a beta tester's chat reaches the
     client through a per-call lookup of their key, never the owner's. A

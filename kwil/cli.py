@@ -1123,9 +1123,11 @@ def add_history_tools(registry: ToolRegistry, config: dict, store, memory) -> No
         return
     from zoneinfo import ZoneInfo
 
+    from kwil import recall
     from kwil.tools.history import history_tools
 
     tz = config["assistant"]["timezone"]
+    recall.attach(store, config)  # search past chats (embeddings if on)
     registry.register(*history_tools(store, memory, ZoneInfo(tz) if tz else None))
 
 
