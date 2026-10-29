@@ -6900,3 +6900,69 @@ and after.
 Counts after round 3 (Linux sandbox, not real hardware), `-k "not
 live_pinecone"`: 3557 passed, 41 skipped, 1 deselected (dfeb817: 3555 /
 41); JavaScript 294 passed.
+
+## Kwil colors new events the way Kyle already colors them (PR 3, 2026-10-29)
+
+Kyle's report: Kwil built his schedule without color-coding it, and an
+earlier time it colored events with new colors instead of the labels he
+already uses. No code creates labels or calendars (the only write is
+`events().insert`/`patch`); the causes were that nothing told the model to
+reuse past colors, and without the extra Google scope a labelled event
+read as a bare "a label", which the model couldn't name or reuse.
+
+- **`calendar_color_habits(days=14, calendar=None)`** (`kwil/tools/calendar.py`,
+  read-only, in `tools.READ_ONLY_TOOLS` and `router.READ_ONLY_TOOLS`, no
+  extra scope needed). One `events.list` of the past `days` (1-28) up to
+  now, at most 250 events. Groups Kyle's own timed events by course code
+  ("PHYS 361 Lecture" and "phys 361 lab" are both "PHYS 361") or by the
+  tidied title ("Tennis", "tennis!"), and returns the color or label used
+  most (a tie goes to the latest), its count and, if mixed, the total
+  (`{"PHYS 361": {"label": "Physics", "count": 6, "of": 7}}`); uncolored
+  events show as `"color": "default"`. At most 30 groups (`more_titles`
+  counts the rest), names cut to 60 characters, plus the classic colors,
+  the label names and `[calendar] color_labels` aliases. Invites, Gmail,
+  guest-editable or taint-marked events and shared calendars are skipped
+  (the `_outside` rule), so the result holds only Kyle's own text and
+  doesn't taint; all-day and untitled events are skipped and counted.
+  INFO logs counts only.
+- **Labels that can't be read.** `_label_state` says whether labels were
+  read (no extra scope, or `calendars.get` failed, means no). A labelled
+  event then shows `"label_unreadable": true` (not "a label"), and
+  `list_calendar_events` and the habits add `"labels_unavailable": true`
+  with `labels_hint`: don't name or invent a label, plus how to grant the
+  permission (`MissingScopes`' own text: the sign-in command on the PC,
+  "reconnect Google" in the app).
+- **Unknown names refused.** A color that matches no classic color, label
+  or alias was already refused before any insert/patch; the error now
+  reads "No color or event label by that name. Choices: ..." and, when
+  labels can't be read, adds the hint.
+- **Prompt.** New `COLOR_PROMPT` in `stable_system` (only when
+  `calendar_color_habits` is registered): call it first when creating
+  schedule events, color each like Kyle's similar past events, use only
+  existing colors and labels, and if unsure leave the default and say so.
+- The label API shape (`labelProperties.eventLabels` from `calendars.get`,
+  `eventLabelId` + `eventLabelVersion=1` on events) is unchanged. Nothing
+  new is stored.
+
+Tests: new `tests/test_calendar_colors.py` (14): a week of events (PHYS
+361 under a Physics label, one under School, tennis in Sage, errands,
+untitled, all-day, an invite, a cancelled one) gives the expected mapping,
+skips and choices without the invite's title; a tie goes to the latest
+use; days clamp and another calendar can be named; output bounds with 300
+events; the list request builds against the real discovery document;
+without the extra scope (and when Google fails) labels are flagged, never
+named; in the app the hint is the reconnect text; an unlabelled listing
+has no flag; an unknown label on create is a tool error with no insert,
+and a label name without the scope is refused on create and update; the
+tool is in both read-only lists; the prompt is in a byte-identical system
+across turns and only with the tool; INFO logs no titles or colors.
+Failing first: with the four source files back at 2317311 (constants
+inlined in a scratch copy of the test so it imports), 13 of 14 fail (the
+14th, "no flag without labelled events", is a guard); reverting only
+`chat.py` fails the prompt test, only `router.py` or only
+`tools/__init__.py` fails the read-only test. On the old code an unknown
+color was already refused without an insert; that test fails there only
+on the new message.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+COUNTS_HERE
