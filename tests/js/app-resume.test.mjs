@@ -7,7 +7,8 @@
 // that conversation's id (JSON and FormData, never on /api/confirm), a
 // queued message keeps the pane it was typed in, a yes/no question only
 // takes text typed in its own pane, a late reply never lands in another
-// pane, and Continue is a read-only GET.
+// pane (nor does a queued message's), "goodbye" unbinds the pane, and
+// Continue is a read-only GET.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ const SCRIPT = readFileSync(new URL('../../kwil/web/app.js', import.meta.url), '
 const HISTORY = readFileSync(new URL('../../kwil/web/history.js', import.meta.url), 'utf8');
 const CID = 'AbCdEfGhIjKlMnOp';
 const OTHER = 'QrStUvWxYz012345';
+const FRESH = 'FreshChat0123456';  // a new conversation the server started
 
 class El {
   constructor(id = '', doc = null) {
@@ -113,6 +115,11 @@ function load({ history = false } = {}) {
       if (url.includes('/continue')) return json(200, { ok: true });
       if (refusing.length) return json(...refusing.shift());
       const s = liveStream();
+      // what the server's "done" says: the bound conversation, or the one a
+      // fresh chat started (which the pane must never bind to)
+      const sent = opts.body instanceof FormData ? opts.body.get('conversation_id')
+        : JSON.parse(opts.body).conversation_id;
+      s.conversation = sent || (url === '/api/turn' ? FRESH : null);
       streams.push(s);
       return s.res;
     },
@@ -132,7 +139,7 @@ function load({ history = false } = {}) {
     await flush();
   }
   async function finish(stream, ...events) {  // the reply, then "done"
-    stream.push(...events, { type: 'done', conversation: null });
+    stream.push(...events, { type: 'done', conversation: stream.conversation });
     stream.end();
     await flush();
   }
@@ -308,4 +315,60 @@ test('history.js: turning incognito on unbinds the pane', async () => {
   assert.equal(p.win.KwilApp.pane().cid, null);
   await p.submit('a private thing');
   assert.deepEqual(p.turns()[0].body, { text: 'a private thing' });
+});
+
+test('a queued message and its reply stay out of a pane opened after it was typed (judge round 2)', async () => {
+  const p = load();
+  await p.flush();
+  p.win.KwilApp.bindPane(CID);
+  await p.submit('first in the lab report');
+  await p.submit('second in the lab report');  // queued in the lab report
+  p.$('log').textContent = '';  // history.js redraws #log for the trip
+  p.win.KwilApp.bindPane(OTHER);
+  await p.finish(p.streams[0], { type: 'reply', text: 'Lab answer one.' });
+  assert.equal(p.turns()[1].body.conversation_id, CID);  // it went, into its own conversation
+  p.streams[1].push({ type: 'delta', text: 'Lab answer' });
+  await p.finish(p.streams[1], { type: 'reply', text: 'Lab answer two.' });
+  assert.deepEqual(p.log('me'), []);
+  assert.deepEqual(p.log('claude'), []);
+  // a message queued in the pane still shown is drawn as usual
+  await p.submit('in the trip');
+  await p.submit('queued in the trip');
+  await p.finish(p.streams[2], { type: 'reply', text: 'Trip one.' });
+  await p.finish(p.streams[3], { type: 'reply', text: 'Trip two.' });
+  assert.deepEqual(p.log('me'), ['in the trip', 'queued in the trip']);
+  assert.deepEqual(p.log('claude'), ['Trip one.', 'Trip two.']);
+});
+
+test('goodbye in a bound pane unbinds it: the next message starts a new conversation (judge round 2)', async () => {
+  const p = load();
+  await p.flush();
+  p.win.KwilApp.bindPane(CID);
+  await p.submit('goodbye');
+  await p.submit('queued after goodbye');
+  p.streams[0].conversation = null;  // the server ended it
+  await p.finish(p.streams[0], { type: 'reply', text: 'Bye.', ended: true });
+  assert.deepEqual(p.log('note'), ['Conversation ended.']);
+  assert.equal(p.win.KwilApp.pane().cid, null);
+  assert.deepEqual(p.turns()[1].body, { text: 'queued after goodbye' });
+  await p.finish(p.streams[1], { type: 'reply', text: 'Hi again.' });
+  await p.submit('a new topic');
+  assert.deepEqual(p.turns()[2].body, { text: 'a new topic' });
+  assert.deepEqual(p.log('me'), ['goodbye', 'queued after goodbye', 'a new topic']);
+});
+
+test('a "done" with no conversation after a bound turn unbinds it; a fresh pane never binds', async () => {
+  const p = load();
+  await p.flush();
+  await p.submit('fresh chat');  // done says FRESH: not bound to it
+  await p.finish(p.streams[0], { type: 'reply', text: 'Hi.' });
+  assert.equal(p.win.KwilApp.pane().cid, null);
+  await p.submit('still fresh');
+  assert.deepEqual(p.turns()[1].body, { text: 'still fresh' });
+  await p.finish(p.streams[1], { type: 'reply', text: 'Yes.' });
+  p.win.KwilApp.bindPane(CID);
+  await p.submit('bound');
+  p.streams[2].conversation = null;  // e.g. ended by the server without a reply flag
+  await p.finish(p.streams[2], { type: 'reply', text: 'OK.' });
+  assert.equal(p.win.KwilApp.pane().cid, null);
 });

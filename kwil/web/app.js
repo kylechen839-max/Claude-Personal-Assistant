@@ -22,7 +22,7 @@ let live = null;  // the reply bubble that streamed text is going into
 // and sent in order, one turn at a time, once the reply is done. Kept in
 // this page's memory only (never stored), a few at most.
 const MAX_QUEUE = 3;
-const queue = [];  // {text, el, cid}
+const queue = [];  // {text, el, cid, epoch}
 // The chat pane: `cid` is the stored conversation it shows (history.js's
 // Continue binds it; null for a new chat). Every turn typed into it carries
 // that id, so the server continues that conversation however long ago it
@@ -77,7 +77,7 @@ function setBusy(value) {
 }
 
 // --- queued messages ---
-function enqueue(text, cid = pane.cid) {
+function enqueue(text, cid = pane.cid, epoch = pane.epoch) {
   if (queue.length >= MAX_QUEUE) {
     addMessage("note", `You can queue up to ${MAX_QUEUE} messages.`);
     return false;
@@ -94,7 +94,7 @@ function enqueue(text, cid = pane.cid) {
   remove.className = "queued-remove";
   remove.setAttribute("aria-label", "Remove queued message");
   remove.textContent = "×";
-  const item = { text, el, cid };  // sent into the pane it was typed in
+  const item = { text, el, cid, epoch };  // sent into, and drawn in, the pane it was typed in
   remove.addEventListener("click", () => { unqueue(item); els.text.focus(); });
   el.appendChild(words);
   el.appendChild(tag);
@@ -123,6 +123,14 @@ function bindPane(cid) {
   live = null;
 }
 
+// The conversation ended on the server ("goodbye"): the pane stays as it
+// is (same epoch), but what is typed next, queued messages included, starts
+// a new conversation instead of resuming the ended one.
+function conversationEnded(cid) {
+  for (const item of queue) if (item.cid === cid) item.cid = null;
+  if (pane.cid === cid) pane.cid = null;
+}
+
 // A conversation was deleted (or the server says it is gone): drop its
 // queued messages, and unbind the pane if it showed it.
 function forgetConversation(cid) {
@@ -136,7 +144,7 @@ function sendQueued() {
   if (!els.login.hidden) { clearQueue(); return; }  // signed out: nothing goes
   const item = queue[0];
   unqueue(item);
-  sendMessage(item.text, item.cid);
+  sendMessage(item.text, item.cid, item.epoch);
 }
 
 // Files picked with "+" (attachments.js) go with the next message, never
@@ -412,27 +420,32 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       setStatus("");
       speak(ev.text, ev.audio);
       if (ev.ended) addMessage("note", "Conversation ended.");
+      if (ev.ended && cid) conversationEnded(cid);
       break;
     case "error":
       addMessage("note", ev.message);
       if (ev.gone && cid) forgetConversation(cid);  // deleted elsewhere
       break;
     case "done":
+      // A bound turn that left no conversation (it ended): unbind. A fresh
+      // pane never binds to the id here, so its idle timeout still holds.
+      if (here && cid && ev.conversation === null) conversationEnded(cid);
       setConfirm(null);
       setStatus("");
       break;
   }
 }
 
-async function send(body, sentFiles, cid = pane.cid) {
+async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
   // body: {text} | FormData with "audio" and/or "text" and "attachment"s.
   // sentFiles: called once the server took the turn (clears the chips).
   // cid: the conversation it goes into (the pane's when it was typed); a
   // yes/no answer belongs to its question's turn and never carries one.
+  // from: the pane it was typed in (a queued message's may be gone).
   const answering = confirming;
   const question = els.question.textContent;
   const asked = confirmEpoch;
-  const epoch = answering ? asked : pane.epoch;  // an answer's turn: its question's pane
+  const epoch = answering ? asked : from;  // an answer's turn: its question's pane
   const url = answering ? "/api/confirm" : "/api/turn";
   const into = answering ? null : cid;
   let options;
@@ -444,7 +457,7 @@ async function send(body, sentFiles, cid = pane.cid) {
     if (into) payload.conversation_id = into;
     options = { method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload) };
-    addMessage("me", body.text);
+    if (epoch === pane.epoch) addMessage("me", body.text);
   }
   // Answered: text typed from now on is a new message (queued), not
   // another answer. A failed answer brings the question back.
@@ -590,9 +603,9 @@ els.textForm.addEventListener("submit", (e) => {
 
 // A typed message (or a yes/no answer while asked), with any picked files,
 // into conversation `cid` (the pane's when it was typed).
-async function sendMessage(text, cid = pane.cid) {
+async function sendMessage(text, cid = pane.cid, epoch = pane.epoch) {
   if (!pendingFiles()) {
-    send({ text }, undefined, cid);
+    send({ text }, undefined, cid, epoch);
     return;
   }
   setBusy(true);  // no second send while photos are still being shrunk
@@ -602,8 +615,8 @@ async function sendMessage(text, cid = pane.cid) {
   const form = new FormData();
   if (text) form.append("text", text);
   tray().appendTo(form);
-  addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
-  send(form, () => tray().clear(), cid);
+  if (epoch === pane.epoch) addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
+  send(form, () => tray().clear(), cid, epoch);
 }
 
 // Stop: the server ends the turn where it is (POST /api/stop), its stream

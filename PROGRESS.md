@@ -6632,8 +6632,7 @@ the old one.
   the turn thread under `s.busy` (its summary of the current conversation
   is a Claude call). A conversation deleted after the route's check gives
   an error event (`"gone": true`) and nothing is recorded or recreated.
-  `"new": true` ends the current conversation first (the timeout branch);
-  with a `conversation_id` too it is a 400. Every `done` event, the quota
+  Every `done` event, the quota
   refusal's included, carries `"conversation"`. Resuming keeps the taint
   (`untrusted_context`), so `confirm_if_untrusted` tools ask. INFO logs:
   the id only. `/continue` stays for the voice view and older pages.
@@ -6657,14 +6656,14 @@ the old one.
 - New server sentence `conversation_gone` (English and Chinese); page
   strings in `i18n.js`; `sw.js` cache `kwil-shell-v13`.
 
-Tests: `tests/test_history_web.py` +16 (a bound turn continues the
+Tests: `tests/test_history_web.py` +14 after round 2 (a bound turn continues the
 conversation, no second one; after the idle timeout the same id; after
 `end_conversation`, the reaper and a voice call's end it is resumed; a
 resumed turn is tainted so a `confirm_if_untrusted` tool asks; an unknown,
 foreign or malformed id 404/404/400 with nothing sent or saved, JSON and
-form; `new` with an id 400; incognito 409; history off 404; a deleted
-conversation is not recreated, by the route and by the turn thread; `new:
-true` ends the current one; `done` carries the id; caplog: INFO has the id
+form; incognito 409; history off 404; a deleted
+conversation is not recreated, by the route and by the turn thread; `done`
+carries the id; caplog: INFO has the id
 and no text), `tests/test_family.py` +1 (a family member's turn into the
 owner's conversation and the reverse are 404), `tests/test_contract.py`
 +1 (contract fakes: a stored conversation with a tool round, continued
@@ -6688,3 +6687,30 @@ Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
 `test_design_skills` failing only because an extract isn't a checkout);
 the two live runs of the new contract test skip without a key.
 JavaScript 290 passed (master: 280).
+
+### Round 2: the judge's findings (2026-10-29)
+1. MED, a queued message and its reply were drawn in the pane being
+   looked at, not the one it was typed in (`sendQueued` passed the cid but
+   not the pane). Queue items now keep their `epoch` too, and `send()`
+   uses it for the turn: the "me" bubble (and the files summary bubble)
+   and the reply are drawn only while that pane is shown. Test: queued in
+   the lab report, sent after Continue on another conversation, nothing
+   lands in the new pane; one queued in the shown pane is drawn as usual.
+2. MED, "goodbye" in a bound pane didn't unbind it, so the next message
+   resumed the ended conversation again (tainted, a second memory
+   summary). A reply with `ended: true`, or a `done` with `conversation:
+   null`, after a bound turn shown in its pane now unbinds it (the log
+   stays; messages queued for it go into a new conversation). An unbound
+   pane still never binds to `done`'s id, so a fresh chat keeps the
+   5-minute rule. Tests: goodbye then the next and the queued turn carry
+   no `conversation_id`; a `done` with null unbinds; a fresh chat's
+   `done` id is not adopted. README sentence.
+3. LOW, the server's `"new": true` flag had no client. Removed from
+   `/api/turn` and `start_turn` with its two tests and the docs (it comes
+   back with the desktop "New chat" in 3b).
+
+Failing first: with `app.js` at 0114a71 the 3 new JS tests fail and the
+judge's probe shows "second in the lab report" and "Lab answer two." in
+the other pane and `conversation_id` on the turn after goodbye; with the
+fix both are gone. Counts: 3521 passed, 39 skipped, 1 deselected (the two
+`new` tests removed); JavaScript 293 passed.

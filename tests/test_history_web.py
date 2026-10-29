@@ -550,14 +550,6 @@ def test_bad_or_someone_elses_conversation_id_is_refused(web, fake_client):
     other.close()
 
 
-def test_new_and_conversation_id_together_is_a_bad_request(web, fake_client):
-    store, _, client, _ = web
-    cid = seed(store)
-    login(client)
-    assert bound_turn(client, cid, new=True).status_code == 400
-    assert fake_client.calls == []
-
-
 def test_a_bound_turn_is_refused_while_incognito(web, fake_client):
     store, assistant, client, _ = web
     cid = seed(store)
@@ -600,20 +592,6 @@ def test_a_conversation_deleted_while_the_turn_starts_gets_an_error(web, fake_cl
     assert evs[0]["gone"] is True and evs[-1]["conversation"] is None
     assert store.count() == 0 and fake_client.calls == []
     assert s.chat.history == []
-
-
-def test_new_true_ends_the_current_conversation_first(web, fake_client):
-    store, assistant, client, _ = web
-    login(client)
-    cid = first_turn(client, fake_client, assistant)
-    fake_client.queue = [make_response(text_block("Asked about the weather.")),
-                         make_response(text_block("Hello again."))]
-    r = client.post("/api/turn", json={"text": "something else", "new": True})
-    fresh = done_of(r)["conversation"]
-    assert fresh and fresh != cid
-    assert store.get(cid)["ended_at"] and store.count() == 2
-    sent = fake_client.calls[-1]["messages"]
-    assert len(sent) == 1  # the old conversation's history didn't go along
 
 
 def test_resume_logs_only_ids_at_info(web, fake_client, caplog):

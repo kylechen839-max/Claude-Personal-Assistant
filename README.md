@@ -206,10 +206,14 @@ call ended it, or a day later. The reply is added to the same conversation
 in History (no second copy is started). Like any resumed conversation, its
 old text counts as untrusted, so changes (adding an event, say) ask first.
 While Incognito is on nothing is tied (the server refuses it), and deleting
-the conversation drops the tie and any message still queued for it. **Incognito** in the settings
-menu (gear) stops saving for this phone until you turn it off; the header
-shows an "Incognito" badge meanwhile. It follows the phone's light or dark
-setting and works as a home-screen app on iOS.
+the conversation drops the tie and any message still queued for it. Saying
+"goodbye" there ends that conversation and drops the tie too: the next
+message starts a new one.
+
+**Incognito** in the settings menu (gear) stops saving for this phone
+until you turn it off; the header shows an "Incognito" badge meanwhile. It
+follows the phone's light or dark setting and works as a home-screen app on
+iOS.
 
 **From the command line:**
 
