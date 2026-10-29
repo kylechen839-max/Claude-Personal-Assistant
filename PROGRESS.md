@@ -6965,4 +6965,6 @@ color was already refused without an insert; that test fails there only
 on the new message.
 
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
-COUNTS_HERE
+3571 passed, 41 skipped, 1 deselected (2317311: 3557 / 41; +14
+new tests). `tests/test_docs.py` now lists `calendar_color_habits` as a
+tool name. JavaScript 294 passed (unchanged).
