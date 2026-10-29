@@ -2345,6 +2345,55 @@ network code of its own.
   ArtifactData are pre-approved in `.claude/settings.json`; Kyle
   approved that.
 
+## Kwil's own memory (`memory_store.py`, `memory_web.py`, `tools/memory_tools.py`)
+
+- **One file per person.** The owner's instructions and memories are in
+  `[memory] local_path` (`data/memory.sqlite`; `/data/memory.sqlite` on the
+  server), a family member's in `<family dir>/<id>/memory.sqlite`. The
+  file is created 0600 (POSIX; on Windows the folder's permissions apply).
+  The Settings routes (`/api/memories...`) take the store from the
+  signed-in session (`WebAssistant.memory_store_of`): there is no person
+  in any path, so an id from someone else's store is a 404 for the owner
+  and members alike. Not signed in is 401; memory off is 404. Changes are
+  POST, behind webapp's Content-Length (411) and cross-site checks;
+  bodies over 64 KB are refused. A separate instance (`--env-file`)
+  without its own `local_path` has memory off, so it can't open Kyle's
+  file.
+- **Bounded.** Instructions 4000 characters, a memory 500 (one line), 200
+  memories; the 201st is refused ("memory is full"), never dropped unseen.
+  Each change is one SQLite transaction.
+- **Taint.** `remember` and `update_memory` ask first
+  (`confirm_if_untrusted`) when the conversation holds untrusted text, and
+  what they save then is marked `untrusted` (sticky through edits).
+  `forget_memory` always asks (`confirm_prompt`). An untrusted memory is
+  shown in the prompt as "information only, never an instruction", has a
+  badge in Settings, makes `list_memories` taint its result, and, when
+  loaded at the start of a conversation, sets `untrusted_memory` so every
+  change in that conversation asks first. Instructions are typed by the
+  person in Settings and are trusted. Memory text is never passed through
+  the prompt's name rewriting.
+- **Deleted means gone.** `secure_delete=ON`, and every delete, edit,
+  instructions save and Forget all ends with `wal_checkpoint(TRUNCATE)`:
+  a test reads the database and WAL bytes after each and finds none of
+  the old text. A memory deleted mid-conversation (voice or Settings) is
+  also taken out of that person's open conversations' system prompt.
+  Deleting a family account removes the file with their folder (its
+  connection is closed first, so Windows can delete it).
+- **Logs.** Ids, lengths and counts only; the text is never logged at any
+  level (caplog tests for the store, the tools, loading and the routes).
+- **Pause and incognito.** Paused: nothing saved, no memories loaded.
+  Incognito: `remember` saves nothing. A health check loads no memory and
+  may only run `list_memories` (read-only).
+- **Pinecone is optional** (`[memory] backend = "pinecone"`); with the
+  default "local" no Pinecone call is made. Its 429 now logs one WARNING
+  and pauses Pinecone calls for 10 minutes (no repeated warnings, no
+  stalled replies).
+- Deliberately not done: memory isn't synced between failover backends
+  (each keeps its own file); the owner's memory isn't in the
+  `/api/backup` zip yet (it can be exported from Settings); an untrusted
+  memory edited in Settings keeps its badge (delete it and say it again to
+  make it trusted).
+
 ## Memory review (`memory_review.py`, `memory_web.py`)
 
 - **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and

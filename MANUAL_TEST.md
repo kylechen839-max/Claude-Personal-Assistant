@@ -1607,6 +1607,28 @@ Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
     family member's state does not have it. `data/usage.json` holds the
     month's totals per model.
 
+## Memory (~10 min)
+Needs a real `ANTHROPIC_API_KEY`; `[memory] backend` left at "local".
+- [ ] On the iPhone app, say or type "always color-code my schedule".
+  - Should: a short "got it"; Settings -> Memory -> "Things Kwil
+    remembered" lists it with today's date.
+- [ ] Start a new conversation (wait out the idle timeout or tap new
+      conversation) and ask Kwil to plan your afternoon (say no to adding
+      anything you don't want, or delete the events afterwards).
+  - Should: it uses your past colors without being asked again.
+- [ ] In Settings -> Memory, type "Call me K." under "Your instructions",
+      tap Save, start a new conversation and say "hi".
+  - Should: it calls you K. The same conversation you were in before the
+    save didn't change.
+- [ ] Edit the color-code memory (Edit, change a word, Save), then Delete
+      it (it asks first), then try Pause memory, Export (a
+      `kwil-memory.json` download) and Forget all (it asks first).
+  - Should: each change shows at once; after Forget all both lists are
+    empty. Check the page in Chinese too (a family member's phone with
+    language zh): every label is Chinese.
+- [ ] As an invited family member, open Settings -> Memory.
+  - Should: their own empty memory, never yours.
+
 ## Kwil rebrand (~10 min)
 
 Only what a person can see or click; the old names are covered by tests.

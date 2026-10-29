@@ -148,20 +148,44 @@ class MemoryStore:
     """The interface (see the module doc). Memories are dicts:
     {"id", "text", "created" (ISO, UTC), "source", "untrusted"}."""
 
-    def instructions(self) -> str: raise NotImplementedError
-    def set_instructions(self, text: str) -> str: raise NotImplementedError
+    def instructions(self) -> str:
+        raise NotImplementedError
+
+    def set_instructions(self, text: str) -> str:
+        """Save (trimmed) and return them; ValueError when too long."""
+        raise NotImplementedError
+
     def add(self, text: str, *, source: str | None = None,
-            untrusted: bool = False) -> dict: raise NotImplementedError
-    def get(self, memory_id: str) -> dict | None: raise NotImplementedError
+            untrusted: bool = False) -> dict:
+        """Save one memory; ValueError, MemoryFull or MemoryPaused."""
+        raise NotImplementedError
+
+    def get(self, memory_id: str) -> dict | None:
+        raise NotImplementedError
+
     def update(self, memory_id: str, text: str, *,
-               untrusted: bool | None = None) -> dict | None: raise NotImplementedError
-    def delete(self, memory_id: str) -> bool: raise NotImplementedError
-    def list(self) -> list[dict]: raise NotImplementedError
+               untrusted: bool | None = None) -> dict | None:
+        raise NotImplementedError
+
+    def delete(self, memory_id: str) -> bool:
+        raise NotImplementedError
+
+    def list(self) -> list[dict]:
+        """Every memory, newest first."""
+        raise NotImplementedError
+
     @property
-    def paused(self) -> bool: raise NotImplementedError
-    def set_paused(self, paused: bool) -> None: raise NotImplementedError
-    def forget_all(self) -> int: raise NotImplementedError
-    def close(self) -> None: raise NotImplementedError
+    def paused(self) -> bool:
+        raise NotImplementedError
+
+    def set_paused(self, paused: bool) -> None:
+        raise NotImplementedError
+
+    def forget_all(self) -> int:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        raise NotImplementedError
 
     def snapshot(self) -> Snapshot:
         """Instructions and (unless paused) memories, oldest first."""

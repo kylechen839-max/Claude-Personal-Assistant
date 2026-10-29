@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kwil now remembers what you tell it, without Pinecone. Say "remember...",
+  "always..." or "from now on..." (like "always color-code my schedule")
+  and it applies from your next conversation. In Settings, Memory you can
+  write your own instructions for Kwil, see, edit and delete what it
+  remembered, pause memory, export it, or forget everything. Family
+  members get their own. Pinecone is now optional and off by default.
 - When Kwil builds your schedule, it now colors the new events the way you
   already color yours: it looks at your own events from the last two weeks
   (for example every PHYS 361 session under your Physics label, tennis in

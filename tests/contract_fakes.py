@@ -28,7 +28,8 @@ list_calendar_events when offered, a tool result gets a short summary,
 "what number did I ask you to remember" is answered from the number in an
 earlier user message actually sent (so lost history fails the check), and
 "get rid of ... on my calendar" lists the events, then deletes one with
-delete_calendar_event when offered, and a structured-output request (the
+delete_calendar_event when offered, "from now on ..." / "always ..." is
+saved with remember when offered, and a structured-output request (the
 student deadlines' extractor) gets one deadline per "<Title> is due
 <YYYY-MM-DD>" sentence in its <text> blocks.
 """
@@ -219,6 +220,15 @@ class ContractClient:
             stop = "tool_use"
         elif not _is_user_turn(last) and called == {"delete_calendar_event"}:
             content.append({"type": "text", "text": "Done, it's off your calendar."})
+        elif not _is_user_turn(last) and called == {"remember"}:
+            content.append({"type": "text", "text": "Got it, I'll remember that."})
+        elif _is_user_turn(last) and "remember" in tools and re.search(
+                r"\b(from now on|always)\b", asked, re.I):
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "remember",  # the words, not the turn's context block
+                            "input": {"note": next(b["text"] for b in _blocks(last)
+                                                   if b.get("type") == "text").strip()}})
+            stop = "tool_use"
         elif not _is_user_turn(last):  # tool results came back
             content.append({"type": "text", "text": "Tomorrow you have two events."})
         elif "calendar" in asked.lower() and "list_calendar_events" in tools:

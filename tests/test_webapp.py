@@ -647,7 +647,7 @@ def test_cli_web_mode_starts_the_server(monkeypatch, tmp_path, restore_root_logg
     assert token not in log_text
 
 
-def test_open_in_browser_is_not_offered(monkeypatch):
+def test_open_in_browser_is_not_offered(monkeypatch, tmp_path):
     from kwil.config import load_config
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -655,6 +655,9 @@ def test_open_in_browser_is_not_offered(monkeypatch):
     monkeypatch.delenv("NOTION_TOKEN", raising=False)
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = False
+    # never the repo's own data/ folder
+    cfg["history"]["path"] = str(tmp_path / "history.sqlite")
+    cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")
     assistant = webapp.build_assistant(cfg, "print", output_fn=lambda m: None)
     assert not assistant.tools.has("open_in_browser")
     assert assistant.tools.has("web_search")
@@ -981,6 +984,7 @@ def test_serve_behind_a_proxy(monkeypatch, tmp_path):
     monkeypatch.delenv("NOTION_TOKEN", raising=False)
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = False
+    cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")  # not the repo's data/
     cfg["webapp"]["trusted_proxy"] = "1"
     seen = {}
     import uvicorn
@@ -1009,6 +1013,7 @@ def test_web_mode_does_not_load_audio_devices():
         "from assistant.config import load_config\n"
         "cfg = load_config(None, None)\n"
         "cfg['calendar']['enabled'] = False\n"
+        "cfg['history']['path'] = cfg['memory']['local_path'] = ':memory:'\n"
         "a = webapp.build_assistant(cfg, 'print', output_fn=lambda m: None)\n"
         "webapp.create_app(a, 'x' * 40)\n"
         "bad = [m for m in ('sounddevice', 'openwakeword', 'pyttsx3') if m in sys.modules]\n"
@@ -1165,6 +1170,7 @@ def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
     monkeypatch.delenv("NOTION_TOKEN", raising=False)
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = False
+    cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")  # not the repo's data/
     seen = {}
     import uvicorn
 
@@ -1493,7 +1499,7 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v13" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v14" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw
 

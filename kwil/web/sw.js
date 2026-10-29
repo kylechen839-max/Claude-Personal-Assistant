@@ -3,7 +3,7 @@
 // anything else are never cached.
 // Also shows the study briefings' push notifications (push.py) and opens
 // the brief (/#brief, brief.js) when one is tapped.
-const CACHE = "kwil-shell-v13";
+const CACHE = "kwil-shell-v14";
 const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/spotify.js", "/notion.js", "/voice-picker.js",
                "/student.js", "/brief.js", "/connect.js", "/connections.js",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];

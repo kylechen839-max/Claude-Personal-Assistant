@@ -548,6 +548,25 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-when { flex: 1; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; }
 .mem-untrusted { background: var(--bad-soft); color: var(--bad-ink); }
 .mem-text { margin: .25rem 0 0; font-size: .9375rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* everyone's own memory: instructions, remembered things, pause, export, forget all */
+.mem-local { padding: 0 var(--s3) var(--s3); }
+.mem-local .group-head label { font: inherit; color: inherit; }
+.mem-local .group-foot { margin: var(--s2) var(--s4) 0; font-size: var(--t-cap); color: var(--muted); }
+.mem-local .group + .group { margin-top: var(--s4); }
+.mem-instr { padding: var(--s3); display: grid; gap: var(--s2); }
+.mem-instr textarea, .mem-edit-field { width: 100%; min-height: 7rem; resize: vertical; font-size: var(--t-body); line-height: 1.4; }
+.mem-instr-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.mem-count { color: var(--muted); font-size: var(--t-cap); font-variant-numeric: tabular-nums; }
+.mem-edit, .mem-edit-cancel { background: none; padding: 0 .5rem; min-height: 44px; font-size: .875rem; font-weight: 600;
+  color: var(--accent-ink); }
+.mem-edit-box { display: grid; grid-template-columns: 1fr auto auto; gap: var(--s2); margin-top: var(--s2); align-items: center; }
+.mem-edit-box textarea { grid-column: 1 / -1; min-height: 4rem; }
+.mem-controls .row { justify-content: space-between; }
+.mem-controls .row + .row { border-top: 1px solid var(--line); }
+.mem-controls .row.danger { color: var(--bad-ink); }
+.mem-row-title { flex: 1; font-size: var(--t-body); }
+.mem-local-status:empty { display: none; }
+.mem-local-status { margin: var(--s3) var(--s4) 0; }
 .status.center:empty { display: none; }
 .conv-list:empty + .status.center:not(:empty) { padding-top: 4.5rem; color: var(--text-2); }
 .conv-list:empty + .status.center:not(:empty)::before { content: ""; display: block; width: 52px; height: 52px; margin: 0 auto 1rem;

@@ -3,8 +3,9 @@
 Kwil (say it like "quill") is an Echo-style voice assistant powered by
 Claude, on the Anthropic API. Say the wake word, ask something, and it
 answers out loud. It can read and change your Google Calendar, check and
-update your Notion assignments, and remembers past conversations in
-Pinecone.
+update your Notion assignments, and remembers what you ask it to (your
+instructions and saved memories, kept on your own machine; see
+[Memory](#memory)).
 
 **Wake word:** say **"Hey Claude"** for now. Kwil was called Hey Claude
 until 2026-10-22, and the trained wake-word model (`keywords/hey_claude.onnx`)
@@ -312,6 +313,9 @@ you are most likely to tune:
 | `[assistant] router` | "auto" | "auto": simple turns go to `fast_model`, changes, lookups, reasoning, attachments and untrusted content stay on `model`; "off" (or `CLAUDE_ROUTER=off`): always `model` |
 | `[assistant] usage_file` | "data/usage.json" | Monthly API token totals and a rough cost estimate (the owner's phone app gets `month_usd`); "" = not kept |
 | `[spotify] enabled` | false | Spotify playback by voice (Premium); see [Spotify by voice](#spotify-by-voice) |
+| `[memory] enabled` | true | Kwil's memory: your instructions and saved memories (see [Memory](#memory)) |
+| `[memory] backend` | "local" | "local": memory on this machine only, Pinecone is never called; "pinecone": also recall notes before each reply and save conversation summaries in Pinecone (needs `PINECONE_API_KEY`) |
+| `[memory] local_path` | "data/memory.sqlite" | Where the owner's instructions and memories are kept (`/data/memory.sqlite` on the cloud server); each family member's are in their own folder |
 
 **Cost: model routing and prompt caching.** Each turn picks its model
 before the request, with no extra API call (`kwil/router.py`): a short,
@@ -1447,13 +1451,51 @@ an email is in the conversation, anything that changes something
 (calendar, Notion, notes, drafts) asks for a spoken yes first, and email
 text never goes into the log file (see SECURITY.md).
 
+### Memory
+
+Kwil remembers two kinds of things, both on your own machine (one SQLite
+file per person, `[memory] local_path`; no Pinecone needed):
+
+- **Your instructions**: what you type in **Settings -> Memory** ("Always
+  color-code my schedule", "Call me K"), up to 4000 characters.
+- **Things Kwil remembered**: when you say "remember...", "always..." or
+  "from now on...", Kwil saves a short memory (up to 500 characters, 200
+  memories). It doesn't save health, religion or politics unless you ask
+  it to remember that exact thing. "Forget that" deletes one after a
+  spoken yes; "actually, make it Tuesdays" edits one; "what do you
+  remember about me?" lists them.
+
+Both are read when a conversation starts and given to Claude for the whole
+conversation (in the cached system prompt), so a change applies from your
+next conversation. A memory saved while a web page, email or other outside
+text was in the conversation asks you first, is marked **Untrusted** and is
+shown to Claude as information, never as an instruction; while one is
+loaded, changes ask for a yes (as after reading an email).
+
+**Settings -> Memory** (everyone, family members too, each their own):
+edit your instructions and Save; edit or delete each memory (delete asks
+first); **Pause memory** (nothing new is saved and no memories are used;
+your instructions still apply); **Export** (a JSON file); **Forget all**
+(asks first, then deletes every memory and your instructions; the file is
+scrubbed, nothing is left to recover). Incognito conversations save
+nothing. A family member's memory is in their own folder, included in
+"Download my data" and deleted with their account. With failover, each
+backend (Pi, PC, cloud) keeps its own memory for now; it isn't synced.
+
+`[memory] backend = "pinecone"` adds the older Pinecone memory on top:
+notes recalled before each reply, conversation summaries, quick notes and
+the weekly review below. If Pinecone answers "over quota" (429), Kwil logs
+"Memory: Pinecone over quota" once and leaves Pinecone alone for 10
+minutes; your local memory keeps working.
+
 ### Quick notes
-"Remember that the lab report needs error bars" saves a short note in
+With `[memory] backend = "pinecone"`: "make a note that the lab report
+needs error bars" saves a short note in
 Pinecone (your `voice-assistant` namespace, tagged as a note);
 "What did I need for the lab report?" finds it by meaning. You can also ask
 for your recent notes or to delete one (it asks first). With conversation
 history on, a saved note also shows up in that conversation. Notes need
-`[memory]` (Pinecone); `[notes] enabled` turns them off.
+`[memory] backend = "pinecone"`; `[notes] enabled` turns them off.
 
 ### Review what it remembers
 "What did you remember about me this week?" gives a short spoken summary of
@@ -1461,7 +1503,8 @@ this week's conversation summaries and notes ("...last week?" works too).
 "Forget the one about cilantro" deletes it after a spoken yes (the same
 `delete_note` as for notes, which now also takes conversation summaries).
 
-In the phone app, **Memory** in the settings menu lists everything the
+With `[memory] backend = "pinecone"`, **Memory** in the phone app's
+settings menu also lists ("Notes in Pinecone") everything the
 assistant saved in Pinecone, newest first and grouped by week, with the
 date, whether it is a conversation summary or a note, and an **Untrusted**
 badge on ones saved while a web page or email was in the conversation.
@@ -1469,8 +1512,8 @@ Delete removes one; "Delete all from this week" removes that week's notes
 (both ask first). Only what the assistant wrote itself (ids starting with
 `voice-` or `note-` in `[memory] namespace`) is listed or deleted; your
 other Pinecone notes are never touched. Old vectors without a date show
-under "Date unknown". It is the owner's only: family members have no memory
-and don't see it.
+under "Date unknown". That part is the owner's only: family members have no
+Pinecone memory and don't see it.
 
 Optional weekly nudge: with `[memory] weekly_review = true`, once a week
 the first conversation that has notes from this week starts with "I saved N
@@ -2093,7 +2136,9 @@ FAILOVER.md has the whole protocol. To set it up:
    the badge (Pi / PC / Cloud), or force one backend.
 
 Conversation history is synced between the machines every
-`sync_interval` seconds (30); memory is shared through Pinecone as before.
+`sync_interval` seconds (30). Memory (your instructions and saved
+memories) is kept per machine and not synced yet; with `[memory] backend =
+"pinecone"` the Pinecone notes are shared as before.
 Tests: `pytest` (server side) and `node --test tests/js/*.test.mjs` (the
 router; Node 18+).
 
@@ -2473,7 +2518,9 @@ kwil/
   stt.py        push-to-talk recording, faster-whisper (beam search, vocabulary prompt)
   stt_cloud.py  optional OpenAI / Deepgram speech-to-text, local Whisper fallback
   wakeword.py   openWakeWord, energy VAD, mic/file sources
-  memory.py     Pinecone recall + conversation summaries
+  memory_store.py  your instructions and saved memories (SQLite, one file per person)
+  memory_web.py Settings -> Memory routes (and the Pinecone notes list)
+  memory.py     Pinecone recall + conversation summaries ([memory] backend = "pinecone")
   history.py    conversation history: SQLite store, search, resume
   history_cli.py  python -m kwil --history ...
   audio.py      wav I/O, resampling, chimes

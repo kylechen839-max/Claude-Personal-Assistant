@@ -124,6 +124,38 @@ def test_two_chats_sharing_one_history_then_a_follow_up(api):
     assert not [c for c in calls if c[0] == "create"]
 
 
+def test_a_remembered_rule_reaches_the_next_conversation(tmp_path):
+    """Memory layer 1: "from now on..." is saved with the remember tool in
+    a real multi-turn exchange (a tool round, then a follow-up), and the
+    next conversation's system prompt carries it. Every request must be
+    one the API accepts. Fake only: whether a live model calls remember is
+    its choice, not the contract."""
+    from kwil.cli import add_memory_tools
+    from kwil.memory_store import SqliteMemoryStore
+
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite")
+    try:
+        client = ContractClient()
+        tools = calendar_tools([])
+        add_memory_tools(tools, None, store)
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools,
+                          max_tokens=1024, local_memory=store)
+        before = chat.stable_system()
+        assert chat.ask("From now on, always color-code my schedule.").strip()
+        assert [m["text"] for m in store.list()] == [
+            "From now on, always color-code my schedule."]
+        assert chat.ask("Thanks. What's on my calendar tomorrow?").strip()
+        assert chat.stable_system() == before  # same bytes all conversation
+        systems = {str(r["system"]) for r in client.requests}
+        assert len(systems) == 1 and "color-code" not in systems.pop()
+        chat.end_conversation()  # the next conversation
+        assert "always color-code my schedule" in chat.stable_system()
+        assert chat.ask("What's on my calendar tomorrow?").strip()
+        assert "always color-code my schedule" in str(client.requests[-1]["system"])
+    finally:
+        store.close()
+
+
 def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
     """Bring your own key (family.UserApi): a beta tester's chat reaches the
     client through a per-call lookup of their key, never the owner's. A

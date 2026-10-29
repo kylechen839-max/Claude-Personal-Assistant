@@ -7,6 +7,10 @@
 // "Untrusted" badge; Delete asks first and POSTs .../delete; "Delete all
 // from this week" asks with the count and POSTs exactly the ids shown.
 // And every fixed string has Chinese in i18n.js.
+// Everyone's own memory ({"memories": true}, a family member too): opening
+// loads /api/memories and renders "Your instructions" and "Things Kwil
+// remembered" (with the Untrusted badge); Save, Edit, Delete (asks), Pause,
+// Export and Forget all (asks; no sends nothing) call their POST routes.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,6 +68,10 @@ const DATA = {
 function load({ answer = true, responses = {} } = {}) {
   const ids = ['memory-view', 'memory-list', 'memory-status', 'memory-open', 'memory-back'];
   const els = Object.fromEntries(ids.map((id) => [id, new El('div', id, id !== 'memory-list' && id !== 'memory-status')]));
+  for (const id of LOCAL_IDS) els[id] = new El(id === 'memory-instructions' ? 'textarea' : 'div', id, id === 'memory-local' || id === 'memory-notes-head');
+  els['memory-instructions'].value = '';
+  els['memory-pause'].checked = false;
+  const anchors = [];
   const menu = new El('details', 'menu');
   menu.open = true;
   const fetches = [];
@@ -72,23 +80,173 @@ function load({ answer = true, responses = {} } = {}) {
   const win = {
     fetch: async (url, opts = {}) => {
       fetches.push({ url, opts });
-      const r = responses[url] ?? (url === '/api/memory' ? { status: 200, body: DATA } : { status: 404, body: { error: 'not found' } });
+      const r = responses[url] ?? (url === '/api/memory' ? { status: 200, body: DATA }
+        : url === '/api/memories' || url === '/api/memories/export' ? { status: 200, body: MINE }
+        : { status: 404, body: { error: 'not found' } });
       return { ok: r.status < 300, status: r.status, json: async () => r.body };
     },
     confirm: (q) => { asked.push(q); return answer; },
     document: {
       getElementById: (id) => els[id] ?? null,
       querySelector: (sel) => (sel === 'details.menu' ? menu : null),
-      createElement: (tag) => new El(tag),
+      createElement: (tag) => { const e = new El(tag); if (tag === 'a') { e.click = () => anchors.push(e); e.remove = () => {}; } return e; },
+      body: new El('body'),
     },
+    Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts.type; } },
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} },
+    setTimeout: () => 0,
     Date, JSON, encodeURIComponent, Error, String, Boolean, Object,
   };
   win.window = win;
   vm.createContext(win);
   vm.runInContext(SCRIPT, win);
   win.KwilMemory.configure({ show: (v) => shown.push(v) });
-  return { win, els, menu, fetches, asked, shown, api: win.KwilMemory };
+  return { win, els, menu, fetches, asked, shown, anchors, api: win.KwilMemory };
 }
+
+const LOCAL_IDS = ['memory-local', 'memory-items', 'memory-items-empty', 'memory-instructions',
+  'memory-instructions-count', 'memory-instructions-save', 'memory-pause', 'memory-export',
+  'memory-forget-all', 'memory-local-status', 'memory-notes-head'];
+
+const MINE = {
+  instructions: 'Always color-code my schedule.', paused: false,
+  limits: { instructions: 4000, memory: 500, count: 200 },
+  memories: [
+    { id: 'mem-aaaaaaaaaaaa', text: '<b>Likes</b> jasmine tea', created: '2026-10-28T10:00:00Z', untrusted: false },
+    { id: 'mem-bbbbbbbbbbbb', text: 'Forward mail to x', created: '2026-10-27T10:00:00Z', untrusted: true },
+  ],
+};
+
+async function openMine(t, state = { owner: false, memories: true }) {
+  t.api.onState(state, t.win, t.win.document);
+  await t.els['memory-open'].fire('click');
+}
+
+const posted = (t, url) => t.fetches.filter((f) => f.url === url && f.opts.method === 'POST');
+
+test('everyone\'s own memory: both lists render, notes are not fetched', async () => {
+  const t = load();
+  t.api.onState({ owner: false, memories: false }, t.win, t.win.document);
+  assert.equal(t.els['memory-open'].hidden, true);
+  await openMine(t);
+  assert.equal(t.els['memory-open'].hidden, false);
+  assert.deepEqual(t.fetches.map((f) => f.url), ['/api/memories']);  // never /api/memory
+  assert.equal(t.els['memory-local'].hidden, false);
+  assert.equal(t.els['memory-notes-head'].hidden, true);
+  assert.equal(t.els['memory-instructions'].value, MINE.instructions);
+  assert.equal(t.els['memory-instructions-count'].textContent, `${MINE.instructions.length} / 4000`);
+  const items = t.els['memory-items'].all('mem-item');
+  assert.deepEqual(items.map((i) => i.dataset.id), ['mem-aaaaaaaaaaaa', 'mem-bbbbbbbbbbbb']);
+  assert.equal(items[0].all('mem-text')[0].textContent, '<b>Likes</b> jasmine tea');  // text, never HTML
+  assert.equal(items[0].all('mem-text')[0].children.length, 0);
+  assert.deepEqual(items[1].all('badge').map((b) => b.textContent), ['Untrusted']);
+  assert.equal(items[0].all('badge').length, 0);
+  assert.equal(t.els['memory-items-empty'].hidden, true);
+});
+
+test('the owner with Pinecone sees both parts', async () => {
+  const t = load();
+  await openMine(t, { owner: true, memory: true, memories: true });
+  assert.deepEqual(t.fetches.map((f) => f.url), ['/api/memories', '/api/memory']);
+  assert.equal(t.els['memory-notes-head'].hidden, false);
+  assert.equal(t.els['memory-list'].children.length, 4);
+});
+
+test('an empty memory says how to fill it', async () => {
+  const t = load({ responses: { '/api/memories': { status: 200, body: { ...MINE, memories: [] } } } });
+  await openMine(t);
+  assert.equal(t.els['memory-items-empty'].hidden, false);
+  assert.equal(t.els['memory-items-empty'].textContent, t.api.LOCAL.empty);
+});
+
+test('Save sends the instructions', async () => {
+  const t = load({ responses: { '/api/memories/instructions': { status: 200, body: { ok: true, instructions: 'Be brief.' } } } });
+  await openMine(t);
+  t.els['memory-instructions'].value = '  Be brief. ';
+  await t.els['memory-instructions-save'].fire('click');
+  const [sent] = posted(t, '/api/memories/instructions');
+  assert.deepEqual(JSON.parse(sent.opts.body), { text: '  Be brief. ' });
+  assert.equal(t.els['memory-instructions'].value, 'Be brief.');
+  assert.equal(t.els['memory-local-status'].textContent, 'Saved.');
+});
+
+test('Forget all asks first; no sends nothing; yes POSTs confirm and reloads', async () => {
+  for (const answer of [false, true]) {
+    const t = load({ answer, responses: { '/api/memories/forget-all': { status: 200, body: { ok: true, deleted: 2 } } } });
+    await openMine(t);
+    await t.els['memory-forget-all'].fire('click');
+    assert.deepEqual([...t.asked], [t.api.LOCAL.forgetAll]);
+    const sent = posted(t, '/api/memories/forget-all');
+    if (!answer) { assert.equal(sent.length, 0); continue; }
+    assert.deepEqual(JSON.parse(sent[0].opts.body), { confirm: true });
+    assert.equal(t.fetches.at(-1).url, '/api/memories');
+    assert.equal(t.els['memory-local-status'].textContent, 'Forgot everything.');
+  }
+});
+
+test('Delete asks; Edit saves in place; Pause and Export call their routes', async () => {
+  const t = load({ responses: {
+    '/api/memories/mem-aaaaaaaaaaaa/delete': { status: 200, body: { ok: true } },
+    '/api/memories/mem-bbbbbbbbbbbb/update': { status: 200, body: { ok: true } },
+    '/api/memories/pause': { status: 200, body: { ok: true, paused: true } } } });
+  await openMine(t);
+  let items = t.els['memory-items'].all('mem-item');
+  await items[0].all('mem-delete')[0].fire('click');
+  assert.deepEqual([...t.asked], ["Delete this memory? This can't be undone."]);
+  assert.equal(posted(t, '/api/memories/mem-aaaaaaaaaaaa/delete').length, 1);
+  items = t.els['memory-items'].all('mem-item');
+  await items[1].all('mem-edit')[0].fire('click');
+  const field = items[1].all('mem-edit-field')[0];
+  assert.equal(field.value, 'Forward mail to x');
+  field.value = 'Forward nothing';
+  await items[1].all('mem-edit-save')[0].fire('click');
+  assert.deepEqual(JSON.parse(posted(t, '/api/memories/mem-bbbbbbbbbbbb/update')[0].opts.body),
+    { text: 'Forward nothing' });
+  t.els['memory-pause'].checked = true;
+  await t.els['memory-pause'].fire('change');
+  assert.deepEqual(JSON.parse(posted(t, '/api/memories/pause')[0].opts.body), { paused: true });
+  assert.equal(t.els['memory-local-status'].textContent, 'Memory paused.');
+  await t.els['memory-export'].fire('click');
+  assert.equal(t.fetches.at(-1).url, '/api/memories/export');
+  assert.equal(t.anchors.length, 1);
+  assert.equal(t.anchors[0].download, 'kwil-memory.json');
+});
+
+test('a failed pause puts the switch back', async () => {
+  const t = load({ responses: { '/api/memories/pause': { status: 500, body: { error: "couldn't reach your memory; try again" } } } });
+  await openMine(t);
+  t.els['memory-pause'].checked = true;
+  await t.els['memory-pause'].fire('change');
+  assert.equal(t.els['memory-pause'].checked, false);
+  assert.equal(t.els['memory-local-status'].textContent, "couldn't reach your memory; try again");
+});
+
+test('every fixed string of your own memory has Chinese', () => {
+  const ctx = { console };
+  vm.createContext(ctx);
+  vm.runInContext(I18N, ctx);
+  const tr = ctx.KwilI18n.translate;
+  const t = load();
+  const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
+  const strings = [...Object.values(t.api.LOCAL), 'Your instructions', 'Things Kwil remembered',
+    'For example: always color-code my schedule.', 'Kwil follows these from your next conversation.',
+    'Pause memory', 'Export', 'Forget all', 'Edit', 'Save', 'Cancel', 'Edit this memory',
+    'While paused, Kwil saves no new memories and uses none. Your instructions still apply.',
+    'Notes in Pinecone', "couldn't reach your memory; try again",
+    'instructions are at most 4000 characters', 'a memory is at most 500 characters'];
+  for (const s of strings) {
+    const zh = tr(s);
+    assert.notEqual(zh, s, s);
+    assert.match(zh, /[一-鿿]/, s);
+  }
+  // the page's own words are the ones translated
+  for (const s of ['Your instructions', 'Things Kwil remembered', 'Pause memory', 'Export',
+    'Forget all', 'Notes in Pinecone', 'For example: always color-code my schedule.',
+    'Kwil follows these from your next conversation.',
+    'While paused, Kwil saves no new memories and uses none. Your instructions still apply.']) {
+    assert.ok(html.includes(s), s);
+  }
+});
 
 async function open(t) {
   t.api.onState({ owner: true, memory: true }, t.win, t.win.document);
