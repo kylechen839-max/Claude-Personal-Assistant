@@ -843,3 +843,40 @@ def test_job_reads_retry_while_windows_swaps_the_file(tmp_path, monkeypatch):
     fails[0] = 99
     with pytest.raises(PermissionError):
         lecture._read_json(path)
+
+
+def test_lecture_date_is_in_kyles_zone(tmp_path, fake_client):
+    """The phone sends started_at in UTC (toISOString): a 9 PM class in New
+    York is 01:00Z the next day, but its notes are dated the day it was."""
+    from kwil.lecture import LectureJob
+
+    up = ChunkedUploads(tmp_path / "lec")
+    assignments, _ = assignments_mock()
+    ny = LecturePipeline(up, fake_client, LectureNotesDB(assignments),
+                         timezone="America/New_York")
+    evening = LectureJob(id="x", started_at="2026-10-30T01:00:00Z")
+    assert ny._date(evening) == "2026-10-29"
+    local = LectureJob(id="y", started_at="2026-10-16T09:00:00-04:00")
+    assert ny._date(local) == "2026-10-16"
+    assert ny._date(LectureJob(id="z", started_at="2026-10-16T09:00:00")) == "2026-10-16"
+    utc = LecturePipeline(up, fake_client, LectureNotesDB(assignments),
+                          timezone="UTC")
+    assert utc._date(evening) == "2026-10-30"
+
+
+def test_web_lecture_pipeline_gets_the_configured_zone(tmp_path, fake_client):
+    from types import SimpleNamespace
+
+    from kwil.config import load_config
+    from kwil.webfeatures import Features
+
+    cfg = load_config(None, None)
+    cfg["assistant"]["timezone"] = "America/New_York"
+    cfg["lecture"]["upload_dir"] = str(tmp_path / "lec")
+    assignments, _ = assignments_mock()
+    features = Features(cfg, SimpleNamespace(transcriber=None), client=fake_client,
+                        assignments=assignments)
+    assert features.pipeline.tz == "America/New_York"
+    cfg["assistant"]["timezone"] = ""
+    assert Features(cfg, SimpleNamespace(transcriber=None), client=fake_client,
+                    assignments=assignments).pipeline.tz is None

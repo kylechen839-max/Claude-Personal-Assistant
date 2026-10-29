@@ -6714,3 +6714,53 @@ judge's probe shows "second in the lab report" and "Lab answer two." in
 the other pane and `conversation_id` on the turn after goodbye; with the
 fix both are gone. Counts: 3521 passed, 39 skipped, 1 deselected (the two
 `new` tests removed); JavaScript 293 passed. Judge round 3 (LOW, fixed by the master): an ended conversation frees its queued messages even when its pane is no longer shown; JavaScript 294 passed.
+
+## The chat's clock is Kyle's time zone, not the server's (PR 1, 2026-10-29)
+Live bug: on Render (UTC) Kyle asked at about 11:30 EDT to schedule physics
+in his free time. Kwil blocked only 3:30-4 PM and later said "it's already
+after seven" at 3 PM. The owner's `ClaudeChat` was built without
+`timezone=` (`cli.build_chat`, and its copy in `webapp.build_assistant`'s
+`chat_factory`, the cloud's path); only family members got one. So the
+turn's "now" was the server's UTC clock while the calendar tools used
+`[assistant] timezone`, and the model mixed the two.
+
+- **One builder.** `cli.build_chat` passes `[assistant] timezone` (None
+  when empty: this machine's zone, as before) and takes `client=`;
+  `chat_factory` now calls it with the shared client, so the PC and cloud
+  chats can't drift again.
+- **Turn context.** Still starts "Current local date and time:", now with
+  the IANA name and a pointer: "Thursday, October 29, 2026, 11:30 AM (EDT,
+  America/New_York, UTC-0400). Calendar times are in this zone." A pinned
+  `TURN_NOW` is shown in the chat's zone. Nothing parses this line (only
+  `tests/conftest.py` matches its prefix).
+- **Other "today"s.** The memory summary's date stamp uses the chat's zone;
+  lecture notes are dated in `[assistant] timezone` (the phone sends
+  `started_at` in UTC, so a 9 PM class in New York was dated the next day;
+  `webfeatures` now passes the zone to `LecturePipeline`).
+- **`find_free_time`** (its maths was already right) adds
+  `"searched_from"`, the spoken local time the search began (e.g.
+  "Thursday, October 29, 11:30 AM"), so the tool also anchors "now".
+- **Startup warning.** On the server profile with no time zone,
+  `build_assistant` logs one WARNING (no personal data) and keeps today's
+  behaviour; `--check`'s "Time zone" line says the time itself would be in
+  UTC too.
+
+Tests: `tests/test_chat.py` +2 (through `cli.build_chat(cfg, client=fake)`
+with `chat._now` faked as a UTC server clock that honours its zone: the
+request has "11:30 AM (EDT, America/New_York, UTC-0400)" and no "03:30 PM";
+the summary stamp at 02:00Z on Jan 2 is "2027-01-01"),
+`tests/test_webapp.py` +2 (the same through `webapp.build_assistant` on the
+server profile and its session's chat; no zone: exactly one WARNING),
+`tests/test_calendar_features.py` +1 (TURN_NOW 15:30Z, events ending 2:15
+PM and starting 4 PM EDT: one slot 2:15-4 PM and `searched_from` 11:30 AM),
+`tests/test_lecture.py` +2 (01:00Z is dated the 29th in New York; the web
+pipeline gets the configured zone). Failing first: with `kwil/` back at
+788180f all 7 fail; with only `timezone=` dropped from `build_chat` both
+chat-time tests still fail, and with only `chat.py` back the two context
+tests and the summary test fail.
+
+Counts (Linux sandbox, Python 3.13, Node 22, not real hardware), with
+`-k "not live_pinecone"`: 3528 passed, 39 skipped, 1 deselected (master
+788180f extracted with `git archive`: 3519 passed, 40 skipped, and
+`test_design_skills` failing only because an extract isn't a checkout).
+JavaScript 294 passed (unchanged).

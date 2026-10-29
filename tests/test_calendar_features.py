@@ -776,6 +776,27 @@ def test_free_time_today_starts_now(turn_clock):
     assert cal.find_free_time("today")["free"] == []  # the window is over
 
 
+def test_free_time_on_a_utc_server_is_in_kyles_zone(turn_clock):
+    """The Render bug: at 11:30 EDT (15:30 UTC on the server) Kyle asked for
+    free time. Free time starts at his 11:30, not the server's 3:30, and the
+    result says where it searched from, so the model has his "now"."""
+    from datetime import datetime
+
+    turn_clock.set(datetime(2026, 10, 29, 15, 30, tzinfo=timezone.utc))
+    lab = {"id": "l", "summary": "Lab", "organizer": OWN,
+           "start": {"dateTime": "2026-10-29T11:00:00-04:00"},
+           "end": {"dateTime": "2026-10-29T14:15:00-04:00"}}
+    club = {"id": "c", "summary": "Club", "organizer": OWN,
+            "start": {"dateTime": "2026-10-29T16:00:00-04:00"},
+            "end": {"dateTime": "2026-10-29T17:00:00-04:00"}}
+    service, _ = make_service(items=[lab, club])
+    out = calendar(service).find_free_time("today", duration_minutes=60)
+    assert out["searched_from"] == "Thursday, October 29, 11:30 AM"
+    assert [(s["date"], s["start"], s["end"], s["minutes"]) for s in out["free"]] == [
+        ("Thursday, October 29", "2:15 PM", "4 PM", 105)]
+    assert len(json.dumps(out)) < 600  # bounded
+
+
 def test_bad_tool_input_never_reaches_the_log(caplog):
     service, events = make_service(event=DENTIST)
     reg = registry(calendar(service), [], answer=True)

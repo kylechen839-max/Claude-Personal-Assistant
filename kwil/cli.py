@@ -1065,15 +1065,20 @@ def run_wake_mode(args, config: dict, chat: ClaudeChat, tts, transcriber,
 
 
 def build_chat(config: dict, tools=None, memory=None,
-               recorder=None, review=None) -> ClaudeChat:
+               recorder=None, review=None, client=None) -> ClaudeChat:
+    """The owner's chat (webapp.build_assistant's chat_factory uses it too,
+    passing its shared `client`). Its clock is [assistant] timezone, the
+    zone the calendar tools use; empty means this machine's."""
     a = config["assistant"]
-    client = anthropic.Anthropic(max_retries=a["api_max_retries"],
-                                 timeout=a["api_timeout"])
+    if client is None:
+        client = anthropic.Anthropic(max_retries=a["api_max_retries"],
+                                     timeout=a["api_timeout"])
     chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
                       max_history=a["max_history"], tools=tools,
                       max_tool_rounds=a["max_tool_rounds"], memory=memory,
                       recorder=recorder, language=a["language"],
-                      fast_model=a["fast_model"], router=a["router"])
+                      fast_model=a["fast_model"], router=a["router"],
+                      timezone=a["timezone"] or None)
     if review is not None:  # [memory] weekly_review (off by default)
         chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:

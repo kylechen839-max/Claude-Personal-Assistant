@@ -2449,9 +2449,8 @@ def set_session_cookie(response, token: str, sid: str, epoch: str = "") -> None:
 
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
-    from kwil.chat import ClaudeChat
-    from kwil.cli import (add_history_tools, add_memory_tools, build_memory,
-                               build_memory_review, build_tools,
+    from kwil.cli import (add_history_tools, add_memory_tools, build_chat,
+                               build_memory, build_memory_review, build_tools,
                                register_memory_review, register_notes)
     from kwil.history import Recorder, open_store
     import anthropic
@@ -2460,6 +2459,11 @@ def build_assistant(config: dict, tts_name: str | None = None,
     from kwil.tts import make_tts
 
     a = config["assistant"]
+    if config.get("profile") == "server" and not a["timezone"]:
+        # the server's clock is UTC: Kwil's "now" would be hours off
+        log.warning("No time zone set (ASSISTANT_TIMEZONE, e.g. "
+                    "America/New_York): the time, \"today\" and \"tomorrow\" "
+                    "are in this server's zone")
     tools = build_tools(config, output_fn)
     for name in PC_ONLY_TOOLS:
         tools.tools.pop(name, None)
@@ -2477,14 +2481,10 @@ def build_assistant(config: dict, tts_name: str | None = None,
         recorder = Recorder(store, "web", incognito=config["history"]["incognito"],
                             client_fn=lambda: client,
                             title_model=config["history"]["title_model"])
-        chat = ClaudeChat(client=client, model=a["model"], max_tokens=a["max_tokens"],
-                          max_history=a["max_history"], tools=registry,
-                          max_tool_rounds=a["max_tool_rounds"], memory=memory,
-                          recorder=recorder, language=a["language"],
-                          fast_model=a["fast_model"], router=a["router"])
-        if review is not None:  # [memory] weekly_review (off by default)
-            chat.review_nudge = review.nudge
-        return chat
+        # the same builder as the PC's, so the two can't drift (the cloud's
+        # chat once missed [assistant] timezone and read the time in UTC)
+        return build_chat(config, registry, memory, recorder, review,
+                          client=client)
 
     family = None
     if config["family"]["enabled"]:

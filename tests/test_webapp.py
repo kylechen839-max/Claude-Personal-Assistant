@@ -6,6 +6,7 @@ available), and TTS writes a real .wav.
 """
 
 import io
+import logging
 import json
 import threading
 from types import SimpleNamespace
@@ -1510,3 +1511,63 @@ def test_history_rows_draw_source_glyphs_in_css_never_emoji():
         assert f".conv-icon[data-source={source}]" in css
     for emoji in ("\U0001F399", "\U0001F4F1", "\U0001F5A5", "⌨", "\U0001F4AC", "\U0001F4CC"):
         assert emoji not in js
+
+
+def built_assistant(monkeypatch, tmp_path, fake_client, **assistant):
+    """webapp.build_assistant as the cloud runs it, offline, its Anthropic
+    client the fake one."""
+    import anthropic
+
+    from kwil.config import load_config
+
+    for var in ("PINECONE_API_KEY", "PINECONE_INDEX", "NOTION_TOKEN", "GOOGLE_TOKEN_JSON",
+                "GOOGLE_CLIENT_JSON", "HISTORY_PATH", "HA_URL", "HA_TOKEN", "CANVAS_TOKEN",
+                "CANVAS_ICS_URL", "ASSISTANT_TIMEZONE", "ASSISTANT_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-key")
+    monkeypatch.chdir(tmp_path)  # no credentials.json or token.json here
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: fake_client)
+    cfg = load_config(None, None, profile="server")
+    cfg["assistant"].update(assistant)
+    cfg["history"]["path"] = str(tmp_path / "history.sqlite")
+    cfg["student"]["dir"] = str(tmp_path / "student")
+    cfg["family"]["dir"] = str(tmp_path / "users")
+    cfg["failover"]["role"] = ""
+    return webapp.build_assistant(cfg, "print", lambda m: None)
+
+
+def test_cloud_chat_reads_the_time_in_the_configured_zone(monkeypatch, tmp_path,
+                                                         fake_client, caplog):
+    """The Render bug: the web/cloud chat_factory built the owner's chat
+    without [assistant] timezone, so at 11:30 EDT Kwil said 3:30 PM (UTC)."""
+    from kwil import chat as chat_module
+    from tests.conftest import request_text
+    from tests.test_chat import server_clock
+
+    monkeypatch.setattr(chat_module, "_now", server_clock)
+    caplog.set_level(logging.WARNING, logger="kwil.webapp")
+    a = built_assistant(monkeypatch, tmp_path, fake_client,
+                        timezone="America/New_York")
+    try:
+        assert "No time zone set" not in caplog.text
+        chat = a.session("s1").chat
+        assert chat.timezone == "America/New_York" and chat.client is fake_client
+        fake_client.queue = [make_response(text_block("You're free until noon."))]
+        chat.ask("when am I free today?")
+        sent = request_text(fake_client.calls[-1])
+        assert "11:30 AM (EDT, America/New_York, UTC-0400)" in sent
+        assert "03:30 PM" not in sent
+    finally:
+        a.history.close()
+
+
+def test_server_without_a_time_zone_warns_once(monkeypatch, tmp_path, fake_client,
+                                               caplog):
+    caplog.set_level(logging.INFO, logger="kwil")
+    a = built_assistant(monkeypatch, tmp_path, fake_client, timezone="")
+    try:
+        warned = [r for r in caplog.records if "No time zone set" in r.getMessage()]
+        assert len(warned) == 1 and warned[0].levelno == logging.WARNING
+        assert a.session("s1").chat.timezone is None  # the server's zone, as before
+    finally:
+        a.history.close()

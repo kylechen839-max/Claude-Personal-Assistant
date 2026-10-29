@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: on the server Kwil read the time in UTC instead of your time zone,
+  so it thought it was 4 hours later than it was (in New York): it blocked
+  only the last bit of your free time and said "it's already after seven" at
+  3 PM. It now uses your `ASSISTANT_TIMEZONE` (the same zone as your
+  calendar), and the server's log warns at startup when that isn't set.
+  Lecture notes are dated in your zone too.
 - Phone app: typing into an old conversation continues it. Opening one from
   History only reads it; the first message you type there goes on in that
   same conversation, even after the 5-minute idle timeout or after it ended.

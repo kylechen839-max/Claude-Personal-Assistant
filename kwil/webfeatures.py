@@ -113,6 +113,7 @@ class Features:
                 uploads, self.client, notes_db,
                 model=self.config["assistant"]["model"], whisper_model=lec["model"],
                 keep_audio=bool(lec["keep_audio"]), whisper_factory=whisper,
+                timezone=self.config["assistant"]["timezone"] or None,
                 on_filed=lecture_to_history)
         return self._pipeline
 
