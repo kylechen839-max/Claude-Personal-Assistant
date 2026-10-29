@@ -26,7 +26,16 @@ DEFAULTS: dict = {
     "assistant": {
         "model": "claude-sonnet-5-5",
         "max_tokens": 1500,  # room for thinking + web search; replies stay short
+        # main-model turns that offer tools: room to plan over tool rounds
+        "max_tokens_tools": 4000,
+        # messages of plain chat: the newest max_history / 2 turns are kept,
+        # each with all its tool rounds (ClaudeChat._trim_history)
         "max_history": 40,
+        # ...and at most this many characters (about 3 a token): past it the
+        # oldest whole turns go, so a request stays well under the context
+        "max_history_chars": 300_000,
+        # earlier turns whose thinking is sent again (at least this many)
+        "thinking_turns": 3,
         "max_tool_rounds": 6,
         "conversation_timeout": 300,  # seconds idle before a new conversation
         "api_max_retries": 3,

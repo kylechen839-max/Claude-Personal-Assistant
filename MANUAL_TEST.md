@@ -1585,6 +1585,13 @@ Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
     `logs/assistant.log` may show `Route: claude-sonnet-5-5
     (escalated_tool)` and `Rewound N message(s) of the fast model's turn`;
     either way there is no "Invalid `signature`" error.
+- [ ] Phone app, one conversation: "block my free time this afternoon for
+      physics" (say no if it asks to add anything you don't want, or
+      delete the blocks afterwards), then "why did you pick those times?".
+  - Should: it used every free gap of the afternoon with exact edges,
+    said the window in a few words ("from now, eleven thirty, to five"),
+    and the "why" answer gives its actual reasons, never "I can't see my
+    reasoning". No "Invalid `signature`" error in `logs/assistant.log`.
 - [ ] Set `CLAUDE_ROUTER=off` and start again.
   - Should: every route line says `claude-sonnet-5-5 (off)`.
 - [ ] Phone app as the owner: open the page's state (`/api/state` after

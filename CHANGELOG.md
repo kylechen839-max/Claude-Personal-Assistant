@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kwil remembers its own reasoning for the rest of a conversation, so "why
+  did you block only 3:30 to 4?" gets a real answer. A long conversation
+  with lots of calendar lookups no longer forgets its first requests, it
+  has more room to think a plan through, and when it plans your day it
+  uses every free gap you asked for with exact times and tells you the
+  window it used.
 - Fixed: on the server Kwil read the time in UTC instead of your time zone,
   so it thought it was 4 hours later than it was (in New York): it blocked
   only the last bit of your free time and said "it's already after seven" at

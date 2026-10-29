@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from contextvars import ContextVar
 from datetime import datetime
 
@@ -120,7 +121,18 @@ TOOLS_PROMPT = (
     "Use your tools instead of guessing whenever a question is about Kyle's "
     "schedule, his assignments, or anything that needs current information. "
     "When listing things, summarize the few that matter most rather than "
-    "reading everything."
+    "reading everything. Keep what you say short, but take the time to "
+    "reason carefully before you act or answer."
+)
+
+# With the calendar's free-time search (find_free_time): how to plan a day.
+SCHEDULE_PROMPT = (
+    "When you build or change a schedule, find the gaps with find_free_time "
+    "instead of eyeballing list_calendar_events. Use the exact start and end "
+    "times of each gap and never round a block's edges to a neater time. Use "
+    "all the free time Kyle asked for, not just one slot. In your reply, say "
+    "the window you used in a few words (\"from now, eleven thirty, to "
+    "five\")."
 )
 
 MEMORY_PROMPT = (
@@ -201,7 +213,8 @@ class ClaudeChat:
                  memory=None, recorder=None, language: str = "en",
                  user_name: str | None = None, timezone: str | None = None,
                  fast_model: str | None = None, router: str = "off",
-                 meter=None):
+                 meter=None, max_tokens_tools: int = 4000,
+                 max_history_chars: int = 300_000, thinking_turns: int = 3):
         self._client = client
         # Where this chat's API usage is counted: None = usage.METER (the
         # owner's bill); a family member's own key counts on theirs (family.py)
@@ -239,9 +252,23 @@ class ClaudeChat:
         # context, so a delete_note can take the note out again
         self._recalled: dict[str, str] = {}
         self.max_tokens = max_tokens
+        # [assistant] max_tokens_tools: the ceiling for main-model turns that
+        # offer tools, room to think a plan through (see _max_tokens)
+        self.max_tokens_tools = max_tokens_tools
         self.system_prompt = system_prompt
         self.max_history = max_history
-        self.history: list[dict] = []
+        # [assistant] max_history_chars: the history's size budget (whole
+        # turns go past it, _trim_history); thinking_turns: how many earlier
+        # turns' thinking is sent again at least (request_messages)
+        self.max_history_chars = max_history_chars
+        self.thinking_turns = thinking_turns
+        # Earlier turns' thinking is sent again only when this chat wrote it,
+        # with the turn's model, since the history was last set from outside
+        # or the model last changed (_thinking_tag, request_messages).
+        self._chat_uid = secrets.token_hex(8)
+        self._thinking_epoch = 0
+        self._thinking_model: str | None = None
+        self._history: list[dict] = []
         self._turn_start: dict | None = None  # user message of the last turn
         self._active_stream = None  # the response being streamed, if any
         # True when the last ask() ran a private tool (email, notes): the
@@ -271,6 +298,27 @@ class ClaudeChat:
 
             self._client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
         return self._client
+
+    @property
+    def history(self) -> list[dict]:
+        return self._history
+
+    @history.setter
+    def history(self, messages: list[dict]) -> None:
+        # Set from outside (resumed, rebuilt, shared with another chat): none
+        # of the thinking in it is sent again. Appends don't come here.
+        self._history = messages
+        self._forget_thinking()
+
+    def _forget_thinking(self) -> None:
+        """From now on, no earlier turn's thinking is sent again (a new
+        history, another model, or a refused signature)."""
+        self._thinking_epoch += 1
+
+    def _thinking_tag(self, model: str) -> str:
+        """Marks an assistant message whose thinking this chat may send
+        again: this chat, this model, since the last _forget_thinking()."""
+        return f"{self._chat_uid}:{self._thinking_epoch}:{model}"
 
     def reset(self) -> None:
         self.history = []
@@ -306,6 +354,8 @@ class ClaudeChat:
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
+            if self.tools.has("find_free_time"):
+                parts.append(SCHEDULE_PROMPT)
             if self.tools.has("web_search") or self.tools.has("web_fetch"):
                 parts.append(WEB_PROMPT)
             if self.tools.has("email_summary"):
@@ -435,7 +485,11 @@ class ClaudeChat:
                     self.history.append({"role": "assistant", "content":
                                          reply or "(interrupted)"})
             except Exception:
-                del self.history[start:]  # keep history valid so the user can retry
+                # keep history valid so the user can retry (a too-long retry
+                # may have trimmed earlier turns: find this one by identity)
+                start = next((i for i, m in enumerate(self.history)
+                              if m is message), start)
+                del self.history[start:]
                 for m, i, block in dropped:  # the retry may still need them
                     m["content"][i] = block
                 if self.recorder:  # the retry saves it again
@@ -610,6 +664,7 @@ class ClaudeChat:
             if isinstance(content, str):
                 content = []
             m["content"] = [b for b in content if b.get("type") != "text"]
+            m.pop(THINKING_TAG, None)  # rewritten: its thinking isn't sent again
         spoken = spoken.strip()
         note = (f"{spoken} [interrupted: Kyle started talking, so the rest of "
                 "this reply was not said]" if spoken else
@@ -742,14 +797,54 @@ class ClaudeChat:
         # cache breakpoint after them; request_messages adds a second one at
         # the end of the conversation so the next request reads it back.
         model = self._turn_model or self.model
+        if model != self._thinking_model:
+            # Another model (the router's pick, or an escalation from the fast
+            # model) can't read the earlier turns' thinking: none is resent.
+            self._forget_thinking()
+            self._thinking_model = model
         system = [{"type": "text", "text": self.stable_system(),
                    "cache_control": {"type": "ephemeral"}}]
+        retried = shortened = False
+        before_shorten = None  # (history, thinking epoch) until a retry works
         for _ in range(self.max_tool_rounds + 1):
-            kwargs = dict(model=model, max_tokens=self.max_tokens, system=system,
-                          messages=request_messages(self.history, cache=True))
-            if self.tools:
-                kwargs["tools"] = self.tools.schemas(model)
-            response = self._create(kwargs, on_text, cancel)
+            while True:
+                tag = self._thinking_tag(model)
+                kwargs = dict(model=model, max_tokens=self._max_tokens(model),
+                              system=system, messages=request_messages(
+                                  self.history, cache=True, thinking=tag,
+                                  thinking_turns=self.thinking_turns))
+                if self.tools:
+                    kwargs["tools"] = self.tools.schemas(model)
+                try:
+                    response = self._create(kwargs, on_text, cancel)
+                    before_shorten = None
+                    break
+                except Exception as e:
+                    if before_shorten is not None:
+                        # Shorter didn't help: the earlier turns weren't the
+                        # cause, so they come back (ask() then undoes only
+                        # this turn).
+                        self._history, self._thinking_epoch = before_shorten
+                        raise
+                    # An attached file is the likely cause of "too long";
+                    # dropping earlier turns wouldn't help, so it isn't tried.
+                    if not shortened and _prompt_too_long(e) \
+                            and not self._turn_has_attachments():
+                        before_shorten = (self._history[:], self._thinking_epoch)
+                        if self._shorten():
+                            shortened = True  # once: the history is now smaller
+                            continue
+                        before_shorten = None
+                    # The API refused an earlier turn's thinking: send the
+                    # conversation once more without any (the old behavior).
+                    if retried or not _signature_refused(e) \
+                            or not has_earlier_thinking(self.history, tag,
+                                                        self.thinking_turns):
+                        raise
+                    retried = True
+                    log.warning("Earlier thinking was refused (signature); "
+                                "retrying without it")
+                    self._forget_thinking()
             self._count_usage(model, response)
             if model != self.model and self.tools and needs_main_for(
                     b.name for b in response.content if b.type == "tool_use"):
@@ -768,8 +863,9 @@ class ClaudeChat:
             if response.stop_reason == "pause_turn":
                 # A long server-side search/fetch paused; send the partial
                 # turn back unchanged (no new user message) to resume it.
-                self.history.append({"role": "assistant", "content":
-                                     [_block_dict(b) for b in response.content]})
+                self.history.append(_assistant_message(
+                    [_block_dict(b) for b in response.content], tag,
+                    response.stop_reason))
                 self._note_server_tools(response.content)
                 continue
             self._note_server_tools(response.content)
@@ -780,8 +876,9 @@ class ClaudeChat:
             blocks = [_block_dict(b) for b in response.content
                       if not (b.type == "text" and not b.text.strip())
                       and not (done and b.type == "tool_use")]
-            self.history.append({"role": "assistant", "content": blocks or
-                                 [{"type": "text", "text": "(no reply)"}]})
+            self.history.append(_assistant_message(
+                blocks or [{"type": "text", "text": "(no reply)"}], tag,
+                response.stop_reason))
             if done:
                 text = "".join(b.text for b in response.content if b.type == "text")
                 if response.stop_reason == "refusal":
@@ -815,6 +912,15 @@ class ClaudeChat:
                 raise _Cancelled("".join(b.text for b in response.content
                                          if b.type == "text"))
         return "Sorry, that took too many steps. Could you ask a simpler way?"
+
+    def _max_tokens(self, model: str) -> int:
+        """The reply's ceiling (thinking included; only what's used is
+        billed): main-model turns that offer tools get max_tokens_tools, so
+        a plan made over several tool rounds isn't cut off; the fast model
+        and plain chat keep max_tokens."""
+        if self.tools and model == self.model:
+            return max(self.max_tokens, self.max_tokens_tools)
+        return self.max_tokens
 
     def _rewind_turn(self) -> int:
         """Back to the start of this turn: Kyle's message (with its context)
@@ -865,22 +971,59 @@ class ClaudeChat:
         return dropped
 
     def _trim_history(self) -> None:
-        """Past max_history, keep about the newest half. Cutting just past
-        the limit would drop the first message on every turn, a new prompt
-        prefix (a full cache write) each time; half keeps the prefix for
-        many turns."""
-        if len(self.history) <= self.max_history:
-            return
-        trimmed = []
-        for keep in (max(self.max_history // 2, 1), self.max_history):
-            trimmed = self.history[-keep:]
-            # The API requires the first message to be a plain user turn
-            # (text, or text with attachments; never tool results).
-            while trimmed and not is_user_turn(trimmed[0]):
-                trimmed.pop(0)
-            if trimmed:  # else: one long tool loop fills the half; use all
-                break
-        self.history = trimmed
+        """Whole turns, never messages: a turn is Kyle's message with every
+        tool round and reply it led to, so a tool_use never loses its
+        tool_result and a tool-heavy turn doesn't push out the rest of a
+        short conversation. max_history counts messages of plain chat (two
+        a turn): past max_history / 2 turns, keep the newest half of them.
+        Cutting just past the limit would drop the first turn every time, a
+        new prompt prefix (a full cache write) each turn; half keeps the
+        prefix for many turns."""
+        starts = [i for i, m in enumerate(self.history) if is_user_turn(m)]
+        limit = max(self.max_history // 2, 1)
+        if len(starts) > limit:
+            # The first message kept is a plain user turn, as the API
+            # requires (text, or text with attachments; never tool results).
+            # Assigned directly: a trim keeps the kept turns' thinking.
+            self._history = self.history[starts[-max(limit // 2, 1)]:]
+        # Size, too: a few turns of big tool results (and their thinking)
+        # could pass the model's context window, and then every request is
+        # refused. Past max_history_chars, oldest whole turns go until the
+        # rest is under half of it (the newest turn always stays).
+        if self.max_history_chars and history_chars(self.history) > self.max_history_chars:
+            dropped = self._drop_oldest_turns(self.max_history_chars // 2)
+            log.info("History over its size budget: dropped %d earlier turn(s)", dropped)
+
+    def _drop_oldest_turns(self, budget: int, keep: int = 1) -> int:
+        """Drop the oldest whole turns until the history is within `budget`
+        characters, keeping at least the newest `keep`. Returns how many
+        went."""
+        dropped = 0
+        while True:
+            starts = [i for i, m in enumerate(self.history) if is_user_turn(m)]
+            if len(starts) <= keep or history_chars(self.history) <= budget:
+                return dropped
+            self._history = self.history[starts[1]:]
+            dropped += 1
+
+    def _turn_has_attachments(self) -> bool:
+        """Does Kyle's latest message carry a photo or file?"""
+        turn = next((m for m in reversed(self.history) if is_user_turn(m)), None)
+        return bool(turn) and isinstance(turn["content"], list) and any(
+            _is_attachment(b) for b in turn["content"])
+
+    def _shorten(self) -> bool:
+        """After "prompt is too long": drop the oldest half of the earlier
+        turns (at least one) and all earlier thinking, so the next request
+        is smaller. False if only the current turn is left."""
+        earlier = sum(1 for m in self.history if is_user_turn(m)) - 1
+        if earlier < 1:
+            return False
+        self._drop_oldest_turns(0, keep=earlier - max(earlier // 2, 1) + 1)
+        self._forget_thinking()
+        log.warning("The conversation was too long for the model: dropped %d "
+                    "earlier turn(s) and retrying", max(earlier // 2, 1))
+        return True
 
 
 # Recalled notes remembered per conversation for forget_note (bounded).
@@ -913,14 +1056,105 @@ def is_user_turn(message: dict) -> bool:
 
 THINKING_TYPES = ("thinking", "redacted_thinking")
 
+# Private key of an assistant message in history (never sent): the
+# ClaudeChat._thinking_tag of the request that wrote its thinking blocks.
+THINKING_TAG = "_thinking_from"
 
-def request_messages(history: list[dict], cache: bool = False) -> list[dict]:
-    """`history` as sent to Claude: thinking blocks are kept only in the
+
+def _assistant_message(blocks: list[dict], tag: str,
+                       stop_reason: str | None = None) -> dict:
+    """An assistant message for history, tagged when its thinking may be
+    sent again in later turns: never for a reply cut off by max_tokens or
+    one that is nothing but thinking (unfinished reasoning)."""
+    message = {"role": "assistant", "content": blocks}
+    thinking = [isinstance(b, dict) and b.get("type") in THINKING_TYPES for b in blocks]
+    if any(thinking) and not all(thinking) and stop_reason != "max_tokens":
+        message[THINKING_TAG] = tag
+    return message
+
+
+# What an attached photo or file counts toward max_history_chars: its
+# tokens don't follow the base64's length (MAX_ATTACHMENT_CHARS bounds that).
+ATTACHMENT_CHARS = 8_000
+
+
+def history_chars(history: list[dict]) -> int:
+    """A cheap size estimate of what `history` sends (about 3-4 characters
+    a token): every block as JSON, attachments at ATTACHMENT_CHARS each."""
+    import json
+
+    total = 0
+    for m in history:
+        total += len(str(m.get("context") or "")) + len(str(m.get("nudge") or ""))
+        content = m.get("content")
+        if isinstance(content, str):
+            total += len(content)
+            continue
+        for b in content or []:
+            total += ATTACHMENT_CHARS if _is_attachment(b) else len(
+                json.dumps(b, ensure_ascii=False, default=str))
+    return total
+
+
+def _has_thinking(message: dict) -> bool:
+    return message.get("role") == "assistant" and isinstance(message.get("content"), list) \
+        and any(isinstance(b, dict) and b.get("type") in THINKING_TYPES
+                for b in message["content"])
+
+
+def has_earlier_thinking(history: list[dict], thinking: str,
+                         thinking_turns: int | None = None) -> bool:
+    """Would request_messages(history, thinking=..., thinking_turns=...)
+    send thinking from a turn before the current one?"""
+    last = max((i for i, m in enumerate(history) if is_user_turn(m)), default=-1)
+    floor = _thinking_floor(history, thinking_turns)
+    return any(m.get(THINKING_TAG) == thinking and _has_thinking(m)
+               for m in history[floor:last])
+
+
+def _thinking_floor(history: list[dict], thinking_turns: int | None) -> int:
+    """The index from which earlier turns' thinking may be sent: the newest
+    `thinking_turns` to 2 * thinking_turns - 1 earlier turns. It moves in
+    steps of `thinking_turns`, so the request's prefix (the prompt cache)
+    changes only every that many turns. None: no limit."""
+    if thinking_turns is None:
+        return 0
+    n = max(int(thinking_turns), 0)
+    starts = [i for i, m in enumerate(history) if is_user_turn(m)]
+    earlier = len(starts) - 1  # the current turn always keeps its own
+    if n == 0:
+        return starts[-1] if starts else 0
+    if earlier < n:
+        return 0
+    return starts[((earlier - n) // n) * n]
+
+
+def _signature_refused(error: Exception) -> bool:
+    """The API's 400 "Invalid `signature` in `thinking` block"."""
+    return getattr(error, "status_code", None) == 400 and "signature" in str(error)
+
+
+def _prompt_too_long(error: Exception) -> bool:
+    """The API's 400 "prompt is too long: N tokens > M maximum"."""
+    return getattr(error, "status_code", None) == 400 \
+        and "prompt is too long" in str(error).lower()
+
+
+def request_messages(history: list[dict], cache: bool = False,
+                     thinking: str | None = None,
+                     thinking_turns: int | None = None) -> list[dict]:
+    """`history` as sent to Claude. Thinking blocks are always kept in the
     current turn (after Kyle's last message), where a tool loop needs them.
-    Earlier ones are dropped, although the 5.5 models would keep earlier
-    turns' thinking: one signed for another conversation (the voice session
-    sharing this one, a continued history) makes every later request fail
-    with "Invalid `signature` in `thinking` block" (the fix for those 400s).
+    An earlier turn's are kept only when its message is tagged `thinking`
+    (ClaudeChat._thinking_tag: written by this chat with this model, and the
+    history wasn't set from outside since), so Claude still has its
+    reasoning when Kyle asks "why did you do that?". All others are
+    dropped: one signed for another conversation (the voice session sharing
+    this one, a continued history) or another model makes every later
+    request fail with "Invalid `signature` in `thinking` block" (the fix for
+    those 400s). The tag itself is never sent. `thinking_turns`: only the
+    newest few earlier turns keep theirs (_thinking_floor), so kept thinking
+    doesn't pile up over a long conversation.
 
     A user turn's "context" (ClaudeChat.turn_context) goes out as a text
     block after its words, the same bytes on every later request, so the
@@ -930,11 +1164,14 @@ def request_messages(history: list[dict], cache: bool = False) -> list[dict]:
     cache once. `cache`: a cache breakpoint on the last block that takes
     one. `history` is never changed; changed messages are copies."""
     last = max((i for i, m in enumerate(history) if is_user_turn(m)), default=-1)
+    floor = _thinking_floor(history, thinking_turns)
     out = []
     for i, m in enumerate(history):
-        if i < last and m.get("role") == "assistant" and isinstance(m.get("content"), list) \
-                and any(isinstance(b, dict) and b.get("type") in THINKING_TYPES
-                        for b in m["content"]):
+        tag = m.get(THINKING_TAG)
+        if THINKING_TAG in m:
+            m = {k: v for k, v in m.items() if k != THINKING_TAG}
+        if i < last and (thinking is None or tag != thinking or i < floor) \
+                and _has_thinking(m):
             kept = [b for b in m["content"]
                     if not (isinstance(b, dict) and b.get("type") in THINKING_TYPES)]
             m = {**m, "content": kept or [{"type": "text", "text": "(no reply)"}]}
