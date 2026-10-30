@@ -372,8 +372,8 @@
     "Saved.": "已保存。",
     "Nothing remembered yet. Say “remember …” and Kwil saves it here.":
       "还没有记住任何事。说“记住……”，Kwil 就会存在这里。",
-    "Forget everything Kwil remembered, and your instructions? This can't be undone.":
-      "要忘掉 Kwil 记住的所有事和你的指示吗？忘掉后无法恢复。",
+    "Forget everything Kwil remembered, your instructions and your study list? This can't be undone.":
+      "要忘掉 Kwil 记住的所有事、你的指示和你的复习清单吗？忘掉后无法恢复。",
     "Forgot everything.": "已全部忘掉。",
     "Memory paused.": "记忆已暂停。",
     "Memory on.": "记忆已开启。",
@@ -388,6 +388,19 @@
     "a memory is at most 500 characters": "一条记忆最多 500 个字。",
     "nothing to remember": "没有可以记住的内容。",
     "not found": "找不到。",
+    // study mode (study.js, memory.js, study.py)
+    "Study mode": "学习模式",
+    "Stop studying": "停止学习",
+    "Studying": "正在学习",
+    "Study mode on. Say what to study, or ask Kwil to quiz you.":
+      "学习模式已开启。说说想学什么，或者让 Kwil 考考你。",
+    "Study mode off.": "学习模式已关闭。",
+    "Study: things to review": "学习：要复习的内容",
+    "Nothing to review yet. When Kwil quizzes you, what you miss shows here.":
+      "还没有要复习的内容。Kwil 考你时，答错的会显示在这里。",
+    "Delete this from your study list? This can't be undone.":
+      "要从复习清单里删除这一项吗？删除后无法恢复。",
+    "Missed once": "错过 1 次",
     // Settings, Reminders (reminders.js, reminders.py)
     "Reminders": "提醒",
     "Missed": "错过的",
@@ -566,6 +579,8 @@
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
   const PATTERNS = [
+    [/^Studying ([^\n.!?]{1,80})$/, "正在学习 $1"],  // study.js's pill (a course name)
+    [/^Missed (\d+) times$/, "错过 $1 次"],  // memory.js's study list
     [/^Working: (.+)…$/, "正在处理：$1…"],
     [/^Error (\d+)$/, "错误 $1"],
     [/^Microphone unavailable: (.*)$/, "麦克风不可用：$1"],

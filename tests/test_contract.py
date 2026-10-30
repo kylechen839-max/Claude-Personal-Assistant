@@ -191,6 +191,50 @@ def test_a_reminder_set_in_a_multi_turn_exchange(tmp_path):
         store.close()
 
 
+def test_a_study_session_quiz_question_answer_and_a_noted_miss(tmp_path):
+    """Study mode: "quiz me on PHYS 361" calls start_study and asks a first
+    question in the same turn (its system prompt unchanged: the rules ride in
+    the tool result); the answer turn carries the study block as a second
+    cached system block, and a wrong answer is noted with note_missed, then
+    explained. Every request must be one the API accepts (cache breakpoints
+    included). Fake only: whether a live model calls the tools is its
+    choice, not the contract."""
+    from kwil.cli import add_study_tools
+    from kwil.config import load_config
+    from kwil.memory_store import SqliteMemoryStore
+
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite")
+    try:
+        client = ContractClient()
+        tools = calendar_tools([])
+        add_study_tools(tools, load_config(None, None, profile=""), store)
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools, max_tokens=1024,
+                          local_memory=store)
+        question = chat.ask("Quiz me on PHYS 361")
+        assert question.startswith("First question:") and question.endswith("?")
+        assert chat.study["course"] == "PHYS 361"
+        first_turn = len(client.requests)
+        assert first_turn == 2
+        assert len({str(r["system"]) for r in client.requests}) == 1
+        assert "Study mode is on" not in str(client.requests[0]["system"])
+        reply = chat.ask("I think the field inside is the same as outside.")
+        assert reply.startswith("Not quite") and reply.endswith("?")
+        (missed,) = store.missed()
+        assert (missed["course"], missed["concept"]) == ("PHYS 361",
+                                                         "Gauss's law inside a conductor")
+        later = client.requests[first_turn:]
+        assert len(later) == 2 and len({str(r["system"]) for r in later}) == 1
+        system = later[0]["system"]
+        assert len(system) == 2 and system[0] == client.requests[0]["system"][0]
+        assert "Study mode is on" in system[1]["text"]
+        calls = [b["name"] for r in client.requests for m in r["messages"]
+                 if isinstance(m["content"], list) for b in m["content"]
+                 if b.get("type") == "tool_use"]
+        assert set(calls) == {"start_study", "note_missed"}
+    finally:
+        store.close()
+
+
 def test_recall_searches_then_reads_a_past_chat(tmp_path):
     """Memory layer 2: "what did we decide about my physics schedule last
     week?" searches past chats, reads the best hit and answers from it, in

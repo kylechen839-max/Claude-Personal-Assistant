@@ -34,6 +34,10 @@ one with create_reminder and says back the time it gives, "what did we
 decide about <topic>"
 searches past chats with search_conversations, reads the first hit with
 read_conversation and answers from its matching message (when offered),
+"quiz me on <course>" turns study mode on with start_study and asks a
+first question, and in study mode (its block in `system`) an answer that
+starts "I think" is a wrong one: noted with note_missed (the course from
+the earlier start_study), then explained, with the next question;
 and a structured-output request (the
 student deadlines' extractor) gets one deadline per "<Title> is due
 <YYYY-MM-DD>" sentence in its <text> blocks.
@@ -238,7 +242,37 @@ class ContractClient:
         stop = "end_turn"
         called = ({b.get("name") for b in _blocks(msgs[-2]) if b.get("type") == "tool_use"}
                   if len(msgs) >= 2 else set())
-        if not _is_user_turn(last) and called == {"list_calendar_events"} \
+        system = kwargs.get("system")
+        system = system if isinstance(system, str) else " ".join(
+            b.get("text", "") for b in system or [])
+        words = next((b.get("text", "") for b in _blocks(last) if b.get("type") == "text"),
+                     "") if _is_user_turn(last) else ""
+        quiz = re.search(r"\bquiz me on ([\w ]+?)\s*[.?!]?$", words, re.I)
+        if not _is_user_turn(last) and called == {"start_study"}:
+            content.append({"type": "text", "text": (
+                "First question: what does Gauss's law say about the field inside "
+                "a charged conducting shell?")})
+        elif not _is_user_turn(last) and called == {"note_missed"}:
+            content.append({"type": "text", "text": (
+                "Not quite: inside the conductor the field is zero, because the "
+                "enclosed charge is zero. Next: what's the flux through a closed "
+                "surface with no charge inside?")})
+        elif quiz and "start_study" in tools:
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "start_study", "input": {"course": quiz.group(1)}})
+            stop = "tool_use"
+        elif _is_user_turn(last) and "note_missed" in tools \
+                and "Study mode is on" in system and re.match(r"\s*I think", words):
+            course = next((b["input"].get("course", "") for m in msgs
+                           if m["role"] == "assistant" for b in _blocks(m)
+                           if b.get("type") == "tool_use" and b.get("name") == "start_study"),
+                          "")
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "note_missed",
+                            "input": {"course": course,
+                                      "concept": "Gauss's law inside a conductor"}})
+            stop = "tool_use"
+        elif not _is_user_turn(last) and called == {"list_calendar_events"} \
                 and "get rid of" in asked.lower() and "delete_calendar_event" in tools:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
                             "name": "delete_calendar_event",

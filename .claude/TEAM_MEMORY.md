@@ -347,6 +347,13 @@ as the work. Never put secrets, tokens or personal data in this file.
   - The tools themselves are in `tools/*.py`. They are registered in
     `cli.py` `build_tools` and the `add_*`/`register_*` helpers, which
     `webapp.py` reuses.
+- Lesson (2026-10-30, study mode): a per-conversation mode that changes
+  what the model is told goes in a second system block after the stable
+  one, each with a cache breakpoint, switched only at a turn boundary
+  (`ClaudeChat._apply_study` in `ask`); the turn that switches it gets the
+  rules in its tool result instead. A route module that imports FastAPI's
+  `Request` inside a function must not use `from __future__ import
+  annotations` (the route then reads `request` as a query field: 400).
 - **Phone app and voice:**
   - `webapp.py`: WebAuth, strict self-only CSP.
   - UI work follows `.claude/DESIGN_SYSTEM.md` (tokens, `.btn` roles,

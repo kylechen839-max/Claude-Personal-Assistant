@@ -1612,6 +1612,32 @@ Needs notifications on (the section above) in the Home Screen app.
   - Should: it reaches only their phone, at their own time zone's time;
     neither of you sees the other's in Settings -> Reminders.
 
+## Study mode (~10 min, iPhone)
+In the Home Screen app, with Canvas course content synced if you have it.
+- [ ] Open the voice view and say "quiz me on PHYS 361".
+  - Should: Kwil asks one short question out loud and waits; maths is
+    said in words. Back in the chat, the header shows "Studying PHYS
+    361".
+- [ ] Answer it wrong on purpose, by voice.
+  - Should: Kwil says it isn't right, explains in a sentence or two and
+    asks the next question; ask "can I get a hint?" on the next one and it
+    gives a hint, not the answer.
+- [ ] Say "stop studying".
+  - Should: Kwil says study mode is off and answers normally again; after
+    that turn the pill is gone.
+- [ ] Say "review what I missed".
+  - Should: Kwil starts with the concept you just got wrong, and the pill
+    is back.
+- [ ] Tap the pill's x, then the book button.
+  - Should: the x hides the pill ("Study mode off."); the book button
+    brings it back ("Studying"), and your next message gets a question.
+- [ ] Gear menu -> **Memory** -> **Study: things to review**.
+  - Should: the missed concept is listed with its course and "Missed
+    once"; **Delete** asks first, and Cancel keeps it.
+- [ ] In a Chinese family member's app: the pill and the list read
+  "正在学习 ..." and "学习：要复习的内容", and their list doesn't show
+  yours.
+
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
 - [ ] In text mode (`python -m kwil --mode text`), ask "what time is

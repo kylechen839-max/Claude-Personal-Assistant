@@ -18,6 +18,15 @@ same bytes for the whole conversation; edits apply from the next one.
 "Pause memory" keeps everything but saves nothing new and loads no
 memories (the instructions still apply: they are settings, not memories).
 
+- **Study: things to review** (study mode, study.py): concepts the person
+  got wrong while being quizzed (course, concept of at most
+  MAX_CONCEPT_CHARS, how often, when last), saved with `note_missed` and
+  used by "review what I missed". At most MAX_MISSED: past that the one
+  seen longest ago is deleted (they're noted by Kwil, not written by the
+  person). Kept in the sibling table `missed`, made with CREATE TABLE IF
+  NOT EXISTS outside the numbered migrations, so an older Kwil (a
+  rollback) still opens the file and simply ignores it.
+
 One SQLite file per person: the owner's at [memory] local_path
 (`data/memory.sqlite`; `/data/memory.sqlite` on the server), a family
 member's at `<family dir>/<id>/memory.sqlite` (family.py), so one person's
@@ -57,6 +66,27 @@ MAX_MEMORIES = 200        # memories per person
 MAX_SOURCE_CHARS = 64     # a conversation id
 ID_PREFIX = "mem-"
 ID_RE = re.compile(r"^mem-[0-9a-f]{12}$")
+MAX_CONCEPT_CHARS = 120   # one missed concept (study mode)
+MAX_COURSE_CHARS = 80     # its course, as the person named it
+MAX_MISSED = 300          # missed concepts per person
+MISS_PREFIX = "miss-"
+MISS_RE = re.compile(r"^miss-[0-9a-f]{12}$")
+
+# Study mode's list (see the module doc): not a numbered migration, so the
+# schema version (and an older Kwil's check of it) stays as it was.
+STUDY_TABLE = """
+CREATE TABLE IF NOT EXISTS missed (
+    rid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    course TEXT NOT NULL,
+    concept TEXT NOT NULL,
+    key TEXT NOT NULL UNIQUE,
+    count INTEGER NOT NULL DEFAULT 1,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    untrusted INTEGER NOT NULL DEFAULT 0
+);
+"""
 
 SCHEMA_VERSION = 1
 MIGRATIONS: list[str] = [
@@ -105,6 +135,28 @@ def clean_memory(text) -> str:
     if len(text) > MAX_MEMORY_CHARS:
         raise ValueError(f"a memory is at most {MAX_MEMORY_CHARS} characters")
     return text
+
+
+def valid_missed_id(missed_id) -> bool:
+    return isinstance(missed_id, str) and bool(MISS_RE.match(missed_id))
+
+
+def _one_line(text, what: str, limit: int, required: bool = True) -> str:
+    if not isinstance(text, str):
+        raise ValueError(f"a {what} is text")
+    text = " ".join("".join(c if c.isprintable() else " " for c in text).split())
+    if required and not text:
+        raise ValueError(f"no {what} given")
+    if len(text) > limit:
+        raise ValueError(f"a {what} is at most {limit} characters: say it in a few words")
+    return text
+
+
+def clean_missed(course, concept) -> tuple[str, str]:
+    """(course, concept) on one line each, or ValueError (an empty concept,
+    or one longer than MAX_CONCEPT_CHARS)."""
+    return (_one_line(course or "", "course", MAX_COURSE_CHARS, required=False),
+            _one_line(concept, "concept", MAX_CONCEPT_CHARS))
 
 
 def clean_instructions(text) -> str:
@@ -193,6 +245,22 @@ class MemoryStore:
     def forget_all(self) -> int:
         raise NotImplementedError
 
+    # study mode's "things to review" (dicts: {"id", "course", "concept",
+    # "count", "last_seen" (ISO, UTC), "untrusted"})
+    def note_missed(self, course: str, concept: str, *,
+                    untrusted: bool = False) -> dict:
+        """Count one miss (the same course and concept again adds one);
+        ValueError or MemoryPaused."""
+        raise NotImplementedError
+
+    def missed(self, course: str | None = None) -> list[dict]:
+        """Most missed first (then most recent); `course`: only those whose
+        course contains it (any case, spaces ignored)."""
+        raise NotImplementedError
+
+    def delete_missed(self, missed_id: str) -> bool:
+        raise NotImplementedError
+
     def close(self) -> None:
         raise NotImplementedError
 
@@ -207,7 +275,7 @@ class MemoryStore:
     def export(self) -> dict:
         """Everything kept, for a download (Settings, account export)."""
         return {"instructions": self.instructions(), "memories": self.list(),
-                "paused": self.paused}
+                "paused": self.paused, "missed": self.missed()}
 
 
 class SqliteMemoryStore(MemoryStore):
@@ -243,6 +311,7 @@ class SqliteMemoryStore(MemoryStore):
             for n in range(version, len(MIGRATIONS)):
                 self._con.executescript("BEGIN IMMEDIATE;\n" + MIGRATIONS[n]
                                         + f"\nPRAGMA user_version = {n + 1};\nCOMMIT;")
+            self._con.executescript("BEGIN IMMEDIATE;\n" + STUDY_TABLE + "\nCOMMIT;")
 
     def _write(self, fn):
         """Run fn(connection) in one IMMEDIATE transaction."""
@@ -408,12 +477,81 @@ class SqliteMemoryStore(MemoryStore):
         def write(db):
             n = db.execute("DELETE FROM memories").rowcount
             db.execute("DELETE FROM instructions")
+            db.execute("DELETE FROM missed")  # the study list too
             return n
         count = self._write(write)
         self._purge()
         self.deletions += 1
         log.info("Memory: forgot everything (%d memories)", count)
         return count
+
+    # ---------- study mode: things to review ----------
+    @staticmethod
+    def _missed_row(r) -> dict:
+        return {"id": r["id"], "course": r["course"], "concept": r["concept"],
+                "count": r["count"], "last_seen": _iso(r["last_seen"]),
+                "untrusted": bool(r["untrusted"])}
+
+    def note_missed(self, course: str, concept: str, *,
+                    untrusted: bool = False) -> dict:
+        course, concept = clean_missed(course, concept)
+        key = course.casefold() + "\n" + concept.casefold()
+        now = self.clock()
+
+        def write(db):
+            if self._paused(db):
+                raise MemoryPaused()
+            row = db.execute("SELECT id FROM missed WHERE key = ?", (key,)).fetchone()
+            evicted = 0
+            if row is not None:
+                missed_id = row["id"]
+                db.execute("UPDATE missed SET count = count + 1, last_seen = ?, "
+                           "untrusted = MAX(untrusted, ?) WHERE id = ?",
+                           (now, int(bool(untrusted)), missed_id))
+            else:
+                total = db.execute("SELECT COUNT(*) FROM missed").fetchone()[0]
+                if total >= MAX_MISSED:  # the one seen longest ago makes room
+                    evicted = db.execute(
+                        "DELETE FROM missed WHERE rid IN (SELECT rid FROM missed "
+                        "ORDER BY last_seen ASC, rid ASC LIMIT ?)",
+                        (total - MAX_MISSED + 1,)).rowcount
+                missed_id = MISS_PREFIX + secrets.token_hex(6)
+                db.execute("INSERT INTO missed (id, course, concept, key, count, "
+                           "first_seen, last_seen, untrusted) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+                           (missed_id, course, concept, key, now, now,
+                            int(bool(untrusted))))
+            saved = self._missed_row(db.execute("SELECT * FROM missed WHERE id = ?",
+                                                (missed_id,)).fetchone())
+            return saved, evicted
+        saved, evicted = self._write(write)
+        if evicted:
+            self._purge()  # the dropped one's text: gone
+        log.info("Study: noted %s (count %d, %d chars%s)%s", saved["id"], saved["count"],
+                 len(concept), ", untrusted" if untrusted else "",
+                 f"; {evicted} oldest dropped" if evicted else "")
+        return saved
+
+    def missed(self, course: str | None = None) -> list[dict]:
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT * FROM missed ORDER BY count DESC, last_seen DESC, rid DESC"
+            ).fetchall()
+        out = [self._missed_row(r) for r in rows]
+        # spaces and case ignored: "PHYS361" finds "PHYS 361"
+        want = "".join(str(course or "").split()).casefold()
+        if want:
+            out = [m for m in out if want in "".join(m["course"].split()).casefold()]
+        return out
+
+    def delete_missed(self, missed_id: str) -> bool:
+        if not valid_missed_id(missed_id):
+            return False
+        found = self._write(lambda db: db.execute(
+            "DELETE FROM missed WHERE id = ?", (missed_id,)).rowcount > 0)
+        if found:
+            self._purge()
+            log.info("Study: deleted %s", missed_id)
+        return found
 
 
 def open_store(config: dict) -> SqliteMemoryStore | None:

@@ -365,6 +365,9 @@ DEFAULTS: dict = {
         "prompt_tasks": True,       # "every Monday tell me what's due": runs Claude with read-only tools
         "max_tasks_per_day": 48,    # scheduled-task runs per person (the owner too) in any 24 hours
     },
+    "study": {                      # study mode (study.py; README "Study mode")
+        "enabled": True,            # the study tools and the chat header's toggle; missed concepts go in [memory] local_path
+    },
     "family": {                   # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person

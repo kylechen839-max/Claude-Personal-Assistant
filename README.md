@@ -1622,6 +1622,47 @@ phone shrinks photos to 1600 px before uploading; the PC accepts only JPEG,
 PNG or WebP up to `[tutor] max_image_mb` (8) and removes the photo's
 metadata (EXIF, including location) before sending it to Claude.
 
+### Study mode (quiz me)
+Say or type "quiz me on PHYS 361", "help me study for the midterm" or
+"test me on chapter 4", in the chat or in the voice view. Kwil becomes a
+Socratic tutor for the rest of the conversation: it asks one question at a
+time and waits for your answer, gives a hint (not the answer) when you're
+stuck, and after each attempt says whether it was right with a short
+explanation, then asks the next one. Questions are short enough to be
+spoken, with maths said in words ("x squared over two"); the chat shows
+plain text, so the Tutor tab is still the place for drawn equations.
+
+- **Your own material:** with your Canvas course content synced
+  (`[canvas] content`), Kwil searches it before the first question and
+  quizzes from what it finds; with school deadlines or Notion assignments
+  it checks what's coming up for "what's on the midterm". Without them it
+  quizzes at a college level from what it knows. (Lecture Notes pages in
+  Notion aren't read yet.)
+- **The header:** a small "Studying PHYS 361" pill shows while it's on; its
+  x turns it off. When it's off, the book button next to it turns it on
+  (Kwil then asks what to study). "Stop studying" or "I'm done" works too.
+  A change applies from your next message.
+- **What you missed:** each wrong or half-right answer is noted (the
+  concept in a few words, its course, how often, when last). Say "review
+  what I missed" (or "...in PHYS 361") to be quizzed on those first, most
+  missed first; a course is matched ignoring spaces and case ("PHYS361"),
+  and one with nothing noted says so instead of quizzing other courses.
+  While memory is paused the list isn't used either. Settings -> **Memory** -> **Study: things to review** lists
+  them with **Delete** (asks first); **Forget all** clears them too.
+  At most 300 are kept per person (the one seen longest ago goes first),
+  120 characters each. They are kept in your memory file (`[memory]
+  local_path`; an invited person's own `<[family] dir>/<id>/memory.sqlite`),
+  so they are in the backup and "Download my data" and deleted with the
+  account. Incognito and "Pause memory" note nothing. On a Pi/PC/cloud
+  setup each backend keeps its own list, like memory.
+- **Model:** while study mode is on every turn goes to the main model (the
+  router never sends a tutor's turn to the fast one).
+- **Prompt cache:** study mode's rules are a second block at the end of
+  the system prompt, switched only between turns, so turning it on or off
+  costs one partial cache miss and the turns in between none.
+- **Settings:** `[study] enabled` (on by default) turns the tools and the
+  header button off.
+
 ### Student deadlines (Canvas)
 "What's due this week?", "when is my physics midterm?", "add my lab report,
 due Friday at 5". Deadlines (exams, assignments, quizzes, classes) are kept
