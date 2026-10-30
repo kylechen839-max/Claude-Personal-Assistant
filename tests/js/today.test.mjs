@@ -355,7 +355,7 @@ test('the page, app.js and sw.js load it', () => {
   for (const k of SECTIONS) assert.match(HTML, new RegExp(`id="today-${k}" class="group" role="list"`), k);
   const sw = readFileSync(new URL('../../kwil/web/sw.js', import.meta.url), 'utf8');
   assert.match(sw, /"\/today\.js"/);
-  assert.match(sw, /const CACHE = "kwil-shell-v24";/);
+  assert.match(sw, /const CACHE = "kwil-shell-v25";/);
   const app = readFileSync(new URL('../../kwil/web/app.js', import.meta.url), 'utf8');
   assert.match(app, /"today-view"/);
   assert.match(app, /KwilToday\.onState\(state\)/);

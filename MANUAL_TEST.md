@@ -337,7 +337,7 @@ short, quick "yes" (or "yeah").
 ## 13. History on the phone (4 min)
 Needs the phone app (`python -m kwil --mode web`, section on the phone
 app above).
-- [ ] Tap the clock button. Type "lab" in the search bar.
+- [ ] Tap **History** in the tab bar (on a desktop, the clock button). Type "lab" in the search bar.
   - Should: within a second, the lab report conversation from step 12 (if
     not deleted yet; otherwise any conversation) with "lab" highlighted.
     Rows are grouped under Today / Yesterday / ...
@@ -356,10 +356,10 @@ app above).
     appears for it).
 - [ ] Long-press a row, choose Delete..., confirm.
   - Should: it disappears; Cancel instead keeps it.
-- [ ] Gear → Incognito on. Say something. Open History and search for it.
+- [ ] Settings → Incognito on. Say something. Open History and search for it.
   - Should: not found; the header shows "Incognito". Turn it off again.
 - [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
-      the back button and the dialogs work, light and dark mode both read well.
+      the tab bar and the dialogs work, light and dark mode both read well.
 
 Note anything that failed or any setting you changed in BLOCKERS.md.
 
@@ -1758,7 +1758,7 @@ Home Screen app.
 In the Home Screen app, with Google connected and a few events today and
 tomorrow (one of them an invite from someone else), a reminder due later
 today, and a deadline due tomorrow.
-- [ ] Tap the calendar button in the chat's header (left of History).
+- [ ] Tap **Today** in the tab bar at the bottom.
   - Should: **Today** opens fast; VoiceOver starts on the "Today" title.
     The brief, then "Today" and "Tomorrow" in bold with their dates, then
     Due, Reminders, Research and To review (the last two only if you have
@@ -1809,22 +1809,24 @@ In the Home Screen app, with Canvas course content synced if you have it.
   yours.
 
 ## Settings page (~5 min, iPhone with VoiceOver, and desktop)
-- [ ] Phone app (Home Screen), tap the gear.
-  - Should: Settings fills the screen: a large "Settings" title and
+- [ ] Phone app (Home Screen), tap **Settings** in the tab bar.
+  - Should: Settings fills the screen, the tab bar stays at the bottom
+    with Settings highlighted: a large "Settings" title and
     "Done" top right, clear of the notch and the Dynamic Island; the last
-    section ("Your account") clears the home indicator when scrolled to
-    the bottom. Sections in order: Voice, Memory and projects,
+    section ("Your account") clears the tab bar when scrolled to the
+    bottom. Sections in order: Voice, Memory and projects,
     Notifications, Connections, Privacy and data, People, Backends, Your
     account (a section with nothing for you is left out).
 - [ ] Scroll Settings up and down hard, past both ends.
   - Should: only Settings moves; the chat behind it never scrolls or
     shows through.
 - [ ] Tap **Done**.
-  - Should: back to the chat, the gear highlighted as before.
-- [ ] Turn on VoiceOver, tap the gear.
+  - Should: back to the chat, Chat highlighted in the tab bar.
+- [ ] Turn on VoiceOver, tap the Settings tab.
   - Should: VoiceOver reads "Settings, heading" first. Swipe right through
     the page: each section head, then its rows. Double-tap **Done**:
-    VoiceOver lands on the gear ("Settings, button").
+    VoiceOver lands on the Settings tab ("Settings, button"; on a desktop,
+    the gear).
 - [ ] On the desktop (Chrome or Edge), open Settings, press **Esc**.
   - Should: Settings closes and focus is on the gear (Enter opens it
     again). With a Connections sheet open, Esc closes only the sheet.
@@ -1832,6 +1834,30 @@ In the Home Screen app, with Canvas course content synced if you have it.
   - Should: dark grey page with lighter cards, no white flashes; heads read
     语音, 记忆和项目, 通知, 服务连接, 隐私和数据, 家人, 服务器, 你的账户 and
     the button 完成.
+
+## Tab bar (~5 min, iPhone with VoiceOver, and desktop)
+In the Home Screen app.
+- [ ] Look at the bottom of the chat, Today, History and Settings.
+  - Should: Chat, Today, History and Settings in a bar just above the
+    home indicator, with a small gap under it (the indicator never sits on
+    a label); the current one is blue. No calendar, clock or gear at the
+    top, and no Back on Today or History.
+- [ ] Tap the message field.
+  - Should: the keyboard comes up and the tab bar is gone; the field sits
+    on the keyboard. Close the keyboard: the bar comes back, the field
+    just above it.
+- [ ] Tap Chat from History, and from Settings.
+  - Should: the chat, with no keyboard popping up.
+- [ ] Open a conversation from History, Memory from Settings, and the
+  brief.
+  - Should: no tab bar on those screens (they have Back).
+- [ ] Open the voice view.
+  - Should: it covers everything, the tab bar too.
+- [ ] Turn on VoiceOver and swipe to the bar.
+  - Should: "Main navigation"; the current tab reads with "selected"
+    (or "current page"), the others don't.
+- [ ] On the desktop (a window wider than about 770px).
+  - Should: no tab bar; the calendar, clock and gear at the top, as before.
 
 ## Projects (~15 min, iPhone and desktop)
 In the Home Screen app, with a syllabus PDF on the phone.

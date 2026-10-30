@@ -16,6 +16,10 @@
 .panel { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   padding: .5rem var(--pad) calc(1.25rem + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: .85rem; }
+/* the phone's tab bar (app.css) already keeps the home indicator's gap */
+@media (max-width: 47.99rem) {
+  html:has(#tabbar:not([hidden])):not(.kb-open) .panel { padding-bottom: 1.25rem; }
+}
 .panel h2 { font-size: .9375rem; font-weight: 600; margin: 1rem 0 -.25rem; color: var(--text); }
 .panel select, .panel textarea { width: 100%; padding: .75em .95em; border-radius: var(--r-md);
   border: 1px solid var(--line-strong); background-color: var(--surface); color: var(--text); font: inherit; }

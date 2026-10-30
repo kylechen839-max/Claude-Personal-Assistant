@@ -670,6 +670,27 @@
   <p id="brief-status" class="status center" role="status"></p>
 </main>
 
+<!-- the phone's tab bar (below 48rem, app.js syncTabs): the root screens
+     only; each tab works through the header's own buttons -->
+<nav id="tabbar" class="tabbar" aria-label="Main navigation" hidden>
+  <button id="tab-chat" class="tabbar-item" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.8a8 8 0 1 1 15.6-3.7z"/></svg>
+    <span class="tabbar-label">Chat</span>
+  </button>
+  <button id="tab-today" class="tabbar-item" type="button" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+    <span class="tabbar-label">Today</span>
+  </button>
+  <button id="tab-history" class="tabbar-item" type="button" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
+    <span class="tabbar-label">History</span>
+  </button>
+  <button id="tab-settings" class="tabbar-item" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    <span class="tabbar-label">Settings</span>
+  </button>
+</nav>
+
 <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
   <form method="dialog">
     <h2 id="sheet-title"></h2>

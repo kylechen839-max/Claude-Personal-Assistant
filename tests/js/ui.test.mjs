@@ -2,7 +2,9 @@
 // kwil/web/ui.js in node:vm with a minimal fake document: the settings
 // menu closes on a tap outside it (not inside) and on Escape; a downward
 // swipe while typing blurs the field (hides the keyboard), a short one or a
-// swipe when not typing does nothing. The owner's health banner: its
+// swipe when not typing does nothing. The phone's tab bar: a tap in it
+// leaves Settings to its tabs, and Done hands focus to its Settings tab on a
+// phone (the header's gear is hidden there). The owner's health banner: its
 // lines (an app down, one failing, stale checks, events) and the element.
 
 import test from 'node:test';
@@ -86,7 +88,7 @@ function setupPage() {
   const fire = (type, ev) => (listeners[type] || []).forEach((fn) => fn(ev));
   const toggle = () => (menuListeners.toggle || []).forEach((fn) => fn({}));
   const tapDone = () => (done.listeners.click || []).forEach((fn) => fn({}));
-  return { menu, focused, fire, toggle, tapDone };
+  return { menu, focused, fire, toggle, tapDone, doc, win };
 }
 
 test('settings page: opening it focuses the title; Done closes it and focuses the gear', () => {
@@ -107,6 +109,100 @@ test('settings page: Escape gives focus back to the gear too', () => {
   t.fire('keydown', { key: 'Escape' });
   assert.equal(t.menu.open, false);
   assert.deepEqual(t.focused, ['summary']);
+});
+
+test('menu: a tap inside the tab bar keeps Settings open (its tabs handle it)', () => {
+  const t = setup();
+  const tab = { id: 'tab-settings' };
+  const bar = { id: 'tabbar', hidden: false, contains: (n) => n === tab || n === bar };
+  t.doc.getElementById = (id) => (id === 'tabbar' ? bar : null);
+  t.fire('pointerdown', { target: tab });
+  assert.equal(t.menu.open, true);
+  t.fire('pointerdown', { target: t.outside });
+  assert.equal(t.menu.open, false);
+});
+
+// Done on a phone (matchMedia matches) with the tab bar showing focuses its
+// Settings tab; on a wide screen, with the bar hidden or no matchMedia, the gear.
+function doneFocus({ phone, barHidden = false, tabHidden = false, media = true }) {
+  const t = setupPage();
+  const bar = { id: 'tabbar', hidden: barHidden };
+  const tab = { id: 'tab-settings', hidden: tabHidden, focus() { t.focused.push('tab-settings'); } };
+  const byId = t.doc.getElementById;
+  t.doc.getElementById = (id) => ({ tabbar: bar, 'tab-settings': tab })[id] || byId(id);
+  if (media) t.win.matchMedia = (q) => ({ matches: phone && q === '(max-width: 47.99rem)' });
+  t.menu.open = true;
+  t.tapDone();
+  assert.equal(t.menu.open, false);
+  return t.focused.at(-1);
+}
+
+test('settings page: Done focuses the Settings tab on a phone, the gear otherwise', () => {
+  assert.equal(doneFocus({ phone: true }), 'tab-settings');
+  assert.equal(doneFocus({ phone: false }), 'summary');
+  assert.equal(doneFocus({ phone: true, barHidden: true }), 'summary');
+  assert.equal(doneFocus({ phone: true, tabHidden: true }), 'summary');
+  assert.equal(doneFocus({ phone: true, media: false }), 'summary');  // no matchMedia
+});
+
+// With the keyboard up (html.kb-open) the bar is display:none but not
+// [hidden]: the tab has no client rects and can't take focus (judge LOW 2).
+function kbDone({ raf = false, vv = false } = {}) {
+  const t = setupPage();
+  const rects = { n: 0 };
+  const bar = { id: 'tabbar', hidden: false };
+  const tab = { id: 'tab-settings', hidden: false, getClientRects: () => ({ length: rects.n }),
+    focus() { t.focused.push('tab-settings'); } };
+  const field = { id: 'text', blurred: 0, blur() { this.blurred++; t.doc.activeElement = null; } };
+  t.doc.activeElement = field;
+  const byId = t.doc.getElementById;
+  t.doc.getElementById = (id) => ({ tabbar: bar, 'tab-settings': tab })[id] || byId(id);
+  t.win.matchMedia = () => ({ matches: true });
+  const frames = [];
+  if (raf) t.win.requestAnimationFrame = (fn) => frames.push(fn);
+  const resize = [];
+  if (vv) t.win.visualViewport = { addEventListener: (type, fn) => resize.push(fn),
+    removeEventListener: (type, fn) => resize.splice(resize.indexOf(fn), 1) };
+  t.menu.open = true;
+  t.tapDone();
+  const frame = () => frames.splice(0).forEach((fn) => fn());
+  return { ...t, rects, field, frames, frame, resize };
+}
+
+test('settings page: Done with the keyboard up puts it away, then focuses the Settings tab', () => {
+  // no requestAnimationFrame, no visualViewport: the gear, as before
+  let t = kbDone();
+  assert.equal(t.menu.open, false);
+  assert.equal(t.field.blurred, 1);
+  assert.deepEqual(t.focused, ['summary']);
+  // a frame after the bar is drawn again
+  t = kbDone({ raf: true });
+  assert.equal(t.field.blurred, 1);
+  assert.deepEqual(t.focused, []);
+  t.frame(); t.frame();
+  assert.deepEqual(t.focused, []);  // the keyboard is still going down
+  t.rects.n = 1;
+  t.frame();
+  assert.deepEqual(t.focused, ['tab-settings']);
+  assert.equal(t.frames.length, 0);  // and it stops looking
+  // the viewport's resize (the keyboard closed)
+  t = kbDone({ vv: true });
+  assert.equal(t.resize.length, 1);
+  t.rects.n = 1;
+  t.resize[0]();
+  assert.deepEqual(t.focused, ['tab-settings']);
+  assert.equal(t.resize.length, 0);  // listener removed
+  // Settings opened again before the bar came back: focus stays with it
+  t = kbDone({ raf: true });
+  t.menu.open = true;
+  t.rects.n = 1;
+  t.frame();
+  assert.deepEqual(t.focused, []);
+  // never drawn again: it gives up after about 2 s of frames
+  t = kbDone({ raf: true });
+  for (let i = 0; i < 200 && t.frames.length; i++) t.frame();
+  assert.equal(t.frames.length, 0);
+  assert.deepEqual(t.focused, []);
 });
 
 const touch = (y) => ({ touches: [{ clientY: y }] });

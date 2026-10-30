@@ -23,6 +23,7 @@
     "Backend in use": "正在使用的服务器",
     "Conversation history": "对话记录",
     "Settings": "设置",
+    "Main navigation": "主导航",  // the phone's tab bar (aria-label)
     // the Settings page's section heads (Voice, Connections, People and
     // Backends are below; "Account" is the invite form's field, not a head)
     "Memory and projects": "记忆和项目",

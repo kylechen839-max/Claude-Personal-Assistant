@@ -1,7 +1,8 @@
 // Small touch behaviours the phone page should have, like other apps:
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
 // - it is a full-screen Settings page: opening it moves focus to its title,
-//   and Done (like Escape) closes it and gives focus back to the gear;
+//   and Done (like Escape) closes it and gives focus back to the gear (on a
+//   phone, to the tab bar's Settings: the header's gear is hidden there);
 // - swiping down while the keyboard is open closes the keyboard (not when
 //   the swipe scrolls a message long enough to scroll inside its field).
 // And the owner's health banner (state.health from /api/state, written by
@@ -15,13 +16,59 @@
     const find = (sel) => (typeof menu.querySelector === "function" ? menu.querySelector(sel) : null);
     const byId = (id) => (typeof doc.getElementById === "function" ? doc.getElementById(id) : null);
     const focus = (el) => { if (el && typeof el.focus === "function") el.focus(); };
-    // close the page and hand focus back to the gear (VoiceOver lands there)
+    // the phone's tab bar (app.css shows it below 48rem): its Settings tab
+    // stands in for the gear there
+    const phone = () => typeof root.matchMedia === "function"
+      && root.matchMedia("(max-width: 47.99rem)").matches;
+    const tabbar = () => byId("tabbar");
+    // laid out (html.kb-open hides the bar with CSS, not [hidden])
+    const rendered = (el) => typeof el.getClientRects !== "function" || el.getClientRects().length > 0;
+    // The keyboard is up, so the bar isn't drawn and can't take focus: put
+    // the keyboard away and focus the tab once the bar is back (the
+    // viewport's next resize, or a frame after kb-open clears; about 2 s at
+    // most). With neither available, the gear as before.
+    const focusWhenShown = (tab) => {
+      const active = doc.activeElement;
+      if (active && typeof active.blur === "function") active.blur();
+      const vv = root.visualViewport;
+      const raf = typeof root.requestAnimationFrame === "function" ? root.requestAnimationFrame.bind(root) : null;
+      const canResize = vv && typeof vv.addEventListener === "function";
+      if (!raf && !canResize) { focus(find("summary")); return; }
+      let done = false, frames = 0;
+      const finish = () => {
+        done = true;
+        if (canResize && typeof vv.removeEventListener === "function") vv.removeEventListener("resize", onResize);
+      };
+      const tryNow = () => {
+        if (done) return true;
+        if (menu.open) { finish(); return true; }  // opened again meanwhile: its title has focus
+        if (rendered(tab)) { finish(); focus(tab); return true; }
+        return false;
+      };
+      const tick = () => { if (!tryNow() && ++frames < 120) raf(tick); else if (!done) finish(); };
+      const onResize = () => {
+        if (tryNow()) return;
+        if (raf) raf(tick); else if (++frames >= 5) finish();  // a few resizes at most
+      };
+      if (canResize) vv.addEventListener("resize", onResize);
+      if (raf) raf(tick);
+    };
+    // close the page and hand focus back to the gear (VoiceOver lands there),
+    // on a phone to the tab bar's Settings
     const close = () => {
       menu.open = false;
-      focus(find("summary"));
+      const tab = byId("tab-settings"), bar = tabbar();
+      if (!(tab && !tab.hidden && bar && !bar.hidden && phone())) focus(find("summary"));
+      else if (rendered(tab)) focus(tab);
+      else focusWhenShown(tab);
+    };
+    // a tap in the tab bar is its own (app.js): Settings stays open for it
+    const inBar = (target) => {
+      const bar = tabbar();
+      return !!bar && typeof bar.contains === "function" && bar.contains(target);
     };
     const onDown = (e) => {
-      if (menu.open && !menu.contains(e.target)) menu.open = false;
+      if (menu.open && !menu.contains(e.target) && !inBar(e.target)) menu.open = false;
     };
     const onKey = (e) => {
       // with a Connections sheet open (connections.js), Escape closes only it

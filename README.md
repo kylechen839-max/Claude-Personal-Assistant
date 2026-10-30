@@ -201,7 +201,8 @@ conversations are found too; deleted ones never, and incognito ones were
 never saved. Like a resumed conversation, what was read counts as
 untrusted, so changes later in that conversation ask first.
 
-**On the phone:** the clock button at the top of the app opens History:
+**On the phone:** the **History** tab in the bar at the bottom (on a wider
+screen, the clock button at the top of the app) opens History:
 a search bar (results update as you type, matching words highlighted),
 filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
 grouped by Today / Yesterday / This week / Older with a source icon, time
@@ -2139,7 +2140,8 @@ spoken mode (`python -m kwil`) doesn't have it.
   asked, once.
 
 ### Today (one look at your day)
-The calendar button in the chat's header (or the link `/#today`) opens
+The **Today** tab at the bottom of the phone app (on a wider screen, the
+calendar button at the top; or the link `/#today`) opens
 **Today**: a read-only screen with, in order, your study brief, today's
 and tomorrow's events (your primary Google calendar), what's due by
 tomorrow and what's overdue (school deadlines from the last two weeks,

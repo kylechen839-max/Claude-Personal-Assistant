@@ -131,14 +131,17 @@ CSP forbids them).
 
 ## Settings page
 - The gear (`<details class="menu">`, `<summary aria-label="Settings">`:
-  scripts and tests find it by that) opens a full-screen page like iOS
+  scripts and tests find it by that; on a phone the tab bar's Settings tab
+  opens it and the gear is hidden) opens a full-screen page like iOS
   Settings: `position: fixed; inset: 0` on `--bg` with the four safe-area
   insets, a centred column of at most 40rem, no shadow, border or pop.
   Nothing scrolls behind it (`html:has(.menu[open])`); reduced motion drops
   its fade.
 - A large title (`#settings-title`, `--t-title`, focused when it opens so
   VoiceOver starts there) and a plain **Done** (`#settings-done`, top
-  right): Done and Esc close it and give focus back to the gear (`ui.js`).
+  right): Done and Esc close it and give focus back to the gear (`ui.js`),
+  or on a phone to the tab bar's Settings tab. The tab bar stays over it
+  (z-index 31 over the page's 30), and the page leaves room for it.
 - Sections in this order, each a `<div class="set-sec">` holding a
   `.group-head` over one `.group` of `.row`s: Voice, Memory and projects,
   Notifications, Connections, Privacy and data, People, Backends (its
@@ -166,7 +169,8 @@ CSP forbids them).
 ## Today screen (redesign phase 5)
 - A full-screen view like History (`#today-view`, Back top left), opened
   by the header's 22px line calendar glyph (`#open-today`, before
-  History). Content is a centred column of at most 40rem.
+  History), or on a phone by the tab bar's Today tab (the header button
+  and Back are hidden there). Content is a centred column of at most 40rem.
 - Sections are `.group-head` + `.group[role=list]`; each row sits in a
   `role=listitem` wrapper so a row that opens something stays a real
   `<button class="row">` with a `.row-chevron`. Title `--t-body`,
@@ -180,6 +184,34 @@ CSP forbids them).
   to say (no brief, no research, no study items) are left out.
 - A running research job shows a `.state` dot in `--accent-ink` that
   breathes (none with reduced motion); finished is `.state.on`.
+
+## Tab bar (redesign phase 6)
+- Below 48rem only: `<nav id="tabbar" class="tabbar" aria-label="Main
+  navigation">` at body level, fixed to the bottom, four
+  `button.tabbar-item`s in order Chat, Today, History, Settings: a 22px
+  line glyph (`aria-hidden`; speech bubble, the calendar, the clock, the
+  gear) over a `--t-cap` 500 label. `--tabbar-h` is 49px including the
+  `--line` hairline on top; under it the home indicator's
+  `env(safe-area-inset-bottom)`; the `.bar` blur background. 48rem and up
+  it never shows and the header keeps its buttons.
+- Not tabs in the ARIA sense: no `role=tab`, no `.tabs` (that is the
+  Chat/Lecture/Tutor segmented control). The current one is
+  `aria-current="page"` (`--accent-ink`; the rest `--text-2`), focus is
+  `--ring`.
+- Root screens only (`app.js` `syncTabs`): the chat, its Settings page
+  (Settings is current while the menu is open), Today and History. A
+  screen reached with Back (transcript, Memory, Projects, a project,
+  Reminders, the brief) and the sign-in have none. Hidden with the
+  keyboard (`html.kb-open`) and in voice mode (`body.voice-open`).
+- Each tab works through the header's own control (`#open-today`,
+  `#open-history`, the menu), so Today and History show exactly when
+  those would; on a phone those header buttons, the gear and the Back of
+  Today and History are hidden (Back keeps its space, so the title stays
+  centred). Chat never focuses the message field (no keyboard), and the
+  current tab does nothing.
+- While it shows, `.app`, `.history`, the Settings page and `.panel` leave
+  `--tabbar-h` + the safe area at the bottom, and the composer drops its
+  own safe-area gap.
 
 ## Every change
 - Light and dark, phone (390x844) and desktop screenshots, English and
