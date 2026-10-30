@@ -677,3 +677,31 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
 .brief .summary:empty { display: none; }
 .brief .primary { margin: 1rem var(--pad) 0; min-height: 50px; border-radius: var(--r-md); }
 .brief .primary[hidden] { display: none; }
+
+/* ---------- try again, edit, branch (app.js, history.js) ---------- */
+/* ↻ under the last reply; the pencil just left of Kyle's last bubble.
+   Both are 44px icon buttons, dimmed while Kwil answers or asks. */
+.msg.me { position: relative; }
+.msg-edit { position: absolute; top: 50%; right: 100%; margin-right: var(--s1);
+  transform: translateY(-50%); color: var(--muted); }
+.msg-edit svg, .redo-btn svg, .msg-more svg { width: 20px; height: 20px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.turn-tools { display: flex; margin-top: calc(-1 * var(--s3)); }
+.redo-btn { color: var(--muted); }
+.msg-edit:disabled, .redo-btn:disabled { opacity: .4; }
+.msg-edit:focus-visible, .redo-btn:focus-visible, .msg-more:focus-visible { box-shadow: var(--ring); }
+.edit-bar { flex: none; display: flex; align-items: center; justify-content: space-between; width: 100%;
+  margin-bottom: var(--s2); padding-left: var(--s4); border-radius: var(--r-md); background: var(--surface-2);
+  color: var(--text-2); font-size: var(--t-sub); }
+.edit-bar[hidden] { display: none; }
+.edit-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+/* a stored message's actions ("Branch from here"): long-press on a phone,
+   hover (or keyboard focus) with a mouse */
+.transcript .msg { position: relative; }
+.msg-more { position: absolute; top: 0; right: 0; color: var(--muted); opacity: 0; }
+.transcript .msg.me .msg-more { right: 100%; }
+.msg:hover > .msg-more, .msg-more:focus-visible { opacity: 1; }
+@media (hover: none) { .msg:hover > .msg-more { opacity: 0; } }
+dialog.sheet .sheet-quote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; }
+dialog.sheet .sheet-quote:empty { display: none; }

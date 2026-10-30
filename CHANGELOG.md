@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Try again, edit and branch in the phone chat: ↻ under Kwil's last
+  reply asks for a new answer, the pencil on your last message lets you
+  change it and send it again (the old reply is replaced everywhere,
+  History and exports included), and long-pressing a message in a saved
+  conversation offers "Branch from here", a new conversation with
+  everything up to that message. A reply that changed something (added an
+  event, saved a note) is never redone: ask again instead.
 - Study mode: say or type "quiz me on PHYS 361" or "help me study for the
   midterm" (in the chat or the voice view) and Kwil becomes a tutor: one
   question at a time, hints before answers, a short explanation after

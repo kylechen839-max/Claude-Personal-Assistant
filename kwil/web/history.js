@@ -15,6 +15,7 @@ const hist = {
   sheetArchive: $("sheet-archive"), rename: $("rename-dialog"), renameInput: $("rename-input"),
   del: $("delete-dialog"), delText: $("delete-text"),
   incognito: $("incognito"), incognitoRow: $("incognito-row"), badge: $("incognito-badge"),
+  msgSheet: $("msg-sheet"), msgSheetText: $("msg-sheet-text"),
 };
 
 // Each source's glyph is a line icon in app.css (.conv-icon[data-source]),
@@ -298,7 +299,7 @@ async function openTranscript(id) {
   hist.tSummary.textContent = current.summary || "";
   hist.tSummary.hidden = !current.summary;
   hist.tLog.textContent = "";
-  for (const m of current.messages) hist.tLog.appendChild(messageNode(m));
+  current.messages.forEach((m, i) => hist.tLog.appendChild(messageNode(m, i)));
   hist.cont.disabled = incognitoOn;
   hist.contHint.textContent = incognitoOn ? "Turn incognito off to continue it." :
     current.active ? "This is the conversation you're in now." : "";
@@ -307,19 +308,99 @@ async function openTranscript(id) {
   hist.tTitle.focus({ preventScroll: true });
 }
 
-function messageNode(m) {
-  if (m.kind === "note") return el("div", "msg note", m.text);
-  if (m.kind === "confirm") {
-    return el("div", "msg note", m.role === "assistant" ? `Asked: ${m.text}` : `Answered: ${m.text}`);
+function messageNode(m, index) {
+  let wrap;
+  if (m.kind === "note") wrap = el("div", "msg note", m.text);
+  else if (m.kind === "confirm") {
+    wrap = el("div", "msg note", m.role === "assistant" ? `Asked: ${m.text}` : `Answered: ${m.text}`);
+  } else {
+    wrap = el("div", `msg ${m.role === "user" ? "me" : "claude"}`, m.text);
+    if (m.interrupted) wrap.appendChild(el("span", "tag", " (interrupted)"));
+    if (m.tools && m.tools.length) {
+      const t = el("span", "tools", m.tools.map((x) =>
+        `${x.tool.replace(/_/g, " ")}${x.status === "ok" ? "" : ` (${x.status})`}`).join(", "));
+      wrap.prepend(t);
+    }
   }
-  const wrap = el("div", `msg ${m.role === "user" ? "me" : "claude"}`, m.text);
-  if (m.interrupted) wrap.appendChild(el("span", "tag", " (interrupted)"));
-  if (m.tools && m.tools.length) {
-    const t = el("span", "tools", m.tools.map((x) =>
-      `${x.tool.replace(/_/g, " ")}${x.status === "ok" ? "" : ` (${x.status})`}`).join(", "));
-    wrap.prepend(t);
-  }
+  if (index !== undefined) messageActions(wrap, index, m.text);
   return wrap;
+}
+
+// A stored message's actions ("Branch from here"): a long-press on a phone,
+// or its "…" button (shown on hover or keyboard focus).
+function messageActions(wrap, index, text) {
+  const more = el("button", "msg-more icon-btn");
+  more.type = "button";
+  more.setAttribute("aria-label", "Message actions");
+  more.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>';
+  more.addEventListener("click", () => openMessageSheet(index, text));
+  wrap.appendChild(more);
+  let x0 = 0, y0 = 0, timer = null;
+  wrap.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") return;
+    x0 = e.clientX; y0 = e.clientY;
+    clearTimeout(timer);
+    timer = setTimeout(() => openMessageSheet(index, text), 550);
+  });
+  wrap.addEventListener("pointermove", (e) => {
+    if (Math.abs(e.clientX - x0) > 10 || Math.abs(e.clientY - y0) > 10) clearTimeout(timer);
+  });
+  for (const type of ["pointerup", "pointercancel"]) wrap.addEventListener(type, () => clearTimeout(timer));
+}
+
+let branchIndex = null;
+function openMessageSheet(index, text) {
+  if (!current) return;
+  branchIndex = index;
+  hist.msgSheetText.textContent = text || "";
+  hist.msgSheet.returnValue = "";
+  // (no new conversation while a reply is running or a question is open)
+  $("msg-branch").disabled = !window.KwilApp.idle() || incognitoOn;
+  if (typeof hist.msgSheet.showModal === "function") hist.msgSheet.showModal();
+}
+
+hist.msgSheet.addEventListener("close", () => {
+  const index = branchIndex;
+  branchIndex = null;
+  if (hist.msgSheet.returnValue === "branch" && index !== null) branchFrom(index);
+});
+
+// "Branch from here": a new conversation with this one's messages up to
+// that one (the server copies them), and the chat pane bound to it.
+async function branchFrom(index) {
+  if (!current) return;
+  if (!window.KwilApp.idle()) { announce("Wait for the reply to finish first."); return; }
+  try {
+    const res = await request(`/api/conversations/${encodeURIComponent(current.id)}/branch`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_index: index }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+    openInChat(data, `Branched into “${data.title}”. Go ahead.`);
+  } catch (e) {
+    announce(e.message || String(e));
+  }
+}
+
+// The chat pane, bound to stored conversation `data` (its transcript),
+// showing its last few messages; try again and edit are offered on its last
+// turn when the server says they may be (data.redo).
+function openInChat(data, note) {
+  window.KwilApp.bindPane(data.id);
+  els.log.textContent = "";
+  const recent = data.messages.filter((m) => m.kind === "chat").slice(-6);
+  if (data.messages.length > recent.length) addMessage("note", "…");
+  let me = null, said = "", after = [];
+  for (const m of recent) {
+    const bubble = addMessage(m.role === "user" ? "me" : "claude", m.text);
+    if (m.role === "user") { me = bubble; said = m.text; after = []; } else after.push(bubble);
+  }
+  addMessage("note", note);
+  show("app");
+  setStatus("");
+  if (window.KwilApp.adoptTurn) window.KwilApp.adoptTurn(me, said, after, data.redo);
+  els.text.focus({ preventScroll: true });
 }
 
 hist.tBack.addEventListener("click", () => {
@@ -338,15 +419,7 @@ hist.cont.addEventListener("click", async () => {
     const res = await request(`/api/conversations/${encodeURIComponent(current.id)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
-    window.KwilApp.bindPane(data.id);
-    els.log.textContent = "";
-    const recent = data.messages.filter((m) => m.kind === "chat").slice(-6);
-    if (data.messages.length > recent.length) addMessage("note", "…");
-    for (const m of recent) addMessage(m.role === "user" ? "me" : "claude", m.text);
-    addMessage("note", `Continuing “${data.title}”. Go ahead.`);
-    show("app");
-    setStatus("");
-    els.text.focus({ preventScroll: true });
+    openInChat(data, `Continuing “${data.title}”. Go ahead.`);
   } catch (e) {
     hist.contHint.textContent = e.message || String(e);
   } finally {

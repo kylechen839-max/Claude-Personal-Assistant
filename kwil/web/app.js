@@ -12,6 +12,7 @@ const els = {
   badge: $("badge"), backends: $("backends"), backendMode: $("backend-mode"),
   urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
   backendsSave: $("backends-save"), backendStatus: $("backend-status"),
+  editBar: $("edit-bar"), editCancel: $("edit-cancel"),
 };
 
 let busy = false;
@@ -30,6 +31,14 @@ const queue = [];  // {text, el, cid, epoch}
 // in a pane opened after it was sent.
 const pane = { cid: null, epoch: 0 };
 let confirmEpoch = 0;  // the pane the open yes/no question was asked in
+// The last turn drawn in this pane, for "try again" (↻ under the reply) and
+// "edit" (the pencil on Kyle's message): his bubble, what he said, and what
+// was drawn after it. Offered only when the server's "done" says so (no
+// tool that may have changed something ran) and never while busy or asked.
+let shown = null;  // {me, text, after: [elements], epoch}
+let redoing = null;  // a try again or edit in flight: {turn, edit, text, oldText, hidden}
+let editing = false;  // the text box holds an edit of Kyle's last message
+const turnTools = { row: null, redo: null, edit: null };
 const player = new Audio();
 let audioUnlocked = false;
 
@@ -55,12 +64,141 @@ function show(view) {
 }
 
 function addMessage(kind, text) {
+  clearTurnTools();  // they belong under the last reply only
   const div = document.createElement("div");
   div.className = `msg ${kind}`;
   div.textContent = text;
   els.log.appendChild(div);
   els.log.scrollTop = els.log.scrollHeight;
+  if (shown && shown.epoch === pane.epoch) shown.after.push(div);
   return div;
+}
+
+// --- try again, edit ---
+const ICON_REDO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4"/></svg>';
+const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
+
+// Kyle's bubble `me` (with what he said, `text`) starts the pane's last turn.
+function beginTurn(me, text) {
+  shown = { me, text, after: [], epoch: pane.epoch };
+}
+
+function clearTurnTools() {
+  for (const key of ["row", "edit"]) {
+    if (turnTools[key]) turnTools[key].remove();
+    turnTools[key] = null;
+  }
+  turnTools.redo = null;
+}
+
+// ↻ under the last reply and the pencil on Kyle's message (44px each).
+function showTurnTools() {
+  clearTurnTools();
+  if (!shown || shown.epoch !== pane.epoch || !shown.me) return;
+  const replies = shown.after.filter((el) => el.className === "msg claude" && !el.hidden);
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "msg-edit icon-btn";
+  edit.setAttribute("aria-label", "Edit message");
+  edit.innerHTML = ICON_EDIT;
+  edit.addEventListener("click", startEdit);
+  shown.me.appendChild(edit);
+  turnTools.edit = edit;
+  if (replies.length) {
+    const row = document.createElement("div");
+    row.className = "turn-tools";
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "redo-btn icon-btn";
+    again.setAttribute("aria-label", "Try again");
+    again.innerHTML = ICON_REDO;
+    again.addEventListener("click", () => { unlockAudio(); redo(); });
+    row.appendChild(again);
+    const last = replies[replies.length - 1];
+    if (typeof last.after === "function") last.after(row); else els.log.appendChild(row);
+    turnTools.row = row;
+    turnTools.redo = again;
+  }
+  updateTurnTools();
+}
+
+function updateTurnTools() {
+  const off = busy || confirming;
+  if (turnTools.redo) turnTools.redo.disabled = off;
+  if (turnTools.edit) turnTools.edit.disabled = off;
+}
+
+function startEdit() {
+  if (busy || confirming || !shown) return;
+  editing = true;
+  els.editBar.hidden = false;
+  els.text.value = shown.text || "";
+  els.text.focus();
+}
+
+function cancelEdit() {
+  if (!editing) return;
+  editing = false;
+  els.editBar.hidden = true;
+  els.text.value = "";
+}
+els.editCancel.addEventListener("click", () => { cancelEdit(); els.text.focus(); });
+els.text.addEventListener("keydown", (e) => { if (e.key === "Escape" && editing) cancelEdit(); });
+
+// Answer the pane's last turn again (`text` undefined: try again; else the
+// edited words). The server refuses while busy or asked, and a turn that
+// may have changed something; its "redo" event hides the old reply (and
+// shows the new words), which comes back if the request then fails.
+async function redo(text) {
+  if (busy || confirming || !shown || shown.epoch !== pane.epoch) return;
+  const turn = shown;
+  const epoch = pane.epoch;
+  const cid = pane.cid;
+  const edit = text !== undefined;
+  const payload = edit ? { text } : {};
+  if (cid) payload.conversation_id = cid;
+  clearTurnTools();
+  redoing = { turn, edit, text, oldText: turn.me ? turn.me.textContent : "", hidden: [] };
+  setBusy(true);
+  setStatus("Thinking…");
+  if (router) router.beginTurn();
+  try {
+    const res = await request(edit ? "/api/edit" : "/api/regenerate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload) });
+    await readEvents(res, epoch, cid);
+  } catch (e) {
+    addMessage("note", e.message || String(e));
+    setStatus("");
+    if (cid && e.status === 404) forgetConversation(cid);  // deleted elsewhere
+  } finally {
+    if (router) router.endTurn();
+    if (redoing) for (const el of redoing.hidden) el.remove();  // replaced
+    redoing = null;
+    setBusy(false);
+    sendQueued();
+  }
+}
+
+// "redo": the server rewound the turn. "restored": it failed, so the old
+// reply is still the conversation's.
+function redoStarted() {
+  if (!redoing) return;
+  const { turn } = redoing;
+  for (const el of turn.after) { el.hidden = true; redoing.hidden.push(el); }
+  if (redoing.edit && turn.me) turn.me.textContent = redoing.text;
+  shown = { me: turn.me, text: redoing.edit ? redoing.text : turn.text, after: [],
+            epoch: turn.epoch };
+}
+
+function redoRestored() {
+  if (!redoing || !redoing.hidden.length) return;
+  for (const el of redoing.hidden) el.hidden = false;
+  if (redoing.edit && redoing.turn.me) redoing.turn.me.textContent = redoing.oldText;
+  const failed = shown ? shown.after : [];
+  shown = redoing.turn;
+  shown.after.push(...failed);  // the error note stays with that turn
+  redoing.hidden = [];
 }
 
 function setStatus(text) { els.status.textContent = text || ""; }
@@ -74,6 +212,7 @@ function setBusy(value) {
   if (hide && !els.stop.hidden && document.activeElement === els.stop) els.text.focus();
   els.stop.hidden = hide;
   els.stop.disabled = stopping;
+  updateTurnTools();
 }
 
 // --- queued messages ---
@@ -121,6 +260,18 @@ function bindPane(cid) {
   pane.cid = cid || null;
   pane.epoch += 1;
   live = null;
+  shown = null;
+  clearTurnTools();
+  cancelEdit();
+}
+
+// history.js drew a stored conversation into the (just bound) pane: its
+// last turn is Kyle's bubble `me` and the bubbles `after` it, and `redo`
+// (the server's word) says whether to offer try again and edit on it.
+function adoptTurn(me, text, after, redo) {
+  if (!me) return;
+  shown = { me, text, after: [...after], epoch: pane.epoch };
+  if (redo === true) showTurnTools();
 }
 
 // The conversation ended on the server ("goodbye"): the pane stays as it
@@ -386,13 +537,16 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
   }
   if (ev.type !== "delta" && ev.type !== "reply") live = null;
   switch (ev.type) {
+    case "redo":
+      if (here) redoStarted();
+      break;
     case "delta":
       if (!live) live = addMessage("claude", "");
       live.textContent += ev.text;
       els.log.scrollTop = els.log.scrollHeight;
       break;
     case "transcript":
-      addMessage("me", ev.text || "(nothing heard)");
+      beginTurn(addMessage("me", ev.text || "(nothing heard)"), ev.text || "");
       setStatus("Thinking…");
       break;
     case "tool":
@@ -425,6 +579,7 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       if (ev.ended && cid) conversationEnded(cid);
       break;
     case "error":
+      if (ev.restored && here) redoRestored();
       addMessage("note", ev.message);
       if (ev.gone && cid) forgetConversation(cid);  // deleted elsewhere
       break;
@@ -435,6 +590,7 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       if (cid && ev.conversation === null) conversationEnded(cid);  // shown or not
       setConfirm(null);
       setStatus("");
+      if (here && ev.redo === true) showTurnTools();  // try again, edit
       break;
   }
 }
@@ -460,7 +616,10 @@ async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
     if (into) payload.conversation_id = into;
     options = { method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload) };
-    if (epoch === pane.epoch) addMessage("me", body.text);
+    if (epoch === pane.epoch) {
+      const me = addMessage("me", body.text);
+      if (!answering) beginTurn(me, body.text);  // an answer is part of its turn
+    }
   }
   // Answered: text typed from now on is a new message (queued), not
   // another answer. A failed answer brings the question back.
@@ -593,6 +752,14 @@ $("logout-all").addEventListener("click", () => {
 els.textForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = els.text.value.trim();
+  if (editing) {  // the edited words replace Kyle's last message
+    if (busy || confirming) { addMessage("note", "Wait for the reply to finish first."); return; }
+    if (!text) return;
+    unlockAudio();
+    cancelEdit();
+    redo(text);
+    return;
+  }
   // Still answering, or asked a yes/no question in another pane: queued.
   if ((busy || confirming) && !answersHere()) {
     // Still answering: the message waits its turn. Picked files stay in
@@ -620,7 +787,9 @@ async function sendMessage(text, cid = pane.cid, epoch = pane.epoch) {
   const form = new FormData();
   if (text) form.append("text", text);
   tray().appendTo(form);
-  if (epoch === pane.epoch) addMessage("me", [text, tray().summary()].filter(Boolean).join("\n"));
+  if (epoch === pane.epoch) {
+    beginTurn(addMessage("me", [text, tray().summary()].filter(Boolean).join("\n")), text);
+  }
   send(form, () => tray().clear(), cid, epoch);
 }
 
@@ -795,6 +964,7 @@ els.mic.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   if (els.mic.disabled) return;
   unlockAudio();
+  cancelEdit();  // a spoken message is a new one
   if (recorder) { stopRecording(); return; }  // second tap of tap-to-toggle
   if (starting) { releaseStops = true; return; }
   pressedAt = Date.now();
@@ -825,7 +995,9 @@ document.addEventListener("visibilitychange", async () => {
 window.KwilApp = {
   bindPane,
   forgetConversation,
+  adoptTurn,
   pane: () => ({ cid: pane.cid, epoch: pane.epoch }),
+  idle: () => !busy && !confirming,  // e.g. "Branch from here" waits for it
   request,
 };
 

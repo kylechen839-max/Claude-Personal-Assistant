@@ -17,6 +17,10 @@ answers with POST /api/confirm (buttons, or a spoken/typed "yes"), and that
 response carries the rest of the turn. POST /api/stop (the page's Stop
 button) ends the running turn early, as a barge-in does; the turn's own
 stream still ends with its reply ("stopped": true) and "done".
+Between turns, POST /api/regenerate ("try again") answers the last turn
+once more and POST /api/edit {"text"} sends Kyle's last message again with
+new words; the old reply (and message) is superseded in history. Neither
+redoes a turn whose tools may have changed something (start_redo).
 
 Privacy: binds to 127.0.0.1; every API call needs the session cookie, which
 is only given for the WEB_TOKEN from .env (generated on first run, never
@@ -1166,21 +1170,89 @@ class WebAssistant:
     @staticmethod
     def _done(s: Session) -> dict:
         """A turn's last event: which conversation it is now in (None: none
-        yet, or it ended), so the page knows what it is showing, and
-        "study" while study mode is on."""
+        yet, or it ended), so the page knows what it is showing, "study"
+        while study mode is on, and "redo": may its reply be tried again or
+        Kyle's message edited (start_redo)?"""
         done = {"type": "done", "conversation": s.chat.conversation_id}
         study = study_public(getattr(s.chat, "study", None))
         if study is not None:  # study mode's pill (study.py); none = off
             done["study"] = study
+        check = getattr(s.chat, "redo_refusal", None)
+        try:
+            done["redo"] = callable(check) and check() is None
+        except Exception:  # the page just shows no button
+            log.exception("Web: checking whether a turn can be redone failed")
+            done["redo"] = False
         return done
 
+    def start_redo(self, s: Session, text: str | None = None,
+                   resume: str | None = None) -> tuple[str, int] | None:
+        """Answer the page's last turn again in the background ("try
+        again"), or with `text` in place of Kyle's last message ("edit"):
+        ClaudeChat.regenerate. Only between turns: never while a turn runs
+        or a question waits for its yes/no (a tool_use without its result
+        breaks the conversation), and never a turn whose tools may have
+        changed something. `resume`: the stored conversation the page's
+        pane is bound to (its owner checked by the route). None when it
+        started (its events follow as a turn's do); else (sentence, HTTP
+        status) of why not."""
+        if not s.busy.acquire(blocking=False):
+            return i18n.t("redo_confirming" if s.pending is not None else "redo_busy",
+                          s.language), 409
+        started = False
+        try:
+            if s.pending is not None:  # (asked in a turn that held the lock)
+                return i18n.t("redo_confirming", s.language), 409
+            refused = self._redo_refusal(s, resume)
+            if refused is not None:
+                log.info("Web: not answering again (%s)", refused.reason)
+                return i18n.t(refused.reason, s.language), 409
+            while not s.events.empty():  # leftovers of an abandoned turn
+                s.events.get_nowait()
+            started = True
+            limit = self.limit_message(s)
+            if limit:  # over their limit: nothing sent, history as it was
+                s.events.put({"type": "error", "message": limit})
+                s.events.put(self._done(s))
+                s.busy.release()
+                return None
+            s.last_active = self.clock()
+            s.cancel = threading.Event()
+            s.thread = threading.Thread(target=self._run_turn,
+                                        args=(s, text, None, None, resume, True),
+                                        name=f"web-redo-{s.sid[:6]}", daemon=True)
+            s.thread.start()
+            return None
+        finally:
+            if not started:
+                s.busy.release()
+
+    def _redo_refusal(self, s: Session, resume: str | None):
+        """chat.redo_refusal, or for a bound conversation this chat isn't
+        in yet, the same check on its saved last turn (before resuming it,
+        which may first end the current one)."""
+        from kwil.chat import RedoRefused
+        from kwil.tools import changing_tools
+
+        if resume is None or resume == s.chat.conversation_id:
+            return s.chat.redo_refusal()
+        store = self.history_of(s)[0]
+        try:
+            turn = store.last_turn(resume)
+        except KeyError:
+            return RedoRefused("conversation_gone")
+        if not turn:
+            return RedoRefused("redo_nothing")
+        changed = changing_tools(n for r in turn for n in r["tools"])
+        return RedoRefused("redo_changed", changed) if changed else None
+
     def _run_turn(self, s: Session, text, recording, attachments=None,
-                  resume: str | None = None) -> None:
+                  resume: str | None = None, redo: bool = False) -> None:
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
         with i18n.using(s.language):  # its sentences and tool questions
-            self._turn_body(s, text, recording, attachments, resume)
+            self._turn_body(s, text, recording, attachments, resume, redo)
 
     @staticmethod
     def _resume(s: Session, cid: str) -> bool:
@@ -1202,12 +1274,20 @@ class WebAssistant:
         return True
 
     def _turn_body(self, s: Session, text, recording, attachments=None,
-                   resume: str | None = None) -> None:
+                   resume: str | None = None, redo: bool = False) -> None:
         from kwil.cli import get_reply, is_exit, loggable_reply
 
         cancel = s.cancel
+        on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
         try:
             if resume is not None and not self._resume(s, resume):
+                return
+            if redo:
+                reply = self._redo(s, text, on_text, cancel)
+                if reply is not None:
+                    log.info("Web replied %d chars", len(reply))
+                    log.debug("Web replied: %r", loggable_reply(s.chat, reply))
+                    self._reply(s, reply, stopped=cancel is not None and cancel.is_set())
                 return
             if recording is not None:
                 text = self.transcribe(recording, s.language, user=s.user)
@@ -1222,7 +1302,6 @@ class WebAssistant:
                 s.chat.end_conversation()
                 self._reply(s, i18n.t("goodbye"), ended=True)
                 return
-            on_text = lambda d: s.events.put({"type": "delta", "text": d})  # noqa: E731
             if attachments:
                 reply = self._ask_with_files(s, text, attachments, on_text, cancel)
             else:
@@ -1241,6 +1320,33 @@ class WebAssistant:
             s.last_active = self.clock()
             s.events.put(self._done(s))  # before release: see start_turn
             s.busy.release()
+
+    @staticmethod
+    def _redo(s: Session, text: str | None, on_text, cancel) -> str | None:
+        """chat.regenerate for start_redo: the reply, or None after an
+        "error" event (refused, or the request failed: the old reply is
+        still the conversation's, "restored": the page shows it again).
+        "redo" is sent once the old turn is rewound."""
+        from kwil.chat import RedoRefused
+        from kwil.cli import friendly_error, uses_own_key
+
+        started = []
+
+        def on_start():
+            started.append(True)
+            s.events.put({"type": "redo", "edit": text is not None})
+        try:
+            return s.chat.regenerate(text=text, on_text=on_text, cancel=cancel,
+                                     on_start=on_start)
+        except RedoRefused as e:
+            log.info("Web: not answering again (%s)", e.reason)
+            s.events.put({"type": "error", "message": i18n.t(e.reason)})
+        except Exception as e:  # noqa: BLE001 - as get_reply
+            sentence = friendly_error(e, text or "", lambda m: None,
+                                      own_key=uses_own_key(s.chat))
+            s.events.put({"type": "error", "message": sentence,
+                          "restored": bool(started)})
+        return None
 
     @staticmethod
     def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text,
@@ -2239,6 +2345,38 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 resume=cid):
             return error("still working on the last request", 409)
         return stream(s)
+
+    async def redo(request: Request, edit: bool):
+        """Try again / edit (WebAssistant.start_redo): {"conversation_id"?}
+        and, for an edit, {"text"}. The response streams as /api/turn's."""
+        s = session_of(request)
+        if s is None:
+            return unauthorized()
+        fields, _data, err = await read_upload(request)
+        if err:
+            return err
+        cid, err = await bound_conversation(s, fields)
+        if err:
+            return err
+        text = None
+        if edit:
+            text = fields.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return error("send the new text", 400)
+        why = await run_in_threadpool(assistant.start_redo, s, text, cid)
+        if why is not None:
+            return error(*why)
+        return stream(s)
+
+    @app.post("/api/regenerate")
+    async def regenerate(request: Request):
+        """"Try again": the last reply, answered once more."""
+        return await redo(request, edit=False)
+
+    @app.post("/api/edit")
+    async def edit_last(request: Request):
+        """Kyle's last message, edited and sent again ({"text"})."""
+        return await redo(request, edit=True)
 
     async def bound_conversation(s: Session, fields: dict):
         """(conversation id or None, error response): the stored

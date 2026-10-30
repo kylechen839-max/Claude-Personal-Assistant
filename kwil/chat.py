@@ -642,7 +642,7 @@ class ClaudeChat:
         return self.stable_system() + "\n\n" + self.turn_context(notes, nudge)
 
     def ask(self, user_text: str, on_text=None, cancel=None,
-            attachments: list[dict] | None = None) -> str:
+            attachments: list[dict] | None = None, record_user: bool = True) -> str:
         """Send one user turn, run any tool calls, and return the text reply.
 
         With `on_text`, replies are streamed and each text delta is passed to
@@ -650,7 +650,8 @@ class ClaudeChat:
         (barge-in): the words already received are kept in history and
         returned. `attachments`: image/document content blocks (the phone's
         "+", attachments.py) sent before the text; saved history gets only
-        a marker such as "[photo]" (attachment_marker)."""
+        a marker such as "[photo]" (attachment_marker). `record_user`
+        False: Kyle's message is already in saved history (regenerate)."""
         token = _CURRENT_CHAT.set(self)
         # "Now" is read once per turn: the prompt's date and the tools'
         # "today"/"tomorrow" must agree even if midnight passes mid-turn.
@@ -672,7 +673,7 @@ class ClaudeChat:
             # saved history gets a marker for attachments, never their bytes
             recorded = "\n".join(t for t in (user_text, attachment_marker(
                 attachments)) if t) if attachments else user_text
-            if self.recorder:  # saved before the reply: crash-safe
+            if self.recorder and record_user:  # saved before the reply: crash-safe
                 saved = self.recorder.user(recorded)
             if attachments:
                 self.untrusted_attachments = True  # before any tool can run
@@ -743,6 +744,87 @@ class ClaudeChat:
         if model == self.model and self.fast_model and self.router != "off":
             self.escalated = True
         return model
+
+    # ---------- try again and edit (the phone's chat) ----------
+    def _last_turn_start(self) -> int | None:
+        return max((i for i, m in enumerate(self._history) if is_user_turn(m)),
+                   default=None)
+
+    def redo_refusal(self) -> "RedoRefused | None":
+        """Why the last turn can't be answered again (regenerate), or None.
+        Never one that used a tool that may have changed something (a
+        calendar event, a note, a light), in this chat or in its saved
+        history (a resumed conversation's tool calls are text now): a new
+        answer could run it again. Read-only tools are fine (tools.
+        REDO_SAFE_TOOLS). The caller makes sure no turn is running and no
+        question is open."""
+        from kwil.tools import changing_tools
+
+        start = self._last_turn_start()
+        if start is None:
+            return RedoRefused("redo_nothing")
+        stored = self.recorder.last_turn() if self.recorder else []
+        if stored is None:  # the store couldn't say what ran: don't guess
+            return RedoRefused("error")
+        names = [b.get("name") for m in self._history[start + 1:]
+                 if m["role"] == "assistant" and isinstance(m["content"], list)
+                 for b in m["content"] if isinstance(b, dict)
+                 and b.get("type") in ("tool_use", "server_tool_use")]
+        names += [n for r in stored for n in r["tools"]]
+        changed = changing_tools(names)
+        return RedoRefused("redo_changed", changed) if changed else None
+
+    def regenerate(self, text: str | None = None, on_text=None, cancel=None,
+                   on_start=None) -> str:
+        """Answer the last turn again ("try again"), or with `text` instead
+        of what Kyle said ("edit"): the old reply (and for an edit his old
+        message) is rewound and, once the new reply is in, superseded in
+        saved history (HistoryStore.supersede: gone everywhere). Its tools
+        are not run again behind his back: a turn that used one that may
+        have changed something raises RedoRefused (redo_refusal), as does
+        no turn at all. Taint stays (_keep_taint; only reset() clears it),
+        and the old reply's thinking goes with it. `on_start` is called once
+        the turn is rewound, before the request. If the request fails, the
+        old turn is put back as it was and the error raised."""
+        refused = self.redo_refusal()
+        if refused is not None:
+            raise refused
+        if text is not None and not text.strip():
+            raise RedoRefused("not_caught")
+        start = self._last_turn_start()
+        content = self._history[start]["content"]
+        blocks = content if isinstance(content, list) else []
+        attachments = [b for b in blocks if _is_attachment(b)]
+        said = content if isinstance(content, str) else "\n".join(
+            b.get("text", "") for b in blocks
+            if isinstance(b, dict) and b.get("type") == "text")
+        # the saved turn: Kyle's message first (kept by "try again"); notes
+        # a feature added meanwhile aren't part of the reply
+        stored = (self.recorder.last_turn() if self.recorder else None) or []
+        old_ids = [r["event_id"] for n, r in enumerate(stored)
+                   if r["kind"] != "note" and (n or text is not None)]
+        cid = self.conversation_id
+        removed = self._history[start:]
+        self._keep_taint(removed)
+        del self._history[start:]  # trimmed in place: earlier thinking stays
+        self._turn_events = []
+        log.info("Answering the last turn again (%s; %d message(s) rewound)",
+                 "edited" if text is not None else "try again", len(removed))
+        if text is not None:
+            log.debug("Edited message: %r", text)
+        if on_start is not None:
+            on_start()
+        try:
+            reply = self.ask(said if text is None else text, on_text=on_text,
+                             cancel=cancel, attachments=attachments or None,
+                             record_user=text is not None)
+        except Exception:
+            self._history.extend(removed)  # ask() took its own turn out
+            self._turn_start = removed[0]
+            raise
+        if self.recorder:
+            self.recorder.supersede(cid, old_ids)
+        return reply
 
     # ---------- conversation history ----------
     def request_resume(self, conversation_id: str) -> dict:
@@ -1491,6 +1573,17 @@ class _Cancelled(Exception):
     def __init__(self, partial: str):
         super().__init__("cancelled")
         self.partial = partial
+
+
+class RedoRefused(Exception):
+    """ClaudeChat.regenerate won't answer the last turn again. `reason` is
+    an i18n key (redo_nothing, redo_changed, not_caught, error); `tools`
+    names the tools that may have changed something."""
+
+    def __init__(self, reason: str, tools=()):
+        super().__init__(reason)
+        self.reason = reason
+        self.tools = list(tools)
 
 
 class StreamEndedEarly(Exception):

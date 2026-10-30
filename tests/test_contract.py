@@ -375,6 +375,58 @@ def test_typing_into_a_stored_conversation_with_a_tool_round(api, tmp_path):
         store.close()
 
 
+def test_try_again_and_edit_in_a_multi_turn_exchange(web_api, tmp_path):
+    """The phone's "try again" and "edit" (ClaudeChat.regenerate) in a
+    multi-turn exchange with a tool round: the redone turn's old reply and
+    thinking are dropped, earlier turns' thinking is sent again only when
+    still valid (same chat and model), and every request, the turn after
+    included, is one the API accepts. Routed too: the redone turn may go to
+    another model than the old reply did."""
+    import json
+
+    from kwil.history import HistoryStore, Recorder
+
+    make, model, fast = web_api
+    calls = []
+    store = HistoryStore(tmp_path / "history.sqlite", eventlog=False)
+    routing = {"fast_model": fast, "router": "auto"} if fast else {}
+
+    def chat_factory(registry):
+        return ClaudeChat(client=make(), model=model, tools=registry, max_tokens=1024,
+                          recorder=Recorder(store, "web", run_async=False), **routing)
+
+    assistant = webapp.WebAssistant(chat_factory, None, None,
+                                    tools=calendar_tools(calls), history=store)
+    app = webapp.create_app(assistant, TOKEN, reap_interval=3600)
+
+    def stream(r):
+        assert r.status_code == 200, r.text
+        evs = [json.loads(line) for line in r.text.splitlines() if line]
+        assert not [e for e in evs if e["type"] == "error"], evs
+        [reply] = [e["text"] for e in evs if e["type"] == "reply"]
+        return reply, evs[-1]
+
+    try:
+        with TestClient(app, base_url=BASE) as http:
+            assert http.post("/api/login", json={"token": TOKEN}).status_code == 200
+            first, done = stream(http.post("/api/turn", json={"text": REMEMBER}))
+            assert first.strip() and any(c[0] == "list" for c in calls)
+            assert done["redo"] is True  # a read-only tool round
+            stream(http.post("/api/turn", json={"text": "Which one is first?"}))
+            again, done = stream(http.post("/api/regenerate", json={}))
+            assert again.strip() and done["redo"] is True
+            edited, done = stream(http.post("/api/edit", json={"text": RECALL}))
+            assert "4417" in edited
+            cid = done["conversation"]
+            after, _ = stream(http.post("/api/turn", json={"text": "Thanks. " + RECALL}))
+            assert "4417" in after
+        said = [m["text"] for m in store.get(cid)["messages"] if m["role"] == "user"]
+        assert said == [REMEMBER, RECALL, "Thanks. " + RECALL]
+        assert not [c for c in calls if c[0] == "create"]
+    finally:
+        store.close()
+
+
 def test_a_mid_turn_escalation_sends_the_main_model_none_of_the_fast_models_turn():
     """Judge B2: the fast model reads the calendar, then asks to delete. Its
     thinking is signed for it, and the API (like this fake) refuses it in
