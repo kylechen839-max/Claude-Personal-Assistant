@@ -2916,6 +2916,34 @@ network code of its own.
   returns is kept. The question leaves the server for Anthropic's web
   search (PRIVACY.md).
 
+## Today screen (`today.py`, `web/today.js`)
+
+- **Read-only.** `GET /api/today` calls the `list_calendar_events`
+  handler itself (primary calendar, today and tomorrow, `events().list`
+  only; a test fails on any other Calendar call) and `list_assignments`;
+  it never goes through `dispatch`, so the open conversation gets no tool
+  event and no taint, and no state-changing tool can run. It never calls
+  Claude.
+- **Per person.** Every section is the signed-in session's own: the
+  owner's, or an invited person's own calendar tool, deadline store,
+  reminder store, research jobs and study list. Signed out is a 401; a
+  family member removed while their session still stands gets a 404 (the
+  check runs after the session lookup), never anyone's data.
+- **Outside titles are never prefilled.** Rows someone else could have
+  worded (invites and every event in a result that has one, every
+  deadline and Notion assignment, reminders and study items marked
+  `untrusted`) carry `outside: true`; the page's "Ask Kwil" question then
+  names them by kind and time only. Text is put in with `textContent`.
+- **No caching, small logs.** The answer is `Cache-Control: no-store`
+  (and the service worker never caches `/api/`). INFO logs carry section
+  names, counts, states and exception type names, never a title or text
+  (caplog test). Each section is capped at 10 rows; the calendar and
+  Notion reads run in a 4-thread pool with an 8 s wait each.
+- **Not fixed, on purpose:** a calendar or Notion read that outlasts the
+  8 s wait keeps its pool thread until Google or Notion answers (Python
+  can't stop a thread); the screen shows that section as an error and the
+  pool's 4 threads bound how many can pile up.
+
 ## Memory review (`memory_review.py`, `memory_web.py`)
 
 - **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and

@@ -8374,3 +8374,67 @@ interaction only; nothing on the server changed.
   and a long press each still send once; no "header" left in the three
   scripts' comments). Each failed before its fix.
 - Full suite: 3994 passed, 53 skipped; JS 438 passed (was 434).
+
+## Today screen (redesign phase 5, 2026-10-30)
+- **What:** a read-only, per-person **Today** view. The header's new
+  calendar button (`#open-today`, before History) or `/#today` opens it;
+  `/api/state` says `"today": true` for everyone listed. Sections: the
+  brief (opens `#brief`), today's and tomorrow's events on the primary
+  calendar ("Ask Kwil"), what's due by tomorrow or overdue (deadline store,
+  at most 14 days back, classes left out; Notion `list_assignments`
+  days_ahead=1; opens Settings), today's reminders (opens `#reminders`),
+  the latest 3 research jobs (a finished one opens its conversation; a
+  running one has a breathing `.state` dot) and the 5 most missed study
+  concepts ("Ask Kwil"). At most 10 rows a section.
+- **Server:** `kwil/today.py`, `GET /api/today` (registered after
+  `proactive_mod.register`). One `chat._now(tz)` reading, set as
+  `timeutil.TURN_NOW` while the sections run; calendar and Notion run side
+  by side in a 4-thread pool (`contextvars.copy_context().run`, 8 s wait
+  each). The calendar handler is called directly (never `dispatch`), and
+  skipped with state `reconnect` while `google_auth.needs_reconnect`.
+  `outside` = the event's `from_others` or the result's untrusted mark;
+  every deadline and Notion row is outside; reminders and study rows by
+  their `untrusted` flag. Each section is `{state, items}`, and one
+  failure stays in its section. 401 signed out, 404 for a member removed
+  mid-request, `Cache-Control: no-store`. INFO logs one line of section
+  names, states and counts; warnings carry exception type names only.
+- **Client:** `kwil/web/today.js` (`KwilToday = {configure, onState,
+  setup, question, TEXT}`), everything by `textContent`. Reads only when
+  the view opens; offline shows a line and Retry. "Ask Kwil" calls
+  `newChat()` then app.js's `prefill` (text in `#text`, `syncComposer()`,
+  focus); it never sends. An outside item's question names it by kind and
+  time only. Chinese for every fixed string and question (`i18n.js`; the
+  question templates are translated before the time/title go in). CSS in
+  `app.css` (tokens only, light/dark, reduced motion); `sw.js`
+  `kwil-shell-v24` with `/today.js`; `webapp.py` static route and
+  `cloud.py` `PUBLIC_GET`.
+- **Tests:** `tests/test_today.py` (14): 401 signed out; the owner's full
+  screen and no-store; invites outside and own events not, every deadline
+  outside; Notion outside with days_ahead=1; a family member sees only her
+  own and a removed one gets 404; caplog (no titles or text at INFO);
+  a calendar error, a sign-in error, a timeout and `needs_reconnect` stay
+  in the calendar section (and `needs_reconnect` makes no Calendar call);
+  a broken deadline store stays in its section; one clock reading across
+  midnight (23:59:59 then 00:00:01: one `_now` call, Thursday's and
+  Friday's items under the right day); only `events().list` on `primary`
+  and no taint on the open chat; rows capped at 10; off sections say off.
+  `tests/js/today.test.mjs` (11): the button only with `today`, no read
+  until opened; textContent rendering of every section; Ask Kwil prefills
+  without sending and an outside row's question has no title; rows open
+  their places; `/#today` opens and Back returns; off/reconnect/empty
+  lines and actions; offline + Retry; Chinese page; zh for every TEXT
+  string; page/app.js/sw.js wiring. Fail-first: 9 source mutations of
+  `today.py` (outside forced off/on, a title in the INFO line, no
+  reconnect skip, no per-section try, a second clock read, every
+  calendar, no 404, no cap) each fail their test; 10 of `today.js`,
+  `i18n.js`, `index.html` and `sw.js` each fail theirs. The no-store
+  assertion also holds without the route's header (the app's middleware
+  sets it on every `/api/` answer), so it is a guard, not a regression
+  test.
+- **Screenshots** (Playwright Chromium with a mocked `/api/today`, not a
+  real iPhone): 390x844 and 1280x900, light and dark, English and Chinese,
+  top and scrolled to the end, plus empty (Google not connected) and
+  offline.
+- Full suite: 4008 passed, 53 skipped (baseline 3994 + 14); JS
+  `tests/js/*.test.mjs` + `voice-core.test.js` 449 passed (baseline 438 +
+  11).

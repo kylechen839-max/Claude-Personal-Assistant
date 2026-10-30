@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Today screen: a calendar button in the header (or /#today) opens a
+  read-only look at your day: your brief, today's and tomorrow's events,
+  what's due by tomorrow or overdue, today's reminders, your latest research
+  and study concepts to review. Each row opens its place; "Ask Kwil" starts a
+  new chat with a question ready to send (never sent by itself; an invite or
+  deadline is named by its time, never its title). Each person sees only
+  their own.
 - Phone app: the chat's composer is one row, like the Claude app: + (photos,
   files, Think harder, Study mode), a text field that grows to about 6 lines,
   the mic (Stop while Kwil answers), and Voice conversation, which turns into
