@@ -803,3 +803,104 @@ test("a short blip while the question plays doesn't cut it off; a quick yes afte
   assert.equal(log.utterances.length, 2, JSON.stringify(log.sent));
   assert.equal(log.sent.filter((m) => m.type === "interrupt").length, 0);
 });
+
+// --- the Camera button ---
+
+test("frameSize keeps the aspect ratio and never upscales", () => {
+  assert.deepEqual(VC.frameSize(1280, 720, 1024), { width: 1024, height: 576 });
+  assert.deepEqual(VC.frameSize(720, 1280, 1024), { width: 576, height: 1024 });
+  assert.deepEqual(VC.frameSize(4032, 3024, 1024), { width: 1024, height: 768 });
+  assert.deepEqual(VC.frameSize(640, 480, 1024), { width: 640, height: 480 });  // small: as it is
+  assert.deepEqual(VC.frameSize(1024, 1024, 1024), { width: 1024, height: 1024 });
+  assert.deepEqual(VC.frameSize(0, 480, 1024), { width: 0, height: 0 });       // no video yet
+  assert.deepEqual(VC.frameSize(5000, 3, 1024), { width: 1024, height: 1 });   // never 0
+});
+
+// A canvas whose JPEG at quality q is `sizes(q)` bytes (toBlob, as browsers).
+function fakeCanvas(sizes, type = "image/jpeg") {
+  const asked = [];
+  return {
+    asked,
+    toBlob(cb, mime, q) {
+      asked.push([mime, q]);
+      const bytes = new Uint8Array(sizes(q));
+      bytes[0] = 0xff; bytes[1] = 0xd8;
+      setTimeout(() => cb(new Blob([bytes], { type })), 0);
+    },
+  };
+}
+
+test("encodeFrame steps the quality down until it fits", async () => {
+  const canvas = fakeCanvas((q) => Math.round(q * 1000));
+  const out = await VC.encodeFrame(canvas, { maxBytes: 650, qualities: [0.8, 0.7, 0.6, 0.5] });
+  assert.ok(out instanceof Uint8Array);
+  assert.equal(out.length, 600);
+  assert.deepEqual(canvas.asked, [["image/jpeg", 0.8], ["image/jpeg", 0.7], ["image/jpeg", 0.6]]);
+  const first = fakeCanvas(() => 100);
+  assert.equal((await VC.encodeFrame(first, { maxBytes: 400 * 1024 })).length, 100);
+  assert.deepEqual(first.asked, [["image/jpeg", 0.8]]);  // the default qualities start at 0.8
+});
+
+test("encodeFrame rejects a frame still too big at the lowest quality, or not a JPEG", async () => {
+  const canvas = fakeCanvas(() => 5000);
+  await assert.rejects(VC.encodeFrame(canvas, { maxBytes: 4000 }), /too large/);
+  assert.equal(canvas.asked.length, 4);
+  await assert.rejects(VC.encodeFrame(fakeCanvas(() => 10, "image/png"), { maxBytes: 4000 }),
+    /too large/);
+});
+
+test("packUtterance: PCM then JPEG, with the JPEG's length in the header", () => {
+  const pcm = new Uint8Array([1, 2, 3, 4, 5, 6]);
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 9, 8]);
+  const buf = VC.packUtterance({ type: "utterance", turn: 2, sample_rate: 16000 }, pcm, jpeg);
+  const { header, payload } = VC.unpackFrame(buf);
+  assert.equal(header.image, 5);
+  assert.equal(header.turn, 2);
+  const body = new Uint8Array(payload);
+  // voice_ws.split_image: the last `image` bytes are the frame, the rest the words
+  assert.deepEqual([...body.slice(0, body.length - header.image)], [...pcm]);
+  assert.deepEqual([...body.slice(body.length - header.image)], [...jpeg]);
+  // no frame: the plain utterance, no "image" key
+  const plain = VC.unpackFrame(VC.packUtterance({ type: "utterance", turn: 3 }, pcm, null));
+  assert.equal("image" in plain.header, false);
+  assert.deepEqual([...new Uint8Array(plain.payload)], [...pcm]);
+});
+
+test("CameraPolicy: off sends nothing, a pinned frame goes once, never with an answer", () => {
+  const p = new VC.CameraPolicy();
+  assert.equal(p.take(false), null);                  // off
+  p.pin(new Uint8Array([1]));
+  assert.equal(p.pinned, null);                       // can't pin with the camera off
+  p.setOn(true);
+  assert.deepEqual(p.take(false), { kind: "live" });
+  const frame = new Uint8Array([7]);
+  p.pin(frame);
+  assert.equal(p.take(true), null);                   // an answer to a yes/no question
+  assert.equal(p.take(false).frame, frame);           // the next real turn gets it...
+  assert.deepEqual(p.take(false), { kind: "live" });  // ...once
+  p.pin(frame);
+  p.unpin();
+  assert.deepEqual(p.take(false), { kind: "live" });
+  p.pin(frame);
+  p.setOn(false);                                     // turning it off drops the pinned frame
+  p.setOn(true);
+  assert.deepEqual(p.take(false), { kind: "live" });
+});
+
+test("an answer to a question is sent while awaitingAnswer (so it carries no frame)", () => {
+  const p = new VC.CameraPolicy();
+  p.setOn(true);
+  const picks = [];
+  const fx = {
+    sendUtterance: () => picks.push(p.take(c.awaitingAnswer)),
+    stopPlayback: () => ({ index: 0, fraction: 0 }),
+  };
+  const c = new VC.TurnController(fx);
+  c.start();
+  c.onVad(speechEnd());                                  // turn 1: a frame goes with it
+  c.onServer({ type: "confirm", turn: 1, question: "Delete it?" });
+  c.onServer({ type: "audio", turn: 1, index: 0, question: true });
+  c.onPlaybackIdle();
+  c.onVad(speechEnd());                                  // "yes"
+  assert.deepEqual(picks, [{ kind: "live" }, null]);
+});

@@ -80,9 +80,10 @@ body.voice-open { overflow: hidden; }
 #voice-mute[aria-pressed="true"] { background: var(--v-text); color: var(--v-bg); box-shadow: none; }
 .voice-controls .voice-end { background: var(--v-end); color: #fff; min-width: 6.5rem; }
 /* CC and the timings stopwatch are round icon buttons, so all four fit one row on a phone */
-#voice-cc, #voice-timings { width: 56px; padding: 0; display: inline-grid; place-items: center; }
-#voice-timings svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
+#voice-cc, #voice-timings, #voice-camera { width: 56px; padding: 0; display: inline-grid; place-items: center; }
+#voice-timings svg, #voice-camera svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
+#voice-camera[hidden], #voice-frame[hidden], .voice-camera-on[hidden], .voice-camera-preview[hidden] { display: none; }
 .voice-controls .voice-end:active { background: color-mix(in srgb, var(--v-end) 85%, #000); }
 .voice-controls button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v-bg), 0 0 0 6px color-mix(in srgb, var(--v-orb-b) 70%, transparent); }
 .voice-resume { margin-bottom: 1rem; min-height: 50px; background: var(--v-orb-b); color: #fff; border-radius: 999px;
@@ -97,3 +98,26 @@ body.voice-open { overflow: hidden; }
 .voice.follow-up .voice-meter { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .voice[data-state="connecting"] .voice-meter, .voice[data-state="ended"] .voice-meter,
 .voice.muted .voice-meter { opacity: .35; }
+
+/* The Camera button: the back camera's live picture fills the orb's space
+   (the orb shrinks to a corner and still shows listening/speaking), a red
+   "Camera on" pill says it is live, "Send this frame" freezes the picture
+   for the next turn. */
+.voice-camera-on { margin: .5rem 0 0; padding: .25rem .75rem; border-radius: 999px; font-size: .8125rem;
+  font-weight: 600; background: color-mix(in srgb, var(--v-end) 14%, var(--v-panel)); color: var(--v-text);
+  display: inline-flex; align-items: center; gap: .4rem; }
+.voice-camera-on::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--v-end); }
+.voice.camera-on .voice-orb-wrap { position: relative; padding: .75rem 0; }
+.voice-camera-preview { width: 100%; max-width: 32rem; max-height: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  border-radius: 20px; background: #000; }
+.voice.camera-on .voice-orb { position: absolute; right: max(.5rem, calc(50% - 15.5rem)); bottom: 1.5rem;
+  width: 4.5rem; }
+.voice.frame-pinned .voice-camera-preview { box-shadow: 0 0 0 3px var(--v-orb-b); }
+.voice-frame { margin-bottom: .75rem; min-height: 50px; padding: 0 1.4em; border-radius: 999px; font-weight: 600;
+  background: var(--v-panel); color: var(--v-text); }
+.voice-frame[aria-pressed="true"] { background: var(--v-orb-b); color: #fff; }
+.voice-frame:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v-bg), 0 0 0 6px color-mix(in srgb, var(--v-orb-b) 70%, transparent); }
+#voice-camera[aria-pressed="true"] { background: color-mix(in srgb, var(--v-end) 22%, var(--v-panel)); }
+@media (prefers-reduced-motion: reduce) {
+  .voice.camera-on .voice-orb { transition: none; }
+}

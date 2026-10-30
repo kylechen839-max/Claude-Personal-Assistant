@@ -634,3 +634,164 @@ def test_wake_and_voice_loop_log_no_words_at_info(caplog):
     info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
     assert any(m.startswith("Heard ") for m in info) and any("Replied" in m for m in info)
     assert not [m for m in info if "4512" in m]
+
+
+# --- the Camera button: a frame with the words ----------------------------------
+
+def frame_jpeg(color=(10, 20, 30), size=(1600, 1200)):
+    from tests.test_tutor import photo
+    return photo("JPEG", size=size, color=color)
+
+
+def sent_images(client):
+    """Each request's image blocks, in order."""
+    return [[b for m in call["messages"] if isinstance(m["content"], list)
+             for b in m["content"] if isinstance(b, dict) and b.get("type") == "image"]
+            for call in client.stream_calls]
+
+
+def test_a_frame_goes_with_its_turn_and_is_let_go():
+    client = stream_client(streamed("A blue square."))
+    conv, chat, events = make_conv(client, "what is this")
+    conv.utterance(1, SPEECH, image=frame_jpeg())
+    events.wait_for("turn_done", turn=1)
+    [[block]] = sent_images(client)
+    assert block["source"]["media_type"] == "image/jpeg"
+    assert conv.current.image is None and conv.current.samples is None
+    assert chat.untrusted_attachments is True
+    assert chat.history[0]["content"][-1] == {"type": "text", "text": "what is this"}
+
+
+def test_a_superseded_turn_drops_its_frame():
+    """Turn 2 (with a frame) is replaced by turn 3 before it ran: its frame
+    is let go unseen; turn 3's own frame goes."""
+    release, started = threading.Event(), threading.Event()
+    reg = ToolRegistry()
+    reg.register(Tool(name="slow", description="Slow.",
+                      input_schema={"type": "object", "properties": {}},
+                      handler=lambda: started.set() or (release.wait(5) and "ok")))
+    client = stream_client(
+        streamed(extra=[tool_use_block("slow", {})], stop_reason="tool_use"),
+        streamed("Third answer."))
+    conv, chat, events = make_conv(client, "first", "third", tools=reg)
+    conv.utterance(1, SPEECH)
+    assert started.wait(5)
+    conv.utterance(2, SPEECH, image=frame_jpeg(color=(200, 0, 0)))
+    second = conv.waiting
+    assert second.image is not None
+    conv.utterance(3, SPEECH, image=frame_jpeg(color=(0, 0, 200)))
+    assert second.image is None and second.samples is None  # let go at once
+    release.set()
+    events.wait_for("turn_done", turn=3)
+    calls = sent_images(client)
+    assert [len(c) for c in calls] == [0, 1]  # turn 1 (cancelled), turn 3 with its frame
+    from PIL import Image
+    import base64
+    import io
+    pixel = Image.open(io.BytesIO(base64.b64decode(
+        calls[-1][0]["source"]["data"]))).convert("RGB").getpixel((5, 5))
+    assert pixel[2] > 150 and pixel[0] < 60  # the blue one
+
+
+def test_a_cancelled_waiting_turn_never_sends_its_frame():
+    """A turn cancelled before it ran (stop set) skips Whisper and its frame."""
+    from kwil.voice_session import VoiceTurn
+    client = stream_client()
+    conv, chat, events = make_conv(client)
+    turn = VoiceTurn(1, 0.0, SPEECH, frame_jpeg())
+    turn.stop.set()
+    assert conv._turn_body(turn, MagicMock()) is False
+    assert turn.image is None and client.stream_calls == []
+
+
+def test_an_answer_with_a_frame_is_still_an_answer():
+    conv, chat, events, client, deleted, asked = ask_to_delete("yes")
+    conv.chunk_played(1, asked["index"])
+    conv.utterance(2, SPEECH, image=frame_jpeg())
+    ans = events.wait_for("confirm_answer")
+    assert ans["yes"] is True and ans["turn"] == 1
+    events.wait_for("turn_done", turn=1)
+    assert deleted == ["Dentist"]
+    assert all(c == [] for c in sent_images(client))  # the frame went nowhere
+
+
+def test_a_refused_turn_drops_its_frame():
+    """Over an invited person's limits (quotas.py): nothing is sent."""
+    client = stream_client()
+    conv, chat, events = make_conv(client, "what is this",
+                                   limit=lambda audio, count: "You've used today's turns.")
+    conv.utterance(1, SPEECH, image=frame_jpeg())
+    events.wait_for("turn_done", turn=1)
+    assert client.stream_calls == [] and conv.current.image is None
+
+
+@pytest.mark.parametrize("data", [b"\x89PNG\r\n\x1a\n" + b"\0" * 64,
+                                  b"\xff\xd8\xff" + b"not really a jpeg"],
+                         ids=["png", "broken-jpeg"])
+def test_a_frame_that_is_not_a_good_jpeg_is_left_out(data, caplog):
+    client = stream_client(streamed("I can't see anything."))
+    conv, chat, events = make_conv(client, "what is this")
+    caplog.set_level(logging.INFO, logger="kwil")
+    conv.utterance(1, SPEECH, image=data)
+    events.wait_for("turn_done", turn=1)
+    assert sent_images(client) == [[]]
+    assert chat.untrusted_attachments is False
+    assert "sent without it" in caplog.text
+
+
+def test_frames_are_shrunk_to_the_configured_side():
+    import base64
+    import io
+
+    from PIL import Image
+
+    client = stream_client(streamed("Okay."))
+    conv, chat, events = make_conv(client, "look", camera_max_side=512)
+    conv.utterance(1, SPEECH, image=frame_jpeg(size=(1600, 1200)))
+    events.wait_for("turn_done", turn=1)
+    img = Image.open(io.BytesIO(base64.b64decode(sent_images(client)[0][0]["source"]["data"])))
+    assert img.size == (384, 512)  # upright (EXIF orientation 6), long side 512
+
+
+def test_chat_keeps_only_the_newest_camera_frames():
+    """ClaudeChat.ask(camera_keep=N): older frames become a note; "+"
+    photos never count; a failed turn puts the dropped frames back."""
+    def img(tag):
+        return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                            "data": tag}}
+
+    client = stream_client(streamed("1."), streamed("2."), streamed("3."), streamed("4."),
+                           streamed("5."))
+    chat = ClaudeChat(client=client, model="m")
+    a, plus, b, c = img("AAAA"), img("PLUS"), img("BBBB"), img("CCCC")
+    chat.ask("one", on_text=lambda d: None, attachments=[a], camera_keep=2)
+    chat.ask("plus", on_text=lambda d: None, attachments=[plus])
+    chat.ask("two", on_text=lambda d: None, attachments=[b], camera_keep=2)
+    live = lambda: [x["source"]["data"] for m in chat.history  # noqa: E731
+                    if isinstance(m["content"], list) for x in m["content"]
+                    if x.get("type") == "image"]
+    assert live() == ["AAAA", "PLUS", "BBBB"]  # two frames kept
+    chat.ask("three", on_text=lambda d: None, attachments=[c], camera_keep=2)
+    assert live() == ["PLUS", "BBBB", "CCCC"]
+    assert chat.history[0]["content"][0] == {
+        "type": "text", "text": "(earlier photo, no longer attached)"}
+    # a failed camera turn: what it dropped is back, and still tracked
+    client.messages.stream.side_effect = RuntimeError("down")
+    with pytest.raises(RuntimeError):
+        chat.ask("four", on_text=lambda d: None, attachments=[img("DDDD")], camera_keep=1)
+    assert live() == ["PLUS", "BBBB", "CCCC"]
+    assert [x["source"]["data"] for x in chat._camera_blocks] == ["BBBB", "CCCC"]
+    assert all(set(x) == {"type", "source"} for x in chat._camera_blocks)
+    chat.reset()
+    assert chat._camera_blocks == []
+
+
+def test_camera_turns_log_sizes_not_words(caplog):
+    client = stream_client(streamed("Your blood pressure is 120 over 80."))
+    conv, chat, events = make_conv(client, "read my lab report")
+    caplog.set_level(logging.DEBUG, logger="kwil")
+    conv.utterance(1, SPEECH, image=frame_jpeg())
+    events.wait_for("turn_done", turn=1)
+    info = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.INFO)
+    assert "camera frame" in info and "bytes sent with it" in info
+    assert "lab report" not in info and "120 over 80" not in info

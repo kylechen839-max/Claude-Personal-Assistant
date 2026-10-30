@@ -116,6 +116,23 @@ def test_family_section_is_mirrored_in_config_toml():
     assert shipped["invite_days"] == 30
 
 
+def test_voice_camera_keys_are_mirrored_in_config_toml_and_readme():
+    """The voice view's Camera button settings: a default each, the same
+    commented line in config.toml, and named in README's voice section."""
+    with open(ROOT / "config.toml", "rb") as f:
+        shipped = tomllib.load(f)["voice"]
+    camera = {k: v for k, v in DEFAULTS["voice"].items() if k.startswith("camera")}
+    assert camera == {"camera": True, "camera_max_side": 1024, "camera_max_kb": 400,
+                      "camera_keep_frames": 1}
+    assert {k: shipped[k] for k in camera} == camera
+    toml = _text("config.toml")
+    for key in camera:
+        assert re.search(rf"^{key} = \S+ +# \S", toml, re.M), key
+    readme = _text("README.md")
+    for key in camera:
+        assert f"[voice] {key}" in readme, key
+
+
 def test_stt_section_is_mirrored_in_config_toml_and_readme():
     """Every [stt] setting has a line in config.toml with its default and a
     row in README's settings table; the keys the cloud engine reads are

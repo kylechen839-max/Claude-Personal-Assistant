@@ -327,6 +327,9 @@ class ClaudeChat:
         # True once a file or photo was attached (the phone's "+"): its text
         # is written by others, so changes ask first until reset().
         self.untrusted_attachments = False
+        # The voice view's camera frames still in the history, by identity
+        # (ask(camera_keep=...)); the API blocks themselves carry no mark.
+        self._camera_blocks: list[dict] = []
         # [memory] weekly_review: called at the start of each conversation;
         # returns a system prompt line offering a review, or None
         # (memory_review.MemoryReview.nudge)
@@ -419,6 +422,7 @@ class ClaudeChat:
         self.untrusted_attachments = False
         self.untrusted_saved_memory = False
         self.untrusted_project_files = False
+        self._camera_blocks = []
         self.study = self._study_on = None  # study mode is per conversation
         self._study_text = ""
         self.project_id = None  # so is the project (set_project, resume)
@@ -796,7 +800,7 @@ class ClaudeChat:
 
     def ask(self, user_text: str, on_text=None, cancel=None,
             attachments: list[dict] | None = None, record_user: bool = True,
-            think: bool = False) -> str:
+            think: bool = False, camera_keep: int | None = None) -> str:
         """Send one user turn, run any tool calls, and return the text reply.
 
         With `on_text`, replies are streamed and each text delta is passed to
@@ -806,6 +810,10 @@ class ClaudeChat:
         "+", attachments.py) sent before the text; saved history gets only
         a marker such as "[photo]" (attachment_marker). `record_user`
         False: Kyle's message is already in saved history (regenerate).
+        `camera_keep`: the attachments are the voice view's camera frames;
+        of all such frames only the newest `camera_keep` (at least these)
+        stay attached, older ones become "(earlier photo, no longer
+        attached)". Photos from the "+" are never counted or dropped by it.
         `think` (the app's "think harder"; "think hard about..." in the
         words does the same): this turn only, on the main model with more
         room to think (thinkhard.py), if think_gate allows one more today."""
@@ -835,6 +843,7 @@ class ClaudeChat:
             new_thread = not (self.recorder and self.recorder.conversation_id)
             saved = None
             dropped: list = []  # attachments turned into markers this turn
+            camera_before = list(self._camera_blocks)
             # saved history gets a marker for attachments, never their bytes
             recorded = "\n".join(t for t in (user_text, attachment_marker(
                 attachments)) if t) if attachments else user_text
@@ -844,6 +853,8 @@ class ClaudeChat:
             if attachments:
                 self.untrusted_attachments = True  # before any tool can run
                 dropped = self._drop_old_attachments(attachments)
+                if camera_keep is not None:
+                    dropped += self._drop_old_frames(attachments, camera_keep)
                 content = list(attachments)
                 if user_text.strip():
                     content.append({"type": "text", "text": user_text})
@@ -877,6 +888,7 @@ class ClaudeChat:
                 del self.history[start:]
                 for m, i, block in dropped:  # the retry may still need them
                     m["content"][i] = block
+                self._camera_blocks = camera_before
                 if self.recorder:  # the retry saves it again
                     self.recorder.retract(saved, new_thread)
                 raise
@@ -1536,9 +1548,27 @@ class ClaudeChat:
                 break
             total -= _block_size(m["content"][i])
             dropped.append((m, i, m["content"][i]))
-            m["content"][i] = {"type": "text", "text": "(earlier "
-                               + attachment_marker([m["content"][i]]).strip("[]")
-                               + ", no longer attached)"}
+            m["content"][i] = _no_longer_attached(m["content"][i])
+        return dropped
+
+    def _drop_old_frames(self, new: list[dict], keep: int) -> list[tuple]:
+        """A camera turn (ask(camera_keep=...)): of the camera frames in
+        the history (tracked by identity in _camera_blocks) and `new`, only
+        the newest `keep` stay attached; older ones become the same marker
+        as _drop_old_attachments. Returns (message, index, block) of each
+        one replaced, so a failed turn can put them back."""
+        tracked = self._camera_blocks
+        held = [(m, i) for m in self.history if is_user_turn(m)
+                and isinstance(m["content"], list)
+                for i, b in enumerate(m["content"])
+                if any(b is c for c in tracked)]
+        excess = max(0, len(held) + len(new) - max(1, int(keep)))
+        dropped = []
+        for m, i in held[:excess]:
+            dropped.append((m, i, m["content"][i]))
+            m["content"][i] = _no_longer_attached(m["content"][i])
+        # only frames still in the history are tracked, so the list stays small
+        self._camera_blocks = [m["content"][i] for m, i in held[excess:]] + list(new)
         return dropped
 
     def _trim_history(self) -> None:
@@ -1618,6 +1648,12 @@ MAX_ATTACHMENT_CHARS = 20_000_000
 
 def _is_attachment(block) -> bool:
     return isinstance(block, dict) and block.get("type") in ("image", "document")
+
+
+def _no_longer_attached(block: dict) -> dict:
+    """The text that replaces an attachment dropped from the history."""
+    return {"type": "text", "text": "(earlier "
+            + attachment_marker([block]).strip("[]") + ", no longer attached)"}
 
 
 def _block_size(block: dict) -> int:

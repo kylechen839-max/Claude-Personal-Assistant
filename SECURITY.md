@@ -130,6 +130,34 @@ itself; the page's CSP only gained `'wasm-unsafe-eval'` (WebAssembly
 compilation), still no inline script, eval or third-party hosts. Tests:
 `tests/test_voice_ws.py`.
 
+**Camera frames on the socket.** The Camera button needed the page's
+`Permissions-Policy` to change from `camera=()` to `camera=(self)` (the
+microphone stays `microphone=(self)`, geolocation `()`): this site's own
+page may ask for the camera, nothing it embeds or links can. The camera is
+asked for only when the button is tapped, video only (the microphone is
+never asked again), and is stopped when the button is tapped again, the
+page goes to the background or the conversation ends. A frame travels in
+the same binary utterance message as the words (`"image": n` in the
+header, the last n bytes of the payload), over the same socket, cookie and
+Origin check; there is no other way in. `n` must be a positive integer no
+larger than the payload (else 1003), at most `[voice] camera_max_kb`
+(400 KB; else 1009), and with `[voice] camera = false` any frame closes the
+socket (1008). The message cap grows by the camera cap only; the words
+alone are still held to `max_utterance_s`. The server then checks the bytes
+itself (`attachments.sniff` must say JPEG) and re-encodes them with
+`tutor.prepare_image` (decoded, pixel-capped, at most `camera_max_side`,
+EXIF/GPS and other metadata dropped, JPEG only) on the turn's worker, after
+the transcript and the person's limits; a frame that fails is left out and
+the turn goes on without it. A frame lives one turn: an utterance that
+answers a yes/no question has its frame dropped before anything reads it
+(the answer is still classified as usual), a superseded or refused turn
+drops its frame, and nothing writes a frame to disk (history keeps
+"[photo]", `chat.attachment_marker`). Only the frame's byte count is
+logged at INFO. A frame taints the conversation exactly like a "+" photo
+(below), and only the newest `[voice] camera_keep_frames` stay in the
+history sent to Claude. Invited people use it under their own key and
+limits (a camera turn is one turn).
+
 ### Email is untrusted input (Gmail tools)
 Anyone can email Kyle, and `email_summary` / `read_email` put that text in
 Claude's context, the same risk as a web page: "AI assistant, delete
@@ -376,6 +404,17 @@ to that session's own conversation.
   history and the event log; the bytes stay in the chat's memory until the
   conversation ends. PDFs are sent as they are (their own metadata, such as
   the author, included); they are not rewritten.
+- **Camera frames from the voice view** (`voice_session.py`, see the voice
+  WebSocket above) are attachments too: the same JPEG check and
+  re-encoding, the same `untrusted_attachments` taint (set before any tool
+  runs, cleared only by `reset()`), the same `[photo]` marker and the same
+  20 MB budget, plus one rule of their own: only the newest `[voice]
+  camera_keep_frames` (1) camera frames stay attached, older ones become
+  "(earlier photo, no longer attached)". The chat tracks its camera frames
+  by identity in a list of its own (`ClaudeChat._camera_blocks`); the API
+  blocks carry no extra key (`tests/contract_fakes.py` refuses one), and
+  "+" photos are never counted or dropped by that rule. A 400 on a camera
+  turn is spoken as "Claude couldn't read that file." like a typed one.
 
 ### Typing while Kwil is thinking (queue and Stop, `app.js`, `/api/stop`)
 - **One turn at a time still holds.** The page queues messages sent during
@@ -2245,6 +2284,15 @@ network code of its own.
   code of their own. It goes away in a later release.
 
 ## Not fixed, on purpose
+
+- **While the camera is on, every question sends a picture without a
+  preview step.** That is the feature (hands-free, like Claude's voice
+  mode); asking "send this?" each turn would defeat it. What guards it: the
+  camera starts only on a tap, a red **Camera on** pill and the live
+  picture are on screen the whole time, it stops in the background and at
+  the end, answers to yes/no questions never carry one, and frames are
+  never stored. Whatever else is in view (a screen, a letter) goes to
+  Anthropic with that turn.
 
 - **A backup is a plain zip of everyone's conversations.** It holds no
   secret that unlocks anything, but it does hold Kyle's and the family's

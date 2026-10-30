@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Voice conversation camera: tap Camera and Kwil sees what your phone's
+  back camera sees with each question and answers out loud ("what does this
+  sign say?"). "Send this frame" freezes a picture for your next question.
+  Frames are never saved (History keeps "[photo]"), yes/no answers never
+  carry one, and a picture makes Kwil ask before changing anything, like an
+  attached photo.
 - Deep research: say "research …" or "do a deep dive on …" and Kwil
   searches and reads the web in the background (after asking, with the time
   and number of searches), then sends a notification. The cited report is

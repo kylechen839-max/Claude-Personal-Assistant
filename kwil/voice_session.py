@@ -17,6 +17,13 @@ TTS, and history keeps only what was said, marked as interrupted.
 
 A tool that needs a yes (deleting an event) asks out loud; the next
 utterance answers it and is never sent to Claude as a new request.
+
+Camera: an utterance may carry one JPEG frame from the page's back camera.
+It is checked and re-encoded (attachments.sniff, tutor.prepare_image: EXIF
+and other metadata dropped) on the worker, after the transcript, and sent
+to Claude as an image block with that turn only. It lives in memory: an
+answer to a yes/no question and a superseded turn drop theirs unseen, and
+saved history keeps only "[photo]" (chat.attachment_marker).
 """
 
 from __future__ import annotations
@@ -152,7 +159,12 @@ class ChatBackend:
         self._answered = threading.Event()
         self._yes = False
 
-    def ask(self, text, on_text, on_tool, cancel) -> str:
+    def ask(self, text, on_text, on_tool, cancel, attachments=None,
+            camera_keep=None) -> str:
+        if attachments:  # a camera frame: only the newest `camera_keep` stay
+            return get_reply(self.chat, text, output_fn=lambda m: None,
+                             on_text=on_text, cancel=cancel,
+                             attachments=attachments, camera_keep=camera_keep)
         return get_reply(self.chat, text, output_fn=lambda m: None,
                          on_text=on_text, cancel=cancel)
 
@@ -192,7 +204,8 @@ class WebBackend:
         self.session = session
         self.conv: "VoiceConversation | None" = None
 
-    def ask(self, text, on_text, on_tool, cancel) -> str:
+    def ask(self, text, on_text, on_tool, cancel, attachments=None,
+            camera_keep=None) -> str:
         def on_event(ev):  # this turn's own events, never the page's queue
             kind = ev.get("type")
             if kind == "confirm":
@@ -205,7 +218,9 @@ class WebBackend:
         parts = []
         try:
             for delta in self.assistant.chat_stream(self.session, text, cancel=cancel,
-                                                    on_event=on_event):
+                                                    on_event=on_event,
+                                                    attachments=attachments,
+                                                    camera_keep=camera_keep):
                 parts.append(delta)
                 on_text(delta)
         except RuntimeError:  # a push-to-talk turn is running in this session
@@ -241,6 +256,7 @@ class VoiceTurn:
     id: int
     received: float
     samples: np.ndarray | None = None
+    image: bytes | None = None  # a camera frame (JPEG), until it is sent
     stop: threading.Event = field(default_factory=threading.Event)
     sentences: queue.Queue = field(default_factory=queue.Queue)
     chunks: list[Chunk] = field(default_factory=list)
@@ -314,8 +330,13 @@ class VoiceConversation:
                  send: Callable[..., None], *, clock=time.monotonic,
                  idle_timeout: float = 120, max_session: float = 1800,
                  wake_phrase: str | None = "Hey Kwil", language: str | None = None,
-                 limit: Callable[..., str | None] | None = None):
+                 limit: Callable[..., str | None] | None = None,
+                 camera_max_bytes: int = 400 * 1024, camera_max_side: int = 1024,
+                 camera_keep: int = 1):
         self.backend = backend
+        self.camera_max_bytes = camera_max_bytes
+        self.camera_max_side = camera_max_side
+        self.camera_keep = max(1, int(camera_keep))  # 0 would hide this turn's own
         self.language = language
         self.limit = limit
         backend.conv = self
@@ -339,14 +360,20 @@ class VoiceConversation:
         self.dropped = 0  # utterances superseded before transcription
 
     # --- from the page ---
-    def utterance(self, turn_id: int, samples: np.ndarray) -> None:
-        """A finished utterance. Returns at once; turns run on the worker."""
+    def utterance(self, turn_id: int, samples: np.ndarray,
+                  image: bytes | None = None) -> None:
+        """A finished utterance (and the camera frame sent with it). Returns
+        at once; turns run on the worker."""
         with self.lock:
             if self.closed:
                 return
             self.last_activity = self.clock()
             pending = self.pending
             if pending is not None:
+                if image is not None:  # an answer is yes/no: its frame is never sent
+                    log.info("Utterance %s answers a question: camera frame dropped",
+                             turn_id)
+                    image = None
                 if pending.answering:
                     log.info("Dropped utterance %s: already answering", turn_id)
                     return
@@ -364,7 +391,8 @@ class VoiceConversation:
                 self.dropped += 1
                 log.info("Dropped utterance %s (superseded by %s) before "
                          "transcribing it", self.waiting.id, turn_id)
-            self.waiting = VoiceTurn(turn_id, self.clock(), samples)
+                self.waiting.samples = self.waiting.image = None
+            self.waiting = VoiceTurn(turn_id, self.clock(), samples, image)
             running = self.current
             if running is not None and not running.finished:
                 self._cancel(running)  # talked over it without a barge-in message
@@ -429,6 +457,8 @@ class VoiceConversation:
                 return None
             self.closed = True
             self.ended_reason = reason
+            if self.waiting is not None:
+                self.waiting.image = None
             self.waiting = None
             turn = self.current
             if turn is not None and not turn.finished:
@@ -626,6 +656,7 @@ class VoiceConversation:
             self._send({"type": "error", "turn": turn.id, "message": message})
             turn.sentences.put(Chunk(message, 0, reply=False))
         finally:
+            turn.image = None  # also after an error: frames live one turn at most
             turn.sentences.put(None)
             speaker.join(timeout=120)
             with self.lock:
@@ -648,15 +679,40 @@ class VoiceConversation:
         message = self.limit(audio=audio, count=count) if self.limit else None
         if not message:
             return False
-        turn.samples = None
+        turn.samples = turn.image = None
         log.info("Voice turn %s: refused (a limit)", turn.id)
         self._send({"type": "error", "turn": turn.id, "message": message})
         turn.sentences.put(Chunk(message, 0, reply=False))
         return True
 
+    def _frame(self, turn: VoiceTurn) -> list[dict] | None:
+        """The turn's camera frame as an image block (checked from its own
+        bytes, re-encoded without metadata, at most camera_max_side), or
+        None. The raw bytes are let go here, whatever happens."""
+        from kwil.attachments import Attachment, sniff
+        from kwil.tutor import ImageRejected, prepare_image
+
+        data, turn.image = turn.image, None
+        if not data:
+            return None
+        if sniff(data) != "image/jpeg":
+            log.info("Voice turn %s: camera frame is not a JPEG; sent without it",
+                     turn.id)
+            return None
+        try:
+            clean, media_type = prepare_image(
+                data, None, self.camera_max_bytes, max_side=self.camera_max_side,
+                allowed={"image/jpeg": "JPEG"})
+        except ImageRejected:
+            log.info("Voice turn %s: camera frame unreadable; sent without it", turn.id)
+            return None
+        log.info("Voice turn %s: camera frame %d bytes sent with it", turn.id, len(clean))
+        return [Attachment("image", media_type, clean, "camera").block()]
+
     def _turn_body(self, turn: VoiceTurn, timer: TurnTimer) -> bool:
         """Transcribe and answer. True if it was "goodbye"."""
         if turn.stop.is_set():
+            turn.image = None
             return False  # superseded while waiting: skip Whisper entirely
         # over a limit (quotas.py): refused before Whisper, nothing counted
         if self._refused(turn, audio=True, count=False):
@@ -669,13 +725,16 @@ class VoiceConversation:
         log.debug("Voice heard: %r", heard)
         self._send({"type": "transcript", "turn": turn.id, "text": heard})
         if not text or turn.stop.is_set():
+            turn.image = None
             return False
         if is_exit(text):
+            turn.image = None
             turn.sentences.put(Chunk(i18n.t("goodbye", self.language), 0, reply=False))
             return True
         # counted only now, as Claude is asked (noise heard as nothing isn't)
         if self._refused(turn, audio=False, count=True):
             return False
+        attachments = self._frame(turn)
         streamed = []
 
         def on_text(delta):
@@ -690,7 +749,12 @@ class VoiceConversation:
             self._send({"type": "tool", "turn": turn.id, "name": name})
 
         turn.asked = True
-        reply = self.backend.ask(text, on_text, on_tool, turn.stop)
+        if attachments:
+            reply = self.backend.ask(text, on_text, on_tool, turn.stop,
+                                     attachments=attachments,
+                                     camera_keep=self.camera_keep)
+        else:
+            reply = self.backend.ask(text, on_text, on_tool, turn.stop)
         if reply and not streamed:  # an error sentence (nothing was streamed)
             self._send({"type": "error", "turn": turn.id, "message": reply})
             turn.sentences.put(Chunk(reply, 0, reply=False))
