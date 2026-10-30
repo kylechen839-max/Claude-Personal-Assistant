@@ -128,7 +128,8 @@ def prompt_parts(snap, who: str = "Kyle", inline: bool = False) -> list[str]:
     if not project:
         return []
     name = " ".join(project["name"].replace('"', "'").split())
-    parts = [PROJECT_PROMPT.replace("Kyle's", f"{who}'s").replace("Kyle", who)
+    braces = who.replace("{", "{{").replace("}", "}}")  # a name is not a template
+    parts = [PROJECT_PROMPT.replace("Kyle's", f"{braces}'s").replace("Kyle", braces)
              .format(name=name)]
     if project["instructions"]:
         parts.append(f"{who}'s instructions for this project (written by {who}; "
