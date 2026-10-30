@@ -483,6 +483,11 @@
       this._set("paused");
     }
     resume() { if (this.state === "paused") this._set("listening"); }
+    // Should utterance `turn`, whose sending was delayed (its camera frame
+    // was still encoding), still go out? Not once the conversation is
+    // paused or over, or the turn was cancelled meanwhile (a barge-in, or
+    // leaving the app): the server would run a turn the page dropped.
+    stillWanted(turn) { return this.live && !this.cancelled.has(turn); }
     end() {
       if (this.state === "ended") return;
       this.held = null;
@@ -518,6 +523,39 @@
       out.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     return new Uint8Array(out.buffer);
+  }
+
+  // Everything the page sends, in the order it happened. An item is the
+  // data, or a function giving the data, null (send nothing) or a promise
+  // of either (an utterance waiting for its camera frame); later items
+  // wait for it, so an "interrupt" can never overtake its own utterance.
+  // With nothing pending, an item is sent at once (synchronously).
+  class OrderedSender {
+    constructor(send) { this.send = send; this.queue = []; this.draining = null; }
+    push(item) {
+      this.queue.push(item);
+      if (!this.draining) this.draining = this._drain();
+      return this.draining || Promise.resolve();
+    }
+    // a promise that settles once everything pushed so far is sent
+    idle() { return this.draining || Promise.resolve(); }
+    _drain() {
+      while (this.queue.length) {
+        const item = this.queue.shift();
+        let data;
+        try { data = typeof item === "function" ? item() : item; } catch (e) { data = null; }
+        if (data && typeof data.then === "function") {
+          return data.then((d) => d, () => null).then((d) => {
+            if (d !== null && d !== undefined) this.send(d);
+            this.draining = this._drain();
+            return this.draining;
+          });
+        }
+        if (data !== null && data !== undefined) this.send(data);
+      }
+      this.draining = null;
+      return null;
+    }
   }
 
   // --- camera frames ---
@@ -579,5 +617,5 @@
 
   return { SAMPLE_RATE, FRAME_SAMPLES, rms, EnergyVAD, Endpointer, TurnController,
     packFrame, unpackFrame, floatToPcm16, concat,
-    frameSize, encodeFrame, packUtterance, CameraPolicy };
+    frameSize, encodeFrame, packUtterance, CameraPolicy, OrderedSender };
 });

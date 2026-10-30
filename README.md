@@ -764,7 +764,7 @@ or ending the conversation turns it off too.
   its long side and JPEG-encodes it under `[voice] camera_max_kb` (400 KB);
   the server checks the bytes, re-encodes it (dropping EXIF: location,
   camera serial) and refuses anything bigger. `[voice] camera = false`
-  hides the button and the server refuses frames.
+  (or a cap of 0) hides the button and the server refuses frames.
 - Only the newest `[voice] camera_keep_frames` (1) frames stay with the
   conversation; older ones become "(earlier photo, no longer attached)", so
   a long camera conversation doesn't grow. Photos from the **+** are not

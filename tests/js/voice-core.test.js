@@ -904,3 +904,65 @@ test("an answer to a question is sent while awaitingAnswer (so it carries no fra
   c.onVad(speechEnd());                                  // "yes"
   assert.deepEqual(picks, [{ kind: "live" }, null]);
 });
+
+// The page's send path as voice.js wires it: controller.send and
+// sendUtterance both go through one OrderedSender; an utterance with a
+// camera frame waits for the frame, then goes only if still wanted.
+function cameraPage() {
+  const wire = [];
+  const sender = new VC.OrderedSender((d) => wire.push(typeof d === "string" ? JSON.parse(d) : d));
+  let release;
+  const frame = new Promise((r) => { release = r; });
+  const c = new VC.TurnController({
+    send: (m) => sender.push(JSON.stringify(m)),
+    stopPlayback: () => ({ index: 0, fraction: 0 }),
+    sendUtterance: (turn) => {
+      sender.push(() => frame.then((jpeg) => (c.stillWanted(turn)
+        ? { utterance: turn, jpeg } : null)));
+    },
+  });
+  return { c, sender, wire, release };
+}
+
+test("leaving the app while a camera frame encodes: that utterance is never sent", async () => {
+  const { c, sender, wire, release } = cameraPage();
+  c.start();
+  c.onVad(speechEnd());                 // turn 1: its frame is still encoding
+  c.pause();                            // the page goes to the background
+  assert.deepEqual(wire, []);           // the interrupt waits behind its utterance
+  release(new Uint8Array([0xff, 0xd8]));
+  await sender.idle();
+  assert.deepEqual(wire, [{ type: "interrupt", turn: 1, index: 0, fraction: 0 }]);
+});
+
+test("a frame that finished first: the utterance goes, then the interrupt", async () => {
+  const { c, sender, wire, release } = cameraPage();
+  c.start();
+  c.onVad(speechEnd());
+  release(new Uint8Array([0xff, 0xd8]));
+  await sender.idle();
+  c.pause();
+  await sender.idle();
+  assert.equal(wire[0].utterance, 1);
+  assert.deepEqual(wire[1], { type: "interrupt", turn: 1, index: 0, fraction: 0 });
+});
+
+test("OrderedSender sends at once when nothing waits, and keeps the order", async () => {
+  const out = [];
+  const s = new VC.OrderedSender((d) => out.push(d));
+  s.push("a");
+  assert.deepEqual(out, ["a"]);         // synchronous: e.g. "end" right before close
+  let release;
+  s.push(() => new Promise((r) => { release = r; }));
+  s.push("c");
+  s.push(() => null);                   // nothing to send
+  s.push(() => "d");
+  assert.deepEqual(out, ["a"]);
+  release("b");
+  await s.idle();
+  assert.deepEqual(out, ["a", "b", "c", "d"]);
+  s.push(() => Promise.reject(new Error("encode failed")));
+  s.push("e");
+  await s.idle();
+  assert.deepEqual(out, ["a", "b", "c", "d", "e"]);
+});

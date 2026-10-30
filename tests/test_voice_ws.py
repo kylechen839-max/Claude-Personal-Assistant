@@ -1012,3 +1012,25 @@ def test_page_packing_matches_the_server_split():
     pcm, image = voice_ws.split_image(header, payload, voice_ws.voice_settings(None))
     assert pcm == bytes([1, 0, 2, 0, 3, 0])
     assert image == bytes([0xff, 0xd8, 0xff, 0xe0, 7, 7])
+
+
+@pytest.mark.parametrize("cap", [{"camera_max_kb": 0}, {"camera_max_side": 0},
+                                 {"camera_max_kb": -5}], ids=["kb-0", "side-0", "kb-neg"])
+def test_a_camera_cap_of_zero_turns_the_camera_off(make_voice, cap):
+    """Judge LOW 2: a cap no frame can meet is "camera off": the page is
+    told so (no button), and a frame is refused like one with the camera
+    off, instead of every frame closing with 1009 or vanishing."""
+    v = voice_ws.voice_settings(cap)
+    assert voice_ws.camera_on(v) is False
+    settings = voice_ws.client_settings(v)
+    assert settings["camera"] is False
+    assert settings["camera_max_side"] == 0 and settings["camera_max_bytes"] == 0
+    client, http = make_voice(**cap)
+    login(http)
+    with connect(http) as ws:
+        assert json.loads(ws.receive_text())["settings"]["camera"] is False
+        ws.send_bytes(camera_utterance(1, jpeg(size=(200, 150))))
+        got = ws.receive()
+        assert got["type"] == "websocket.close" and got["code"] == 1008
+    assert client.stream_calls == []
+    assert voice_ws.camera_on(voice_ws.voice_settings(None)) is True

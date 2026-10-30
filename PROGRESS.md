@@ -8209,3 +8209,26 @@ Full suite: 3988 passed, 53 skipped (baseline about 3958 passed); JS
 `tests/js/*.test.mjs` 364 passed (baseline 363), `voice-core.test.js` 48
 (baseline 42). Frame sizes and timing on a real iPhone not measured (no
 hardware here): MANUAL_TEST "Voice conversation on the phone".
+
+### Camera in voice mode, judge round 1 (2026-10-30)
+- MED 1: leaving the app while a frame was still encoding sent the
+  "interrupt" before its utterance, so the server ran a turn the page had
+  dropped. Everything the page sends now goes through one
+  `VoiceCore.OrderedSender` (in order; at once when nothing waits), and a
+  delayed utterance is sent only if `TurnController.stillWanted(turn)`
+  (not cancelled, not paused or ended). Tests (`voice-core.test.js`):
+  `leaving the app while a camera frame encodes: that utterance is never
+  sent`, `a frame that finished first: the utterance goes, then the
+  interrupt`, `OrderedSender sends at once when nothing waits, and keeps
+  the order`. All three fail with the source reverted; the first also
+  fails with only `stillWanted` made to return true.
+- LOW 2: a `camera_max_kb` or `camera_max_side` of 0 or less is "camera
+  off" (`voice_ws.camera_on`: `ready` says `camera: false`, frames are
+  refused with 1008); the page uses `??` and hides the button for a 0 cap.
+  `test_a_camera_cap_of_zero_turns_the_camera_off` (3 cases) fails with the
+  source reverted and with `client_settings` / `split_image` back on
+  `[voice] camera` alone.
+- Both node-driven pytest tests skip cleanly without node ("node is not
+  installed"), checked with node off the PATH.
+- Full suite: 3991 passed, 53 skipped (round 0: 3988); JS `*.test.mjs` 364,
+  `voice-core.test.js` 51 (round 0: 48).

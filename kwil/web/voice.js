@@ -60,7 +60,11 @@
   let timings = {}; // turn -> {name: ms}
   let debugOn = false;
   let generation = 0; // bumped by finish(), so a start() still loading gives up
-  let sendChain = Promise.resolve(); // utterances go out in order (frames take a moment)
+  // Everything sent on the socket, in the order it happened: an utterance
+  // waiting for its camera frame holds back the "interrupt" that follows it
+  // (VoiceCore.OrderedSender). Made per socket by start().
+  let sender = null;
+  function sendJson(m) { if (sender) sender.push(JSON.stringify(m)); }
 
   // --- camera: a video-only stream (the mic is never asked for again) ---
   const camera = {
@@ -121,13 +125,13 @@
     async grab() {
       const v = ui.preview;
       if (!this.stream || !v || !v.videoWidth) return null;
-      const size = VC.frameSize(v.videoWidth, v.videoHeight, settings.camera_max_side || 1024);
+      const size = VC.frameSize(v.videoWidth, v.videoHeight, settings.camera_max_side ?? 1024);
       if (!size.width) return null;
       const c = this.canvas || (this.canvas = document.createElement("canvas"));
       c.width = size.width;
       c.height = size.height;
       c.getContext("2d").drawImage(v, 0, 0, size.width, size.height);
-      return VC.encodeFrame(c, { maxBytes: settings.camera_max_bytes || 400 * 1024 });
+      return VC.encodeFrame(c, { maxBytes: settings.camera_max_bytes ?? 400 * 1024 });
     },
     // "Send this frame": freeze the picture; it goes with the next turn.
     async pin() {
@@ -141,12 +145,13 @@
       this.showPinned(true);
       caption("status", CAMERA_TEXT.pinned);
     },
-    // The frame for this utterance, or null (camera off, an answer, failed).
-    async forTurn(awaitingAnswer) {
+    // The frame for this utterance: null at once (camera off, an answer),
+    // else a promise of the JPEG bytes (null if it couldn't be made).
+    forTurn(awaitingAnswer) {
       const pick = this.policy.take(awaitingAnswer);
       if (!pick) return null;
-      if (pick.kind === "pinned") { this.showPinned(false); return pick.frame; }
-      try { return await this.grab(); } catch (e) { caption("status", CAMERA_TEXT.tooBig); return null; }
+      if (pick.kind === "pinned") { this.showPinned(false); return Promise.resolve(pick.frame); }
+      return this.grab().catch(() => { caption("status", CAMERA_TEXT.tooBig); return null; });
     },
   };
 
@@ -174,9 +179,7 @@
         node.onended = () => {
           this.sources = this.sources.filter((s) => s !== entry);
           // A yes/no question only counts as asked once it was heard to the end.
-          if (header.question && ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: "played", turn: header.turn, index: header.index }));
-          }
+          if (header.question) sendJson({ type: "played", turn: header.turn, index: header.index });
           if (!this.sources.length) controller.onPlaybackIdle();
         };
       });
@@ -262,7 +265,7 @@
       t.reported = true;
       const out = { type: "client_timings", turn, vad: vadName };
       for (const [k] of rows) if (t[k] !== undefined) out[k] = Math.round(t[k] - base);
-      ws.send(JSON.stringify(out));
+      sendJson(out);
     }
   }
 
@@ -466,22 +469,25 @@
     });
   }
 
-  // The words and (camera on) one frame, as one message; in order, even
-  // while a frame is still being encoded.
+  // The words and (camera on) one frame, as one message, in order with
+  // everything else sent. Without a frame it goes out at once. With one,
+  // it waits for the frame, and is dropped if the turn was cancelled or
+  // the conversation paused or ended meanwhile (the page's "interrupt" for
+  // it is queued behind it, so the server never runs a dropped turn).
   function sendUtterance(turn, audio) {
-    if (!ws || ws.readyState !== 1) return;
-    const sock = ws;
+    if (!sender || !ws || ws.readyState !== 1) return;
     const pcm = VC.floatToPcm16(audio);
-    const answering = !!(controller && controller.awaitingAnswer); // never with a frame
+    const ctl = controller;
+    const answering = !!(ctl && ctl.awaitingAnswer); // never with a frame
     const frame = camera.forTurn(answering);
-    sendChain = sendChain.then(async () => {
-      let jpeg = null;
-      try { jpeg = await frame; } catch (e) { jpeg = null; }
-      if (ws !== sock || sock.readyState !== 1) return;
-      sock.send(VC.packUtterance({ type: "utterance", turn, sample_rate: VC.SAMPLE_RATE,
-        vad: vadName }, pcm, jpeg));
+    const build = (jpeg, waited) => {
+      if (waited && (controller !== ctl || !ctl || !ctl.stillWanted(turn))) return null;
       mark("sent", turn);
-    });
+      return VC.packUtterance({ type: "utterance", turn, sample_rate: VC.SAMPLE_RATE,
+        vad: vadName }, pcm, jpeg);
+    };
+    sender.push(frame ? () => frame.then((j) => build(j, true), () => build(null, true))
+      : () => build(null, false));
   }
 
   // --- wake lock / interruptions ---
@@ -611,11 +617,17 @@
       if (cancelled()) return;
       await connect();
       if (cancelled()) return;
+      const sock = ws;
+      sender = new VC.OrderedSender((data) => { if (ws === sock && sock.readyState === 1) sock.send(data); });
       if (settings.debug_panel && !debugOn && ui.debugToggle) ui.debugToggle.click();
-      if (ui.camera) ui.camera.hidden = settings.camera !== true || !navigator.mediaDevices;
+      // a cap of 0 means no camera (the server says camera: false then too)
+      if (ui.camera) {
+        ui.camera.hidden = settings.camera !== true || !navigator.mediaDevices
+          || !(settings.camera_max_side > 0) || !(settings.camera_max_bytes > 0);
+      }
       controller = new VC.TurnController({
         setState, caption, sendUtterance,
-        send: (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); },
+        send: sendJson,
         stopPlayback: () => playback.stop(),
         mark, followUp,
         // the end of a sentence still echoes: it mustn't start an utterance
@@ -676,6 +688,7 @@
     playback.stop();
     earcons.play("ended");
     if (ws) { try { ws.close(1000); } catch (e) { /* closed */ } ws = null; }
+    sender = null;
     if (capture) { capture.port.onmessage = null; capture.disconnect(); capture = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
     if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }

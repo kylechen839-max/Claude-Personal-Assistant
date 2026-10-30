@@ -142,7 +142,13 @@ header, the last n bytes of the payload), over the same socket, cookie and
 Origin check; there is no other way in. `n` must be a positive integer no
 larger than the payload (else 1003), at most `[voice] camera_max_kb`
 (400 KB; else 1009), and with `[voice] camera = false` any frame closes the
-socket (1008). The message cap grows by the camera cap only; the words
+socket (1008); a `camera_max_kb` or `camera_max_side` of 0 or less counts
+as camera off (the page gets `camera: false`). The page sends everything in
+the order it happened (`VoiceCore.OrderedSender`): an utterance waiting
+for its frame holds back the "interrupt" after it, and is not sent at all
+if its turn was cancelled or the conversation paused meanwhile, so leaving
+the app right after speaking can't leave the server running a turn the
+page dropped. The message cap grows by the camera cap only; the words
 alone are still held to `max_utterance_s`. The server then checks the bytes
 itself (`attachments.sniff` must say JPEG) and re-encodes them with
 `tutor.prepare_image` (decoded, pixel-capped, at most `camera_max_side`,
