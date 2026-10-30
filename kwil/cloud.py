@@ -106,6 +106,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/reminders.js",
               # the chat header's study button and pill (/api/study needs sign-in)
               "/study.js",
+              # Settings, Projects and the header's project name (/api/projects needs sign-in)
+              "/projects.js",
               # the owner's "Connect Spotify" button (its routes need sign-in)
               "/spotify.js",
               # Google's redirect back after a family member's sign-in: the

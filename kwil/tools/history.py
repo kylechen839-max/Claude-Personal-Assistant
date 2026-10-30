@@ -11,6 +11,10 @@ search_conversations(query="physics schedule", since=...) ->
 read_conversation(id, query="physics schedule") -> "In your chat on
 Tuesday you settled on..." The current conversation stays the same.
 
+In a project's conversation (projects.py), both take `project_only`:
+search only that project's conversations, and read one only if it is in
+it ("what did we cover last week in this class?").
+
 Search results hold titles, dates, short summaries and snippets;
 read_conversation at most READ_MESSAGES messages of READ_CHARS each. Both
 read only the store they were made with (one person's own history), and
@@ -42,18 +46,33 @@ def _date(ts: float, tz=None) -> str:
     return f"{dt:%A}, {dt:%B} {dt.day}, {dt.year}"
 
 
+def _chat_project(chat) -> str | None:
+    project = getattr(chat, "project_id", None) if chat is not None else None
+    return project if isinstance(project, str) else None
+
+
+NO_PROJECT = {"status": "error",
+              "message": "This conversation isn't in a project; search without "
+                         "project_only."}
+
+
 def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Tool]:
     def search_conversations(query: str = "", since: str = "", until: str = "",
-                             source: str = "", pinned: bool | None = None) -> dict:
+                             source: str = "", pinned: bool | None = None,
+                             project_only: bool = False) -> dict:
         chat = current_chat()
         current = chat.conversation_id if chat else None
+        project = _chat_project(chat)
+        if project_only is True and project is None:
+            return NO_PROJECT
+        scope = {"project": project} if project_only is True else {}
         # archived=None: an archived conversation is still Kyle's to recall
         hits = history.search_conversations(
             store, query, memory, limit=MAX_RESULTS + 1,
             snippet_tokens=recall.TOOL_SNIPPET_TOKENS,
             source=source or None, pinned=pinned, archived=None,
             since=history.parse_day(since, tz=tz),
-            until=history.parse_day(until, end=True, tz=tz))
+            until=history.parse_day(until, end=True, tz=tz), **scope)
         results = [{"id": h["id"],
                     "title": history._truncate(h["title"], 120) or "(untitled)",
                     "when": _when(h["updated_at"], tz),
@@ -61,7 +80,9 @@ def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Too
                     "where": history.SOURCE_LABELS.get(h["source"], h["source"]),
                     "summary": history._truncate(h.get("summary") or "", SUMMARY_CHARS),
                     "snippet": history._truncate(
-                        history.plain_snippet(h.get("snippet", "")), SNIPPET_CHARS)}
+                        history.plain_snippet(h.get("snippet", "")), SNIPPET_CHARS),
+                    **({"in_this_project": True}
+                       if project and h.get("project") == project else {})}
                    for h in hits if h["id"] != current][:MAX_RESULTS]
         return {"conversations": results} if results else {
             "conversations": [], "message": "No saved conversations match."}
@@ -83,13 +104,20 @@ def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Too
                 "message": "Switched to this conversation. Pick up where it "
                            "left off in one or two spoken sentences."}
 
-    def read_conversation(conversation_id: str, query: str = "") -> dict:
+    def read_conversation(conversation_id: str, query: str = "",
+                          project_only: bool = False) -> dict:
         """Read-only: the current conversation stays what it is."""
+        project = _chat_project(current_chat())
+        if project_only is True and project is None:
+            return NO_PROJECT
         try:
             conv = store.get(conversation_id)  # this person's store only
         except KeyError:
             return {"status": "error",
                     "message": "No saved conversation has that id. Search first."}
+        if project_only is True and conv.get("project") != project:
+            return {"status": "error",
+                    "message": "That conversation isn't in this project."}
         query = str(query or "")[:200]
         messages = [m for m in conv["messages"] if m["kind"] in ("chat", "note")]
         shown, matched = recall.excerpt(messages, query, READ_MESSAGES)
@@ -135,7 +163,12 @@ def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Too
                                            "typed, web = phone app, voice = "
                                            "phone voice mode"},
                  "pinned": {"type": "boolean",
-                            "description": "only pinned conversations"}}},
+                            "description": "only pinned conversations"},
+                 "project_only": {"type": "boolean",
+                                  "description": "only conversations in this "
+                                                 "conversation's project (when "
+                                                 "Kyle asks about this class or "
+                                                 "project)"}}},
              search_conversations),
         Tool("resume_conversation",
              "Switch to a saved conversation so Kyle can continue it ('continue "
@@ -156,7 +189,10 @@ def history_tools(store: history.HistoryStore, memory=None, tz=None) -> list[Too
                  "conversation_id": {"type": "string"},
                  "query": {"type": "string",
                            "description": "topic words to find in it, e.g. "
-                                          "'physics schedule'"}},
+                                          "'physics schedule'"},
+                 "project_only": {"type": "boolean",
+                                  "description": "refuse one outside this "
+                                                 "conversation's project"}},
               "required": ["conversation_id"]},
              read_conversation, untrusted_output=True, private=True),
     ]

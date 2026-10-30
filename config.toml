@@ -323,6 +323,14 @@ max_tasks_per_day = 48        # scheduled-task runs per person (you too) in any 
 [study]                       # "quiz me on PHYS 361": Kwil as a Socratic tutor (README "Study mode")
 enabled = true                # start_study / end_study / note_missed and the chat header's study button; missed concepts live in [memory] local_path
 
+[projects]                    # one space per class: its own instructions, files, memories and chats (README "Projects")
+enabled = true                # Settings -> Projects and the project file tools; kept in [memory] local_path (needs memory on)
+max_files = 20                # files per project (PDFs and text)
+max_file_mb = 10              # per file (never over [webapp] max_upload_mb; 4 on Render)
+max_person_mb = 50            # all of one person's project files together (Render: 20)
+inline_tokens = 40000         # a project's files are sent in full with each request up to about this many tokens...
+inline_mb = 4                 # ...and this many MB; past either, Kwil searches them (search_project_files) instead
+
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on
 dir = "data/users"            # users.json + one history folder per person (Render: /data/users)

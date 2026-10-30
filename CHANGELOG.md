@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Projects, one per class: each with its own instructions, files (PDF/text,
+  sent in full while small, searched when large), memories and chats;
+  suggested from your Canvas, deadline and Notion courses; History filters
+  by project; the chat header shows the project.
 - Try again, edit and branch in the phone chat: ↻ under Kwil's last
   reply asks for a new answer, the pencil on your last message lets you
   change it and send it again (the old reply is replaced everywhere,

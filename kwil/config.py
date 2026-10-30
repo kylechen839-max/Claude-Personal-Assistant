@@ -368,6 +368,14 @@ DEFAULTS: dict = {
     "study": {                      # study mode (study.py; README "Study mode")
         "enabled": True,            # the study tools and the chat header's toggle; missed concepts go in [memory] local_path
     },
+    "projects": {                   # one space per class (projects.py; README "Projects")
+        "enabled": True,            # Settings -> Projects and the project file tools; kept in [memory] local_path
+        "max_files": 20,            # files per project
+        "max_file_mb": 10,          # per file (never over [webapp] max_upload_mb)
+        "max_person_mb": 50,        # all of one person's project files
+        "inline_tokens": 40000,     # a project's files are sent in full up to about this many tokens...
+        "inline_mb": 4,             # ...and this many MB; past either, Kwil searches them instead
+    },
     "family": {                   # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
@@ -470,6 +478,7 @@ SERVER_PROFILE: dict = {
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
     "reminders": {"path": "/data/reminders.sqlite"},  # on the disk
+    "projects": {"max_person_mb": 20},  # in each person's memory file, on a small shared disk
     "connect": {"dir": "/data/owner"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
     # just under max_upload_mb (4) above, so check_limits has nothing to lower

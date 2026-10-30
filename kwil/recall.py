@@ -76,7 +76,7 @@ class Retriever(Protocol):
                offset: int = 0, snippet_tokens: int = SNIPPET_TOKENS) -> list[dict]:
         """Best first: conversation dicts (HistoryStore.list's shape) with
         `snippet`, `score` and `match` ("keyword" or "semantic").
-        `filters`: source, pinned, archived, since, until.
+        `filters`: source, pinned, archived, since, until, project.
         `snippet_tokens`: words around a keyword match."""
 
     def delete(self, conversation_id: str) -> None:
@@ -127,7 +127,7 @@ def _store_filters(filters: dict | None) -> dict:
     f = dict(filters or {})
     return {"source": f.get("source"), "pinned": f.get("pinned"),
             "archived": f.get("archived", False), "since": f.get("since"),
-            "until": f.get("until")}
+            "until": f.get("until"), "project": f.get("project")}
 
 
 # ---------- keyword + vectors ----------

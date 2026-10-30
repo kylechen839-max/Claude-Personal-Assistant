@@ -6,9 +6,10 @@ import logging
 import os
 import secrets
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import datetime
 
-from kwil import usage
+from kwil import projects, usage
 from kwil.memory_store import EMPTY as EMPTY_MEMORY
 from kwil.router import needs_main_for
 from kwil.tools.timeutil import TURN_NOW, zone_name
@@ -250,7 +251,8 @@ class ClaudeChat:
                  fast_model: str | None = None, router: str = "off",
                  meter=None, max_tokens_tools: int = 4000,
                  max_history_chars: int = 300_000, thinking_turns: int = 3,
-                 local_memory=None):
+                 local_memory=None, project_inline_tokens: int = 40000,
+                 project_inline_bytes: int = 4_000_000):
         self._client = client
         # Where this chat's API usage is counted: None = usage.METER (the
         # owner's bill); a family member's own key counts on theirs (family.py)
@@ -343,6 +345,21 @@ class ClaudeChat:
         self.study: dict | None = None
         self._study_on: dict | None = None
         self._study_text = ""
+        # Projects (projects.py): the project this conversation is in (an id
+        # in local_memory), chosen before it starts (set_project) or taken
+        # from the stored conversation it resumes; reset() clears it.
+        # Its instructions, memories and file list are in memory_snapshot;
+        # the files it sends in full ([projects] inline_tokens/inline_mb)
+        # are _project_docs, [(file id, document block)], sent at the start
+        # of every request (_with_project_docs). Once they were, the
+        # conversation holds outside text (untrusted_project_files, sticky).
+        self.project_id: str | None = None
+        self.project_inline_tokens = project_inline_tokens
+        self.project_inline_bytes = project_inline_bytes
+        self._project_docs: list[tuple[str, dict]] = []
+        self._project_inline = False
+        self._project_tagged: str | None = None  # the conversation set_project wrote
+        self.untrusted_project_files = False
         self._load_memory()
 
     def _count_usage(self, model: str, response) -> None:
@@ -386,8 +403,10 @@ class ClaudeChat:
         self.untrusted_memory = False
         self.untrusted_attachments = False
         self.untrusted_saved_memory = False
+        self.untrusted_project_files = False
         self.study = self._study_on = None  # study mode is per conversation
         self._study_text = ""
+        self.project_id = None  # so is the project (set_project, resume)
         self._load_memory()
 
     # ---------- study mode (study.py) ----------
@@ -437,17 +456,102 @@ class ClaudeChat:
         now (at most once per conversation: the system prompt stays the
         same bytes until reset). A memory saved from outside text makes the
         conversation's changes ask first (untrusted_memory, sticky)."""
-        snapshot = EMPTY_MEMORY
+        snapshot, loaded = EMPTY_MEMORY, False
         if self.local_memory is not None and not self.check_mode:
             try:
                 self._memory_deletions = getattr(self.local_memory, "deletions", 0)
-                snapshot = self.local_memory.snapshot()
+                snapshot = (self.local_memory.snapshot(project=self.project_id)
+                            if self.project_id else self.local_memory.snapshot())
+                loaded = True
             except Exception as e:  # memory is a bonus; never block a reply
                 log.warning("Memory: couldn't load (%s)", type(e).__name__)
+        if self.project_id and loaded and snapshot.project is None:
+            log.info("Projects: %s is gone; this conversation is in none", self.project_id)
+            self.project_id = None
         self.memory_snapshot = snapshot
         self.untrusted_saved_memory |= snapshot.untrusted
+        self._load_project_docs()
         log.debug("Memory: %d memories and %d characters of instructions loaded",
                   len(snapshot.memories), len(snapshot.instructions))
+
+    # ---------- projects (projects.py) ----------
+    def set_project(self, project_id: str | None) -> None:
+        """Put the conversation about to start in `project_id` (None: in
+        none), from its first turn's system prompt. Only between
+        conversations (RuntimeError once one has a turn); KeyError for a
+        project this person doesn't have."""
+        if self._history:
+            raise RuntimeError("a project is chosen before its conversation starts")
+        if project_id is not None and (self.local_memory is None or not callable(
+                getattr(self.local_memory, "project", None))
+                or self.local_memory.project(project_id) is None):
+            raise KeyError("no such project")
+        self.project_id = project_id
+        self._load_memory()
+        log.info("Projects: the next conversation is in %s", project_id or "no project")
+
+    def _enter_project(self, project_id: str | None) -> None:
+        """A stored conversation was resumed (resume, _switch_to): its
+        project (None: none) is this one's from now on, read as at a
+        conversation's start. Taint already gathered stays."""
+        if self.local_memory is None or project_id == self.project_id:
+            return
+        self.project_id = project_id
+        self._load_memory()
+        log.info("Projects: continuing in %s", project_id or "no project")
+
+    def _load_project_docs(self) -> None:
+        """The project's files sent in full with every request of this
+        conversation, when they fit the budget (else none: the model
+        searches them with search_project_files)."""
+        snap = self.memory_snapshot
+        self._project_docs, self._project_inline = [], False
+        if not snap.project_files or not projects.fits(
+                snap.project_files, self.project_inline_tokens, self.project_inline_bytes):
+            if snap.project_files:
+                log.info("Projects: %d file(s) over the inline budget: searched instead",
+                         len(snap.project_files))
+            return
+        docs = []
+        try:
+            for f in snap.project_files:
+                full = self.local_memory.file(f["id"])
+                if full is not None:
+                    docs.append((f["id"], projects.file_block(full)))
+        except Exception as e:  # never block a reply
+            log.warning("Projects: couldn't read the files (%s)", type(e).__name__)
+            docs = []
+        self._project_docs, self._project_inline = docs, bool(docs)
+        if docs:  # written by others (a handout, a PDF): outside text
+            self.untrusted_project_files = True
+            log.info("Projects: %d file(s) attached to this conversation", len(docs))
+
+    def _search_project_files_instead(self) -> None:
+        """The API refused the request with the files attached: none are
+        sent again in this conversation; the system prompt lists them for
+        search_project_files (one cache miss). Taint stays (they were in)."""
+        dropped = len(self._project_docs)
+        self._project_docs, self._project_inline = [], False
+        log.warning("Projects: the request was refused with %d file(s) attached; "
+                    "searching them instead in this conversation", dropped)
+
+    def project_public(self) -> dict | None:
+        """For the page (/api/state, a turn's "done"): {"id", "name"}."""
+        project = self.memory_snapshot.project
+        return {"id": project["id"], "name": project["name"]} if project else None
+
+    def _with_project_docs(self, messages: list[dict]) -> list[dict]:
+        """`messages` (as sent) with the project's files first in the first
+        message, a cache breakpoint after the last of them (a copy)."""
+        if not self._project_docs or not messages:
+            return messages
+        first = messages[0]
+        content = first["content"]
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) \
+            else list(content)
+        docs = [dict(b) for _fid, b in self._project_docs]
+        docs[-1]["cache_control"] = {"type": "ephemeral"}
+        return [{**first, "content": docs + blocks}] + list(messages[1:])
 
     def _drop_deleted_memories(self) -> None:
         """Before a turn of a running conversation: anything deleted from
@@ -458,19 +562,38 @@ class ClaudeChat:
         deletions = getattr(store, "deletions", None)
         if store is None or deletions is None or deletions == self._memory_deletions:
             return
+        snap = self.memory_snapshot
+        project = snap.project
         try:
             live = {m["id"] for m in store.list()}
             instructions = store.instructions()
+            if project is not None:
+                still = store.project(project["id"]) is not None
+                if still:
+                    live |= {m["id"] for m in store.list(project["id"])}
+                    files = {f["id"] for f in store.files(project["id"])}
         except Exception as e:
             log.warning("Memory: couldn't check for deletes (%s)", type(e).__name__)
             return
         self._memory_deletions = deletions
-        snap = self.memory_snapshot
-        gone = [m["id"] for m in snap.memories if m["id"] not in live]
+        gone = [m["id"] for m in snap.memories + snap.project_memories
+                if m["id"] not in live]
         if gone:
             snap = snap.without(gone)
         if snap.instructions and not instructions:  # cleared (Forget all)
-            snap = type(snap)("", snap.memories, snap.paused)
+            snap = replace(snap, instructions="")
+        if project is not None and not still:  # the project was deleted
+            snap = snap.without_project()
+            self._project_docs = []
+            log.info("Projects: %s was deleted: out of this conversation", project["id"])
+        elif project is not None:
+            dropped = [f["id"] for f in snap.project_files if f["id"] not in files]
+            if dropped:
+                snap = snap.without_files(dropped)
+                self._project_docs = [(fid, b) for fid, b in self._project_docs
+                                      if fid in files]
+                log.info("Projects: %d deleted file(s) taken out of this conversation",
+                         len(dropped))
         if snap is not self.memory_snapshot:
             log.info("Memory: %d deleted memories taken out of this conversation",
                      len(gone))
@@ -482,7 +605,7 @@ class ClaudeChat:
         conversation? tainted() without the loaded memories: a memory
         saved now is marked untrusted only for this (tools/memory_tools)."""
         return (self.untrusted_memory or self.untrusted_context
-                or self.untrusted_attachments
+                or self.untrusted_attachments or self.untrusted_project_files
                 or (bool(self.tools) and has_untrusted_content(
                     self.history, self.tools.untrusted_names())))
 
@@ -492,7 +615,8 @@ class ClaudeChat:
         the prompt cache once)."""
         snap = self.memory_snapshot
         self.memory_snapshot = (snap.without(memory_ids) if memory_ids is not None
-                                else type(snap)(paused=snap.paused))
+                                else replace(snap, instructions="", memories=(),
+                                             project_memories=()))
 
     def tainted(self) -> bool:
         """Has untrusted text been in this conversation: web, email or
@@ -553,12 +677,19 @@ class ClaudeChat:
         if self.language == "zh":
             # The English tool/memory prompts are about Kyle; this user isn't.
             parts = [parts[0]] + self._about_user(parts[1:])
-            parts += self._memory_parts()
+            parts += self._memory_parts() + self._project_parts()
             parts.append(zh_help_prompt(self.tools))
             parts.append(ZH_REPLY_RULE)
         else:
-            parts = self._about_user(parts) + self._memory_parts()
+            parts = self._about_user(parts) + self._memory_parts() + self._project_parts()
         return "\n\n".join(parts)
+
+    def _project_parts(self) -> list[str]:
+        """The conversation's project: what it is, its instructions,
+        memories and files (projects.prompt_parts), the person's own words
+        (never passed through _about_user)."""
+        who = "the user" if self.language == "zh" else (self.user_name or "Kyle")
+        return projects.prompt_parts(self.memory_snapshot, who, inline=self._project_inline)
 
     def _memory_parts(self) -> list[str]:
         """The conversation's instructions and memories (memory_snapshot),
@@ -680,6 +811,7 @@ class ClaudeChat:
                 attachments)) if t) if attachments else user_text
             if self.recorder and record_user:  # saved before the reply: crash-safe
                 saved = self.recorder.user(recorded)
+                self._tag_project()
             if attachments:
                 self.untrusted_attachments = True  # before any tool can run
                 dropped = self._drop_old_attachments(attachments)
@@ -874,7 +1006,30 @@ class ClaudeChat:
         self.history = rebuild_history(conv, self.max_history)
         self.untrusted_context = True
         self.recorder.resume(conversation_id)
+        self._enter_project(self._stored_project(conversation_id))
+        self._project_tagged = conversation_id
         return conv
+
+    def _stored_project(self, conversation_id: str) -> str | None:
+        """The project a stored conversation is in (HistoryStore.project_of)."""
+        find = getattr(getattr(self.recorder, "store", None), "project_of", None)
+        try:
+            return find(conversation_id) if callable(find) else None
+        except Exception as e:  # history is a bonus here
+            log.warning("Projects: couldn't read a conversation's project (%s)",
+                        type(e).__name__)
+            return None
+
+    def _tag_project(self) -> None:
+        """The conversation just written to is in this chat's project
+        (HistoryStore.set_project), once per conversation."""
+        rec = self.recorder
+        cid = rec.conversation_id if rec is not None else None
+        if not self.project_id or not cid or cid == self._project_tagged \
+                or not callable(getattr(rec, "set_project", None)):
+            return
+        rec.set_project(self.project_id)
+        self._project_tagged = cid
 
     def _switch_to(self, conversation_id: str, user_text: str, reply: str,
                    new_thread: bool) -> None:
@@ -895,12 +1050,15 @@ class ClaudeChat:
             previous, untrusted = list(self.history), self.tainted()
             cid = self.recorder.finish()
             if self.memory and not self.incognito:
-                _background().submit(self._remember, previous, cid, untrusted)
+                _background().submit(self._remember, previous, cid, untrusted,
+                                     self.project_id)
         self.history = rebuild_history(conv, self.max_history)
         # study mode was the other conversation's (per conversation)
         self.study = self._study_on = None
         self._study_text = ""
         self.recorder.resume(conversation_id)
+        self._enter_project(self._stored_project(conversation_id))  # and its project
+        self._project_tagged = conversation_id
         self.recorder.user(user_text)
         # with the turn's tools (History shows them; regenerate refuses)
         self.recorder.assistant(reply, tool_events=self._turn_events)
@@ -1012,7 +1170,8 @@ class ClaudeChat:
         if not self.memory or self.check_mode:  # a health check: no Pinecone query
             return []
         try:
-            notes = self.memory.retrieve(user_text)
+            # a project's summaries only in that project's conversations
+            notes = self.memory.retrieve(user_text, project=self.project_id)
             matches = getattr(self.memory, "last_matches", None)
             if isinstance(matches, list):
                 self._recalled.update(
@@ -1041,15 +1200,15 @@ class ClaudeChat:
         """Summarize the conversation into long-term memory, then reset.
 
         Returns the stored summary, or None if nothing was stored."""
-        previous, untrusted = self.history, self.tainted()
+        previous, untrusted, project = self.history, self.tainted(), self.project_id
         self.reset()
         cid = self.recorder.finish() if self.recorder else None
         if self.incognito:
             return None  # incognito: no history and no long-term memory
-        return self._remember(previous, cid, untrusted)
+        return self._remember(previous, cid, untrusted, project)
 
     def _remember(self, history: list[dict], conversation_id: str | None = None,
-                  untrusted: bool = False):
+                  untrusted: bool = False, project: str | None = None):
         from kwil.memory import SUMMARY_PROMPT, transcript
 
         # With untrusted text in the conversation (see tainted()), Claude's
@@ -1073,6 +1232,8 @@ class ClaudeChat:
             stamp = _now(self.timezone).strftime("%Y-%m-%d")  # Kyle's date
             summary = f"{stamp}: {summary}"
             extra = {"from_user_only": True, "untrusted": True} if untrusted else {}
+            if project:  # recalled only in that project's conversations (recall)
+                extra["project_id"] = project
             # The conversation id links a semantic search hit back to the
             # full conversation in history.
             if conversation_id:
@@ -1141,15 +1302,16 @@ class ClaudeChat:
             self._forget_thinking()
             self._thinking_model = model
         system = self._system_blocks()
-        retried = shortened = False
+        retried = shortened = docs_dropped = False
         before_shorten = None  # (history, thinking epoch) until a retry works
         for _ in range(self.max_tool_rounds + 1):
             while True:
                 tag = self._thinking_tag(model)
                 kwargs = dict(model=model, max_tokens=self._max_tokens(model),
-                              system=system, messages=request_messages(
-                                  self.history, cache=True, thinking=tag,
-                                  thinking_turns=self.thinking_turns))
+                              system=system, messages=self._with_project_docs(
+                                  request_messages(self.history, cache=True,
+                                                   thinking=tag,
+                                                   thinking_turns=self.thinking_turns)))
                 if self.tools:
                     kwargs["tools"] = self.tools.schemas(model)
                 try:
@@ -1157,6 +1319,16 @@ class ClaudeChat:
                     before_shorten = None
                     break
                 except Exception as e:
+                    # The project's files are the likely cause of "too long"
+                    # or "too many PDF pages" (an estimate that was wrong):
+                    # from now on this conversation searches them instead,
+                    # and the request goes once more without them.
+                    if self._project_docs and not docs_dropped and (
+                            _prompt_too_long(e) or _pdf_pages_refused(e)):
+                        docs_dropped = True
+                        self._search_project_files_instead()
+                        system = self._system_blocks()
+                        continue
                     if before_shorten is not None:
                         # Shorter didn't help: the earlier turns weren't the
                         # cause, so they come back (ask() then undoes only
@@ -1480,6 +1652,12 @@ def _thinking_floor(history: list[dict], thinking_turns: int | None) -> int:
 def _signature_refused(error: Exception) -> bool:
     """The API's 400 "Invalid `signature` in `thinking` block"."""
     return getattr(error, "status_code", None) == 400 and "signature" in str(error)
+
+
+def _pdf_pages_refused(error: Exception) -> bool:
+    """The API's 400 "A maximum of 100 PDF pages may be provided"."""
+    return getattr(error, "status_code", None) == 400 \
+        and "pdf pages" in str(error).lower()
 
 
 def _prompt_too_long(error: Exception) -> bool:

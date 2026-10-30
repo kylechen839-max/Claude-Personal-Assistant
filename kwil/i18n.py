@@ -42,6 +42,7 @@ EN = {
     "not_caught": "I didn't catch that. Try again?",
     # a turn typed into a conversation deleted meanwhile (another phone)
     "conversation_gone": "That conversation was deleted, so I didn't send this.",
+    "project_gone": "That project was deleted, so I didn't send this.",
     # the phone's "try again" and "edit" (ClaudeChat.regenerate)
     "redo_nothing": "There's no reply to try again yet.",
     "redo_changed": "That reply already changed something, so I won't redo it. Ask again instead.",
@@ -179,6 +180,7 @@ ZH = {
     "confirm_unclear": "还是没听清，所以我没有做。",
     "not_caught": "我没听清楚，请再说一遍？",
     "conversation_gone": "那个对话已经删除了，所以这条消息没有发送。",
+    "project_gone": "那个项目已经删除了，所以这条消息没有发送。",
     "redo_nothing": "还没有可以重试的回复。",
     "redo_changed": "那条回复已经改动了东西，所以我不会重做。请重新问一次。",
     "redo_busy": "请等回复结束后再试。",

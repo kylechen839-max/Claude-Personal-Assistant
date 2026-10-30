@@ -489,7 +489,7 @@ class NoteMemory:
     def __init__(self):
         self.last_matches = []
 
-    def retrieve(self, query):
+    def retrieve(self, query, project=None):
         self.last_matches = [("note-20261020-locker", "locker code 1234")]
         return ["locker code 1234"]
 
@@ -516,7 +516,7 @@ def test_a_deleted_note_is_never_sent_again(fake_client, confirm):
     chat.memory = NoteMemory()
     chat.ask("what's my locker code")
     assert "locker code 1234" in sent_text(fake_client.calls[0])
-    chat.memory.retrieve = lambda q: []  # the next turns recall nothing
+    chat.memory.retrieve = lambda q, project=None: []  # the next turns recall nothing
     chat.ask("forget it")
     chat.ask("thanks")
     last = sent_text(fake_client.calls[-1])
@@ -536,7 +536,7 @@ def test_a_note_recalled_once_stays_in_its_own_turn(fake_client):
     chat = ClaudeChat(client=fake_client)
     chat.memory = NoteMemory()
     chat.ask("one")
-    chat.memory.retrieve = lambda q: []
+    chat.memory.retrieve = lambda q, project=None: []
     chat.ask("two")
     assert "locker code 1234" in sent_text(fake_client.calls[1])
     assert "locker code 1234" not in request_text(fake_client.calls[1])  # not turn 2's

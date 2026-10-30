@@ -4,8 +4,11 @@ and "Delete my account" in their own Settings (web/family.js).
   GET  /api/me/export   a zip of their conversations (history.export JSON),
                         profile, school deadlines (deadlines.json), Canvas
                         course content text (coursefiles.json) and their
-                        memory (memory.json: instructions and saved
-                        memories) and reminders (reminders.json: their
+                        memory (memory.json: instructions, saved
+                        memories and projects; each project file itself
+                        under projects/, counted against [projects]
+                        max_person_mb, not export_max_mb) and reminders
+                        (reminders.json: their
                         reminders and scheduled tasks); never tokens,
                         keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
@@ -118,6 +121,15 @@ def revoke_google_token_file(path, revoke: Callable[[str], None] | None = None,
     except Exception as e:  # noqa: BLE001 - removing goes ahead regardless
         log.warning("%s: revoking %s's Google grant failed (%s); "
                     "deleting anyway", label, who, type(e).__name__)
+
+
+def project_file_name(project_id: str, f: dict) -> str:
+    """Where a project file goes in an export: projects/<project>/<file id>-<name>
+    (the name made safe for a zip on any system)."""
+    import re
+
+    name = re.sub(r"[^\w.\- ()]+", "_", f["name"]).strip(" .") or "file"
+    return f"projects/{project_id}/{f['id']}-{name[:80]}"
 
 
 def confirmed(given, user: dict) -> bool:
@@ -299,7 +311,22 @@ class Account:
                memory=None, reminders=None) -> tuple[int, int]:
         from kwil import history
 
+        from kwil import projects
+
         cap, total = self.max_bytes, 0
+        # project files have their own allowance: [projects] max_person_mb,
+        # which uploads already keep them under, so they never push the
+        # rest of an export over [family] export_max_mb
+        file_cap = projects.limits(getattr(self.family, "config", {}) or {})["max_total_bytes"]
+        files_total = 0
+
+        def add_file(zf, name: str, data: bytes) -> None:
+            nonlocal files_total
+            files_total += len(data)
+            if files_total > file_cap:
+                raise ExportError("your project files are larger than allowed; "
+                                  "delete some first", 413)
+            zf.writestr(name, data)
 
         def add(zf, name: str, text: str) -> None:
             nonlocal total
@@ -324,8 +351,15 @@ class Account:
                 add(zf, "coursefiles.json", json.dumps(content.export(user["id"]), indent=2,
                                                        ensure_ascii=False))
             if memory is not None:  # their instructions and saved memories
-                add(zf, "memory.json", json.dumps(memory.export(), indent=2,
+                exported = memory.export()
+                add(zf, "memory.json", json.dumps(exported, indent=2,
                                                   ensure_ascii=False))
+                for project in exported.get("projects", ()):  # their own files
+                    for f in project["files"]:
+                        full = memory.file(f["id"])
+                        if full is not None:
+                            add_file(zf, project_file_name(project["id"], full),
+                                     full["data"])
             if reminders is not None:  # their reminders and scheduled tasks
                 add(zf, "reminders.json", json.dumps(reminders.export(), indent=2,
                                                      ensure_ascii=False))

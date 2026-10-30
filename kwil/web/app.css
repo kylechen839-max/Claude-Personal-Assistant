@@ -127,8 +127,8 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .menu-body > button { background: none; border-radius: 0; text-align: left; padding: 0 1rem; min-height: 50px;
   font-weight: 400; border-top: 1px solid var(--line); }
 .menu-body > button:active { background: var(--surface-2); transform: none; }
-.menu-body > #memory-open, .menu-body > #reminders-open { display: flex; align-items: center; justify-content: space-between; }
-.menu-body > #memory-open::after, .menu-body > #reminders-open::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: var(--s1);
+.menu-body > #memory-open, .menu-body > #reminders-open, .menu-body > #projects-open { display: flex; align-items: center; justify-content: space-between; }
+.menu-body > #memory-open::after, .menu-body > #reminders-open::after, .menu-body > #projects-open::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: var(--s1);
   border: solid color-mix(in srgb, var(--muted) 70%, transparent); border-width: 0 2px 2px 0; transform: rotate(-45deg); }
 .menu-body > #logout { margin-top: .4rem; border-top-width: 8px; border-top-color: var(--surface-2); }
 .menu-body > #logout-all { color: var(--bad-ink); }
@@ -454,6 +454,23 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
 .study-stop:active { transform: scale(.97); }
 .study-stop:focus-visible { box-shadow: var(--ring); }
 #study-toggle[aria-pressed=true] { color: var(--accent-ink); }
+/* ---------- projects (projects.js) ---------- */
+/* the header's project name: the study pill's shape; its name opens the page */
+.project-pill { max-width: 38vw; }
+.project-pill-text { min-width: 0; min-height: 44px; padding: 0; background: none; color: inherit;
+  font: inherit; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-pill-text:active { transform: none; opacity: .8; }
+.project-pill-text:focus-visible { box-shadow: var(--ring); border-radius: var(--r-sm); }
+.projects-list .row + .row, .projects-list + .projects-new { border-top: 1px solid var(--line); }
+.projects-new { color: var(--accent-ink); font-size: var(--t-body); }
+.project-suggestion .btn { flex: none; min-height: 44px; }
+.row-chevron { flex: none; width: 7px; height: 7px; margin-right: var(--s1);
+  border: solid color-mix(in srgb, var(--muted) 70%, transparent); border-width: 0 2px 2px 0;
+  transform: rotate(-45deg); }
+#project-chat { margin-top: var(--s4); }
+.project-file-name { flex: 1; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.project-file .mem-when { flex: none; }
 .mem-missed { margin-top: var(--s4); }
 .mem-concept { font-weight: 500; }
 

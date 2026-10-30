@@ -396,6 +396,54 @@
     "a memory is at most 500 characters": "一条记忆最多 500 个字。",
     "nothing to remember": "没有可以记住的内容。",
     "not found": "找不到。",
+    // projects (projects.js, app.js, projects_web.py)
+    "Projects": "项目",
+    "Back to projects": "返回项目",
+    "New project": "新建项目",
+    "Rename project": "重命名项目",
+    "Suggested from your courses": "根据你的课程推荐",
+    "Each project has its own instructions, files, memories and chats. What Kwil remembers in a project stays in it.":
+      "每个项目都有自己的说明、文件、记忆和对话。Kwil 在项目里记住的内容只留在这个项目里。",
+    "New chat in this project": "在这个项目里开始新对话",
+    "Instructions": "说明",
+    "For example: PHYS 361, Classical Mechanics. Use Taylor's notation. Exams are closed-book.":
+      "例如：PHYS 361，经典力学。用 Taylor 教材的记号。考试闭卷。",
+    "Kwil follows these in this project's chats, from the next one.":
+      "Kwil 会在这个项目的对话里遵守这些说明，从下一次对话开始。",
+    "Files": "文件",
+    "Add file": "添加文件",
+    "Things Kwil remembered here": "Kwil 在这里记住的内容",
+    "Chats": "对话",
+    "Delete project": "删除项目",
+    "Open project": "打开项目",
+    "Leave project": "离开项目",
+    "For example, PHYS 361": "例如：PHYS 361",
+    "No projects yet. Make one per class: its own instructions, files and chats.":
+      "还没有项目。每门课建一个：有自己的说明、文件和对话。",
+    "Connect Canvas or add deadlines, and your courses show here.":
+      "连接 Canvas 或添加截止日期后，你的课程会显示在这里。",
+    "Create": "创建",
+    "Delete this project, its files and its memories? Its chats stay in History. This can't be undone.":
+      "要删除这个项目、它的文件和记忆吗？它的对话会留在对话记录里。删除后无法恢复。",
+    "Project deleted.": "项目已删除。",
+    "Delete this file from the project? This can't be undone.":
+      "要从项目里删除这个文件吗？删除后无法恢复。",
+    "Adding…": "正在添加…",
+    "Added.": "已添加。",
+    "No files yet. Add a syllabus, notes or handouts (PDF or text).":
+      "还没有文件。可以添加教学大纲、笔记或讲义（PDF 或文本）。",
+    "Nothing remembered here yet. Say “remember …” in one of this project's chats.":
+      "这里还没有记住的内容。在这个项目的对话里说“记住……”。",
+    "No chats yet.": "还没有对话。",
+    "New conversation": "新对话",
+    "New chat.": "新对话。",
+    "That project was deleted, so I didn't send this.": "那个项目已经删除了，所以这条消息没有发送。",
+    "A project file is a PDF or a text file (attach photos to a message instead)":
+      "项目文件只能是 PDF 或文本文件（照片请附在消息里）",
+    "Your project files are at their limit": "你的项目文件已经到上限了",
+    "couldn't reach your projects; try again": "无法读取你的项目，请重试",
+    "bad request (one file at a time)": "请求有误（一次只能上传一个文件）",
+    "send a form with one file": "请上传一个文件",
     // study mode (study.js, memory.js, study.py)
     "Study mode": "学习模式",
     "Stop studying": "停止学习",
@@ -587,6 +635,14 @@
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
   const PATTERNS = [
+    [/^(\d+) files? · (\d+) memor(?:y|ies)$/, "$1 个文件 · $2 条记忆"],  // projects.js's rows
+    [/^New chat in ([^\n]{1,80})\.$/, "在“$1”里开始新对话。"],  // app.js
+    [/^Text · ([\d.]+) (KB|MB)$/, "文本 · $1 $2"],
+    [/^A project holds at most (\d+) files$/, "一个项目最多放 $1 个文件"],
+    [/^A project file is at most ([\d.]+) MB$/, "一个项目文件最多 $1 MB"],
+    [/^Your project files are at their limit \(([\d.]+) MB in all\): delete one first$/,
+      "你的项目文件已经到上限了（一共 $1 MB）：请先删除一个"],
+    [/^You have (\d+) projects: delete one first$/, "你已经有 $1 个项目了：请先删除一个"],
     [/^Studying ([^\n.!?]{1,80})$/, "正在学习 $1"],  // study.js's pill (a course name)
     [/^Missed (\d+) times$/, "错过 $1 次"],  // memory.js's study list
     [/^Working: (.+)…$/, "正在处理：$1…"],

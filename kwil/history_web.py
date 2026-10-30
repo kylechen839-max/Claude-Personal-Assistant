@@ -2,6 +2,8 @@
 
   GET    /api/conversations              ?q= &source= &pinned= &archived=
                                          &since= &until= &limit= &offset=
+                                         &project= (one of this person's
+                                         projects, projects.py; else 404)
   GET    /api/conversations/{id}         the transcript
   POST   /api/conversations/{id}/branch  {"message_index"}: a new
                                          conversation with its messages up
@@ -43,7 +45,7 @@ def item(conv: dict) -> dict:
             "source": conv["source"], "started_at": conv["started_at"],
             "updated_at": conv["updated_at"], "pinned": conv["pinned"],
             "archived": conv["archived"], "message_count": conv["message_count"],
-            "match": conv.get("match"),
+            "match": conv.get("match"), "project": conv.get("project"),
             "snippet": [[t, m] for t, m in history.snippet_parts(conv.get("snippet", ""))]}
 
 
@@ -130,6 +132,14 @@ def register(app, assistant, session_of, error) -> None:
             return error("bad request", 400)
         if filters["source"] and filters["source"] not in history.SOURCES:
             return error("bad request", 400)
+        project = p.get("project")
+        if project:  # one of this person's own projects (else: unknown)
+            find = getattr(assistant, "memory_store_of", None)
+            mine = find(s) if callable(find) else None
+            if mine is None or not callable(getattr(mine, "project", None)) \
+                    or mine.project(project) is None:
+                return error("not found", 404)
+            filters["project"] = project
         query = (p.get("q") or "").strip()[:200]
         hits = history.search_conversations(
             store, query, memory_of(s), limit=limit + 1, offset=offset,

@@ -1335,8 +1335,11 @@ sign in on the phone or a computer as the owner and open
   while the app keeps running),
 - `users/users.json` and `users/<id>/history.sqlite`: the family list and
   each member's own history,
+- `memory.sqlite` and `users/<id>/memory.sqlite`: everyone's memory and
+  projects (instructions and memories; the project files themselves are
+  left out, see Projects),
 - `waitlist.json`, if there is one, and `MANIFEST.json` (when, which
-  version, each file's size).
+  version, each file's size, how many project files were left out).
 
 It never holds Google tokens, keys or any `.enc` file, signed-in sessions,
 `.env`, logs or lecture audio, or anyone already removed, so the zip is
@@ -1683,6 +1686,69 @@ plain text, so the Tutor tab is still the place for drawn equations.
   costs one partial cache miss and the turns in between none.
 - **Settings:** `[study] enabled` (on by default) turns the tools and the
   header button off.
+
+### Projects (one per class)
+Like Projects in ChatGPT and Claude: a space per class (PHYS 361, CS 171,
+...) with its own **instructions** ("PHYS 361: Classical Mechanics, use
+Taylor's notation, exams are closed-book"), its own **files** (syllabus,
+notes, handouts), its own **memories** and its own **chats**. Settings ->
+**Projects** lists them; **New project** names one, and **Suggested from
+your courses** offers your Canvas courses, the courses of your school
+deadlines and (for you, the owner) your Notion Assignments' Course options:
+**Create** makes one in a tap (tapping again opens the same one).
+
+- **A project's page:** **New chat in this project**, its instructions
+  (Save; they apply from the next chat in it), its files (**Add file**: a
+  PDF or a text/Markdown file, checked like a chat attachment: the type
+  from the file's bytes, at most 100 pages; photos go with a message
+  instead; **Delete** asks first), what Kwil remembered there (**Delete**
+  asks), its chats (tap one to read or continue it), **Rename** and
+  **Delete project** (asks; its files and memories go, its chats stay in
+  History, in no project).
+- **The header** shows the project's name while a chat is in one: tap it
+  for the project's page, its x leaves the project (your next message
+  starts a chat in none). Continuing a chat from History brings its
+  project with it; so do "try again", "edit" and "Branch from here".
+- **In a project's chat** Kwil follows its instructions, knows its
+  memories and reads its files. Your general memories and "Your
+  instructions" still apply everywhere; a project's memories are loaded
+  only in that project's chats, never anywhere else. "Remember..." in a
+  project saves to that project; "remember, in general, ..." saves it for
+  every chat.
+- **Files:** while a project's files fit about `[projects] inline_tokens`
+  (40,000) tokens and `inline_mb` (4 MB), they are sent in full with every
+  request of its chats (cached, so later turns are cheap); past that Kwil
+  searches them (`search_project_files`, `read_project_file`) instead.
+  Bounds: `max_files` (20) per project, `max_file_mb` (10, never over
+  `[webapp] max_upload_mb`: 4 on Render) each, `max_person_mb` (50; 20 on
+  Render) for all of one person's project files; at most 30 projects and
+  100 memories per project; a PDF at most 100 pages. The estimate counts
+  2,000 tokens a PDF page and, for text, about a token per three bytes (so
+  Chinese counts about a token a character); a PDF whose page count can't
+  be read is always searched. If Claude still says the files are too
+  long, that chat switches to searching them by itself.
+- **Outside text:** a handout or a PDF is usually written by someone else,
+  so a chat with project files in it asks first before changing anything
+  (as with a chat attachment), and what it remembers there is marked
+  "Untrusted". The instructions you type never do that.
+- **History:** History's search sees every chat; `?project=` filters by
+  one (the project page lists its chats). In a project's chat, "what did we
+  cover in this class last week?" searches only that project's chats.
+- **Where it's kept:** in your memory file (`[memory] local_path`; an
+  invited person's own `<[family] dir>/<id>/memory.sqlite`), so each
+  person has their own projects (nobody can open anyone else's), they are
+  in an invited person's "Download my data" (with the files themselves
+  under `projects/`, on top of its size cap) and deleted with the account.
+  The owner's backup has every project, its instructions and memories,
+  but not the files themselves (keep your originals): with them it would
+  be everyone's `max_person_mb` together, over `backup_max_mb`. With
+  `[memory] backend = "pinecone"`, a project chat's summary is recalled
+  only in that project's chats.
+  Deletes are real (overwritten, not just unlinked). Each backend
+  (Pi/PC/cloud) keeps its own projects, like memory. Never the Anthropic
+  Files API (it belongs to one workspace, not one person).
+- **Settings:** `[projects] enabled` (on by default; needs `[memory]
+  enabled`).
 
 ### Student deadlines (Canvas)
 "What's due this week?", "when is my physics midterm?", "add my lab report,
@@ -2687,6 +2753,8 @@ kwil/
   wakeword.py   openWakeWord, energy VAD, mic/file sources
   memory_store.py  your instructions and saved memories (SQLite, one file per person)
   memory_web.py Settings -> Memory routes (and the Pinecone notes list)
+  projects.py   projects (one per class): prompt, file budget, uploads, suggestions
+  projects_web.py  Settings -> Projects routes (/api/projects)
   memory.py     Pinecone recall + conversation summaries ([memory] backend = "pinecone")
   history.py    conversation history: SQLite store, search, resume
   history_cli.py  python -m kwil --history ...

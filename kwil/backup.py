@@ -10,13 +10,23 @@ on the disk is ever added):
                             status, tier); never an invite's hash
   users/<id>/history.sqlite each listed family member's own history
   memory.sqlite             the owner's instructions and saved memories
-                            (memory_store.py)
+                            (memory_store.py), and his projects with their
+                            instructions and memories (projects.py), but
+                            not the project files themselves (below)
   users/<id>/memory.sqlite  each listed family member's own memory
   reminders.sqlite          the owner's reminders and scheduled tasks
                             (reminders.py)
   users/<id>/reminders.sqlite each listed family member's own reminders
   waitlist.json             the public waitlist, if there is one
   MANIFEST.json             when it was made, the version, each file's size
+
+Project files are left out of every memory.sqlite copy (their rows are
+deleted from the copy, then it is vacuumed; MANIFEST.json says how many
+per file, never their names): they are each person's own uploads, which
+they still have, and with them the backup would be every person's
+[projects] max_person_mb together (11 people x 20 MB on Render's 1 GB
+disk), over backup_max_mb, so there would be no backup at all. The size
+check counts the databases without them.
 
 Never included: Google tokens, encrypted keys (*.enc), signed-in sessions,
 .env or any other secret, logs, lecture audio, people already removed.
@@ -154,7 +164,8 @@ class Backup:
         try:
             self.sweep()
             dbs = self._databases()
-            planned = sum(self._size(p) for _, p in dbs)
+            planned = sum(self._size(p) - (project_bytes(p) if n.endswith(MEMORY_DB) else 0)
+                          for n, p in dbs)
             if planned > self.max_bytes:
                 raise self._too_large(planned)
             self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -182,8 +193,14 @@ class Backup:
             for i, (name, path) in enumerate(dbs):
                 copy = folder / f"db-{i}.sqlite"
                 copy_database(path, copy)
+                entry = {"name": name}
+                if name.endswith(MEMORY_DB):
+                    left_out = strip_project_files(copy)
+                    if left_out:
+                        entry["project_files_left_out"] = left_out
                 zf.write(copy, name)
-                files.append({"name": name, "bytes": copy.stat().st_size})
+                entry["bytes"] = copy.stat().st_size
+                files.append(entry)
                 copy.unlink()
                 self._check(out)
             members = self._members() if self.family is not None else None
@@ -201,7 +218,8 @@ class Backup:
                 {"made": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock())),
                  "version": __version__, "files": files,
                  "never_included": "tokens, keys, *.enc files, sessions, .env, "
-                                   "logs, removed people"}, indent=1))
+                                   "logs, removed people, project files"},
+                indent=1))
         self._check(out)
         return out
 
@@ -209,6 +227,41 @@ class Backup:
         size = out.stat().st_size
         if size > self.max_bytes:
             raise self._too_large(size)
+
+
+MEMORY_DB = "memory.sqlite"
+
+
+def project_bytes(path: Path) -> int:
+    """The project files' bytes in a memory database (0 without any)."""
+    try:
+        con = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True,
+                              timeout=10)
+    except sqlite3.Error:
+        return 0
+    try:
+        return con.execute("SELECT COALESCE(SUM(size), 0) FROM project_files").fetchone()[0]
+    except sqlite3.Error:  # an older file: no such table
+        return 0
+    finally:
+        con.close()
+
+
+def strip_project_files(copy: Path) -> int:
+    """Delete the project files from a memory database's backup copy (see
+    the module doc) and shrink it. Returns how many went."""
+    con = sqlite3.connect(copy)
+    try:
+        try:
+            n = con.execute("DELETE FROM project_files").rowcount
+        except sqlite3.Error:  # an older file: no such table
+            return 0
+        con.commit()
+        if n:
+            con.execute("VACUUM")
+        return n
+    finally:
+        con.close()
 
 
 def copy_database(src: Path, dst: Path) -> None:

@@ -131,36 +131,45 @@ class PineconeMemory:
             self._quota_logged = True
             raise PineconeOverQuota("Pinecone is over quota") from None
 
-    def retrieve(self, query: str) -> list[str]:
+    def retrieve(self, query: str, project: str | None = None) -> list[str]:
         """Return the text of notes relevant to `query`, best first (none
-        while Pinecone is over quota)."""
+        while Pinecone is over quota). A summary of a project's conversation
+        (metadata project_id, projects.py) is returned only for that
+        `project`, never elsewhere."""
         self.last_untrusted = False
         self.last_matches = []
         if not query.strip():
             return []
         try:
-            return self._guarded(self._retrieve, query)
+            return self._guarded(self._retrieve, query, project)
         except PineconeOverQuota:
             return []
 
-    def _retrieve(self, query: str) -> list[str]:
+    def _retrieve(self, query: str, project: str | None = None) -> list[str]:
         vector = self.embed(query, "query")
         namespaces = self.namespaces()
+        # Over-fetch: other projects' summaries are dropped below, so asking
+        # for only top_k could leave this chat with fewer notes, or none.
+        fetch = min(self.top_k * 3, 50)
         if len(namespaces) == 1:
-            result = self.index.query(vector=vector, top_k=self.top_k,
+            result = self.index.query(vector=vector, top_k=fetch,
                                       namespace=namespaces[0],
                                       include_metadata=True)
         else:
             result = self.index.query_namespaces(
                 vector=vector, namespaces=namespaces, metric="cosine",
-                top_k=self.top_k, include_metadata=True)
+                top_k=fetch, include_metadata=True)
         notes = []
         self.last_untrusted = False
         self.last_matches = []
         for match in result.matches:
+            if len(notes) >= self.top_k:
+                break
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()
+            if meta.get("project_id") not in (None, project):
+                continue  # another project's (or, outside one, any project's)
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
                 self.last_matches.append((getattr(match, "id", ""), notes[-1]))

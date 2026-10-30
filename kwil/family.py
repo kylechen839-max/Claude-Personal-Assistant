@@ -467,6 +467,11 @@ class Family:
 
             # study mode; their missed concepts in their own memory file
             registry.register(*study_tools(memory))
+        if memory is not None and self.config.get("projects", {}).get("enabled", True):
+            from kwil.tools.projects import project_tools
+
+            # their own projects' files, in their own memory file
+            registry.register(*project_tools(memory))
         reminders = self.reminders_of(user["id"])
         if reminders is not None:
             from kwil.tools.reminders import reminder_tools
@@ -1007,6 +1012,12 @@ class Family:
 
             recall.attach(store, self.config)  # their own index, in their file
 
+        from kwil import projects
+
+        bounds = projects.limits(self.config)  # their project files' budget
+        project_options = {"project_inline_tokens": bounds["inline_tokens"],
+                           "project_inline_bytes": bounds["inline_bytes"]}
+
         def chat_factory(session_registry):
             # their own key (or, for family, the owner's), looked up per call
             chat_api, title_api = UserApi(self, user["id"]), UserApi(self, user["id"])
@@ -1023,7 +1034,7 @@ class Family:
                               user_name=user["name"],
                               timezone=user.get("timezone") or None,
                               fast_model=a["fast_model"], router=a["router"],
-                              local_memory=memory)
+                              local_memory=memory, **project_options)
 
         return UserContext(user, registry, store, chat_factory, memory)
 
