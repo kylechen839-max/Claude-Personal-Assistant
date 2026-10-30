@@ -7841,5 +7841,5 @@ precheck, the file deleted through another project's URL, files under the
 export cap, no files allowance, the backup keeping files, recall
 unfiltered, the summary untagged).
 
-Counts (Linux sandbox): 3823 passed, 45 skipped, 1 deselected (16cf97d:
+Counts (Linux sandbox): 3828 passed, 45 skipped, 1 deselected after the [auto-review] braces fix (+4) and judge round 3's Pinecone over-fetch test (+1) (3823 before them; 16cf97d:
 3817 / 45; +6). JavaScript 343 passed (unchanged).

@@ -148,18 +148,23 @@ class PineconeMemory:
     def _retrieve(self, query: str, project: str | None = None) -> list[str]:
         vector = self.embed(query, "query")
         namespaces = self.namespaces()
+        # Over-fetch: other projects' summaries are dropped below, so asking
+        # for only top_k could leave this chat with fewer notes, or none.
+        fetch = min(self.top_k * 3, 50)
         if len(namespaces) == 1:
-            result = self.index.query(vector=vector, top_k=self.top_k,
+            result = self.index.query(vector=vector, top_k=fetch,
                                       namespace=namespaces[0],
                                       include_metadata=True)
         else:
             result = self.index.query_namespaces(
                 vector=vector, namespaces=namespaces, metric="cosine",
-                top_k=self.top_k, include_metadata=True)
+                top_k=fetch, include_metadata=True)
         notes = []
         self.last_untrusted = False
         self.last_matches = []
         for match in result.matches:
+            if len(notes) >= self.top_k:
+                break
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()

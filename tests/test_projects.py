@@ -1013,3 +1013,31 @@ def test_deleting_her_account_deletes_her_projects(env, owner, tmp_path):
     env.app.state.account.revoke = lambda token: None
     assert mom.post("/api/me/delete", json={"confirm": "DELETE"}).status_code == 200
     assert not path.exists()
+
+
+def test_other_projects_summaries_never_crowd_out_a_chats_notes():
+    """Judge round 3: the project filter ran after Pinecone returned top_k
+    matches, so other projects' closest summaries could leave a chat with
+    no notes. It now over-fetches, filters, then keeps top_k."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from kwil.memory import PineconeMemory
+
+    pc = MagicMock()
+    pc.inference.embed.return_value = SimpleNamespace(data=[{"values": [0.1] * 1024}])
+    others = [SimpleNamespace(id=f"o{i}", score=0.95, metadata={
+        "text": f"other {i}", "project_id": "prj-bbbbbbbbbbbb"}) for i in range(4)]
+    mine = [SimpleNamespace(id=f"g{i}", score=0.9, metadata={"text": f"general {i}"})
+            for i in range(6)]
+
+    def query(**kw):
+        return SimpleNamespace(matches=(others + mine)[: kw["top_k"]])
+
+    index = MagicMock()
+    index.query.side_effect = query
+    mem = PineconeMemory(pc=pc, index=index)
+    mem.search_namespaces = ["voice-assistant"]
+    got = mem.retrieve("x")
+    assert got == [f"general {i}" for i in range(mem.top_k)]
+    assert index.query.call_args.kwargs["top_k"] > mem.top_k
