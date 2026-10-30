@@ -54,16 +54,21 @@ def study_tools(store=None) -> list[Tool]:
                 result["to_review"] = []
                 result["message"] = ("Missed concepts aren't kept here (memory is "
                                      "off): quiz on the course instead.")
+            elif store.paused:  # "Pause memory": the list isn't used either
+                result["to_review"] = []
+                result["status_review"] = "paused"
+                result["message"] = ("Memory is paused in Settings, so the missed list "
+                                     "isn't used: say so and quiz on the course instead.")
             else:
+                # only that course ("PHYS361" matches "PHYS 361"), never others
                 found = store.missed(state["course"] or None)
-                if not found and state["course"]:
-                    found = store.missed()  # e.g. "PHYS361" vs "PHYS 361"
                 result["to_review"] = [
                     {k: m[k] for k in ("course", "concept", "count")}
                     for m in found[:MAX_REVIEW]]
                 if not found:
-                    result["message"] = ("Nothing is noted as missed yet: say so "
-                                         "and quiz on the course instead.")
+                    where = f" for {state['course']}" if state["course"] else ""
+                    result["message"] = (f"Nothing to review{where} yet: say so and "
+                                         "quiz on the course instead.")
                 mark_untrusted(result, any(m["untrusted"] for m in found[:MAX_REVIEW]))
         return result
 
@@ -90,6 +95,10 @@ def study_tools(store=None) -> list[Tool]:
         return {"status": "noted", "id": saved["id"], "count": saved["count"]}
 
     def list_missed(course: str = "") -> dict:
+        if store.paused:
+            return {"status": "paused", "missed": [],
+                    "message": "Memory is paused in Settings, so the missed list "
+                               "isn't used. Say so in one short sentence."}
         found = store.missed(str(course or "")[:100] or None)
         result = {"missed": [{k: m[k] for k in ("id", "course", "concept", "count",
                                                 "last_seen")} for m in found[:100]],

@@ -7538,3 +7538,28 @@ study tools, no toggle route, no list routes.
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3738 passed, 42 skipped, 1 deselected (250da33: 3717 / 42; +21).
 JavaScript 321 passed (313; +8).
+
+### Study mode, judge round 2 (2026-10-30)
+1. **Taint of the missed list tested:** a concept noted untrusted, then
+   `list_missed` or a review: the result is marked untrusted, the
+   conversation is tainted, and a later `confirm_if_untrusted` tool asks
+   (both paths, parametrized).
+2. **A review stays in its course:** courses match ignoring spaces and
+   case ("PHYS361" = "PHYS 361", also for `list_missed`); a course with
+   nothing noted gets an empty list and "Nothing to review for Chem 101
+   yet", never other courses' concepts.
+3. **Pause memory:** `list_missed` returns "paused" with no list, and a
+   review starts without one (`status_review: "paused"`).
+4. SECURITY: an older Kwil after a rollback leaves the list on Forget all.
+5. **Resumed conversations:** `_switch_to` clears study mode (it belonged
+   to the conversation that was left).
+6. Router: 学习, 考试 and 测试 are main-model words too (学习 also
+   matches everyday sentences; that only costs the main model).
+
+Failing first (scratch copy, one change reverted at a time): 7 mutations
+(each mark_untrusted removed, the all-courses fallback, the old
+space-sensitive match, the pause checks, `_switch_to` keeping study, the
+Chinese words) each fail their new test.
+
+Counts (Linux sandbox): 3743 passed, 42 skipped, 1 deselected (4c00e06:
+3738 / 42; +5). JavaScript 321 passed (unchanged).

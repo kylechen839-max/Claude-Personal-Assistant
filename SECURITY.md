@@ -2428,7 +2428,9 @@ network code of its own.
   its deletion with a family account. The table is made with `CREATE
   TABLE IF NOT EXISTS` outside the numbered migrations, so the schema
   version stays 1 and an older Kwil after a rollback still opens the file
-  (a test checks `user_version`).
+  (a test checks `user_version`). That older Kwil doesn't know the table:
+  its Forget all leaves the study list in the file (shown again, and
+  deletable, once the newer Kwil is back).
 - **Bounded.** A concept is one line of at most 120 characters (longer is
   refused, so the model says it shorter), a course 80; at most 300 per
   person: a new one past that deletes the one seen longest ago (they are

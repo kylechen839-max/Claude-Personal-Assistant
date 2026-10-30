@@ -790,6 +790,9 @@ class ClaudeChat:
             if self.memory and not self.incognito:
                 _background().submit(self._remember, previous, cid, untrusted)
         self.history = rebuild_history(conv, self.max_history)
+        # study mode was the other conversation's (per conversation)
+        self.study = self._study_on = None
+        self._study_text = ""
         self.recorder.resume(conversation_id)
         self.recorder.user(user_text)
         self.recorder.assistant(reply)

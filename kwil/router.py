@@ -90,7 +90,10 @@ _EN_KEYWORDS = (
 _EN = re.compile(r"\b(?:" + "|".join(_EN_KEYWORDS) + ")", re.IGNORECASE)
 _ZH_KEYWORDS = ("安排", "添加", "加", "删", "取消", "改", "邮件", "搜索",
                 "天气", "新闻", "为什么", "解释", "翻译", "提醒", "记住", "打开",
-                "关", "播放", "推", "设置", "复习", "考考我", "测验")
+                "关", "播放", "推", "设置", "复习", "考考我", "测验",
+                # study mode: 学习 also matches everyday sentences, which only
+                # costs the main model for that turn
+                "学习", "考试", "测试")
 _CJK = re.compile(r"[㐀-鿿豈-﫿]")
 
 

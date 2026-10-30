@@ -255,7 +255,7 @@ class MemoryStore:
 
     def missed(self, course: str | None = None) -> list[dict]:
         """Most missed first (then most recent); `course`: only those whose
-        course contains it (any case)."""
+        course contains it (any case, spaces ignored)."""
         raise NotImplementedError
 
     def delete_missed(self, missed_id: str) -> bool:
@@ -537,9 +537,10 @@ class SqliteMemoryStore(MemoryStore):
                 "SELECT * FROM missed ORDER BY count DESC, last_seen DESC, rid DESC"
             ).fetchall()
         out = [self._missed_row(r) for r in rows]
-        want = " ".join(str(course or "").split()).casefold()
+        # spaces and case ignored: "PHYS361" finds "PHYS 361"
+        want = "".join(str(course or "").split()).casefold()
         if want:
-            out = [m for m in out if want in m["course"].casefold()]
+            out = [m for m in out if want in "".join(m["course"].split()).casefold()]
         return out
 
     def delete_missed(self, missed_id: str) -> bool:

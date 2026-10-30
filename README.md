@@ -1645,7 +1645,9 @@ plain text, so the Tutor tab is still the place for drawn equations.
 - **What you missed:** each wrong or half-right answer is noted (the
   concept in a few words, its course, how often, when last). Say "review
   what I missed" (or "...in PHYS 361") to be quizzed on those first, most
-  missed first. Settings -> **Memory** -> **Study: things to review** lists
+  missed first; a course is matched ignoring spaces and case ("PHYS361"),
+  and one with nothing noted says so instead of quizzing other courses.
+  While memory is paused the list isn't used either. Settings -> **Memory** -> **Study: things to review** lists
   them with **Delete** (asks first); **Forget all** clears them too.
   At most 300 are kept per person (the one seen longest ago goes first),
   120 characters each. They are kept in your memory file (`[memory]
