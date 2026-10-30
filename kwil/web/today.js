@@ -74,19 +74,25 @@
     askOwnAllDayTomorrow: "Tell me about “{title}” tomorrow.",
     askStudy: "Quiz me on {title}.",
     askStudyOutside: "Quiz me on item {n} of my review list.",
+    askContinues: "What's my event that continues today about?",
+    askOwnContinues: "Tell me about “{title}”, which continues today.",
+    until: "until {time}",
+    tooMany: "Too many requests; try again in a minute.",
   };
   const URL_HASH = "#today";
   const SECTIONS = ["brief", "today", "tomorrow", "due", "reminders", "research", "study"];
 
   // A local wall time the server sent as ISO ("2027-01-14T15:00") in the
-  // page's language ("3:00 PM", "15:00"); "" for a date alone. Built from
-  // its parts, so the device's own zone never moves it.
+  // page's language ("3:00 PM", "15:00"); "" for a date alone. Built and
+  // printed in UTC, so the phone's own zone (and its clock-change gap)
+  // never moves it.
   function wallTime(iso, lang = "en-US") {
     const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(String(iso || ""));
     if (!m) return "";
-    const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+    const at = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+      Number(m[4]), Number(m[5])));
     try {
-      return at.toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" });
+      return at.toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
     } catch (e) { return `${m[4]}:${m[5]}`; }
   }
 
@@ -98,6 +104,10 @@
       (all, name) => (name in values ? String(values[name]) : all));
     if (kind === "event") {
       const day = item.day === "tomorrow" ? "Tomorrow" : "Today";
+      if (item.continues) {  // started before today: never a start time
+        return item.outside ? fill("askContinues", {})
+          : fill("askOwnContinues", { title: item.title });
+      }
       if (item.outside) {
         return item.all_day || !item.start ? fill(`askAllDay${day}`, {})
           : fill(`askEvent${day}`, { time: wallTime(item.start, lang) });
@@ -145,7 +155,11 @@
         : await win.fetch(url, { credentials: "same-origin" });
       let body = {};
       try { body = await res.json(); } catch (e) { /* not JSON */ }
-      if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
+      if (!res.ok) {
+        const err = new Error(body.error || `Error ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
       return body;
     }
 
@@ -268,8 +282,9 @@
     }
 
     function eventRow(e) {
-      const time = e.all_day || !e.start ? tr(TEXT.allDay)
-        : e.end ? `${at(e.start)} – ${at(e.end)}` : at(e.start);
+      const time = e.continues && !e.all_day && e.end ? tr(TEXT.until).replace("{time}", at(e.end))
+        : e.all_day || !e.start ? tr(TEXT.allDay)
+          : e.end ? `${at(e.start)} – ${at(e.end)}` : at(e.start);
       return asker(e.title, join(time, e.location), question("event", e, tr, lang()));
     }
 
@@ -359,7 +374,7 @@
         if (status) status.textContent = "";
       } catch (e) {
         if (me !== seq) return;
-        if (status) status.textContent = tr(TEXT.offline);
+        if (status) status.textContent = tr(e && e.status === 429 ? TEXT.tooMany : TEXT.offline);
         if (retry) retry.hidden = false;
       } finally {
         if (me === seq) busy(false);

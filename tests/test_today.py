@@ -565,3 +565,152 @@ def test_too_many_screens_a_minute_is_a_429(owner, monkeypatch):
     assert r.status_code == 429 and "wait a minute" in r.json()["error"]
     clock.t += 61
     assert owner.client.get("/api/today").status_code == 200
+
+
+# --- judge round 2 -----------------------------------------------------------------
+
+def test_an_event_from_yesterday_continues_without_a_start_time(owner):
+    """Round 2, item 2: never today's date on yesterday's start."""
+    late = {**MINE, "id": "ev-late", "start": {"dateTime": "2027-01-13T23:00:00-05:00"},
+            "end": {"dateTime": "2027-01-14T01:00:00-05:00"}}
+    trip = {**ALL_DAY, "id": "ev-trip", "start": {"date": "2027-01-12"},
+            "end": {"date": "2027-01-16"}}
+    owner.events.list.return_value.execute.return_value = {"items": [late, trip, MINE]}
+    items = owner.client.get("/api/today").json()["calendar"]["items"]
+    got = {e["id"]: (e["day"], e["start"], e["end"], e["continues"], e["all_day"]) for e in items}
+    assert got["ev-late"] == ("today", "", "2027-01-14T01:00", True, False)
+    assert got["ev-trip"] == ("today", "", "", True, True)
+    assert got["ev-own"] == ("today", "2027-01-14T15:00", "2027-01-14T16:00", False, False)
+
+
+def gated_app(make_app, monkeypatch):
+    """An owner app whose calendar waits on `gate`; run_in_threadpool
+    records what it runs (set up before create_app imports it)."""
+    import threading
+
+    import starlette.concurrency as concurrency
+
+    ran = []
+    real = concurrency.run_in_threadpool
+
+    async def recording(fn, *args, **kwargs):
+        ran.append(getattr(fn, "__name__", repr(fn)))
+        return await real(fn, *args, **kwargs)
+    monkeypatch.setattr(concurrency, "run_in_threadpool", recording)
+    pin(monkeypatch, NOW)
+    gate, started = threading.Event(), threading.Event()
+    service, events = make_service()
+
+    def slow():
+        started.set()
+        gate.wait(5)
+        return {"items": [MINE]}
+    events.list.return_value.execute.side_effect = slow
+    _, client = make_app(tools=owner_tools(service))
+    login(client)
+    return client, gate, started, ran, events
+
+
+def in_thread(fn):
+    import threading
+
+    out = []
+
+    def run():
+        try:
+            out.append(fn())
+        except Exception as e:  # the leader's own failure (TestClient re-raises it)
+            out.append(e)
+    th = threading.Thread(target=run)
+    th.start()
+    return th, out
+
+
+def wait_until(check):
+    import time
+
+    for _ in range(500):
+        if check():
+            return
+        time.sleep(0.01)
+    raise AssertionError("never happened")
+
+
+def test_a_joiner_waits_without_a_worker_thread(make_app, monkeypatch):
+    """Round 2, item 3: the second request waits on the event loop."""
+    client, gate, started, ran, events = gated_app(make_app, monkeypatch)
+    lead, first = in_thread(lambda: client.get("/api/today"))
+    assert started.wait(5)
+    join, second = in_thread(lambda: client.get("/api/today"))
+    wait_until(lambda: client.app.state.today_gate.waiters.get("") == 1)
+    gate.set()
+    lead.join(5)
+    join.join(5)
+    assert first[0].status_code == second[0].status_code == 200
+    assert first[0].json() == second[0].json()
+    assert ran.count("build") == 1 and "result" not in ran
+    assert client.app.state.today_gate.waiters == {}
+
+
+def test_waiters_are_capped_and_a_failed_screen_is_a_plain_error(make_app, monkeypatch):
+    from kwil import today
+
+    monkeypatch.setattr(today, "MAX_WAITERS", 1)
+    client, gate, started, ran, events = gated_app(make_app, monkeypatch)
+    real_build = today.build
+
+    def failing(*args):
+        real_build(*args)
+        raise RuntimeError("boom")
+    monkeypatch.setattr(today, "build", failing)
+    lead, first = in_thread(lambda: client.get("/api/today"))
+    assert started.wait(5)
+    join, second = in_thread(lambda: client.get("/api/today"))
+    wait_until(lambda: client.app.state.today_gate.waiters.get("") == 1)
+    third = client.get("/api/today")  # a second waiter: refused at once
+    assert third.status_code == 429
+    gate.set()
+    lead.join(5)
+    join.join(5)
+    assert isinstance(first[0], RuntimeError)  # the leader's own 500
+    assert second[0].status_code == 503
+    assert second[0].json() == {"error": "couldn't load Today; try again"}
+
+
+def test_reads_are_capped_for_everyone_together():
+    """Round 2, item 4: MAX_LIVE (here 2): a third person waits for a slot."""
+    import threading
+
+    from kwil import today
+
+    reads = today.Reads(limit=2)
+    gate = threading.Event()
+    a = reads.start(("a", "calendar"), gate.wait, 5)
+    b = reads.start(("b", "calendar"), gate.wait, 5)
+    assert a is not None and b is not None
+    assert reads.start(("c", "calendar"), lambda: "c's") is None
+    gate.set()
+    a.result(5)
+    b.result(5)
+    wait_until(lambda: not reads.live)
+    c = reads.start(("c", "calendar"), lambda: "c's")
+    assert c is not None and c.result(5) == "c's"
+
+
+def test_a_thread_that_cannot_start_leaves_no_entry(monkeypatch):
+    """Round 2, item 5."""
+    import threading
+
+    from kwil import today
+
+    reads = today.Reads()
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    future = reads.start(("a", "notion"), lambda: "x")
+    assert reads.live == {}
+    with pytest.raises(RuntimeError):
+        future.result(1)
+    monkeypatch.undo()
+    assert reads.start(("a", "notion"), lambda: "y").result(5) == "y"

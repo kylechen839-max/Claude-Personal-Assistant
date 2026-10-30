@@ -8473,3 +8473,24 @@ interaction only; nothing on the server changed.
 - Full suite: 4015 passed, 53 skipped (was 4008); JS 452 passed (was
   449). zh phone screenshot retaken (Chromium, not a real iPhone): times
   read 15:00, 23:59, no "PM".
+
+### Today screen, judge round 2 LOWs (2026-10-30)
+- (1) `wallTime` builds and prints in UTC, so a time in the phone's own
+  clock-change gap (2027-03-14 02:30 in New York) stays 2:30.
+- (2) An event that started before today comes with `continues` and no
+  start time: "until 1:00 AM" (timed) or "All day", and Ask Kwil says
+  "...which continues today" with no time (zh too).
+- (3) A request joining the screen in flight waits with
+  `asyncio.wait_for(shield(wrap_future(...)))` on the event loop, no
+  worker thread; a timeout or the first request's failure or cancellation
+  is a plain 503; at most `MAX_WAITERS` (4) wait per person, then 429. The
+  page shows a 429 as "Too many requests; try again in a minute." (zh too).
+- (4) A test for the all-people cap (`Reads(limit=2)`: a third person is
+  refused, then gets a slot once one ends).
+- (5) `Reads.start` removes its entry and fails the future if the thread
+  can't start.
+- Tests: `test_today.py` +5, `today.test.mjs` +3. With 44db255's
+  `today.py`, `today.js` and `i18n.js`, 4 Python and 3 JS of them fail;
+  the cap test (4) passes there (the code was right, only untested) and
+  fails with the cap check removed.
+- Full suite: 4020 passed, 53 skipped (was 4015); JS 455 passed (was 452).

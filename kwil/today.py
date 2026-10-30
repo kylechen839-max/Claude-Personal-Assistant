@@ -28,6 +28,7 @@ puts such a title into the "Ask Kwil" question it prefills. The log gets
 section names, counts, states and exception type names only.
 """
 
+import asyncio
 import contextvars
 import logging
 import re
@@ -50,6 +51,7 @@ SLOW_SECONDS = 8.0   # calendar and Notion together: past this, "error"
 PER_MINUTE = 20      # screens a person may load a minute (joining one in flight is free)
 MAX_LIVE = 16        # calendar/Notion reads alive at once, everyone together
 MAX_PEOPLE = 1000    # rate-limit entries kept
+MAX_WAITERS = 4      # requests a person may have waiting on their screen in flight
 RUNNING = ("queued", "planning", "researching", "writing")
 # exception names that mean "sign in again" (as student_web._code)
 RECONNECT = ("MissingScopes", "GoogleSignInError", "RefreshError", "NotionReconnect")
@@ -94,7 +96,13 @@ class Reads:
                     if self.live.get(key) is future:
                         del self.live[key]
         future.set_running_or_notify_cancel()
-        threading.Thread(target=run, name=f"today-{key[1]}", daemon=True).start()
+        try:
+            threading.Thread(target=run, name=f"today-{key[1]}", daemon=True).start()
+        except BaseException as e:  # e.g. "can't start new thread": no entry left behind
+            with self.lock:
+                if self.live.get(key) is future:
+                    del self.live[key]
+            future.set_exception(e)
         return future
 
 
@@ -106,14 +114,19 @@ class Gate:
         self.clock = clock
         self.lock = threading.Lock()
         self.flights: dict = {}  # person -> Future of the screen
+        self.waiters: dict = {}  # person -> requests waiting on it
         self.recent: OrderedDict = OrderedDict()  # person -> deque of times
 
     def join_or_lead(self, key: str):
-        """(future, leads): the screen in flight, or a new one this caller
-        builds; (None, False) past the rate limit."""
+        """(future, leads): the screen in flight (call leave() when done
+        waiting), or a new one this caller builds; (None, False) past the
+        rate limit or MAX_WAITERS."""
         with self.lock:
             running = self.flights.get(key)
             if running is not None:
+                if self.waiters.get(key, 0) >= MAX_WAITERS:
+                    return None, False
+                self.waiters[key] = self.waiters.get(key, 0) + 1
                 return running, False
             now = self.clock()
             times = self.recent.setdefault(key, deque())
@@ -128,6 +141,14 @@ class Gate:
             future: Future = Future()
             self.flights[key] = future
             return future, True
+
+    def leave(self, key: str) -> None:
+        with self.lock:
+            left = self.waiters.get(key, 0) - 1
+            if left > 0:
+                self.waiters[key] = left
+            else:
+                self.waiters.pop(key, None)
 
     def land(self, key: str, future: Future) -> None:
         with self.lock:
@@ -188,14 +209,20 @@ def calendar_section(registry, account, today) -> dict:
         if not isinstance(e, dict):
             continue
         day = tomorrow if e.get("date") == spoken_date(tomorrow) else today
+        # started before today (e.g. last night until 1 AM, or a trip):
+        # no start time, the end only for a timed one (as "until ...")
+        continues = e.get("date") not in (spoken_date(today), spoken_date(tomorrow))
         # local wall times as ISO ("2027-01-14T15:00"): the page words them
         # in its own language
         start, end = clock_of(e.get("start")), clock_of(e.get("end"))
+        if continues:
+            start = ""
         days["tomorrow" if day == tomorrow else "today"].append({
             "id": str(e.get("id", "")), "title": str(e.get("title", "")),
             "day": "tomorrow" if day == tomorrow else "today",
             "start": f"{day.isoformat()}T{start}" if start else "",
             "end": f"{day.isoformat()}T{end}" if end else "",
+            "continues": continues,
             "all_day": bool(e.get("all_day")), "location": e.get("location", ""),
             "outside": bool(e.get("from_others")) or tainted})
     # each day its own MAX_ROWS: a full today never hides tomorrow
@@ -397,17 +424,34 @@ def register(app, assistant, session_of, error, scheduler) -> None:
         key = s.user or ""
         future, leads = gate.join_or_lead(key)
         if future is None:
-            log.warning("Today: %s over %d a minute", s.user or "owner", PER_MINUTE)
+            log.warning("Today: %s refused (over %d a minute, or %d waiting)", s.user or "owner",
+                        PER_MINUTE, MAX_WAITERS)
             return error("too many requests; wait a minute", 429)
         if leads:
             try:
                 data = await run_in_threadpool(build, assistant, s, scheduler, student)
                 future.set_result(data)
             except BaseException as e:
-                future.set_exception(e)
+                # a joiner gets a plain failure, never this request's own
+                # cancellation (the client went away)
+                future.set_exception(e if isinstance(e, Exception)
+                                     else RuntimeError("the screen was abandoned"))
                 raise
             finally:
                 gate.land(key, future)
         else:  # the same person's screen in flight: its answer, no second read
-            data = await run_in_threadpool(future.result, SLOW_SECONDS + 5)
+            try:
+                # on the event loop, no worker thread held; shield: our own
+                # timeout never cancels the screen the first request builds
+                data = await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)),
+                                              SLOW_SECONDS + 5)
+            except asyncio.TimeoutError:
+                log.warning("Today: %s waited too long for the screen in flight",
+                            s.user or "owner")
+                return error("couldn't load Today; try again", 503)
+            except Exception as e:  # noqa: BLE001 - the first request's failure
+                log.warning("Today: the screen in flight failed (%s)", type(e).__name__)
+                return error("couldn't load Today; try again", 503)
+            finally:
+                gate.leave(key)
         return JSONResponse(data, headers={"Cache-Control": "no-store"})

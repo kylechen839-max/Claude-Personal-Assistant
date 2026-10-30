@@ -2942,13 +2942,16 @@ network code of its own.
 - **Bounded reads** (judge round 1). The calendar and Notion reads each
   run on a thread of their own, never in a queue, and share one wait of
   about 8 s. A person has at most one screen in flight (a second request
-  gets the same answer, with no second upstream call), at most one
+  gets the same answer, waiting on the event loop with no worker thread;
+  at most 4 wait, and a failed or abandoned first request gives them a
+  plain 503, never its own cancellation), at most one
   calendar and one Notion read alive (while their last one still hangs,
   a new screen shows that section as an error instead of asking again),
   and at most 20 new screens a minute (then 429). All people together
   have at most 16 reads alive. So one person's hung Notion can't delay
   anyone else's calendar, and nothing queued waits to start after its
-  screen gave up (tests for each).
+  screen gave up (tests for each). A read whose thread can't start
+  leaves no entry behind (its section just errors).
 - **Not fixed, on purpose:** a read that outlasts the wait keeps its
   thread until Google or Notion answers (Python can't stop a thread). The
   limits above cap how many such threads there can be: 2 per person, 16

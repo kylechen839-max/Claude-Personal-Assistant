@@ -556,6 +556,10 @@
     "Tell me about “{title}” tomorrow.": "跟我说说明天的“{title}”。",
     "Quiz me on {title}.": "考考我：{title}。",
     "Quiz me on item {n} of my review list.": "就我复习清单上的第 {n} 项考考我。",
+    "What's my event that continues today about?": "我今天还在进行的那个活动是关于什么的？",
+    "Tell me about “{title}”, which continues today.": "跟我说说今天还在进行的“{title}”。",
+    "until {time}": "到 {time}",
+    "Too many requests; try again in a minute.": "请求太多了，请一分钟后再试。",
     // reply-voice picker (voice-picker.js)
     "Reply voice": "回复的声音",
     "Preview": "试听",

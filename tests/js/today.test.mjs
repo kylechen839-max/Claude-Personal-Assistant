@@ -361,3 +361,50 @@ test('the page, app.js and sw.js load it', () => {
   assert.match(app, /KwilToday\.onState\(state\)/);
   assert.match(app, /KwilToday\.configure\(\{ request, show, newChat,/);
 });
+
+// --- judge round 2 ---
+
+test('round 2, item 1: a wall time in the phone zone\'s clock-change gap stays put', () => {
+  const before = process.env.TZ;
+  process.env.TZ = 'America/New_York';  // 2:00-3:00 AM on 2027-03-14 doesn't exist here
+  try {
+    const t = load();
+    assert.equal(t.api.wallTime('2027-03-14T02:30', 'en-US'), '2:30 AM');
+    assert.equal(t.api.wallTime('2027-03-14T02:30', 'zh-CN'), '2:30');
+    assert.equal(t.api.wallTime('2026-11-01T01:30', 'en-US'), '1:30 AM');
+    assert.equal(t.api.wallTime('2027-01-14', 'en-US'), '');
+  } finally {
+    if (before === undefined) delete process.env.TZ; else process.env.TZ = before;
+  }
+});
+
+test('round 2, item 2: an event from yesterday shows "until" and never a start time', async () => {
+  const items = [
+    { id: 'late', title: 'Night shift', day: 'today', start: '', end: '2027-01-14T01:00',
+      continues: true, all_day: false, location: '', outside: false },
+    { id: 'trip', title: 'Conference', day: 'today', start: '', end: '', continues: true,
+      all_day: true, location: '', outside: true }];
+  for (const lang of ['en', 'zh']) {
+    const t = load({ lang, responses: { '/api/today': { status: 200, body: {
+      ...DATA, calendar: { state: 'ok', items } } } } });
+    await open(t);
+    const subs = rows(t, 'today').map((r) => r.all('today-sub')[0].textContent);
+    assert.deepEqual(subs, lang === 'en' ? ['until 1:00 AM', 'All day'] : ['到 1:00', '全天']);
+    for (const r of rows(t, 'today')) await r.all('today-ask')[0].fire('click');
+    assert.deepEqual([...t.filled], lang === 'en'
+      ? ['Tell me about “Night shift”, which continues today.',
+        "What's my event that continues today about?"]
+      : ['跟我说说今天还在进行的“Night shift”。', '我今天还在进行的那个活动是关于什么的？']);
+  }
+});
+
+test('round 2, item 3: a 429 says to wait a minute, not that the phone is offline', async () => {
+  for (const lang of ['en', 'zh']) {
+    const t = load({ lang, responses: { '/api/today': { status: 429,
+      body: { error: 'too many requests; wait a minute' } } } });
+    await open(t);
+    assert.equal(t.els['today-status'].textContent, lang === 'en'
+      ? 'Too many requests; try again in a minute.' : '请求太多了，请一分钟后再试。');
+    assert.equal(t.els['today-retry'].hidden, false);
+  }
+});
