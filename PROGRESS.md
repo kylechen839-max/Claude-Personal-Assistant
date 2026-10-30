@@ -8102,3 +8102,29 @@ test, live variants marked `live`). Each new behaviour was checked to
 fail with its source change reverted (a scratch copy, 27 mutations). Cost
 not measured on the real API (no key in the sandbox).
 Full suite: 3947 passed, 51 skipped (baseline 3911 passed); JS 363 passed (baseline 355).
+
+### Deep research, judge round 1 (2026-10-30)
+All eight findings fixed, each with a test that fails with its fix reverted:
+- MED 1: research_status is `untrusted_output` and marks its result
+  untrusted (a tainted job's question can't enter a clean chat as trusted).
+  `test_research_status_is_outside_text`.
+- MED 2: a failed research step ends the research there; the report is
+  written from what was found, partial "error" ("a search step failed",
+  en/zh). `test_a_failed_step_keeps_what_was_found`.
+- MED 3: the confirmation always shows the whole question (never cut);
+  the tool description says not to include personal details unless asked;
+  README/SECURITY say "only the question, exactly as you confirmed it".
+  `test_the_question_is_always_shown_whole`.
+- LOW 4: a confirmation skipped because the job would be refused makes
+  that call refuse with the same reason, and the handler starts only the
+  question that was confirmed. `test_a_refusal_that_clears_never_starts_unasked`.
+- LOW 5: a cancel landing during the save deletes the saved conversation
+  and sends nothing. `test_cancel_while_saving_keeps_and_sends_nothing`.
+- LOW 6: research requests time out by the 75% mark; the write gets at
+  least its 25% share and one retry at most. `test_timeouts_keep_the_write_its_share`.
+- LOW 7 (docs only, code kept): a family member without a key runs on the
+  owner's key and bill, within the per-person limits.
+  `test_docs_say_whose_key_family_research_uses`.
+- LOW 8: job files go with the retrying unlink (`family._unlink`), and a
+  failed prune never stops a new job. `test_a_failed_prune_never_stops_a_new_job`,
+  `test_prune_retries_a_file_windows_holds`.

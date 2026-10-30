@@ -2793,13 +2793,19 @@ network code of its own.
   `delete_calendar_event` mid-research: nothing is dispatched (each step
   is its own single-message conversation, so the call is never answered).
   The tool description tells the model to put what the research needs in
-  the question; the question is the only channel, and it is shown to the
-  person before anything runs (below).
+  the question and no personal details (names, contact details, schedule,
+  grades, addresses) unless asked for; the question is the only channel,
+  and it goes out exactly as the person confirmed it (below).
 - **Asks first, always.** start_research has a `confirm_prompt` (every
-  time, not just when tainted) naming the time and the number of
-  searches; in a tainted conversation the question is shown in full (a
-  page could have written it), otherwise cut to 120 characters. It isn't
-  asked when the job would be refused anyway (the result says why).
+  time, not just when tainted) naming the time, the number of searches and
+  the whole question (at most 500 characters, never cut), and it starts
+  only that question. It isn't asked when the job would be refused anyway;
+  that call then refuses with the reason it was given, so a job never
+  starts unasked even if the refusal clears in between (test).
+- **Status is outside text.** research_status returns the person's
+  questions, one of which may have been written while a page was in a
+  conversation: it is `untrusted_output`, so after it changes ask first
+  (test).
 - **The report is outside text.** It is web content: the saved
   conversation is continued through `ClaudeChat.resume`, which marks the
   chat untrusted, so changes ask first (test). Its sources are checked by
@@ -2814,9 +2820,11 @@ network code of its own.
   the report says it is partial. Per person: one job queued or running,
   `per_day` (3) started in any 24 hours (the owner too), counted from the
   job files so a restart doesn't reset it (a cancelled job still counts).
-  Across everyone: at most 10 waiting or running, 2 at once. Invited
-  people pay with their own key (a beta tester without one is refused
-  before anything is sent); usage goes on their meter.
+  Across everyone: at most 10 waiting or running, 2 at once. An invited
+  person's research runs on their own key when they saved one (usage on
+  their meter); a "family" member without one uses the owner's key, like
+  their chats (on the owner's bill, within the same per-person limits); a
+  beta tester without one is refused before anything is sent.
 - **Per-person isolation.** Each person's jobs are files in their own
   folder (`[research] dir` for the owner; `<[family] dir>/<id>/research/`,
   deleted with the account); the routes (`GET /api/research`, `POST
@@ -2841,6 +2849,13 @@ network code of its own.
   second page (test). Notion's own error text is never logged or shown.
 - **Logs.** Ids, depths, counts, statuses and times at INFO; the question
   and the report only at DEBUG (caplog test).
+- **Failing safe.** A research step that fails (an API error) ends the
+  research there and the report is written from what was found, marked
+  partial; a cancel that lands while the report is being saved deletes
+  the saved conversation and sends no notification. Research requests
+  time out by the 75% mark of the time budget; the write gets at least
+  its own 25% share and at most one retry. Job files are deleted with the
+  retrying unlink (Windows), and a failed prune never stops a new job.
 - Deliberately not done: a request already in flight when Cancel is
   tapped finishes (up to its timeout) before the job stops; nothing it
   returns is kept. The question leaves the server for Anthropic's web

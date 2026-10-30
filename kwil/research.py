@@ -5,9 +5,9 @@ then sends a notification; the report is a conversation in History.
 
 Starting one (tools/research.py, `start_research(question, depth)`): it
 always asks first, with the time and cost ("Start research on: ...? It
-takes about 5 to 10 minutes and does up to 10 web searches"); in a
-conversation with outside text in it the question is shown in full. Then
-it returns at once. Bounds per person ([research]): one job queued or
+takes about 5 to 10 minutes and does up to 10 web searches") and the
+whole question, exactly what the research will see. Then it returns at
+once. Bounds per person ([research]): one job queued or
 running at a time, at most `per_day` started in any 24 hours (counted from
 the job files, so a restart doesn't reset it), across everyone at most
 MAX_PENDING waiting or running, WORKERS at once. With [history] off or an
@@ -283,7 +283,10 @@ class JobStore:
                    "step": 0, "steps": 0, "conversation_id": None, "partial": "",
                    "error": "", "notion_url": ""}
             self._write(job)
-        self.prune()
+        try:
+            self.prune()
+        except Exception as e:  # noqa: BLE001 - the new job still runs
+            log.warning("Research: pruning old jobs failed (%s)", type(e).__name__)
         return job
 
     def update(self, job_id: str, active_only: bool = False, **fields) -> dict | None:
@@ -298,11 +301,15 @@ class JobStore:
             return job
 
     def delete(self, job_id: str) -> None:
+        from kwil.family import _unlink  # retried: Windows may hold it a moment
+
         with self.lock:
-            self._path(job_id).unlink(missing_ok=True)
+            _unlink(self._path(job_id))
 
     def prune(self) -> int:
         """Finished jobs past KEEP_DAYS, and the oldest beyond MAX_JOB_FILES."""
+        from kwil.family import _unlink  # retried: Windows may hold it a moment
+
         now = self.clock()
         with self.lock:
             jobs = self.list()
@@ -311,7 +318,7 @@ class JobStore:
             kept = [j for j in jobs if j not in gone]
             gone += [j for j in kept[MAX_JOB_FILES:] if j.get("status") in FINAL]
             for j in gone:
-                self._path(j["id"]).unlink(missing_ok=True)
+                _unlink(self._path(j["id"]))
         return len(gone)
 
 
@@ -371,7 +378,7 @@ class Report:
     cites: dict | None
     title: str
     summary: str = ""
-    partial: str = ""        # "", "time", "tokens", "write" (why it stopped early)
+    partial: str = ""        # "", "time", "tokens", "searches", "length", "write", "error"
     searches: int = 0
     fetches: int = 0
     sections: int = 0        # parts researched
@@ -414,10 +421,21 @@ class ResearchRunner:
             return "tokens"
         return ""
 
-    def _call(self, **kwargs):
-        timeout = max(30.0, min(float(MAX_REQUEST_SECONDS), self._left()))
-        response = self.client.messages.create(model=self.model, timeout=timeout,
-                                               **kwargs)
+    def _call(self, write: bool = False, **kwargs):
+        """One request. A research request's timeout ends by the research
+        share of the time budget (at least 30 s); the write's is what is
+        left of the whole budget but never under its own share, and it is
+        retried at most once (a retry can't eat the write's time)."""
+        elapsed = self.clock() - self.started
+        if write:
+            timeout = max(WRITE_SHARE * self.budget.seconds, self._left())
+        else:
+            timeout = max(30.0, self.budget.seconds * (1 - WRITE_SHARE) - elapsed)
+        timeout = min(float(MAX_REQUEST_SECONDS), timeout)
+        client = self.client
+        if write and callable(getattr(client, "with_options", None)):
+            client = client.with_options(max_retries=1)
+        response = client.messages.create(model=self.model, timeout=timeout, **kwargs)
         usage = _get(response, "usage")
         if usage is not None:
             self.tokens += sum(int(_get(usage, k, 0) or 0) for k in (
@@ -609,7 +627,7 @@ class ResearchRunner:
         content = [{"type": "text", "text": intro}, *results,
                    {"type": "text", "text": "Write the report now, citing the search "
                                             "results above."}]
-        response = self._call(max_tokens=self.settings.report_tokens,
+        response = self._call(write=True, max_tokens=self.settings.report_tokens,
                               system=WRITE_PROMPT + (ZH_LINE if self.language == "zh" else ""),
                               messages=[{"role": "user", "content": content}],
                               **self._thinking())
@@ -660,7 +678,20 @@ class ResearchRunner:
                 break  # every search used: write with what was found
             progress(status="researching", step=i + 1, steps=len(outline),
                      searches=self.searches, fetches=self.fetches)
-            self.step(question, title, outline, i, cancel)
+            try:
+                self.step(question, title, outline, i, cancel)
+            except Exception as e:  # noqa: BLE001 - write with what was found
+                if cancel.is_set():
+                    return None
+                from kwil.userkeys import MissingKey
+
+                if isinstance(e, MissingKey):
+                    raise
+                log.warning("Research: part %d of %d failed (%s); writing the "
+                            "report from what was found", i + 1, len(outline),
+                            type(e).__name__)
+                partial = "error"
+                break
             done += 1
         if cancel.is_set():
             return None
@@ -691,7 +722,8 @@ def partial_note(report: Report, language: str) -> str:
     from kwil import i18n
 
     why = i18n.t(f"research_why_{report.partial}", language) \
-        if report.partial in ("time", "tokens", "searches", "length", "write") else ""
+        if report.partial in ("time", "tokens", "searches", "length", "write", "error") \
+        else ""
     return "\n\n---\n" + i18n.t("research_partial", language, why=why,
                                 done=report.sections, total=report.planned)
 
@@ -1000,10 +1032,19 @@ class Research:
             return
         cid = self._save(person, job, report, markdown, lang)
         status = "partial" if report.partial else "done"
-        person.store.update(job_id, active_only=True, status=status, conversation_id=cid,
-                            partial=report.partial, finished=self.clock(),
-                            searches=report.searches, fetches=report.fetches,
-                            error="" if cid else "not_saved")
+        if person.store.update(job_id, active_only=True, status=status, conversation_id=cid,
+                               partial=report.partial, finished=self.clock(),
+                               searches=report.searches, fetches=report.fetches,
+                               error="" if cid else "not_saved") is None:
+            # cancelled (or gone) while it was being saved: nothing kept or sent
+            if cid is not None:
+                try:
+                    person.history.delete(cid)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Research: removing %s's report failed (%s)", job_id,
+                                type(e).__name__)
+            log.info("Research: %s's job %s cancelled while saving", tag, job_id)
+            return
         log.info("Research: %s's job %s %s in %.0f s (%d searches, %d fetches, "
                  "%d sources, %d chars)", tag, job_id, status, self.monotonic() - started,
                  report.searches, report.fetches,

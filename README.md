@@ -2081,10 +2081,13 @@ spoken mode (`python -m kwil`) doesn't have it.
   `standard_searches` / `deep_searches` searches and `standard_fetches` /
   `deep_fetches` pages per job. Each job also has a time and token budget
   (`standard_minutes` / `standard_tokens`, `deep_minutes` / `deep_tokens`);
-  past it Kwil writes the report from what it found and says it is
-  partial. Invited people use their own key (a beta tester without one is
-  told to add it).
-- **What the research can see:** only the question. None of your
+  past it (or if a search step fails) Kwil writes the report from what it
+  found and says it is partial. Invited people's research runs on their own key if they saved
+  one; a family member without one uses yours (as their chats do), so
+  their research is on your bill, within the same 3 a day per person; a
+  beta tester without one is told to add it.
+- **What the research can see:** only the question, exactly as you
+  confirmed it (Kwil shows it whole before it starts). None of your
   memories, instructions, projects, files, history, calendar or email is
   sent with it, and it has no tool but web search and fetch, so nothing
   it reads on the web can change anything or slip your data into a

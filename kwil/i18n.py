@@ -188,6 +188,7 @@ EN = {
     "research_why_searches": " (search limit)",
     "research_why_length": " (length limit)",
     "research_why_write": " (the write-up failed, so these are the findings as gathered)",
+    "research_why_error": " (a search step failed)",
 }
 
 ZH = {
@@ -324,6 +325,7 @@ ZH = {
     "research_why_searches": "（搜索次数上限）",
     "research_why_length": "（长度上限）",
     "research_why_write": "（整理报告失败，以下是收集到的内容）",
+    "research_why_error": "（有一步搜索出错了）",
 }
 
 

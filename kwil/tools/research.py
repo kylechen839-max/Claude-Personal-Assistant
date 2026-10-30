@@ -4,21 +4,26 @@
 
 - `start_research(question, depth)`: "research the best internships for
   physics majors this summer", "do a deep dive on X". Always asks first,
-  with the time and how many searches it may do; with outside text in the
-  conversation the question is shown in full (a page could have written
-  it). Nothing is asked when it would be refused anyway (one running, the
-  day's count, history off): the result says why. Returns at once.
+  with the time, how many searches it may do and the whole question (it
+  is all the research sees). Nothing is asked when it would be refused
+  anyway (one running, the day's count, history off): that call then
+  refuses with the reason, even if it cleared meanwhile (never starts
+  unasked). It starts only the question that was confirmed. Returns at
+  once.
 - `research_status`: read-only, the person's recent jobs ("is my research
-  done?").
+  done?"). Its result counts as outside text (a question may have been
+  written while a web page was in a conversation).
 
 The question is the person's own words: both tools are private (no inputs
 or results in the log)."""
 
 from __future__ import annotations
 
-from kwil.tools import UNTRUSTED_CONTEXT, Tool
+import threading
 
-SHORT = 120  # characters of the question in an untainted conversation's question
+from kwil.tools import UNTRUSTED_CONTEXT, Tool, mark_untrusted
+
+_DECIDED = threading.local()  # this thread's last ask(): the question asked, or a refusal
 
 
 def research_tools(service, uid: str | None = None) -> list[Tool]:
@@ -38,27 +43,38 @@ def research_tools(service, uid: str | None = None) -> list[Tool]:
         return depth if depth in R.DEPTHS else "standard"
 
     def ask(i: dict) -> str | None:
+        """The question to confirm, or None when it would be refused: then
+        the refusal is kept for this call, and the tool refuses with it
+        (never starts unasked, even if the refusal clears meanwhile)."""
+        _DECIDED.value = None
         try:
             question = R.clean_question(i.get("question"))
-        except R.ResearchRefused:
+        except R.ResearchRefused as e:
+            _DECIDED.value = ("refused", e.key)
             return None  # nothing to ask: the tool says why
         chat = _chat()
-        if getattr(chat, "incognito", False) is True or service.refusal(uid):
+        why = "research_off" if getattr(chat, "incognito", False) is True \
+            else service.refusal(uid)
+        if why:
+            _DECIDED.value = ("refused", why)
             return None
+        _DECIDED.value = ("asked", question)
         depth = depth_of(i)
         low, high = service.settings.minutes(depth)
-        # outside text in the conversation: the whole question, so a page
-        # can't hide what it would make Kwil research behind a cut
-        shown = question if UNTRUSTED_CONTEXT.get() else R.cut(question, SHORT)
-        return i18n.t("research_confirm", lang(), question=shown, low=low, high=high,
+        # always the whole question: it is all the research sees, so the
+        # person confirms exactly what leaves (at most MAX_QUESTION characters)
+        return i18n.t("research_confirm", lang(), question=question, low=low, high=high,
                       searches=service.settings.budgets[depth].searches,
                       cost=i18n.t(f"research_cost_{depth}", lang()))
 
     def start_research(question: str, depth: str = "standard") -> dict:
-        chat = _chat()
-        if getattr(chat, "incognito", False) is True:
-            return {"status": "refused", "message": say("research_off")}
+        decided, _DECIDED.value = getattr(_DECIDED, "value", None), None
+        if decided is None or decided[0] != "asked":
+            key = decided[1] if decided else "research_bad"
+            return {"status": "refused", "reason": key, "message": say(key)}
         try:
+            if R.clean_question(question) != decided[1]:  # not what was confirmed
+                raise R.ResearchRefused("research_bad")
             job = service.start(uid, question, depth_of({"depth": depth}),
                                 tainted=bool(UNTRUSTED_CONTEXT.get()))
         except R.ResearchRefused as e:
@@ -70,11 +86,17 @@ def research_tools(service, uid: str | None = None) -> list[Tool]:
                            f"when it's ready (about {low} to {high} minutes) and "
                            "that it shows in the chat. Don't research it yourself now."}
 
+    # its questions may have been written while outside text was in a
+    # conversation (a job's `tainted`): always outside text here
     def research_status() -> dict:
         jobs = service.jobs_of(uid) or []
-        return {"jobs": [{k: j[k] for k in ("question", "status", "searches",
-                                             "max_searches", "partial", "created")}
-                         for j in jobs[:5]]}
+        result = {"jobs": [{k: j[k] for k in ("question", "status", "searches",
+                                               "max_searches", "partial", "created")}
+                           for j in jobs[:5]]}
+        person = service.person(uid)
+        tainted = person is not None and any(
+            j.get("tainted") for j in person.store.list()[:5])
+        return mark_untrusted(result, tainted or bool(jobs))
 
     return [
         Tool("start_research",
@@ -86,7 +108,9 @@ def research_tools(service, uid: str | None = None) -> list[Tool]:
              "user is asked to confirm automatically; just call it. depth "
              "'standard' (about 5-10 minutes) unless they ask for a deep or "
              "thorough one ('deep', about 10-20 minutes). Only the question goes "
-             "to the research; put everything it needs in it.",
+             "to the research; put everything it needs in it. Don't include "
+             "personal details (names, contact details, schedule, grades, "
+             "addresses) unless the user asked for them in this research.",
              {"type": "object",
               "properties": {
                   "question": {"type": "string",
@@ -100,5 +124,5 @@ def research_tools(service, uid: str | None = None) -> list[Tool]:
              "The user's recent research jobs: running (with searches so far) or "
              "finished. Finished reports are in History.",
              {"type": "object", "properties": {}},
-             research_status, private=True),
+             research_status, untrusted_output=True, private=True),
     ]
