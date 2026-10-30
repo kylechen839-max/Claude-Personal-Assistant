@@ -200,6 +200,17 @@ test('Today and History tabs click their header buttons; the current tab does no
   assert.equal(p.menu.open, true);
 });
 
+test('every tab leaves Today through its Back, so a /#today link is cleared (judge LOW 1)', async () => {
+  for (const [tab, view] of [['tab-history', 'history-view'], ['tab-chat', 'app'], ['tab-settings', 'app']]) {
+    const p = load();
+    await p.flush();
+    p.win.show('today-view');
+    p.$(tab).click();
+    assert.equal(p.$('today-back').clicks, 1, tab);
+    assert.deepEqual(p.shown(), [view], tab);
+  }
+});
+
 test('Today and History tabs show only when their header buttons do (after /api/state)', async () => {
   const p = load();
   await p.flush();

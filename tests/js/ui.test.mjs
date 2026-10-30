@@ -145,6 +145,66 @@ test('settings page: Done focuses the Settings tab on a phone, the gear otherwis
   assert.equal(doneFocus({ phone: true, media: false }), 'summary');  // no matchMedia
 });
 
+// With the keyboard up (html.kb-open) the bar is display:none but not
+// [hidden]: the tab has no client rects and can't take focus (judge LOW 2).
+function kbDone({ raf = false, vv = false } = {}) {
+  const t = setupPage();
+  const rects = { n: 0 };
+  const bar = { id: 'tabbar', hidden: false };
+  const tab = { id: 'tab-settings', hidden: false, getClientRects: () => ({ length: rects.n }),
+    focus() { t.focused.push('tab-settings'); } };
+  const field = { id: 'text', blurred: 0, blur() { this.blurred++; t.doc.activeElement = null; } };
+  t.doc.activeElement = field;
+  const byId = t.doc.getElementById;
+  t.doc.getElementById = (id) => ({ tabbar: bar, 'tab-settings': tab })[id] || byId(id);
+  t.win.matchMedia = () => ({ matches: true });
+  const frames = [];
+  if (raf) t.win.requestAnimationFrame = (fn) => frames.push(fn);
+  const resize = [];
+  if (vv) t.win.visualViewport = { addEventListener: (type, fn) => resize.push(fn),
+    removeEventListener: (type, fn) => resize.splice(resize.indexOf(fn), 1) };
+  t.menu.open = true;
+  t.tapDone();
+  const frame = () => frames.splice(0).forEach((fn) => fn());
+  return { ...t, rects, field, frames, frame, resize };
+}
+
+test('settings page: Done with the keyboard up puts it away, then focuses the Settings tab', () => {
+  // no requestAnimationFrame, no visualViewport: the gear, as before
+  let t = kbDone();
+  assert.equal(t.menu.open, false);
+  assert.equal(t.field.blurred, 1);
+  assert.deepEqual(t.focused, ['summary']);
+  // a frame after the bar is drawn again
+  t = kbDone({ raf: true });
+  assert.equal(t.field.blurred, 1);
+  assert.deepEqual(t.focused, []);
+  t.frame(); t.frame();
+  assert.deepEqual(t.focused, []);  // the keyboard is still going down
+  t.rects.n = 1;
+  t.frame();
+  assert.deepEqual(t.focused, ['tab-settings']);
+  assert.equal(t.frames.length, 0);  // and it stops looking
+  // the viewport's resize (the keyboard closed)
+  t = kbDone({ vv: true });
+  assert.equal(t.resize.length, 1);
+  t.rects.n = 1;
+  t.resize[0]();
+  assert.deepEqual(t.focused, ['tab-settings']);
+  assert.equal(t.resize.length, 0);  // listener removed
+  // Settings opened again before the bar came back: focus stays with it
+  t = kbDone({ raf: true });
+  t.menu.open = true;
+  t.rects.n = 1;
+  t.frame();
+  assert.deepEqual(t.focused, []);
+  // never drawn again: it gives up after about 2 s of frames
+  t = kbDone({ raf: true });
+  for (let i = 0; i < 200 && t.frames.length; i++) t.frame();
+  assert.equal(t.frames.length, 0);
+  assert.deepEqual(t.focused, []);
+});
+
 const touch = (y) => ({ touches: [{ clientY: y }] });
 
 test('keyboard: a swipe down while typing hides it; a small move does not', () => {

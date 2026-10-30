@@ -21,11 +21,46 @@
     const phone = () => typeof root.matchMedia === "function"
       && root.matchMedia("(max-width: 47.99rem)").matches;
     const tabbar = () => byId("tabbar");
-    // close the page and hand focus back to the gear (VoiceOver lands there)
+    // laid out (html.kb-open hides the bar with CSS, not [hidden])
+    const rendered = (el) => typeof el.getClientRects !== "function" || el.getClientRects().length > 0;
+    // The keyboard is up, so the bar isn't drawn and can't take focus: put
+    // the keyboard away and focus the tab once the bar is back (the
+    // viewport's next resize, or a frame after kb-open clears; about 2 s at
+    // most). With neither available, the gear as before.
+    const focusWhenShown = (tab) => {
+      const active = doc.activeElement;
+      if (active && typeof active.blur === "function") active.blur();
+      const vv = root.visualViewport;
+      const raf = typeof root.requestAnimationFrame === "function" ? root.requestAnimationFrame.bind(root) : null;
+      const canResize = vv && typeof vv.addEventListener === "function";
+      if (!raf && !canResize) { focus(find("summary")); return; }
+      let done = false, frames = 0;
+      const finish = () => {
+        done = true;
+        if (canResize && typeof vv.removeEventListener === "function") vv.removeEventListener("resize", onResize);
+      };
+      const tryNow = () => {
+        if (done) return true;
+        if (menu.open) { finish(); return true; }  // opened again meanwhile: its title has focus
+        if (rendered(tab)) { finish(); focus(tab); return true; }
+        return false;
+      };
+      const tick = () => { if (!tryNow() && ++frames < 120) raf(tick); else if (!done) finish(); };
+      const onResize = () => {
+        if (tryNow()) return;
+        if (raf) raf(tick); else if (++frames >= 5) finish();  // a few resizes at most
+      };
+      if (canResize) vv.addEventListener("resize", onResize);
+      if (raf) raf(tick);
+    };
+    // close the page and hand focus back to the gear (VoiceOver lands there),
+    // on a phone to the tab bar's Settings
     const close = () => {
       menu.open = false;
       const tab = byId("tab-settings"), bar = tabbar();
-      focus(tab && !tab.hidden && bar && !bar.hidden && phone() ? tab : find("summary"));
+      if (!(tab && !tab.hidden && bar && !bar.hidden && phone())) focus(find("summary"));
+      else if (rendered(tab)) focus(tab);
+      else focusWhenShown(tab);
     };
     // a tap in the tab bar is its own (app.js): Settings stays open for it
     const inBar = (target) => {

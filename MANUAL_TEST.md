@@ -356,10 +356,10 @@ app above).
     appears for it).
 - [ ] Long-press a row, choose Delete..., confirm.
   - Should: it disappears; Cancel instead keeps it.
-- [ ] Gear → Incognito on. Say something. Open History and search for it.
+- [ ] Settings → Incognito on. Say something. Open History and search for it.
   - Should: not found; the header shows "Incognito". Turn it off again.
 - [ ] On iPhone, from the home-screen icon (standalone): History scrolls,
-      the back button and the dialogs work, light and dark mode both read well.
+      the tab bar and the dialogs work, light and dark mode both read well.
 
 Note anything that failed or any setting you changed in BLOCKERS.md.
 

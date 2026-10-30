@@ -8514,8 +8514,8 @@ interaction only; nothing on the server changed.
   `hidden`. Each tab works through the header's own control: Today and
   History click their buttons (closing Settings first), Settings shows the
   chat and opens the menu, Chat closes the menu and shows the chat without
-  focusing the field; from Today both go through `#today-back` so a
-  `/#today` link is cleared. The current tab does nothing. `ui.js`: a
+  focusing the field; from Today every tab goes through `#today-back`
+  first, so a `/#today` link is cleared. The current tab does nothing. `ui.js`: a
   pointerdown inside `#tabbar` doesn't close Settings; Done/Esc focus the
   Settings tab on a phone (`matchMedia("(max-width: 47.99rem)")`, guarded),
   else the gear. CSS (`app.css`, `--tabbar-h: 49px` incl. the hairline;
@@ -8542,3 +8542,22 @@ interaction only; nothing on the server changed.
   (`display: none`) on desktop, with kb-open and on the transcript.
 - Full suite: 4020 passed, 53 skipped (baseline 4020; no Python change,
   only the v25 pins); JS 467 passed (baseline 455 + 12).
+
+### Phone tab bar, judge LOWs (2026-10-30)
+- (1) Every tab, not only Chat and Settings, leaves Today through
+  `#today-back` first (`leaveToday()` in `onTab`), so History from Today
+  clears `/#today` too and setting `#today` again opens it.
+- (2) Done/Esc with the keyboard up: the bar is `display:none`
+  (`html.kb-open`) but not `[hidden]`, so the tab has no client rects and
+  can't take focus. `ui.js` now blurs the field and focuses the Settings
+  tab once it is drawn again (a `visualViewport` resize or a
+  `requestAnimationFrame` check, at most about 120 frames; not if Settings
+  was opened again meanwhile); with neither API, the gear as before.
+- (3) MANUAL_TEST History section: "Settings → Incognito", "the tab bar and
+  the dialogs work".
+- Tests: `tabbar.test.mjs` +1 (History, Chat and Settings from Today each
+  click Today's Back once), `ui.test.mjs` +1 (no rects: gear without
+  rAF/visualViewport; rAF focuses once drawn and stops; resize focuses and
+  removes its listener; reopened Settings keeps focus; gives up). With
+  0bd3cdd's `app.js` and `ui.js` both fail.
+- Full suite: 4020 passed, 53 skipped (unchanged); JS 469 passed (was 467).

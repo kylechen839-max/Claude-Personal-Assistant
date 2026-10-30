@@ -123,11 +123,14 @@ function syncTabs(view) {
     if ($(tab) && $(head)) $(tab).hidden = $(head).hidden;
   }
 }
-// Back to the chat screen without focusing the field (no keyboard pops up);
-// from Today through its Back, which also clears a /#today link.
-function tabToChat() {
+// Every tab leaves Today through its Back, which also clears a /#today link
+// (left behind, setting #today again would open nothing).
+function leaveToday() {
   const today = $("today-view"), back = $("today-back");
   if (today && !today.hidden && back && typeof back.click === "function") back.click();
+}
+// Back to the chat screen without focusing the field (no keyboard pops up).
+function tabToChat() {
   if (els.app.hidden) show("app");
 }
 function onTab(id, go) {
@@ -135,6 +138,7 @@ function onTab(id, go) {
   if (!tab) return;
   tab.addEventListener("click", () => {
     if (currentTab(shownView()) === id) return;  // already there
+    leaveToday();
     go(settingsMenu());
   });
 }
