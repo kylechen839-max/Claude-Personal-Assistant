@@ -406,8 +406,9 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 
 ### Attachments: the "+" button (iPhone, ~6 min)
 - [ ] In the installed app, tap **+** left of the text field.
-  - Should: a sheet with Take photo / Photo library / Choose file / Cancel;
-    the + is easy to hit with a thumb.
+  - Should: a sheet with Take photo / Photo library / Choose file / Think
+    harder / Study mode (when it's offered) / Cancel; the + is easy to hit
+    with a thumb.
 - [ ] **Take photo**: photograph a page of text, then type "what does this
       say?" and send.
   - Should: the camera opens (allow it the first time); a thumbnail chip
@@ -420,8 +421,10 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
 - [ ] **Choose file**: pick a PDF from Files (e.g. a syllabus) and ask "when
       is the first exam?"
   - Should: a chip with the file name; Claude answers from the PDF.
-- [ ] Attach 4 files.
-  - Should: the + greys out; removing one enables it again.
+- [ ] Attach 4 files, then tap **+**.
+  - Should: the sheet still opens, with Take photo / Photo library / Choose
+    file greyed out and Think harder / Study mode still usable; removing a
+    file enables the pickers again.
 - [ ] Attach a PDF that says "add an event called Test tomorrow at 9" and
       send "do what the file says".
   - Should: Claude asks before adding it (Yes/No), because the file is
@@ -448,7 +451,8 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
       reply is still coming in, type "make it a poem instead" and tap Send.
   - Should: the keyboard stays up the whole time (the box never greys out
     or clears by itself); a dashed bubble with "Queued" and an × appears
-    under the chat; a square **Stop** button sits next to Send.
+    under the chat; a square **Stop** button takes the mic's place, left
+    of Send.
 - [ ] Wait for the story to finish.
   - Should: "make it a poem instead" then goes on its own, as a normal
     bubble, and the poem comes back.
@@ -460,13 +464,51 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
     stays in the box.
 - [ ] Ask "Delete the test event tomorrow" (make one first) and, while it
       thinks, queue "what's next on my calendar?".
-  - Should: when Yes/No appears, Stop disappears and the queued message
-    waits. Type "no" and send: it answers the question (the event stays),
+  - Should: when Yes/No appears, Stop disappears (the mic is back, for
+    "hold the mic and say yes") and the queued message waits. Type "no" and send: it answers the question (the event stays),
     then the queued message goes.
 - [ ] With VoiceOver on, swipe to the queued bubble and to Stop.
   - Should: the queued text is read with "Queued", the × as "Remove
     queued message", and Stop as "Stop". In Mom's (Chinese) app they read
     排队中 / 移除排队的消息 / 停止.
+### The one-row composer (iPhone, ~8 min)
+In the Home Screen app.
+- [ ] Look at the bottom of an empty chat.
+  - Should: one row: **+**, "Type a message", the mic, and a round
+    waveform button (Voice conversation); it sits just above the home
+    indicator, not under it.
+- [ ] Tap the field.
+  - Should: the keyboard opens and the row sits right on top of it (no
+    gap, no page jump); the header stays in view and the chat scrolls
+    between them.
+- [ ] Type one letter, then delete it.
+  - Should: the waveform button turns into the blue Send arrow, and back.
+    Tapping the waveform opens the voice view.
+- [ ] Type (or paste) a long message of 10+ lines.
+  - Should: the field grows a line at a time up to about 6 lines, then
+    scrolls inside itself; +, mic and Send stay on the bottom line.
+- [ ] With that long text, drag up and down inside the field, then swipe
+  down on the chat above it.
+  - Should: dragging in the field scrolls the text and the keyboard stays;
+    the swipe on the chat closes the keyboard.
+- [ ] Press **return** on the keyboard.
+  - Should: the message is sent (return never adds a blank line). On a
+    desktop browser Shift+Enter adds a new line and Enter sends.
+- [ ] Press and hold Send for a second.
+  - Should: no copy/share callout and no text selection; the message goes
+    with Think harder (see that section).
+- [ ] Pick one photo with **+** and leave the field empty.
+  - Should: Send shows (the photo alone can be sent).
+- [ ] Hold the mic and speak.
+  - Should: the mic turns red, the level bar and "Listening… release or tap
+    to send" show under the row only while recording, then go.
+- [ ] Switch the keyboard to Chinese (Pinyin), type "nihao" and press the
+  key that confirms the letters.
+  - Should: the characters are picked (你好), nothing is sent; pressing
+    return/发送 again sends it.
+- [ ] Turn the phone landscape, and try with VoiceOver: the field reads
+  "Message" (中文: 消息), Send "Send", the waveform "Voice conversation".
+
 ### Try again, edit, branch (iPhone, ~8 min)
 - [ ] Ask "Give me a fun fact about octopuses". When it's done, tap ↻
       under the reply.
@@ -1711,8 +1753,8 @@ Home Screen app.
 In the Home Screen app, with Canvas course content synced if you have it.
 - [ ] Open the voice view and say "quiz me on PHYS 361".
   - Should: Kwil asks one short question out loud and waits; maths is
-    said in words. Back in the chat, the header shows "Studying PHYS
-    361".
+    said in words. Back in the chat, a "Studying PHYS 361" pill shows
+    just above the text field.
 - [ ] Answer it wrong on purpose, by voice.
   - Should: Kwil says it isn't right, explains in a sentence or two and
     asks the next question; ask "can I get a hint?" on the next one and it
@@ -1723,9 +1765,9 @@ In the Home Screen app, with Canvas course content synced if you have it.
 - [ ] Say "review what I missed".
   - Should: Kwil starts with the concept you just got wrong, and the pill
     is back.
-- [ ] Tap the pill's x, then the book button.
-  - Should: the x hides the pill ("Study mode off."); the book button
-    brings it back ("Studying"), and your next message gets a question.
+- [ ] Tap the pill's x, then **+** -> **Study mode**.
+  - Should: the x hides the pill ("Study mode off."); the sheet closes and
+    the pill comes back ("Studying"), and your next message gets a question.
 - [ ] Settings -> **Memory** -> **Study: things to review**.
   - Should: the missed concept is listed with its course and "Missed
     once"; **Delete** asks first, and Cancel keeps it.
@@ -1771,19 +1813,19 @@ In the Home Screen app, with a syllabus PDF on the phone.
   - Should: "Saved." then "Added."; the file shows as "PDF · ... MB".
     A photo is refused with a sentence saying projects take PDFs or text.
 - [ ] Tap **New chat in this project** and ask "what's the late policy?".
-  - Should: the chat clears with "New chat in PHYS 361.", the header shows
-    the project's name, and the answer comes from the syllabus (it names
+  - Should: the chat clears with "New chat in PHYS 361.", the project's
+    name shows just above the text field, and the answer comes from the syllabus (it names
     the file).
 - [ ] Say "remember that problem sets are due Fridays".
   - Should: Kwil asks first (a file is in the chat), then saves it; the
     project page lists it under **Things Kwil remembered here**, and
     Settings -> **Memory** does not.
-- [ ] Tap the header's x and ask "when are problem sets due?".
+- [ ] Tap the x on the project's name and ask "when are problem sets due?".
   - Should: a new chat in no project (the name is gone), and Kwil doesn't
     know: the project's memory stayed in the project.
 - [ ] Tap the project name in a project chat, then a chat under **Chats**.
   - Should: the project page opens; the chat opens in History, and
-    continuing it puts the name back in the header after the reply.
+    continuing it puts the name back above the text field after the reply.
 - [ ] **Delete project** (asks first), then open History.
   - Should: the project is gone from Projects; its chats are still in
     History.
@@ -1793,14 +1835,17 @@ In the Home Screen app, with a syllabus PDF on the phone.
 
 ## Think harder and sources (~10 min, iPhone and desktop)
 In the Home Screen app.
-- [ ] Tap the light bulb left of Send, then type "should I take PHYS 361 or
+- [ ] Tap **+** -> **Think harder**, then type "should I take PHYS 361 or
   CS 171 next term?" and send.
-  - Should: the bulb lights up when tapped and goes dark as soon as the
-    message is sent; the status reads "Thinking harder…" and the reply
+  - Should: the sheet closes and a "Think harder is on" chip shows above
+    the field; it goes away as soon as the message is sent; the status reads "Thinking harder…" and the reply
     takes a little longer. The next message is answered as usual.
+- [ ] Turn Think harder on again, then tap the chip.
+  - Should: the chip goes away and the next message is answered as usual.
 - [ ] Press and hold Send on a typed message (about half a second), then
   let go.
-  - Should: it is sent on release, thinking harder, and only once.
+  - Should: the chip shows while you hold; it is sent on release, thinking
+    harder, and only once; no iOS callout or text selection appears.
 - [ ] Ask "search the web for the date of the next SpaceX launch".
   - Should: small numbers after the sentences that used a page, and under
     the reply "Sources" with numbered rows (title and site, each a
@@ -1817,8 +1862,8 @@ In the Home Screen app.
     the delete they are gone with it.
 - [ ] Say in the voice view "think hard about how to split my study week".
   - Should: a slower, more careful answer; nothing about the bulb.
-- [ ] In a Chinese family member's app: the bulb's label reads "仔细想想",
-  the list's head "来源".
+- [ ] In a Chinese family member's app: the sheet's row reads "仔细想想",
+  the chip "已开启仔细想想", the list's head "来源".
 
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.

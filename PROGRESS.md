@@ -8284,3 +8284,65 @@ hardware here): MANUAL_TEST "Voice conversation on the phone".
   `tests/js/*.test.mjs` + `voice-core.test.js` 422 passed (baseline 416).
   Safe areas, VoiceOver and the scroll lock on a real iPhone: MANUAL_TEST
   "Settings page".
+
+## One-row composer (redesign phase 4, 2026-10-30)
+Kyle wants speed: the chat's bottom is now one row, like the Claude app:
+`[+] [field, 1 to about 6 lines] [mic, or Stop while busy] [Voice
+conversation, or Send when there is something to send]`. Layout and
+interaction only; nothing on the server changed.
+- `index.html`: `#text` is a `<textarea rows="1" enterkeyhint="send"
+  aria-label="Message">`; the mic and Voice conversation (now an icon
+  button) moved into `#text-form` in the order attach, text, stop, mic,
+  voice-open, send; every button but Send is `type="button"`. The project
+  and study pills left the header for a `#composer-modes` line above the
+  row, with a new `#think-chip` ("Think harder is on"; tapping it turns
+  think harder off). `#think` (same markup) and `#study-toggle` are now
+  rows in the "+" sheet after the pickers, before Cancel, with
+  `data-close`. `#mic-meter` and `#mic-hint` (`role="status"`) show only
+  while recording. Every listed id is kept.
+- `app.js` `syncComposer()` (also `window.KwilApp.syncComposer`): Send
+  shows when the field has words, files are picked (not while a yes/no
+  question is open) or an edit is open, else Voice; the mic hides while
+  Stop shows; a control that hides while focused hands focus to the field.
+  Called on input, after every submit, in startEdit/cancelEdit, setBusy
+  (so setConfirm), and when the tray changes. Enter sends unless Shift is
+  held or an IME is composing (`isComposing`, or keyCode 229 on Safari).
+  The field grows with CSS `field-sizing: content`; a script fallback sets
+  its height only where `CSS.supports` says no. `visualViewport` (guarded)
+  sets `--app-h`, toggles `html.kb-open` and undoes Safari's page scroll.
+  The think chip follows `setThink`; the long press on Send and the mic's
+  tap/hold are unchanged.
+- `attachments.js`: at 4 files the sheet's pickers are disabled, not "+",
+  so Think harder and Study mode stay reachable; `[data-close]` rows close
+  the sheet; `render()` tells app.js (`opts.changed`).
+- `app.css`: the row (`align-items: flex-end`, `--r-lg` card), the textarea
+  overriding the generic one (no border/ring, `field-sizing`, a ~6-line
+  max-height, `resize: none`, scrolls), the 84px mic and its 700px rules
+  gone (a 44px line mic, `--bad` with a ripple while recording), Voice a
+  44px accent circle with the waveform mask, `#send` with no callout or
+  selection, `.app { height: var(--app-h, 100%) }`, less footer padding
+  under `html.kb-open`, the modes line hidden when empty (`:has`), the
+  sheet's toggle rows, and a reduced-motion line. Tokens only.
+- `ui.js`: a swipe down that starts in a `#text` taller than its box (it
+  scrolls) doesn't close the keyboard.
+- i18n: 消息, 已开启仔细想想, 关闭仔细想想. `sw.js` cache `kwil-shell-v23`.
+- Tests: new `tests/js/app-composer.test.mjs` (9: Send/Voice swap with
+  the text; Enter sends, Shift+Enter, `isComposing` and keyCode 229 don't;
+  busy shows Stop and hides the mic, a question does the reverse; files
+  alone show Send, never for an answer; an edit shows Send; a long press
+  still sends with think on and the chip hides after, the chip turns it
+  off and gives focus to the field; a hidden control's focus goes to the
+  field; visualViewport sets `--app-h`, `kb-open` and scrolls back; the
+  markup and its order); `attachments.test.mjs` +1 and the tray test
+  updated (pickers disabled at 4, "+" still opens, data-close rows close,
+  app.js told of changes); `ui.test.mjs` +1 (a swipe inside a scrollable
+  field doesn't blur it); `i18n.test.mjs` +1 (the new strings; the
+  textarea's placeholder and aria-label). The pins kept: the queue and
+  Stop markup, the think and Send markup, "+" before the field,
+  `id="voice-open"`. With `app.js`, `attachments.js`, `ui.js`, `i18n.js`
+  and `index.html` reverted to 451a8d2, all 9 composer tests, the 2 tray
+  tests, the ui test and the i18n test fail.
+- Screenshots (Playwright, Chromium in the sandbox, not a real iPhone):
+  390x844 and 1280x800, light and dark, English and Chinese, empty and
+  typed, plus a 10-line message (it stops at 6 lines and scrolls), the
+  modes line with all three pills, and the sheet in both languages.

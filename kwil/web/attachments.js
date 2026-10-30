@@ -5,8 +5,11 @@
 // (kwil/attachments.py checks every file again). Photos are shrunk to
 // 1600 px and re-encoded as JPEG here first (which drops EXIF/GPS, and saves
 // data); the tutor (static/features.js) uses the same shrinkImage(). At most
-// MAX files; "+" is disabled at the limit. Loaded before app.js, which asks
-// window.KwilAttach.tray for the pending files.
+// MAX files: at the limit the sheet's pickers are disabled, while "+" still
+// opens it for its other rows (Think harder, Study mode; a row with
+// data-close just closes the sheet after its own click). Loaded before
+// app.js, which asks window.KwilAttach.tray for the pending files and is
+// told when they change (opts.changed: the composer's Send button).
 "use strict";
 
 (function (root) {
@@ -102,6 +105,8 @@
     const inputs = { camera: $("attach-camera"), library: $("attach-library"), file: $("attach-file") };
     if (!plus || !sheet || !chips) return null;
     const note = opts.note || (() => {});
+    const changed = opts.changed || (() => {});
+    const picks = Array.from(sheet.querySelectorAll("button[data-pick]"));
     let list = [];
     let work = Promise.resolve();  // photos still being shrunk
 
@@ -131,7 +136,8 @@
         chips.appendChild(chip);
       });
       chips.hidden = list.length === 0;
-      plus.disabled = !canAdd(list);
+      for (const btn of picks) btn.disabled = !canAdd(list);
+      changed();
     }
 
     async function picked(input) {
@@ -164,19 +170,23 @@
       if (input) input.addEventListener("change", () => picked(input));
     }
     plus.addEventListener("click", () => {
-      if (!canAdd(list)) return;
-      if (typeof sheet.showModal === "function") sheet.showModal(); else inputs.file.click();
+      if (typeof sheet.showModal === "function") sheet.showModal();
+      else if (canAdd(list) && inputs.file) inputs.file.click();
     });
     // The picker opens from the button's own tap (iOS needs the gesture).
-    for (const btn of sheet.querySelectorAll("button[data-pick]")) {
+    for (const btn of picks) {
       btn.addEventListener("click", () => {
         sheet.close();
+        if (!canAdd(list)) return;
         const input = inputs[btn.dataset.pick];
         if (input) input.click();
       });
     }
     const cancel = sheet.querySelector("button.cancel");
     if (cancel) cancel.addEventListener("click", () => sheet.close());
+    for (const btn of sheet.querySelectorAll("[data-close]")) {
+      btn.addEventListener("click", () => sheet.close());
+    }
     render();
 
     return {
@@ -196,6 +206,11 @@
     // app.js's addMessage (a global function of that classic script)
     api.tray = setupTray(root.document, {
       note: (text) => (typeof root.addMessage === "function" ? root.addMessage("note", text) : null),
+      // app.js's composer (Send shows for files alone); not there yet at load
+      changed: () => {
+        const app = root.KwilApp;
+        if (app && typeof app.syncComposer === "function") app.syncComposer();
+      },
     });
   }
 })(typeof window !== "undefined" ? window : globalThis);

@@ -462,6 +462,9 @@
     // "think harder" and a reply's sources (app.js, sources.js, thinkhard.py)
     "Think harder": "仔细想想",
     "Send (hold to think harder)": "发送（按住可仔细想想）",
+    "Think harder is on": "已开启仔细想想",
+    "Turn off think harder": "关闭仔细想想",
+    "Message": "消息",
     "Thinking harder…": "正在仔细想…",
     "Sources": "来源",
     "That's all your think-harder replies for today, so this one was answered the usual way.":

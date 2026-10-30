@@ -2,8 +2,10 @@
 //
 // Runs the phone page's kwil/web/attachments.js in node:vm: which
 // picked files are allowed, the 4-file limit, chips with a remove button,
-// "+" disabled at the limit, photos sent as their shrunk JPEG, and the
-// FormData parts /api/turn gets.
+// the sheet's pickers disabled at the limit (while "+" still opens the
+// sheet for Think harder and Study mode, whose data-close rows close it),
+// the composer told of every change, photos sent as their shrunk JPEG, and
+// the FormData parts /api/turn gets.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +30,10 @@ class El {
   click() { this.clicked += 1; return this.fire('click'); }
   showModal() { this.open = true; }
   close() { this.open = false; }
-  querySelectorAll(sel) { return sel === 'button[data-pick]' ? this.pickers : []; }
+  querySelectorAll(sel) {
+    if (sel === 'button[data-pick]') return this.pickers;
+    return sel === '[data-close]' ? (this.closers || []) : [];
+  }
   querySelector(sel) { return sel === 'button.cancel' ? this.cancel : null; }
   // canvas
   getContext() { return { drawImage() {} }; }
@@ -36,7 +41,7 @@ class El {
   toDataURL() { return 'data:image/jpeg;base64,AAAA'; }
 }
 
-function load({ withDocument = false, imageFails = false } = {}) {
+function load({ withDocument = false, imageFails = false, app = null } = {}) {
   const els = {};
   for (const id of ['attach', 'attach-sheet', 'attach-chips', 'attach-camera',
                     'attach-library', 'attach-file']) els[id] = new El('div', id);
@@ -44,6 +49,7 @@ function load({ withDocument = false, imageFails = false } = {}) {
     const b = new El('button'); b.dataset.pick = pick; return b;
   });
   els['attach-sheet'].cancel = new El('button');
+  els['attach-sheet'].closers = ['think', 'study-toggle'].map((id) => new El('button', id));
   const notes = [];
   const doc = {
     getElementById: (id) => els[id] || null,
@@ -58,6 +64,7 @@ function load({ withDocument = false, imageFails = false } = {}) {
     Image: class {},
     addMessage: (kind, text) => notes.push([kind, text]),
   };
+  if (app) ctx.KwilApp = app;  // app.js, loaded later on the page
   if (withDocument) ctx.document = doc;
   vm.createContext(ctx);
   ctx.window = ctx;
@@ -110,7 +117,7 @@ test('appendTo sends shrunk photos as .jpg and files as they are', () => {
   assert.equal(parts[1][2], 'plan.pdf');
 });
 
-test('the tray: sheet, chips, remove, "+" disabled at 4, clear', async () => {
+test('the tray: sheet, chips, remove, pickers disabled at 4, clear', async () => {
   const { api, els, notes } = load({ withDocument: true });
   const tray = api.tray;
   assert.ok(tray);
@@ -142,10 +149,14 @@ test('the tray: sheet, chips, remove, "+" disabled at 4, clear', async () => {
                               file('e.exe', 'application/x-msdownload')];
   await els['attach-file'].fire('change');
   assert.equal(tray.count(), 4);
-  assert.equal(els.attach.disabled, true);
+  assert.equal(els.attach.disabled, false);  // the sheet's other rows stay reachable
+  assert.deepEqual(els['attach-sheet'].pickers.map((b) => b.disabled), [true, true, true]);
   assert.deepEqual(notes.map((n) => n[1]), ['You can attach up to 4 files.',
     'Only photos, PDFs and text files can be attached.']);
-  await els.attach.click();  // disabled: no sheet
+  await els.attach.click();
+  assert.equal(els['attach-sheet'].open, true);
+  await choose.click();  // (a disabled button fires no click on a page; and if it did)
+  assert.equal(els['attach-file'].clicked, 1);  // no fifth file picker
   assert.equal(els['attach-sheet'].open, false);
   assert.equal(tray.summary(), '[photo] [file: a.pdf] [file: b.txt] [file: c.md]');
 
@@ -158,11 +169,35 @@ test('the tray: sheet, chips, remove, "+" disabled at 4, clear', async () => {
   assert.equal(remove.attrs['aria-label'], 'Remove');
   await remove.click();
   assert.equal(tray.count(), 3);
-  assert.equal(els.attach.disabled, false);
+  assert.deepEqual(els['attach-sheet'].pickers.map((b) => b.disabled), [false, false, false]);
   assert.equal(tray.summary(), '[photo] [file: b.txt] [file: c.md]');
   tray.clear();
   assert.equal(tray.count(), 0);
   assert.equal(els['attach-chips'].hidden, true);
+});
+
+test('at 4 files "+" still opens the sheet; Think and Study rows close it; the composer hears every change', async () => {
+  let synced = 0;
+  const { api, els } = load({ withDocument: true, app: { syncComposer: () => { synced += 1; } } });
+  const tray = api.tray;
+  const before = synced;
+  els['attach-file'].files = ['a', 'b', 'c', 'd'].map((n) => file(`${n}.pdf`, 'application/pdf'));
+  await els['attach-file'].fire('change');
+  assert.equal(tray.count(), 4);
+  assert.ok(synced > before, 'Send shows for files alone: app.js is told');
+  assert.equal(els.attach.disabled, false);
+  assert.ok(els['attach-sheet'].pickers.every((b) => b.disabled));
+  await els.attach.click();
+  assert.equal(els['attach-sheet'].open, true);
+  const [think, study] = els['attach-sheet'].closers;
+  await think.click();
+  assert.equal(els['attach-sheet'].open, false);
+  await els.attach.click();
+  await study.click();
+  assert.equal(els['attach-sheet'].open, false);
+  const n = synced;
+  tray.clear();
+  assert.equal(synced, n + 1);
 });
 
 test('a photo that cannot be opened is dropped with a note', async () => {
