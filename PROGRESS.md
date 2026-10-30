@@ -8031,3 +8031,9 @@ cited, no range check, and the JS kind missing each fail their tests.
 
 Counts (Linux sandbox, not real hardware): 3910 passed, 49 skipped, 1
 deselected (51e82fc: 3907 / 49; +3). JavaScript 355 passed (354; +1).
+
+### Think harder and sources, judge round 4 (2026-10-30)
+- MED, fixed by the master: an attachment cited more than once was listed
+  once per citation (`Sources._number` compared without the title fallback
+  its key used), which could fill MAX_SOURCES and drop later web pages. Test
+  `test_an_attachment_cited_twice_is_listed_once`; fails without the fix.

@@ -332,7 +332,7 @@ class Sources:
     def _number(self, item: dict) -> int | None:
         key = (item["kind"], item.get("url") or item.get("ref") or item["title"])
         for n, s in enumerate(self.items, 1):
-            if (s["kind"], s.get("url") or s.get("ref")) == key:
+            if (s["kind"], s.get("url") or s.get("ref") or s["title"]) == key:
                 return n
         if len(self.items) >= MAX_SOURCES:
             return None

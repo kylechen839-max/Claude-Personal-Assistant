@@ -418,3 +418,23 @@ def test_an_attached_file_is_named_not_linked(fake_client):
     assert chat.last_citations["sources"] == [{"kind": "attachment",
                                                "title": "plan.pdf (attached)"}]
     assert citations.stored(chat.last_citations) == chat.last_citations  # kept in history
+
+
+def test_an_attachment_cited_twice_is_listed_once():
+    """Judge round 3: an attachment has no url or ref, so each citation of it
+    added a new source (and filled MAX_SOURCES, dropping later web pages)."""
+    s = citations.Sources()
+    pdf = {"type": "document", "title": "plan.pdf", "source": {
+        "type": "base64", "media_type": "application/pdf", "data": "JVBERi0x"}}
+    s.set_documents([{"role": "user", "content": [pdf, {"type": "text", "text": "q"}]}], [])
+    doc = {"type": "page_location", "document_index": 0, "cited_text": "x",
+           "start_page_number": 1, "end_page_number": 2}
+    web = {"type": "web_search_result_location", "url": "https://example.com/a",
+           "title": "Example", "cited_text": "y"}
+    from types import SimpleNamespace as B
+    s.reply([B(type="text", text="One.", citations=[doc]),
+             B(type="text", text=" Two.", citations=[doc]),
+             B(type="text", text=" Three.", citations=[web])])
+    got = s.finish()
+    assert [x["kind"] for x in got["sources"]] == ["attachment", "web"]
+    assert [m[1] for m in got["marks"]] == [[1], [1], [2]]
