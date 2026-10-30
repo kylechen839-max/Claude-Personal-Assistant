@@ -847,6 +847,17 @@ def test_the_prompt_names_a_family_member_and_keeps_the_name_as_typed():
     assert "Kyle says" not in part and "Mom says" in part and " his " not in part
 
 
+@pytest.mark.parametrize("who", ["Sam {dad}", "J{0}", "}{", "{name}"])
+def test_a_display_name_with_braces_does_not_break_the_project_prompt(who):
+    from kwil.memory_store import Snapshot
+
+    snap = Snapshot(project={"id": "prj-0123456789ab", "name": "PHYS 361",
+                             "instructions": ""})
+    (part,) = projects.prompt_parts(snap, who=who)
+    assert part.startswith(f"This conversation is in {who}'s project \"PHYS 361\"")
+    assert f"{who} says" in part
+
+
 def test_family_members_have_their_own_projects_404_both_ways(env, owner, tmp_path):
     mine = with_projects(env, tmp_path)
     kyle = owner.post("/api/projects", json={"name": "PHYS 361"}).json()["project"]["id"]
