@@ -107,12 +107,29 @@ CSP forbids them).
   item is at least 44px tall; the superscripts in the text are
   `--accent-ink` at .7em and not tappable.
 
-## Settings menu sections
-- Below the plain switch rows, each section is a band of `--bg` holding a
-  `.group-head` and one `.group` card (Connections, People). A person is a
-  row: name (`--t-body`) over status (`--t-cap`), plain actions on the
-  right ("New link" accent, "Remove" red); "Invite someone" is the card's
-  last row. A menu row that opens another page (Memory) gets the chevron.
+## Settings page
+- The gear (`<details class="menu">`, `<summary aria-label="Settings">`:
+  scripts and tests find it by that) opens a full-screen page like iOS
+  Settings: `position: fixed; inset: 0` on `--bg` with the four safe-area
+  insets, a centred column of at most 40rem, no shadow, border or pop.
+  Nothing scrolls behind it (`html:has(.menu[open])`); reduced motion drops
+  its fade.
+- A large title (`#settings-title`, `--t-title`, focused when it opens so
+  VoiceOver starts there) and a plain **Done** (`#settings-done`, top
+  right): Done and Esc close it and give focus back to the gear (`ui.js`).
+- Sections in this order, each a `<div class="set-sec">` holding a
+  `.group-head` over one `.group` of `.row`s: Voice, Memory and projects,
+  Notifications, Connections, Privacy and data, People, Backends (its
+  `<legend>` is the head), Your account. A status line under a card is a
+  `.group-foot`. A section whose rows its scripts all hid disappears
+  (`:has`), so a family member never sees an empty head. Never "Account"
+  as a head (that string is the invite form's field in `i18n.js`).
+- Rows inside a card are split by a hairline inset from the left; a row
+  that opens another page (Memory, Projects, Reminders) ends in a
+  `.row-chevron`; sign-out-everywhere and delete are `.row.danger` (red
+  text, no fill). A person is a row: name (`--t-body`) over status
+  (`--t-cap`), plain actions on the right ("New link" accent, "Remove"
+  red); "Invite someone" is the card's last row.
 - Group headers are sentence case at `--t-cap` everywhere, including
   `<legend>`s: never tracked capitals.
 

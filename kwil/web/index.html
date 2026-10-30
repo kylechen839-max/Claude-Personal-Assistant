@@ -85,210 +85,249 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </summary>
       <div class="menu-body">
-        <label><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
-        <label><input id="mute" type="checkbox"> Don't speak replies</label>
-        <section id="voice-picker" class="voice-picker" hidden>
-          <label>Reply voice
-            <select id="voice-select"></select>
-          </label>
-          <div class="voice-picker-row">
-            <span id="voice-paid" class="tag" hidden>paid</span>
-            <button id="voice-preview" type="button">Preview</button>
+        <div class="settings-page">
+          <div class="settings-top">
+            <h2 id="settings-title" tabindex="-1">Settings</h2>
+            <button id="settings-done" type="button" class="btn plain">Done</button>
           </div>
-          <div id="voice-custom-row" class="voice-picker-row" hidden>
-            <input id="voice-custom" type="text" maxlength="64" autocapitalize="off"
-                   spellcheck="false" placeholder="ElevenLabs voice ID" aria-label="ElevenLabs voice ID">
-            <button id="voice-custom-use" type="button">Use this voice</button>
+          <div class="set-sec">
+            <h2 class="group-head">Voice</h2>
+            <div class="group">
+              <label class="row"><input id="phone-voice" type="checkbox"> Use the phone's voice</label>
+              <label class="row"><input id="mute" type="checkbox"> Don't speak replies</label>
+              <section id="voice-picker" class="voice-picker" hidden>
+                <label>Reply voice
+                  <select id="voice-select"></select>
+                </label>
+                <div class="voice-picker-row">
+                  <span id="voice-paid" class="tag" hidden>paid</span>
+                  <button id="voice-preview" type="button">Preview</button>
+                </div>
+                <div id="voice-custom-row" class="voice-picker-row" hidden>
+                  <input id="voice-custom" type="text" maxlength="64" autocapitalize="off"
+                         spellcheck="false" placeholder="ElevenLabs voice ID" aria-label="ElevenLabs voice ID">
+                  <button id="voice-custom-use" type="button">Use this voice</button>
+                </div>
+                <p id="voice-status" class="hint" role="status"></p>
+              </section>
+            </div>
           </div>
-          <p id="voice-status" class="hint" role="status"></p>
-        </section>
-        <label id="incognito-row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
-        <fieldset id="backends" class="backends" hidden>
-          <legend>Backends</legend>
-          <label>Use
-            <select id="backend-mode">
-              <option value="auto">Auto: Pi, then PC, then cloud</option>
-              <option value="pi">Pi only</option>
-              <option value="pc">PC only</option>
-              <option value="cloud">Cloud only</option>
-            </select>
-          </label>
-          <label>Pi (tailnet) <input id="url-pi" type="url" inputmode="url" autocapitalize="off"
-                 spellcheck="false" placeholder="https://pi.your-tailnet.ts.net"></label>
-          <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
-                 spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
-          <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
-                 spellcheck="false" placeholder="this app's address"></label>
-          <p class="hint">Empty = the address the server suggests.</p>
-          <button id="backends-save" type="button">Save and check</button>
-          <ul id="backend-status" class="backend-status"></ul>
-        </fieldset>
-        <button id="projects-open" type="button" hidden>Projects</button>
-        <button id="memory-open" type="button" hidden>Memory</button>
-        <button id="reminders-open" type="button" hidden>Reminders</button>
-        <button id="push-toggle" type="button" hidden>Enable notifications</button>
-        <p id="push-status" class="hint" role="status" hidden></p>
-        <section id="connections" class="conns" aria-labelledby="conn-title" hidden>
-          <svg class="conn-sprite" aria-hidden="true">
-            <symbol id="icon-anthropic" viewBox="0 0 24 24"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></symbol>
-            <symbol id="icon-canvas" viewBox="0 0 24 24"><path d="M.4403 15.4142a13.7061 13.7061 0 0 1-.4362-3.4403 13.7 13.7 0 0 1 .4362-3.4401c1.7144.2103 3.0438 1.6686 3.0438 3.44 0 1.771-1.3287 3.23-3.0438 3.4404zm3.9728-3.4403c0 .6004.4866 1.0873 1.0872 1.0873.601 0 1.088-.487 1.088-1.0873s-.487-1.088-1.088-1.088c-.6006 0-1.0872.4876-1.0872 1.088zM23.56 8.5338c-1.7151.2103-3.044 1.6686-3.044 3.44 0 1.771 1.3289 3.23 3.044 3.4404a13.7313 13.7313 0 0 0 .436-3.4403c0-1.1883-.1518-2.3413-.436-3.4401zm-6.148 3.44c0 .6005.4865 1.0874 1.0877 1.0874.6002 0 1.088-.487 1.088-1.0873s-.4878-1.088-1.088-1.088c-.6012 0-1.0877.4876-1.0877 1.088zm-5.4347 8.5465c-1.7709 0-3.229 1.33-3.44 3.044a13.7364 13.7364 0 0 0 3.441.4357c1.1885 0 2.3403-.1515 3.44-.4357-.2107-1.714-1.6687-3.044-3.441-3.044zm.001-3.1046c-.6012 0-1.0878.4876-1.0878 1.0883s.4866 1.0882 1.0878 1.0882c.6 0 1.087-.4874 1.087-1.0882s-.487-1.0883-1.087-1.0883zm0-13.936c1.7713 0 3.2295-1.3292 3.4399-3.0438A13.7353 13.7353 0 0 0 11.9782 0c-1.1887 0-2.3412.1519-3.441.4359.211 1.7146 1.6691 3.0438 3.441 3.0438zm0 .9291c-.6012 0-1.0878.4866-1.0878 1.0876 0 .6002.4866 1.0876 1.0878 1.0876.6 0 1.087-.4874 1.087-1.0876 0-.601-.487-1.0876-1.087-1.0876zm6.032 13.5965c-1.2514 1.2523-1.344 3.2211-.2825 4.582a13.762 13.762 0 0 0 4.8636-4.8654c-1.3608-1.0597-3.3299-.9673-4.5812.2834zm-.6568-2.1948c-.425-.4245-1.1135-.4245-1.539 0-.4243.4252-.4243 1.1136 0 1.5383.4255.4253 1.114.4253 1.539 0 .424-.4247.424-1.1131 0-1.5383zM5.9648 5.9603c1.2516-1.2513 1.3437-3.2206.2825-4.5813a13.7677 13.7677 0 0 0-4.8644 4.8643c1.3612 1.0616 3.3306.9687 4.582-.283zm.6567.6572c-.424.4247-.424 1.1139 0 1.5383.4245.4246 1.114.4246 1.5382 0 .4248-.4244.4248-1.1136 0-1.5383-.4243-.4243-1.1137-.4243-1.5382 0zm15.9625-.3857a13.7597 13.7597 0 0 0-4.8637-4.8642c-1.0614 1.3609-.969 3.33.2823 4.5818 1.2517 1.2507 3.2204 1.3436 4.5814.2824zM17.346 8.1443c.4237-.4248.4237-1.1135 0-1.5383-.425-.4247-1.1145-.4247-1.5388 0-.4241.4248-.4241 1.1135 0 1.5383.4243.4243 1.1137.4243 1.5388 0zM1.3772 17.7087a13.763 13.763 0 0 0 4.8647 4.8654c1.0613-1.3608.9685-3.3297-.2833-4.5818-1.2512-1.251-3.2204-1.3436-4.5814-.2836zm5.2385-1.9115c-.4238.4247-.4238 1.1136 0 1.5384.425.4246 1.1141.4246 1.5382 0 .425-.4248.425-1.1137 0-1.5384-.4241-.4245-1.1131-.4245-1.5382 0z"/></symbol>
-            <symbol id="icon-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol>
-            <symbol id="icon-home_assistant" viewBox="0 0 24 24"><path d="M22.939 10.627 13.061.749a1.505 1.505 0 0 0-2.121 0l-9.879 9.878C.478 11.21 0 12.363 0 13.187v9c0 .826.675 1.5 1.5 1.5h9.227l-4.063-4.062a2.034 2.034 0 0 1-.664.113c-1.13 0-2.05-.92-2.05-2.05s.92-2.05 2.05-2.05 2.05.92 2.05 2.05c0 .233-.041.456-.113.665l3.163 3.163V9.928a2.05 2.05 0 0 1-1.15-1.84c0-1.13.92-2.05 2.05-2.05s2.05.92 2.05 2.05a2.05 2.05 0 0 1-1.15 1.84v8.127l3.146-3.146A2.051 2.051 0 0 1 18 12.239c1.13 0 2.05.92 2.05 2.05s-.92 2.05-2.05 2.05c-.25 0-.488-.047-.709-.13L12.9 20.602v3.088h9.6c.825 0 1.5-.675 1.5-1.5v-9c0-.825-.477-1.977-1.061-2.561z"/></symbol>
-            <symbol id="icon-notion" viewBox="0 0 24 24"><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z"/></symbol>
-            <symbol id="icon-spotify" viewBox="0 0 24 24"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></symbol>
-          </svg>
-          <h2 id="conn-title" class="group-head">Connections</h2>
-          <div class="group conn-group">
-            <h3 id="conn-connected-label" class="sr-only">Connected</h3>
-            <ul id="conn-connected" class="conn-list" aria-labelledby="conn-connected-label" hidden></ul>
-            <h3 id="conn-available-label" class="sr-only">Available</h3>
-            <ul id="conn-available" class="conn-list" aria-labelledby="conn-available-label" hidden>
-              <li class="conn-row" id="conn-google" data-conn="google" hidden>
-                <button class="row conn-head" id="conn-google-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-google-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-google"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Google</span><span class="conn-sub">Calendar and email</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-google-body" aria-labelledby="conn-google-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-google"/></svg></span><h2 id="conn-google-title">Google</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <p class="conn-about">Your calendar, and your email if your account includes it. I only ever write drafts; you send them.</p>
-                  <p id="google-status" class="hint" hidden></p>
-                  <button id="google-connect" type="button" class="btn primary" hidden>Connect Google account</button>
-                  <button id="google-disconnect" type="button" class="danger" hidden>Disconnect Google account</button>
-                </dialog>
-              </li>
-              <li class="conn-row" id="conn-notion" data-conn="notion" hidden>
-                <button class="row conn-head" id="conn-notion-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-notion-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-notion"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Notion</span><span class="conn-sub">Assignments and notes</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-notion-body" aria-labelledby="conn-notion-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-notion"/></svg></span><h2 id="conn-notion-title">Notion</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <p class="conn-about">Your Notion assignments and notes, so I can list what's due and file your notes.</p>
-                  <p id="notion-status" class="hint" hidden></p>
-                  <p id="notion-detail" class="hint" hidden></p>
-                  <button id="notion-connect" type="button" class="btn primary" hidden>Connect Notion</button>
-                  <button id="notion-disconnect" type="button" class="danger" hidden>Disconnect Notion</button>
-                </dialog>
-              </li>
-              <li class="conn-row" id="conn-canvas" data-conn="canvas" hidden>
-                <button class="row conn-head" id="conn-canvas-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-canvas-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-canvas"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Canvas</span><span class="conn-sub">School deadlines</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-canvas-body" aria-labelledby="conn-canvas-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-canvas"/></svg></span><h2 id="conn-canvas-title">Canvas</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <p class="conn-about">Your school deadlines from Canvas. I never ask for your school password.</p>
-                  <section id="student" class="api-key student" hidden></section>
-                </dialog>
-              </li>
-              <li class="conn-row" id="conn-home_assistant" data-conn="home_assistant" hidden>
-                <button class="row conn-head" id="conn-home_assistant-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-home_assistant-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-home_assistant"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Home Assistant</span><span class="conn-sub">Lights and devices</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-home_assistant-body" aria-labelledby="conn-home_assistant-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-home_assistant"/></svg></span><h2 id="conn-home_assistant-title">Home Assistant</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <p class="conn-about">Your lights and devices. Locks, garage doors and alarms always ask you first.</p>
-                </dialog>
-              </li>
-              <li class="conn-row" id="conn-spotify" data-conn="spotify" hidden>
-                <button class="row conn-head" id="conn-spotify-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-spotify-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-spotify"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Spotify</span><span class="conn-sub">Music</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-spotify-body" aria-labelledby="conn-spotify-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-spotify"/></svg></span><h2 id="conn-spotify-title">Spotify</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <p class="conn-about">Play music and control playback on your devices.</p>
-                  <p id="spotify-status" class="hint" hidden></p>
-                  <button id="spotify-connect" type="button" class="btn primary" hidden>Connect Spotify</button>
-                </dialog>
-              </li>
-              <li class="conn-row" id="conn-anthropic" data-conn="anthropic" hidden>
-                <button class="row conn-head" id="conn-anthropic-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-anthropic-body">
-                  <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-anthropic"/></svg></span>
-                  <span class="conn-text"><span class="conn-name">Anthropic</span><span class="conn-sub">Your API key</span></span>
-                  <span class="conn-state state off"></span>
-                  <span class="conn-action value connect" hidden></span>
-                </button>
-                <dialog class="conn-body conn-sheet" id="conn-anthropic-body" aria-labelledby="conn-anthropic-title" hidden>
-                  <div class="conn-grab" aria-hidden="true"></div>
-                  <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-anthropic"/></svg></span><h2 id="conn-anthropic-title">Anthropic</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
-                  <section id="api-key" class="api-key" hidden>
-                    <p class="api-key-title">Your Anthropic API key</p>
-                    <p id="api-key-state" class="hint" role="status"></p>
-                    <p id="api-key-cost" class="hint" hidden></p>
-                    <form id="api-key-form" class="api-key-form" autocomplete="off">
-                      <input id="api-key-input" type="password" autocomplete="off" autocapitalize="off"
-                             spellcheck="false" maxlength="256" placeholder="sk-ant-…" aria-label="Anthropic API key">
-                      <div class="api-key-row">
-                        <button id="api-key-save" type="submit" class="btn primary">Save key</button>
-                        <button id="api-key-remove" type="button" class="danger" hidden>Remove key</button>
-                      </div>
-                    </form>
-                    <p class="hint">You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, open API Keys, tap Create Key, and paste it here.</p>
-                    <p class="hint api-key-link">console.anthropic.com/settings/keys</p>
-                  </section>
-                </dialog>
-              </li>
-            </ul>
+          <div class="set-sec">
+            <h2 class="group-head">Memory and projects</h2>
+            <div class="group">
+              <button id="memory-open" type="button" class="row" hidden><span class="row-label">Memory</span><span class="row-chevron" aria-hidden="true"></span></button>
+              <button id="projects-open" type="button" class="row" hidden><span class="row-label">Projects</span><span class="row-chevron" aria-hidden="true"></span></button>
+            </div>
           </div>
-        </section>
-        <section id="family" class="family" aria-labelledby="family-title" hidden>
-          <h2 id="family-title" class="group-head">People</h2>
-          <div class="group family-group">
-            <ul id="family-list" class="family-list"></ul>
-            <button id="invite-open" type="button" class="row">Invite someone</button>
+          <div class="set-sec">
+            <h2 class="group-head">Notifications</h2>
+            <div class="group">
+              <button id="push-toggle" type="button" class="row" hidden>Enable notifications</button>
+              <button id="reminders-open" type="button" class="row" hidden><span class="row-label">Reminders</span><span class="row-chevron" aria-hidden="true"></span></button>
+            </div>
+            <p id="push-status" class="hint group-foot" role="status" hidden></p>
           </div>
-          <form id="invite-form" class="invite-form" autocomplete="off" hidden>
-            <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
-            <label>Language
-              <select id="invite-language">
-                <option value="en">English</option>
-                <option value="zh">中文 (Chinese)</option>
-              </select>
-            </label>
-            <label>Account
-              <select id="invite-tier">
-                <option value="beta" selected>Beta (Calendar only)</option>
-                <option value="family">Family (Calendar and Gmail)</option>
-              </select>
-            </label>
-            <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
-                   spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
-            <button type="submit" class="btn primary">Create invite link</button>
-          </form>
-          <p id="invite-status" class="hint" role="status"></p>
-          <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
-        </section>
-        <section id="account-self" class="family account-self" hidden>
-          <button id="account-export" type="button">Download my data</button>
-          <button id="account-delete-open" type="button" class="danger">Delete my account</button>
-          <form id="account-delete-form" class="invite-form" autocomplete="off" hidden>
-            <p class="hint">This deletes your account, your conversations and your connected Google account from this app. It can't be undone.</p>
-            <label>Type DELETE (or your name) to confirm
-              <input id="account-delete-confirm" type="text" maxlength="60" autocapitalize="off"
-                     spellcheck="false" required></label>
-            <button type="submit" class="danger">Delete everything</button>
-          </form>
-          <p id="account-status" class="hint" role="status"></p>
-        </section>
-        <button id="logout" type="button">Sign out</button>
-        <button id="logout-all" type="button">Sign out everywhere</button>
+          <div class="set-sec">
+            <section id="connections" class="conns" aria-labelledby="conn-title" hidden>
+              <svg class="conn-sprite" aria-hidden="true">
+                <symbol id="icon-anthropic" viewBox="0 0 24 24"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></symbol>
+                <symbol id="icon-canvas" viewBox="0 0 24 24"><path d="M.4403 15.4142a13.7061 13.7061 0 0 1-.4362-3.4403 13.7 13.7 0 0 1 .4362-3.4401c1.7144.2103 3.0438 1.6686 3.0438 3.44 0 1.771-1.3287 3.23-3.0438 3.4404zm3.9728-3.4403c0 .6004.4866 1.0873 1.0872 1.0873.601 0 1.088-.487 1.088-1.0873s-.487-1.088-1.088-1.088c-.6006 0-1.0872.4876-1.0872 1.088zM23.56 8.5338c-1.7151.2103-3.044 1.6686-3.044 3.44 0 1.771 1.3289 3.23 3.044 3.4404a13.7313 13.7313 0 0 0 .436-3.4403c0-1.1883-.1518-2.3413-.436-3.4401zm-6.148 3.44c0 .6005.4865 1.0874 1.0877 1.0874.6002 0 1.088-.487 1.088-1.0873s-.4878-1.088-1.088-1.088c-.6012 0-1.0877.4876-1.0877 1.088zm-5.4347 8.5465c-1.7709 0-3.229 1.33-3.44 3.044a13.7364 13.7364 0 0 0 3.441.4357c1.1885 0 2.3403-.1515 3.44-.4357-.2107-1.714-1.6687-3.044-3.441-3.044zm.001-3.1046c-.6012 0-1.0878.4876-1.0878 1.0883s.4866 1.0882 1.0878 1.0882c.6 0 1.087-.4874 1.087-1.0882s-.487-1.0883-1.087-1.0883zm0-13.936c1.7713 0 3.2295-1.3292 3.4399-3.0438A13.7353 13.7353 0 0 0 11.9782 0c-1.1887 0-2.3412.1519-3.441.4359.211 1.7146 1.6691 3.0438 3.441 3.0438zm0 .9291c-.6012 0-1.0878.4866-1.0878 1.0876 0 .6002.4866 1.0876 1.0878 1.0876.6 0 1.087-.4874 1.087-1.0876 0-.601-.487-1.0876-1.087-1.0876zm6.032 13.5965c-1.2514 1.2523-1.344 3.2211-.2825 4.582a13.762 13.762 0 0 0 4.8636-4.8654c-1.3608-1.0597-3.3299-.9673-4.5812.2834zm-.6568-2.1948c-.425-.4245-1.1135-.4245-1.539 0-.4243.4252-.4243 1.1136 0 1.5383.4255.4253 1.114.4253 1.539 0 .424-.4247.424-1.1131 0-1.5383zM5.9648 5.9603c1.2516-1.2513 1.3437-3.2206.2825-4.5813a13.7677 13.7677 0 0 0-4.8644 4.8643c1.3612 1.0616 3.3306.9687 4.582-.283zm.6567.6572c-.424.4247-.424 1.1139 0 1.5383.4245.4246 1.114.4246 1.5382 0 .4248-.4244.4248-1.1136 0-1.5383-.4243-.4243-1.1137-.4243-1.5382 0zm15.9625-.3857a13.7597 13.7597 0 0 0-4.8637-4.8642c-1.0614 1.3609-.969 3.33.2823 4.5818 1.2517 1.2507 3.2204 1.3436 4.5814.2824zM17.346 8.1443c.4237-.4248.4237-1.1135 0-1.5383-.425-.4247-1.1145-.4247-1.5388 0-.4241.4248-.4241 1.1135 0 1.5383.4243.4243 1.1137.4243 1.5388 0zM1.3772 17.7087a13.763 13.763 0 0 0 4.8647 4.8654c1.0613-1.3608.9685-3.3297-.2833-4.5818-1.2512-1.251-3.2204-1.3436-4.5814-.2836zm5.2385-1.9115c-.4238.4247-.4238 1.1136 0 1.5384.425.4246 1.1141.4246 1.5382 0 .425-.4248.425-1.1137 0-1.5384-.4241-.4245-1.1131-.4245-1.5382 0z"/></symbol>
+                <symbol id="icon-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol>
+                <symbol id="icon-home_assistant" viewBox="0 0 24 24"><path d="M22.939 10.627 13.061.749a1.505 1.505 0 0 0-2.121 0l-9.879 9.878C.478 11.21 0 12.363 0 13.187v9c0 .826.675 1.5 1.5 1.5h9.227l-4.063-4.062a2.034 2.034 0 0 1-.664.113c-1.13 0-2.05-.92-2.05-2.05s.92-2.05 2.05-2.05 2.05.92 2.05 2.05c0 .233-.041.456-.113.665l3.163 3.163V9.928a2.05 2.05 0 0 1-1.15-1.84c0-1.13.92-2.05 2.05-2.05s2.05.92 2.05 2.05a2.05 2.05 0 0 1-1.15 1.84v8.127l3.146-3.146A2.051 2.051 0 0 1 18 12.239c1.13 0 2.05.92 2.05 2.05s-.92 2.05-2.05 2.05c-.25 0-.488-.047-.709-.13L12.9 20.602v3.088h9.6c.825 0 1.5-.675 1.5-1.5v-9c0-.825-.477-1.977-1.061-2.561z"/></symbol>
+                <symbol id="icon-notion" viewBox="0 0 24 24"><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z"/></symbol>
+                <symbol id="icon-spotify" viewBox="0 0 24 24"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></symbol>
+              </svg>
+              <h2 id="conn-title" class="group-head">Connections</h2>
+              <div class="group conn-group">
+                <h3 id="conn-connected-label" class="sr-only">Connected</h3>
+                <ul id="conn-connected" class="conn-list" aria-labelledby="conn-connected-label" hidden></ul>
+                <h3 id="conn-available-label" class="sr-only">Available</h3>
+                <ul id="conn-available" class="conn-list" aria-labelledby="conn-available-label" hidden>
+                  <li class="conn-row" id="conn-google" data-conn="google" hidden>
+                    <button class="row conn-head" id="conn-google-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-google-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-google"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Google</span><span class="conn-sub">Calendar and email</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-google-body" aria-labelledby="conn-google-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-google"/></svg></span><h2 id="conn-google-title">Google</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <p class="conn-about">Your calendar, and your email if your account includes it. I only ever write drafts; you send them.</p>
+                      <p id="google-status" class="hint" hidden></p>
+                      <button id="google-connect" type="button" class="btn primary" hidden>Connect Google account</button>
+                      <button id="google-disconnect" type="button" class="danger" hidden>Disconnect Google account</button>
+                    </dialog>
+                  </li>
+                  <li class="conn-row" id="conn-notion" data-conn="notion" hidden>
+                    <button class="row conn-head" id="conn-notion-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-notion-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-notion"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Notion</span><span class="conn-sub">Assignments and notes</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-notion-body" aria-labelledby="conn-notion-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-notion"/></svg></span><h2 id="conn-notion-title">Notion</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <p class="conn-about">Your Notion assignments and notes, so I can list what's due and file your notes.</p>
+                      <p id="notion-status" class="hint" hidden></p>
+                      <p id="notion-detail" class="hint" hidden></p>
+                      <button id="notion-connect" type="button" class="btn primary" hidden>Connect Notion</button>
+                      <button id="notion-disconnect" type="button" class="danger" hidden>Disconnect Notion</button>
+                    </dialog>
+                  </li>
+                  <li class="conn-row" id="conn-canvas" data-conn="canvas" hidden>
+                    <button class="row conn-head" id="conn-canvas-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-canvas-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-canvas"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Canvas</span><span class="conn-sub">School deadlines</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-canvas-body" aria-labelledby="conn-canvas-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-canvas"/></svg></span><h2 id="conn-canvas-title">Canvas</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <p class="conn-about">Your school deadlines from Canvas. I never ask for your school password.</p>
+                      <section id="student" class="api-key student" hidden></section>
+                    </dialog>
+                  </li>
+                  <li class="conn-row" id="conn-home_assistant" data-conn="home_assistant" hidden>
+                    <button class="row conn-head" id="conn-home_assistant-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-home_assistant-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-home_assistant"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Home Assistant</span><span class="conn-sub">Lights and devices</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-home_assistant-body" aria-labelledby="conn-home_assistant-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-home_assistant"/></svg></span><h2 id="conn-home_assistant-title">Home Assistant</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <p class="conn-about">Your lights and devices. Locks, garage doors and alarms always ask you first.</p>
+                    </dialog>
+                  </li>
+                  <li class="conn-row" id="conn-spotify" data-conn="spotify" hidden>
+                    <button class="row conn-head" id="conn-spotify-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-spotify-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-spotify"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Spotify</span><span class="conn-sub">Music</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-spotify-body" aria-labelledby="conn-spotify-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-spotify"/></svg></span><h2 id="conn-spotify-title">Spotify</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <p class="conn-about">Play music and control playback on your devices.</p>
+                      <p id="spotify-status" class="hint" hidden></p>
+                      <button id="spotify-connect" type="button" class="btn primary" hidden>Connect Spotify</button>
+                    </dialog>
+                  </li>
+                  <li class="conn-row" id="conn-anthropic" data-conn="anthropic" hidden>
+                    <button class="row conn-head" id="conn-anthropic-head" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="conn-anthropic-body">
+                      <span class="conn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-anthropic"/></svg></span>
+                      <span class="conn-text"><span class="conn-name">Anthropic</span><span class="conn-sub">Your API key</span></span>
+                      <span class="conn-state state off"></span>
+                      <span class="conn-action value connect" hidden></span>
+                    </button>
+                    <dialog class="conn-body conn-sheet" id="conn-anthropic-body" aria-labelledby="conn-anthropic-title" hidden>
+                      <div class="conn-grab" aria-hidden="true"></div>
+                      <div class="conn-sheet-head"><span class="conn-icon lg" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-anthropic"/></svg></span><h2 id="conn-anthropic-title">Anthropic</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+                      <section id="api-key" class="api-key" hidden>
+                        <p class="api-key-title">Your Anthropic API key</p>
+                        <p id="api-key-state" class="hint" role="status"></p>
+                        <p id="api-key-cost" class="hint" hidden></p>
+                        <form id="api-key-form" class="api-key-form" autocomplete="off">
+                          <input id="api-key-input" type="password" autocomplete="off" autocapitalize="off"
+                                 spellcheck="false" maxlength="256" placeholder="sk-ant-…" aria-label="Anthropic API key">
+                          <div class="api-key-row">
+                            <button id="api-key-save" type="submit" class="btn primary">Save key</button>
+                            <button id="api-key-remove" type="button" class="danger" hidden>Remove key</button>
+                          </div>
+                        </form>
+                        <p class="hint">You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, open API Keys, tap Create Key, and paste it here.</p>
+                        <p class="hint api-key-link">console.anthropic.com/settings/keys</p>
+                      </section>
+                    </dialog>
+                  </li>
+                </ul>
+              </div>
+            </section>
+          </div>
+          <div class="set-sec">
+            <h2 class="group-head">Privacy and data</h2>
+            <div class="group">
+              <label id="incognito-row" class="row" hidden><input id="incognito" type="checkbox"> Incognito (don't save)</label>
+              <section id="account-self" class="family account-self" hidden>
+                <button id="account-export" type="button" class="row">Download my data</button>
+                <button id="account-delete-open" type="button" class="row danger">Delete my account</button>
+                <form id="account-delete-form" class="invite-form" autocomplete="off" hidden>
+                  <p class="hint">This deletes your account, your conversations and your connected Google account from this app. It can't be undone.</p>
+                  <label>Type DELETE (or your name) to confirm
+                    <input id="account-delete-confirm" type="text" maxlength="60" autocapitalize="off"
+                           spellcheck="false" required></label>
+                  <button type="submit" class="danger">Delete everything</button>
+                </form>
+                <p id="account-status" class="hint" role="status"></p>
+              </section>
+            </div>
+          </div>
+          <div class="set-sec">
+            <section id="family" class="family" aria-labelledby="family-title" hidden>
+              <h2 id="family-title" class="group-head">People</h2>
+              <div class="group family-group">
+                <ul id="family-list" class="family-list"></ul>
+                <button id="invite-open" type="button" class="row">Invite someone</button>
+              </div>
+              <form id="invite-form" class="invite-form" autocomplete="off" hidden>
+                <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
+                <label>Language
+                  <select id="invite-language">
+                    <option value="en">English</option>
+                    <option value="zh">中文 (Chinese)</option>
+                  </select>
+                </label>
+                <label>Account
+                  <select id="invite-tier">
+                    <option value="beta" selected>Beta (Calendar only)</option>
+                    <option value="family">Family (Calendar and Gmail)</option>
+                  </select>
+                </label>
+                <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
+                       spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
+                <button type="submit" class="btn primary">Create invite link</button>
+              </form>
+              <p id="invite-status" class="hint" role="status"></p>
+              <input id="invite-link" type="text" readonly hidden aria-label="Invite link">
+            </section>
+          </div>
+          <div class="set-sec">
+            <fieldset id="backends" class="backends" hidden>
+              <legend class="group-head">Backends</legend>
+              <div class="group backends-card">
+                <label>Use
+                  <select id="backend-mode">
+                    <option value="auto">Auto: Pi, then PC, then cloud</option>
+                    <option value="pi">Pi only</option>
+                    <option value="pc">PC only</option>
+                    <option value="cloud">Cloud only</option>
+                  </select>
+                </label>
+                <label>Pi (tailnet) <input id="url-pi" type="url" inputmode="url" autocapitalize="off"
+                       spellcheck="false" placeholder="https://pi.your-tailnet.ts.net"></label>
+                <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
+                       spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
+                <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
+                       spellcheck="false" placeholder="this app's address"></label>
+                <p class="hint">Empty = the address the server suggests.</p>
+                <button id="backends-save" type="button">Save and check</button>
+                <ul id="backend-status" class="backend-status"></ul>
+              </div>
+            </fieldset>
+          </div>
+          <div class="set-sec">
+            <h2 class="group-head">Your account</h2>
+            <div class="group">
+              <button id="logout" type="button" class="row">Sign out</button>
+              <button id="logout-all" type="button" class="row danger">Sign out everywhere</button>
+            </div>
+          </div>
+        </div>
       </div>
     </details>
   </header>

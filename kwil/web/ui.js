@@ -1,5 +1,7 @@
 // Small touch behaviours the phone page should have, like other apps:
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
+// - it is a full-screen Settings page: opening it moves focus to its title,
+//   and Done (like Escape) closes it and gives focus back to the gear;
 // - swiping down while the keyboard is open closes the keyboard.
 // And the owner's health banner (state.health from /api/state, written by
 // the watchdog, kwil/watch.py): "Mom's app is down since 06:13".
@@ -9,17 +11,29 @@
   function closeMenuOutside(doc) {
     const menu = doc.querySelector("details.menu");
     if (!menu) return null;
+    const find = (sel) => (typeof menu.querySelector === "function" ? menu.querySelector(sel) : null);
+    const byId = (id) => (typeof doc.getElementById === "function" ? doc.getElementById(id) : null);
+    const focus = (el) => { if (el && typeof el.focus === "function") el.focus(); };
+    // close the page and hand focus back to the gear (VoiceOver lands there)
+    const close = () => {
+      menu.open = false;
+      focus(find("summary"));
+    };
     const onDown = (e) => {
       if (menu.open && !menu.contains(e.target)) menu.open = false;
     };
     const onKey = (e) => {
       // with a Connections sheet open (connections.js), Escape closes only it
-      const sheet = typeof menu.querySelector === "function" && menu.querySelector("dialog[open]");
-      if (e.key === "Escape" && menu.open && !sheet) menu.open = false;
+      const sheet = find("dialog[open]");
+      if (e.key === "Escape" && menu.open && !sheet) close();
     };
+    const onToggle = () => { if (menu.open) focus(byId("settings-title")); };
+    const done = byId("settings-done");
+    if (done && typeof done.addEventListener === "function") done.addEventListener("click", close);
+    if (typeof menu.addEventListener === "function") menu.addEventListener("toggle", onToggle);
     doc.addEventListener("pointerdown", onDown, true);
     doc.addEventListener("keydown", onKey);
-    return { onDown, onKey };
+    return { onDown, onKey, onToggle, close };
   }
 
   const SWIPE_PX = 40;  // a deliberate downward swipe, not a tap or a scroll jitter
