@@ -8037,3 +8037,68 @@ deselected (51e82fc: 3907 / 49; +3). JavaScript 355 passed (354; +1).
   once per citation (`Sources._number` compared without the title fallback
   its key used), which could fill MAX_SOURCES and drop later web pages. Test
   `test_an_attachment_cited_twice_is_listed_once`; fails without the fix.
+
+## Deep research (2026-10-30)
+"Research the best internships for physics majors this summer" / "do a
+deep dive on X": a background job that plans, searches and reads the web
+in several rounds and writes a cited report (`research.py`,
+`tools/research.py`, `web/research.js`).
+
+**API shapes, checked first** (docs fetched from the sandbox, `.md`
+pages): `agents-and-tools/tool-use/web-search-tool` (`max_uses` is per
+request; `max_uses_exceeded` past it; `usage.server_tool_use.
+web_search_requests`; `pause_turn` is continued by sending the paused
+assistant content back as it came), `.../web-fetch-tool` (`citations`
+optional and off by default; fetched pages cited by `char_location`
+`document_index`; `web_fetch_requests`) and `.../server-tools`. The SDK's
+`WebSearchTool20260209Param` / `WebFetchTool20260209Param` list the
+fields; `tests/contract_fakes.py` now refuses any other field, a wrong
+name or a `max_uses` under 1, and scripts the research plan, steps and
+write.
+
+- **start_research(question, depth)** always asks first ("Start research
+  on: ...? It takes about 5 to 10 minutes and does up to 10 web searches
+  (a small cost)."), the whole question when the conversation is tainted;
+  returns at once. Bounds: one job queued or running per person,
+  `[research] per_day` (3) started in any 24 hours (from the job files, so
+  a restart keeps the count), 10 waiting or running across everyone, 2 at
+  once. Refused without asking when it would be refused anyway; refused
+  with History off or in incognito (the report goes there) and for a beta
+  tester without a key. **research_status** (read-only) for "is my
+  research done?".
+- **The session** (`ResearchRunner`): the main model, adaptive thinking,
+  `[research] effort` "high". Plan (structured output, at most 3 / 5
+  parts) -> one step per part with only web_search and web_fetch (fetch
+  citations on), `max_uses` = what is left of the job's cap divided over
+  the parts left (a paused step goes on with the remainder, the whole turn
+  so far sent back, or stops) -> write with the findings as one
+  search_result block per page (source = its address; `Sources.offer_web`
+  added to citations.py) so the report's citations become the
+  conversation's web sources. Time and token budgets keep their last 25%
+  for the write; past that no more parts, and the report ends "Partial
+  report: ...". A failed write saves the findings as they are.
+- **Nothing of the person's** reaches it: its own requests with only the
+  question, no ToolRegistry, no client tools.
+- **Delivery:** a History conversation "Research: <question>" (title kept
+  as the person's), the report with its sources, untrusted when continued
+  (resume taints); a push "Your research on X is ready" opening
+  `/#research=<id>`; the card's Save to Notion (`ResearchNotesDB`, the
+  lecture database pattern, the job id as "Research ID") only when the
+  person's Notion is connected. Owner jobs run under the failover
+  JobRunner (`research:owner:<id>`); a job cut off by a restart is marked
+  failed, not rerun.
+- **UI:** a card above the composer ("Researching… (3/10 searches)",
+  polls every 4 s while a job runs, Cancel asks first; Open report opens
+  the History transcript with its sources; Save to Notion; dismiss), in
+  English and Chinese. `sw.js` `kwil-shell-v20`.
+- **Config:** `[research] enabled, dir, per_day, standard_searches,
+  standard_fetches, standard_minutes, standard_tokens, deep_*, effort,
+  report_tokens` (DEFAULTS, config.toml, the server profile's
+  `/data/research`, config.mom.toml's own folder).
+
+**Tests:** `tests/test_research.py` (31), `tests/js/research.test.mjs`
+(8), `tests/test_contract.py` (+4 refusal cases, +1 research request
+test, live variants marked `live`). Each new behaviour was checked to
+fail with its source change reverted (a scratch copy, 27 mutations). Cost
+not measured on the real API (no key in the sandbox).
+Full suite: 3947 passed, 51 skipped (baseline 3911 passed); JS 363 passed (baseline 355).
