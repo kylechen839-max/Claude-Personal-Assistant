@@ -134,7 +134,7 @@
       top.appendChild(el("span", "mem-when", whenLabel(note)));
       top.appendChild(el("span", "badge", KIND[note.kind] || KIND.summary));
       if (note.untrusted) {
-        const flag = el("span", "badge mem-untrusted", "Untrusted");
+        const flag = el("span", "badge mem-untrusted", "Outside source");
         flag.setAttribute("title", UNTRUSTED_HINT);
         top.appendChild(flag);
       }
@@ -185,7 +185,7 @@
       const top = el("div", "mem-top");
       top.appendChild(el("span", "mem-when", whenLabel({ created_at: m.created })));
       if (m.untrusted) {
-        const flag = el("span", "badge mem-untrusted", "Untrusted");
+        const flag = el("span", "badge mem-untrusted", "Outside source");
         flag.setAttribute("title", UNTRUSTED_HINT);
         top.appendChild(flag);
         // the person vouches for it: from now on it's theirs (trusted)
@@ -275,7 +275,7 @@
       top.appendChild(el("span", "mem-when", m.course || ""));
       top.appendChild(el("span", "mem-count", missedTimes(Number(m.count) || 1)));
       if (m.untrusted) {
-        const flag = el("span", "badge mem-untrusted", "Untrusted");
+        const flag = el("span", "badge mem-untrusted", "Outside source");
         flag.setAttribute("title", UNTRUSTED_HINT);
         top.appendChild(flag);
       }

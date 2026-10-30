@@ -100,8 +100,8 @@
     "Branch from here": "从这里分支",
     "Message actions": "消息操作",
     "Sign out on every phone and browser?": "要在所有手机和浏览器上退出登录吗？",
-    "This browser can't record. It needs HTTPS (see the README's Tailscale steps).":
-      "这个浏览器不能录音（需要 HTTPS 地址）。",
+    "This browser can't record here. Open Kwil from its https:// address.":
+      "这个浏览器在这里不能录音。请用 https:// 地址打开 Kwil。",
     ["Microphone access is blocked. On iPhone: Settings → Safari → Microphone → " +
       "Allow (or in Safari, aA → Website Settings → Microphone), then reopen the app. " +
       "On Android: tap the lock icon by the address → Permissions → Microphone."]:
@@ -190,6 +190,7 @@
     "Disconnect Home Assistant? I won't control your home any more.":
       "要断开 Home Assistant 吗？之后我就不能控制你家里的设备了。",
     "Disconnected.": "已断开。",
+    "Disconnect this service?": "要断开这个服务吗？",  // connect.js's fallback question
     // a student's deadlines card (student.js, student_web.py)
     "School deadlines": "学校截止日期",
     "Canvas calendar feed link": "Canvas 日历订阅链接",
@@ -229,6 +230,7 @@
     "Dates disagree": "日期不一致",
     "Not checked": "未确认",
     "Canvas calendar": "Canvas 日历",
+    "Course files": "课程文件",
     "Canvas": "Canvas",
     "Canvas pages": "Canvas 页面",
     "Canvas email": "Canvas 邮件",
@@ -316,6 +318,7 @@
     "Name": "名字",
     "Language": "语言",
     "Time zone": "时区",
+    "For example, Asia/Shanghai": "例如 Asia/Shanghai",
     "Create invite link": "生成邀请链接",
     "Invite link": "邀请链接",
     "Invite link ready.": "邀请链接已准备好。",
@@ -369,7 +372,7 @@
     "Memory": "记忆",
     "Summary": "对话摘要",
     "Note": "笔记",
-    "Untrusted": "来源不可信",
+    "Outside source": "外部来源",
     "Saved while a web page or email was in the conversation": "保存时对话里有网页或邮件内容",
     "Date unknown": "日期未知",
     "Last week": "上周",
@@ -390,7 +393,7 @@
     "Forget all": "全部忘掉",
     "While paused, Kwil saves no new memories and uses none. Your instructions still apply.":
       "暂停时，Kwil 不会保存新的记忆，也不会用已有的记忆。你的指示照样有效。",
-    "Notes in Pinecone": "Pinecone 里的笔记",
+    "Long-term notes": "长期笔记",
     "Edit": "编辑",
     "Edit this memory": "编辑这条记忆",
     "Saved.": "已保存。",
@@ -434,8 +437,7 @@
     "Open project": "打开项目",
     "Leave project": "离开项目",
     "For example, PHYS 361": "例如：PHYS 361",
-    "No projects yet. Make one per class: its own instructions, files and chats.":
-      "还没有项目。每门课建一个：有自己的说明、文件和对话。",
+    "No projects yet.": "还没有项目。",
     "Connect Canvas or add deadlines, and your courses show here.":
       "连接 Canvas 或添加截止日期后，你的课程会显示在这里。",
     "Create": "创建",
@@ -468,6 +470,7 @@
     "Message": "消息",
     "Thinking harder…": "正在仔细想…",
     "Sources": "来源",
+    "Source": "来源",  // sources.js's TEXT.source (its numbered labels are a PATTERN)
     "That's all your think-harder replies for today, so this one was answered the usual way.":
       "今天的“仔细想想”次数已经用完了，这次按平常的方式回答。",
     // study mode (study.js, memory.js, study.py)
@@ -489,8 +492,8 @@
     "Say “remind me at 9 to …” or “every Monday at 8, tell me what's due”. Reminders arrive as notifications on this phone.":
       "说“9 点提醒我……”或“每周一 8 点告诉我这周要交什么”。提醒会以通知的形式发到这部手机上。",
     "Turn on notifications in Settings so reminders can arrive.": "请在设置里打开通知，提醒才能送达。",
-    "No reminders yet. Say “remind me at 9 to …” and it shows here.":
-      "还没有提醒。说“9 点提醒我……”，它就会出现在这里。",
+    "No reminders yet.": "还没有提醒。",
+    "Upcoming": "即将提醒",  // the Reminders list head (People's "Active" is 已加入)
     "Task": "任务",
     "Made while a web page or email was in the conversation": "创建时对话里有网页或邮件内容",
     "Pause": "暂停",
@@ -577,14 +580,13 @@
     // tabs, settings, history, lecture and tutor screens
     "Backends": "服务器",
     "Use": "使用",
-    "Auto": "Pi, then PC, then cloud\": \"自动：先树莓派，再电脑，再云端",
     "Pi only": "只用树莓派",
     "PC only": "只用电脑",
     "Cloud only": "只用云端",
     "Pi (tailnet)": "树莓派（tailnet）",
     "PC (tailnet)": "电脑（tailnet）",
     "Cloud": "云端",
-    "Empty = the address the server suggests.": "留空 = 使用服务器建议的地址。",
+    "Leave empty to use the address the server suggests.": "留空就使用服务器建议的地址。",
     "Save and check": "保存并检查",
     "CC": "字幕",
     "All": "全部",
@@ -603,9 +605,10 @@
     "Export as Markdown": "导出为 Markdown",
     "Delete…": "删除…",
     "Delete conversation?": "删除这个对话？",
-    "this app's address": "这个应用的地址",
+    "This app's address": "这个应用的地址",
     "Filter": "筛选",
     "Back to history": "返回历史记录",
+    "This is the conversation you're in now.": "这就是你现在所在的对话。",
     "More actions": "更多操作",
     "Chat / Lecture / Tutor": "聊天 / 讲座 / 作业辅导",
     "Chat": "聊天",
@@ -698,26 +701,26 @@
     // first-run guide (data-google instances: a family member's own app)
     "Enter the sign-in code you were sent. You only need to do this once on this phone.":
       "请输入发给你的登录码。这部手机只需要输入一次。",
-    "Welcome! A few one-time steps:": "欢迎！只需要做一次的几个步骤：",
+    "Welcome. A few one-time steps:": "欢迎。只需要做一次的几个步骤：",
     "Got it": "知道了",
     ["Add this app to your home screen: in Safari, tap the Share button (the square " +
       "with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there."]:
       "把这个应用加到主屏幕：在 Safari 里点下面的分享按钮（带箭头的方框），" +
       "再点“添加到主屏幕”，以后从主屏幕打开。",
-    ["Connect your own Google account so I can see your calendar and email: tap the gear at " +
-      "the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
+    ["Connect your own Google account so I can see your calendar and email: tap Settings, " +
+      "then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
       "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
       "app was made by your family, not a company."]:
-      "连接你的 Google 账户，我就能看你的日历和邮件：点右上角的齿轮，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
+      "连接你的 Google 账户，我就能看你的日历和邮件：点“设置”，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。这是正常的：" +
       "这个应用是你的家人做的，不是公司做的。",
-    ["Connect your own Google account so I can see your calendar: tap the gear at " +
-      "the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
+    ["Connect your own Google account so I can see your calendar: tap Settings, " +
+      "then \"Google\" under Connections and \"Connect Google account\", and sign in with your own Google " +
       "account. If Google says it hasn't verified " +
       "this app, tap \"Advanced\", then \"Go to … (unsafe)\"."]:
-      "连接你的 Google 账户，我就能看你的日历：点右上角的齿轮，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
+      "连接你的 Google 账户，我就能看你的日历：点“设置”，在“服务连接”里点“Google”，再点“连接 Google 账户”，" +
       "用你自己的 Google 账户登录。" +
       "如果 Google 说“此应用未经验证”，点“高级”，再点“转至…（不安全）”。",
   };
@@ -847,13 +850,13 @@
     "square with an arrow) at the bottom, then \"Add to Home Screen\", and open it from there.";
   // (a family member's own account on the shared server, google_web.py)
   const STEP_GOOGLE = "Connect your own Google account so I can see your calendar and email: tap " +
-    "the gear at the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own " +
+    "Settings, then \"Google\" under Connections and \"Connect Google account\", and sign in with your own " +
     "Google account. If Google says it hasn't " +
     "verified this app, tap \"Advanced\", then \"Go to … (unsafe)\". That's expected: this " +
     "app was made by your family, not a company.";
   // a beta tester's (status "gmail": false): Calendar only, no mail wording
   const STEP_GOOGLE_CALENDAR = "Connect your own Google account so I can see your calendar: " +
-    "tap the gear at the top right, then \"Google\" under Connections and \"Connect Google account\", and sign in with your " +
+    "tap Settings, then \"Google\" under Connections and \"Connect Google account\", and sign in with your " +
     "own Google account. If Google says it hasn't verified this app, tap \"Advanced\", " +
     "then \"Go to … (unsafe)\".";
 
@@ -892,7 +895,7 @@
     if ((!steps.length && !examples.length) || dismissed) { box.hidden = true; return; }
     const lines = [];
     if (steps.length) {
-      lines.push(say("Welcome! A few one-time steps:"),
+      lines.push(say("Welcome. A few one-time steps:"),
                  ...steps.map((step, i) => `${i + 1}. ${say(step)}`));
     }
     if (examples.length) {

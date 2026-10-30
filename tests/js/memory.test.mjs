@@ -4,12 +4,12 @@
 // fake DOM: "Memory" shows in the menu only for the owner with memory on;
 // opening it loads /api/memory and shows the weeks (This week / Last week /
 // Week of ... / Date unknown) with each note's date, kind and an
-// "Untrusted" badge; Delete asks first and POSTs .../delete; "Delete all
+// "Outside source" badge; Delete asks first and POSTs .../delete; "Delete all
 // from this week" asks with the count and POSTs exactly the ids shown.
 // And every fixed string has Chinese in i18n.js.
 // Everyone's own memory ({"memories": true}, a family member too): opening
 // loads /api/memories and renders "Your instructions" and "Things Kwil
-// remembered" (with the Untrusted badge); Save, Edit, Delete (asks), Pause,
+// remembered" (with the Outside source badge); Save, Edit, Delete (asks), Pause,
 // Export and Forget all (asks; no sends nothing) call their POST routes.
 
 import test from 'node:test';
@@ -150,7 +150,7 @@ test('everyone\'s own memory: both lists render, notes are not fetched', async (
   assert.deepEqual(items.map((i) => i.dataset.id), ['mem-aaaaaaaaaaaa', 'mem-bbbbbbbbbbbb']);
   assert.equal(items[0].all('mem-text')[0].textContent, '<b>Likes</b> jasmine tea');  // text, never HTML
   assert.equal(items[0].all('mem-text')[0].children.length, 0);
-  assert.deepEqual(items[1].all('badge').map((b) => b.textContent), ['Untrusted']);
+  assert.deepEqual(items[1].all('badge').map((b) => b.textContent), ['Outside source']);
   assert.equal(items[0].all('badge').length, 0);
   assert.equal(t.els['memory-items-empty'].hidden, true);
 });
@@ -262,7 +262,7 @@ test('every fixed string of your own memory has Chinese', () => {
     'For example: always color-code my schedule.', 'Kwil follows these from your next conversation.',
     'Pause memory', 'Export', 'Forget all', 'Edit', 'Save', 'Cancel', 'Edit this memory',
     'While paused, Kwil saves no new memories and uses none. Your instructions still apply.',
-    'Notes in Pinecone', "couldn't reach your memory; try again",
+    'Long-term notes', "couldn't reach your memory; try again",
     'instructions are at most 4000 characters', 'a memory is at most 500 characters'];
   for (const s of strings) {
     const zh = tr(s);
@@ -271,7 +271,7 @@ test('every fixed string of your own memory has Chinese', () => {
   }
   // the page's own words are the ones translated
   for (const s of ['Your instructions', 'Things Kwil remembered', 'Pause memory', 'Export',
-    'Forget all', 'Notes in Pinecone', 'For example: always color-code my schedule.',
+    'Forget all', 'Long-term notes', 'For example: always color-code my schedule.',
     'Kwil follows these from your next conversation.',
     'While paused, Kwil saves no new memories and uses none. Your instructions still apply.']) {
     assert.ok(html.includes(s), s);
@@ -310,7 +310,7 @@ test('opening lists the weeks newest first, with dates, kinds and badges', async
   assert.equal(items[0].all('mem-text')[0].textContent, DATA.weeks[0].notes[0].text);
   assert.equal(items[0].all('mem-text')[0].children.length, 0);
   const badges = (item) => item.all('badge').map((b) => b.textContent);
-  assert.deepEqual(badges(items[0]), ['Summary', 'Untrusted']);
+  assert.deepEqual(badges(items[0]), ['Summary', 'Outside source']);
   assert.deepEqual(badges(items[1]), ['Note']);
   assert.match(items[0].all('mem-untrusted')[0].getAttribute('title'), /web page or email/);
   assert.equal(groups[3].all('mem-when')[0].textContent, 'Date unknown');
@@ -382,7 +382,7 @@ test('every fixed string on the Memory screen has Chinese', async () => {
   const tr = ctx.KwilI18n.translate;
   const t = load();
   const q = (week, n) => t.api.deleteWeekQuestion(week, DATA, n);
-  const strings = ['Memory', 'Back to chat', 'Summary', 'Note', 'Untrusted', 'Date unknown',
+  const strings = ['Memory', 'Back to chat', 'Summary', 'Note', 'Outside source', 'Date unknown',
     'Saved while a web page or email was in the conversation', 'This week', 'Last week',
     'Delete', 'Delete all from this week', 'Delete all from that week', 'Delete all with no date',
     "Delete this memory? This can't be undone.", 'Nothing saved yet.', 'Loading…', 'Deleted.',
@@ -413,7 +413,7 @@ test('study mode\'s things to review: listed with course and count, delete asks'
   assert.equal(rows[0].all('mem-when')[0].textContent, 'PHYS 361');
   assert.equal(rows[0].all('mem-count')[0].textContent, 'Missed 3 times');
   assert.equal(rows[1].all('mem-count')[0].textContent, 'Missed once');
-  assert.deepEqual(rows[1].all('badge').map((b) => b.textContent), ['Untrusted']);
+  assert.deepEqual(rows[1].all('badge').map((b) => b.textContent), ['Outside source']);
   assert.equal(t.els['memory-missed-empty'].hidden, true);
   const del = rows[0].all('mem-delete')[0];
   const before = t.fetches.length;

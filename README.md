@@ -1648,10 +1648,10 @@ this week's conversation summaries and notes ("...last week?" works too).
 `delete_note` as for notes, which now also takes conversation summaries).
 
 With `[memory] backend = "pinecone"`, **Memory** in the phone app's
-settings menu also lists ("Notes in Pinecone") everything the
+settings menu also lists ("Long-term notes") everything the
 assistant saved in Pinecone, newest first and grouped by week, with the
-date, whether it is a conversation summary or a note, and an **Untrusted**
-badge on ones saved while a web page or email was in the conversation.
+date, whether it is a conversation summary or a note, and an **Outside
+source** badge on ones saved while a web page or email was in the conversation.
 Delete removes one; "Delete all from this week" removes that week's notes
 (both ask first). Only what the assistant wrote itself (ids starting with
 `voice-` or `note-` in `[memory] namespace`) is listed or deleted; your
@@ -1796,7 +1796,7 @@ deadlines and (for you, the owner) your Notion Assignments' Course options:
 - **Outside text:** a handout or a PDF is usually written by someone else,
   so a chat with project files in it asks first before changing anything
   (as with a chat attachment), and what it remembers there is marked
-  "Untrusted". The instructions you type never do that.
+  "Outside source". The instructions you type never do that.
 - **History:** History's search sees every chat; `?project=` filters by
   one (the project page lists its chats). In a project's chat, "what did we
   cover in this class last week?" searches only that project's chats.

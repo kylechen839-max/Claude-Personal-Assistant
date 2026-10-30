@@ -267,8 +267,8 @@
                 <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
                 <label>Language
                   <select id="invite-language">
-                    <option value="en">English</option>
-                    <option value="zh">中文 (Chinese)</option>
+                    <option value="en" lang="en">English</option>
+                    <option value="zh" lang="zh">中文 (Chinese)</option>
                   </select>
                 </label>
                 <label>Account
@@ -278,7 +278,7 @@
                   </select>
                 </label>
                 <label>Time zone <input id="invite-tz" type="text" autocapitalize="off"
-                       spellcheck="false" placeholder="e.g. Asia/Shanghai"></label>
+                       spellcheck="false" placeholder="For example, Asia/Shanghai"></label>
                 <button type="submit" class="btn primary">Create invite link</button>
               </form>
               <p id="invite-status" class="hint" role="status"></p>
@@ -302,8 +302,8 @@
                 <label>PC (tailnet) <input id="url-pc" type="url" inputmode="url" autocapitalize="off"
                        spellcheck="false" placeholder="https://your-pc.your-tailnet.ts.net"></label>
                 <label>Cloud <input id="url-cloud" type="url" inputmode="url" autocapitalize="off"
-                       spellcheck="false" placeholder="this app's address"></label>
-                <p class="hint">Empty = the address the server suggests.</p>
+                       spellcheck="false" placeholder="This app's address"></label>
+                <p class="hint">Leave empty to use the address the server suggests.</p>
                 <button id="backends-save" type="button">Save and check</button>
                 <ul id="backend-status" class="backend-status"></ul>
               </div>
@@ -518,7 +518,7 @@
       <div id="memory-missed" class="group mem-items" role="list" aria-labelledby="memory-missed-title"></div>
       <p id="memory-missed-empty" class="group-foot" hidden></p>
     </section>
-    <h2 id="memory-notes-head" class="group-head" hidden>Notes in Pinecone</h2>
+    <h2 id="memory-notes-head" class="group-head" hidden>Long-term notes</h2>
   </section>
   <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
   <p id="memory-status" class="status center" role="status"></p>
@@ -596,7 +596,7 @@
     <span class="bar-spacer"></span>
   </header>
   <section class="mem-local" aria-labelledby="reminders-items-title">
-    <h2 class="group-head" id="reminders-items-title">Active</h2>
+    <h2 class="group-head" id="reminders-items-title">Upcoming</h2>
     <div id="reminders-items" class="group mem-items" role="list" aria-labelledby="reminders-items-title"></div>
     <p id="reminders-empty" class="group-foot" hidden></p>
     <h2 class="group-head" id="reminders-missed-title" hidden>Missed</h2>

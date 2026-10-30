@@ -250,7 +250,7 @@ test('first-run guide: home screen and Google steps in Chinese, then gone', asyn
   await p.flush();
   assert.equal(p.loginP.textContent, '请输入发给你的登录码。这部手机只需要输入一次。');
   assert.equal(p.guide.hidden, false);
-  assert.match(p.guideText.textContent, /^欢迎！/);
+  assert.match(p.guideText.textContent, /^欢迎。/);
   assert.match(p.guideText.textContent, /1\. 把这个应用加到主屏幕/);
   assert.match(p.guideText.textContent, /2\. 连接你的 Google 账户/);
   assert.match(p.guideText.textContent, /点“高级”/);

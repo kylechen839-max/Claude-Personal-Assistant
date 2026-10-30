@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
+  notes" and an "Outside source" badge; one-line empty states; no exclamation
+  marks; the first-run guide points to Settings; the Chinese app has no
+  leftover English (with a test that checks it); the chat behind Settings is
+  hidden from VoiceOver; small spacing and token fixes.
 - Phone app: a tab bar at the bottom (Chat, Today, History, Settings)
   replaces the calendar, clock and gear at the top on phones; it hides with
   the keyboard and in voice mode. The desktop layout is unchanged.

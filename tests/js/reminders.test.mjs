@@ -3,8 +3,8 @@
 // Runs the phone page's kwil/web/reminders.js in node:vm with a minimal
 // fake DOM: "Reminders" shows in the menu only with {"reminders": true};
 // opening it loads /api/reminders and lists the active ones (text, next
-// time and repeat as the server worded them, "Task" and "Untrusted"
-// badges) and the missed ones; Pause/Resume POST .../pause; Delete asks
+// time and repeat as the server worded them, "Task" and "Outside
+// source" badges) and the missed ones; Pause/Resume POST .../pause; Delete asks
 // first ("no" sends nothing) and POSTs .../delete; a notification's tap
 // (/#reminders, or sw.js's message) opens it. Text goes in as text, never
 // HTML, and every fixed string has Chinese in i18n.js.
@@ -124,7 +124,7 @@ test('opening lists active and missed reminders with their times, repeats and ba
   assert.equal(rows[0].all('rem-pause')[0].textContent, 'Pause');
   assert.equal(rows[1].all('rem-when')[0].textContent, 'Paused');
   assert.equal(rows[1].all('rem-repeat')[0].textContent, 'every Monday at 8:00 AM');
-  assert.deepEqual(rows[1].all('badge').map((b) => b.textContent), ['Task', 'Untrusted']);
+  assert.deepEqual(rows[1].all('badge').map((b) => b.textContent), ['Task', 'Outside source']);
   assert.equal(rows[1].all('rem-pause')[0].textContent, 'Resume');
   const missed = t.els['reminders-missed'].all('rem-item');
   assert.deepEqual(missed.map((r) => r.dataset.id), ['rem-cccccccccccc']);
@@ -216,7 +216,7 @@ test('every fixed string has Chinese', () => {
   const tr = ctx.KwilI18n.translate;
   const t = load();
   const strings = [...Object.values(t.api.TEXT),
-    'Reminders', 'Active', 'Missed', 'Turn on notifications in Settings so reminders can arrive.',
+    'Reminders', 'Upcoming', 'Missed', 'Turn on notifications in Settings so reminders can arrive.',
     "Say “remind me at 9 to …” or “every Monday at 8, tell me what's due”. Reminders arrive as notifications on this phone.",
     "couldn't reach your reminders; try again"];
   for (const s of strings) {

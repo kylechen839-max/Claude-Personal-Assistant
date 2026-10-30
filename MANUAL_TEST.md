@@ -1859,6 +1859,33 @@ In the Home Screen app.
 - [ ] On the desktop (a window wider than about 770px).
   - Should: no tab bar; the calendar, clock and gear at the top, as before.
 
+## Copy and polish pass (~10 min, iPhone, English and Chinese)
+Do this once with the app in English and once in Chinese (`[assistant]
+language = "zh"`, or a family member's phone), light mode.
+- [ ] Settings → Reminders with no reminders.
+  - Should: the head says "Upcoming" (即将提醒, not 已加入); the empty
+    line is just "No reminders yet." (还没有提醒。); the example ("remind
+    me at 9 to …") is only in the note under it. Nothing in English on
+    the Chinese screen.
+- [ ] Settings → Memory, scroll to the bottom (with Pinecone on).
+  - Should: a clear gap between each card's note and the next card;
+    "Long-term notes" (长期笔记) with its empty line left-aligned and
+    small under it, no clock icon. A note saved while a web page was in
+    the chat shows "Outside source" (外部来源).
+- [ ] Settings → Projects with no projects.
+  - Should: one card holding only "New project", with no line above it;
+    "No projects yet." (还没有项目。) under it.
+- [ ] History.
+  - Should: the day heads small and grey like Settings' section heads; a
+    row with no snippet has its icon centred on the title. With
+    VoiceOver, a row reads its source, title, "Pinned" and time, in
+    Chinese on the Chinese app.
+- [ ] Open Settings with VoiceOver on and swipe right past the last
+  item.
+  - Should: VoiceOver stays on the Settings page (and the tab bar); it
+    never reaches the chat behind it. After Done it reaches the chat
+    again.
+
 ## Projects (~15 min, iPhone and desktop)
 In the Home Screen app, with a syllabus PDF on the phone.
 - [ ] Settings -> **Projects**.

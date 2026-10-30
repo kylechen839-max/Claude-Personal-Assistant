@@ -2,7 +2,7 @@
 // scheduled tasks, when /api/state says {"reminders": true}. "Reminders" in
 // the settings menu opens the list: each active one with its text, its
 // next time in the person's own time zone and its repeat ("every Monday at
-// 8:00 AM"), a "Task" badge for a scheduled prompt and "Untrusted" for one
+// 8:00 AM"), a "Task" badge for a scheduled prompt and "Outside source" for one
 // made while outside text was in the conversation; Pause / Resume and
 // Delete (asks first). Missed one-time reminders (the server was down) are
 // listed under "Missed". A notification's tap (/#reminders) opens it.
@@ -23,10 +23,10 @@
   }
 
   const TEXT = {
-    empty: "No reminders yet. Say “remind me at 9 to …” and it shows here.",
+    empty: "No reminders yet.",
     paused: "Paused",
     task: "Task",
-    untrusted: "Untrusted",
+    untrusted: "Outside source",
     untrustedHint: "Made while a web page or email was in the conversation",
     pause: "Pause",
     resume: "Resume",
