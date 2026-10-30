@@ -1593,7 +1593,7 @@ Both are read when a conversation starts and given to Claude for the whole
 conversation (in the cached system prompt), so a change applies from your
 next conversation. A memory saved while a web page, email or other outside
 text was in the conversation asks you first (with the whole text) and is
-marked **Untrusted**: Kwil still follows it as your preference, but while
+marked **Outside source**: Kwil still follows it as your preference, but while
 one is loaded every change asks for a yes (as after reading an email). Tap
 **Keep as mine** on it in Settings to vouch for it. A memory you save in a
 conversation without outside text is never marked, even when an untrusted
@@ -2070,7 +2070,7 @@ on first: Settings -> **Enable notifications**).
   grace_minutes` (60) late comes once when it is back; an older one is
   listed as Missed (a repeat goes on from its next time).
 - **Outside text:** a reminder set while a web page, email or calendar
-  invite is in the conversation asks you first, is marked Untrusted, and
+  invite is in the conversation asks you first, is marked Outside source, and
   its notification's title says "(from outside text)".
 - **Limits:** 100 active reminders and 200 notifications a day per person,
   300 characters each. Each person (family members too) has their own,

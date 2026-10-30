@@ -54,10 +54,11 @@
       if (canResize) vv.addEventListener("resize", onResize);
       if (raf) raf(tick);
     };
-    // the chat behind the open page: out of reach for VoiceOver and Tab
+    // the chat behind the open page, and the header around the menu: out of
+    // reach for VoiceOver and Tab
     const behind = (on) => {
       if (typeof doc.querySelectorAll !== "function") return;
-      for (const el of doc.querySelectorAll("#app > :not(header)")) el.inert = on;
+      for (const el of doc.querySelectorAll("#app > :not(header), #app > header > :not(details.menu)")) el.inert = on;
     };
     // close the page and hand focus back to the gear (VoiceOver lands there),
     // on a phone to the tab bar's Settings

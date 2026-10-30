@@ -120,7 +120,6 @@ test('every string in the scripts\' fixed text maps translates', () => {
 test('the allowlist holds only names and technical text the page really shows', () => {
   const shown = new Set([...htmlStrings(), ...mapStrings()].map((s) => s.text));
   for (const s of ALLOW) {
-    if (s === 'English' || s === '中文 (Chinese)') continue;  // the language picker's own names
     assert.ok(shown.has(s), `unused allowlist entry: ${s}`);
   }
 });

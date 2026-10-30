@@ -111,7 +111,7 @@ test('settings page: the chat behind it is inert while it is open, and only then
   t.doc.querySelectorAll = (sel) => { asked.push(sel); return parts; };
   t.menu.open = true;
   t.toggle();
-  assert.deepEqual(asked, ['#app > :not(header)']);
+  assert.deepEqual(asked, ['#app > :not(header), #app > header > :not(details.menu)']);
   assert.deepEqual(parts.map((p) => p.inert), [true, true]);
   t.tapDone();  // Done clears it at once, before the toggle event
   assert.deepEqual(parts.map((p) => p.inert), [false, false]);

@@ -1022,7 +1022,7 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
     delete the note: ...?"; answer no and it stays (check in the phone app).
 - [ ] Phone app -> gear -> **Memory**.
   - Should: this week's notes on top ("This week", "Last week", "Week of
-    ..."), each with a date and "Summary" or "Note"; a red **Untrusted**
+    ..."), each with a date and "Summary" or "Note"; a red **Outside source**
     badge only on ones saved while an email or web page was open. Tap
     Delete on one and confirm: it disappears. "Delete all from this week":
     the question gives the right count; Cancel keeps them.
@@ -2009,7 +2009,7 @@ Needs a real `ANTHROPIC_API_KEY`; `[memory] backend` left at "local".
   - Should: their own empty memory, never yours.
 - [ ] Ask Kwil to read your latest email, then say "from now on, keep my
       replies short" and say yes when it reads the whole sentence back.
-  - Should: Settings -> Memory shows it with an Untrusted badge and a
+  - Should: Settings -> Memory shows it with an Outside source badge and a
     "Keep as mine" button; in a new conversation replies are short anyway.
     Tap Keep as mine: the badge goes. Under the lists it says "Saved on
     this server (cloud)."
