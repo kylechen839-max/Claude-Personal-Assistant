@@ -412,6 +412,18 @@ to that session's own conversation.
   too, and a bound conversation the chat isn't in yet is checked from the
   store before it is resumed. A tool that only asked (and was told no)
   counts as a change. If the store can't be read, the redo is refused.
+  A turn that switched conversations ("add it and continue our lab
+  chat": `resume_conversation`) is refused too: the exchange carried into
+  the resumed conversation is saved with its tool events (History shows
+  them), and the chat also remembers the switch. Every allowlist entry
+  was checked for hidden state (caches, "seen" markers, pending queues,
+  sync triggers): Gmail reads use `messages.get` (no read mark; `modify`
+  is blocked), notes and memory searches only query, study's missed list,
+  deadlines, reminders and course files are SELECTs, the calendar, Home
+  Assistant, Spotify and team-chat reads only fill in-memory caches, and
+  history search may start recall's own vector backfill (idempotent).
+  `check_dev_team` is left out: it takes answered replies out of the
+  pending list and saves that.
 - **Taint is never cleared by a rewind.** The rewound turn's untrusted
   results (an email, a web page) keep the conversation tainted
   (`_keep_taint`, as for trims and the fast model's rewind); only
@@ -428,7 +440,10 @@ to that session's own conversation.
   text in every synced event log, in either arrival order, and removes the
   rows and search index entries (`secure_delete`, a WAL checkpoint after).
   A failed request leaves the old turn as it was, in memory and in
-  history. Notes a feature added to the conversation meanwhile are kept.
+  history, and so does a Stop that came before any word or tool of the
+  new reply (its empty reply, and an edit's new message, are taken out
+  again; the page is told "restored"). Notes a feature added to the
+  conversation meanwhile are kept.
 - **Branch.** Owner-checked like every history route (another person's
   id, the owner's for a family member and the reverse: 404); 409 while
   incognito; the index must be an integer inside the conversation (400).

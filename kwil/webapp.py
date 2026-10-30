@@ -1327,7 +1327,7 @@ class WebAssistant:
         "error" event (refused, or the request failed: the old reply is
         still the conversation's, "restored": the page shows it again).
         "redo" is sent once the old turn is rewound."""
-        from kwil.chat import RedoRefused
+        from kwil.chat import RedoRefused, RedoStopped
         from kwil.cli import friendly_error, uses_own_key
 
         started = []
@@ -1341,6 +1341,9 @@ class WebAssistant:
         except RedoRefused as e:
             log.info("Web: not answering again (%s)", e.reason)
             s.events.put({"type": "error", "message": i18n.t(e.reason)})
+        except RedoStopped:  # Stop before anything came: the old reply stays
+            s.events.put({"type": "error", "message": i18n.t("redo_stopped"),
+                          "restored": True})
         except Exception as e:  # noqa: BLE001 - as get_reply
             sentence = friendly_error(e, text or "", lambda m: None,
                                       own_key=uses_own_key(s.chat))

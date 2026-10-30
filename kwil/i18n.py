@@ -47,6 +47,7 @@ EN = {
     "redo_changed": "That reply already changed something, so I won't redo it. Ask again instead.",
     "redo_busy": "Wait for the reply to finish first.",
     "redo_confirming": "Answer the question first.",
+    "redo_stopped": "Stopped. The earlier reply stays.",
     # "Branch from here": the new conversation's title (history_web.py)
     "branch_title": "{title} (branch)",
     "wont_delete": "OK, I won't delete it.",
@@ -182,6 +183,7 @@ ZH = {
     "redo_changed": "那条回复已经改动了东西，所以我不会重做。请重新问一次。",
     "redo_busy": "请等回复结束后再试。",
     "redo_confirming": "请先回答这个问题。",
+    "redo_stopped": "已停止，之前的回复保留。",
     "branch_title": "{title}（分支）",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",

@@ -272,6 +272,9 @@ class ClaudeChat:
         self.recorder = recorder
         self._turn_events: list[dict] = []
         self._pending_resume: str | None = None
+        # True when the last turn switched to another conversation
+        # (_switch_to): it is never redone (regenerate)
+        self._switched = False
         # Text from saved history (a resumed conversation, history search
         # results) comes back as plain text and may repeat web pages, so
         # changes ask first for the rest of the conversation, as with web
@@ -377,6 +380,7 @@ class ClaudeChat:
     def reset(self) -> None:
         self.history = []
         self.escalated = False
+        self._switched = False
         self._recalled = {}
         self.untrusted_context = False
         self.untrusted_memory = False
@@ -662,6 +666,7 @@ class ClaudeChat:
             else:  # deleted elsewhere meanwhile: out of this one too
                 self._drop_deleted_memories()
             self._apply_study()  # a turn boundary: the only time it changes
+            self._switched = False
             notes = self.recall(user_text)
             nudge = self._nudge() if not self.history else None
             self._turn_model = self._route(user_text, attachments)
@@ -763,6 +768,8 @@ class ClaudeChat:
         start = self._last_turn_start()
         if start is None:
             return RedoRefused("redo_nothing")
+        if self._switched:  # its tools ran in the conversation it left
+            return RedoRefused("redo_changed", ["resume_conversation"])
         stored = self.recorder.last_turn() if self.recorder else []
         if stored is None:  # the store couldn't say what ran: don't guess
             return RedoRefused("error")
@@ -785,7 +792,9 @@ class ClaudeChat:
         no turn at all. Taint stays (_keep_taint; only reset() clears it),
         and the old reply's thinking goes with it. `on_start` is called once
         the turn is rewound, before the request. If the request fails, the
-        old turn is put back as it was and the error raised."""
+        old turn is put back as it was and the error raised; so it is when
+        Stop came before any word or tool of the new reply (RedoStopped):
+        nothing better replaced the old answer."""
         refused = self.redo_refusal()
         if refused is not None:
             raise refused
@@ -822,6 +831,22 @@ class ClaudeChat:
             self._history.extend(removed)  # ask() took its own turn out
             self._turn_start = removed[0]
             raise
+        if cancel is not None and cancel.is_set() and not reply.strip() \
+                and not self._turn_events:
+            # Stopped before anything came: keep the old answer, and take
+            # the new empty turn (and an edit's new message) out again
+            begin = next((i for i, m in enumerate(self._history)
+                          if m is self._turn_start), len(self._history))
+            del self._history[begin:]
+            self._history.extend(removed)
+            self._turn_start = removed[0]
+            if self.recorder:
+                known = {r["event_id"] for r in stored}
+                self.recorder.supersede(cid, [
+                    r["event_id"] for r in (self.recorder.last_turn() or [])
+                    if r["event_id"] not in known and r["kind"] != "note"])
+            log.info("Answering again was stopped before any reply: the old one stays")
+            raise RedoStopped()
         if self.recorder:
             self.recorder.supersede(cid, old_ids)
         return reply
@@ -877,10 +902,12 @@ class ClaudeChat:
         self._study_text = ""
         self.recorder.resume(conversation_id)
         self.recorder.user(user_text)
-        self.recorder.assistant(reply)
+        # with the turn's tools (History shows them; regenerate refuses)
+        self.recorder.assistant(reply, tool_events=self._turn_events)
         self.history += [{"role": "user", "content": user_text},
                          {"role": "assistant", "content": reply}]
         self.untrusted_context = True
+        self._switched = True
         log.info("Resumed conversation %s", conversation_id)
 
     def _confirm_wrapper(self, confirm):
@@ -1584,6 +1611,11 @@ class RedoRefused(Exception):
         super().__init__(reason)
         self.reason = reason
         self.tools = list(tools)
+
+
+class RedoStopped(Exception):
+    """regenerate was stopped before any word or tool of the new reply:
+    the old turn was put back, in the chat and in saved history."""
 
 
 class StreamEndedEarly(Exception):

@@ -324,6 +324,27 @@ test('a failed request after the rewind brings the old reply back', async () => 
   assert.ok(p.redoBtn());  // it may be tried again
 });
 
+test('Stop before the new reply says anything: the old reply comes back', async () => {
+  const p = load();
+  await p.flush();
+  await firstTurn(p);
+  await p.redoBtn().fire('click');
+  await p.flush();
+  p.streams[1].push({ type: 'redo', edit: false });
+  await p.flush();
+  assert.deepEqual(p.shownLog('claude'), []);
+  await p.$('stop').fire('click');
+  await p.flush();
+  assert.ok(p.fetches.some((f) => f.url === '/api/stop'));
+  await p.finish(p.streams[1],
+                 { type: 'error', message: 'Stopped. The earlier reply stays.', restored: true },
+                 p.done(p.streams[1]));
+  assert.deepEqual(p.shownLog('claude'), ['Bananas.']);
+  assert.deepEqual(p.shownLog('me'), ['fruit?']);
+  assert.equal(p.shownLog('note').at(-1), 'Stopped. The earlier reply stays.');
+  assert.ok(p.redoBtn());
+});
+
 test('a new pane drops the tools and the edit', async () => {
   const p = load();
   await p.flush();

@@ -7654,3 +7654,41 @@ Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3777 passed, 45 skipped, 1 deselected (d75b206: 3743 / 42; +34 passed,
 +3 live contract params skipped without a key). JavaScript 333 passed
 (321; +12).
+
+### Try again, edit, branch: judge round 2 (2026-10-30)
+1. **A write plus a resume in one turn is never redone.** `_switch_to`
+   saved the exchange it carries into the resumed conversation without
+   its tool events, and the chat history became plain text, so "add 'Lab
+   due' to my calendar and continue our lab chat" could be tried again
+   and ran `create_calendar_event` twice. The carried reply is now saved
+   with the turn's tool events (History shows them), and the chat
+   remembers the switch (`_switched`, cleared by the next turn and by
+   `reset()`): either one alone refuses the redo.
+2. **`check_dev_team` left `REDO_SAFE_TOOLS`:** `devteam.replies()`
+   takes answered replies out of the pending list and saves that. Every
+   other entry was re-read for hidden state: Gmail reads use
+   `messages.get` (no read mark; `modify` is blocked); notes, memory
+   searches, the missed list, deadlines, reminders and course files only
+   query; calendar, Home Assistant, Spotify and team-chat reads fill
+   in-memory caches; history search may start recall's own idempotent
+   vector backfill. Nothing else moved.
+3. **Stop before the first word keeps the old answer.** If a redo is
+   stopped before any text or tool of the new reply, the old turn is put
+   back (chat history, and the empty reply plus an edit's new message are
+   taken out of saved history; nothing superseded) and `RedoStopped`
+   gives the page `{"type": "error", "restored": true}` ("Stopped. The
+   earlier reply stays."). The page already brought the old reply back on
+   "restored"; a JS test now covers it through the Stop button.
+
+Tests: 5 new Python (the judge's exact path, both try again and edit,
+plus the switch flag alone, a later chat reading the saved tools and the
+flag clearing; check_dev_team refused; Stop before a word for try again
+and for an edit, and on the page) and 1 JS (Stop, then "restored").
+Failing first: the 5 Python tests fail on 2c0701c (the JS one passes
+there: the page's handling didn't change); 7 single mutations each fail
+their test (switch saved without tool events, the switch not remembered,
+the flag not cleared, check_dev_team allowed, Stop superseding, a stopped
+edit's new message left, the page not told "restored").
+
+Counts (Linux sandbox): 3782 passed, 45 skipped, 1 deselected (2c0701c:
+3777 / 45; +5). JavaScript 334 passed (333; +1).

@@ -141,6 +141,72 @@ def test_a_turn_that_changed_something_is_never_redone(fake_client, store):
     assert other.redo_refusal().reason == "redo_changed"
 
 
+def test_a_write_and_a_resume_in_one_turn_is_never_redone(fake_client, store):
+    """Judge round 1: "add 'Lab due' to my calendar and continue our lab
+    chat" ran create_calendar_event, then resume_conversation; the
+    exchange carried into the resumed conversation was saved without its
+    tool events and became plain text, so try again ran the create twice."""
+    from kwil.tools.history import history_tools
+
+    lab = seed(store, turns=("Plan the lab.", "Step one."), title="Lab")
+    ran = []
+    tools = registry(ran)
+    tools.register(*history_tools(store))
+    tools.confirm = lambda q: True
+    chat = make_chat(fake_client, store, tools=tools)
+    fake_client.queue = [
+        make_response(tool_use_block("create_calendar_event", {"title": "Lab due"}),
+                      stop_reason="tool_use"),
+        make_response(tool_use_block("resume_conversation", {"conversation_id": lab},
+                                     id="toolu_2"), stop_reason="tool_use"),
+        make_response(text_block("Added, and back to the lab."))]
+    chat.ask("add 'Lab due' to my calendar and continue our lab chat")
+    assert chat.conversation_id == lab and ran == [("create", "Lab due")]
+    # History shows the carried turn's tools
+    carried = store.get(lab)["messages"][-1]
+    assert [e["tool"] for e in carried["tool_events"]] == [
+        "create_calendar_event", "resume_conversation"]
+    calls = len(fake_client.calls)
+    for text in (None, "add it on Friday instead"):
+        with pytest.raises(RedoRefused) as e:
+            chat.regenerate(text=text)
+        assert e.value.reason == "redo_changed"
+    assert ran == [("create", "Lab due")] and len(fake_client.calls) == calls
+    # belt and braces: the switch alone refuses (even with no saved tools)
+    chat.recorder.last_turn = lambda: []
+    assert chat.redo_refusal().reason == "redo_changed"
+    # and a chat that resumes the conversation later reads the saved tools
+    other = make_chat(fake_client, store, tools=registry(ran))
+    other.resume(lab)
+    assert other.redo_refusal().reason == "redo_changed"
+    # a new turn clears the switch
+    fake_client.queue = [make_response(text_block("Sure."))]
+    chat.recorder = Recorder(store, "web", run_async=False)
+    chat.recorder.resume(lab)
+    chat.ask("thanks")
+    assert chat.redo_refusal() is None
+
+
+def test_check_dev_team_is_not_redone(fake_client, store):
+    """check_dev_team takes answered replies out of the pending list and
+    saves that (devteam.replies): it changes state, so its turn is never
+    redone."""
+    assert "check_dev_team" not in REDO_SAFE_TOOLS
+    ran = []
+    tools = registry(ran)
+    tools.register(Tool("check_dev_team", "Check replies.",
+                        {"type": "object", "properties": {}},
+                        lambda: ran.append("check") or {"replies": []}))
+    chat = make_chat(fake_client, store, tools=tools)
+    fake_client.queue = [
+        make_response(tool_use_block("check_dev_team", {}), stop_reason="tool_use"),
+        make_response(text_block("No replies yet."))]
+    chat.ask("did the dev team answer?")
+    with pytest.raises(RedoRefused) as e:
+        chat.regenerate()
+    assert e.value.tools == ["check_dev_team"] and ran == ["check"]
+
+
 def test_a_read_only_tool_turn_may_be_redone(fake_client, store):
     ran = []
     chat = make_chat(fake_client, store, tools=registry(ran))
@@ -610,6 +676,49 @@ def test_a_note_added_by_a_feature_is_not_superseded(fake_client, store):
     chat.regenerate()
     assert texts(store.get(chat.conversation_id)) == [
         ("user", "fruit?"), ("assistant", "[lecture] notes"), ("assistant", NEW)]
+
+
+@pytest.mark.parametrize("edit", [None, "vegetables?"])
+def test_stop_before_any_word_keeps_the_old_reply(fake_client, store, edit):
+    """Stop before the new reply said anything (and no tool ran): nothing
+    replaced the good answer, so the old turn is put back, in the chat and
+    in saved history (no supersede), and RedoStopped tells the caller."""
+    from kwil.chat import RedoStopped
+
+    chat = make_chat(fake_client, store)
+    fake_client.queue = [make_response(text_block(OLD)), make_response(text_block(NEW))]
+    chat.ask("fruit?")
+    before = json.dumps(chat.history)
+    cancel = threading.Event()
+    with pytest.raises(RedoStopped):
+        chat.regenerate(text=edit, cancel=cancel, on_start=cancel.set)
+    assert json.dumps(chat.history) == before
+    cid = chat.conversation_id
+    assert texts(store.get(cid)) == [("user", "fruit?"), ("assistant", OLD)]
+    assert not [e for e in store.eventlog.by_conv(cid) if e.kind == "delete_message"
+                and e.data.get("target") in {m["id"] for m in store.get(cid)["messages"]}]
+    # and it can be tried again
+    assert chat.regenerate() == NEW
+    assert texts(store.get(cid)) == [("user", "fruit?"), ("assistant", NEW)]
+
+
+def test_stop_before_any_word_on_the_page_restores(web, fake_client, monkeypatch):
+    login(web.client)
+    fake_client.queue = [make_response(text_block(OLD))]
+    cid = events(web.client.post("/api/turn", json={"text": "fruit?"}))[-1]["conversation"]
+    s = session(web.assistant)
+    real = s.chat.regenerate
+
+    def stopped_at_once(**kw):  # Stop pressed as the redo starts
+        on_start = kw.pop("on_start")
+        return real(**kw, on_start=lambda: (on_start(), s.cancel.set()))
+    monkeypatch.setattr(s.chat, "regenerate", stopped_at_once)
+    fake_client.queue = [make_response(text_block(NEW))]
+    evs = events(redo(web.client))
+    assert [e["type"] for e in evs] == ["redo", "error", "done"]
+    assert evs[1]["restored"] is True and evs[1]["message"] == i18n.t("redo_stopped")
+    assert evs[-1]["redo"] is True
+    assert texts(web.store.get(cid)) == [("user", "fruit?"), ("assistant", OLD)]
 
 
 def test_a_stopped_try_again_still_replaces_the_old_reply(fake_client, store):
