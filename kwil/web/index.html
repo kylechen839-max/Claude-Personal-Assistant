@@ -31,6 +31,7 @@
 <script src="/voice-picker.js" defer></script>
 <script src="/brief.js" defer></script>
 <script src="/study.js" defer></script>
+<script src="/projects.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -58,6 +59,12 @@
 <main id="app" class="app" hidden>
   <header>
     <h1>Kwil <span id="incognito-badge" class="badge" hidden>Incognito</span></h1>
+    <span id="project-pill" class="study-pill project-pill" hidden>
+      <button id="project-pill-text" class="project-pill-text" type="button" aria-label="Open project"></button>
+      <button id="project-leave" class="study-stop" type="button" aria-label="Leave project">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+    </span>
     <span id="study-pill" class="study-pill" hidden>
       <span id="study-pill-text"></span>
       <button id="study-stop" class="study-stop" type="button" aria-label="Stop studying">
@@ -114,6 +121,7 @@
           <button id="backends-save" type="button">Save and check</button>
           <ul id="backend-status" class="backend-status"></ul>
         </fieldset>
+        <button id="projects-open" type="button" hidden>Projects</button>
         <button id="memory-open" type="button" hidden>Memory</button>
         <button id="reminders-open" type="button" hidden>Reminders</button>
         <button id="push-toggle" type="button" hidden>Enable notifications</button>
@@ -452,6 +460,69 @@
   <p id="memory-status" class="status center" role="status"></p>
 </main>
 
+<main id="projects-view" class="history memory projects" hidden aria-labelledby="projects-title">
+  <header class="bar">
+    <button id="projects-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="projects-title" tabindex="-1">Projects</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section class="mem-local" aria-labelledby="projects-title">
+    <div class="group projects-group">
+      <div id="projects-list" class="projects-list" role="list" hidden></div>
+      <button id="projects-new" class="row projects-new" type="button">New project</button>
+    </div>
+    <p id="projects-empty" class="group-foot" hidden></p>
+    <h2 class="group-head" id="projects-suggestions-title">Suggested from your courses</h2>
+    <div id="projects-suggestions" class="group projects-list" role="list" aria-labelledby="projects-suggestions-title" hidden></div>
+    <p id="projects-suggestions-empty" class="group-foot" hidden></p>
+    <p class="group-foot">Each project has its own instructions, files, memories and chats. What Kwil remembers in a project stays in it.</p>
+    <p id="projects-status" class="hint mem-local-status" role="status"></p>
+  </section>
+</main>
+
+<main id="project-view" class="history memory project" hidden aria-labelledby="project-title">
+  <header class="bar">
+    <button id="project-back" class="icon-btn" type="button" aria-label="Back to projects">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="project-title" tabindex="-1"></h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section class="mem-local" aria-labelledby="project-title">
+    <button id="project-chat" class="btn primary wide" type="button">New chat in this project</button>
+    <h2 class="group-head"><label for="project-instructions">Instructions</label></h2>
+    <div class="group mem-instr">
+      <textarea id="project-instructions" rows="5" maxlength="4000"
+                placeholder="For example: PHYS 361, Classical Mechanics. Use Taylor's notation. Exams are closed-book."></textarea>
+      <div class="mem-instr-foot">
+        <span id="project-instructions-count" class="mem-count" aria-live="polite"></span>
+        <button id="project-instructions-save" class="btn secondary" type="button">Save</button>
+      </div>
+    </div>
+    <p class="group-foot">Kwil follows these in this project's chats, from the next one.</p>
+    <h2 class="group-head" id="project-files-title">Files</h2>
+    <div class="group">
+      <div id="project-files" class="mem-items" role="list" aria-labelledby="project-files-title" hidden></div>
+      <button id="project-add-file" class="row projects-new" type="button">Add file</button>
+    </div>
+    <p id="project-files-empty" class="group-foot" hidden></p>
+    <input id="project-file-input" type="file" hidden accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md">
+    <h2 class="group-head" id="project-memories-title">Things Kwil remembered here</h2>
+    <div id="project-memories" class="group mem-items" role="list" aria-labelledby="project-memories-title" hidden></div>
+    <p id="project-memories-empty" class="group-foot" hidden></p>
+    <h2 class="group-head" id="project-chats-title">Chats</h2>
+    <div id="project-chats" class="group projects-list" role="list" aria-labelledby="project-chats-title" hidden></div>
+    <p id="project-chats-empty" class="group-foot" hidden></p>
+    <div class="group mem-controls">
+      <button id="project-rename" class="row" type="button">Rename</button>
+      <button id="project-delete" class="row danger" type="button">Delete project</button>
+    </div>
+    <p id="project-status" class="hint mem-local-status" role="status"></p>
+  </section>
+</main>
+
 <main id="reminders-view" class="history memory reminders" hidden aria-labelledby="reminders-title">
   <header class="bar">
     <button id="reminders-back" class="icon-btn" type="button" aria-label="Back to chat">
@@ -512,6 +583,18 @@
   <form method="dialog">
     <h2 id="rename-title">Rename</h2>
     <input id="rename-input" type="text" maxlength="120" required aria-labelledby="rename-title">
+    <div class="row">
+      <button value="cancel" class="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="project-name-dialog" class="sheet" aria-labelledby="project-name-title">
+  <form method="dialog">
+    <h2 id="project-name-title">New project</h2>
+    <input id="project-name-input" type="text" maxlength="80" required aria-labelledby="project-name-title"
+           placeholder="For example, PHYS 361">
     <div class="row">
       <button value="cancel" class="cancel" formnovalidate>Cancel</button>
       <button value="save" class="primary">Save</button>

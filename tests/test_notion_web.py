@@ -299,7 +299,8 @@ def test_callback_saves_encrypted_notion_token_and_adds_tools(n):
 
 MEMORY = {"remember", "list_memories", "update_memory", "forget_memory",  # their own memory
           "create_reminder", "list_reminders", "update_reminder", "cancel_reminder",  # reminders
-          "start_study", "end_study", "note_missed", "list_missed"}  # study mode
+          "start_study", "end_study", "note_missed", "list_missed",  # study mode
+          "search_project_files", "read_project_file"}  # their own projects' files
 
 
 def test_beta_registry_gets_list_assignments_only_after_connecting(n):
@@ -484,7 +485,9 @@ def test_both_tools_are_untrusted_and_private_and_update_asks(n):
         assert tools[name].untrusted_output is True and tools[name].private is True
     assert tools["update_assignment_status"].confirm_if_untrusted is not None
     assert n.fam.context(uid).registry.untrusted_names() == {
-        "list_assignments", "update_assignment_status"}
+        "list_assignments", "update_assignment_status",
+        # their own projects' file text (tools/projects.py): outside text too
+        "search_project_files", "read_project_file"}
     q = tools["update_assignment_status"].confirm_if_untrusted({"name": "Essay",
                                                                 "status": "Done"})
     assert "Essay" in q and "Done" in q

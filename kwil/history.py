@@ -129,6 +129,22 @@ CREATE TABLE IF NOT EXISTS recall_vectors (
     vector BLOB NOT NULL     -- float32, unit length
 );
 """
+# Projects (projects.py): which project a conversation is in (at most one).
+# Local bookkeeping like memory_vectors, not an event: the projects
+# themselves live in each backend's own memory file, so a peer would have
+# no such project anyway. Created like recall_vectors (IF NOT EXISTS), and
+# ON DELETE CASCADE: however a conversation goes, its row goes with it.
+PROJECTS_SQL = """
+CREATE TABLE IF NOT EXISTS conversation_projects (
+    conversation_id TEXT PRIMARY KEY
+        REFERENCES conversations(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS conversation_projects_project
+    ON conversation_projects(project_id);
+"""
+PROJECT_ID_RE = re.compile(r"^prj-[0-9a-f]{12}$")  # memory_store.PROJECT_RE
+
 # Recall reads at most this many vectors per search (brute-force cosine);
 # past that, a Postgres + pgvector Retriever is the way (recall.py).
 MAX_RECALL_SCAN = 20000
@@ -334,6 +350,7 @@ class HistoryStore:
         self._migrate()
         with self._lock:
             self._con.executescript(RECALL_SQL)
+            self._con.executescript(PROJECTS_SQL)
         if use_fts is None:
             use_fts = fts5_available()
         self.fts = self._ensure_fts() if use_fts else self._drop_fts_triggers()
@@ -693,6 +710,8 @@ class HistoryStore:
                                  interrupted=bool(m["interrupted"]),
                                  tool_events=m["tool_events"] or None)
             self.update(cid, title=title.format(title=base[:110]))
+            if conv.get("project"):  # a branch stays in its project
+                self.set_project(cid, conv["project"])
         return cid
 
     def mark_interrupted(self, conversation_id: str,
@@ -762,6 +781,40 @@ class HistoryStore:
                     "pinned": bool(row["pinned"] if pinned is None else pinned),
                     "archived": bool(row["archived"] if archived is None else archived)})
             return self.get(conversation_id, messages=False)
+
+    # ---------- projects (projects.py) ----------
+    def set_project(self, conversation_id: str, project_id: str | None) -> None:
+        """Put a conversation in a project (None: in none). KeyError if it
+        isn't this owner's; ValueError for a malformed project id."""
+        if project_id is not None and not (isinstance(project_id, str)
+                                           and PROJECT_ID_RE.match(project_id)):
+            raise ValueError("bad project id")
+        with self._lock:
+            self._own(conversation_id)
+            if project_id is None:
+                self._con.execute("DELETE FROM conversation_projects WHERE "
+                                  "conversation_id = ?", (conversation_id,))
+            else:
+                self._con.execute("INSERT OR REPLACE INTO conversation_projects "
+                                  "VALUES (?, ?)", (conversation_id, project_id))
+        log.info("History: conversation %s in project %s", conversation_id,
+                 project_id or "none")
+
+    def project_of(self, conversation_id: str) -> str | None:
+        with self._lock:
+            row = self._con.execute(
+                "SELECT project_id FROM conversation_projects WHERE conversation_id = ?",
+                (conversation_id,)).fetchone()
+        return row[0] if row else None
+
+    def unfile_project(self, project_id: str) -> int:
+        """The project was deleted: its conversations stay, in no project.
+        Returns how many."""
+        with self._lock:
+            n = self._con.execute("DELETE FROM conversation_projects WHERE "
+                                  "project_id = ?", (str(project_id),)).rowcount
+        log.info("History: %d conversation(s) taken out of project %s", n, project_id)
+        return n
 
     def add_memory_vector(self, conversation_id: str, vector_id: str) -> None:
         """Remember a Pinecone summary's id (local bookkeeping, not synced:
@@ -1045,10 +1098,12 @@ class HistoryStore:
         return True
 
     def recall_vectors(self, model: str, *, source=None, pinned=None,
-                       archived=None, since=None, until=None) -> list[tuple]:
+                       archived=None, since=None, until=None,
+                       project=None) -> list[tuple]:
         """[(conversation id, vector bytes, dim)] for `model`, newest first,
         filtered like `search`, at most MAX_RECALL_SCAN."""
-        where, params = self._filters(source, pinned, archived, since, until)
+        where, params = self._filters(source, pinned, archived, since, until,
+                                      project=project)
         with self._lock:
             return [tuple(r) for r in self._con.execute(
                 f"SELECT c.id, v.vector, v.dim FROM recall_vectors v "
@@ -1082,9 +1137,11 @@ class HistoryStore:
     def list(self, *, limit: int = 20, offset: int = 0, source: str | None = None,
              pinned: bool | None = None, archived: bool | None = False,
              since: float | None = None, until: float | None = None,
-             ids: list[str] | None = None) -> list[dict]:
-        """Newest activity first. `archived=None` includes archived ones."""
-        where, params = self._filters(source, pinned, archived, since, until, ids)
+             ids: list[str] | None = None, project: str | None = None) -> list[dict]:
+        """Newest activity first. `archived=None` includes archived ones.
+        `project`: only that project's conversations."""
+        where, params = self._filters(source, pinned, archived, since, until, ids,
+                                      project=project)
         with self._lock:
             rows = self._con.execute(
                 f"SELECT {_CONV_COLS} FROM "
@@ -1101,7 +1158,8 @@ class HistoryStore:
     def count(self, **filters) -> int:
         where, params = self._filters(filters.get("source"), filters.get("pinned"),
                                       filters.get("archived", False),
-                                      filters.get("since"), filters.get("until"))
+                                      filters.get("since"), filters.get("until"),
+                                      project=filters.get("project"))
         with self._lock:
             return self._con.execute(
                 f"SELECT count(*) FROM conversations c WHERE {where}",
@@ -1110,20 +1168,23 @@ class HistoryStore:
     def search(self, query: str, *, limit: int = 20, offset: int = 0,
                source: str | None = None, pinned: bool | None = None,
                archived: bool | None = False, since: float | None = None,
-               until: float | None = None, snippet_tokens: int = 12) -> list[dict]:
+               until: float | None = None, snippet_tokens: int = 12,
+               project: str | None = None) -> list[dict]:
         """Ranked keyword search. Each hit is a conversation (as in `list`)
         with a `snippet` whose matches are wrapped in MARK_START/MARK_END
         and a `score` (higher is better). All words must match; if nothing
         does, any word may. Conversations whose title or summary match come
         before ones that only mention the words in passing.
-        `snippet_tokens`: words around the match (at most 64)."""
+        `snippet_tokens`: words around the match (at most 64). `project`:
+        only that project's conversations."""
         snippet_tokens = max(4, min(int(snippet_tokens), 64))
         terms = query_terms(query)
         if not terms:
             return self.list(limit=limit, offset=offset, source=source,
                              pinned=pinned, archived=archived, since=since,
-                             until=until)
-        filters = self._filters(source, pinned, archived, since, until)
+                             until=until, project=project)
+        filters = self._filters(source, pinned, archived, since, until,
+                                project=project)
         with self._lock:
             ranked = (self._search_fts if self.fts else self._search_like)(
                 terms, filters, False)
@@ -1229,8 +1290,13 @@ class HistoryStore:
                       key=lambda h: (h[0] not in topical, -h[1],
                                      -updated.get(h[0], 0)))
 
-    def _filters(self, source, pinned, archived, since, until, ids=None):
+    def _filters(self, source, pinned, archived, since, until, ids=None,
+                 project=None):
         where, params = ["c.owner = ?", _HAS_MESSAGES], [self.owner]
+        if project is not None:
+            where.append("c.id IN (SELECT conversation_id FROM conversation_projects "
+                         "WHERE project_id = ?)")
+            params.append(str(project))
         if ids is not None:
             ids = [i for i in ids if valid_id(i)] or [""]
             where.append(f"c.id IN ({','.join('?' * len(ids))})")
@@ -1263,7 +1329,8 @@ _HAS_MESSAGES = "EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)"
 _CONV_COLS = ("c.id, c.source, c.started_at, c.updated_at, c.ended_at, c.title, "
               "c.summary, c.pinned, c.archived, (SELECT count(*) FROM messages "
               f"WHERE conversation_id = c.id) AS message_count, ({_FIRST_USER}) "
-              "AS preview")
+              "AS preview, (SELECT project_id FROM conversation_projects WHERE "
+              "conversation_id = c.id) AS project")
 
 
 def _limit(limit) -> int:
@@ -1278,7 +1345,8 @@ def _conv_dict(row) -> dict:
             "summary": row["summary"] or "", "pinned": bool(row["pinned"]),
             "archived": bool(row["archived"]),
             "message_count": row["message_count"],
-            "preview": _truncate(row["preview"] or "", 200)}
+            "preview": _truncate(row["preview"] or "", 200),
+            "project": row["project"] if "project" in row.keys() else None}
 
 
 def _msg_dict(row, seq: int) -> dict:
@@ -1693,6 +1761,11 @@ class Recorder:
         if conversation_id:
             self._safe(self.store.add_memory_vector, conversation_id, vector_id)
 
+    def set_project(self, project_id: str | None) -> None:
+        """The current conversation is in this project (projects.py)."""
+        if self.conversation_id:
+            self._safe(self.store.set_project, self.conversation_id, project_id)
+
     def message_count(self) -> int:
         if not self.conversation_id or not self.active:
             return 0
@@ -1865,7 +1938,7 @@ def search_conversations(store: HistoryStore, query: str, memory=None, *,
         limit=200, ids=[s["conversation_id"] for s in wanted],
         source=filters.get("source"), pinned=filters.get("pinned"),
         archived=filters.get("archived", False), since=filters.get("since"),
-        until=filters.get("until"))}
+        until=filters.get("until"), project=filters.get("project"))}
     for s in wanted:
         conv = found.get(s["conversation_id"])
         if conv and len(hits) < limit:
@@ -1911,7 +1984,9 @@ def export(conv: dict, fmt: str = "md") -> str:
             "summary": redact(conv["summary"]), "source": conv["source"],
             "started_at": _iso(conv["started_at"]),
             "ended_at": _iso(conv["ended_at"]) if conv["ended_at"] else None,
-            "pinned": conv["pinned"], "messages": messages},
+            "pinned": conv["pinned"],
+            **({"project": conv["project"]} if conv.get("project") else {}),
+            "messages": messages},
             indent=2, ensure_ascii=False)
     if fmt != "md":
         raise ValueError("format must be md or json")

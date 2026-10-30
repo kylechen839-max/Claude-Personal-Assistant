@@ -1668,6 +1668,39 @@ In the Home Screen app, with Canvas course content synced if you have it.
   "正在学习 ..." and "学习：要复习的内容", and their list doesn't show
   yours.
 
+## Projects (~15 min, iPhone and desktop)
+In the Home Screen app, with a syllabus PDF on the phone.
+- [ ] Gear menu -> **Projects**.
+  - Should: the menu closes and the Projects page opens; with Canvas or
+    deadlines connected, **Suggested from your courses** lists your
+    classes. Tap **Create** on one.
+  - Should: its page opens with its name at the top and **New chat in
+    this project** as the one blue button.
+- [ ] Type instructions ("Use Taylor's notation. Exams are closed-book."),
+  tap **Save**, then **Add file** and pick the syllabus PDF.
+  - Should: "Saved." then "Added."; the file shows as "PDF · ... MB".
+    A photo is refused with a sentence saying projects take PDFs or text.
+- [ ] Tap **New chat in this project** and ask "what's the late policy?".
+  - Should: the chat clears with "New chat in PHYS 361.", the header shows
+    the project's name, and the answer comes from the syllabus (it names
+    the file).
+- [ ] Say "remember that problem sets are due Fridays".
+  - Should: Kwil asks first (a file is in the chat), then saves it; the
+    project page lists it under **Things Kwil remembered here**, and
+    Settings -> **Memory** does not.
+- [ ] Tap the header's x and ask "when are problem sets due?".
+  - Should: a new chat in no project (the name is gone), and Kwil doesn't
+    know: the project's memory stayed in the project.
+- [ ] Tap the project name in a project chat, then a chat under **Chats**.
+  - Should: the project page opens; the chat opens in History, and
+    continuing it puts the name back in the header after the reply.
+- [ ] **Delete project** (asks first), then open History.
+  - Should: the project is gone from Projects; its chats are still in
+    History.
+- [ ] On a desktop browser and in a Chinese family member's app: the
+  pages fit, read "项目" and "在这个项目里开始新对话", and their Projects
+  list doesn't show yours.
+
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
 - [ ] In text mode (`python -m kwil --mode text`), ask "what time is

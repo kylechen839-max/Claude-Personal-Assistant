@@ -354,6 +354,14 @@ as the work. Never put secrets, tokens or personal data in this file.
   rules in its tool result instead. A route module that imports FastAPI's
   `Request` inside a function must not use `from __future__ import
   annotations` (the route then reads `request` as a query field: 400).
+- Lesson (2026-10-30, projects): per-conversation documents (a project's
+  files) can't go in `system` (text blocks only): they are prepended to
+  the first message at request time (`ClaudeChat._with_project_docs`),
+  never stored in history, with one breakpoint after the last of them.
+  With the stable system block, study mode's block and the conversation's
+  end that is the API's four; a fifth cache_control anywhere is a 400
+  (contract_fakes checks). A test needs two or more documents to catch
+  one breakpoint per document.
 - **Phone app and voice:**
   - `webapp.py`: WebAuth, strict self-only CSP.
   - UI work follows `.claude/DESIGN_SYSTEM.md` (tokens, `.btn` roles,

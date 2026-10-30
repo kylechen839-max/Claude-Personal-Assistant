@@ -235,6 +235,59 @@ def test_a_study_session_quiz_question_answer_and_a_noted_miss(tmp_path):
         store.close()
 
 
+def test_a_project_chat_with_a_file_and_a_remember(tmp_path):
+    """Projects: a conversation in PHYS 361 sends its syllabus as a cached
+    document at the start of every request, its instructions in the stable
+    system block (the same bytes all conversation), and "from now on..."
+    is saved with remember to that project only, after a yes (the file is
+    outside text). With study mode on too: at most four breakpoints. Every
+    request must be one the API accepts. Fake only: whether a live model
+    calls remember is its choice, not the contract."""
+    from kwil.cli import add_memory_tools, add_project_tools
+    from kwil.config import load_config
+    from kwil.memory_store import SqliteMemoryStore
+
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite")
+    try:
+        project = store.create_project("PHYS 361", "Use Taylor's notation.")
+        syllabus = "PHYS 361 syllabus: homework loses ten percent per day late.\n"
+        store.add_file(project["id"], "syllabus.txt", "text", syllabus.encode(),
+                       text=syllabus, max_files=20, max_bytes=10**7,
+                       max_total_bytes=5 * 10**7)
+        client = ContractClient()
+        tools = calendar_tools([])
+        asked = []
+        tools.confirm = lambda q: asked.append(q) or True
+        add_memory_tools(tools, None, store)
+        add_project_tools(tools, load_config(None, None, profile=""), store)
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools,
+                          max_tokens=1024, local_memory=store)
+        chat.set_project(project["id"])
+        assert chat.ask("From now on, always use SI units in this class.").strip()
+        assert [m["text"] for m in store.list(project["id"])] == [
+            "From now on, always use SI units in this class."]
+        assert store.list() == [] and len(asked) == 1  # asked: a file is in it
+        assert store.list(project["id"])[0]["untrusted"] is True
+        chat.start_study(course="PHYS 361", source="app")
+        assert chat.ask("Thanks. What's on my calendar tomorrow?").strip()
+        assert len(client.requests) == 4
+        for request in client.requests:
+            first = request["messages"][0]["content"]
+            assert first[0]["type"] == "document" and first[0]["cache_control"]
+            assert first[0]["source"]["data"] == syllabus
+            assert "Use Taylor's notation." in request["system"][0]["text"]
+        assert len({str(r["system"][0]) for r in client.requests}) == 1
+        assert len(client.requests[-1]["system"]) == 2  # study mode's block
+        chat.end_conversation()  # the next conversation: in no project
+        assert chat.ask("What's on my calendar tomorrow?").strip()
+        last = client.requests[-1]
+        assert "Taylor" not in str(last["system"]) and "SI units" not in str(last["system"])
+        assert all(b.get("type") != "document" for m in last["messages"]
+                   if isinstance(m["content"], list) for b in m["content"])
+    finally:
+        store.close()
+
+
 def test_recall_searches_then_reads_a_past_chat(tmp_path):
     """Memory layer 2: "what did we decide about my physics schedule last
     week?" searches past chats, reads the best hit and answers from it, in

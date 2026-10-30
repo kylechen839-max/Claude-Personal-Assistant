@@ -10,7 +10,8 @@ on the disk is ever added):
                             status, tier); never an invite's hash
   users/<id>/history.sqlite each listed family member's own history
   memory.sqlite             the owner's instructions and saved memories
-                            (memory_store.py)
+                            (memory_store.py), and his projects with their
+                            memories and files (projects.py)
   users/<id>/memory.sqlite  each listed family member's own memory
   reminders.sqlite          the owner's reminders and scheduled tasks
                             (reminders.py)

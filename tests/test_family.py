@@ -43,7 +43,9 @@ MEMORY_TOOLS = {"remember", "list_memories", "update_memory", "forget_memory",
                 # and their own reminders (tools/reminders.py)
                 "create_reminder", "list_reminders", "update_reminder", "cancel_reminder",
                 # and study mode, its missed concepts in their memory file (tools/study.py)
-                "start_study", "end_study", "note_missed", "list_missed"}
+                "start_study", "end_study", "note_missed", "list_missed",
+                # and their own projects' files (tools/projects.py)
+                "search_project_files", "read_project_file"}
 
 
 def owner_registry():

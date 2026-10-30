@@ -27,6 +27,20 @@ memories (the instructions still apply: they are settings, not memories).
   NOT EXISTS outside the numbered migrations, so an older Kwil (a
   rollback) still opens the file and simply ignores it.
 
+- **Projects** (projects.py; one per class, like ChatGPT and Claude
+  Projects): a name, the person's own instructions for it (trusted, as
+  "Your instructions"), its own memories and its own files, in the
+  sibling tables `projects`, `project_memories` and `project_files`
+  (also outside the numbered migrations). A project memory is loaded only
+  into that project's conversations (`snapshot(project=...)`), never
+  anywhere else, and an older Kwil never sees it as a global memory
+  (it is in its own table). Memory ids share one space ("mem-..."), so
+  update, trust and delete work on either kind. A file's bytes are kept
+  here as a BLOB (at most the [projects] bounds the caller passes), with
+  its extracted text for search_project_files; secure_delete zeroes both
+  when it goes. Deleting a project deletes its memories and files in the
+  same transaction.
+
 One SQLite file per person: the owner's at [memory] local_path
 (`data/memory.sqlite`; `/data/memory.sqlite` on the server), a family
 member's at `<family dir>/<id>/memory.sqlite` (family.py), so one person's
@@ -54,7 +68,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -71,6 +85,17 @@ MAX_COURSE_CHARS = 80     # its course, as the person named it
 MAX_MISSED = 300          # missed concepts per person
 MISS_PREFIX = "miss-"
 MISS_RE = re.compile(r"^miss-[0-9a-f]{12}$")
+MAX_PROJECTS = 30            # projects per person
+MAX_PROJECT_NAME = 80        # characters of a project's name
+MAX_PROJECT_MEMORIES = 100   # memories per project
+MAX_COURSE_KEY = 40          # the course a suggested project came from ("phys361")
+MAX_FILE_NAME = 80           # attachments.MAX_NAME_CHARS
+MAX_FILE_TEXT = 1_000_000    # characters of a file's extracted text kept
+PROJECT_PREFIX = "prj-"
+PROJECT_RE = re.compile(r"^prj-[0-9a-f]{12}$")
+FILE_PREFIX = "pfile-"
+FILE_RE = re.compile(r"^pfile-[0-9a-f]{12}$")
+FILE_KINDS = ("pdf", "text")
 
 # Study mode's list (see the module doc): not a numbered migration, so the
 # schema version (and an older Kwil's check of it) stays as it was.
@@ -86,6 +111,44 @@ CREATE TABLE IF NOT EXISTS missed (
     last_seen REAL NOT NULL,
     untrusted INTEGER NOT NULL DEFAULT 0
 );
+"""
+
+# Projects (see the module doc): not numbered migrations either. Rows
+# that belong to a project are deleted with it explicitly (no foreign
+# keys: older files never turned them on).
+PROJECT_TABLES = """
+CREATE TABLE IF NOT EXISTS projects (
+    rid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    course TEXT NOT NULL DEFAULT '',
+    created REAL NOT NULL,
+    updated REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_memories (
+    rid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    project TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created REAL NOT NULL,
+    source TEXT,
+    untrusted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS project_memories_project ON project_memories(project);
+CREATE TABLE IF NOT EXISTS project_files (
+    rid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    project TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    pages INTEGER,
+    data BLOB NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    created REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_files_project ON project_files(project);
 """
 
 SCHEMA_VERSION = 1
@@ -118,6 +181,32 @@ class MemoryFull(Exception):
 
 class MemoryPaused(Exception):
     """"Pause memory" is on: nothing new is saved."""
+
+
+class ProjectsFull(Exception):
+    """MAX_PROJECTS projects exist already."""
+
+
+class NoSuchProject(KeyError):
+    """The project is gone (deleted meanwhile) or was never this person's."""
+
+
+class FileRefused(ValueError):
+    """A project file over a bound (count, size, the person's total): the
+    message says which, for the page."""
+
+
+def valid_project_id(project_id) -> bool:
+    return isinstance(project_id, str) and bool(PROJECT_RE.match(project_id))
+
+
+def valid_file_id(file_id) -> bool:
+    return isinstance(file_id, str) and bool(FILE_RE.match(file_id))
+
+
+def clean_project_name(name) -> str:
+    """One line, at most MAX_PROJECT_NAME characters, or ValueError."""
+    return _one_line(name, "project name", MAX_PROJECT_NAME)
 
 
 def valid_id(memory_id) -> bool:
@@ -180,17 +269,34 @@ class Snapshot:
     instructions: str = ""
     memories: tuple = ()   # ({"id", "text", "untrusted"}, ...), oldest first
     paused: bool = False
+    # The conversation's project (projects.py), or None: {"id", "name",
+    # "instructions"}; its memories (as `memories`) and its files'
+    # metadata ({"id", "name", "kind", "size", "pages", "chars"}, oldest
+    # first; the bytes are read by the chat, ClaudeChat._load_project_docs)
+    project: dict | None = None
+    project_memories: tuple = ()
+    project_files: tuple = ()
 
     @property
     def untrusted(self) -> bool:
         """A memory saved from outside text is in it: changes ask first."""
-        return any(m["untrusted"] for m in self.memories)
+        return any(m["untrusted"] for m in self.memories + self.project_memories)
 
     def without(self, memory_ids) -> "Snapshot":
         gone = set(memory_ids)
-        return Snapshot(self.instructions,
-                        tuple(m for m in self.memories if m["id"] not in gone),
-                        self.paused)
+        return replace(self,
+                       memories=tuple(m for m in self.memories if m["id"] not in gone),
+                       project_memories=tuple(m for m in self.project_memories
+                                              if m["id"] not in gone))
+
+    def without_files(self, file_ids) -> "Snapshot":
+        gone = set(file_ids)
+        return replace(self, project_files=tuple(f for f in self.project_files
+                                                 if f["id"] not in gone))
+
+    def without_project(self) -> "Snapshot":
+        """The project was deleted: none of it is sent again."""
+        return replace(self, project=None, project_memories=(), project_files=())
 
 
 EMPTY = Snapshot()
@@ -213,8 +319,9 @@ class MemoryStore:
         raise NotImplementedError
 
     def add(self, text: str, *, source: str | None = None,
-            untrusted: bool = False) -> dict:
-        """Save one memory; ValueError, MemoryFull or MemoryPaused."""
+            untrusted: bool = False, project: str | None = None) -> dict:
+        """Save one memory (`project`: that project's only); ValueError,
+        MemoryFull, MemoryPaused or NoSuchProject."""
         raise NotImplementedError
 
     def get(self, memory_id: str) -> dict | None:
@@ -231,8 +338,50 @@ class MemoryStore:
         """The person said "Keep as mine" (Settings): no longer untrusted."""
         raise NotImplementedError
 
-    def list(self) -> list[dict]:
-        """Every memory, newest first."""
+    def list(self, project: str | None = None) -> list[dict]:
+        """Every global memory, newest first (`project`: that project's
+        memories instead)."""
+        raise NotImplementedError
+
+    # projects (dicts: {"id", "name", "instructions", "course", "created",
+    # "updated" (ISO, UTC), "memories", "files"})
+    def projects(self) -> list[dict]:
+        raise NotImplementedError
+
+    def project(self, project_id: str) -> dict | None:
+        raise NotImplementedError
+
+    def create_project(self, name: str, instructions: str = "",
+                       course: str = "") -> dict:
+        """ValueError or ProjectsFull. `course` (a suggestion's course key):
+        an existing project made from it is returned instead (one tap twice
+        makes one project)."""
+        raise NotImplementedError
+
+    def update_project(self, project_id: str, *, name: str | None = None,
+                       instructions: str | None = None) -> dict | None:
+        raise NotImplementedError
+
+    def delete_project(self, project_id: str) -> bool:
+        """The project, its memories and its files: gone."""
+        raise NotImplementedError
+
+    def add_file(self, project_id: str, name: str, kind: str, data: bytes, *,
+                 text: str = "", pages: int | None = None, max_files: int,
+                 max_bytes: int, max_total_bytes: int) -> dict:
+        """FileRefused over a bound, NoSuchProject."""
+        raise NotImplementedError
+
+    def files(self, project_id: str) -> list[dict]:
+        """Metadata only, oldest first ({"id", "name", "kind", "size",
+        "pages", "chars", "created"})."""
+        raise NotImplementedError
+
+    def file(self, file_id: str) -> dict | None:
+        """Metadata plus "data" (bytes) and "text"."""
+        raise NotImplementedError
+
+    def delete_file(self, file_id: str) -> bool:
         raise NotImplementedError
 
     @property
@@ -264,18 +413,32 @@ class MemoryStore:
     def close(self) -> None:
         raise NotImplementedError
 
-    def snapshot(self) -> Snapshot:
-        """Instructions and (unless paused) memories, oldest first."""
+    def snapshot(self, project: str | None = None) -> Snapshot:
+        """Instructions and (unless paused) memories, oldest first; with
+        `project`, that project's instructions, memories (unless paused)
+        and files too (a gone project: none)."""
         paused = self.paused
-        memories = () if paused else tuple(
-            {"id": m["id"], "text": m["text"], "untrusted": m["untrusted"]}
-            for m in reversed(self.list()))
-        return Snapshot(self.instructions(), memories, paused)
+
+        def short(memories):
+            return () if paused else tuple(
+                {"id": m["id"], "text": m["text"], "untrusted": m["untrusted"]}
+                for m in reversed(memories))
+        snap = Snapshot(self.instructions(), short(self.list()), paused)
+        found = self.project(project) if project else None
+        if found is None:
+            return snap
+        files = tuple({k: f[k] for k in ("id", "name", "kind", "size", "pages", "chars")}
+                      for f in self.files(project))
+        return replace(snap, project={k: found[k] for k in ("id", "name", "instructions")},
+                       project_memories=short(self.list(project)), project_files=files)
 
     def export(self) -> dict:
-        """Everything kept, for a download (Settings, account export)."""
+        """Everything kept, for a download (Settings, account export): a
+        project's files as metadata (account.py adds the files themselves)."""
+        projects = [{**p, "memories": self.list(p["id"]), "files": self.files(p["id"])}
+                    for p in self.projects()]
         return {"instructions": self.instructions(), "memories": self.list(),
-                "paused": self.paused, "missed": self.missed()}
+                "paused": self.paused, "missed": self.missed(), "projects": projects}
 
 
 class SqliteMemoryStore(MemoryStore):
@@ -311,7 +474,8 @@ class SqliteMemoryStore(MemoryStore):
             for n in range(version, len(MIGRATIONS)):
                 self._con.executescript("BEGIN IMMEDIATE;\n" + MIGRATIONS[n]
                                         + f"\nPRAGMA user_version = {n + 1};\nCOMMIT;")
-            self._con.executescript("BEGIN IMMEDIATE;\n" + STUDY_TABLE + "\nCOMMIT;")
+            self._con.executescript("BEGIN IMMEDIATE;\n" + STUDY_TABLE
+                                    + PROJECT_TABLES + "\nCOMMIT;")
 
     def _write(self, fn):
         """Run fn(connection) in one IMMEDIATE transaction."""
@@ -363,37 +527,63 @@ class SqliteMemoryStore(MemoryStore):
     # ---------- memories ----------
     @staticmethod
     def _row(r) -> dict:
+        keys = r.keys()
         return {"id": r["id"], "text": r["text"], "created": _iso(r["created"]),
-                "source": r["source"], "untrusted": bool(r["untrusted"])}
+                "source": r["source"], "untrusted": bool(r["untrusted"]),
+                "project": r["project"] if "project" in keys else None}
+
+    @staticmethod
+    def _find(db, memory_id: str):
+        """(table, row) of a memory, global or a project's; (None, None)."""
+        for table in ("memories", "project_memories"):
+            row = db.execute(f"SELECT * FROM {table} WHERE id = ?", (memory_id,)).fetchone()
+            if row is not None:
+                return table, row
+        return None, None
 
     def add(self, text: str, *, source: str | None = None,
-            untrusted: bool = False) -> dict:
+            untrusted: bool = False, project: str | None = None) -> dict:
         text = clean_memory(text)
         source = str(source)[:MAX_SOURCE_CHARS] if source else None
         memory_id = ID_PREFIX + secrets.token_hex(6)
+        if project is not None and not valid_project_id(project):
+            raise NoSuchProject(project)
 
         def write(db):
             if self._paused(db):
                 raise MemoryPaused()
-            count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-            if count >= MAX_MEMORIES:
+            if project is None:
+                count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+                if count >= MAX_MEMORIES:
+                    raise MemoryFull()
+                db.execute("INSERT INTO memories (id, text, created, source, untrusted) "
+                           "VALUES (?, ?, ?, ?, ?)",
+                           (memory_id, text, self.clock(), source, int(bool(untrusted))))
+                return self._row(db.execute("SELECT * FROM memories WHERE id = ?",
+                                            (memory_id,)).fetchone())
+            if db.execute("SELECT 1 FROM projects WHERE id = ?", (project,)).fetchone() is None:
+                raise NoSuchProject(project)
+            count = db.execute("SELECT COUNT(*) FROM project_memories WHERE project = ?",
+                               (project,)).fetchone()[0]
+            if count >= MAX_PROJECT_MEMORIES:
                 raise MemoryFull()
-            db.execute("INSERT INTO memories (id, text, created, source, untrusted) "
-                       "VALUES (?, ?, ?, ?, ?)",
-                       (memory_id, text, self.clock(), source, int(bool(untrusted))))
-            return self._row(db.execute("SELECT * FROM memories WHERE id = ?",
+            db.execute("INSERT INTO project_memories (id, project, text, created, source, "
+                       "untrusted) VALUES (?, ?, ?, ?, ?, ?)",
+                       (memory_id, project, text, self.clock(), source,
+                        int(bool(untrusted))))
+            return self._row(db.execute("SELECT * FROM project_memories WHERE id = ?",
                                         (memory_id,)).fetchone())
         saved = self._write(write)
-        log.info("Memory: saved %s (%d chars%s)", memory_id, len(text),
-                 ", untrusted" if untrusted else "")
+        log.info("Memory: saved %s (%d chars%s%s)", memory_id, len(text),
+                 ", untrusted" if untrusted else "",
+                 f", project {project}" if project else "")
         return saved
 
     def get(self, memory_id: str) -> dict | None:
         if not valid_id(memory_id):
             return None
         with self._lock:
-            row = self._con.execute("SELECT * FROM memories WHERE id = ?",
-                                    (memory_id,)).fetchone()
+            _table, row = self._find(self._con, memory_id)
         return self._row(row) if row else None
 
     def update(self, memory_id: str, text: str, *,
@@ -405,14 +595,13 @@ class SqliteMemoryStore(MemoryStore):
             return None
 
         def write(db):
-            row = db.execute("SELECT untrusted FROM memories WHERE id = ?",
-                             (memory_id,)).fetchone()
+            table, row = self._find(db, memory_id)
             if row is None:
                 return None
             flag = row["untrusted"] if untrusted is None else int(bool(untrusted))
-            db.execute("UPDATE memories SET text = ?, untrusted = ? WHERE id = ?",
+            db.execute(f"UPDATE {table} SET text = ?, untrusted = ? WHERE id = ?",
                        (text, flag, memory_id))
-            return self._row(db.execute("SELECT * FROM memories WHERE id = ?",
+            return self._row(db.execute(f"SELECT * FROM {table} WHERE id = ?",
                                         (memory_id,)).fetchone())
         saved = self._write(write)
         if saved is not None:
@@ -423,8 +612,9 @@ class SqliteMemoryStore(MemoryStore):
     def delete(self, memory_id: str) -> bool:
         if not valid_id(memory_id):
             return False
-        found = self._write(lambda db: db.execute(
-            "DELETE FROM memories WHERE id = ?", (memory_id,)).rowcount > 0)
+        found = self._write(lambda db: sum(db.execute(
+            f"DELETE FROM {table} WHERE id = ?", (memory_id,)).rowcount
+            for table in ("memories", "project_memories")) > 0)
         if found:
             self._purge()
             self.deletions += 1
@@ -436,21 +626,27 @@ class SqliteMemoryStore(MemoryStore):
             return None
 
         def write(db):
-            if db.execute("UPDATE memories SET untrusted = 0 WHERE id = ?",
-                          (memory_id,)).rowcount == 0:
+            table, row = self._find(db, memory_id)
+            if row is None:
                 return None
-            return self._row(db.execute("SELECT * FROM memories WHERE id = ?",
+            db.execute(f"UPDATE {table} SET untrusted = 0 WHERE id = ?", (memory_id,))
+            return self._row(db.execute(f"SELECT * FROM {table} WHERE id = ?",
                                         (memory_id,)).fetchone())
         saved = self._write(write)
         if saved is not None:
             log.info("Memory: %s kept as the person's own (trusted)", memory_id)
         return saved
 
-    def list(self) -> list[dict]:
-        """Every memory, newest first."""
+    def list(self, project: str | None = None) -> list[dict]:
+        """Every global memory, newest first (`project`: that project's)."""
         with self._lock:
-            rows = self._con.execute(
-                "SELECT * FROM memories ORDER BY created DESC, rid DESC").fetchall()
+            if project is None:
+                rows = self._con.execute(
+                    "SELECT * FROM memories ORDER BY created DESC, rid DESC").fetchall()
+            else:
+                rows = self._con.execute(
+                    "SELECT * FROM project_memories WHERE project = ? "
+                    "ORDER BY created DESC, rid DESC", (str(project),)).fetchall()
         return [self._row(r) for r in rows]
 
     # ---------- pause, forget all ----------
@@ -472,10 +668,12 @@ class SqliteMemoryStore(MemoryStore):
         log.info("Memory: %s", "paused" if paused else "resumed")
 
     def forget_all(self) -> int:
-        """Delete every memory and the instructions (the pause setting
-        stays). Returns how many memories went."""
+        """Delete every memory (every project's too) and the instructions
+        (the pause setting, the projects themselves, their instructions and
+        files stay). Returns how many memories went."""
         def write(db):
             n = db.execute("DELETE FROM memories").rowcount
+            n += db.execute("DELETE FROM project_memories").rowcount
             db.execute("DELETE FROM instructions")
             db.execute("DELETE FROM missed")  # the study list too
             return n
@@ -551,6 +749,195 @@ class SqliteMemoryStore(MemoryStore):
         if found:
             self._purge()
             log.info("Study: deleted %s", missed_id)
+        return found
+
+    # ---------- projects (projects.py) ----------
+    @staticmethod
+    def _project_row(r, db) -> dict:
+        counts = db.execute(
+            "SELECT (SELECT COUNT(*) FROM project_memories WHERE project = ?), "
+            "(SELECT COUNT(*) FROM project_files WHERE project = ?)",
+            (r["id"], r["id"])).fetchone()
+        return {"id": r["id"], "name": r["name"], "instructions": r["instructions"],
+                "course": r["course"], "created": _iso(r["created"]),
+                "updated": _iso(r["updated"]), "memories": counts[0], "files": counts[1]}
+
+    def projects(self) -> list[dict]:
+        """Every project, the most recently changed first."""
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT * FROM projects ORDER BY updated DESC, rid DESC").fetchall()
+            return [self._project_row(r, self._con) for r in rows]
+
+    def project(self, project_id: str) -> dict | None:
+        if not valid_project_id(project_id):
+            return None
+        with self._lock:
+            row = self._con.execute("SELECT * FROM projects WHERE id = ?",
+                                    (project_id,)).fetchone()
+            return self._project_row(row, self._con) if row else None
+
+    def create_project(self, name: str, instructions: str = "",
+                       course: str = "") -> dict:
+        name = clean_project_name(name)
+        instructions = clean_instructions(instructions or "")
+        course = _one_line(course or "", "course", MAX_COURSE_KEY, required=False)
+        project_id = PROJECT_PREFIX + secrets.token_hex(6)
+        now = self.clock()
+
+        def write(db):
+            if course:
+                row = db.execute("SELECT * FROM projects WHERE course = ?",
+                                 (course,)).fetchone()
+                if row is not None:  # made from this suggestion already
+                    return self._project_row(row, db), False
+            if db.execute("SELECT COUNT(*) FROM projects").fetchone()[0] >= MAX_PROJECTS:
+                raise ProjectsFull()
+            db.execute("INSERT INTO projects (id, name, instructions, course, created, "
+                       "updated) VALUES (?, ?, ?, ?, ?, ?)",
+                       (project_id, name, instructions, course, now, now))
+            return self._project_row(db.execute("SELECT * FROM projects WHERE id = ?",
+                                                (project_id,)).fetchone(), db), True
+        saved, made = self._write(write)
+        if made:
+            log.info("Projects: created %s (name %d chars, instructions %d chars%s)",
+                     saved["id"], len(name), len(instructions),
+                     ", suggested" if course else "")
+        return saved
+
+    def update_project(self, project_id: str, *, name: str | None = None,
+                       instructions: str | None = None) -> dict | None:
+        if name is not None:
+            name = clean_project_name(name)
+        if instructions is not None:
+            instructions = clean_instructions(instructions)
+        if not valid_project_id(project_id):
+            return None
+
+        def write(db):
+            row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                return None
+            db.execute("UPDATE projects SET name = ?, instructions = ?, updated = ? "
+                       "WHERE id = ?",
+                       (row["name"] if name is None else name,
+                        row["instructions"] if instructions is None else instructions,
+                        self.clock(), project_id))
+            return self._project_row(db.execute("SELECT * FROM projects WHERE id = ?",
+                                                (project_id,)).fetchone(), db)
+        saved = self._write(write)
+        if saved is not None:
+            self._purge()  # the old name and instructions: gone
+            log.info("Projects: %s changed (name %d chars, instructions %d chars)",
+                     project_id, len(saved["name"]), len(saved["instructions"]))
+        return saved
+
+    def delete_project(self, project_id: str) -> bool:
+        if not valid_project_id(project_id):
+            return False
+
+        def write(db):
+            memories = db.execute("DELETE FROM project_memories WHERE project = ?",
+                                  (project_id,)).rowcount
+            files = db.execute("DELETE FROM project_files WHERE project = ?",
+                               (project_id,)).rowcount
+            found = db.execute("DELETE FROM projects WHERE id = ?",
+                               (project_id,)).rowcount > 0
+            return found, memories, files
+        found, memories, files = self._write(write)
+        if found:
+            self._purge()
+            self.deletions += 1
+            log.info("Projects: deleted %s (%d memories, %d files)", project_id,
+                     memories, files)
+        return found
+
+    # ---------- a project's files ----------
+    @staticmethod
+    def _file_row(r) -> dict:
+        return {"id": r["id"], "project": r["project"], "name": r["name"],
+                "kind": r["kind"], "size": r["size"], "pages": r["pages"],
+                "chars": r["chars"], "created": _iso(r["created"])}
+
+    _FILE_COLS = ("id, project, name, kind, size, pages, length(text) AS chars, created")
+
+    def add_file(self, project_id: str, name: str, kind: str, data: bytes, *,
+                 text: str = "", pages: int | None = None, max_files: int,
+                 max_bytes: int, max_total_bytes: int) -> dict:
+        if not valid_project_id(project_id):
+            raise NoSuchProject(project_id)
+        if kind not in FILE_KINDS or not isinstance(data, (bytes, bytearray)) or not data:
+            raise FileRefused("That file can't be added")
+        name = _one_line(name or "file", "file name", MAX_FILE_NAME * 2)[:MAX_FILE_NAME] \
+            or "file"
+        text = str(text or "")[:MAX_FILE_TEXT]
+        size = len(data)
+        if size > max_bytes:
+            raise FileRefused(f"A project file is at most {max_bytes / 1_000_000:g} MB")
+        file_id = FILE_PREFIX + secrets.token_hex(6)
+
+        def write(db):
+            if db.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise NoSuchProject(project_id)
+            count = db.execute("SELECT COUNT(*) FROM project_files WHERE project = ?",
+                               (project_id,)).fetchone()[0]
+            if count >= max_files:
+                raise FileRefused(f"A project holds at most {max_files} files")
+            used = db.execute("SELECT COALESCE(SUM(size), 0) FROM project_files"
+                              ).fetchone()[0]
+            if used + size > max_total_bytes:
+                raise FileRefused("Your project files are at their limit "
+                                  f"({max_total_bytes / 1_000_000:g} MB in all): "
+                                  "delete one first")
+            now = self.clock()
+            db.execute("INSERT INTO project_files (id, project, name, kind, size, pages, "
+                       "data, text, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (file_id, project_id, name, kind, size,
+                        int(pages) if pages else None, bytes(data), text, now))
+            db.execute("UPDATE projects SET updated = ? WHERE id = ?", (now, project_id))
+            return self._file_row(db.execute(
+                f"SELECT {self._FILE_COLS} FROM project_files WHERE id = ?",
+                (file_id,)).fetchone())
+        saved = self._write(write)
+        log.info("Projects: file %s added to %s (%s, %d bytes, %d chars of text)",
+                 file_id, project_id, kind, size, len(text))
+        return saved
+
+    def files(self, project_id: str) -> list[dict]:
+        if not valid_project_id(project_id):
+            return []
+        with self._lock:
+            rows = self._con.execute(
+                f"SELECT {self._FILE_COLS} FROM project_files WHERE project = ? "
+                "ORDER BY created, rid", (project_id,)).fetchall()
+        return [self._file_row(r) for r in rows]
+
+    def file(self, file_id: str) -> dict | None:
+        if not valid_file_id(file_id):
+            return None
+        with self._lock:
+            row = self._con.execute(
+                f"SELECT {self._FILE_COLS}, data, text FROM project_files WHERE id = ?",
+                (file_id,)).fetchone()
+        if row is None:
+            return None
+        return {**self._file_row(row), "data": bytes(row["data"]), "text": row["text"]}
+
+    def file_bytes(self) -> int:
+        """All of this person's project files, in bytes."""
+        with self._lock:
+            return self._con.execute("SELECT COALESCE(SUM(size), 0) FROM project_files"
+                                     ).fetchone()[0]
+
+    def delete_file(self, file_id: str) -> bool:
+        if not valid_file_id(file_id):
+            return False
+        found = self._write(lambda db: db.execute(
+            "DELETE FROM project_files WHERE id = ?", (file_id,)).rowcount > 0)
+        if found:
+            self._purge()
+            self.deletions += 1
+            log.info("Projects: file %s deleted", file_id)
         return found
 
 

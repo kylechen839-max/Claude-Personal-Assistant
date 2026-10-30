@@ -912,6 +912,27 @@ def add_study_tools(tools: ToolRegistry, config: dict, store=None) -> None:
     tools.register(*study_tools(store))
 
 
+def add_project_tools(tools: ToolRegistry, config: dict, store=None) -> None:
+    """Projects (projects.py): search_project_files / read_project_file on
+    his memory `store`. None with [projects] enabled = false or no store."""
+    from kwil import projects
+
+    if store is None or not projects.enabled(config):
+        return
+    from kwil.tools.projects import project_tools
+
+    tools.register(*project_tools(store))
+
+
+def project_chat_options(config: dict) -> dict:
+    """ClaudeChat's project file budget ([projects] inline_tokens, inline_mb)."""
+    from kwil import projects
+
+    bounds = projects.limits(config)
+    return {"project_inline_tokens": bounds["inline_tokens"],
+            "project_inline_bytes": bounds["inline_bytes"]}
+
+
 def build_reminders(config: dict):
     """The owner's reminder store (reminders.py), or None with [reminders]
     enabled = false. The PC's voice and web processes share the file; the
@@ -1127,7 +1148,7 @@ def build_chat(config: dict, tools=None, memory=None,
                       recorder=recorder, language=a["language"],
                       fast_model=a["fast_model"], router=a["router"],
                       timezone=a["timezone"] or None,
-                      local_memory=local_memory)
+                      local_memory=local_memory, **project_chat_options(config))
     if review is not None:  # [memory] weekly_review (off by default)
         chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
@@ -1317,6 +1338,7 @@ def main(argv=None) -> int:
         local = build_local_memory(config)
         add_memory_tools(tools, memory, local)
         add_study_tools(tools, config, local)
+        add_project_tools(tools, config, local)
         add_reminder_tools(tools, config, build_reminders(config))
         register_notes(tools, memory, config)
         review = build_memory_review(config, memory)

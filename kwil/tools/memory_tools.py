@@ -7,6 +7,12 @@ first). A memory saved or edited while untrusted text (a web page, an
 email) is in the conversation asks first too and is stored marked
 untrusted, so it is later shown as data, never as an instruction.
 
+In a conversation that is in a project (projects.py), `remember` saves to
+that project unless the person says it's general (`general: true`), and
+list / update / forget see the global memories and that project's only:
+another project's memory is "no memory with that id" there, and outside
+any project every project memory is.
+
 `search_memory_tool(memory)`: with `[memory] backend = "pinecone"`, a
 search of the Pinecone notes and past conversation summaries on request
 (relevant ones are already recalled before every reply)."""
@@ -66,18 +72,38 @@ def _from_outside(chat) -> bool:
     return bool(outside()) if callable(outside) else True
 
 
+def _project(chat) -> str | None:
+    """The project the running conversation is in (ClaudeChat.project_id)."""
+    project = getattr(chat, "project_id", None) if chat is not None else None
+    return project if isinstance(project, str) else None
+
+
 def memory_tools(store) -> list[Tool]:
     from kwil.memory_store import (MAX_MEMORIES, MAX_MEMORY_CHARS, MemoryFull,
-                                   MemoryPaused, valid_id)
+                                   MemoryPaused, NoSuchProject, valid_id)
 
-    def remember(note: str) -> dict:
+    def visible(memory: dict | None) -> dict | None:
+        """The memory, if this conversation may see it: a global one, or
+        one of its own project's (never another project's)."""
+        if memory is None or memory.get("project") in (None, _project(_chat())):
+            return memory
+        return None
+
+    def remember(note: str, general: bool = False) -> dict:
         chat = _chat()
         refused = _incognito(chat)
         if refused:
             return refused
+        project = None if general is True else _project(chat)
         try:
             saved = store.add(note, source=getattr(chat, "conversation_id", None),
-                              untrusted=_from_outside(chat))
+                              untrusted=_from_outside(chat),
+                              **({"project": project} if project else {}))
+        except NoSuchProject:
+            return {"status": "error",
+                    "message": "This conversation's project was deleted, so "
+                               "nothing was saved. Ask whether to remember it in "
+                               "general instead (general: true)."}
         except MemoryPaused:
             return {"status": "paused",
                     "message": "Memory is paused in Settings, so nothing was "
@@ -89,11 +115,17 @@ def memory_tools(store) -> list[Tool]:
                                "Settings, Memory."}
         except ValueError as e:
             return {"status": "error", "message": str(e)}
+        if project:
+            return {"status": "saved", "id": saved["id"], "scope": "project"}
         return {"status": "saved", "id": saved["id"]}
 
     def list_memories() -> dict:
+        project = _project(_chat())
         memories = [{k: m[k] for k in ("id", "text", "created", "untrusted")}
                     for m in store.list()]
+        if project:  # this project's, marked
+            memories += [{**{k: m[k] for k in ("id", "text", "created", "untrusted")},
+                          "project": True} for m in store.list(project)]
         result = {"memories": memories, "paused": store.paused}
         if any(m["untrusted"] for m in memories):
             chat = _chat()
@@ -110,7 +142,7 @@ def memory_tools(store) -> list[Tool]:
         refused = _incognito(chat)
         if refused:
             return refused
-        old = store.get(memory_id)
+        old = visible(store.get(memory_id))
         if old is None:
             return {"status": "error", "message": "No memory with that id."}
         try:
@@ -122,7 +154,8 @@ def memory_tools(store) -> list[Tool]:
         return {"status": "updated", "id": memory_id}
 
     def forget_memory(memory_id: str) -> dict:
-        if not store.delete(memory_id):
+        if not valid_id(memory_id) or visible(store.get(memory_id)) is None \
+                or not store.delete(memory_id):
             return {"status": "error", "message": "No memory with that id."}
         return {"status": "forgotten", "id": memory_id}
 
@@ -131,7 +164,7 @@ def memory_tools(store) -> list[Tool]:
 
     def ask_forget(i: dict) -> str | None:
         memory_id = i.get("memory_id")
-        old = store.get(memory_id) if valid_id(memory_id) else None
+        old = visible(store.get(memory_id)) if valid_id(memory_id) else None
         # no such memory: nothing to ask; the tool says so
         return f"Forget this: {short(old['text'])}?" if old else None
 
@@ -142,10 +175,15 @@ def memory_tools(store) -> list[Tool]:
              "'remember...', 'always...', 'from now on...' or 'next time...', "
              "or states a lasting preference. Write one self-contained "
              f"sentence in their words (at most {MAX_MEMORY_CHARS} characters). "
-             + SAVE_RULE,
+             + SAVE_RULE + " In a project's conversation it is saved to that "
+             "project only, unless general is true.",
              {"type": "object",
               "properties": {"note": {"type": "string",
-                                      "description": "The memory to save."}},
+                                      "description": "The memory to save."},
+                             "general": {"type": "boolean",
+                                         "description": "Only in a project's "
+                                         "conversation: true when the user says it's "
+                                         "about them in general, not this project."}},
               "required": ["note"]},
              remember,
              # A web page or email must not be able to plant memories.

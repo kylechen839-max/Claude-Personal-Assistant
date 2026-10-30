@@ -4,8 +4,9 @@ and "Delete my account" in their own Settings (web/family.js).
   GET  /api/me/export   a zip of their conversations (history.export JSON),
                         profile, school deadlines (deadlines.json), Canvas
                         course content text (coursefiles.json) and their
-                        memory (memory.json: instructions and saved
-                        memories) and reminders (reminders.json: their
+                        memory (memory.json: instructions, saved
+                        memories and projects; each project file itself
+                        under projects/) and reminders (reminders.json: their
                         reminders and scheduled tasks); never tokens,
                         keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
@@ -118,6 +119,15 @@ def revoke_google_token_file(path, revoke: Callable[[str], None] | None = None,
     except Exception as e:  # noqa: BLE001 - removing goes ahead regardless
         log.warning("%s: revoking %s's Google grant failed (%s); "
                     "deleting anyway", label, who, type(e).__name__)
+
+
+def project_file_name(project_id: str, f: dict) -> str:
+    """Where a project file goes in an export: projects/<project>/<file id>-<name>
+    (the name made safe for a zip on any system)."""
+    import re
+
+    name = re.sub(r"[^\w.\- ()]+", "_", f["name"]).strip(" .") or "file"
+    return f"projects/{project_id}/{f['id']}-{name[:80]}"
 
 
 def confirmed(given, user: dict) -> bool:
@@ -301,9 +311,9 @@ class Account:
 
         cap, total = self.max_bytes, 0
 
-        def add(zf, name: str, text: str) -> None:
+        def add(zf, name: str, text) -> None:
             nonlocal total
-            data = text.encode("utf-8")
+            data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
             total += len(data)
             if total > cap:
                 raise ExportError(
@@ -324,8 +334,14 @@ class Account:
                 add(zf, "coursefiles.json", json.dumps(content.export(user["id"]), indent=2,
                                                        ensure_ascii=False))
             if memory is not None:  # their instructions and saved memories
-                add(zf, "memory.json", json.dumps(memory.export(), indent=2,
+                exported = memory.export()
+                add(zf, "memory.json", json.dumps(exported, indent=2,
                                                   ensure_ascii=False))
+                for project in exported.get("projects", ()):  # their own files
+                    for f in project["files"]:
+                        full = memory.file(f["id"])
+                        if full is not None:
+                            add(zf, project_file_name(project["id"], full), full["data"])
             if reminders is not None:  # their reminders and scheduled tasks
                 add(zf, "reminders.json", json.dumps(reminders.export(), indent=2,
                                                      ensure_ascii=False))

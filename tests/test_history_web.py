@@ -153,7 +153,8 @@ def test_list_paginates_newest_first(web):
     assert len(page["conversations"]) == 5 and page["next_offset"] is None
     item = page["conversations"][0]
     assert set(item) == {"id", "title", "live", "source", "started_at", "updated_at",
-                         "pinned", "archived", "message_count", "match", "snippet"}
+                         "pinned", "archived", "message_count", "match", "snippet",
+                         "project"}  # its project's id, or None (projects.py)
 
 
 def test_a_conversation_in_progress_is_named_by_its_first_words(web, fake_client):

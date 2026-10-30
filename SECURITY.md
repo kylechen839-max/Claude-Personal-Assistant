@@ -2529,6 +2529,77 @@ network code of its own.
   `study`); `start_study` and `note_missed` aren't read-only, so a fast
   model that tries one is escalated before anything runs.
 
+## Projects (`projects.py`, `projects_web.py`, `tools/projects.py`, the project tables in `memory_store.py`)
+
+- **Where they live.** A person's projects, project memories and project
+  files are sibling tables (`projects`, `project_memories`,
+  `project_files`) in their own memory file, made with `CREATE TABLE IF
+  NOT EXISTS` outside the numbered migrations (the schema version stays
+  1; a test checks it), so they inherit the file's isolation, private
+  creation, backup, "Download my data" and deletion with a family
+  account. A project memory is in its own table, never `memories`: an
+  older Kwil after a rollback can't load it as a global memory. Which
+  project a conversation is in is a local table in history.sqlite
+  (`conversation_projects`, `ON DELETE CASCADE`), not a synced event:
+  each backend keeps its own projects.
+- **Isolation (rule 5).** Every `/api/projects...` route takes the store
+  from the signed-in session (`memory_store_of`): no person in any path,
+  an id from another person's store is a 404 both ways (the owner can't
+  open a family member's project and the reverse; a test tries every
+  route), as is `/api/turn {"project_id"}` and `/api/conversations
+  ?project=` with someone else's id. Not signed in is 401; projects off
+  for that person (no project tools: `[projects] enabled = false` or no
+  memory) is 404. Changes are POST behind the Content-Length and
+  cross-site checks; JSON bodies over 64 KB are refused. The file tools
+  read only the running conversation's own project (another project's
+  file id is "no file" there), and the memory tools see the global
+  memories and that project's only (another project's memory is "no
+  memory with that id"; outside any project every project memory is).
+- **Uploads (rule 7).** One file per request, read up to the cap plus one
+  byte, then checked by `attachments.prepare` (the type from the bytes,
+  never the name; PDFs at most 100 pages by their page tree; text must be
+  UTF-8 without control bytes); photos are refused. Bounds: `[projects]
+  max_files` per project, `max_file_mb` per file (never above `[webapp]
+  max_upload_mb`, which the middleware enforces on the whole request),
+  `max_person_mb` for one person's files together, 30 projects and 100
+  memories per project; each checked inside the write transaction. A
+  PDF's text is extracted once for search (pypdf, page and time capped;
+  `textextract.py`'s limits); a PDF it can't read is still stored and
+  attached whole when it fits.
+- **Deleted means gone (rule 4).** `secure_delete=ON` and a
+  `wal_checkpoint(TRUNCATE)` after deleting a file, a project (its
+  memories and files go in the same transaction) or editing its
+  instructions; tests read the database and WAL bytes afterwards. An open
+  conversation drops a deleted file's document, a deleted memory and a
+  deleted project's instructions and memories before its next request
+  (`_drop_deleted_memories`). Deleting a project leaves its conversations
+  in History, in no project (said in the confirm); they are deleted from
+  History like any other.
+- **Taint (rule 2).** The instructions are typed by the person: trusted,
+  shown as theirs. Files are the person's uploads, but a syllabus or a
+  PDF is written by someone else, so attaching them to a conversation sets
+  `untrusted_project_files` (sticky until `reset()`, kept when a file is
+  deleted mid-conversation): changes ask first and a memory saved there is
+  stored untrusted, as with a chat attachment. Searched or read file text
+  is `untrusted_output` (it taints when it enters). A suggested project's
+  name comes from Canvas or Notion: it is only a label, one line of at
+  most 80 characters, quoted in the system prompt. Deliberately not done:
+  a chat in a project whose files are searched rather than attached isn't
+  tainted until a search runs, so the file names (the person's own) in
+  its system prompt don't make every change ask.
+- **Prompt and cache.** The project is read once per conversation (the
+  same bytes every turn); its files go as document blocks at the start of
+  the first message with one cache breakpoint, so a request has at most
+  four (the stable system block, study mode's, the files, the end of the
+  conversation; the contract fake refuses a fifth and a test checks).
+  Files are attached whole only while they fit `inline_tokens` and
+  `inline_mb` (the API's 32 MB request cap with the chat attachments'
+  20 MB budget). Never the Anthropic Files API (workspace-scoped).
+- **Logs (rule 1).** INFO says ids, counts, kinds, sizes and lengths; a
+  project's name, instructions, memories, file names, file text and
+  search queries never (the file tools are `private`). A caplog test
+  checks it.
+
 ## Reminders and scheduled tasks (`reminders.py`, `tools/reminders.py`)
 
 - **One file per person.** The owner's reminders are in `[reminders]

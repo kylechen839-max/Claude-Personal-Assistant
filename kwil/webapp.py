@@ -72,6 +72,7 @@ from starlette.requests import HTTPConnection
 from kwil import audio, canvas_helper, i18n, usage
 from kwil.attachments import MAX_ATTACHMENTS
 from kwil.chat import is_user_turn
+from kwil.projects_web import available as projects_available
 from kwil.study import available as study_available, public as study_public
 from kwil.tools import READ_ONLY_TOOLS, ToolRegistry
 
@@ -865,6 +866,11 @@ class WebAssistant:
         # which machine keeps the memory files ("cloud", "pc", "pi"; "" =
         # don't say): each failover backend has its own for now
         self.memory_where = ""
+        # projects (projects_web.py): [projects] bounds (projects.limits; None:
+        # the defaults), and the owner's Notion Course options for the
+        # suggested projects (a function, or None)
+        self.project_limits = None
+        self.notion_courses = None
         # memory_review.MemoryReview (the Memory screen); made from `memory`
         # on first use when not given
         self.memory_review = memory_review
@@ -1132,12 +1138,16 @@ class WebAssistant:
     def start_turn(self, s: Session, text: str | None = None,
                    recording: np.ndarray | None = None,
                    attachments: list[dict] | None = None,
-                   resume: str | None = None) -> bool:
+                   resume: str | None = None, project: str | None = None) -> bool:
         """Start a turn in the background. False if one is already running.
         `attachments`: content blocks of files sent with it (attachments.py).
         `resume`: the stored conversation the page's chat is showing (its
         id, owned by this session's person: the route checks): the turn goes
         on in it, even after the idle timeout or after it ended.
+        `project` (a new chat's pane, projects.py): the project its
+        conversation is in, "" for none (the route checks it is this
+        person's); a conversation in another one is ended first and the
+        turn starts a new one there. None: whatever the chat is in.
 
         Waits briefly for the lock: a turn puts "done" just before releasing
         it, so a page that starts the next turn right away isn't refused."""
@@ -1162,7 +1172,8 @@ class WebAssistant:
         s.last_active = self.clock()
         s.cancel = threading.Event()
         s.thread = threading.Thread(target=self._run_turn,
-                                    args=(s, text, recording, attachments, resume),
+                                    args=(s, text, recording, attachments, resume,
+                                          False, project),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
         s.thread.start()
         return True
@@ -1177,6 +1188,9 @@ class WebAssistant:
         study = study_public(getattr(s.chat, "study", None))
         if study is not None:  # study mode's pill (study.py); none = off
             done["study"] = study
+        project = WebAssistant.project_of(s)
+        if project is not None:  # the header's project name (projects.py)
+            done["project"] = project
         check = getattr(s.chat, "redo_refusal", None)
         try:
             done["redo"] = callable(check) and check() is None
@@ -1247,12 +1261,35 @@ class WebAssistant:
         return RedoRefused("redo_changed", changed) if changed else None
 
     def _run_turn(self, s: Session, text, recording, attachments=None,
-                  resume: str | None = None, redo: bool = False) -> None:
+                  resume: str | None = None, redo: bool = False,
+                  project: str | None = None) -> None:
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
         with i18n.using(s.language):  # its sentences and tool questions
-            self._turn_body(s, text, recording, attachments, resume, redo)
+            self._turn_body(s, text, recording, attachments, resume, redo, project)
+
+    @staticmethod
+    def project_of(s: Session) -> dict | None:
+        """{"id", "name"} of the project the session's chat is in, or None."""
+        public = getattr(s.chat, "project_public", None)
+        try:
+            return public() if callable(public) else None
+        except Exception:  # the page just shows no name
+            log.exception("Web: reading the chat's project failed")
+            return None
+
+    @staticmethod
+    def _enter_project(s: Session, project: str | None) -> None:
+        """In the turn thread, with s.busy held: a new chat's pane says which
+        project (None: none) its conversation is in. One in another project
+        (or in none) is ended first (saved and summarized as any), so this
+        turn starts the new one; KeyError if the project is gone."""
+        if getattr(s.chat, "project_id", None) == project:
+            return
+        if s.chat.history or s.chat.conversation_id:
+            s.chat.end_conversation()
+        s.chat.set_project(project)
 
     @staticmethod
     def _resume(s: Session, cid: str) -> bool:
@@ -1274,7 +1311,8 @@ class WebAssistant:
         return True
 
     def _turn_body(self, s: Session, text, recording, attachments=None,
-                   resume: str | None = None, redo: bool = False) -> None:
+                   resume: str | None = None, redo: bool = False,
+                   project: str | None = None) -> None:
         from kwil.cli import get_reply, is_exit, loggable_reply
 
         cancel = s.cancel
@@ -1282,6 +1320,15 @@ class WebAssistant:
         try:
             if resume is not None and not self._resume(s, resume):
                 return
+            if resume is None and project is not None and callable(
+                    getattr(s.chat, "set_project", None)):
+                try:
+                    self._enter_project(s, project or None)
+                except KeyError:  # deleted since the route checked it
+                    log.info("Web: the project is gone; turn not run")
+                    s.events.put({"type": "error", "project_gone": True,
+                                  "message": i18n.t("project_gone")})
+                    return
             if redo:
                 reply = self._redo(s, text, on_text, cancel)
                 if reply is not None:
@@ -2116,7 +2163,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript"),
                         ("brief.js", "text/javascript"),
-                        ("study.js", "text/javascript")):
+                        ("study.js", "text/javascript"),
+                        ("projects.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2285,6 +2333,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                # study mode (study.py): the header's button, and its pill
                "study_mode": study_available(s),
                "study": study_public(getattr(s.chat, "study", None)),
+               # projects (projects.py): Settings' Projects row, and the
+               # header's project name
+               "projects": projects_available(assistant, s),
+               "project": WebAssistant.project_of(s),
                "turns": sum(1 for m in s.chat.history if is_user_turn(m)),
                # the watchdog's issues (watch.py): the owner's only, never
                # a family member's
@@ -2330,6 +2382,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         cid, err = await bound_conversation(s, fields)
         if err:
             return err
+        project, err = await chosen_project(s, fields, cid)
+        if err:
+            return err
         blocks, err = await read_attachments(files)
         if err:
             return err
@@ -2345,7 +2400,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if not await run_in_threadpool(
                 assistant.start_turn, s,
                 text if recording is None else None, recording, blocks,
-                resume=cid):
+                resume=cid, project=project):
             return error("still working on the last request", 409)
         return stream(s)
 
@@ -2403,6 +2458,24 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         except KeyError:
             return None, error("not found", 404)
         return cid, None
+
+    async def chosen_project(s: Session, fields: dict, cid: str | None):
+        """(project id, "" for none, or None: not said; error response): a
+        new chat pane's project ("project_id"), this person's own (another
+        person's id is unknown: 404). A bound conversation keeps its own."""
+        from kwil.memory_store import valid_project_id
+
+        pid = fields.get("project_id")
+        if pid is None or cid is not None:
+            return None, None
+        if pid == "":
+            return "", None
+        if not isinstance(pid, str) or not valid_project_id(pid):
+            return None, error("bad request", 400)
+        store = assistant.memory_store_of(s) if projects_available(assistant, s) else None
+        if store is None or await run_in_threadpool(store.project, pid) is None:
+            return None, error("not found", 404)
+        return pid, None
 
     @app.post("/api/confirm")
     async def confirm(request: Request):
@@ -2500,6 +2573,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from kwil import study
 
     study.register(app, assistant, session_of, error)  # the chat header's toggle
+    from kwil import projects_web
+
+    projects_web.register(app, assistant, session_of, error)  # everyone's own
     reminders_mod.register(app, assistant, session_of, error)  # everyone's own
     if getattr(assistant, "backup", None) is not None:
         from kwil import backup as backup_mod
@@ -2523,6 +2599,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         from kwil import webfeatures
 
         webfeatures.install(app, features)
+        if getattr(assistant, "notion_courses", None) is None:
+            # the owner's Notion Course options: suggested projects (projects_web)
+            assistant.notion_courses = getattr(features, "courses", None)
     from kwil import family as family_mod
 
     family_mod.register(app, family, web, assistant, error)
@@ -2673,7 +2752,7 @@ def memory_location(config: dict) -> str:
 
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
-    from kwil.cli import (add_history_tools, add_memory_tools,
+    from kwil.cli import (add_history_tools, add_memory_tools, add_project_tools,
                                add_reminder_tools, add_study_tools, build_chat,
                                build_local_memory, build_memory,
                                build_memory_review, build_reminders, build_tools,
@@ -2697,6 +2776,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     local = build_local_memory(config)  # his instructions and saved memories
     add_memory_tools(tools, memory, local)
     add_study_tools(tools, config, local)  # study mode (study.py)
+    add_project_tools(tools, config, local)  # projects' files (projects.py)
     reminders = build_reminders(config)  # his reminders and scheduled tasks
     holder: dict = {}  # the assistant, once made: its push says if a phone is set up
     add_reminder_tools(tools, config, reminders,
@@ -2744,6 +2824,9 @@ def build_assistant(config: dict, tts_name: str | None = None,
     from kwil.backup import Backup
 
     assistant.memory_where = memory_location(config)
+    from kwil import projects
+
+    assistant.project_limits = projects.limits(config)  # [projects] bounds (projects_web)
     # GET /api/backup (memory files too)
     assistant.backup = Backup.from_config(config, store, family, memory=local,
                                           reminders=reminders)

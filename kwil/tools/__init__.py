@@ -24,7 +24,8 @@ UNTRUSTED_MARK = "untrusted_content"  # in a tool result: "holds others' text"
 READ_ONLY_TOOLS = ("list_calendar_events", "calendar_color_habits",
                    "list_assignments", "ha_list", "ha_state",
                    "spotify_now_playing", "spotify_devices", "search_course_files",
-                   "read_course_file", "list_memories")
+                   "read_course_file", "list_memories", "search_project_files",
+                   "read_project_file")
 
 # Tools that only read (private ones too, so wider than READ_ONLY_TOOLS):
 # a turn that used nothing else may be answered again (the phone's "try

@@ -28,8 +28,12 @@ const queue = [];  // {text, el, cid, epoch}
 // Continue binds it; null for a new chat). Every turn typed into it carries
 // that id, so the server continues that conversation however long ago it
 // ended. `epoch` changes with every binding: a turn's late text never lands
-// in a pane opened after it was sent.
-const pane = { cid: null, epoch: 0 };
+// in a pane opened after it was sent. `project` ({id, name}, projects.js):
+// the project a new chat's pane is in; its turns carry "project_id" (the
+// server starts the conversation there), and `leaving` sends "" once after
+// the header's × (the next turn starts a chat in no project). A turn's
+// "done" says which project the pane's conversation is in.
+const pane = { cid: null, epoch: 0, project: null, leaving: false };
 let confirmEpoch = 0;  // the pane the open yes/no question was asked in
 // The last turn drawn in this pane, for "try again" (↻ under the reply) and
 // "edit" (the pencil on Kyle's message): his bubble, what he said, and what
@@ -54,10 +58,12 @@ loadSetting(els.mute, "mute");
 if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 
 // --- views ---
+const VIEWS = ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view",
+               "projects-view", "project-view"];
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
-  for (const id of ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view"]) {  // history.js, memory.js, brief.js, reminders.js
+  for (const id of VIEWS) {  // history.js, memory.js, brief.js, reminders.js, projects.js
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
@@ -259,10 +265,48 @@ function clearQueue() { while (queue.length) unqueue(queue[0]); }
 function bindPane(cid) {
   pane.cid = cid || null;
   pane.epoch += 1;
+  pane.project = null;  // a stored conversation's comes with its first "done"
+  pane.leaving = false;
+  showProject();
   live = null;
   shown = null;
   clearTurnTools();
   cancelEdit();
+}
+
+// The header's project name (projects.js) for this pane.
+function showProject() {
+  if (window.KwilProjects) window.KwilProjects.pill(pane.project);
+}
+
+// A new chat (projects.js's "New chat in this project", or the header's ×
+// with `project` null): a fresh pane in that project, the log cleared.
+function newChat(project) {
+  bindPane(null);
+  pane.project = project && project.id ? { id: project.id, name: project.name } : null;
+  pane.leaving = !pane.project;
+  els.log.textContent = "";
+  addMessage("note", pane.project ? `New chat in ${pane.project.name}.` : "New chat.");
+  showProject();
+  show("app");
+  els.text.focus();
+}
+
+// The pane's project was deleted (from another phone, say): its next
+// message starts a chat in no project.
+function projectGone(epoch) {
+  if (epoch !== pane.epoch || !pane.project) return;
+  pane.project = null;
+  pane.leaving = true;
+  showProject();
+}
+
+// What a new chat's turn says about its project: an id, "" (leave), or
+// nothing (a bound pane: its conversation keeps its own).
+function projectField(cid, from) {
+  if (cid || from !== pane.epoch) return undefined;
+  if (pane.project) return pane.project.id;
+  return pane.leaving ? "" : undefined;
 }
 
 // history.js drew a stored conversation into the (just bound) pane: its
@@ -585,6 +629,11 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       break;
     case "done":
       if (window.KwilStudy) window.KwilStudy.onDone(ev);  // study.js: the pill
+      if (here) {  // the server's word on the pane's project (projects.js)
+        pane.project = ev.project || null;
+        pane.leaving = false;
+        showProject();
+      }
       // A bound turn that left no conversation (it ended): unbind. A fresh
       // pane never binds to the id here, so its idle timeout still holds.
       if (cid && ev.conversation === null) conversationEnded(cid);  // shown or not
@@ -607,13 +656,16 @@ async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
   const epoch = answering ? asked : from;  // an answer's turn: its question's pane
   const url = answering ? "/api/confirm" : "/api/turn";
   const into = answering ? null : cid;
+  const project = answering ? undefined : projectField(into, from);
   let options;
   if (body instanceof FormData) {
     if (into) body.append("conversation_id", into);
+    if (project !== undefined) body.append("project_id", project);
     options = { method: "POST", body };
   } else {
     const payload = answering ? { answer: body.text } : { text: body.text };
     if (into) payload.conversation_id = into;
+    if (project !== undefined) payload.project_id = project;
     options = { method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload) };
     if (epoch === pane.epoch) {
@@ -635,6 +687,7 @@ async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
     addMessage("note", e.message || String(e));
     setStatus("");
     if (into && e.status === 404) forgetConversation(into);  // deleted elsewhere
+    if (project && e.status === 404) projectGone(from);  // the project was deleted elsewhere
     // the question is gone on the server (409: expired or answered
     // elsewhere): don't bring it back, the queue may go
     if (answering && !confirming && e.status !== 409) setConfirm(question, asked);
@@ -651,7 +704,7 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    const elsewhere = ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view"].some((id) => $(id) && !$(id).hidden);
+    const elsewhere = VIEWS.some((id) => $(id) && !$(id).hidden);
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.KwilFamily) window.KwilFamily.onState(state);  // family.js
@@ -663,6 +716,11 @@ async function refreshState() {
     if (window.KwilVoicePicker) window.KwilVoicePicker.onState(state);  // voice-picker.js
     if (window.KwilBrief) window.KwilBrief.onState(state);  // brief.js
     if (window.KwilStudy) window.KwilStudy.onState(state);  // study.js
+    if (window.KwilProjects) window.KwilProjects.onState(state);  // projects.js
+    // a fresh pane takes the chat's project (one a voice "continue" moved
+    // into), unless the person just chose one or left one
+    if (!pane.cid && !pane.project && !pane.leaving && state.project) pane.project = state.project;
+    showProject();
     if (window.KwilUI) window.KwilUI.renderHealth(document, state.health);  // ui.js
     setConfirm(state.confirm);
     if (!state.busy && !state.confirm) sendQueued();  // e.g. the question expired
@@ -996,7 +1054,8 @@ window.KwilApp = {
   bindPane,
   forgetConversation,
   adoptTurn,
-  pane: () => ({ cid: pane.cid, epoch: pane.epoch }),
+  pane: () => ({ cid: pane.cid, epoch: pane.epoch, project: pane.project }),
+  newChat,
   idle: () => !busy && !confirming,  // e.g. "Branch from here" waits for it
   request,
 };
@@ -1014,6 +1073,8 @@ if ("serviceWorker" in navigator) {
   if (window.KwilVoicePicker) window.KwilVoicePicker.configure({ request, player });
   if (window.KwilBrief) window.KwilBrief.configure({ request, show, player });  // brief.js
   if (window.KwilStudy) window.KwilStudy.configure({ request, note: (t) => addMessage("note", t) });  // study.js
+  if (window.KwilProjects) window.KwilProjects.configure({ request, show, newChat,  // projects.js
+    openConversation: (id) => { if (typeof window.openTranscript === "function") window.openTranscript(id); } });
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {

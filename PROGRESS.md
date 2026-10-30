@@ -7692,3 +7692,105 @@ edit's new message left, the page not told "restored").
 
 Counts (Linux sandbox): 3782 passed, 45 skipped, 1 deselected (2c0701c:
 3777 / 45; +5). JavaScript 334 passed (333; +1).
+
+## Projects, one per class (2026-10-30)
+Like Projects in ChatGPT and Claude: a space per class (PHYS 361, CS 171)
+with its own instructions, files, memories and conversations.
+
+- **Storage** (`memory_store.py`): sibling tables `projects`,
+  `project_memories` and `project_files` in each person's own memory file
+  (`CREATE TABLE IF NOT EXISTS`, schema version still 1, so a rollback
+  opens the file and never sees a project memory as a global one). Chosen
+  over a separate file: one per-person home that already has the isolation
+  (`memory_store_of`), the backup, "Download my data", account deletion,
+  Pause and Forget all. Memory ids share one space, so update, trust and
+  delete (tools and Settings routes) work on both kinds. Files are BLOBs
+  plus their extracted text (pypdf via `textextract.py`), so a delete is
+  zeroed by `secure_delete` and checkpointed, with no files on disk to
+  replace atomically on Windows. Bounds: 30 projects, 100 memories each,
+  `[projects] max_files` / `max_file_mb` / `max_person_mb`, checked inside
+  the write transaction.
+- **Conversations** (`history.py`): `conversation_projects`, a local table
+  in history.sqlite (`ON DELETE CASCADE`, like `recall_vectors`; not a
+  synced event: projects are per backend). `list`/`search`/`count`/
+  `recall_vectors` take `project=`; each conversation dict says its
+  `project`; `branch` copies it; a project's delete unfiles its chats.
+- **Chat** (`chat.py`, `projects.py`): `ClaudeChat.project_id`, chosen
+  before a conversation starts (`set_project`) or taken from the stored
+  conversation it resumes (`resume`, `_switch_to`); `reset()` clears it,
+  regenerate keeps it. The project is part of the per-conversation
+  snapshot (`snapshot(project=...)`): its instructions and memories go into
+  the stable system block, the same bytes all conversation. Its files go
+  as document blocks at the start of the first message, added at request
+  time (never in history), one cache breakpoint after the last: with the
+  stable block, study mode's and the end, four at most. Only while they
+  fit `inline_tokens` and `inline_mb`; past that the system prompt lists
+  them and `search_project_files` / `read_project_file` (new, read-only,
+  untrusted, private) find them. Attached files taint the conversation
+  (`untrusted_project_files`, sticky); deleted files, memories and
+  projects leave a running conversation before its next request.
+- **Remember** saves to the conversation's project unless `general: true`;
+  list/update/forget see global memories and that project's only. Global
+  memories and "Your instructions" still load everywhere.
+- **History tools:** `search_conversations` and `read_conversation` take
+  `project_only` in a project's conversation.
+- **Web** (`projects_web.py`, `webapp.py`): `/api/projects` list/create
+  (one tap from a suggestion; the same course twice makes one),
+  `/suggestions` (the person's Canvas course content and deadline courses,
+  the owner's Notion Course options), `/{id}` (page data with its chats),
+  update, delete (`{"confirm": true}`), one-file upload and file delete;
+  `/api/turn {"project_id"}` starts or keeps a new chat in a project ("":
+  leave it); `done` and `/api/state` carry `project`;
+  `/api/conversations?project=`. All through `memory_store_of`: 404 across
+  people.
+- **Page** (`projects.js`, `index.html`, `app.js`, `app.css`, `i18n.js`):
+  Settings -> Projects (rows, New project in a sheet, suggestions with
+  Create), a project page (New chat in this project, instructions, files
+  with Add file, memories, chats, Rename, Delete project), the header's
+  project name (opens the page; x leaves). English and Chinese; `sw.js`
+  `kwil-shell-v18`; `projects.js` in the static routes, `SHELL` and
+  `PUBLIC_GET`.
+- **Export and backup:** the owner's backup has them (memory.sqlite); an
+  invited person's export has `memory.json` with projects and each file
+  under `projects/<project>/`.
+
+Tests: `tests/test_projects.py` (34: store bounds, real deletes of files
+and projects in the database and WAL bytes, the rollback-safe schema,
+Forget all, export; the system prompt only in its project and byte-stable,
+global memories still there, pause; remember scoping and other projects'
+ids unknown; files as cached documents with taint, the budget switching to
+search, the file tools keeping to their project, four breakpoints with two
+files + study mode + an attachment on the contract fake, deletes leaving a
+running conversation; tagging, the History filter, search/read
+`project_only`, try again and edit, branch, resume; no project text at
+INFO; the routes, upload validation and bounds (a photo never decoded),
+a new chat from the page, incognito, family isolation on every route both
+ways, suggestions, her export and the backup, account deletion), a
+contract test (`test_a_project_chat_with_a_file_and_a_remember`), and
+`tests/js/projects.test.mjs` (9: menu, list and suggestions, the page's
+actions, rename/delete, the pill, the pane's `project_id`, a bound pane,
+`/api/state`, a 404'd project, Chinese strings and wiring). Existing
+tests updated for the new tools and fields (family/Notion tool sets, the
+untrusted set, `/api/state`, the History item keys, `sw.js` v18 pins).
+
+Failing first (scratch copy, never git stash): on b539432's source every
+new Python test errors (no module) and the contract and JS tests fail; 52
+single mutations each fail their test (project memories in the global
+list, reset keeping the project, reloading each turn, no project block,
+remember ignoring the project or `general`, other projects' ids visible,
+no taint, a breakpoint per document, none, the budget never switching,
+another project's file read, deleted files/projects kept, delete without
+purge, files left by a project delete, Forget all leaving project
+memories, no person total, no project cap, photos accepted or decoded, no
+tagging, no History filter, `project_only` ignored twice, branch dropping
+the project, regenerate or resume losing it, the name or query at INFO,
+the owner's store for everyone, unchecked turn and History ids, the turn
+ignoring `project_id`, chats left filed, Kyle's Notion for family members,
+two taps making two, the export without files, incognito refused, "his"
+in a family member's prompt; JS: no `project_id`, no "" on leaving, a
+bound pane sending one, `done` or `/api/state` not adopted, the pill as
+HTML or shown when off, a file delete without asking, a 404 kept).
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3817 passed, 45 skipped, 1 deselected (b539432: 3782 / 45; +35).
+JavaScript 343 passed (334; +9).
