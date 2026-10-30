@@ -3,6 +3,10 @@
   GET    /api/conversations              ?q= &source= &pinned= &archived=
                                          &since= &until= &limit= &offset=
   GET    /api/conversations/{id}         the transcript
+  POST   /api/conversations/{id}/branch  {"message_index"}: a new
+                                         conversation with its messages up
+                                         to that one ("Branch from here";
+                                         the page binds its pane to it)
   POST   /api/conversations/{id}/continue  load it into this browser's chat
                                          (the voice view, older pages; the
                                          page's Continue is a GET, and its
@@ -25,7 +29,7 @@ search, so Kyle's conversations are unknown ids to them.
 import logging
 import re
 
-from kwil import history
+from kwil import history, i18n
 
 log = logging.getLogger(__name__)
 
@@ -52,13 +56,25 @@ def untitled(conv: dict) -> str:
 
 def detail(conv: dict, active: bool = False) -> dict:
     return {**item(conv), "summary": conv["summary"], "ended_at": conv["ended_at"],
-            "active": active,
+            "active": active, "redo": can_redo(conv["messages"]),
             "messages": [{"role": m["role"], "kind": m["kind"], "text": m["text"],
                           "created_at": m["created_at"],
                           "interrupted": m["interrupted"],
                           "tools": [{"tool": e.get("tool"), "status": e.get("status")}
                                     for e in m["tool_events"]]}
                          for m in conv["messages"]]}
+
+
+def can_redo(messages: list[dict]) -> bool:
+    """May the page offer "try again" and "edit" on this conversation's
+    last turn (Kyle's last message and what followed): one that used no
+    tool that may have changed something (webapp.start_redo checks again)."""
+    from kwil.tools import changing_tools
+
+    start = max((i for i, m in enumerate(messages)
+                 if m["role"] == "user" and m["kind"] == "chat"), default=None)
+    return start is not None and not changing_tools(
+        e.get("tool") for m in messages[start:] for e in m["tool_events"])
 
 
 def _bool(value):
@@ -152,6 +168,38 @@ def register(app, assistant, session_of, error) -> None:
         log.info("Web: continuing conversation %s", cid)
         return {"ok": True, **detail(store.get(cid), active=True),
                 "title": conv["title"] or untitled(conv)}
+
+    @app.post("/api/conversations/{cid}/branch")
+    async def branch_conversation(cid: str, request: Request):
+        """"Branch from here": a new conversation holding this one's
+        messages up to and including {"message_index"} (as the transcript
+        lists them, at most history.MAX_BRANCH_MESSAGES). Nothing changes
+        in this browser's chat: the page binds its pane to the new id, and
+        its first turn resumes it like any stored conversation (text only,
+        and counted as outside text, as every resumed one is)."""
+        s, store, err = guard(request)
+        if err:
+            return err
+        if s.chat.incognito:
+            return error("turn incognito off to branch a conversation", 409)
+        try:
+            body = await request.json()
+        except ValueError:
+            return error("bad request", 400)
+        index = body.get("message_index") if isinstance(body, dict) else None
+        if isinstance(index, bool) or not isinstance(index, int):
+            return error("bad request", 400)
+        try:
+            new = await run_in_threadpool(store.branch, cid, index, 0,
+                                          i18n.t("branch_title", s.language))
+        except KeyError:
+            return error("not found", 404)
+        except IndexError:
+            return error("no such message", 400)
+        conv = store.get(new)
+        log.info("Web: branched conversation %s at message %d into %s (%d messages)",
+                 cid, index, new, conv["message_count"])
+        return {"ok": True, **detail(conv)}
 
     @app.patch("/api/conversations/{cid}")
     async def update_conversation(cid: str, request: Request):

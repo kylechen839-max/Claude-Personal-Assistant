@@ -161,7 +161,8 @@ def test_web_turns_are_limited_with_nothing_sent_or_saved(env, owner):
     assert r.status_code == 200
     # "done" still says which conversation the page is in (the same one)
     assert events(r) == [{"type": "error", "message": i18n.t("limit_minute", "en")},
-                         {"type": "done", "conversation": s.chat.conversation_id}]
+                         {"type": "done", "conversation": s.chat.conversation_id,
+                          "redo": True}]
     assert s.chat.conversation_id
     assert len(env.fake_client.calls) == calls  # Claude was never asked
     assert s.chat.history == history  # the conversation as it was

@@ -7563,3 +7563,132 @@ Chinese words) each fail their new test.
 
 Counts (Linux sandbox): 3743 passed, 42 skipped, 1 deselected (4c00e06:
 3738 / 42; +5). JavaScript 321 passed (unchanged).
+
+## Try again, edit and resend, branch (2026-10-30)
+The phone chat gets ChatGPT/Claude-style controls. **↻** under Kwil's
+last reply answers the same message again; the **pencil** on Kyle's last
+message puts it back in the text box ("Editing your last message", × or
+Esc cancels) and sends the new words; **Branch from here** (long-press a
+message in a stored transcript, or its hover "…" button) copies the
+conversation up to that message into a new one, "<title> (branch)", and
+binds the chat pane to it.
+
+- `ClaudeChat.regenerate(text=None, on_text, cancel, on_start)` (chat.py):
+  refuses (`RedoRefused`) with no turn, or when the turn used a tool outside
+  `tools.REDO_SAFE_TOOLS` (an allowlist of tools that only read, plus web
+  search/fetch), from its tool_use blocks and from the saved tool events
+  (a resumed conversation is text). Otherwise the turn is rewound
+  (`_keep_taint` first: taint survives), `ask()` runs it again (Kyle's
+  message not saved twice: `record_user=False`; attachments kept), and
+  once the new reply is in, the old reply (and for an edit the old message)
+  is superseded in history. A failed request puts the old turn back.
+- History (history.py): `last_turn`, `supersede` (a `delete_message`
+  tombstone marked `"superseded": true` per message: no new event kind, so
+  every backend applies it and redacts the text in either order; search
+  index and WAL purged), `branch` (a new id, at most `MAX_BRANCH_MESSAGES`
+  = 200 of the newest messages up to the index, text and compact tool
+  events only, the title kept as if Kyle set it; not the summary).
+  Feature notes (kind "note") are never superseded.
+- Web (webapp.py): `POST /api/regenerate` and `POST /api/edit {"text"}`
+  (both take `conversation_id`, checked like `/api/turn`'s) go through
+  `WebAssistant.start_redo`: the turn lock taken without waiting (409 "Wait
+  for the reply to finish first." / "Answer the question first."), the
+  redo check (for a bound conversation the chat isn't in yet, from the
+  store before resuming it), quotas, then a normal turn thread that emits
+  `{"type": "redo"}` once rewound and `{"type": "error", "restored": true}`
+  if the request then failed. Every page turn's "done" says `"redo"`:
+  whether to offer the buttons. `POST /api/conversations/{id}/branch
+  {"message_index"}` (history_web.py): owner-checked 404, 409 incognito,
+  400 for a bad index; the transcript's detail carries `"redo"` too.
+- Page (app.js, history.js, index.html, app.css, i18n.js): the pane
+  tracks its last turn (Kyle's bubble, what he said, what came after);
+  the buttons are 44px icon buttons (line SVGs), disabled while busy or
+  asked, gone when anything else is drawn; the "redo" event hides the old
+  reply (and rewrites the bubble for an edit), "restored" brings it back,
+  "done" removes it. Continue and Branch share `openInChat` and offer the
+  buttons on the stored last turn when the server says so. English and
+  Chinese strings; `sw.js` cache `kwil-shell-v17`.
+- Deviation: superseded messages are hidden (deleted), not shown
+  collapsed. "Branch from here" is in the History transcript (stored
+  messages have indices), not on the live chat bubbles.
+
+Tested: `tests/test_regenerate.py` (32): try again replaces the reply and
+the old one is gone from the store, search, both exports and the event
+log (redacted); edit resends the new text; refused after a write tool
+(also once resumed as text), while busy, while a question is open (also a
+question asked by the redone turn), with nothing to redo, for another
+owner's id; read-only tool turns redo; taint survives; the old reply's
+thinking and the `_thinking_from` tag never go out, earlier thinking only
+with the same model; a failed request restores the turn (chat, store and
+the page's "restored"); a Stop keeps the partial reply and still
+supersedes; feature notes stay; no text at INFO (chat, web, branch);
+branch copies up to the index, new id, title, the pane's first turn
+resumes it text-only and tainted, tool names but no tool calls, bounded,
+input checks, 401, 403 cross-site, incognito 409, family and owner 404
+both ways (her own branch works); sync: superseded tombstones applied on a
+peer in order and tombstone-first, and a delete there removes it all.
+`tests/test_contract.py`: try again and edit in a multi-turn exchange with
+a tool round on contract_fakes (plain and routed; live in CI). JS:
+`tests/js/app-redo.test.mjs` (12): buttons only with `"redo": true`,
+placement, POST bodies (bound id), the redo/restored/done drawing, edit
+flow and cancel, disabled while busy or asked, edit refused while busy,
+409 note, new pane drops them, Continue offers them (or not), Branch posts
+the index and binds the pane, waits for idle, shows refusals. Existing
+tests updated: "done" now carries `"redo"` (3 exact matches), the branch
+route in the 401 list, `sw.js` v17 pins.
+
+Failing first (scratch copy, one source change reverted at a time,
+restored after each; never git stash): all new tests fail on the base
+commit (no routes or methods); 27 single mutations each fail their test:
+no `_keep_taint` on the rewind, no write-tool refusal, saved tool events
+ignored, the old reply left in history, no restore on failure, no
+supersede, the edit keeping the old message, notes superseded, edited
+text at INFO, no confirming check, waiting for the lock, no store check
+for a bound conversation, no "restored", `done.redo` always true, branch
+unbounded, negative index accepted, branching while incognito, the title
+at INFO, a deny-list instead of the allowlist; JS: no disabled state,
+buttons without `redo`, no restore, the old reply kept, no bound id,
+branch not binding, branch while busy, Continue without the buttons.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3777 passed, 45 skipped, 1 deselected (d75b206: 3743 / 42; +34 passed,
++3 live contract params skipped without a key). JavaScript 333 passed
+(321; +12).
+
+### Try again, edit, branch: judge round 2 (2026-10-30)
+1. **A write plus a resume in one turn is never redone.** `_switch_to`
+   saved the exchange it carries into the resumed conversation without
+   its tool events, and the chat history became plain text, so "add 'Lab
+   due' to my calendar and continue our lab chat" could be tried again
+   and ran `create_calendar_event` twice. The carried reply is now saved
+   with the turn's tool events (History shows them), and the chat
+   remembers the switch (`_switched`, cleared by the next turn and by
+   `reset()`): either one alone refuses the redo.
+2. **`check_dev_team` left `REDO_SAFE_TOOLS`:** `devteam.replies()`
+   takes answered replies out of the pending list and saves that. Every
+   other entry was re-read for hidden state: Gmail reads use
+   `messages.get` (no read mark; `modify` is blocked); notes, memory
+   searches, the missed list, deadlines, reminders and course files only
+   query; calendar, Home Assistant, Spotify and team-chat reads fill
+   in-memory caches; history search may start recall's own idempotent
+   vector backfill. Nothing else moved.
+3. **Stop before the first word keeps the old answer.** If a redo is
+   stopped before any text or tool of the new reply, the old turn is put
+   back (chat history, and the empty reply plus an edit's new message are
+   taken out of saved history; nothing superseded) and `RedoStopped`
+   gives the page `{"type": "error", "restored": true}` ("Stopped. The
+   earlier reply stays."). The page already brought the old reply back on
+   "restored"; a JS test now covers it through the Stop button.
+
+Tests: 5 new Python (the judge's exact path, both try again and edit,
+plus the switch flag alone, a later chat reading the saved tools and the
+flag clearing; check_dev_team refused; Stop before a word for try again
+and for an edit, and on the page) and 1 JS (Stop, then "restored").
+Failing first: the 5 Python tests fail on 2c0701c (the JS one passes
+there: the page's handling didn't change); 7 single mutations each fail
+their test (switch saved without tool events, the switch not remembered,
+the flag not cleared, check_dev_team allowed, Stop superseding, a stopped
+edit's new message left, the page not told "restored").
+
+Counts (Linux sandbox): 3782 passed, 45 skipped, 1 deselected (2c0701c:
+3777 / 45; +5). JavaScript 334 passed (333; +1).

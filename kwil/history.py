@@ -229,6 +229,9 @@ def _fts_query(terms: list[str], any_term: bool = False) -> str:
 
 MESSAGE_KINDS = ("chat", "confirm", "note")  # note: added by a feature, not said
 MAX_TEXT = 8000  # characters per message (an event is at most 64 KB of JSON)
+# "Branch from here" copies at most this many messages (the newest up to
+# that point); a continued branch is trimmed further (rebuild_history).
+MAX_BRANCH_MESSAGES = 200
 
 
 @dataclass(frozen=True)
@@ -624,6 +627,73 @@ class HistoryStore:
         with self._lock:
             self._own(conversation_id)
             self._record("delete_message", conversation_id, {"target": event_id})
+
+    def last_turn(self, conversation_id: str) -> list[dict]:
+        """The stored messages of the last turn: Kyle's last message (role
+        user, kind chat) and everything after it, oldest first, each
+        {"event_id", "role", "kind", "tools": [tool names]}. Empty if he
+        never said anything."""
+        with self._lock:
+            self._own(conversation_id)
+            start = self._con.execute(
+                "SELECT ev_ts, event_id FROM messages WHERE conversation_id = ? "
+                "AND role = 'user' AND kind = 'chat' "
+                "ORDER BY ev_ts DESC, event_id DESC LIMIT 1",
+                (conversation_id,)).fetchone()
+            if not start:
+                return []
+            rows = self._con.execute(
+                "SELECT event_id, role, kind, tool_events FROM messages "
+                "WHERE conversation_id = ? AND (ev_ts > ? OR (ev_ts = ? AND "
+                "event_id >= ?)) ORDER BY ev_ts, event_id",
+                (conversation_id, start[0], start[0], start[1])).fetchall()
+        return [{"event_id": r["event_id"], "role": r["role"], "kind": r["kind"],
+                 "tools": [str(e.get("tool", "")) for e in
+                           (json.loads(r["tool_events"]) if r["tool_events"] else [])
+                           if isinstance(e, dict)]}
+                for r in rows]
+
+    def supersede(self, conversation_id: str, event_ids: list[str]) -> int:
+        """Messages replaced by "try again" or an edit: never shown again,
+        anywhere. Each is a delete_message tombstone marked "superseded" (no
+        new event kind, so every backend, an older one too, applies it and
+        redacts the old text from its log), and the deleted text leaves the
+        search index and the write-ahead log as with any delete. Returns how
+        many."""
+        with self._lock:
+            self._own(conversation_id)
+            for eid in event_ids:
+                self._record("delete_message", conversation_id,
+                             {"target": str(eid), "superseded": True})
+            if event_ids:
+                self._purge()
+        return len(event_ids)
+
+    def branch(self, conversation_id: str, message_index: int,
+               max_messages: int = 0, title: str = "{title} (branch)") -> str:
+        """"Branch from here": a new conversation (source "web") holding
+        copies of this one's messages up to and including `message_index`
+        (0-based, as `get` lists them), at most `max_messages` of the
+        newest (MAX_BRANCH_MESSAGES by default), titled "<title> (branch)"
+        (`title`, e.g. in Chinese; as if Kyle named it, so it is kept). Text and the
+        compact tool events only, as stored: never a tool call to replay.
+        IndexError for an index outside the conversation. Returns the new
+        id."""
+        conv = self.get(conversation_id)  # KeyError: unknown or someone else's
+        messages = conv["messages"]
+        if isinstance(message_index, bool) or not isinstance(message_index, int) \
+                or not 0 <= message_index < len(messages):
+            raise IndexError("no such message")
+        copied = messages[:message_index + 1][-(max_messages or MAX_BRANCH_MESSAGES):]
+        base = conv["title"] or fallback_title(messages)[0]
+        with self._lock:
+            cid = self.create("web")
+            for m in copied:
+                self.add_message(cid, m["role"], m["text"], kind=m["kind"],
+                                 interrupted=bool(m["interrupted"]),
+                                 tool_events=m["tool_events"] or None)
+            self.update(cid, title=title.format(title=base[:110]))
+        return cid
 
     def mark_interrupted(self, conversation_id: str,
                          spoken_text: str | None = None) -> bool:
@@ -1591,6 +1661,25 @@ class Recorder:
             self.discard()
         elif event_id and self.conversation_id:
             self._safe(self.store.retract, self.conversation_id, event_id)
+
+    def last_turn(self) -> list[dict] | None:
+        """HistoryStore.last_turn of the current conversation ([] if there
+        is none, or incognito); None if the store couldn't be read."""
+        if not self.active or not self.conversation_id:
+            return []
+        try:
+            return self.store.last_turn(self.conversation_id)
+        except KeyError:  # deleted meanwhile (e.g. from the phone)
+            return []
+        except Exception:
+            log.exception("History: could not read the last turn")
+            return None
+
+    def supersede(self, conversation_id: str | None, event_ids: list[str]) -> None:
+        """HistoryStore.supersede, in `conversation_id` (the one the old
+        turn was in: the new turn may have moved on to another)."""
+        if conversation_id and event_ids:
+            self._safe(self.store.supersede, conversation_id, event_ids)
 
     def confirm(self, question: str, answer: str) -> None:
         self.assistant(question, kind="confirm")

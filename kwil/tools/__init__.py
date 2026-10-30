@@ -26,6 +26,27 @@ READ_ONLY_TOOLS = ("list_calendar_events", "calendar_color_habits",
                    "spotify_now_playing", "spotify_devices", "search_course_files",
                    "read_course_file", "list_memories")
 
+# Tools that only read (private ones too, so wider than READ_ONLY_TOOLS):
+# a turn that used nothing else may be answered again (the phone's "try
+# again" and "edit", ClaudeChat.regenerate). An allowlist: any other tool,
+# a new one included, may have changed something, and its turn is never
+# redone, so nothing runs twice. Each entry was checked to change nothing
+# Kyle can see when run twice (at most a cache, or recall's own vector
+# index catching up); not here: check_dev_team (it takes answered replies
+# out of the pending list and saves that). Anthropic's server tools only
+# read. A new entry needs the same check.
+REDO_SAFE_TOOLS = frozenset(READ_ONLY_TOOLS) | {
+    "find_free_time", "list_deadlines", "list_reminders", "list_recent_notes",
+    "recall_notes", "search_memory", "search_conversations", "read_conversation",
+    "read_email", "email_summary", "chat_channels", "chat_files", "chat_read",
+    "chat_read_file", "chat_search", "list_missed", "web_search", "web_fetch"}
+
+
+def changing_tools(names) -> list[str]:
+    """The tools in `names` that may have changed something (not in
+    REDO_SAFE_TOOLS), each once, in order."""
+    return list(dict.fromkeys(n for n in names if n and n not in REDO_SAFE_TOOLS))
+
 
 def mark_untrusted(result: dict, untrusted: bool) -> dict:
     if untrusted:

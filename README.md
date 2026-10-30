@@ -223,6 +223,25 @@ the conversation drops the tie and any message still queued for it. Saying
 "goodbye" there ends that conversation and drops the tie too: the next
 message starts a new one.
 
+**Try again, edit, branch** (like ChatGPT and Claude). Under Kwil's last
+reply a ↻ button asks for a new answer to the same message; the pencil on
+your last message puts it back in the text box to change and send again.
+The old reply (and, for an edit, your old message) is replaced: it is gone
+from History, search and exports, on every synced backend. Both work only
+between turns (not while Kwil answers or waits for a yes/no) and only when
+that reply used nothing that may have changed something: if it added an
+event, saved a note or turned on a light, Kwil says "That reply already
+changed something, so I won't redo it. Ask again instead." (read-only
+tools like reading your calendar or email are fine; a reply that switched
+to another conversation, or checked the dev team's replies, counts as a
+change). Stop before the new reply says anything keeps the old one. In a stored
+conversation, long-press a message (or hover it with a mouse and tap its
+"…") and pick **Branch from here**: a new conversation, "<title>
+(branch)", gets the messages up to that one (at most 200, as text) and the
+chat continues there; the original stays as it was. The branch is a copy:
+deleting one of them leaves the other, so delete both to remove the words.
+Not while Incognito is on.
+
 **Incognito** in the settings menu (gear) stops saving for this phone
 until you turn it off; the header shows an "Incognito" badge meanwhile. It
 follows the phone's light or dark setting and works as a home-screen app on
@@ -517,7 +536,9 @@ asks Claude, and sends back the reply as text and audio (in the voice from
 and again to stop), or type. You can keep typing while Kwil is
 answering: Send then queues the message (up to 3, each with an × to
 remove it) and it goes as soon as the reply is done; **Stop** ends the
-reply early and sends the queue. When Claude wants to delete something, Yes/No
+reply early and sends the queue. ↻ under the last reply tries again and
+the pencil edits your last message (see
+[Conversation history](#conversation-history)). When Claude wants to delete something, Yes/No
 buttons appear; saying "yes" into the mic works too. Each phone/browser
 gets its own conversation; after `[assistant] conversation_timeout` (5
 minutes) of quiet it ends and is summarized to memory, like the voice loop.

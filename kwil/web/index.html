@@ -302,6 +302,12 @@
   </section>
 
   <footer>
+    <div id="edit-bar" class="edit-bar" role="status" hidden>
+      <span>Editing your last message</span>
+      <button id="edit-cancel" class="icon-btn" type="button" aria-label="Cancel editing">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
     <div id="attach-chips" class="attach-chips" hidden aria-label="Attachments"></div>
     <form id="text-form" autocomplete="off">
       <button id="attach" class="attach-btn" type="button" aria-label="Add photos or files" aria-haspopup="dialog">
@@ -489,6 +495,15 @@
     <button value="archive" id="sheet-archive">Archive</button>
     <button value="export">Export as Markdown</button>
     <button value="delete" class="danger">Delete…</button>
+    <button value="cancel" class="cancel">Cancel</button>
+  </form>
+</dialog>
+
+<dialog id="msg-sheet" class="sheet" aria-labelledby="msg-sheet-title">
+  <form method="dialog">
+    <h2 id="msg-sheet-title">This message</h2>
+    <p id="msg-sheet-text" class="sheet-quote"></p>
+    <button value="branch" id="msg-branch">Branch from here</button>
     <button value="cancel" class="cancel">Cancel</button>
   </form>
 </dialog>

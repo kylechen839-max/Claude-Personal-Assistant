@@ -21,6 +21,7 @@ from tests.test_webapp import (BASE, TOKEN, Clock, FakeTranscriber, events,  # n
 
 ROUTES = [("GET", "/api/conversations"), ("GET", "/api/conversations/{id}"),
           ("POST", "/api/conversations/{id}/continue"),
+          ("POST", "/api/conversations/{id}/branch"),
           ("PATCH", "/api/conversations/{id}"), ("DELETE", "/api/conversations/{id}"),
           ("GET", "/api/conversations/{id}/export"), ("GET", "/api/incognito"),
           ("POST", "/api/incognito")]
@@ -422,7 +423,8 @@ def test_a_turn_with_conversation_id_continues_that_conversation(web, fake_clien
     login(client)
     fake_client.queue = [make_response(text_block("Use the SD."))]
     r = bound_turn(client, cid)
-    assert done_of(r) == {"type": "done", "conversation": cid}
+    # "redo": the page may offer "try again" on this reply (no tool ran)
+    assert done_of(r) == {"type": "done", "conversation": cid, "redo": True}
     assert session(assistant).chat.conversation_id == cid
     assert fake_client.calls[-1]["messages"][0]["content"] == "How do error bars work?"
     assert store.count() == 1 and store.get(cid)["message_count"] == 4
@@ -522,7 +524,8 @@ def test_a_resumed_turn_stays_tainted_so_a_change_asks_first(fake_client, tmp_pa
         assert evs[-1]["question"] == "Add Meeting?"
         assert session(assistant).chat.tainted()
         evs = events(client.post("/api/confirm", json={"answer": "no"}))
-        assert evs[-1] == {"type": "done", "conversation": cid}
+        # a turn that called a write tool is never offered "try again"
+        assert evs[-1] == {"type": "done", "conversation": cid, "redo": False}
         assert added == []
     finally:
         next(gen, None)

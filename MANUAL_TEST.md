@@ -467,6 +467,36 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: the queued text is read with "Queued", the × as "Remove
     queued message", and Stop as "Stop". In Mom's (Chinese) app they read
     排队中 / 移除排队的消息 / 停止.
+### Try again, edit, branch (iPhone, ~8 min)
+- [ ] Ask "Give me a fun fact about octopuses". When it's done, tap ↻
+      under the reply.
+  - Should: the old reply disappears and a new one streams in its place;
+    ↻ and the pencil come back under it. Open History: the conversation
+    shows your question once and only the new reply (search for a word
+    only the old reply had: nothing).
+- [ ] Tap the pencil on your question, change it to "a fun fact about
+      squid", send.
+  - Should: a small "Editing your last message" bar with an × shows
+    while editing; after sending, your bubble reads the new words and a
+    new answer comes; History shows only the new pair.
+- [ ] While a long reply is still coming in, look at ↻ and the pencil
+      (they belong to the turn before): they are gone or dimmed; tapping
+      does nothing. Same while Yes/No is showing.
+- [ ] Make a test event ("add a test event tomorrow at 9", say yes), then
+      tap ↻ if it shows.
+  - Should: no ↻ or pencil under that reply (or, if tapped from an older
+    page, "That reply already changed something, so I won't redo it. Ask
+    again instead."). The calendar has the event once.
+- [ ] Open History, open a conversation with a few turns, long-press
+      Kwil's first reply, tap **Branch from here**.
+  - Should: the chat opens with "Branched into “… (branch)”. Go ahead.";
+    your next message is answered knowing only the messages up to that
+    reply. History has the new "(branch)" conversation and the original
+    is unchanged. With Incognito on, Branch from here is greyed out.
+- [ ] With VoiceOver on: ↻ reads "Try again", the pencil "Edit message",
+      the message button "Message actions". In Mom's (Chinese) app: 再试一次
+      / 编辑消息 / 消息操作 / 从这里分支.
+
 ### Reply voice (optional, ~5 min)
 - [ ] Open the gear menu: **Reply voice** lists the voices on this server
       (Default, the Piper voices in `voices/`, Kokoro if downloaded, System

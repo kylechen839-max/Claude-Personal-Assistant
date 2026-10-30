@@ -42,6 +42,14 @@ EN = {
     "not_caught": "I didn't catch that. Try again?",
     # a turn typed into a conversation deleted meanwhile (another phone)
     "conversation_gone": "That conversation was deleted, so I didn't send this.",
+    # the phone's "try again" and "edit" (ClaudeChat.regenerate)
+    "redo_nothing": "There's no reply to try again yet.",
+    "redo_changed": "That reply already changed something, so I won't redo it. Ask again instead.",
+    "redo_busy": "Wait for the reply to finish first.",
+    "redo_confirming": "Answer the question first.",
+    "redo_stopped": "Stopped. The earlier reply stays.",
+    # "Branch from here": the new conversation's title (history_web.py)
+    "branch_title": "{title} (branch)",
     "wont_delete": "OK, I won't delete it.",
     "wont_do": "OK, I won't do that.",
     "cal_delete": "Do you want me to delete {title} on {when}?",
@@ -171,6 +179,12 @@ ZH = {
     "confirm_unclear": "还是没听清，所以我没有做。",
     "not_caught": "我没听清楚，请再说一遍？",
     "conversation_gone": "那个对话已经删除了，所以这条消息没有发送。",
+    "redo_nothing": "还没有可以重试的回复。",
+    "redo_changed": "那条回复已经改动了东西，所以我不会重做。请重新问一次。",
+    "redo_busy": "请等回复结束后再试。",
+    "redo_confirming": "请先回答这个问题。",
+    "redo_stopped": "已停止，之前的回复保留。",
+    "branch_title": "{title}（分支）",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",
     "cal_delete": "要我删除{when}的“{title}”吗？",

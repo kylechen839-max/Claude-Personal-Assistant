@@ -396,6 +396,68 @@ to that session's own conversation.
   fixed lines with no conversation text ("Web turn stopped", "Turn
   stopped: confirmation not asked", "Skipped <tool>").
 
+### Try again, edit and branch (`ClaudeChat.regenerate`, `/api/regenerate`, `/api/edit`, `/api/conversations/{id}/branch`)
+- **Only between turns (rule 3).** `WebAssistant.start_redo` takes the
+  session's turn lock without waiting: while a turn runs, or a yes/no
+  question is open (asked inside a turn that holds the lock, also the
+  voice view's), it answers 409 and nothing is sent. A redone turn is an
+  ordinary turn after that: Stop, the cancel check before every dispatch
+  and one-turn-at-a-time apply as before.
+- **Tools never run twice behind Kyle's back.** A turn that used any tool
+  outside `tools.REDO_SAFE_TOOLS` (an allowlist of tools that only read,
+  plus web search and fetch; a new tool is outside it until added) is never
+  redone: refused with "That reply already changed something" before any
+  request. Both the chat's own tool calls and the saved tool events count,
+  so a conversation resumed as text (no tool blocks left) is checked
+  too, and a bound conversation the chat isn't in yet is checked from the
+  store before it is resumed. A tool that only asked (and was told no)
+  counts as a change. If the store can't be read, the redo is refused.
+  A turn that switched conversations ("add it and continue our lab
+  chat": `resume_conversation`) is refused too: the exchange carried into
+  the resumed conversation is saved with its tool events (History shows
+  them), and the chat also remembers the switch. Every allowlist entry
+  was checked for hidden state (caches, "seen" markers, pending queues,
+  sync triggers): Gmail reads use `messages.get` (no read mark; `modify`
+  is blocked), notes and memory searches only query, study's missed list,
+  deadlines, reminders and course files are SELECTs, the calendar, Home
+  Assistant, Spotify and team-chat reads only fill in-memory caches, and
+  history search may start recall's own vector backfill (idempotent).
+  `check_dev_team` is left out: it takes answered replies out of the
+  pending list and saves that.
+- **Taint is never cleared by a rewind.** The rewound turn's untrusted
+  results (an email, a web page) keep the conversation tainted
+  (`_keep_taint`, as for trims and the fast model's rewind); only
+  `reset()` clears it. A branch is resumed like any stored conversation,
+  so it always starts tainted.
+- **Thinking.** The redone turn's old assistant messages leave the
+  history with their thinking blocks and private `_thinking_from` tags;
+  earlier turns' thinking is sent again only under #84's rules (same chat
+  and model); the request never carries the tag.
+- **Superseded means gone.** The old reply (and for an edit the old
+  message) is replaced only after the new reply is in: each gets a
+  `delete_message` tombstone marked `"superseded": true` (no new event
+  kind, so every backend, an older one too, applies it), which redacts its
+  text in every synced event log, in either arrival order, and removes the
+  rows and search index entries (`secure_delete`, a WAL checkpoint after).
+  A failed request leaves the old turn as it was, in memory and in
+  history, and so does a Stop that came before any word or tool of the
+  new reply (its empty reply, and an edit's new message, are taken out
+  again; the page is told "restored"). Notes a feature added to the
+  conversation meanwhile are kept.
+- **Branch.** Owner-checked like every history route (another person's
+  id, the owner's for a family member and the reverse: 404); 409 while
+  incognito; the index must be an integer inside the conversation (400).
+  It copies at most `history.MAX_BRANCH_MESSAGES` (200) of the newest
+  messages up to that one, text and the compact tool events only (never a
+  tool call to replay), into a new random id in the same store; the
+  source's summary is not copied (it may describe later messages). The
+  branch is its own conversation: deleting the original leaves the branch
+  (and the reverse), so each is deleted on its own (README says so).
+- **Logs.** INFO has ids, counts and refusal reasons only ("Answering the
+  last turn again (edited; 2 message(s) rewound)", "Web: branched
+  conversation <id> at message 3 into <id> (4 messages)"); edited text is
+  at DEBUG. Tests check both with caplog.
+
 ## Cloud server (Render): on the public internet
 
 `render.yaml` runs the phone web app 24/7 at `https://<name>.onrender.com`

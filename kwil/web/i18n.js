@@ -75,6 +75,14 @@
     "Stop": "停止",
     "Stopped.": "已停止。",
     "You can queue up to 3 messages.": "最多可以排队 3 条消息。",
+    // try again, edit and branch (app.js, history.js)
+    "Edit message": "编辑消息",
+    "Editing your last message": "正在编辑你的上一条消息",
+    "Cancel editing": "取消编辑",
+    "Wait for the reply to finish first.": "请等回复结束后再试。",
+    "This message": "这条消息",
+    "Branch from here": "从这里分支",
+    "Message actions": "消息操作",
     "Sign out on every phone and browser?": "要在所有手机和浏览器上退出登录吗？",
     "This browser can't record. It needs HTTPS (see the README's Tailscale steps).":
       "这个浏览器不能录音（需要 HTTPS 地址）。",
@@ -590,6 +598,7 @@
     [/^No conversations match “(.+)”\.$/, "没有和“$1”相符的对话。"],
     [/^(\d+) messages$/, "$1 条消息"],
     [/^Continuing “(.+)”\. Go ahead\.$/, "继续“$1”，请说。"],
+    [/^Branched into “(.+)”\. Go ahead\.$/, "已分支到“$1”，请说。"],
     [/^Asked: (.*)$/s, "问：$1"],
     [/^Answered: (.*)$/s, "答：$1"],
     [/^Transcribing (\d+)%$/, "正在转写 $1%"],
