@@ -8346,3 +8346,8 @@ interaction only; nothing on the server changed.
   390x844 and 1280x800, light and dark, English and Chinese, empty and
   typed, plus a 10-line message (it stops at 6 lines and scrolls), the
   modes line with all three pills, and the sheet in both languages.
+- Full suite: 3994 passed, 53 skipped (unchanged from 451a8d2: no Python
+  tests added, only the cache pins moved to v23); JS `tests/js/*.test.mjs`
+  + `voice-core.test.js` 434 passed (baseline 422). The keyboard, the
+  safe area, the Chinese IME and the long press on a real iPhone: MANUAL_TEST
+  "The one-row composer".
