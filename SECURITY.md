@@ -2417,6 +2417,88 @@ network code of its own.
   its badge (tap "Keep as mine" to vouch for it).
 - Trimming a long conversation (by turn count, size budget or after "prompt is too long") never clears its taint: if a dropped turn held untrusted text (email, web page, invite), the conversation stays tainted until it ends, so changes still ask first and a memory saved later is still marked untrusted.
 
+## Reminders and scheduled tasks (`reminders.py`, `tools/reminders.py`)
+
+- **One file per person.** The owner's reminders are in `[reminders]
+  path` (`data/reminders.sqlite`; `/data/reminders.sqlite` on the
+  server), a family member's in `<family dir>/<id>/reminders.sqlite`
+  (`Family.reminders_of`, only for someone listed, active and not being
+  removed). The file is created 0600 (POSIX). The Settings routes
+  (`/api/reminders`, `.../{id}/pause`, `.../{id}/delete`) take the store
+  from the signed-in session (`WebAssistant.reminder_store_of`): no person
+  in any path, so an id from someone else's store is a 404 both ways. Not
+  signed in is 401; reminders off is 404. Changes are POST.
+- **Time zones.** Quiet hours are checked in the person's zone; with no
+  `[assistant] timezone` (a PC or Pi) that is the machine's own zone, the
+  same one the reminder was saved in, never UTC.
+- **Bounded.** 300 characters a reminder, 100 active per person (the
+  101st is refused, never an old one dropped, and so is setting a
+  finished one again while 100 are active), 200 runs per person in any
+  24 hours (the rest are logged as skipped), 24 times a day per repeat,
+  100 finished rows kept at most 7 days, a run log (ids and times only)
+  of 2 days, at most 50 pushes held for a retry and 20 scheduled tasks
+  waiting, in memory.
+- **Strict input.** Times are ISO with a clock time (a naive one is read
+  in the person's zone), not in the past and at most two years ahead; a
+  repeat is the RRULE subset (DAILY/WEEKLY, BYDAY, BYHOUR, BYMINUTE) and
+  anything else is refused with a sentence, never guessed.
+- **Taint.** `create_reminder` and `update_reminder` ask first
+  (`confirm_if_untrusted`) whenever the conversation is tainted, with the
+  whole text in the question; what they save is marked untrusted when
+  outside text is in this conversation (`ClaudeChat.outside_content`, as
+  memory). `cancel_reminder` always asks (`confirm_prompt`). Listing
+  untrusted reminders taints the conversation (their text is outside
+  text). Settings shows an Untrusted badge.
+- **Once, and only once.** Each run's key (`<id>:<due ms>`) is written in
+  the same SQLite transaction that moves the reminder on, before any push
+  is sent: a crash never sends one twice, and a second process on the
+  same file finds the key taken. The owner's runs on a failover setup are
+  also claimed in the shared history log (`reminder:owner:<key>`,
+  failover.leader.JobRunner), so a copy of the store on another backend
+  (a restored backup) fires once. No leader gate, on purpose: each
+  backend's store is its own (not synced), and a gate would silence a
+  reminder only a lower-priority backend holds (the same reasoning as the
+  briefings' `owner_jobs`).
+- **Scheduled tasks never change anything.** A task runs in a fresh
+  conversation with `TaskTools`: only the read-only tools in
+  `reminders.TASK_TOOLS` (calendar lists, deadlines, Notion assignments,
+  memories, course file search, reminders list), no web search or fetch
+  (no way to send the person's data to a page), confirmations always
+  answered no, and any other tool call refused before it runs (a test has
+  the model ask for `create_calendar_event`: it is refused and never
+  run). A task saved from outside text runs with its text marked as data
+  in the system prompt and the conversation tainted from the start (so
+  the main model answers), and its notification's title says "(from
+  outside text)" (plain reminders too). The answer goes only to that
+  person's own devices and History (nothing saved with `[history]
+  incognito`). It counts in their quotas and on their own key; at most
+  `max_tasks_per_day` (48) per person, the owner included, and at most 5
+  of the 20 waiting tasks per person, so one person can't hold up the
+  others; a skipped task tells the person once a day. A task deleted or
+  paused while it waited is not run (its text never reaches Claude or
+  History).
+- **Push.** The text goes to the person's own devices only, encrypted for
+  the phone (RFC 8291; the push service can't read it), at most 300
+  characters (the body: a whole reminder; a task's answer is cut) and 80
+  (the title). Each reminder notification
+  has no tag, so one never replaces another; a tap opens `/#reminders`.
+- **Deleted means gone.** `secure_delete=ON` and
+  `wal_checkpoint(TRUNCATE)` after every delete, edit and prune (a test
+  reads the database and WAL bytes); a retry never sends a reminder
+  deleted meanwhile. Deleting a family account closes and removes their
+  file with their folder.
+- **Logs.** Ids, kinds, lengths, counts and statuses at INFO; the text
+  (and a task's answer) only at DEBUG (caplog tests for the store, the
+  tools, the scheduler and tasks).
+- **Export and backup.** An invited person's "Download my data" has
+  `reminders.json`; the owner's `/api/backup` has `reminders.sqlite` and
+  each listed person's `users/<id>/reminders.sqlite`.
+- Deliberately not done: reminders aren't synced between failover
+  backends (each keeps its own file, like memory); a reminder set in an
+  incognito conversation is still saved (it is an explicit request, not
+  history); a failed push's retries are held in memory, so a restart
+  drops them (the run stays recorded as failed).
+
 ## Memory review (`memory_review.py`, `memory_web.py`)
 
 - **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and

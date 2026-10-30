@@ -29,7 +29,9 @@ list_calendar_events when offered, a tool result gets a short summary,
 earlier user message actually sent (so lost history fails the check), and
 "get rid of ... on my calendar" lists the events, then deletes one with
 delete_calendar_event when offered, "from now on ..." / "always ..." is
-saved with remember when offered, "what did we decide about <topic>"
+saved with remember when offered, "remind me in N minutes to ..." sets
+one with create_reminder and says back the time it gives, "what did we
+decide about <topic>"
 searches past chats with search_conversations, reads the first hit with
 read_conversation and answers from its matching message (when offered),
 and a structured-output request (the
@@ -246,6 +248,20 @@ class ContractClient:
             content.append({"type": "text", "text": "Done, it's off your calendar."})
         elif not _is_user_turn(last) and called == {"remember"}:
             content.append({"type": "text", "text": "Got it, I'll remember that."})
+        elif not _is_user_turn(last) and called == {"create_reminder"}:
+            when = _tool_json(last).get("when")  # said back as the tool worded it
+            content.append({"type": "text", "text": (f"I'll remind you {when}." if when
+                                                     else "I couldn't set that.")})
+        elif _is_user_turn(last) and "create_reminder" in tools and re.search(
+                r"\bremind me in \d+ minutes? to ", asked, re.I):
+            words = next(b["text"] for b in _blocks(last) if b.get("type") == "text")
+            minutes, what = re.search(r"remind me in (\d+) minutes? to (.+)", words,
+                                      re.I).groups()
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "create_reminder",
+                            "input": {"text": what.strip().rstrip("."),
+                                      "in_minutes": int(minutes)}})
+            stop = "tool_use"
         elif _is_user_turn(last) and "remember" in tools and re.search(
                 r"\b(from now on|always)\b", asked, re.I):
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",

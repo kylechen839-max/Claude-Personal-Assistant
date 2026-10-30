@@ -5,6 +5,7 @@
 // (with defaults for an empty or broken payload, and always one: iOS
 // requires it), a tap focuses an open app and tells it to open the brief,
 // or opens /#brief, and a payload can never send the tap to another site.
+// A reminder (/#reminders) gets no tag, so two never replace each other.
 // Also: the cache version and SHELL list brief.js.
 
 import test from 'node:test';
@@ -67,6 +68,17 @@ test('a push shows the notification push.py sent', async () => {
   assert.equal(options.icon, '/icon-192.png');
 });
 
+test('each reminder shows on its own; only the brief replaces the last brief', async () => {
+  const sw = load();
+  await push(sw, json({ title: 'Reminder', body: 'Submit HW7', url: '/#reminders' }));
+  await push(sw, json({ title: 'Reminder', body: 'Stretch', url: '/#reminders' }));
+  assert.deepEqual(sw.shown.map((s) => s.options.body), ['Submit HW7', 'Stretch']);
+  assert.ok(sw.shown.every((s) => s.options.tag === undefined));  // neither replaces the other
+  assert.equal(sw.shown[0].options.data.url, '/#reminders');
+  await tap(sw, { url: '/#reminders' });
+  assert.deepEqual(sw.opened, ['/#reminders']);
+});
+
 test('an empty or broken payload still shows a notification', async () => {
   const sw = load();
   await push(sw, null);
@@ -127,7 +139,7 @@ test('a tap with an off-site url still opens only this site', async () => {
 });
 
 test('the shell caches brief.js under a new cache version', () => {
-  assert.match(SCRIPT, /const CACHE = "kwil-shell-v14";/);
+  assert.match(SCRIPT, /const CACHE = "kwil-shell-v15";/);
   const sw = load();
   assert.ok(vm.runInContext('SHELL', sw.ctx).includes('/brief.js'));
 });

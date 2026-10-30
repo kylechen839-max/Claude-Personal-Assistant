@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reminders: "remind me at 9 to submit HW7", "remind me in 20 minutes to
+  stretch", "every Monday at 8am..." arrive as notifications on your
+  phone, at your own time zone's time (also across daylight saving).
+  Scheduled tasks: "every Monday at 8, tell me what's due this week" runs
+  with read-only tools and sends you the answer (the whole answer is in
+  History). Settings, Reminders lists them with Pause and Delete. Family
+  members get their own.
 - Memory: ask about earlier chats ("what did we decide about my physics
   schedule last week?"). Kwil searches your history, reads the best match
   without switching conversations, and says which chat it came from. Title

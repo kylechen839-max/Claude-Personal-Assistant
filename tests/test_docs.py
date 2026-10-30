@@ -39,6 +39,8 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations", "read_conversati
                      "list_deadlines", "confirm_deadline", "add_deadline",
                      "delete_deadline", "search_course_files", "read_course_file",
                      "calendar_color_habits",
+                     "create_reminder", "list_reminders", "update_reminder",
+                     "cancel_reminder",  # tools/reminders.py
                      *tts_kokoro.ENGLISH_VOICES}  # Kokoro voice names
 
 

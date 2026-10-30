@@ -604,7 +604,8 @@ def test_build_assistant_adds_the_picker_unless_turned_off(config, monkeypatch):
 
     monkeypatch.setattr(stt, "Transcriber", lambda *a, **k: FakeTranscriber())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    for section in ("calendar", "gmail", "notion", "memory", "notes", "history"):
+    for section in ("calendar", "gmail", "notion", "memory", "notes", "history",
+                    "reminders"):
         config[section]["enabled"] = False
     config["family"]["enabled"] = False
     a = webapp.build_assistant(config, "print", output_fn=lambda m: None)

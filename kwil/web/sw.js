@@ -1,10 +1,11 @@
 // Makes the page installable and opens it quickly. Only the app shell is
 // cached (network first, so updates show up); API calls, reply audio and
 // anything else are never cached.
-// Also shows the study briefings' push notifications (push.py) and opens
-// the brief (/#brief, brief.js) when one is tapped.
-const CACHE = "kwil-shell-v14";
-const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/spotify.js", "/notion.js", "/voice-picker.js",
+// Also shows the study briefings' and reminders' push notifications
+// (push.py) and opens the brief (/#brief, brief.js) or Settings, Reminders
+// (/#reminders, reminders.js) when one is tapped.
+const CACHE = "kwil-shell-v15";
+const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/reminders.js", "/spotify.js", "/notion.js", "/voice-picker.js",
                "/student.js", "/brief.js", "/connect.js", "/connections.js",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];
 
@@ -62,7 +63,8 @@ self.addEventListener("push", (e) => {
   const p = payloadOf(e.data);
   e.waitUntil(self.registration.showNotification(p.title, {
     body: p.body, icon: "/icon-192.png", badge: "/icon-192.png",
-    tag: "kwil-brief", data: { url: p.url },
+    // the brief replaces the last brief; each reminder shows on its own
+    ...(p.url === BRIEF_URL ? { tag: "kwil-brief" } : {}), data: { url: p.url },
   }));
 });
 

@@ -58,6 +58,7 @@ READ_ONLY_TOOLS = frozenset({
     "ha_list", "ha_state",                # home_assistant.py
     "spotify_now_playing", "spotify_devices",  # spotify.py
     "search_course_files", "read_course_file",  # tools/coursefiles.py
+    "list_reminders",                     # tools/reminders.py
 })
 
 # Words that send a turn to the main model. Word starts, so "reschedule"

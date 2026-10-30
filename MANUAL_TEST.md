@@ -1587,6 +1587,31 @@ deadline store (README "Study briefings").
 - [ ] Gear menu -> **Turn off notifications**.
   - Should: no more notifications on that phone.
 
+## Reminders and scheduled tasks (~15 min, iPhone)
+Needs notifications on (the section above) in the Home Screen app.
+- [ ] Say or type "remind me in 2 minutes to stretch".
+  - Should: Kwil says the time back in your own time zone ("I'll remind
+    you today at 3:42 PM"), and about two minutes later a "Reminder"
+    notification says "stretch", with the phone locked too.
+- [ ] Tap that notification.
+  - Should: the app opens on Settings -> Reminders (the stretch reminder
+    is gone from the list: it is done).
+- [ ] Say "every Monday at 8am, tell me what's due this week".
+  - Should: Kwil confirms "every Monday at 8:00 AM". Gear menu ->
+    **Reminders** lists it with a "Task" badge and "every Monday at 8:00
+    AM"; Monday at 8 a "Kwil" notification sums up what's due, and
+    History has a conversation named after the task with the whole
+    answer. (To try it now, ask for a time two minutes ahead instead of
+    Monday.)
+- [ ] In Reminders, tap **Pause** on it, then **Resume**; then **Delete**.
+  - Should: Pause shows "Paused"; Delete asks first, and Cancel keeps it.
+- [ ] Say "remind me tomorrow to call mom" late in the evening (after
+      `[proactive] quiet_start`).
+  - Should: the notification comes at `quiet_end` (07:30), not overnight.
+- [ ] A family member sets a reminder on their own phone.
+  - Should: it reaches only their phone, at their own time zone's time;
+    neither of you sees the other's in Settings -> Reminders.
+
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
 - [ ] In text mode (`python -m kwil --mode text`), ask "what time is

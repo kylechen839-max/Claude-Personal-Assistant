@@ -157,7 +157,7 @@ def test_login_sets_a_strict_cookie(make_app):
     assert client.get("/api/state").json() == {
         "busy": False, "confirm": None, "turns": 0, "incognito": False,
         "history": False, "conversation": None, "owner": True, "family": False,
-        "memory": False, "memories": False, "language": "en", "voice_picker": False,
+        "memory": False, "memories": False, "reminders": False, "language": "en", "voice_picker": False,
         "health": None,
         "month_usd": 0}  # the owner's API cost estimate (usage.py)
     client.post("/api/logout")
@@ -658,6 +658,7 @@ def test_open_in_browser_is_not_offered(monkeypatch, tmp_path):
     # never the repo's own data/ folder
     cfg["history"]["path"] = str(tmp_path / "history.sqlite")
     cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")
+    cfg["reminders"]["path"] = str(tmp_path / "reminders.sqlite")
     assistant = webapp.build_assistant(cfg, "print", output_fn=lambda m: None)
     assert not assistant.tools.has("open_in_browser")
     assert assistant.tools.has("web_search")
@@ -830,6 +831,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/update-watch.js",  # reloads the page after an update (host.py)
           "/attachments.js",  # the chat's "+" (attachments.py checks the files)
           "/memory.js",  # the Memory screen's code (its data needs the owner)
+          "/reminders.js",  # Settings, Reminders (its routes need sign-in)
           "/student.js",  # the "School deadlines" card (routes need sign-in)
           "/notion.js",  # an invited person's "Connect Notion" button (routes need sign-in)
           "/connect.js",  # the owner's own sign-ins (routes need the owner)
@@ -985,6 +987,7 @@ def test_serve_behind_a_proxy(monkeypatch, tmp_path):
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = False
     cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")  # not the repo's data/
+    cfg["reminders"]["path"] = str(tmp_path / "reminders.sqlite")
     cfg["webapp"]["trusted_proxy"] = "1"
     seen = {}
     import uvicorn
@@ -1014,6 +1017,7 @@ def test_web_mode_does_not_load_audio_devices():
         "cfg = load_config(None, None)\n"
         "cfg['calendar']['enabled'] = False\n"
         "cfg['history']['path'] = cfg['memory']['local_path'] = ':memory:'\n"
+        "cfg['reminders']['path'] = ':memory:'\n"
         "a = webapp.build_assistant(cfg, 'print', output_fn=lambda m: None)\n"
         "webapp.create_app(a, 'x' * 40)\n"
         "bad = [m for m in ('sounddevice', 'openwakeword', 'pyttsx3') if m in sys.modules]\n"
@@ -1171,6 +1175,7 @@ def test_serve_accepts_a_proxy_address(monkeypatch, tmp_path):
     cfg = load_config(None, None)
     cfg["calendar"]["enabled"] = False
     cfg["memory"]["local_path"] = str(tmp_path / "memory.sqlite")  # not the repo's data/
+    cfg["reminders"]["path"] = str(tmp_path / "reminders.sqlite")
     seen = {}
     import uvicorn
 
@@ -1499,9 +1504,9 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v14" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v15" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
-    assert '"/memory.js"' in sw
+    assert '"/memory.js"' in sw and '"/reminders.js"' in sw
 
 
 def test_history_rows_draw_source_glyphs_in_css_never_emoji():

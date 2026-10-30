@@ -90,6 +90,7 @@ def _dod_config(tmp_path):
         f'[calendar]\ncredentials = {json.dumps(str(creds))}\n'
         f'token = {json.dumps(str(tmp_path / "token.json"))}\n'
         f'[memory]\nenabled = false\n'
+        f'[reminders]\npath = {json.dumps(str(tmp_path / "reminders.sqlite"))}\n'
         f'[logging]\nfile = {json.dumps(str(tmp_path / "assistant.log"))}\n')
     return cfg
 

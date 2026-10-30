@@ -297,7 +297,8 @@ def test_callback_saves_encrypted_notion_token_and_adds_tools(n):
     assert not tess.cookies.get(notion_web.BIND_COOKIE)
 
 
-MEMORY = {"remember", "list_memories", "update_memory", "forget_memory"}  # their own memory
+MEMORY = {"remember", "list_memories", "update_memory", "forget_memory",  # their own memory
+          "create_reminder", "list_reminders", "update_reminder", "cancel_reminder"}  # reminders
 
 
 def test_beta_registry_gets_list_assignments_only_after_connecting(n):

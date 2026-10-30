@@ -127,8 +127,8 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .menu-body > button { background: none; border-radius: 0; text-align: left; padding: 0 1rem; min-height: 50px;
   font-weight: 400; border-top: 1px solid var(--line); }
 .menu-body > button:active { background: var(--surface-2); transform: none; }
-.menu-body > #memory-open { display: flex; align-items: center; justify-content: space-between; }
-.menu-body > #memory-open::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: var(--s1);
+.menu-body > #memory-open, .menu-body > #reminders-open { display: flex; align-items: center; justify-content: space-between; }
+.menu-body > #memory-open::after, .menu-body > #reminders-open::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: var(--s1);
   border: solid color-mix(in srgb, var(--muted) 70%, transparent); border-width: 0 2px 2px 0; transform: rotate(-45deg); }
 .menu-body > #logout { margin-top: .4rem; border-top-width: 8px; border-top-color: var(--surface-2); }
 .menu-body > #logout-all { color: var(--bad-ink); }
@@ -564,6 +564,8 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-controls .row { justify-content: space-between; }
 .mem-controls .row + .row { border-top: 1px solid var(--line); }
 .mem-controls .row.danger { color: var(--bad-ink); }
+/* Settings, Reminders (reminders.js): the memory list's rows, plus the repeat line */
+.rem-repeat { display: block; margin: var(--s1) 0 0; }
 .mem-row-title { flex: 1; font-size: var(--t-body); }
 .mem-local-status:empty { display: none; }
 .mem-local-status { margin: var(--s3) var(--s4) 0; }

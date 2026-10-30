@@ -102,6 +102,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/i18n.js", "/history.js",
               # the Memory screen's code (its /api/memory data needs the owner)
               "/memory.js",
+              # Settings, Reminders (its /api/reminders data needs sign-in)
+              "/reminders.js",
               # the owner's "Connect Spotify" button (its routes need sign-in)
               "/spotify.js",
               # Google's redirect back after a family member's sign-in: the
