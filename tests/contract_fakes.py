@@ -242,8 +242,14 @@ class ContractClient:
         source_keys = set(Base64ImageSourceParam.__annotations__)
         media = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG",
                  "image/gif": b"GIF8", "image/webp": b"RIFF"}
-        allowed = set(typing.get_args(typing.get_type_hints(
-            Base64ImageSourceParam)["media_type"]))
+        def literals(t):
+            # Python 3.10 wraps the hint as Required[Literal[...]]: unwrap to the strings
+            out = set()
+            for a in typing.get_args(t):
+                out |= {a} if isinstance(a, str) else literals(a)
+            return out
+
+        allowed = literals(typing.get_type_hints(Base64ImageSourceParam)["media_type"])
         for i, m in enumerate(kwargs.get("messages") or []):
             for j, b in enumerate(_blocks(m)):
                 if not isinstance(b, dict) or b.get("type") != "image":
