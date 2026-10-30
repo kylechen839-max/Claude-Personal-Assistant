@@ -142,6 +142,11 @@ EN = {
                     "You can still type, and talking works again tomorrow.",
     "google_reconnect": "Reconnect Google from the app's settings: tap the gear, "
                         "then \"Connect Google account\".",
+    # reminders.py: a notification's title, and a scheduled task that couldn't run
+    "reminder_title": "Reminder",
+    "reminder_task_title": "Kwil",
+    "reminder_task_limit": "Your scheduled task didn't run: you've reached today's limit.",
+    "reminder_task_failed": "Your scheduled task couldn't run just now. Open Kwil to ask again.",
 }
 
 ZH = {
@@ -244,6 +249,10 @@ ZH = {
     "limit_day": "你今天的 {per_day} 条消息已经用完了，明天再来找我吧。",
     "limit_speech": "你今天的 {minutes} 分钟语音已经用完了。还可以打字，明天就能再说话了。",
     "google_reconnect": "请在应用的设置里重新连接 Google：点齿轮，再点“连接 Google 账户”。",
+    "reminder_title": "提醒",
+    "reminder_task_title": "Kwil",
+    "reminder_task_limit": "定时任务没有运行：今天的使用次数已用完。",
+    "reminder_task_failed": "定时任务暂时无法运行。请打开 Kwil 再问一次。",
 }
 
 

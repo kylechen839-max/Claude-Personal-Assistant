@@ -902,6 +902,27 @@ def add_memory_tools(tools: ToolRegistry, memory, store=None) -> None:
         tools.register(search_memory_tool(memory))
 
 
+def build_reminders(config: dict):
+    """The owner's reminder store (reminders.py), or None with [reminders]
+    enabled = false. The PC's voice and web processes share the file; the
+    web app's scheduler fires them."""
+    from kwil import reminders
+
+    return reminders.open_store(config)
+
+
+def add_reminder_tools(tools: ToolRegistry, config: dict, store,
+                       devices=None) -> None:
+    """create / list / update / cancel reminders on the owner's `store`;
+    `devices()`: does he have a phone with notifications on?"""
+    if store is None:
+        return
+    from kwil.tools.reminders import reminder_tools
+
+    tools.register(*reminder_tools(store, config["assistant"]["timezone"] or None,
+                                   devices))
+
+
 def build_memory_review(config: dict, memory):
     """The memory review (memory_review.py) for this memory, or None."""
     if memory is None:
@@ -1285,6 +1306,7 @@ def main(argv=None) -> int:
         memory = build_memory(config)
         local = build_local_memory(config)
         add_memory_tools(tools, memory, local)
+        add_reminder_tools(tools, config, build_reminders(config))
         register_notes(tools, memory, config)
         review = build_memory_review(config, memory)
         register_memory_review(tools, review)

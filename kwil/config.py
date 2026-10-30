@@ -357,6 +357,13 @@ DEFAULTS: dict = {
         "model": "",                # wording the message; "" = [assistant] fast_model
         "max_tokens": 1000,         # room for adaptive thinking (Sonnet); the text is cut to 240
     },
+    "reminders": {                  # reminders and scheduled tasks (reminders.py; README "Reminders")
+        "enabled": True,            # the reminder tools and Settings -> Reminders; they arrive as [push] notifications
+        "path": "data/reminders.sqlite",  # the owner's (invited people's: [family] dir/<id>/)
+        "check_seconds": 60,        # how often due reminders are looked for
+        "grace_minutes": 60,        # one missed while the server was down fires if this late at most
+        "prompt_tasks": True,       # "every Monday tell me what's due": runs Claude with read-only tools
+    },
     "family": {                   # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on
         "dir": "data/users",        # users.json + one folder per person
@@ -458,6 +465,7 @@ SERVER_PROFILE: dict = {
                "local_path": "/data/memory.sqlite"},  # on the disk
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
+    "reminders": {"path": "/data/reminders.sqlite"},  # on the disk
     "connect": {"dir": "/data/owner"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
     # just under max_upload_mb (4) above, so check_limits has nothing to lower

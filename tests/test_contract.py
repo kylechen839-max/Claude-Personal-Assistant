@@ -156,6 +156,41 @@ def test_a_remembered_rule_reaches_the_next_conversation(tmp_path):
         store.close()
 
 
+def test_a_reminder_set_in_a_multi_turn_exchange(tmp_path):
+    """Reminders: "remind me in 2 minutes to stretch" is set with
+    create_reminder in a real multi-turn exchange (a tool round, then a
+    follow-up turn with its own tool round), and the reply says the time
+    back in the configured zone. Every request must be one the API accepts.
+    Fake only: whether a live model calls the tool is its choice."""
+    from kwil.cli import add_reminder_tools
+    from kwil.config import load_config
+    from kwil.reminders import SqliteReminderStore
+
+    store = SqliteReminderStore(tmp_path / "reminders.sqlite")
+    try:
+        client = ContractClient()
+        tools = calendar_tools([])
+        config = load_config(None, None, profile="")
+        config["assistant"]["timezone"] = "America/New_York"
+        add_reminder_tools(tools, config, store)
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools, max_tokens=1024,
+                          timezone="America/New_York")
+        reply = chat.ask("Remind me in 2 minutes to stretch.")
+        (saved,) = store.list()
+        assert saved["text"] == "stretch" and saved["kind"] == "once"
+        assert reply.startswith("I'll remind you today at ") or \
+            reply.startswith("I'll remind you tomorrow at ")  # near midnight
+        assert reply.endswith(("AM.", "PM."))
+        assert chat.ask("Thanks. What's on my calendar tomorrow?").strip()
+        calls = {b["id"]: b["name"] for r in client.requests for m in r["messages"]
+                 if isinstance(m["content"], list) for b in m["content"]
+                 if b.get("type") == "tool_use"}
+        assert sorted(calls.values()) == ["create_reminder", "list_calendar_events"]
+        assert len({str(r["system"]) for r in client.requests}) == 1
+    finally:
+        store.close()
+
+
 def test_recall_searches_then_reads_a_past_chat(tmp_path):
     """Memory layer 2: "what did we decide about my physics schedule last
     week?" searches past chats, reads the best hit and answers from it, in

@@ -48,7 +48,7 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
-  for (const id of ["history-view", "transcript-view", "memory-view", "brief-view"]) {  // history.js, memory.js, brief.js
+  for (const id of ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view"]) {  // history.js, memory.js, brief.js, reminders.js
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
@@ -491,11 +491,12 @@ async function refreshState() {
   try {
     const res = await request("/api/state");
     const state = await res.json();
-    const elsewhere = ["history-view", "transcript-view", "memory-view", "brief-view"].some((id) => $(id) && !$(id).hidden);
+    const elsewhere = ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view"].some((id) => $(id) && !$(id).hidden);
     if (!elsewhere) show("app");
     if (typeof onHistoryState === "function") onHistoryState(state);  // history.js
     if (window.KwilFamily) window.KwilFamily.onState(state);  // family.js
     if (window.KwilMemory) window.KwilMemory.onState(state);  // memory.js
+    if (window.KwilReminders) window.KwilReminders.onState(state);  // reminders.js
     if (window.KwilSpotify) window.KwilSpotify.onState(state);  // spotify.js
     if (window.KwilNotion) window.KwilNotion.onState(state);  // notion.js
     if (window.KwilConnect) window.KwilConnect.onState(state);  // connect.js
@@ -835,6 +836,7 @@ if ("serviceWorker" in navigator) {
   const family = window.KwilFamily;
   if (family) family.configure({ request });  // the owner's invites: through the router too
   if (window.KwilMemory) window.KwilMemory.configure({ request, show });  // memory.js
+  if (window.KwilReminders) window.KwilReminders.configure({ request, show });  // reminders.js
   if (window.KwilVoicePicker) window.KwilVoicePicker.configure({ request, player });
   if (window.KwilBrief) window.KwilBrief.configure({ request, show, player });  // brief.js
   if (family && await family.acceptInvite(window)) return;  // the page reloads

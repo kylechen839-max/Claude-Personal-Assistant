@@ -852,6 +852,11 @@ class WebAssistant:
         # the owner's own memory store (memory_store.py; Settings, Memory),
         # or None; a family member's is in their family.UserContext
         self.local_memory = local_memory
+        # the owner's reminders (reminders.SqliteReminderStore), or None; a
+        # family member's come from family.Family.reminders_of
+        self.reminders = None
+        # reminders.ReminderScheduler (build_assistant; create_app starts it)
+        self.reminder_scheduler = None
         # which machine keeps the memory files ("cloud", "pc", "pi"; "" =
         # don't say): each failover backend has its own for now
         self.memory_where = ""
@@ -951,6 +956,16 @@ class WebAssistant:
             return self.local_memory
         ctx = self.family.context(s.user) if self.family is not None else None
         return getattr(ctx, "memory", None) if ctx is not None else None
+
+    def reminder_store_of(self, s: Session):
+        """The reminder store a session may see and change: its own
+        person's, else None (as memory_store_of)."""
+        if s.user is None:
+            return self.reminders
+        find = getattr(self.family, "reminders_of", None)
+        if not callable(find) or self.family.context(s.user) is None:
+            return None
+        return find(s.user)
 
     def forget_memories(self, user: str | None, memory_ids=None) -> None:
         """Memories `user` (None: the owner) deleted in Settings: out of
@@ -1744,6 +1759,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     push = push if isinstance(push, Push) else None
     briefings = getattr(assistant, "proactive", None)
     briefings = briefings if isinstance(briefings, proactive_mod.Scheduler) else None
+    from kwil import reminders as reminders_mod
+
+    reminder_scheduler = getattr(assistant, "reminder_scheduler", None)
+    reminder_scheduler = reminder_scheduler if isinstance(
+        reminder_scheduler, reminders_mod.ReminderScheduler) else None
 
     @asynccontextmanager
     async def lifespan(app):
@@ -1752,6 +1772,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             if briefings.deadlines is None:  # the student deadline store, if any
                 briefings.deadlines = getattr(assistant, "deadlines", None)
             briefings.start()
+        if reminder_scheduler is not None:
+            reminder_scheduler.start()
         # everyone's background Canvas sync (student_web.register made it)
         course_sync = getattr(app.state, "course_sync", None)
         if course_sync is not None:
@@ -1772,6 +1794,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             stop.set()
             if briefings is not None:
                 briefings.stop()
+            if reminder_scheduler is not None:
+                reminder_scheduler.stop()
             if course_sync is not None:
                 course_sync.stop()
             await run_in_threadpool(assistant.shutdown)
@@ -1968,6 +1992,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("family.js", "text/javascript"),
                         ("attachments.js", "text/javascript"),
                         ("memory.js", "text/javascript"),
+                        ("reminders.js", "text/javascript"),
                         ("spotify.js", "text/javascript"),
                         ("notion.js", "text/javascript"),
                         ("connections.js", "text/javascript"),
@@ -2135,6 +2160,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                # Settings, Memory: this person's own instructions and memories
                "memories": callable(getattr(assistant, "memory_store_of", None))
                            and assistant.memory_store_of(s) is not None,
+               # Settings, Reminders: this person's own reminders
+               "reminders": callable(getattr(assistant, "reminder_store_of", None))
+                            and assistant.reminder_store_of(s) is not None,
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
@@ -2318,6 +2346,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     memory_web.register(app, assistant, owner_of, error)  # Kyle's Pinecone notes only
     memory_web.register_local(app, assistant, session_of, error)  # everyone's own
+    reminders_mod.register(app, assistant, session_of, error)  # everyone's own
     if getattr(assistant, "backup", None) is not None:
         from kwil import backup as backup_mod
 
@@ -2421,6 +2450,9 @@ def start_history_sync(config: dict, assistant, token: str, failover):
     if getattr(briefings, "jobs", None) is not None:
         # the owner's briefing claims (proactive.py) sync before they count
         briefings.jobs.sync = syncer.sync_all
+    reminders = getattr(assistant, "reminder_scheduler", None)
+    if getattr(reminders, "jobs", None) is not None:
+        reminders.jobs.sync = syncer.sync_all  # and his reminder runs' (reminders.py)
     thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
                               name="history-sync", daemon=True)
     thread.start()
@@ -2487,9 +2519,10 @@ def memory_location(config: dict) -> str:
 
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
-    from kwil.cli import (add_history_tools, add_memory_tools, build_chat,
+    from kwil.cli import (add_history_tools, add_memory_tools,
+                               add_reminder_tools, build_chat,
                                build_local_memory, build_memory,
-                               build_memory_review, build_tools,
+                               build_memory_review, build_reminders, build_tools,
                                register_memory_review, register_notes)
     from kwil.history import Recorder, open_store
     import anthropic
@@ -2509,6 +2542,11 @@ def build_assistant(config: dict, tts_name: str | None = None,
     memory = build_memory(config, output_fn)
     local = build_local_memory(config)  # his instructions and saved memories
     add_memory_tools(tools, memory, local)
+    reminders = build_reminders(config)  # his reminders and scheduled tasks
+    holder: dict = {}  # the assistant, once made: its push says if a phone is set up
+    add_reminder_tools(tools, config, reminders,
+                       devices=lambda: bool(getattr(holder.get("a"), "push", None))
+                       and holder["a"].push.has_devices(None))
     register_notes(tools, memory, config)
     review = build_memory_review(config, memory)
     register_memory_review(tools, review)
@@ -2542,6 +2580,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
                              history=store, memory=memory, family=family,
                              memory_review=review, local_memory=local,
                              speech=family_speech(config) if family is not None else None)
+    holder["a"] = assistant
+    assistant.reminders = reminders
     if tts_cfg["picker"]:
         from kwil.voice_picker import VoicePicker
 
@@ -2550,7 +2590,8 @@ def build_assistant(config: dict, tts_name: str | None = None,
 
     assistant.memory_where = memory_location(config)
     # GET /api/backup (memory files too)
-    assistant.backup = Backup.from_config(config, store, family, memory=local)
+    assistant.backup = Backup.from_config(config, store, family, memory=local,
+                                          reminders=reminders)
     assistant.backup.sweep()  # a crashed backup's plaintext copy in the temp folder
     from kwil import owner_connect
 
@@ -2568,6 +2609,12 @@ def build_assistant(config: dict, tts_name: str | None = None,
     # phone notifications and the study briefings' scheduler (create_app starts it)
     assistant.push, assistant.proactive = proactive.from_config(
         config, client, family, store, deadlines=assistant.deadlines)
+    if family is not None and assistant.push is not None:
+        family.devices = assistant.push.has_devices  # the reminder tools' note
+    from kwil import reminders as reminders_mod
+
+    # due reminders as notifications, scheduled prompts (create_app starts it)
+    assistant.reminder_scheduler = reminders_mod.from_config(config, assistant, client)
     return assistant
 
 

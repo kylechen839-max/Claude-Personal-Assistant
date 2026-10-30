@@ -39,7 +39,9 @@ OWNER_TOOLS = ("list_assignments", "update_assignment_status", "search_memory",
 DEADLINE_TOOLS = {"list_deadlines", "confirm_deadline", "add_deadline", "delete_deadline",
                   "search_course_files", "read_course_file"}
 # a person's own memory (memory_store.py, in <dir>/<id>/memory.sqlite)
-MEMORY_TOOLS = {"remember", "list_memories", "update_memory", "forget_memory"}
+MEMORY_TOOLS = {"remember", "list_memories", "update_memory", "forget_memory",
+                # and their own reminders (tools/reminders.py)
+                "create_reminder", "list_reminders", "update_reminder", "cancel_reminder"}
 
 
 def owner_registry():

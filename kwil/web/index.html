@@ -23,6 +23,7 @@
 <script src="/family.js" defer></script>
 <script src="/attachments.js" defer></script>
 <script src="/memory.js" defer></script>
+<script src="/reminders.js" defer></script>
 <script src="/spotify.js" defer></script>
 <script src="/notion.js" defer></script>
 <script src="/connect.js" defer></script>
@@ -104,6 +105,7 @@
           <ul id="backend-status" class="backend-status"></ul>
         </fieldset>
         <button id="memory-open" type="button" hidden>Memory</button>
+        <button id="reminders-open" type="button" hidden>Reminders</button>
         <button id="push-toggle" type="button" hidden>Enable notifications</button>
         <p id="push-status" class="hint" role="status" hidden></p>
         <section id="connections" class="conns" aria-labelledby="conn-title" hidden>
@@ -427,6 +429,26 @@
   </section>
   <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>
   <p id="memory-status" class="status center" role="status"></p>
+</main>
+
+<main id="reminders-view" class="history memory reminders" hidden aria-labelledby="reminders-title">
+  <header class="bar">
+    <button id="reminders-back" class="icon-btn" type="button" aria-label="Back to chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="reminders-title" tabindex="-1">Reminders</h1>
+    <span class="bar-spacer"></span>
+  </header>
+  <section class="mem-local" aria-labelledby="reminders-items-title">
+    <h2 class="group-head" id="reminders-items-title">Active</h2>
+    <div id="reminders-items" class="group mem-items" role="list" aria-labelledby="reminders-items-title"></div>
+    <p id="reminders-empty" class="group-foot" hidden></p>
+    <h2 class="group-head" id="reminders-missed-title" hidden>Missed</h2>
+    <div id="reminders-missed" class="group mem-items" role="list" aria-labelledby="reminders-missed-title" hidden></div>
+    <p class="group-foot">Say “remind me at 9 to …” or “every Monday at 8, tell me what's due”. Reminders arrive as notifications on this phone.</p>
+    <p id="reminders-push" class="group-foot" hidden>Turn on notifications in Settings so reminders can arrive.</p>
+    <p id="reminders-status" class="hint mem-local-status" role="status"></p>
+  </section>
 </main>
 
 <main id="brief-view" class="history brief" hidden aria-labelledby="brief-title">

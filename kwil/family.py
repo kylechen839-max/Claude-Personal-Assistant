@@ -28,6 +28,10 @@ course file tools on `<dir>/<id>/coursefiles.sqlite` (coursefiles.py).
 Their own memory ([memory] enabled; memory_store.py): their instructions
 and saved memories in `<dir>/<id>/memory.sqlite`, with the remember /
 list / update / forget tools and Settings, Memory (memory_web.py).
+Their own reminders and scheduled tasks ([reminders] enabled;
+reminders.py) in `<dir>/<id>/reminders.sqlite` (reminders_of), with the
+create / list / update / cancel tools and Settings, Reminders; they arrive
+on their own devices (push.py) in their own time zone.
 Nothing else: no Kyle's Notion, Pinecone memory or notes, Kyle's Google,
 dev team, lecture recorder or tutor, and no way to see anyone else's
 history. Removing someone signs them out and deletes their folder, Google
@@ -234,6 +238,12 @@ class Family:
         # the next removal and when the owner opens the list
         self._deleting: set[str] = set()
         self._contexts: dict[str, UserContext] = {}
+        # uid -> their reminders.SqliteReminderStore (reminders_of), opened
+        # on first use by a tool, a route or the reminder scheduler
+        self._reminders: dict[str, object] = {}
+        # uid -> does someone have a phone with notifications on? (set by
+        # webapp.build_assistant from push.Push.has_devices; None = unknown)
+        self.devices: Callable[[str], bool] | None = None
         # their turns and speech per minute and day (in memory), never the
         # owner's; a day in their own time zone (users.json is swapped
         # whole, so reading it without the lock is safe)
@@ -385,6 +395,7 @@ class Family:
             self._save(users, deleting)  # OSError: nothing changed, try again
             self.users, self._deleting = users, deleting
             ctx = self._contexts.pop(uid, None)
+            reminders = self._reminders.pop(uid, None)
             self._user_clients.pop(uid, None)
             self._meters.pop(uid, None)
             self._drop_notion_api(uid)
@@ -394,6 +405,11 @@ class Family:
                 before_delete(uid)
         if ctx is not None:
             ctx.close()
+        if reminders is not None:  # closed before their folder goes (Windows)
+            try:
+                reminders.close()
+            except Exception:
+                log.exception("Family: closing a reminders store failed")
         self._finish_deletes()
         log.info("Family: removed %s (%d people left)", uid, len(self.users))
         return True
@@ -446,6 +462,14 @@ class Family:
             from kwil.tools.memory_tools import memory_tools
 
             registry.register(*memory_tools(memory))
+        reminders = self.reminders_of(user["id"])
+        if reminders is not None:
+            from kwil.tools.reminders import reminder_tools
+
+            uid = user["id"]
+            registry.register(*reminder_tools(
+                reminders, user.get("timezone") or self.config["assistant"]["timezone"]
+                or None, devices=lambda: self.devices is None or self.devices(uid)))
         web = self.config["web"]
         if not web["enabled"]:
             return
@@ -455,6 +479,30 @@ class Family:
         cfg = {**web, "location": {"timezone": user.get("timezone") or ""}}
         registry.add_server_tools(
             *web_tools.server_tools(self.config["assistant"]["model"], cfg))
+
+    def reminders_of(self, uid: str):
+        """Their own reminder store (`<dir>/<id>/reminders.sqlite`), opened
+        once; None with [reminders] off, for someone not listed and active
+        (or being removed), or if the file can't be opened."""
+        if not self.config.get("reminders", {}).get("enabled", True):
+            return None
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or user.get("status") != "active" or not valid_id(uid) \
+                    or uid in self._deleting:
+                return None
+            store = self._reminders.get(uid)
+            if store is None:
+                from kwil.reminders import SqliteReminderStore
+
+                try:  # their own file, never the owner's
+                    store = self._reminders[uid] = SqliteReminderStore(
+                        self.dir / uid / "reminders.sqlite")
+                except Exception as e:
+                    log.error("Family: %s's reminders couldn't be opened (%s)", uid,
+                              type(e).__name__)
+                    return None
+            return store
 
     # ---------- their own Google (google_web.py signs them in) ----------
     def google_token(self, uid: str) -> Path:
@@ -1071,8 +1119,14 @@ class Family:
     def close(self) -> None:
         with self.lock:
             contexts, self._contexts = list(self._contexts.values()), {}
+            reminders, self._reminders = list(self._reminders.values()), {}
         for ctx in contexts:
             ctx.close()
+        for store in reminders:
+            try:
+                store.close()
+            except Exception:
+                log.exception("Family: closing a reminders store failed")
 
 
 class UserApi:

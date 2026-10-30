@@ -43,6 +43,9 @@ enabled = false
 local_path = "data/mom/memory.sqlite"
 review_state_file = "data/mom/memory_review.json"
 
+[reminders]
+path = "data/mom/reminders.sqlite"  # her own reminders (Settings -> Reminders)
+
 [notes]
 enabled = false
 

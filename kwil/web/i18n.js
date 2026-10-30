@@ -388,6 +388,23 @@
     "a memory is at most 500 characters": "一条记忆最多 500 个字。",
     "nothing to remember": "没有可以记住的内容。",
     "not found": "找不到。",
+    // Settings, Reminders (reminders.js, reminders.py)
+    "Reminders": "提醒",
+    "Missed": "错过的",
+    "Say “remind me at 9 to …” or “every Monday at 8, tell me what's due”. Reminders arrive as notifications on this phone.":
+      "说“9 点提醒我……”或“每周一 8 点告诉我这周要交什么”。提醒会以通知的形式发到这部手机上。",
+    "Turn on notifications in Settings so reminders can arrive.": "请在设置里打开通知，提醒才能送达。",
+    "No reminders yet. Say “remind me at 9 to …” and it shows here.":
+      "还没有提醒。说“9 点提醒我……”，它就会出现在这里。",
+    "Task": "任务",
+    "Made while a web page or email was in the conversation": "创建时对话里有网页或邮件内容",
+    "Pause": "暂停",
+    "Resume": "继续",
+    "Delete this reminder? This can't be undone.": "要删除这个提醒吗？删除后无法恢复。",
+    "Reminder paused.": "提醒已暂停。",
+    "Reminder on.": "提醒已开启。",
+    "couldn't reach your reminders; try again": "连不上你的提醒，请再试一次。",
+    "that reminder already finished; set a new time": "这个提醒已经结束了，请设一个新时间。",
     // reply-voice picker (voice-picker.js)
     "Reply voice": "回复的声音",
     "Preview": "试听",

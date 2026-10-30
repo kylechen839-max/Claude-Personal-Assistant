@@ -1839,6 +1839,52 @@ go?" after a class. Tapping one opens the brief in the app with a
   at briefing time, that phone misses it, so enable notifications from
   the backend that is normally in use.
 
+### Reminders and scheduled tasks
+Ask Kwil to remind you, and the reminder arrives as a notification on
+your phone (the same notifications as the study briefings, so turn them
+on first: Settings -> **Enable notifications**).
+
+- "Remind me at 9 to submit HW7", "remind me in 20 minutes to stretch",
+  "remind me 30 minutes before tennis" (Kwil looks the event up first).
+  Kwil says the time back in your own time zone ("I'll remind you
+  Thursday at 9:00 PM").
+- Repeats: "every Monday at 8am...", "every weekday at 7:30". Daily or
+  weekly, on any days, at up to 24 times a day; no "every other week" or
+  end date yet. A repeat keeps its clock time across daylight saving
+  (9:00 stays 9:00); a time that doesn't exist that night (2:30 when the
+  clocks go forward) comes at 3:30.
+- **Scheduled tasks:** "every Monday at 8, tell me what's due this week".
+  At that time Kwil runs the request with read-only tools only (your
+  calendar, school deadlines, Notion assignments, memories; never the web
+  and never anything that changes something), in a fresh conversation
+  that isn't saved as you talking. The answer is the notification (cut to
+  its size) and the whole answer is in History under the task's name. It
+  counts against an invited person's daily limits and uses their own key.
+- **See and change them:** Settings -> **Reminders** lists the active ones
+  with their next time and repeat, with **Pause** / **Resume** and
+  **Delete** (asks first); tapping a reminder notification opens it. By
+  voice: "what reminders do I have?", "move the HW7 reminder to 10",
+  "cancel the gym reminder" (Kwil asks before cancelling).
+- **Quiet hours** (`[proactive] quiet_start`-`quiet_end`) only hold back
+  a reminder whose time you didn't say ("remind me tomorrow to..."); it
+  comes when they end. A time you said ("at 6am") is kept.
+- **If the server was down:** a reminder at most `[reminders]
+  grace_minutes` (60) late comes once when it is back; an older one is
+  listed as Missed (a repeat goes on from its next time).
+- **Outside text:** a reminder set while a web page, email or calendar
+  invite is in the conversation asks you first and is marked Untrusted.
+- **Limits:** 100 active reminders and 200 notifications a day per person,
+  300 characters each. Each person (family members too) has their own,
+  in their own time zone: `[reminders] path` for yours
+  (`data/reminders.sqlite`, Render: `/data/reminders.sqlite`), and
+  `<[family] dir>/<id>/reminders.sqlite` for invited people. They are in
+  the backup, an invited person's "Download my data", and deleted with
+  their account.
+- **Settings:** `[reminders] enabled`, `check_seconds` (how often due
+  reminders are looked for, 60) and `prompt_tasks` (scheduled tasks on or
+  off). On a Pi/PC/cloud setup each backend keeps its own reminders (like
+  memory); set them through the backend that is normally in use.
+
 ## Smart home (Home Assistant)
 
 "Turn off the bedroom lights", "set the living room light to 50%", "is the
@@ -2604,13 +2650,14 @@ kwil/
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
                 notion.py, notes.py, web.py, history.py, spotify.py, deadlines.py,
-                tool registry
+                reminders.py, tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)
   deadlines.py  each person's school deadlines (SQLite): sync upserts, conflicts, deletes
   canvas.py     Canvas calendar feed, REST API, school lookup, Claude date extraction
   student_web.py  the phone app's "School deadlines" card: connect Canvas, sync, list
   push.py       phone notifications: VAPID key, sealed subscriptions, Web Push
   proactive.py  study briefings: deadline rules, scheduler thread, /api/student/brief
+  reminders.py  reminders and scheduled tasks: store, RRULE subset, scheduler, routes
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

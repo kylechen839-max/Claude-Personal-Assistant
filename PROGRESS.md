@@ -7318,3 +7318,97 @@ that test's evidence.
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3659 passed, 42 skipped, 1 deselected (6c8513e: 3656 / 42; +3). JavaScript
 303 passed (unchanged).
+
+## Reminders and scheduled tasks (2026-10-30)
+"Remind me at 9 to submit HW7", "remind me in 20 minutes to stretch",
+"every Monday at 8am tell me what's due this week": reminders arrive as web
+push notifications on the person's phone (the briefings' push.py).
+
+- **Store** (`kwil/reminders.py`, `SqliteReminderStore`): one SQLite file
+  per person, the memory store's pattern (private file, WAL,
+  `secure_delete`, `wal_checkpoint(TRUNCATE)` after deletes and edits).
+  Owner: `[reminders] path` (`data/reminders.sqlite`, Render
+  `/data/reminders.sqlite`); family: `<dir>/<id>/reminders.sqlite`
+  (`Family.reminders_of`, closed on removal). Fields: id, text (300),
+  kind once/recurring, due_at or RRULE + zone, next_run (UTC), created,
+  untrusted, paused, last_run, prompt_task, explicit, state
+  active/done/missed. Bounds: 100 active, 200 runs a day, 24 times a day
+  per rule, finished rows 7 days / 100, a run log of 2 days (ids only).
+- **RRULE subset** written by hand (no new dependency): DAILY/WEEKLY,
+  BYDAY, BYHOUR, BYMINUTE, INTERVAL=1; anything else refused with a
+  sentence. Next times are wall-clock in the reminder's zone: 9:00 stays
+  9:00 across DST; 2:30 on the spring-forward night runs at 3:30; 1:30 on
+  the fall-back night runs once.
+- **Tools** (`kwil/tools/reminders.py`): `create_reminder` (when, in_minutes
+  or rrule; time_given; prompt_task), `list_reminders` (in
+  `router.READ_ONLY_TOOLS` only, not the health-check list),
+  `update_reminder`, `cancel_reminder` (always asks). Times are read in the
+  conversation's zone (the configured one, a family member's own) and said
+  back in it ("Thursday at 9:00 PM"). With outside text in the
+  conversation, create and update ask first and save it untrusted. All
+  private. Registered for the owner (cli and web) and each family member.
+- **Firing** (`ReminderScheduler`, a thread started in create_app's
+  lifespan, every `[reminders] check_seconds`): each run's key is written
+  in the transaction that moves the reminder on, before the push; the
+  owner's runs on a failover setup are also claimed in the shared log
+  (`JobRunner`, `reminder:owner:<key>`, no leader gate: each backend's
+  store is its own, as `proactive.owner_jobs`). Quiet hours hold back only
+  a time the person didn't say; a run at most `grace_minutes` late fires
+  once, older ones are marked missed (repeats go on). A push no device
+  took (network, 5xx) is retried at the next checks, 3 tries.
+- **Phase 2, scheduled prompts** (`PromptTasks`, `TaskTools`): a fresh,
+  unrecorded conversation with only `TASK_TOOLS` (calendar lists,
+  deadlines, Notion assignments, memories, course search, reminders list;
+  no web tools), confirmations always no, any other call refused before
+  it runs; routed by router.py (fast model unless the words or a tool need
+  the main one; a tainted task goes to the main one). Counted in family
+  quotas and on their own key. The answer, cut to 300 characters, is the
+  notification; the whole answer goes to History as a conversation
+  titled with the task. Built in this PR (not deferred).
+- **Settings, Reminders** (`web/reminders.js`, `/api/reminders`, pause,
+  delete): active ones with the next time and repeat in the person's own
+  language and zone, Task and Untrusted badges, Pause/Resume, Delete (asks
+  first), Missed ones listed apart; a reminder notification opens it
+  (`/#reminders`). English and Chinese strings. `sw.js` v15; a reminder
+  notification has no tag, so one never replaces another.
+- **Export, delete, backup:** `reminders.json` in an invited person's
+  "Download my data"; their file goes with their account; the owner's
+  `/api/backup` has `reminders.sqlite` and `users/<id>/reminders.sqlite`.
+
+Tests: `tests/test_reminders.py` (48): RRULE subset, DST on Nov 1 and
+Mar 8 2026 (New York) in the rule and through the scheduler, bounds,
+deletes leave no text in the file or WAL, create/list/cancel with the
+confirmation, time parsing in New York on a TZ=UTC process with a pinned
+turn clock, a family member's zone, untrusted creation asks (yes and
+no), once on one file (two schedulers) and once across two backends with
+a copied store (shared log), a run already recorded never goes again,
+quiet hours, missed runs and missed repeats, the 200-a-day cap, retries
+(and none for a reminder deleted meanwhile), one bad send doesn't stop
+the rest, the push payload size (through the real push.py), the prompt
+task's tools (a write is refused, never run; no web tools; fast then main
+model), taint, quotas, History, routes, family isolation (404 both ways,
+each person's pushes to their own uid), export/delete/backup, the app
+starts and stops the scheduler, its claims sync with peers, and no
+reminder text at INFO. `tests/test_contract.py`: a reminder in a
+multi-turn exchange on contract_fakes (new script line). JS:
+`tests/js/reminders.test.mjs` (9) and a sw-push test (each reminder its
+own notification). Existing tests updated for the new tools, `/api/state`
+key, public `/reminders.js`, `sw.js` v15 and `reminders.json`; tests that
+build the app now point `[reminders] path` into tmp (not the repo's
+`data/`).
+
+Failing first (scratch copies, restored after each; never git stash): 33
+single source reverts, each failing its test(s): the DST computation, the
+run-key check, the job claim, quiet hours (off, and applied to a said
+time), the grace check, the daily cap, the active bound, secure_delete,
+TaskTools' filter and registration, task taint, quotas, both cuts, text
+at INFO (push and task answer), the same-tick retry (a real bug found
+while building), the per-send guard, confirm_if_untrusted,
+confirm_prompt, naive times in the server zone, the router entry, the
+per-person store lookup, family tools, export, closing on removal,
+backup, the lifespan start, the sync wiring, sw.js's tag, reminders.js's
+delete question and a missing Chinese string.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3708 passed, 42 skipped, 1 deselected (5997dda: 3659 / 42; +49).
+JavaScript 313 passed (303; +10).
