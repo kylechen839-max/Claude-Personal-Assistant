@@ -4,7 +4,9 @@
 //   follows them from the next conversation), "Things Kwil remembered"
 //   (each can be edited in place or deleted, after a yes), "Pause memory"
 //   (a switch: nothing saved or used while on), "Export" (a JSON file) and
-//   "Forget all" (asks first).
+//   "Forget all" (asks first), and study mode's "Study: things to review"
+//   (/api/memories/missed: each concept Kwil noted as missed while quizzing,
+//   with its course and how often; Delete asks first).
 // - The owner's Pinecone notes ([memory] backend = "pinecone"), when it
 //   says {"owner": true, "memory": true}: conversation summaries and notes,
 //   newest first and grouped by week, with a badge on notes saved while a
@@ -67,13 +69,18 @@
   const LOCAL = {
     saved: "Saved.",
     empty: "Nothing remembered yet. Say “remember …” and Kwil saves it here.",
-    forgetAll: "Forget everything Kwil remembered, and your instructions? This can't be undone.",
+    forgetAll: "Forget everything Kwil remembered, your instructions and your study list? This can't be undone.",
     forgot: "Forgot everything.",
     paused: "Memory paused.",
     resumed: "Memory on.",
     exported: "Export started.",
     kept: "Kept as yours.",
+    missedEmpty: "Nothing to review yet. When Kwil quizzes you, what you miss shows here.",
+    missedAsk: "Delete this from your study list? This can't be undone.",
+    missedOnce: "Missed once",
   };
+  // "Missed 3 times" (i18n.js has a pattern for it)
+  const missedTimes = (n) => (n === 1 ? LOCAL.missedOnce : `Missed ${n} times`);
   // which machine keeps this memory (/api/memories "where"): each backend
   // has its own file until memory is synced
   const WHERE = {
@@ -93,6 +100,8 @@
     const exportBtn = $("memory-export"), forgetBtn = $("memory-forget-all");
     const localStatus = $("memory-local-status"), notesHead = $("memory-notes-head");
     const where = $("memory-where");
+    const missedSection = $("memory-missed-section"), missedList = $("memory-missed");
+    const missedEmpty = $("memory-missed-empty");
     let data = null, mine = null;
     let seq = 0, localSeq = 0;
     let localOn = false, notesOn = false;
@@ -257,6 +266,55 @@
       renderLocal();
     }
 
+    // ---------- study mode: things to review ----------
+    function missedNode(m) {
+      const row = el("div", "mem-item");
+      row.dataset.id = m.id;
+      row.setAttribute("role", "listitem");
+      const top = el("div", "mem-top");
+      top.appendChild(el("span", "mem-when", m.course || ""));
+      top.appendChild(el("span", "mem-count", missedTimes(Number(m.count) || 1)));
+      if (m.untrusted) {
+        const flag = el("span", "badge mem-untrusted", "Untrusted");
+        flag.setAttribute("title", UNTRUSTED_HINT);
+        top.appendChild(flag);
+      }
+      const del = el("button", "mem-delete danger", "Delete");
+      del.type = "button";
+      del.addEventListener("click", async () => {
+        if (!win.confirm(LOCAL.missedAsk)) return;
+        try {
+          await post(`/api/memories/missed/${encodeURIComponent(m.id)}/delete`);
+          await loadMissed();
+          say("Deleted.");
+        } catch (e) { say(e.message || String(e)); }
+      });
+      top.appendChild(del);
+      row.appendChild(top);
+      row.appendChild(el("p", "mem-text mem-concept", m.concept));
+      return row;
+    }
+
+    async function loadMissed() {
+      if (!missedSection || !missedList) return;
+      let body;
+      try {
+        body = await call("/api/memories/missed");
+      } catch (e) {  // study mode off here (404), or unreachable: no section
+        missedSection.hidden = true;
+        return;
+      }
+      const found = body.missed || [];
+      missedList.textContent = "";
+      for (const m of found) missedList.appendChild(missedNode(m));
+      missedList.hidden = !found.length;
+      if (missedEmpty) {
+        missedEmpty.textContent = found.length ? "" : LOCAL.missedEmpty;
+        missedEmpty.hidden = Boolean(found.length);
+      }
+      missedSection.hidden = false;
+    }
+
     async function forgetOne(m) {
       if (!win.confirm("Delete this memory? This can't be undone.")) return;
       try {
@@ -291,6 +349,7 @@
       try {
         await post("/api/memories/forget-all", { confirm: true });
         await loadLocal();
+        await loadMissed();
         say(LOCAL.forgot);
       } catch (e) { say(e.message || String(e)); }
     });
@@ -318,7 +377,8 @@
       if (localOn) {
         say("");
         try { await loadLocal(); } catch (e) { say(e.message || String(e)); }
-      }
+        await loadMissed();
+      } else if (missedSection) missedSection.hidden = true;
       if (!notesOn) {
         list.textContent = "";
         status.textContent = "";

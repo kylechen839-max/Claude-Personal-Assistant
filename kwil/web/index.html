@@ -30,6 +30,7 @@
 <script src="/student.js" defer></script>
 <script src="/voice-picker.js" defer></script>
 <script src="/brief.js" defer></script>
+<script src="/study.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -57,6 +58,15 @@
 <main id="app" class="app" hidden>
   <header>
     <h1>Kwil <span id="incognito-badge" class="badge" hidden>Incognito</span></h1>
+    <span id="study-pill" class="study-pill" hidden>
+      <span id="study-pill-text"></span>
+      <button id="study-stop" class="study-stop" type="button" aria-label="Stop studying">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+    </span>
+    <button id="study-toggle" class="icon-btn" type="button" aria-label="Study mode" aria-pressed="false" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z"/></svg>
+    </button>
     <span id="badge" class="backend-badge" title="Backend in use" hidden></span>
     <button id="open-history" class="icon-btn" type="button" aria-label="Conversation history" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
@@ -425,6 +435,11 @@
     <p class="group-foot">While paused, Kwil saves no new memories and uses none. Your instructions still apply.</p>
     <p id="memory-where" class="group-foot" hidden></p>
     <p id="memory-local-status" class="hint mem-local-status" role="status"></p>
+    <section id="memory-missed-section" class="mem-missed" aria-labelledby="memory-missed-title" hidden>
+      <h2 class="group-head" id="memory-missed-title">Study: things to review</h2>
+      <div id="memory-missed" class="group mem-items" role="list" aria-labelledby="memory-missed-title"></div>
+      <p id="memory-missed-empty" class="group-foot" hidden></p>
+    </section>
     <h2 id="memory-notes-head" class="group-head" hidden>Notes in Pinecone</h2>
   </section>
   <section id="memory-list" class="conv-list" aria-live="polite" aria-busy="false"></section>

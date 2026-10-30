@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Study mode: say or type "quiz me on PHYS 361" or "help me study for the
+  midterm" (in the chat or the voice view) and Kwil becomes a tutor: one
+  question at a time, hints before answers, a short explanation after
+  each try, grounded in your Canvas course files when they're synced. A
+  "Studying PHYS 361" pill in the chat header shows it's on (its x, or
+  "stop studying", turns it off; the book button turns it on). What you
+  get wrong is noted, "review what I missed" quizzes you on it, and
+  Settings, Memory, "Study: things to review" lists it with Delete.
+  Family members get their own; incognito notes nothing.
 - Reminders: "remind me at 9 to submit HW7", "remind me in 20 minutes to
   stretch", "every Monday at 8am..." arrive as notifications on your
   phone, at your own time zone's time (also across daylight saving).

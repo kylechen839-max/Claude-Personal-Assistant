@@ -277,7 +277,8 @@ def test_failed_callback_page_is_in_their_language(g):
 
 
 MEMORY = {"remember", "list_memories", "update_memory", "forget_memory",  # their own memory
-          "create_reminder", "list_reminders", "update_reminder", "cancel_reminder"}  # reminders
+          "create_reminder", "list_reminders", "update_reminder", "cancel_reminder",  # reminders
+          "start_study", "end_study", "note_missed", "list_missed"}  # study mode
 
 
 def test_tools_only_after_connecting(g):

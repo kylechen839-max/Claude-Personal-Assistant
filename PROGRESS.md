@@ -7447,3 +7447,94 @@ once-a-day notice, the per-person share, the title suffix.
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3717 passed, 42 skipped, 1 deselected (dd1c3a0: 3708 / 42; +9).
 JavaScript 313 passed (unchanged).
+
+## Study mode in chat and voice (2026-10-30)
+"Quiz me on PHYS 361", "help me study for the midterm", typed or spoken:
+Kwil becomes a Socratic tutor for the rest of the conversation.
+
+- **State** (`kwil/study.py`, `ClaudeChat.study`): per conversation,
+  cleared by `reset()`. Turned on by the `start_study(course, topic,
+  review)` tool, the chat header's book button (`POST /api/study`), and
+  off by `end_study` ("stop studying") or the pill's x.
+- **Prompt cache rule:** `ask()` applies the wanted state before the
+  turn's first request (`_apply_study`), so every request of a turn sends
+  the same system bytes. The study block (STUDY_PROMPT, the course and
+  topic as quoted names, grounding for the tools this conversation has,
+  the review note) is a second system text block after the unchanged
+  stable one, each with a cache breakpoint (3 in all with the messages
+  one): a toggle rewrites only the tail after the stable prompt, the
+  study turns in between hit. The turn that calls `start_study` gets the
+  same rules in the tool result, so its first question follows them.
+  `stable_system()` returns both blocks joined (one change per toggle).
+- **Rules:** one question at a time, wait, hint before answer, a short
+  explanation after each attempt, `note_missed` after a wrong one, maths
+  said in words (the chat shows plain text and speaks replies, so no
+  LaTeX; the Tutor tab keeps KaTeX). Grounding: `search_course_files` /
+  `read_course_file` first when course content is synced,
+  `list_deadlines` and `list_assignments` for "what's on the midterm";
+  else from general knowledge. No study turn reaches the fast model
+  (router reason `study`; "quiz", "study", "review", "test me", 复习,
+  考考我, 测验 are main-model words).
+- **Missed concepts:** a sibling table `missed` in the person's memory
+  file (memory_store.py; `CREATE TABLE IF NOT EXISTS` outside the
+  numbered migrations, so `user_version` stays 1 and a rollback still
+  opens the file). Course (80), concept (120), count, first/last seen,
+  untrusted; the same course and concept counts up; at most 300 (the one
+  seen longest ago is deleted, then the WAL is truncated). `note_missed`
+  (incognito and pause save nothing; marked untrusted when outside text
+  is in the conversation, no question: SECURITY.md says why),
+  `list_missed` (read-only, router-allowed), `start_study(review=true)`
+  returns the list (that course, most missed first, 30 at most). In the
+  export, the backup and "Download my data" through the memory file;
+  Forget all clears it too.
+- **Settings, Memory, "Study: things to review"** (`memory.js`,
+  `GET /api/memories/missed`, `POST /api/memories/missed/{id}/delete`):
+  course, concept, "Missed 3 times", Untrusted badge, Delete (asks).
+- **Header** (`web/study.js`): the book button (with `[study] enabled`
+  and the session's tools), the "Studying PHYS 361" pill with its x, kept
+  in sync by `/api/state` and each turn's `done` (`"study"` only while
+  on). English and Chinese strings; `sw.js` v16.
+- **Family:** each member has study mode in their own conversation and
+  their list in their own memory file; routes are 404 across people.
+- **Config:** `[study] enabled` (DEFAULTS and config.toml).
+- Not done: Lecture Notes pages in Notion aren't read (no chat tool reads
+  them yet); the voice view has no pill (the chat's shows once you're
+  back).
+
+Tests: `tests/test_study.py` (20): the block only from the next turn
+(same system bytes inside the starting turn, rules in the tool result),
+one change per toggle by a trailing cached block (the stable block
+byte-identical, no change between study turns or for the same course,
+the old bytes back after end, at most 4 breakpoints), end_study and
+reset, start_study asks first with outside text, bounded names, the store
+(count-up, the 120 bound, eviction of the oldest at 300, course filter),
+real deletes (file and WAL bytes, Forget all), the schema version left at
+1, export, the tool (stored, marked untrusted, paused), incognito,
+review from the list (filtered, most missed first, empty), course-file
+grounding with a fake CourseStore, the router (reason study, keywords,
+read-only list), no study text at INFO (DEBUG only for the course),
+config, the toggle and x routes and the done event, 404 without study
+mode, the Settings routes, family isolation (her note goes to her file;
+404 both ways; her study state is hers). `tests/test_contract.py`: "quiz
+me on PHYS 361" -> start_study -> a question -> a wrong answer ->
+note_missed -> an explanation, on contract_fakes (new script lines),
+every request accepted. JS: `tests/js/study.test.mjs` (5: button and
+pill, toggle and x POSTs, done redraws, text not HTML, errors, Chinese,
+wiring) and 3 in `memory.test.mjs` (the list, delete asks, empty and off,
+Chinese). Existing tests updated for the new tools, `/api/state` keys,
+public `/study.js`, `sw.js` v16 and the Forget all wording.
+
+Failing first (scratch copy of the tree, one source change reverted at a
+time, restored after each; never git stash): all new Python tests fail
+on the base commit (the JS ones too); 19 single mutations each fail
+their test: chat.py reverted, the block applied at once inside the turn,
+one merged system block, reset keeping study, router.py reverted,
+memory_store.py reverted, no WAL purge after a delete, Forget all keeping
+the list, no eviction, the table bumping the schema version, incognito
+ignored, no confirm_if_untrusted on start_study, review ignoring the
+list, no course-file grounding, the course logged at INFO, family without
+study tools, no toggle route, no list routes.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3738 passed, 42 skipped, 1 deselected (250da33: 3717 / 42; +21).
+JavaScript 321 passed (313; +8).

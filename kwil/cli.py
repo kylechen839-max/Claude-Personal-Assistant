@@ -902,6 +902,16 @@ def add_memory_tools(tools: ToolRegistry, memory, store=None) -> None:
         tools.register(search_memory_tool(memory))
 
 
+def add_study_tools(tools: ToolRegistry, config: dict, store=None) -> None:
+    """Study mode (study.py): start_study / end_study, and with his memory
+    `store` note_missed / list_missed. None with [study] enabled = false."""
+    if not config["study"]["enabled"]:
+        return
+    from kwil.tools.study import study_tools
+
+    tools.register(*study_tools(store))
+
+
 def build_reminders(config: dict):
     """The owner's reminder store (reminders.py), or None with [reminders]
     enabled = false. The PC's voice and web processes share the file; the
@@ -1306,6 +1316,7 @@ def main(argv=None) -> int:
         memory = build_memory(config)
         local = build_local_memory(config)
         add_memory_tools(tools, memory, local)
+        add_study_tools(tools, config, local)
         add_reminder_tools(tools, config, build_reminders(config))
         register_notes(tools, memory, config)
         review = build_memory_review(config, memory)

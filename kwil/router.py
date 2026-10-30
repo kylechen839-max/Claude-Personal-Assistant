@@ -23,6 +23,11 @@ Once a conversation needed the main model it stays there until it is reset
 (chat.ClaudeChat.escalated): the prompt cache is per model, and the fast
 model can't read the main model's thinking.
 
+While study mode is on (study.py, ClaudeChat.studying) every turn goes to
+the main model: a tutor's questions, hints and explanations are where
+quality matters, and "quiz me" / "study" words send the turn that starts
+it there too.
+
 Confirmations don't depend on the model: the same tools, with the same
 questions, run on either.
 
@@ -59,6 +64,7 @@ READ_ONLY_TOOLS = frozenset({
     "spotify_now_playing", "spotify_devices",  # spotify.py
     "search_course_files", "read_course_file",  # tools/coursefiles.py
     "list_reminders",                     # tools/reminders.py
+    "list_missed",                        # tools/study.py
 })
 
 # Words that send a turn to the main model. Word starts, so "reschedule"
@@ -78,11 +84,13 @@ _EN_KEYWORDS = (
     # reasoning and writing
     r"why", r"explain", r"compare", r"plan", r"help me write", r"code",
     r"calculat", r"translat",
+    # study mode (study.py)
+    r"quiz", r"stud(?:y|ie)", r"review", r"test me",
 )
 _EN = re.compile(r"\b(?:" + "|".join(_EN_KEYWORDS) + ")", re.IGNORECASE)
 _ZH_KEYWORDS = ("安排", "添加", "加", "删", "取消", "改", "邮件", "搜索",
                 "天气", "新闻", "为什么", "解释", "翻译", "提醒", "记住", "打开",
-                "关", "播放", "推", "设置")
+                "关", "播放", "推", "设置", "复习", "考考我", "测验")
 _CJK = re.compile(r"[㐀-鿿豈-﫿]")
 
 
@@ -115,6 +123,8 @@ def choose_model(chat, text: str, attachments=None) -> tuple[str, str]:
         reason = "off"
     elif not fast or fast == main:
         reason = "no_fast_model"
+    elif getattr(chat, "studying", False) is True:
+        reason = "study"
     elif attachments or has_attachments(chat.history):
         reason = "attachments"
     elif chat.tainted():

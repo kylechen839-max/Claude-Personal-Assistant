@@ -2417,6 +2417,54 @@ network code of its own.
   its badge (tap "Keep as mine" to vouch for it).
 - Trimming a long conversation (by turn count, size budget or after "prompt is too long") never clears its taint: if a dropped turn held untrusted text (email, web page, invite), the conversation stays tainted until it ends, so changes still ask first and a memory saved later is still marked untrusted.
 
+## Study mode (`study.py`, `tools/study.py`, the `missed` table in `memory_store.py`)
+
+- **Where the list lives.** Missed concepts are a sibling table
+  (`missed`) in the person's own memory file, so they inherit its
+  isolation (one file per person; the Settings routes
+  `/api/memories/missed...` take the store from the session, an id from
+  another person's store is a 404, not signed in is 401, memory off is
+  404), its 0600 creation, its backup and "Download my data" copies and
+  its deletion with a family account. The table is made with `CREATE
+  TABLE IF NOT EXISTS` outside the numbered migrations, so the schema
+  version stays 1 and an older Kwil after a rollback still opens the file
+  (a test checks `user_version`).
+- **Bounded.** A concept is one line of at most 120 characters (longer is
+  refused, so the model says it shorter), a course 80; at most 300 per
+  person: a new one past that deletes the one seen longest ago (they are
+  noted by Kwil, not written by the person). The same course and concept
+  again only counts up. Each change is one transaction.
+- **Deleted means gone.** `secure_delete=ON`; deleting one, evicting the
+  oldest and Forget all (which now clears the list too) end with
+  `wal_checkpoint(TRUNCATE)`; a test reads the database and WAL bytes
+  afterwards. A conversation that already quoted a concept (a review's
+  tool result) keeps it until it ends, as with any tool result, and
+  saved history keeps the compact record of the `note_missed` call (its
+  first 40 characters), as it does for `remember`; delete that
+  conversation in History to remove it.
+- **Taint.** `start_study` asks first while outside text is in the
+  conversation (`confirm_if_untrusted`): its course and topic go into the
+  next turn's system prompt, as names quoted on one bounded line.
+  Deliberately not done: `note_missed` doesn't ask, even then. A study
+  session grounded in course files is always tainted (`search_course_files`
+  is untrusted output), so a question after every wrong answer would make
+  study mode unusable by voice; the risk is small (a planted concept only
+  becomes a quiz topic): what it saves then is marked untrusted (badge in
+  Settings), it never enters the system prompt, and `start_study`'s review
+  list and `list_missed` mark their result untrusted when it includes one.
+- **Incognito and pause.** Incognito notes nothing; "Pause memory" saves
+  nothing new. Study mode itself is per conversation (`ClaudeChat.study`,
+  cleared by `reset()`), never stored. The toggle (`POST /api/study`) acts
+  on the signed-in session's own conversation only, is POST behind the
+  Content-Length and cross-site checks, refuses bodies over 4 KB and
+  non-boolean input, and is 404 with `[study] enabled = false`.
+- **Logs.** INFO says on/off, the source (tool or app), lengths, ids and
+  counts; the course and topic only at DEBUG; questions, answers and
+  concepts never (the tools are `private`). A caplog test checks it.
+- **Model.** Study turns always use the main model (router reason
+  `study`); `start_study` and `note_missed` aren't read-only, so a fast
+  model that tries one is escalated before anything runs.
+
 ## Reminders and scheduled tasks (`reminders.py`, `tools/reminders.py`)
 
 - **One file per person.** The owner's reminders are in `[reminders]

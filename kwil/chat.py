@@ -333,6 +333,13 @@ class ClaudeChat:
         # say outside text is in *this* conversation (outside_content).
         self.untrusted_saved_memory = False
         self._memory_deletions = 0  # the store's delete count at the load
+        # Study mode (study.py): `study` is what start_study / end_study or
+        # the app's toggle asked for; `_study_on` is what this turn's system
+        # prompt says. ask() copies one to the other before a turn's first
+        # request, so the system prompt changes only at a turn boundary.
+        self.study: dict | None = None
+        self._study_on: dict | None = None
+        self._study_text = ""
         self._load_memory()
 
     def _count_usage(self, model: str, response) -> None:
@@ -375,7 +382,51 @@ class ClaudeChat:
         self.untrusted_memory = False
         self.untrusted_attachments = False
         self.untrusted_saved_memory = False
+        self.study = self._study_on = None  # study mode is per conversation
+        self._study_text = ""
         self._load_memory()
+
+    # ---------- study mode (study.py) ----------
+    def start_study(self, course=None, topic=None, review: bool = False,
+                    source: str = "tool") -> dict:
+        """Study mode on (or another course or topic), from the next turn's
+        system prompt: start_study (tools/study.py) or the app's toggle."""
+        from kwil.study import new_state
+
+        self.study = new_state(course, topic, review, source)
+        log.info("Study mode: on from the next turn (%s; course %d chars, topic %d chars%s)",
+                 source, len(self.study["course"]), len(self.study["topic"]),
+                 ", review" if review else "")
+        log.debug("Study mode course %r, topic %r", self.study["course"],
+                  self.study["topic"])
+        return self.study
+
+    def end_study(self) -> bool:
+        """Study mode off from the next turn. False if it wasn't on."""
+        was = self.study is not None
+        self.study = None
+        if was:
+            log.info("Study mode: off from the next turn")
+        return was
+
+    @property
+    def studying(self) -> bool:
+        """Is study mode on, or asked for (router.py keeps the main model)?"""
+        return self.study is not None or self._study_on is not None
+
+    def _apply_study(self) -> None:
+        """At a turn boundary: the wanted study state becomes the system
+        prompt's (the next request misses the cached tail once)."""
+        wanted = dict(self.study) if self.study else None
+        if wanted == self._study_on:
+            return
+        from kwil.study import block
+
+        self._study_on = wanted
+        self._study_text = (self._about_user([block(wanted, self.tools)])[0]
+                            if wanted else "")
+        log.info("Study mode: %s in this conversation's prompt",
+                 "on" if wanted else "off")
 
     def _load_memory(self) -> None:
         """Read the instructions and memories for the conversation starting
@@ -458,7 +509,24 @@ class ClaudeChat:
     def stable_system(self) -> str:
         """The system prompt: the same bytes for every turn of this chat, so
         the API can cache it (with the tools before it). What changes per
-        turn (time, recalled notes, the review offer) is in turn_context()."""
+        turn (time, recalled notes, the review offer) is in turn_context().
+        Study mode's block comes last, changed only at a turn boundary
+        (_apply_study; sent as its own block, _system_blocks)."""
+        base = self._base_system()
+        return base + "\n\n" + self._study_text if self._study_text else base
+
+    def _system_blocks(self) -> list[dict]:
+        """`system` as sent: the stable prompt, then study mode's block, each
+        with a cache breakpoint, so turning study mode on or off rewrites
+        only the cache after the stable prompt."""
+        mark = {"type": "ephemeral"}
+        blocks = [{"type": "text", "text": self._base_system(), "cache_control": mark}]
+        if self._study_text:
+            blocks.append({"type": "text", "text": self._study_text,
+                           "cache_control": mark})
+        return blocks
+
+    def _base_system(self) -> str:
         parts = [self.system_prompt]
         if self.tools:
             parts.append(TOOLS_PROMPT)
@@ -592,6 +660,7 @@ class ClaudeChat:
                 self._load_memory()
             else:  # deleted elsewhere meanwhile: out of this one too
                 self._drop_deleted_memories()
+            self._apply_study()  # a turn boundary: the only time it changes
             notes = self.recall(user_text)
             nudge = self._nudge() if not self.history else None
             self._turn_model = self._route(user_text, attachments)
@@ -959,8 +1028,7 @@ class ClaudeChat:
             # model) can't read the earlier turns' thinking: none is resent.
             self._forget_thinking()
             self._thinking_model = model
-        system = [{"type": "text", "text": self.stable_system(),
-                   "cache_control": {"type": "ephemeral"}}]
+        system = self._system_blocks()
         retried = shortened = False
         before_shorten = None  # (history, thinking epoch) until a retry works
         for _ in range(self.max_tool_rounds + 1):

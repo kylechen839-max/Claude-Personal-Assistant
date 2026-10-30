@@ -65,10 +65,11 @@ const DATA = {
   ],
 };
 
-function load({ answer = true, responses = {} } = {}) {
+function load({ answer = true, responses = {}, missed = false } = {}) {
   const ids = ['memory-view', 'memory-list', 'memory-status', 'memory-open', 'memory-back'];
   const els = Object.fromEntries(ids.map((id) => [id, new El('div', id, id !== 'memory-list' && id !== 'memory-status')]));
   for (const id of LOCAL_IDS) els[id] = new El(id === 'memory-instructions' ? 'textarea' : 'div', id, id === 'memory-local' || id === 'memory-notes-head');
+  if (missed) for (const id of MISSED_IDS) els[id] = new El('div', id, id !== 'memory-missed');
   els['memory-instructions'].value = '';
   els['memory-pause'].checked = false;
   const anchors = [];
@@ -82,6 +83,7 @@ function load({ answer = true, responses = {} } = {}) {
       fetches.push({ url, opts });
       const r = responses[url] ?? (url === '/api/memory' ? { status: 200, body: DATA }
         : url === '/api/memories' || url === '/api/memories/export' ? { status: 200, body: MINE }
+        : url === '/api/memories/missed' ? { status: 200, body: MISSED }
         : { status: 404, body: { error: 'not found' } });
       return { ok: r.status < 300, status: r.status, json: async () => r.body };
     },
@@ -107,6 +109,15 @@ function load({ answer = true, responses = {} } = {}) {
 const LOCAL_IDS = ['memory-local', 'memory-items', 'memory-items-empty', 'memory-instructions',
   'memory-instructions-count', 'memory-instructions-save', 'memory-pause', 'memory-export',
   'memory-forget-all', 'memory-local-status', 'memory-notes-head', 'memory-where'];
+
+// study mode's "Study: things to review" (memory_web.py /api/memories/missed)
+const MISSED_IDS = ['memory-missed-section', 'memory-missed', 'memory-missed-empty'];
+const MISSED = { limit: 300, missed: [
+  { id: 'miss-aaaaaaaaaaaa', course: 'PHYS 361', concept: '<b>Gauss</b>\'s law', count: 3,
+    last_seen: '2026-10-29T10:00:00Z', untrusted: false },
+  { id: 'miss-bbbbbbbbbbbb', course: 'CS 171', concept: 'Big-O of merge sort', count: 1,
+    last_seen: '2026-10-28T10:00:00Z', untrusted: true },
+] };
 
 const MINE = {
   instructions: 'Always color-code my schedule.', paused: false, where: 'cloud',
@@ -387,4 +398,57 @@ test('every fixed string on the Memory screen has Chinese', async () => {
   // labels match what memory.js renders
   assert.equal(t.api.KIND.summary, 'Summary');
   assert.equal(t.api.weekLabel(null, DATA), 'Date unknown');
+});
+
+test('study mode\'s things to review: listed with course and count, delete asks', async () => {
+  const t = load({ missed: true, responses: {
+    '/api/memories/missed/miss-aaaaaaaaaaaa/delete': { status: 200, body: { ok: true } } } });
+  await openMine(t);
+  assert.deepEqual(t.fetches.map((f) => f.url), ['/api/memories', '/api/memories/missed']);
+  assert.equal(t.els['memory-missed-section'].hidden, false);
+  const rows = t.els['memory-missed'].all('mem-item');
+  assert.deepEqual(rows.map((r) => r.dataset.id), ['miss-aaaaaaaaaaaa', 'miss-bbbbbbbbbbbb']);
+  assert.equal(rows[0].all('mem-concept')[0].textContent, '<b>Gauss</b>\'s law');  // text, never HTML
+  assert.equal(rows[0].all('mem-concept')[0].children.length, 0);
+  assert.equal(rows[0].all('mem-when')[0].textContent, 'PHYS 361');
+  assert.equal(rows[0].all('mem-count')[0].textContent, 'Missed 3 times');
+  assert.equal(rows[1].all('mem-count')[0].textContent, 'Missed once');
+  assert.deepEqual(rows[1].all('badge').map((b) => b.textContent), ['Untrusted']);
+  assert.equal(t.els['memory-missed-empty'].hidden, true);
+  const del = rows[0].all('mem-delete')[0];
+  const before = t.fetches.length;
+  t.asked.length = 0;
+  await del.fire('click');
+  assert.deepEqual([...t.asked], [t.api.LOCAL.missedAsk]);
+  assert.deepEqual(posted(t, '/api/memories/missed/miss-aaaaaaaaaaaa/delete').length, 1);
+  assert.equal(t.fetches.at(-1).url, '/api/memories/missed');  // and reloads the list
+  assert.ok(t.fetches.length > before + 1);
+});
+
+test('study mode\'s list: a no sends nothing, empty says how it fills, off hides it', async () => {
+  const t = load({ missed: true, answer: false });
+  await openMine(t);
+  await t.els['memory-missed'].all('mem-delete')[0].fire('click');
+  assert.equal(t.fetches.filter((f) => f.opts.method === 'POST').length, 0);
+  const empty = load({ missed: true, responses: { '/api/memories/missed': { status: 200, body: { limit: 300, missed: [] } } } });
+  await openMine(empty);
+  assert.equal(empty.els['memory-missed-section'].hidden, false);
+  assert.equal(empty.els['memory-missed-empty'].hidden, false);
+  assert.equal(empty.els['memory-missed-empty'].textContent, empty.api.LOCAL.missedEmpty);
+  const off = load({ missed: true, responses: { '/api/memories/missed': { status: 404, body: { error: 'not found' } } } });
+  await openMine(off);
+  assert.equal(off.els['memory-missed-section'].hidden, true);
+});
+
+test('study mode\'s list strings have Chinese, and the page has the section', () => {
+  const ctx = { console };
+  vm.createContext(ctx);
+  vm.runInContext(I18N, ctx);
+  const tr = ctx.KwilI18n.translate;
+  const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
+  for (const s of ['Study: things to review', 'Missed 3 times', 'Missed once']) {
+    assert.match(tr(s), /[一-鿿]/, s);
+  }
+  for (const id of MISSED_IDS) assert.ok(html.includes(`id="${id}"`), id);
+  assert.ok(html.includes('Study: things to review'));
 });

@@ -441,6 +441,22 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cg stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 5v4M5 2v10M9 4v6M13 1v12M17 5v4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
   color: var(--accent-graphic); }
 
+/* ---------- study mode's pill in the chat header (study.js) ---------- */
+.study-pill { display: inline-flex; align-items: center; gap: var(--s1); min-width: 0; max-width: 46vw;
+  padding-left: var(--s3); border-radius: var(--r-pill); background: var(--accent-soft);
+  color: var(--accent-ink); font-size: var(--t-cap); font-weight: 600; }
+.study-pill[hidden] { display: none; }
+#study-pill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.study-stop { flex: none; width: 44px; height: 44px; min-height: 0; padding: 0; background: none;
+  border-radius: var(--r-pill); color: inherit; display: inline-grid; place-items: center; }
+.study-stop svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; }
+.study-stop:active { transform: scale(.97); }
+.study-stop:focus-visible { box-shadow: var(--ring); }
+#study-toggle[aria-pressed=true] { color: var(--accent-ink); }
+.mem-missed { margin-top: var(--s4); }
+.mem-concept { font-weight: 500; }
+
 /* ---------- header bits shared with history ---------- */
 .icon-btn { background: none; padding: 0; border-radius: 50%; line-height: 0; color: var(--text-2);
   min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; }
@@ -624,6 +640,7 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
   .mic.recording::before { opacity: .25; transform: scale(1.25); }
   .mic.recording::after { opacity: 0; }
   .msg.claude:empty::before { opacity: .7; }
+  .study-stop:active { transform: none; }
 }
 
 /* Mic level meter (push-to-talk and voice conversation): how much sound is

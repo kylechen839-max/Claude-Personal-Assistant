@@ -462,6 +462,11 @@ class Family:
             from kwil.tools.memory_tools import memory_tools
 
             registry.register(*memory_tools(memory))
+        if self.config.get("study", {}).get("enabled", True):
+            from kwil.tools.study import study_tools
+
+            # study mode; their missed concepts in their own memory file
+            registry.register(*study_tools(memory))
         reminders = self.reminders_of(user["id"])
         if reminders is not None:
             from kwil.tools.reminders import reminder_tools

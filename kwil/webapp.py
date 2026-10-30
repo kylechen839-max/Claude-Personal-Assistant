@@ -68,6 +68,7 @@ from starlette.requests import HTTPConnection
 from kwil import audio, canvas_helper, i18n, usage
 from kwil.attachments import MAX_ATTACHMENTS
 from kwil.chat import is_user_turn
+from kwil.study import available as study_available, public as study_public
 from kwil.tools import READ_ONLY_TOOLS, ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -1165,8 +1166,13 @@ class WebAssistant:
     @staticmethod
     def _done(s: Session) -> dict:
         """A turn's last event: which conversation it is now in (None: none
-        yet, or it ended), so the page knows what it is showing."""
-        return {"type": "done", "conversation": s.chat.conversation_id}
+        yet, or it ended), so the page knows what it is showing, and
+        "study" while study mode is on."""
+        done = {"type": "done", "conversation": s.chat.conversation_id}
+        study = study_public(getattr(s.chat, "study", None))
+        if study is not None:  # study mode's pill (study.py); none = off
+            done["study"] = study
+        return done
 
     def _run_turn(self, s: Session, text, recording, attachments=None,
                   resume: str | None = None) -> None:
@@ -2000,7 +2006,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("student.js", "text/javascript"),
                         ("voice-picker.js", "text/javascript"),
                         ("ui.js", "text/javascript"),
-                        ("brief.js", "text/javascript")):
+                        ("brief.js", "text/javascript"),
+                        ("study.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2166,6 +2173,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
+               # study mode (study.py): the header's button, and its pill
+               "study_mode": study_available(s),
+               "study": study_public(getattr(s.chat, "study", None)),
                "turns": sum(1 for m in s.chat.history if is_user_turn(m)),
                # the watchdog's issues (watch.py): the owner's only, never
                # a family member's
@@ -2346,6 +2356,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     memory_web.register(app, assistant, owner_of, error)  # Kyle's Pinecone notes only
     memory_web.register_local(app, assistant, session_of, error)  # everyone's own
+    from kwil import study
+
+    study.register(app, assistant, session_of, error)  # the chat header's toggle
     reminders_mod.register(app, assistant, session_of, error)  # everyone's own
     if getattr(assistant, "backup", None) is not None:
         from kwil import backup as backup_mod
@@ -2520,7 +2533,7 @@ def memory_location(config: dict) -> str:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from kwil.cli import (add_history_tools, add_memory_tools,
-                               add_reminder_tools, build_chat,
+                               add_reminder_tools, add_study_tools, build_chat,
                                build_local_memory, build_memory,
                                build_memory_review, build_reminders, build_tools,
                                register_memory_review, register_notes)
@@ -2542,6 +2555,7 @@ def build_assistant(config: dict, tts_name: str | None = None,
     memory = build_memory(config, output_fn)
     local = build_local_memory(config)  # his instructions and saved memories
     add_memory_tools(tools, memory, local)
+    add_study_tools(tools, config, local)  # study mode (study.py)
     reminders = build_reminders(config)  # his reminders and scheduled tasks
     holder: dict = {}  # the assistant, once made: its push says if a phone is set up
     add_reminder_tools(tools, config, reminders,

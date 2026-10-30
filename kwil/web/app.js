@@ -429,6 +429,7 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       if (ev.gone && cid) forgetConversation(cid);  // deleted elsewhere
       break;
     case "done":
+      if (window.KwilStudy) window.KwilStudy.onDone(ev);  // study.js: the pill
       // A bound turn that left no conversation (it ended): unbind. A fresh
       // pane never binds to the id here, so its idle timeout still holds.
       if (cid && ev.conversation === null) conversationEnded(cid);  // shown or not
@@ -502,6 +503,7 @@ async function refreshState() {
     if (window.KwilConnect) window.KwilConnect.onState(state);  // connect.js
     if (window.KwilVoicePicker) window.KwilVoicePicker.onState(state);  // voice-picker.js
     if (window.KwilBrief) window.KwilBrief.onState(state);  // brief.js
+    if (window.KwilStudy) window.KwilStudy.onState(state);  // study.js
     if (window.KwilUI) window.KwilUI.renderHealth(document, state.health);  // ui.js
     setConfirm(state.confirm);
     if (!state.busy && !state.confirm) sendQueued();  // e.g. the question expired
@@ -839,6 +841,7 @@ if ("serviceWorker" in navigator) {
   if (window.KwilReminders) window.KwilReminders.configure({ request, show });  // reminders.js
   if (window.KwilVoicePicker) window.KwilVoicePicker.configure({ request, player });
   if (window.KwilBrief) window.KwilBrief.configure({ request, show, player });  // brief.js
+  if (window.KwilStudy) window.KwilStudy.configure({ request, note: (t) => addMessage("note", t) });  // study.js
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {

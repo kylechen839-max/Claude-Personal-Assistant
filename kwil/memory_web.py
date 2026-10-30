@@ -18,6 +18,11 @@ someone else's memories, and an id from another person's store is a 404.
   POST /api/memories/{id}/update    {"text"} (keeps the untrusted flag)
   POST /api/memories/{id}/trust     "Keep as mine": no longer untrusted
   POST /api/memories/{id}/delete
+  GET  /api/memories/missed         study mode's "Study: things to review"
+                                     {"missed": [{"id", "course", "concept",
+                                     "count", "last_seen", "untrusted"}],
+                                     "limit"} (most missed first)
+  POST /api/memories/missed/{id}/delete
 
 Not signed in is 401; memory off is 404. Changes are POST (with failover
 the page calls the Pi or PC cross-origin, and their preflight allows only
@@ -146,7 +151,8 @@ def register_local(app, assistant, session_of, error) -> None:
     from starlette.concurrency import run_in_threadpool
 
     from kwil.memory_store import (MAX_INSTRUCTIONS, MAX_MEMORIES,
-                                   MAX_MEMORY_CHARS, valid_id)
+                                   MAX_MEMORY_CHARS, MAX_MISSED, valid_id,
+                                   valid_missed_id)
 
     def guard(request):
         """(session, their store, error response)."""
@@ -261,6 +267,33 @@ def register_local(app, assistant, session_of, error) -> None:
         return JSONResponse(data, headers={
             "Content-Disposition": 'attachment; filename="kwil-memory.json"',
             "Cache-Control": "no-store"})
+
+    # study mode's list (memory_store "missed"); routes before the {id} ones
+    @app.get("/api/memories/missed")
+    async def missed_show(request: Request):
+        s, store, err = guard(request)
+        if err:
+            return err
+        try:
+            found = await run_in_threadpool(store.missed)
+        except Exception:
+            return failed("listing missed concepts")
+        return {"missed": found, "limit": MAX_MISSED}
+
+    @app.post("/api/memories/missed/{missed_id}/delete")
+    async def missed_delete(missed_id: str, request: Request):
+        s, store, err = guard(request)
+        if err:
+            return err
+        if not valid_missed_id(missed_id):
+            return error("not found", 404)
+        try:
+            found = await run_in_threadpool(store.delete_missed, missed_id)
+        except Exception:
+            return failed("deleting a missed concept")
+        if not found:
+            return error("not found", 404)
+        return {"ok": True}
 
     @app.post("/api/memories/{memory_id}/update")
     async def memories_update(memory_id: str, request: Request):

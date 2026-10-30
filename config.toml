@@ -320,6 +320,9 @@ grace_minutes = 60            # a reminder missed while the server was down stil
 prompt_tasks = true           # scheduled prompts run Claude with read-only tools (calendar, deadlines, memories)
 max_tasks_per_day = 48        # scheduled-task runs per person (you too) in any 24 hours; more are skipped (you're told once a day)
 
+[study]                       # "quiz me on PHYS 361": Kwil as a Socratic tutor (README "Study mode")
+enabled = true                # start_study / end_study / note_missed and the chat header's study button; missed concepts live in [memory] local_path
+
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on
 dir = "data/users"            # users.json + one history folder per person (Render: /data/users)
