@@ -78,11 +78,11 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 
 // --- views ---
 const VIEWS = ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view",
-               "projects-view", "project-view"];
+               "projects-view", "project-view", "today-view"];
 function show(view) {
   els.login.hidden = view !== "login";
   els.app.hidden = view !== "app";
-  for (const id of VIEWS) {  // history.js, memory.js, brief.js, reminders.js, projects.js
+  for (const id of VIEWS) {  // history.js, memory.js, brief.js, reminders.js, projects.js, today.js
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
@@ -790,6 +790,7 @@ async function refreshState() {
     if (window.KwilStudy) window.KwilStudy.onState(state);  // study.js
     if (window.KwilProjects) window.KwilProjects.onState(state);  // projects.js
     if (window.KwilResearch) window.KwilResearch.onState(state);  // research.js
+    if (window.KwilToday) window.KwilToday.onState(state);  // today.js
     // a fresh pane takes the chat's project (one a voice "continue" moved
     // into), unless the person just chose one or left one
     if (!pane.cid && !pane.project && !pane.leaving && state.project) pane.project = state.project;
@@ -1227,6 +1228,9 @@ if ("serviceWorker" in navigator) {
   if (window.KwilResearch) window.KwilResearch.configure({ request });  // research.js
   if (window.KwilProjects) window.KwilProjects.configure({ request, show, newChat,  // projects.js
     openConversation: (id) => { if (typeof window.openTranscript === "function") window.openTranscript(id); } });
+  if (window.KwilToday) window.KwilToday.configure({ request, show, newChat,  // today.js
+    // "Ask Kwil": the question in the composer, never sent by itself
+    prefill: (text) => { show("app"); els.text.value = text; syncComposer(); els.text.focus(); } });
   if (family && await family.acceptInvite(window)) return;  // the page reloads
   // A family member's phone talks to this server only (no Pi/PC failover).
   if (!(family && family.isFamilyAccount(window))) {

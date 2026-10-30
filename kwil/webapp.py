@@ -2201,7 +2201,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("study.js", "text/javascript"),
                         ("projects.js", "text/javascript"),
                         ("sources.js", "text/javascript"),
-                        ("research.js", "text/javascript")):
+                        ("research.js", "text/javascript"),
+                        ("today.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2366,6 +2367,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                             and assistant.reminder_store_of(s) is not None,
                # deep research (research.js): the progress card
                "research": research_available(s),
+               # the header's Today button (today.py): each listed person's own
+               "today": s.user is None or (family is not None
+                                           and family.get(s.user) is not None),
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
@@ -2676,6 +2680,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     student_web.register(app, family, web, error)  # each person's own deadlines
     # each person's own notifications and study brief
     proactive_mod.register(app, assistant, push, briefings, error)
+    from kwil import today as today_mod
+
+    # each person's own Today screen (read-only; the brief is briefings')
+    today_mod.register(app, assistant, session_of, error, briefings)
     if public is not None:
         from kwil import public_site
 

@@ -674,6 +674,40 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-controls .row { justify-content: space-between; }
 .mem-controls .row + .row { border-top: 1px solid var(--line); }
 .mem-controls .row.danger { color: var(--bad-ink); }
+/* ---------- the Today screen (today.js) ---------- */
+/* the bold is spent on the date headings only (DESIGN_SYSTEM.md) */
+.today .bar h1 { font-weight: 500; }
+/* focus lands on the title when it opens (today.js), for VoiceOver: not a control, no ring */
+#today-title:focus-visible { box-shadow: none; }
+.today-body { width: 100%; max-width: 40rem; margin: 0 auto;
+  padding-bottom: calc(var(--s6) + env(safe-area-inset-bottom)); }
+.today-sec[hidden] { display: none; }
+.today .group-head.today-day { margin-top: var(--s5); font-size: var(--t-body); color: var(--text); }
+.today-day-name { font-weight: 700; }
+.today-day-date { margin-left: var(--s1); font-size: var(--t-cap); font-weight: 400; color: var(--muted); }
+.today-item { position: relative; }
+.today-item + .today-item::before { content: ""; position: absolute; top: 0; left: var(--s4); right: 0;
+  border-top: 1px solid var(--line); }
+.today .group .row { color: var(--text); }
+.today-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.today-main { font-size: var(--t-body); font-weight: 400; overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.today-sub { font-size: var(--t-cap); color: var(--muted); }
+.today-sub.today-late { color: var(--bad-ink); }
+.today-text .state { font-size: var(--t-cap); }
+/* (.row button would stretch it) */
+.today-row .today-ask { flex: none; min-height: 44px; margin-right: calc(-1 * var(--s2)); }
+.today-note:not([hidden]) { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: var(--s2); }
+.today-note-text { flex: 1; min-width: 12rem; }
+.today-action, .today-retry { min-height: 44px; }
+.today-note .today-action { margin-left: calc(-1 * var(--s2)); }
+.today-retry:not([hidden]) { display: flex; margin: var(--s2) auto 0; }
+.today-status { text-align: center; }
+/* a research job still running: the accent dot, breathing */
+.state.today-running { color: var(--accent-ink); }
+.state.today-running::before { animation: research-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .state.today-running::before { animation: none; } }
 /* Settings, Reminders (reminders.js): the memory list's rows, plus the repeat line */
 .rem-repeat { display: block; margin: var(--s1) 0 0; }
 .mem-row-title { flex: 1; font-size: var(--t-body); }
