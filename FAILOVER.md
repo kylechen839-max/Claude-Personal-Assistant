@@ -342,6 +342,14 @@ this module owns the protocol.
    is older than 10 minutes (its backend crashed mid-job) stops counting,
    so another backend can still run the job.
 
+Deep research (`research.py`) uses the same claims for the owner's jobs
+(`research:owner:<job id>`, the reminders' JobRunner and its sync, no
+leader gate): a job is started on the backend Kyle asked, so only a copy
+of its job file (a restored backup) could run it twice, and the claim
+stops that. A research job can run longer than the 10-minute claim
+window; a copy resumed on another backend after that would not be
+stopped, which is accepted (it needs a restore while a job runs).
+
 Across a real partition (the PC can't reach the Pi, the Pi is up but can't
 reach anyone) both may act; both fires are then in the merged log, so the
 job can tell ("already reminded at 8:00 from the Pi").

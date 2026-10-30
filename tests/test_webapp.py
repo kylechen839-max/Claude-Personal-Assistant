@@ -161,6 +161,7 @@ def test_login_sets_a_strict_cookie(make_app):
         "health": None,
         "study_mode": False, "study": None,  # no start_study in these tools (study.py)
         "projects": False, "project": None,  # no memory store here (projects.py)
+        "research": False,  # no research here (research.py)
         "month_usd": 0}  # the owner's API cost estimate (usage.py)
     client.post("/api/logout")
     assert client.get("/api/state").status_code == 401
@@ -837,6 +838,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/study.js",  # the chat header's study button and pill (its route needs sign-in)
           "/projects.js",  # Settings, Projects and the header's project name (routes need sign-in)
           "/sources.js",  # a reply's sources list (page code only)
+          "/research.js",  # the chat's research card (its routes need sign-in)
           "/student.js",  # the "School deadlines" card (routes need sign-in)
           "/notion.js",  # an invited person's "Connect Notion" button (routes need sign-in)
           "/connect.js",  # the owner's own sign-ins (routes need the owner)
@@ -1509,7 +1511,7 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v19" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v20" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw and '"/reminders.js"' in sw and '"/study.js"' in sw
     assert '"/projects.js"' in sw

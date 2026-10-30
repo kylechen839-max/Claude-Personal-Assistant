@@ -2777,6 +2777,75 @@ network code of its own.
   history); a failed push's retries are held in memory, so a restart
   drops them (the run stays recorded as failed).
 
+## Deep research (`research.py`, `tools/research.py`, `web/research.js`)
+
+- **Isolated from the person's data, by construction.** The research job
+  is its own Claude session (`ResearchRunner`): its requests hold the
+  question and what the web returned, nothing else. No memories,
+  instructions, project files, history, notes, calendar, email or user
+  name is sent, and it gets no client tools at all (no `ToolRegistry`):
+  only Anthropic's web search and web fetch server tools, which only read.
+  So a page that tries to steer it can't change anything, and can't get
+  the person's data into a search query or a fetched URL, because the
+  session never has any. A test plants instructions, a memory, a project
+  and an earlier turn in the conversation that starts the job and checks
+  none reaches the research requests; another has the model ask for
+  `delete_calendar_event` mid-research: nothing is dispatched (each step
+  is its own single-message conversation, so the call is never answered).
+  The tool description tells the model to put what the research needs in
+  the question; the question is the only channel, and it is shown to the
+  person before anything runs (below).
+- **Asks first, always.** start_research has a `confirm_prompt` (every
+  time, not just when tainted) naming the time and the number of
+  searches; in a tainted conversation the question is shown in full (a
+  page could have written it), otherwise cut to 120 characters. It isn't
+  asked when the job would be refused anyway (the result says why).
+- **The report is outside text.** It is web content: the saved
+  conversation is continued through `ClaudeChat.resume`, which marks the
+  chat untrusted, so changes ask first (test). Its sources are checked by
+  `citations.clean` (http(s) only, bounded) and the page draws everything
+  with textContent; a Notion link on the card must be http(s).
+- **Cost caps.** Per job: `[research] standard_searches` /
+  `deep_searches` (10 / 25) searches and `*_fetches` (10 / 20) pages,
+  enforced by sending each step's `max_uses` as what is left of the job's
+  budget (a paused step goes on with the remainder, or stops), so the API
+  itself refuses a search past the cap; `*_minutes` and `*_tokens` stop
+  further research once 75% is used (the rest is kept for writing) and
+  the report says it is partial. Per person: one job queued or running,
+  `per_day` (3) started in any 24 hours (the owner too), counted from the
+  job files so a restart doesn't reset it (a cancelled job still counts).
+  Across everyone: at most 10 waiting or running, 2 at once. Invited
+  people pay with their own key (a beta tester without one is refused
+  before anything is sent); usage goes on their meter.
+- **Per-person isolation.** Each person's jobs are files in their own
+  folder (`[research] dir` for the owner; `<[family] dir>/<id>/research/`,
+  deleted with the account); the routes (`GET /api/research`, `POST
+  .../{id}/cancel`, `POST .../{id}/notion`) take the person from the
+  session, so an id from someone else's folder is a 404 both ways (test).
+  The report goes to that person's own History and their own devices;
+  Save to Notion uses their own Notion (the owner's NOTION_TOKEN or app
+  sign-in; an invited person's own OAuth grant), never someone else's.
+- **Files.** One JSON file per job, written privately and atomically
+  (`google_auth.write_private`: `mkstemp` in the folder, 0600 on POSIX,
+  `os.replace` retried on Windows). It holds the question, counts, times
+  and the conversation id, never the report; finished ones are deleted
+  after 2 days (at most 50 kept).
+- **Once across backends.** The owner's job runs under the failover
+  JobRunner (`research:owner:<id>`, the briefings' and reminders' claims
+  log and sync), so a queued job copied to another backend (a restored
+  backup) runs once (test). A job cut off by a restart is marked failed,
+  not run again.
+- **Notion once.** Save to Notion looks the job id up in the Research
+  database's "Research ID" property before creating a page (the lecture
+  notes' pattern), so a second tap or a lost local record never files a
+  second page (test). Notion's own error text is never logged or shown.
+- **Logs.** Ids, depths, counts, statuses and times at INFO; the question
+  and the report only at DEBUG (caplog test).
+- Deliberately not done: a request already in flight when Cancel is
+  tapped finishes (up to its timeout) before the job stops; nothing it
+  returns is kept. The question leaves the server for Anthropic's web
+  search (PRIVACY.md).
+
 ## Memory review (`memory_review.py`, `memory_web.py`)
 
 - **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and

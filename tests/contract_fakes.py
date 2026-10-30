@@ -27,6 +27,9 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
   "omitted"); "enabled" with budget_tokens is the API's 400 on the Claude 5
   models Kwil uses (only the 4.6 and older models took it), as is
   "disabled" on Opus/Sonnet 5.5 (Haiku 5.5 only up to high effort);
+- server tools (web_search / web_fetch): only the fields the SDK's
+  WebSearchTool20260209Param / WebFetchTool20260209Param list, the right
+  name, and a `max_uses` of 1 or more;
 - search_result blocks (Kwil's own data, cited like web results): only in
   user messages, top level or as a tool_result's whole content (never
   mixed with other blocks there), each with a source, a title and
@@ -48,7 +51,8 @@ earlier user message actually sent (so lost history fails the check), and
 "get rid of ... on my calendar" lists the events, then deletes one with
 delete_calendar_event when offered, "from now on ..." / "always ..." is
 saved with remember when offered, "remind me in N minutes to ..." sets
-one with create_reminder and says back the time it gives, "what did we
+one with create_reminder and says back the time it gives, "research ..."
+or "do a deep dive on ..." starts it with start_research, "what did we
 decide about <topic>"
 searches past chats with search_conversations, reads the first hit with
 read_conversation and answers from its matching message (when offered),
@@ -56,6 +60,12 @@ read_conversation and answers from its matching message (when offered),
 search and answers with web_search_result_location citations, a
 read_conversation result made of search_result blocks is answered with
 a search_result_location citation of its best message,
+deep research (research.py) is scripted too: its plan (a structured output
+whose schema has an "outline") gets two parts, each "Research step N"
+request runs up to two searches and one fetch (never more than the
+request's max_uses; usage.server_tool_use counts them) and answers with
+cited findings, and "Write the report" (with search_result blocks) writes a
+Markdown report citing them;
 "quiz me on <course>" turns study mode on with start_study and asks a
 first question, and in study mode (its block in `system`) an answer that
 starts "I think" is a wrong one: noted with note_missed (the course from
@@ -135,6 +145,10 @@ def _tool_json(message: dict) -> dict:
 # what the fake's web search finds (url, title)
 WEB_RESULTS = (("https://physics.example.edu/exams", "PHYS 361 exam schedule"),
                ("https://news.example.org/a?b=1", "Campus news"))
+# what deep research finds (url, title)
+RESEARCH_PAGES = (("https://physics.example.edu/internships", "Summer physics internships"),
+                  ("https://careers.example.org/reu", "NSF REU programs"),
+                  ("https://news.example.com/deadlines", "Application deadlines"))
 
 
 def _search_results(msgs: list[dict]) -> list[tuple[int, dict]]:
@@ -178,6 +192,7 @@ class ContractClient:
         self.validate_output_config(kwargs)
         self.validate_thinking(kwargs)
         self.validate_search_results(kwargs)
+        self.validate_tools(kwargs)
         if not msgs or msgs[0]["role"] != "user":
             raise bad_request("messages: the first message must use the user role")
         for i, m in enumerate(msgs):
@@ -321,6 +336,31 @@ class ContractClient:
                               + (" at this effort" if "sonnet-5-5" in model else ""))
 
     @staticmethod
+    def validate_tools(kwargs: dict) -> None:
+        """Server tool definitions as the SDK types them (docs:
+        agents-and-tools/tool-use/web-search-tool, .../web-fetch-tool)."""
+        from anthropic.types import WebFetchTool20260209Param, WebSearchTool20260209Param
+
+        for i, t in enumerate(kwargs.get("tools") or []):
+            kind = str(t.get("type") or "")
+            if not kind.startswith(("web_search_", "web_fetch_")):
+                continue
+            search = kind.startswith("web_search_")
+            allowed = set((WebSearchTool20260209Param if search
+                           else WebFetchTool20260209Param).__annotations__)
+            extra = sorted(set(t) - allowed)
+            if extra:
+                raise bad_request(f"tools.{i}.{kind}.{extra[0]}: Extra inputs are not permitted")
+            if t.get("name") != ("web_search" if search else "web_fetch"):
+                raise bad_request(f"tools.{i}.{kind}.name: Input should be "
+                                  f"'{'web_search' if search else 'web_fetch'}'")
+            uses = t.get("max_uses")
+            if uses is not None and (not isinstance(uses, int) or isinstance(uses, bool)
+                                     or uses < 1):
+                raise bad_request(f"tools.{i}.{kind}.max_uses: Input should be greater "
+                                  "than 0")
+
+    @staticmethod
     def validate_search_results(kwargs: dict) -> None:
         """search_result blocks (docs: build-with-claude/search-results)."""
         found = []  # (where, block)
@@ -413,7 +453,14 @@ class ContractClient:
         words = next((b.get("text", "") for b in _blocks(last) if b.get("type") == "text"),
                      "") if _is_user_turn(last) else ""
         quiz = re.search(r"\bquiz me on ([\w ]+?)\s*[.?!]?$", words, re.I)
-        if not _is_user_turn(last) and called == {"start_study"}:
+        research = self._research(kwargs, msgs, n) if _is_user_turn(last) else None
+        usage = {"input_tokens": 10, "output_tokens": 5}
+        if research is not None:
+            blocks, used = research
+            content += blocks
+            if used:
+                usage["server_tool_use"] = used
+        elif not _is_user_turn(last) and called == {"start_study"}:
             content.append({"type": "text", "text": (
                 "First question: what does Gauss's law say about the field inside "
                 "a charged conducting shell?")})
@@ -451,6 +498,17 @@ class ContractClient:
             when = _tool_json(last).get("when")  # said back as the tool worded it
             content.append({"type": "text", "text": (f"I'll remind you {when}." if when
                                                      else "I couldn't set that.")})
+        elif not _is_user_turn(last) and called == {"start_research"}:
+            started = _tool_json(last).get("status") == "started"
+            content.append({"type": "text", "text": (
+                "I'll let you know when your research is ready." if started
+                else "I couldn't start that research.")})
+        elif _is_user_turn(last) and "start_research" in tools and re.match(
+                r"\s*(?:research|do a deep dive on)\b", words, re.I):
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "start_research",
+                            "input": {"question": words.strip()}})
+            stop = "tool_use"
         elif _is_user_turn(last) and "create_reminder" in tools and re.search(
                 r"\bremind me in \d+ minutes? to ", asked, re.I):
             words = next(b["text"] for b in _blocks(last) if b.get("type") == "text")
@@ -553,8 +611,74 @@ class ContractClient:
         return Message.model_validate({
             "id": f"msg_{n:04d}", "type": "message", "role": "assistant",
             "model": kwargs.get("model", "test"), "content": content,
-            "stop_reason": stop, "stop_sequence": None,
-            "usage": {"input_tokens": 10, "output_tokens": 5}})
+            "stop_reason": stop, "stop_sequence": None, "usage": usage})
+
+    @staticmethod
+    def _research(kwargs: dict, msgs: list[dict], n: int):
+        """Deep research's three requests (see the module doc), or None:
+        (content blocks, usage.server_tool_use or None)."""
+        tools = {t.get("name"): t for t in kwargs.get("tools") or []}
+        fmt = (kwargs.get("output_config") or {}).get("format") or {}
+        words = _text_of(msgs[-1])
+        if "outline" in ((fmt.get("schema") or {}).get("properties") or {}):
+            plan = {"title": "Physics internships, summer 2027", "outline": [
+                {"heading": "Programs", "goal": "Which programs take physics majors"},
+                {"heading": "Deadlines", "goal": "When to apply"}]}
+            return [{"type": "text", "text": json.dumps(plan)}], None
+        step = re.search(r"Research step (\d+)", words)
+        if step and "web_search" in tools:
+            k = int(step.group(1))
+            searches = min(2, tools["web_search"].get("max_uses") or 2)
+            fetches = min(1, (tools.get("web_fetch") or {}).get("max_uses") or 0)
+            blocks = []
+            for i in range(searches):
+                url, title = RESEARCH_PAGES[(k + i) % len(RESEARCH_PAGES)]
+                blocks += [
+                    {"type": "server_tool_use", "id": f"srvtoolu_{n:04d}_{i}",
+                     "name": "web_search", "input": {"query": f"step {k} query {i}"}},
+                    {"type": "web_search_tool_result", "tool_use_id": f"srvtoolu_{n:04d}_{i}",
+                     "content": [{"type": "web_search_result", "url": url, "title": title,
+                                  "encrypted_content": "enc", "page_age": None}]}]
+            url, title = RESEARCH_PAGES[k % len(RESEARCH_PAGES)]
+            blocks.append({"type": "text", "text": f"Step {k}: the programs open in "
+                           "January.", "citations": [{
+                               "type": "web_search_result_location", "url": url,
+                               "title": title, "encrypted_index": "ei",
+                               "cited_text": f"Applications for step {k} open in January."}]})
+            if fetches:
+                page, name = RESEARCH_PAGES[(k + 2) % len(RESEARCH_PAGES)]
+                blocks += [
+                    {"type": "server_tool_use", "id": f"srvtoolu_{n:04d}_f",
+                     "name": "web_fetch", "input": {"url": page}},
+                    {"type": "web_fetch_tool_result", "tool_use_id": f"srvtoolu_{n:04d}_f",
+                     "content": {"type": "web_fetch_result", "url": page,
+                                 "retrieved_at": "2026-10-30T12:00:00Z",
+                                 "content": {"type": "document", "title": name,
+                                             "citations": {"enabled": True},
+                                             "source": {"type": "text",
+                                                        "media_type": "text/plain",
+                                                        "data": "Deadline: March 1."}}}},
+                    {"type": "text", "text": "The deadline is March 1.", "citations": [{
+                        "type": "char_location", "document_index": 0,
+                        "document_title": name, "start_char_index": 0,
+                        "end_char_index": 18, "cited_text": "Deadline: March 1."}]}]
+            return blocks, {"web_search_requests": searches, "web_fetch_requests": fetches}
+        results = _search_results(msgs)
+        if "Write the report" in words and results:
+            blocks = [{"type": "text", "text": "# Physics internships\n\nSeveral programs "
+                       "take physics majors; most deadlines are in early spring.\n\n"
+                       "## Programs\n\n"}]
+            for index, r in results[:3]:
+                blocks.append({"type": "text", "text": f"- {r['title']} is worth a look.",
+                               "citations": [{
+                                   "type": "search_result_location", "source": r["source"],
+                                   "title": r["title"],
+                                   "cited_text": r["content"][0]["text"][:100],
+                                   "search_result_index": index, "start_block_index": 0,
+                                   "end_block_index": 1}]})
+                blocks.append({"type": "text", "text": "\n"})
+            return blocks, None
+        return None
 
     # --- the SDK's surface ---
     def create(self, **kwargs) -> Message:

@@ -328,6 +328,21 @@ grace_minutes = 60            # a reminder missed while the server was down stil
 prompt_tasks = true           # scheduled prompts run Claude with read-only tools (calendar, deadlines, memories)
 max_tasks_per_day = 48        # scheduled-task runs per person (you too) in any 24 hours; more are skipped (you're told once a day)
 
+[research]                    # "research the best internships for physics majors" (README "Research")
+enabled = true                # the start_research tool and the chat's progress card; needs [web] search and [history] on
+dir = "data/research"         # your job files (Render: /data/research); invited people's are in [family] dir/<id>/research
+per_day = 3                   # research jobs one person (you too) may start in any 24 hours; one runs at a time; 0 = no limit
+standard_searches = 10        # web searches in one standard job (web search is about $10 per 1000, plus Claude's tokens)
+standard_fetches = 10         # pages read in one standard job
+standard_minutes = 10         # a standard job's time budget; past it the report is written from what was found
+standard_tokens = 400000      # a standard job's token budget (input + output of every request together)
+deep_searches = 25            # the same four for a "deep dive"
+deep_fetches = 20
+deep_minutes = 20
+deep_tokens = 1000000
+effort = "high"               # the research session's effort (low / medium / high / xhigh / max)
+report_tokens = 16000         # the written report's max_tokens (at most 21000)
+
 [study]                       # "quiz me on PHYS 361": Kwil as a Socratic tutor (README "Study mode")
 enabled = true                # start_study / end_study / note_missed and the chat header's study button; missed concepts live in [memory] local_path
 

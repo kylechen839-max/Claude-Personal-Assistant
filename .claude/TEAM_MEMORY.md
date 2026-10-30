@@ -170,6 +170,15 @@ as the work. Never put secrets, tokens or personal data in this file.
   (platform.claude.com/docs/en/build-with-claude/...) with `.md` appended:
   they fetch from the sandbox.
 
+- Lesson (2026-10-30, deep research): a background Claude session that
+  reads the web is kept away from the person's data by construction (its
+  own requests with only the question, no ToolRegistry, only server
+  tools), not by a filter; a test plants instructions, memories, a project
+  and an earlier turn and checks none reach it. Server tools' `max_uses`
+  is per request: cap a whole job by sending what is left each time.
+  contract_fakes checks server tool fields against the SDK's
+  `WebSearchTool20260209Param` / `WebFetchTool20260209Param`.
+
 ## Environment (Linux cloud sandbox)
 - Setup:
   - `sudo apt-get install -y espeak-ng libportaudio2 ffmpeg shellcheck`

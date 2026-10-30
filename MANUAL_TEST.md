@@ -1642,6 +1642,33 @@ Needs notifications on (the section above) in the Home Screen app.
   - Should: it reaches only their phone, at their own time zone's time;
     neither of you sees the other's in Settings -> Reminders.
 
+## Research (~20 min, iPhone)
+Needs notifications on (Study briefings and notifications, above) in the
+Home Screen app.
+- [ ] Say "research the best internships for physics majors this summer".
+  - Should: Kwil asks "Start research on: ...? It takes about 5 to 10
+    minutes and does up to 10 web searches (a small cost)." Say yes: it
+    answers at once that it will let you know, and a card above the
+    message box says "Researching… (n/10 searches)", counting up.
+- [ ] Lock the phone and wait.
+  - Should: within about 10 minutes a "Research ready" notification says
+    "Your research on ... is ready"; tapping it opens the report (a title,
+    a short summary, sections) with numbered sources under it that open
+    the pages.
+- [ ] Open History.
+  - Should: "Research: <your question>" is there; Export gives the report
+    with its sources; Continue and ask a follow-up works.
+- [ ] With Notion connected, tap **Save to Notion** on the card.
+  - Should: it turns into "Saved to Notion" and opens a page in a
+    "Research" database next to Assignments; tapping again doesn't make a
+    second page. Without Notion connected the button isn't there.
+- [ ] Start another and tap **Cancel** on the card.
+  - Should: it asks first; then the card says "Research cancelled" and no
+    notification or History conversation comes.
+- [ ] In Chinese (a family member with Chinese): "研究一下物理专业的暑期实习".
+  - Should: the question, card and notification are in Chinese and the
+    report is written in Chinese.
+
 ## Study mode (~10 min, iPhone)
 In the Home Screen app, with Canvas course content synced if you have it.
 - [ ] Open the voice view and say "quiz me on PHYS 361".

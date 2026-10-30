@@ -481,6 +481,25 @@
     "Reminder on.": "提醒已开启。",
     "couldn't reach your reminders; try again": "连不上你的提醒，请再试一次。",
     "that reminder already finished; set a new time": "这个提醒已经结束了，请设一个新时间。",
+    // deep research's card (research.js, research.py)
+    "Research waiting to start": "研究等待开始",
+    "Planning the research…": "正在规划研究…",
+    "Writing the report…": "正在撰写报告…",
+    "Research ready": "研究完成",
+    "Research ready (partial)": "研究完成（部分）",
+    "Research couldn't finish": "研究没能完成",
+    "Research stopped: the server restarted": "研究已停止：服务器重启了",
+    "Add your Anthropic API key in Settings to use research.": "请先在设置里添加你的 Anthropic API 密钥，才能使用研究功能。",
+    "Research cancelled": "研究已取消",
+    "Research is running on another server": "研究正在另一台服务器上进行",
+    "Cancel this research? What it found so far isn't kept.": "要取消这个研究吗？已经找到的内容不会保留。",
+    "Open report": "打开报告",
+    "Save to Notion": "保存到 Notion",
+    "Saving…": "正在保存…",
+    "Saved to Notion": "已保存到 Notion",
+    "Dismiss": "关闭",
+    "Notion isn't connected": "还没有连接 Notion",
+    "couldn't save to Notion; try again": "没能保存到 Notion，请再试一次。",
     // reply-voice picker (voice-picker.js)
     "Reply voice": "回复的声音",
     "Preview": "试听",
@@ -651,6 +670,7 @@
       "你的项目文件已经到上限了（一共 $1 MB）：请先删除一个"],
     [/^You have (\d+) projects: delete one first$/, "你已经有 $1 个项目了：请先删除一个"],
     [/^Studying ([^\n.!?]{1,80})$/, "正在学习 $1"],  // study.js's pill (a course name)
+    [/^Researching… \((\d+)\/(\d+) searches\)$/, "正在研究…（已搜索 $1/$2 次）"],  // research.js's card
     [/^Missed (\d+) times$/, "错过 $1 次"],  // memory.js's study list
     [/^Source ([\d, ]{1,20})$/, "来源 $1"],  // sources.js's superscripts (aria-label)
     [/^Working: (.+)…$/, "正在处理：$1…"],

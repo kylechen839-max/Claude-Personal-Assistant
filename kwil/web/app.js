@@ -651,6 +651,7 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
       break;
     case "done":
       if (window.KwilStudy) window.KwilStudy.onDone(ev);  // study.js: the pill
+      if (window.KwilResearch) window.KwilResearch.onDone(ev);  // research.js: its card
       if (here) {  // the server's word on the pane's project (projects.js)
         pane.project = ev.project || null;
         pane.leaving = false;
@@ -751,6 +752,7 @@ async function refreshState() {
     if (window.KwilBrief) window.KwilBrief.onState(state);  // brief.js
     if (window.KwilStudy) window.KwilStudy.onState(state);  // study.js
     if (window.KwilProjects) window.KwilProjects.onState(state);  // projects.js
+    if (window.KwilResearch) window.KwilResearch.onState(state);  // research.js
     // a fresh pane takes the chat's project (one a voice "continue" moved
     // into), unless the person just chose one or left one
     if (!pane.cid && !pane.project && !pane.leaving && state.project) pane.project = state.project;
@@ -1141,6 +1143,7 @@ if ("serviceWorker" in navigator) {
   if (window.KwilVoicePicker) window.KwilVoicePicker.configure({ request, player });
   if (window.KwilBrief) window.KwilBrief.configure({ request, show, player });  // brief.js
   if (window.KwilStudy) window.KwilStudy.configure({ request, note: (t) => addMessage("note", t) });  // study.js
+  if (window.KwilResearch) window.KwilResearch.configure({ request });  // research.js
   if (window.KwilProjects) window.KwilProjects.configure({ request, show, newChat,  // projects.js
     openConversation: (id) => { if (typeof window.openTranscript === "function") window.openTranscript(id); } });
   if (family && await family.acceptInvite(window)) return;  // the page reloads

@@ -864,6 +864,8 @@ class WebAssistant:
         self.reminders = None
         # reminders.ReminderScheduler (build_assistant; create_app starts it)
         self.reminder_scheduler = None
+        # research.Research: everyone's deep research jobs (build_assistant)
+        self.research = None
         # which machine keeps the memory files ("cloud", "pc", "pi"; "" =
         # don't say): each failover backend has its own for now
         self.memory_where = ""
@@ -1951,6 +1953,12 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             briefings.start()
         if reminder_scheduler is not None:
             reminder_scheduler.start()
+        from kwil import research as research_jobs
+
+        if isinstance(getattr(assistant, "research", None), research_jobs.Research):
+            # queued ones run; one cut off by the restart is marked failed
+            await run_in_threadpool(assistant.research.resume_pending,
+                                    research_jobs.people_of(assistant))
         # everyone's background Canvas sync (student_web.register made it)
         course_sync = getattr(app.state, "course_sync", None)
         if course_sync is not None:
@@ -1973,6 +1981,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 briefings.stop()
             if reminder_scheduler is not None:
                 reminder_scheduler.stop()
+            if isinstance(getattr(assistant, "research", None), research_jobs.Research):
+                assistant.research.stop()
             if course_sync is not None:
                 course_sync.stop()
             await run_in_threadpool(assistant.shutdown)
@@ -2180,7 +2190,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("brief.js", "text/javascript"),
                         ("study.js", "text/javascript"),
                         ("projects.js", "text/javascript"),
-                        ("sources.js", "text/javascript")):
+                        ("sources.js", "text/javascript"),
+                        ("research.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2343,6 +2354,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                # Settings, Reminders: this person's own reminders
                "reminders": callable(getattr(assistant, "reminder_store_of", None))
                             and assistant.reminder_store_of(s) is not None,
+               # deep research (research.js): the progress card
+               "research": research_available(s),
                "language": s.language,
                "voice_picker": getattr(assistant, "voices", None) is not None,
                "conversation": s.chat.conversation_id,
@@ -2362,6 +2375,11 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         elif family is not None:  # their own key: "required" (beta) or "optional"
             out["api_key"] = "required" if family.tier(s.user) == "beta" else "optional"
         return out
+
+    def research_available(s: Session) -> bool:
+        service = getattr(assistant, "research", None)
+        return bool(service is not None and s.chat.tools is not None
+                    and s.chat.tools.has("start_research"))
 
     def owner_health(s: Session):
         if health is None or s.user is not None:
@@ -2596,6 +2614,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
 
     projects_web.register(app, assistant, session_of, error)  # everyone's own
     reminders_mod.register(app, assistant, session_of, error)  # everyone's own
+    from kwil import research as research_mod
+
+    research_mod.register(app, assistant, session_of, error)  # everyone's own
     if getattr(assistant, "backup", None) is not None:
         from kwil import backup as backup_mod
 
@@ -2705,6 +2726,9 @@ def start_history_sync(config: dict, assistant, token: str, failover):
     reminders = getattr(assistant, "reminder_scheduler", None)
     if getattr(reminders, "jobs", None) is not None:
         reminders.jobs.sync = syncer.sync_all  # and his reminder runs' (reminders.py)
+    research = getattr(assistant, "research", None)
+    if getattr(research, "jobs", None) is not None:
+        research.jobs.sync = syncer.sync_all  # and his research jobs' (research.py)
     thread = threading.Thread(target=syncer.run_forever, args=(stop, interval),
                               name="history-sync", daemon=True)
     thread.start()
@@ -2772,7 +2796,8 @@ def memory_location(config: dict) -> str:
 def build_assistant(config: dict, tts_name: str | None = None,
                     output_fn=print) -> WebAssistant:
     from kwil.cli import (add_history_tools, add_memory_tools, add_project_tools,
-                               add_reminder_tools, add_study_tools, build_chat,
+                               add_reminder_tools, add_research_tools, add_study_tools,
+                               build_chat,
                                build_local_memory, build_memory,
                                build_memory_review, build_reminders, build_tools,
                                register_memory_review, register_notes)
@@ -2872,6 +2897,15 @@ def build_assistant(config: dict, tts_name: str | None = None,
 
     # due reminders as notifications, scheduled prompts (create_app starts it)
     assistant.reminder_scheduler = reminders_mod.from_config(config, assistant, client)
+    from kwil import research
+
+    # deep research jobs (research.py; create_app resumes queued ones)
+    assistant.research = research.from_config(config, assistant, client)
+    if assistant.research is not None:
+        assistant.research.push = assistant.push
+        add_research_tools(tools, assistant.research)  # the owner's
+        if family is not None:
+            family.research = assistant.research  # each person's own (family.py)
     return assistant
 
 

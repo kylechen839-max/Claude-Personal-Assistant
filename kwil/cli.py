@@ -958,6 +958,16 @@ def add_reminder_tools(tools: ToolRegistry, config: dict, store,
                                    devices))
 
 
+def add_research_tools(tools: ToolRegistry, service, uid: str | None = None) -> None:
+    """start_research and research_status on `service` (research.Research)
+    for the owner (uid None) or one invited person; nothing without it."""
+    if service is None:
+        return
+    from kwil.tools.research import research_tools
+
+    tools.register(*research_tools(service, uid))
+
+
 def build_memory_review(config: dict, memory):
     """The memory review (memory_review.py) for this memory, or None."""
     if memory is None:

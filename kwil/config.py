@@ -371,6 +371,21 @@ DEFAULTS: dict = {
         "prompt_tasks": True,       # "every Monday tell me what's due": runs Claude with read-only tools
         "max_tasks_per_day": 48,    # scheduled-task runs per person (the owner too) in any 24 hours
     },
+    "research": {                   # deep research (research.py; README "Research")
+        "enabled": True,            # the start_research tool and the chat's progress card; needs [web] search and [history]
+        "dir": "data/research",     # the owner's job files (invited people's: [family] dir/<id>/research)
+        "per_day": 3,               # jobs one person may start in any 24 hours (the owner too); 0 = no limit
+        "standard_searches": 10,    # web searches in one standard job (about $10 per 1000, plus tokens)
+        "standard_fetches": 10,     # pages read in one standard job
+        "standard_minutes": 10,     # a standard job's time budget
+        "standard_tokens": 400000,  # ... and token budget (input + output of every request)
+        "deep_searches": 25,        # the same for a "deep dive"
+        "deep_fetches": 20,
+        "deep_minutes": 20,
+        "deep_tokens": 1000000,
+        "effort": "high",           # output_config.effort of the research session
+        "report_tokens": 16000,     # the written report's max_tokens (at most 21000)
+    },
     "study": {                      # study mode (study.py; README "Study mode")
         "enabled": True,            # the study tools and the chat header's toggle; missed concepts go in [memory] local_path
     },
@@ -484,6 +499,7 @@ SERVER_PROFILE: dict = {
     "assistant": {"usage_file": "/data/usage.json"},  # on the disk
     "push": {"owner_dir": "/data/student"},  # on the disk
     "reminders": {"path": "/data/reminders.sqlite"},  # on the disk
+    "research": {"dir": "/data/research"},  # on the disk
     "projects": {"max_person_mb": 20},  # in each person's memory file, on a small shared disk
     "connect": {"dir": "/data/owner"},  # on the disk
     "logging": {"file": "", "console_level": "INFO"},
