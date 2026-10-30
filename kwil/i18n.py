@@ -147,6 +147,10 @@ EN = {
     "reminder_task_title": "Kwil",
     "reminder_task_limit": "Your scheduled task didn't run: you've reached today's limit.",
     "reminder_task_failed": "Your scheduled task couldn't run just now. Open Kwil to ask again.",
+    "reminder_task_skipped": "Skipped: too many scheduled tasks today.",
+    # made while outside text (a web page, an email) was in the conversation
+    "reminder_title_untrusted": "Reminder (from outside text)",
+    "reminder_task_title_untrusted": "Kwil (from outside text)",
 }
 
 ZH = {
@@ -253,6 +257,9 @@ ZH = {
     "reminder_task_title": "Kwil",
     "reminder_task_limit": "定时任务没有运行：今天的使用次数已用完。",
     "reminder_task_failed": "定时任务暂时无法运行。请打开 Kwil 再问一次。",
+    "reminder_task_skipped": "已跳过：今天的定时任务太多了。",
+    "reminder_title_untrusted": "提醒（来自外部内容）",
+    "reminder_task_title_untrusted": "Kwil（来自外部内容）",
 }
 
 

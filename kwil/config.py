@@ -363,6 +363,7 @@ DEFAULTS: dict = {
         "check_seconds": 60,        # how often due reminders are looked for
         "grace_minutes": 60,        # one missed while the server was down fires if this late at most
         "prompt_tasks": True,       # "every Monday tell me what's due": runs Claude with read-only tools
+        "max_tasks_per_day": 48,    # scheduled-task runs per person (the owner too) in any 24 hours
     },
     "family": {                   # invite family members (cloud web app)
         "enabled": False,           # the server profile turns it on

@@ -151,6 +151,10 @@ def reminder_tools(store, timezone: str | None = None,
                                  explicit=(True if in_minutes is not None
                                            else time_given if isinstance(time_given, bool)
                                            else None))
+        except R.ReminderFull:
+            return {"status": "full",
+                    "message": f"The user already has {R.MAX_ACTIVE} reminders. Ask "
+                               "which one to cancel first."}
         except R.ReminderError as e:
             return {"status": "error", "message": str(e)}
         if saved is None:

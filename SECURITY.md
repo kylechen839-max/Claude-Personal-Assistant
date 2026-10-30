@@ -2428,8 +2428,12 @@ network code of its own.
   from the signed-in session (`WebAssistant.reminder_store_of`): no person
   in any path, so an id from someone else's store is a 404 both ways. Not
   signed in is 401; reminders off is 404. Changes are POST.
+- **Time zones.** Quiet hours are checked in the person's zone; with no
+  `[assistant] timezone` (a PC or Pi) that is the machine's own zone, the
+  same one the reminder was saved in, never UTC.
 - **Bounded.** 300 characters a reminder, 100 active per person (the
-  101st is refused, never an old one dropped), 200 runs per person in any
+  101st is refused, never an old one dropped, and so is setting a
+  finished one again while 100 are active), 200 runs per person in any
   24 hours (the rest are logged as skipped), 24 times a day per repeat,
   100 finished rows kept at most 7 days, a run log (ids and times only)
   of 2 days, at most 50 pushes held for a retry and 20 scheduled tasks
@@ -2464,8 +2468,15 @@ network code of its own.
   the model ask for `create_calendar_event`: it is refused and never
   run). A task saved from outside text runs with its text marked as data
   in the system prompt and the conversation tainted from the start (so
-  the main model answers). The answer goes only to that person's own
-  devices and History. It counts in their quotas and on their own key.
+  the main model answers), and its notification's title says "(from
+  outside text)" (plain reminders too). The answer goes only to that
+  person's own devices and History (nothing saved with `[history]
+  incognito`). It counts in their quotas and on their own key; at most
+  `max_tasks_per_day` (48) per person, the owner included, and at most 5
+  of the 20 waiting tasks per person, so one person can't hold up the
+  others; a skipped task tells the person once a day. A task deleted or
+  paused while it waited is not run (its text never reaches Claude or
+  History).
 - **Push.** The text goes to the person's own devices only, encrypted for
   the phone (RFC 8291; the push service can't read it), at most 300
   characters (the body: a whole reminder; a task's answer is cut) and 80

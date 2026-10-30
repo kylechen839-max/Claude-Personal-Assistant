@@ -1858,8 +1858,12 @@ on first: Settings -> **Enable notifications**).
   calendar, school deadlines, Notion assignments, memories; never the web
   and never anything that changes something), in a fresh conversation
   that isn't saved as you talking. The answer is the notification (cut to
-  its size) and the whole answer is in History under the task's name. It
-  counts against an invited person's daily limits and uses their own key.
+  its size) and the whole answer is in History under the task's name
+  (unless `[history] incognito` is on). It counts against an invited
+  person's daily limits and uses their own key. At most `[reminders]
+  max_tasks_per_day` (48) run per person in a day, you included; past
+  that a task is skipped and you get one "Skipped: too many scheduled
+  tasks today" notification that day.
 - **See and change them:** Settings -> **Reminders** lists the active ones
   with their next time and repeat, with **Pause** / **Resume** and
   **Delete** (asks first); tapping a reminder notification opens it. By
@@ -1872,7 +1876,8 @@ on first: Settings -> **Enable notifications**).
   grace_minutes` (60) late comes once when it is back; an older one is
   listed as Missed (a repeat goes on from its next time).
 - **Outside text:** a reminder set while a web page, email or calendar
-  invite is in the conversation asks you first and is marked Untrusted.
+  invite is in the conversation asks you first, is marked Untrusted, and
+  its notification's title says "(from outside text)".
 - **Limits:** 100 active reminders and 200 notifications a day per person,
   300 characters each. Each person (family members too) has their own,
   in their own time zone: `[reminders] path` for yours

@@ -65,9 +65,15 @@ read-only tools in TASK_TOOLS (calendar, deadlines, Notion assignments,
 memories; no web tools, never a tool that changes anything: TaskTools
 refuses any other call), routed by router.py (the fast model unless it
 needs the main one). It counts in the person's quotas (family.quotas) and
-on their own key/bill (family.UserApi). The answer, cut to the push size,
+on their own key/bill (family.UserApi); at most [reminders]
+max_tasks_per_day run per person (the owner too) in any 24 hours, and one
+person holds at most MAX_PENDING_PER_PERSON of the MAX_PENDING_TASKS
+waiting; one over either is skipped, and the person is told so once a
+day. A task deleted or paused while it waited doesn't run. The answer, cut to the push size,
 is the notification; the whole answer goes to the person's History as a
-conversation titled with the task. A task made from outside text is run
+conversation titled with the task (not with [history] incognito on). A
+notification for a reminder or task made from outside text says so in
+its title ("Reminder (from outside text)"). A task made from outside text is run
 with that text marked as data, and its conversation is tainted.
 
 Logs: ids, counts, lengths and times at INFO; a reminder's text only at
@@ -104,7 +110,8 @@ MAX_AHEAD_DAYS = 2 * 366  # a "once" reminder at most this far ahead
 PAST_SLACK = 60           # seconds: "now" said a moment ago is still fine
 RETRIES = 3               # tries of a push no device took (network, 5xx)
 MAX_RETRY = 50            # pushes held for a retry, across everyone
-MAX_PENDING_TASKS = 20    # prompt tasks waiting for the worker
+MAX_PENDING_TASKS = 20    # prompt tasks waiting for the worker, across everyone
+MAX_PENDING_PER_PERSON = 5  # ... and one person's share of them
 PUSH_BODY = 300           # characters of a notification's text (push.MAX_BODY): a whole reminder
 ID_PREFIX = "rem-"
 ID_RE = re.compile(r"^rem-[0-9a-f]{12}$")
@@ -129,7 +136,7 @@ TASK_TOOLS = frozenset({
     "list_reminders",                                            # tools/reminders.py
 })
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MIGRATIONS: list[str] = [
     """
     CREATE TABLE reminders (
@@ -159,6 +166,10 @@ MIGRATIONS: list[str] = [
         status TEXT NOT NULL
     );
     CREATE INDEX runs_at ON runs (at);
+    """,
+    # a scheduled task's runs, for [reminders] max_tasks_per_day
+    """
+    ALTER TABLE runs ADD COLUMN task INTEGER NOT NULL DEFAULT 0;
     """,
 ]
 
@@ -498,6 +509,14 @@ class SqliteReminderStore:
             return self._con.execute(
                 "SELECT COUNT(*) FROM reminders WHERE state = 'active'").fetchone()[0]
 
+    def tasks_since(self, since: float) -> int:
+        """Scheduled-task runs since `since` that were let through (missed,
+        skipped, cancelled and just-taken ones don't count): [reminders] max_tasks_per_day."""
+        with self._lock:
+            return self._con.execute(
+                "SELECT COUNT(*) FROM runs WHERE at >= ? AND task = 1 AND "
+                "status NOT IN ('missed', 'skipped', 'claimed', 'cancelled')", (since,)).fetchone()[0]
+
     def runs_since(self, since: float) -> int:
         """Runs (not missed ones) since `since`: the daily cap."""
         with self._lock:
@@ -580,6 +599,12 @@ class SqliteReminderStore:
             if row["state"] != "active" and due_at is None and rrule is None:
                 if paused is not None or new_text is not None:
                     raise ReminderError("that reminder already finished; set a new time")
+            if row["state"] != "active" and (due_at is not None or rrule is not None):
+                # finished, set again: it counts against the bound like a new one
+                active = db.execute("SELECT COUNT(*) FROM reminders WHERE "
+                                    "state = 'active'").fetchone()[0]
+                if active >= MAX_ACTIVE:
+                    raise ReminderFull()
             values = {}
             if new_text is not None:
                 values["text"] = new_text
@@ -663,7 +688,8 @@ class SqliteReminderStore:
         with self._lock:
             ids = [r["id"] for r in self._con.execute(
                 "SELECT id FROM reminders WHERE state = 'active' AND paused = 0 "
-                "AND next_run IS NOT NULL AND next_run <= ?", (now,)).fetchall()]
+                "AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run, rid",
+                (now,)).fetchall()]
         runs = []
         for reminder_id in ids:
             run = self._write(lambda db, rid=reminder_id: self._take(
@@ -686,9 +712,10 @@ class SqliteReminderStore:
 
         def log_run(at_due: float, status: str) -> bool:
             return db.execute("INSERT OR IGNORE INTO runs (key, reminder_id, due, at, "
-                              "status) VALUES (?, ?, ?, ?, ?)",
+                              "status, task) VALUES (?, ?, ?, ?, ?, ?)",
                               (f"{reminder_id}:{int(at_due * 1000)}", reminder_id,
-                               at_due, now, status)).rowcount > 0
+                               at_due, now, status, int(bool(r["prompt_task"])))
+                              ).rowcount > 0
 
         if now - due > grace:  # too late to be useful: missed
             log_run(due, "missed")
@@ -867,12 +894,21 @@ def cut(text: str, limit: int = PUSH_BODY) -> str:
 
 # ---------- the scheduler ----------
 
+def title_of(run: Run, lang: str, task: bool = False) -> str:
+    """The notification's title; one made from outside text says so."""
+    from kwil import i18n
+
+    key = "reminder_task_title" if task else "reminder_title"
+    return i18n.t(key + ("_untrusted" if run.untrusted else ""), lang)
+
+
 @dataclass(frozen=True)
 class Settings:
     check_seconds: int = 60
     grace_minutes: int = 60
     quiet: Quiet = field(default_factory=Quiet)
     prompt_tasks: bool = True
+    max_tasks_per_day: int = 48
 
     @classmethod
     def from_config(cls, config: dict) -> "Settings":
@@ -882,7 +918,8 @@ class Settings:
         return cls(check_seconds=max(10, int(r["check_seconds"])),
                    grace_minutes=max(0, int(r["grace_minutes"])),
                    quiet=Quiet(parse_hhmm(p["quiet_start"]), parse_hhmm(p["quiet_end"])),
-                   prompt_tasks=bool(r["prompt_tasks"]))
+                   prompt_tasks=bool(r["prompt_tasks"]),
+                   max_tasks_per_day=max(0, int(r["max_tasks_per_day"])))
 
 
 class ReminderScheduler:
@@ -905,6 +942,9 @@ class ReminderScheduler:
         # key -> (uid, run, title, body, url, tries): pushes to try again
         self._retry: dict[str, tuple] = {}
         self._pending = 0
+        self._pending_of: dict = {}  # uid -> their tasks waiting
+        # uid -> the local day a "skipped" notice went out (at most one a day)
+        self._skip_told: dict = {}
         # one worker: a task's Claude call never holds up plain reminders
         self._worker = None if inline_tasks else ThreadPoolExecutor(
             1, thread_name_prefix="reminder-task")
@@ -925,47 +965,86 @@ class ReminderScheduler:
                 store = self.stores(uid)
                 if store is None:
                     continue
+                # "" is this machine's zone (as the reminders' own and the
+                # briefings'), never UTC
+                tz = zone(zone_name_or_default(tz_name))
                 runs = store.take_due(now, self.settings.grace_minutes * 60,
-                                      self.settings.quiet, zone(tz_name))
+                                      self.settings.quiet, tz)
             except Exception:
                 log.exception("Reminders: checking %s's failed", uid or "owner")
                 continue
             for run in runs:
                 taken += 1
                 try:
-                    self._fire(uid, store, run, lang)
+                    self._fire(uid, store, run, lang, now, tz)
                 except Exception:  # one bad send never holds up the rest
                     log.exception("Reminders: sending %s failed", run.reminder_id)
                     self._finish(store, run.key, "failed")
         self._retry_failed(held, now, listed)
+        with self.lock:  # removed people: nothing of theirs kept
+            for gone in [u for u in self._skip_told if u not in listed]:
+                del self._skip_told[gone]
         return taken
 
     # ---------- one run ----------
-    def _fire(self, uid, store, run: Run, lang: str) -> None:
+    def _fire(self, uid, store, run: Run, lang: str, now: float | None = None,
+              tz=None) -> None:
         if run.prompt_task and self.tasks is not None and self.settings.prompt_tasks:
+            now = self.clock() if now is None else now
+            if store.tasks_since(now - 86400) >= self.settings.max_tasks_per_day:
+                log.warning("Reminders: %s is over max_tasks_per_day; %s skipped",
+                            uid or "owner", run.reminder_id)
+                self._skip(uid, store, run, lang, now, tz)
+                return
             with self.lock:
-                if self._pending >= MAX_PENDING_TASKS:
-                    log.warning("Reminders: too many tasks waiting; %s skipped",
-                                run.reminder_id)
-                    self._finish(store, run.key, "refused")
-                    return
-                self._pending += 1
+                full = self._pending >= MAX_PENDING_TASKS or \
+                    self._pending_of.get(uid, 0) >= MAX_PENDING_PER_PERSON
+                if not full:
+                    self._pending += 1
+                    self._pending_of[uid] = self._pending_of.get(uid, 0) + 1
+            if full:
+                log.warning("Reminders: too many tasks waiting; %s skipped",
+                            run.reminder_id)
+                self._skip(uid, store, run, lang, now, tz)
+                return
+            self._finish(store, run.key, "queued")  # counts from now on
             if self._worker is None:
                 self._task(uid, store, run, lang)
             else:
                 self._worker.submit(self._task, uid, store, run, lang)
             return
+        self._send(uid, store, run, title_of(run, lang), run.text, URL)
+
+    def _skip(self, uid, store, run: Run, lang: str, now: float, tz) -> None:
+        """A task not run (too many today, or too many waiting): recorded as
+        skipped (not counted), and the person told once a day."""
         from kwil import i18n
 
-        self._send(uid, store, run, i18n.t("reminder_title", lang), run.text, URL)
+        self._finish(store, run.key, "skipped")
+        day = datetime.fromtimestamp(now, tz or timezone.utc).date().isoformat()
+        with self.lock:
+            if self._skip_told.get(uid) == day:
+                return
+            self._skip_told[uid] = day
+        if self.push is not None:
+            self.push.deliver(uid, i18n.t("reminder_task_title", lang),
+                              i18n.t("reminder_task_skipped", lang), URL)
 
     def _task(self, uid, store, run: Run, lang: str) -> None:
-        from kwil import i18n
-
         try:
+            try:  # deleted or paused while it waited: not run, nothing saved
+                current = store.get(run.reminder_id)
+            except Exception:  # noqa: BLE001 - closed (they were removed)
+                current = None
+            if current is None or current["paused"]:
+                log.info("Reminders: task %s gone or paused before it ran",
+                         run.reminder_id)
+                self._finish(store, run.key, "cancelled")
+                return
+
             def action():
                 result = self.tasks.run(uid, run, lang)  # the whole answer: History
-                return self._deliver(uid, store, run, i18n.t("reminder_task_title", lang),
+                return self._deliver(uid, store, run, title_of(run, lang, task=True),
                                      result.body or run.text, URL)
             self._claimed(uid, store, run, action)
         except Exception:
@@ -974,6 +1053,11 @@ class ReminderScheduler:
         finally:
             with self.lock:
                 self._pending -= 1
+                left = self._pending_of.get(uid, 0) - 1
+                if left > 0:
+                    self._pending_of[uid] = left
+                else:
+                    self._pending_of.pop(uid, None)
 
     def _send(self, uid, store, run: Run, title: str, body: str, url: str) -> None:
         self._claimed(uid, store, run,
@@ -1038,12 +1122,6 @@ class ReminderScheduler:
         except Exception as e:  # noqa: BLE001 - bookkeeping only
             log.warning("Reminders: recording a run failed (%s)", type(e).__name__)
 
-    def forget(self, uid: str | None) -> None:
-        """Someone removed: nothing of theirs is held for a retry."""
-        with self.lock:
-            for key in [k for k, v in self._retry.items() if v[0] == uid]:
-                del self._retry[key]
-
     # ---------- the thread ----------
     def _loop(self) -> None:
         delay = FIRST_DELAY
@@ -1092,6 +1170,11 @@ def from_config(config: dict, assistant, client=None) -> "ReminderScheduler | No
             return getattr(assistant, "reminders", None)
         return family.reminders_of(uid) if family is not None else None
 
+    def history_of(store):
+        # [history] incognito: nothing saved, a task's answer included (the
+        # notification still goes)
+        return None if config["history"]["incognito"] else store
+
     def context(uid):
         if uid is None:
             from kwil.cli import build_chat
@@ -1099,7 +1182,7 @@ def from_config(config: dict, assistant, client=None) -> "ReminderScheduler | No
             def make(registry):
                 return build_chat(config, registry, None, None, None, client=client,
                                   local_memory=getattr(assistant, "local_memory", None))
-            return make, assistant.tools, getattr(assistant, "history", None), None
+            return make, assistant.tools, history_of(getattr(assistant, "history", None)), None
         if family is None:
             return None
         ctx = family.context(uid)
@@ -1110,7 +1193,7 @@ def from_config(config: dict, assistant, client=None) -> "ReminderScheduler | No
             chat = ctx.chat_factory(registry)
             chat.recorder = None  # not recorded: the result is saved below
             return chat
-        return (make_member, ctx.registry, ctx.history,
+        return (make_member, ctx.registry, history_of(ctx.history),
                 lambda: family.quotas.admit(uid))
 
     jobs = None

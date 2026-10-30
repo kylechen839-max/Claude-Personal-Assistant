@@ -1015,3 +1015,196 @@ def test_the_owners_reminder_claims_sync_before_they_count(tmp_path, monkeypatch
         assert getattr(bound, "__func__", None) is sync.Syncer.sync_all
     finally:
         history.close()
+
+
+# --- round 2 (judge findings) -----------------------------------------------------
+
+def test_quiet_hours_use_this_machines_zone_when_none_is_set(tmp_path, monkeypatch):
+    """[assistant] timezone = "" (a PC or Pi): quiet hours are local time,
+    the zone the reminder itself was saved in, never UTC."""
+    from kwil.tools import timeutil
+
+    monkeypatch.setattr(timeutil, "local_zone", lambda name=None: NY)
+    clock = Clock(at(2026, 10, 30, 18, 0))
+    s = SqliteReminderStore(tmp_path / "r.sqlite", clock=clock)
+    try:
+        evening = s.add("take out trash", due_at=at(2026, 10, 30, 19, 0), tz="",
+                        explicit=False)
+        night = s.add("water plants", due_at=at(2026, 10, 30, 23, 0), tz="",
+                      explicit=False)
+        assert evening["tz"] == "America/New_York"
+        push = FakePush()
+        sch = ReminderScheduler(Settings(), push, lambda uid: s,
+                                lambda: [(None, "", "en")], clock=clock, inline_tasks=True)
+        clock.now = at(2026, 10, 30, 19, 0)  # 23:00 UTC: quiet there, not here
+        assert sch.tick() == 1 and push.sent[-1]["body"] == "take out trash"
+        clock.now = at(2026, 10, 30, 23, 0)
+        assert sch.tick() == 0
+        assert utc(s.get(night["id"])["next_ts"]) == utc(at(2026, 10, 31, 7, 30))
+    finally:
+        s.close()
+
+
+def gated_tasks(gate, ran):
+    class Tasks:
+        def run(self, uid, run, lang="en"):
+            gate.wait(5)
+            ran.append(run.text)
+            return R.TaskResult("answer to " + run.text)
+    return Tasks()
+
+
+def wait_for(cond, seconds=5):
+    import time as time_mod
+
+    end = time_mod.time() + seconds
+    while not cond() and time_mod.time() < end:
+        time_mod.sleep(0.01)
+    return cond()
+
+
+@pytest.mark.parametrize("change", ["delete", "pause"])
+def test_a_task_deleted_or_paused_while_queued_never_runs(store, clock, change):
+    import threading
+
+    first = store.add("slow task", due_at=clock.now + 60, tz="UTC", prompt_task=True)
+    second = store.add("PRIVATE task", rrule="FREQ=DAILY;BYHOUR=16;BYMINUTE=1",
+                       tz="UTC", prompt_task=True)
+    gate, ran, push = threading.Event(), [], FakePush()
+    sch = ReminderScheduler(Settings(), push, lambda uid: store,
+                            lambda: [(None, "UTC", "en")], tasks=gated_tasks(gate, ran),
+                            clock=clock)
+    try:
+        clock.now = max(first["next_ts"], second["next_ts"]) + 1
+        assert sch.tick() == 2  # both queued behind the first
+        if change == "delete":
+            store.delete(second["id"])
+        else:
+            store.update(second["id"], paused=True)
+        gate.set()
+        assert wait_for(lambda: sch._pending == 0)
+        assert ran == ["slow task"]
+        assert [p["body"] for p in push.sent] == ["answer to slow task"]
+    finally:
+        sch.stop()
+
+
+def test_task_answers_skip_history_when_history_is_incognito(tmp_path):
+    from kwil.config import load_config
+
+    config = load_config(None, None, profile="")
+    history = object()
+    assistant = SimpleNamespace(push=FakePush(), family=None, reminders=None,
+                                history=history, proactive=None, tools=ToolRegistry(),
+                                local_memory=None)
+    sch = R.from_config(config, assistant)
+    assert sch.tasks.context(None)[2] is history
+    config["history"]["incognito"] = True
+    sch = R.from_config(config, assistant)
+    assert sch.tasks.context(None)[2] is None  # the push still goes; nothing saved
+
+
+def test_setting_a_finished_reminder_again_counts_against_the_bound(store, clock, turn):
+    old = [store.add(f"a{i}", due_at=clock.now + 60, tz="UTC") for i in range(50)]
+    clock.now += 61
+    store.take_due()  # 50 done
+    for i in range(MAX_ACTIVE):
+        store.add(f"b{i}", due_at=clock.now + 3600, tz="UTC")
+    with pytest.raises(ReminderFull):
+        store.update(old[0]["id"], due_at=clock.now + 7200)
+    assert store.count_active() == MAX_ACTIVE and store.get(old[0]["id"])["state"] == "done"
+    out = run(registry(store), "update_reminder", reminder_id=old[1]["id"], in_minutes=30)
+    assert out["status"] == "full"
+    store.delete(store.list()[0]["id"])  # room again: it may come back
+    assert store.update(old[0]["id"], due_at=clock.now + 7200)["state"] == "active"
+
+
+class Answer:
+    def __init__(self):
+        self.ran = []
+
+    def run(self, uid, run, lang="en"):
+        self.ran.append(run.text)
+        return R.TaskResult("ok")
+
+
+def test_at_most_max_tasks_per_day_and_the_person_is_told_once(store, clock):
+    for i in range(4):
+        store.add(f"task {i}", due_at=clock.now + 60 + i, tz="UTC", prompt_task=True)
+    store.add("a plain reminder", due_at=clock.now + 60, tz="UTC")
+    tasks, push = Answer(), FakePush()
+    sch = ReminderScheduler(Settings(max_tasks_per_day=2), push, lambda uid: store,
+                            lambda: [(None, "America/New_York", "en")], tasks=tasks,
+                            clock=clock, inline_tasks=True)
+    clock.now += 120
+    assert sch.tick() == 5
+    assert tasks.ran == ["task 0", "task 1"]
+    skipped = [p for p in push.sent if "Skipped" in p["body"]]
+    assert [p["body"] for p in skipped] == ["Skipped: too many scheduled tasks today."]
+    assert "a plain reminder" in [p["body"] for p in push.sent]  # plain ones aren't capped
+    assert store.tasks_since(clock.now - 86400) == 2  # skipped ones don't count
+    store.add("task 4", due_at=clock.now + 60, tz="UTC", prompt_task=True)
+    clock.now += 120
+    sch.tick()
+    assert tasks.ran == ["task 0", "task 1"]
+    assert len([p for p in push.sent if "Skipped" in p["body"]]) == 1  # once a day
+    clock.now += 86400  # a new day: room again
+    store.add("task 5", due_at=clock.now + 60, tz="UTC", prompt_task=True)
+    clock.now += 120
+    sch.tick()
+    assert tasks.ran[-1] == "task 5"
+
+
+def test_one_person_cannot_fill_the_task_queue(tmp_path, clock):
+    import threading
+
+    mine = SqliteReminderStore(tmp_path / "mine.sqlite", clock=clock)
+    hers = SqliteReminderStore(tmp_path / "hers.sqlite", clock=clock)
+    for i in range(R.MAX_PENDING_PER_PERSON + 2):
+        mine.add(f"mine {i}", due_at=clock.now + 60 + i, tz="UTC", prompt_task=True)
+    hers.add("hers", due_at=clock.now + 60, tz="UTC", prompt_task=True)
+    gate, ran, push = threading.Event(), [], FakePush()
+    sch = ReminderScheduler(Settings(), push, {None: mine, "u_her": hers}.get,
+                            lambda: [(None, "UTC", "en"), ("u_her", "UTC", "en")],
+                            tasks=gated_tasks(gate, ran), clock=clock)
+    try:
+        clock.now += 120
+        sch.tick()
+        gate.set()
+        assert wait_for(lambda: sch._pending == 0)
+        assert sorted(ran) == sorted([f"mine {i}" for i in range(R.MAX_PENDING_PER_PERSON)]
+                                     + ["hers"])
+        told = [p for p in push.sent if "Skipped" in p["body"]]
+        assert [p["uid"] for p in told] == [None]
+    finally:
+        sch.stop()
+        mine.close()
+        hers.close()
+
+
+def test_a_reminder_from_outside_text_says_so_in_the_title(store, clock):
+    store.add("Wire $500", due_at=clock.now + 60, tz="UTC", untrusted=True)
+    store.add("Stretch", due_at=clock.now + 60, tz="UTC")
+    push = FakePush()
+    clock.now += 61
+    scheduler({None: store}, push, clock).tick()
+    assert sorted((p["title"], p["body"]) for p in push.sent) == [
+        ("Reminder", "Stretch"), ("Reminder (from outside text)", "Wire $500")]
+    assert R.title_of(R.Run("k", "rem-000000000001", 0, "x", True, True), "zh",
+                      task=True) == "Kwil（来自外部内容）"
+
+
+def test_a_first_version_file_is_migrated(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite"
+    con = sqlite3.connect(path)
+    con.executescript(R.MIGRATIONS[0] + "\nPRAGMA user_version = 1;")
+    con.close()
+    s = SqliteReminderStore(path)
+    try:
+        with s._lock:
+            assert s._con.execute("PRAGMA user_version").fetchone()[0] == R.SCHEMA_VERSION == 2
+        assert s.tasks_since(0) == 0
+    finally:
+        s.close()

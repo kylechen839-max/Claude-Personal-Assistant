@@ -318,6 +318,7 @@ path = "data/reminders.sqlite"  # yours (Render: /data/reminders.sqlite); invite
 check_seconds = 60            # how often due reminders are looked for
 grace_minutes = 60            # a reminder missed while the server was down still fires if at most this late
 prompt_tasks = true           # scheduled prompts run Claude with read-only tools (calendar, deadlines, memories)
+max_tasks_per_day = 48        # scheduled-task runs per person (you too) in any 24 hours; more are skipped (you're told once a day)
 
 [family]                      # "Invite someone" in the phone app (cloud server; README "Invite family")
 enabled = false               # the server profile (Render) turns it on

@@ -7412,3 +7412,38 @@ delete question and a missing Chinese string.
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3708 passed, 42 skipped, 1 deselected (5997dda: 3659 / 42; +49).
 JavaScript 313 passed (303; +10).
+
+### Reminders, judge round 2 (2026-10-30)
+1. **Quiet hours in the machine's zone.** With `[assistant] timezone` ""
+   (a PC or Pi) the scheduler read quiet hours in UTC; it now resolves the
+   person's zone with `zone_name_or_default`, the same zone the reminder
+   was saved in. Test: a local New York machine (patched local zone), a
+   19:00 reminder with no stated time fires at 19:00 and a 23:00 one waits
+   for 07:30 local.
+2. **A queued task deleted or paused before it runs** is not run: `_task`
+   re-reads the reminder (a closed store counts as gone), so its text
+   never reaches Claude or History. Tests: delete and pause.
+3. **`[history] incognito`**: task answers aren't saved to History (the
+   notification still goes), for the owner and family members. Test.
+4. **Setting a finished reminder again** counts against the 100-active
+   bound (`ReminderFull`; the tool says "full"). Test: 100 active + 50
+   done, refused; allowed again after one delete.
+5. **Task cost and fairness:** `[reminders] max_tasks_per_day` (48, the
+   owner too) in any 24 hours, counted in the run log (new `task` column,
+   schema 2, migrated); one person holds at most 5 of the 20 waiting
+   tasks; a skipped task records "skipped" (not counted) and the person
+   gets one localized "Skipped: too many scheduled tasks today" a day.
+   Tests: the cap and the once-a-day notice, the per-person share with a
+   real worker, the migration.
+- Minor: removed the unused `ReminderScheduler.forget`; a notification for
+  a reminder or task made from outside text says "(from outside text)"
+  in its title (test).
+
+Failing first (scratch copies, restored after each): each of the eight
+fixes reverted alone fails its test(s): the quiet zone, the queued
+re-check (2), incognito, the reactivation bound, the daily cap, the
+once-a-day notice, the per-person share, the title suffix.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3717 passed, 42 skipped, 1 deselected (dd1c3a0: 3708 / 42; +9).
+JavaScript 313 passed (unchanged).
