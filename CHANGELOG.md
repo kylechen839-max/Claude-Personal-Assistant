@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings is now a full-screen page, like iOS Settings: a large title and
+  Done, with grouped sections (Voice, Memory and projects, Notifications,
+  Connections, Privacy and data, People, Backends, Your account). Done and
+  Esc return to the gear, and VoiceOver starts at the title.
 - Voice conversation camera: tap Camera and Kwil sees what your phone's
   back camera sees with each question and answers out loud ("what does this
   sign say?"). "Send this frame" freezes a picture for your next question.

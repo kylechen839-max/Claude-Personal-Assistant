@@ -58,6 +58,57 @@ test('menu: Escape with a Connections sheet open closes only the sheet', () => {
   assert.equal(t.menu.open, false);
 });
 
+// The menu as the full-screen Settings page: a gear (summary), a title and
+// Done; the fake records focus and the menu's own listeners.
+function setupPage() {
+  const focused = [];
+  const node = (id) => ({ id, focus() { focused.push(id); } });
+  const summary = node('summary');
+  const title = node('settings-title');
+  const menuListeners = {};
+  const done = { id: 'settings-done', listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); } };
+  const menu = {
+    open: false, contains: () => true,
+    querySelector: (sel) => (sel === 'summary' ? summary : null),
+    addEventListener: (type, fn) => { (menuListeners[type] ??= []).push(fn); },
+  };
+  const listeners = {};
+  const doc = {
+    querySelector: (sel) => (sel === 'details.menu' ? menu : null),
+    getElementById: (id) => ({ 'settings-title': title, 'settings-done': done })[id] || null,
+    addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); },
+  };
+  const win = { document: doc };
+  win.window = win;
+  vm.createContext(win);
+  vm.runInContext(SCRIPT, win);
+  const fire = (type, ev) => (listeners[type] || []).forEach((fn) => fn(ev));
+  const toggle = () => (menuListeners.toggle || []).forEach((fn) => fn({}));
+  const tapDone = () => (done.listeners.click || []).forEach((fn) => fn({}));
+  return { menu, focused, fire, toggle, tapDone };
+}
+
+test('settings page: opening it focuses the title; Done closes it and focuses the gear', () => {
+  const t = setupPage();
+  t.menu.open = true;
+  t.toggle();
+  assert.deepEqual(t.focused, ['settings-title']);
+  t.tapDone();
+  assert.equal(t.menu.open, false);
+  assert.deepEqual(t.focused, ['settings-title', 'summary']);
+  t.toggle();  // the close's own toggle event moves nothing
+  assert.deepEqual(t.focused, ['settings-title', 'summary']);
+});
+
+test('settings page: Escape gives focus back to the gear too', () => {
+  const t = setupPage();
+  t.menu.open = true;
+  t.fire('keydown', { key: 'Escape' });
+  assert.equal(t.menu.open, false);
+  assert.deepEqual(t.focused, ['summary']);
+});
+
 const touch = (y) => ({ touches: [{ clientY: y }] });
 
 test('keyboard: a swipe down while typing hides it; a small move does not', () => {

@@ -116,35 +116,17 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .menu summary svg, .icon-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
 .menu[open] summary { background: var(--surface-2); color: var(--text); }
-.menu-body { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 5; width: min(23rem, calc(100vw - 1.5rem));
-  max-height: calc(100vh - 6rem - env(safe-area-inset-top)); overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
-  box-shadow: var(--shadow-2); padding: .4rem 0; display: grid; animation: pop .16s ease-out; transform-origin: top right; }
-.menu-body > label { display: flex; align-items: center; justify-content: space-between; gap: .75rem;
-  min-height: 52px; padding: .35rem 1rem; font-size: 1rem; cursor: pointer; }
-.menu-body > label + label, .menu-body > label + fieldset { border-top: 1px solid var(--line); }
-.menu-body > label input[type=checkbox] { order: 2; }
-.menu-body > button { background: none; border-radius: 0; text-align: left; padding: 0 1rem; min-height: 50px;
-  font-weight: 400; border-top: 1px solid var(--line); }
-.menu-body > button:active { background: var(--surface-2); transform: none; }
-.menu-body > #memory-open, .menu-body > #reminders-open, .menu-body > #projects-open { display: flex; align-items: center; justify-content: space-between; }
-.menu-body > #memory-open::after, .menu-body > #reminders-open::after, .menu-body > #projects-open::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: var(--s1);
-  border: solid color-mix(in srgb, var(--muted) 70%, transparent); border-width: 0 2px 2px 0; transform: rotate(-45deg); }
-.menu-body > #logout { margin-top: .4rem; border-top-width: 8px; border-top-color: var(--surface-2); }
-.menu-body > #logout-all { color: var(--bad-ink); }
+/* the menu's body is the Settings page: see "Settings page" below */
 /* family invites (family.js): the owner's list; a family member has no owner tabs */
-.family { border-top: 1px solid var(--line); padding: 0 0 .4rem; display: grid; }
+.family { display: grid; }
 .family > button { background: none; border-radius: 0; text-align: left; padding: 0 1rem; min-height: 50px; font-weight: 400; }
 .invite-form { display: grid; gap: .5rem; padding: .25rem 1rem .5rem; }
 .invite-form label { display: grid; gap: .25rem; font-size: .9375rem; }
 .family .hint, #invite-link { margin: 0 1rem; }
 .family-list { list-style: none; margin: 0; padding: 0; display: grid; }
 .family-list:empty { display: none; }
-/* People (the owner's): a band of the page colour under Connections, one
-   grouped card of person rows (name, status under it, plain actions on the
-   right) and "Invite someone" as its last row */
-#family { border-top: 0; background: var(--bg); padding: 0 var(--s3) var(--s3); }
-#family .group-head { margin: var(--s2) var(--s2) var(--s2); }
+/* People (the owner's): one grouped card of person rows (name, status
+   under it, plain actions on the right) and "Invite someone" as its last row */
 .family-list li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center; column-gap: 0; min-height: var(--row-h); padding: var(--s1) var(--s1) var(--s1) var(--s4); }
 .family-list li + li::before, .family-list:not(:empty) + #invite-open::before { content: ""; position: absolute; top: 0;
@@ -205,9 +187,6 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .value.connect { color: var(--accent-ink); font-weight: 500; }
 
 /* ---------- Connections (connections.js): rows that open a sheet ---------- */
-/* a band of the page colour inside the menu, so the grouped card reads */
-.conns { border-top: 1px solid var(--line); background: var(--bg); padding: 0 var(--s3) var(--s3); }
-.conns .group-head { margin: var(--s3) var(--s2) var(--s2); }
 .conn-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .conn-list { list-style: none; margin: 0; padding: 0; }
 .conn-row { position: relative; }
@@ -313,7 +292,7 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
   .conn-sheet button:active:not(:disabled) { transform: none; }
 }
 /* reply-voice picker (voice-picker.js) */
-.voice-picker { border-top: 1px solid var(--line); padding: .35rem 1rem .5rem; display: grid; gap: .45rem; }
+.voice-picker { padding: var(--s3) var(--s4); display: grid; gap: .45rem; }
 .voice-picker > label { display: grid; gap: .3rem; font-size: 1rem; }
 .voice-picker select { min-height: 44px; max-width: 100%; }
 .voice-picker-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
@@ -322,7 +301,49 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
 .voice-picker .hint { margin: 0; }
 .tag { font-size: .75rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid var(--line);
   color: var(--muted); }
-@keyframes pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Settings page (the gear's <details class="menu">) ---------- */
+/* full screen over the app like iOS Settings: a large title, Done, and a
+   centred column of sections, each a .group-head over one .group card; a
+   tone step from the page, never a shadow or a border */
+.menu[open] .menu-body { position: fixed; inset: 0; z-index: 30; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; background: var(--bg); color: var(--text);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  animation: settings-in var(--t-scrim) ease-out; }
+/* a Connections sheet over the page: the page behind it doesn't scroll (outranks the rule above) */
+html.conn-sheet-open .menu[open] .menu-body { overflow: hidden; }
+/* nothing scrolls behind it */
+html:has(.menu[open]), html:has(.menu[open]) body { overflow: hidden; }
+.settings-page { max-width: 40rem; margin: 0 auto; padding: 0 var(--s4) var(--s6); }
+.settings-top { display: grid; grid-template-columns: 1fr auto; align-items: center; min-height: 52px; }
+#settings-done { grid-column: 2; grid-row: 1; min-width: 44px; font-size: var(--t-body); font-weight: 600; }
+#settings-done:focus-visible { box-shadow: var(--ring); }
+#settings-title { grid-column: 1 / -1; grid-row: 2; justify-self: start; margin: 0 var(--s1); padding: 0 var(--s1);
+  border-radius: var(--r-sm); font-size: var(--t-title); font-weight: 700; letter-spacing: -.03em; }
+/* focus lands here when the page opens (ui.js), for VoiceOver: not a control, no ring */
+#settings-title:focus-visible { box-shadow: none; }
+/* a section with nothing to show (its scripts left every row hidden) goes */
+.set-sec:not(:has(> .group > .row:not([hidden]), > .group > section:not([hidden]), > section:not([hidden]),
+  > fieldset:not([hidden]), > .group-foot:not([hidden]))) { display: none; }
+.set-sec > .group:not(:has(> :not([hidden]))) { display: none; }
+/* a hairline above every visible row but the card's first, inset like iOS */
+.set-sec > .group > *, .set-sec .account-self > * { position: relative; }
+.set-sec > .group > :not([hidden]) ~ :not([hidden])::before,
+.set-sec .account-self > :not([hidden]) ~ :not([hidden])::before { content: ""; position: absolute; top: 0;
+  left: var(--s4); right: 0; border-top: 1px solid var(--line); }
+.set-sec .row { font-size: var(--t-body); }
+.set-sec label.row { justify-content: space-between; cursor: pointer; }
+.set-sec label.row input[type=checkbox] { order: 2; }
+.set-sec .row-label { flex: 1; min-width: 0; }
+.set-sec .row.danger { color: var(--bad-ink); }
+.set-sec > .group-foot { margin: var(--s2) var(--s4) 0; }
+.set-sec .account-self > .hint { margin: 0; padding: var(--s2) var(--s4); }
+.set-sec .account-self > .hint:empty { display: none; }
+.set-sec .account-self .invite-form { padding: var(--s3) var(--s4); }
+@keyframes settings-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .menu[open] .menu-body { animation: none; }
+}
 
 .log { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   padding: 1rem var(--pad) 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
@@ -538,8 +559,10 @@ button.source:active { background: var(--surface-2); }
 .backend-badge[data-role=cloud] { color: var(--accent-ink); background: var(--accent-soft); }
 .backend-badge[data-role=offline] { color: var(--bad-ink); background: var(--bad-soft); }
 @media (prefers-color-scheme: dark) { .backend-badge[data-role=pc] { color: #7cc4c0; background: #7cc4c026; } }
-.backends { margin: 0; border: 0; border-top: 1px solid var(--line); padding: .75rem 1rem; display: grid; gap: .6rem; }
-.backends legend { float: left; width: 100%; padding: 0; font-size: var(--t-cap); font-weight: 500; color: var(--muted); }
+/* a Settings section: the legend is its group head, the fields one card */
+.backends { margin: 0; border: 0; padding: 0; min-width: 0; }
+.backends legend { float: left; width: 100%; margin: var(--s5) 0 var(--s2); padding: 0 var(--s4); }
+.backends-card { clear: both; display: grid; gap: .6rem; padding: var(--s3) var(--s4) var(--s4); }
 .backends label { display: grid; gap: .3rem; font-size: .875rem; color: var(--text-2); }
 .backends input, .backends select { min-height: 44px; font-size: .9375rem; }
 .backends .hint { margin: 0; }

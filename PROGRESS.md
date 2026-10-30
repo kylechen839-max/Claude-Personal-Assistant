@@ -8232,3 +8232,55 @@ hardware here): MANUAL_TEST "Voice conversation on the phone".
   installed"), checked with node off the PATH.
 - Full suite: 3991 passed, 53 skipped (round 0: 3988); JS `*.test.mjs` 364,
   `voice-core.test.js` 51 (round 0: 48).
+
+## Settings as one grouped page (redesign phase 2, 2026-10-30)
+- The gear no longer opens a popover: `<details class="menu">` (kept, with
+  `<summary aria-label="Settings">`, which twelve scripts and the JS tests
+  find) now opens a full-screen page like iOS Settings. A large "Settings"
+  title (`#settings-title`) and a **Done** button (`#settings-done`), then
+  eight sections in this order, each a `<div class="set-sec">` with a
+  `.group-head` over one `.group` of `.row`s: Voice (phone voice, mute,
+  reply voice), Memory and projects, Notifications (enable, Reminders, the
+  push status as a `.group-foot`), Connections (unchanged), Privacy and
+  data (Incognito, a family member's own export/delete), People
+  (unchanged), Backends (the fieldset; its legend is the head), Your
+  account (sign out, sign out everywhere). No About section.
+- Markup, CSS and i18n only, plus `ui.js`: every id, endpoint, script and
+  show/hide rule is as before; google-connect stays before notion-connect,
+  `#connections` before `#api-key`, the script order unchanged.
+- CSS (`app.css`): the popover rules (`.menu-body > ...`, the `pop`
+  keyframes, the bands behind Connections and People) are gone; a new
+  "Settings page" block after the voice picker's: `position: fixed;
+  inset: 0` on `--bg` with all four safe-area insets, a 40rem centred
+  column, no shadow/border, tokens only (light and dark), inset hairlines
+  between rows, `.row-chevron` on rows that open another page, a section
+  with no visible row hidden through `:has` (child combinators, so the
+  Connections rows hidden inside their own list don't count), the page
+  behind it locked (`html:has(.menu[open])`), 44px targets, a focus ring
+  on Done, and a reduced-motion path for its fade.
+- `ui.js`: opening the page focuses the title (VoiceOver starts there);
+  Done closes it like Esc, and both give focus back to the gear.
+- i18n: 记忆和项目, 通知, 隐私和数据, 你的账户 (Done, Settings, Voice,
+  Backends and People were there). "Account" is never a head: it is the
+  invite form's field (账户类型).
+- `sw.js` cache `kwil-shell-v22`.
+- Tests: `tests/js/settings-page.test.mjs` (4: the heads in order; each
+  stable id inside its own section and only there; title and Done above
+  the sections; every head, Done and Settings in Chinese and no head
+  "Account"); `tests/js/ui.test.mjs` +2 (opening focuses the title, Done
+  closes and focuses the gear; Esc focuses the gear);
+  `tests/test_settings_page.py` (2: 70 stable ids each exactly once inside
+  the menu; the order constraints); `tests/test_theme.py` +1 (the settings
+  block: no hex/rgb/`--shadow`, fixed with the four safe-area insets, the
+  40rem column, the `:has` rule, the scroll lock, Done's 44px and ring,
+  reduced motion, the old popover and bands gone). With the four source
+  files reverted to ccfbde4 all 9 fail; with only `i18n.js` reverted the
+  Chinese test fails, with only `ui.js` reverted both ui tests fail.
+- Screenshots (Playwright, Chromium in the sandbox, not a real iPhone):
+  390x844 and 1280x860, light and dark, English and Chinese. Focus was on
+  the title after opening, `html` overflow hidden while open, and after
+  Done the menu was closed with focus on the gear, in all eight runs.
+- Full suite: 3994 passed, 53 skipped (ccfbde4 collects 3 fewer: 4044 vs 4047); JS
+  `tests/js/*.test.mjs` + `voice-core.test.js` 422 passed (baseline 416).
+  Safe areas, VoiceOver and the scroll lock on a real iPhone: MANUAL_TEST
+  "Settings page".

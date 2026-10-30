@@ -392,7 +392,7 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
   - Should: your words appear, then the answer as text and spoken through the
     phone's speaker within a few seconds.
   - If no sound: check the phone isn't on silent (iPhone switch), or tick
-    "Use the phone's voice" in the gear menu.
+    "Use the phone's voice" in Settings.
 - [ ] Tap once, ask "Mark Homework 6 as in progress", tap again to send.
 - [ ] Create a test event by typing "Add a test event tomorrow at 3", then say
       "Delete the test event tomorrow".
@@ -498,7 +498,7 @@ Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
       / 编辑消息 / 消息操作 / 从这里分支.
 
 ### Reply voice (optional, ~5 min)
-- [ ] Open the gear menu: **Reply voice** lists the voices on this server
+- [ ] Open Settings (the gear): **Reply voice** lists the voices on this server
       (Default, the Piper voices in `voices/`, Kokoro if downloaded, System
       voice). Pick one and tap **Preview**.
   - Should: a short sample in that voice plays from the phone's speaker
@@ -531,7 +531,7 @@ phone (or yours signed in as her test user).
     高级 → 转至… hint). Opened from the home screen, only the Google step is
     left; after connecting Google the card is gone.
   - Should: the sign-in page is in Chinese (登录). After the token, the
-    chat page, the gear menu and the voice screen are in Chinese.
+    chat page, Settings and the voice screen are in Chinese.
 - [ ] Ask by voice: "你好，今天天气怎么样？"
   - Should: her words appear in Chinese characters; the reply is one or two
     short sentences in Simplified Chinese, spoken by the Chinese Piper voice
@@ -539,7 +539,7 @@ phone (or yours signed in as her test user).
 - [ ] Ask "我的日历上明天有什么？" before connecting Google.
   - Should: she's told it can't see a calendar (no tools); nothing about
     your calendar, Notion or memory.
-- [ ] Gear menu -> 连接 Google 账户 -> sign in with her Google account ->
+- [ ] Settings (设置) -> 连接 Google 账户 -> sign in with her Google account ->
       Advanced -> continue -> allow Calendar and Gmail.
   - Should: back in the app; the menu now shows 重新连接 Google 账户 and
     "Google 账户已连接。"; `data/mom/google_token.json` exists; no browser
@@ -1622,7 +1622,7 @@ the PC (README "Spotify by voice").
   - Should: playback moves to the phone.
 - [ ] Quit Spotify everywhere, then "Hey Claude, play some jazz".
   - Should: it says Spotify isn't open anywhere (no error noise).
-- [ ] Phone app, gear menu (owner).
+- [ ] Phone app, Settings (owner).
   - Should: "Connect Spotify" (or "Reconnect Spotify" once connected); a
     tap goes to Spotify and back to the app. A family member's phone does
     not show the button.
@@ -1632,10 +1632,10 @@ the PC (README "Spotify by voice").
 Needs the cloud (or a server with `USER_DATA_KEY`), the app added to the
 iPhone's Home Screen (iOS 16.4+), and some deadlines in the student
 deadline store (README "Study briefings").
-- [ ] In Safari (not the Home Screen app), open the gear menu.
+- [ ] In Safari (not the Home Screen app), open Settings (the gear).
   - Should: no "Enable notifications" button; a line says to add the app
     to the Home Screen first.
-- [ ] In the Home Screen app, gear menu -> **Enable notifications**.
+- [ ] In the Home Screen app, Settings -> **Enable notifications**.
   - Should: iOS asks to allow notifications right after the tap; after
     "Allow" the button reads "Turn off notifications" and the menu says
     they are on.
@@ -1652,7 +1652,7 @@ deadline store (README "Study briefings").
     to the chat.
 - [ ] Set `[proactive] quiet_start` to a time just passed and restart.
   - Should: no notification until `quiet_end`.
-- [ ] Gear menu -> **Turn off notifications**.
+- [ ] Settings -> **Turn off notifications**.
   - Should: no more notifications on that phone.
 
 ## Reminders and scheduled tasks (~15 min, iPhone)
@@ -1665,7 +1665,7 @@ Needs notifications on (the section above) in the Home Screen app.
   - Should: the app opens on Settings -> Reminders (the stretch reminder
     is gone from the list: it is done).
 - [ ] Say "every Monday at 8am, tell me what's due this week".
-  - Should: Kwil confirms "every Monday at 8:00 AM". Gear menu ->
+  - Should: Kwil confirms "every Monday at 8:00 AM". Settings ->
     **Reminders** lists it with a "Task" badge and "every Monday at 8:00
     AM"; Monday at 8 a "Kwil" notification sums up what's due, and
     History has a conversation named after the task with the whole
@@ -1726,16 +1726,41 @@ In the Home Screen app, with Canvas course content synced if you have it.
 - [ ] Tap the pill's x, then the book button.
   - Should: the x hides the pill ("Study mode off."); the book button
     brings it back ("Studying"), and your next message gets a question.
-- [ ] Gear menu -> **Memory** -> **Study: things to review**.
+- [ ] Settings -> **Memory** -> **Study: things to review**.
   - Should: the missed concept is listed with its course and "Missed
     once"; **Delete** asks first, and Cancel keeps it.
 - [ ] In a Chinese family member's app: the pill and the list read
   "正在学习 ..." and "学习：要复习的内容", and their list doesn't show
   yours.
 
+## Settings page (~5 min, iPhone with VoiceOver, and desktop)
+- [ ] Phone app (Home Screen), tap the gear.
+  - Should: Settings fills the screen: a large "Settings" title and
+    "Done" top right, clear of the notch and the Dynamic Island; the last
+    section ("Your account") clears the home indicator when scrolled to
+    the bottom. Sections in order: Voice, Memory and projects,
+    Notifications, Connections, Privacy and data, People, Backends, Your
+    account (a section with nothing for you is left out).
+- [ ] Scroll Settings up and down hard, past both ends.
+  - Should: only Settings moves; the chat behind it never scrolls or
+    shows through.
+- [ ] Tap **Done**.
+  - Should: back to the chat, the gear highlighted as before.
+- [ ] Turn on VoiceOver, tap the gear.
+  - Should: VoiceOver reads "Settings, heading" first. Swipe right through
+    the page: each section head, then its rows. Double-tap **Done**:
+    VoiceOver lands on the gear ("Settings, button").
+- [ ] On the desktop (Chrome or Edge), open Settings, press **Esc**.
+  - Should: Settings closes and focus is on the gear (Enter opens it
+    again). With a Connections sheet open, Esc closes only the sheet.
+- [ ] Phone set to dark mode, and the app in Chinese (a family member's).
+  - Should: dark grey page with lighter cards, no white flashes; heads read
+    语音, 记忆和项目, 通知, 服务连接, 隐私和数据, 家人, 服务器, 你的账户 and
+    the button 完成.
+
 ## Projects (~15 min, iPhone and desktop)
 In the Home Screen app, with a syllabus PDF on the phone.
-- [ ] Gear menu -> **Projects**.
+- [ ] Settings -> **Projects**.
   - Should: the menu closes and the Projects page opens; with Canvas or
     deadlines connected, **Suggested from your courses** lists your
     classes. Tap **Create** on one.

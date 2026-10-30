@@ -23,6 +23,12 @@
     "Backend in use": "正在使用的服务器",
     "Conversation history": "对话记录",
     "Settings": "设置",
+    // the Settings page's section heads (Voice, Connections, People and
+    // Backends are below; "Account" is the invite form's field, not a head)
+    "Memory and projects": "记忆和项目",
+    "Notifications": "通知",
+    "Privacy and data": "隐私和数据",
+    "Your account": "你的账户",
     "Use the phone's voice": "使用手机自带的声音",
     "Don't speak replies": "不朗读回复",
     "Incognito (don't save)": "无痕模式（不保存）",

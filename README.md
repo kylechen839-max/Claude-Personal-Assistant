@@ -642,7 +642,7 @@ Replies play through the phone's speaker even with the ringer switch on
 silent. The app shell (page, script, icons) is cached so it opens quickly;
 conversations and audio are never cached.
 
-`tailscale serve reset` stops publishing it. "Sign out" in the gear menu
+`tailscale serve reset` stops publishing it. "Sign out" in Settings (the gear)
 revokes that phone's cookie on the server; "Sign out everywhere" (e.g. after
 losing a phone) revokes every browser's (with failover, every phone's access
 token on every backend too, see FAILOVER.md). Signed-in phones are listed in

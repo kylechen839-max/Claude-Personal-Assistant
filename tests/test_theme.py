@@ -218,3 +218,37 @@ def test_maskable_icon_keeps_the_quill_in_the_safe_zone():
         for px, py in pts:
             reach = ((px - 256) ** 2 + (py - 256) ** 2) ** 0.5 * k + width * k / 2
             assert reach <= 0.4 * 512
+
+
+def test_settings_page_css_is_full_screen_tokens_only_and_calm():
+    """The gear's menu is a full-screen Settings page: fixed over the app
+    with the safe-area insets, the page colour behind grouped cards, no
+    shadow or literal colour, a section with nothing visible hidden by
+    :has, nothing scrolling behind it, 44px targets, a focus ring and a
+    reduced-motion path."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    start = css.index("/* ---------- Settings page")
+    block = css[start:css.index("\n.log {", start)]
+    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", block) == []
+    assert "rgb(" not in block and "rgba(" not in block and "--shadow" not in block
+    rules = dict(re.findall(r"\n([^{}\n@]+)\{([^{}]*)\}", block))
+    page = rules[".menu[open] .menu-body "]
+    assert "position: fixed; inset: 0;" in page and "background: var(--bg)" in page
+    for side in ("top", "right", "bottom", "left"):
+        assert f"env(safe-area-inset-{side})" in page, side
+    assert "border" not in page and "shadow" not in page
+    assert "max-width: 40rem; margin: 0 auto;" in rules[".settings-page "]
+    assert re.search(r"\.set-sec:not\(:has\(> \.group > \.row:not\(\[hidden\]\)[^{]*\{ display: none; \}", block)
+    assert "html:has(.menu[open])" in block and "overflow: hidden" in block
+    # a Connections sheet still locks the page's own scroller, and the lock
+    # comes after (and outranks) the page's overflow-y: auto
+    lock = "html.conn-sheet-open .menu[open] .menu-body { overflow: hidden; }"
+    assert lock in block and block.index(lock) > block.index(".menu[open] .menu-body {")
+    assert "min-width: 44px" in rules["#settings-done "]
+    assert "box-shadow: var(--ring)" in rules["#settings-done:focus-visible "]
+    reduced = block[block.index("@media (prefers-reduced-motion: reduce)"):]
+    assert ".menu[open] .menu-body { animation: none; }" in reduced
+    # the old popover and its pop animation are gone, and so are the bands
+    assert "animation: pop" not in css and "@keyframes pop" not in css
+    assert ".menu-body > " not in css
+    assert not re.search(r"#family \{[^}]*background", css) and ".conns {" not in css
