@@ -9,6 +9,9 @@
 //                   listening -> thinking -> speaking -> (barge-in) -> listening
 //                   with a follow-up window ("still listening") after a reply
 //   packFrame / unpackFrame / floatToPcm16 - the socket's binary framing
+//   frameSize / encodeFrame / packUtterance / CameraPolicy - the Camera
+//                   button: which frame (if any) rides along with a turn,
+//                   shrunk and JPEG-encoded under the server's cap
 "use strict";
 
 (function (root, factory) {
@@ -480,6 +483,11 @@
       this._set("paused");
     }
     resume() { if (this.state === "paused") this._set("listening"); }
+    // Should utterance `turn`, whose sending was delayed (its camera frame
+    // was still encoding), still go out? Not once the conversation is
+    // paused or over, or the turn was cancelled meanwhile (a barge-in, or
+    // leaving the app): the server would run a turn the page dropped.
+    stillWanted(turn) { return this.live && !this.cancelled.has(turn); }
     end() {
       if (this.state === "ended") return;
       this.held = null;
@@ -517,6 +525,99 @@
     return new Uint8Array(out.buffer);
   }
 
+  // Everything the page sends, in the order it happened. An item is the
+  // data, or a function giving the data, null (send nothing) or a promise
+  // of either (an utterance waiting for its camera frame); later items
+  // wait for it, so an "interrupt" can never overtake its own utterance.
+  // With nothing pending, an item is sent at once (synchronously).
+  class OrderedSender {
+    constructor(send) { this.send = send; this.queue = []; this.draining = null; }
+    // a send that throws (socket gone) never wedges the items behind it
+    _out(d) { try { this.send(d); } catch (e) { /* dropped */ } }
+    push(item) {
+      this.queue.push(item);
+      if (!this.draining) this.draining = this._drain();
+      return this.draining || Promise.resolve();
+    }
+    // a promise that settles once everything pushed so far is sent
+    idle() { return this.draining || Promise.resolve(); }
+    _drain() {
+      while (this.queue.length) {
+        const item = this.queue.shift();
+        let data;
+        try { data = typeof item === "function" ? item() : item; } catch (e) { data = null; }
+        if (data && typeof data.then === "function") {
+          return data.then((d) => d, () => null).then((d) => {
+            if (d !== null && d !== undefined) this._out(d);
+            this.draining = this._drain();
+            return this.draining;
+          });
+        }
+        if (data !== null && data !== undefined) this._out(data);
+      }
+      this.draining = null;
+      return null;
+    }
+  }
+
+  // --- camera frames ---
+  // The size to draw a w x h video frame at: the long side at most `max`,
+  // aspect ratio kept, never upscaled.
+  function frameSize(w, h, max) {
+    w = Math.max(0, Math.floor(Number(w) || 0));
+    h = Math.max(0, Math.floor(Number(h) || 0));
+    if (!w || !h) return { width: 0, height: 0 };
+    const scale = Math.min(1, (Number(max) || 0) > 0 ? max / Math.max(w, h) : 1);
+    return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+  }
+
+  // A canvas as JPEG bytes of at most `maxBytes`: lower quality each try;
+  // rejects if even the last one is too big (the server would close the
+  // socket over it). canvas.toBlob gives a Blob, never a blob: URL.
+  async function encodeFrame(canvas, { maxBytes, qualities = [0.8, 0.7, 0.6, 0.5] } = {}) {
+    for (const q of qualities) {
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", q));
+      if (!blob || blob.type !== "image/jpeg") continue;
+      if (blob.size <= maxBytes) return new Uint8Array(await blob.arrayBuffer());
+    }
+    throw new Error("the camera frame is too large to send");
+  }
+
+  // One utterance message: the header (with "image": its length when a
+  // frame goes along), the PCM, then the JPEG (voice_ws.split_image).
+  function packUtterance(header, pcm, jpeg) {
+    if (!jpeg || !jpeg.byteLength) return packFrame(header, pcm);
+    const body = new Uint8Array(pcm.byteLength + jpeg.byteLength);
+    body.set(new Uint8Array(pcm.buffer || pcm, pcm.byteOffset || 0, pcm.byteLength), 0);
+    body.set(new Uint8Array(jpeg.buffer || jpeg, jpeg.byteOffset || 0, jpeg.byteLength), pcm.byteLength);
+    return packFrame({ ...header, image: jpeg.byteLength }, body);
+  }
+
+  // Which frame goes with the next utterance: none while the camera is off;
+  // a frame pinned with "Send this frame" once (then live frames again);
+  // else a live one. An answer to a yes/no question never carries one (and
+  // a pinned frame waits for the next real turn).
+  class CameraPolicy {
+    constructor() { this.on = false; this.pinned = null; }
+    setOn(on) {
+      this.on = !!on;
+      if (!this.on) this.pinned = null;
+    }
+    pin(frame) { if (this.on && frame) this.pinned = frame; }
+    unpin() { this.pinned = null; }
+    // -> null, { kind: "pinned", frame } or { kind: "live" }
+    take(awaitingAnswer) {
+      if (!this.on || awaitingAnswer) return null;
+      if (this.pinned) {
+        const frame = this.pinned;
+        this.pinned = null;
+        return { kind: "pinned", frame };
+      }
+      return { kind: "live" };
+    }
+  }
+
   return { SAMPLE_RATE, FRAME_SAMPLES, rms, EnergyVAD, Endpointer, TurnController,
-    packFrame, unpackFrame, floatToPcm16, concat };
+    packFrame, unpackFrame, floatToPcm16, concat,
+    frameSize, encodeFrame, packUtterance, CameraPolicy, OrderedSender };
 });

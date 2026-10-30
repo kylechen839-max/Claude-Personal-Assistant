@@ -3,6 +3,9 @@
 // can't load), streams the reply back sentence by sentence and plays it, and
 // stops talking as soon as you talk over it. The turn-taking logic lives in
 // voice-core.js; this file is the mic, the speaker, the socket and the UI.
+// The Camera button adds the back camera: each turn carries one frame of it
+// (or the one "Send this frame" froze), shrunk and JPEG-encoded here, in the
+// same socket message as the words.
 "use strict";
 
 (() => {
@@ -14,6 +17,8 @@
     end: $("voice-end"), mute: $("voice-mute"), ccToggle: $("voice-cc"),
     resume: $("voice-resume"), debug: $("voice-debug"), debugToggle: $("voice-timings"),
     meter: $("voice-meter"),
+    camera: $("voice-camera"), frame: $("voice-frame"), preview: $("voice-camera-preview"),
+    cameraOn: $("voice-camera-on"),
   };
   if (!ui.open || !VC) return;
 
@@ -22,6 +27,14 @@
   const FOLLOW_UP_LABEL = "Still listening…"; // the follow-up window after a reply
   const CUE_TAIL_MS = 250; // after an earcon, the mic still hears it (latency, room)
   const reducedMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)");
+  // What the camera says on the page (i18n.js has each in Chinese)
+  const CAMERA_TEXT = {
+    denied: "Kwil can't use the camera. Allow it, then close and reopen Kwil.",
+    failed: "The camera couldn't start.",
+    stopped: "The camera stopped.",
+    tooBig: "That frame was too large to send; the turn went without it.",
+    pinned: "This frame goes with your next question.",
+  };
 
   let ctx = null; // one AudioContext for capture and playback (unlocked by the tap)
   let mic = null; // MediaStream
@@ -47,6 +60,100 @@
   let timings = {}; // turn -> {name: ms}
   let debugOn = false;
   let generation = 0; // bumped by finish(), so a start() still loading gives up
+  // Everything sent on the socket, in the order it happened: an utterance
+  // waiting for its camera frame holds back the "interrupt" that follows it
+  // (VoiceCore.OrderedSender). Made per socket by start().
+  let sender = null;
+  function sendJson(m) { if (sender) sender.push(JSON.stringify(m)); }
+
+  // --- camera: a video-only stream (the mic is never asked for again) ---
+  const camera = {
+    stream: null,
+    policy: new VC.CameraPolicy(),
+    canvas: null,
+    asking: false,
+    // Inside the Camera tap (iOS wants getUserMedia there).
+    async start() {
+      if (this.stream || this.asking || !running) return;
+      this.asking = true;
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false });
+      } catch (e) {
+        this.asking = false;
+        const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+        caption("status", denied ? CAMERA_TEXT.denied : CAMERA_TEXT.failed);
+        return;
+      }
+      this.asking = false;
+      if (!running || document.visibilityState === "hidden") {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      this.stream = stream;
+      for (const track of stream.getVideoTracks()) {
+        track.onended = () => { if (this.stream === stream) { this.stop(); caption("status", CAMERA_TEXT.stopped); } };
+      }
+      ui.preview.srcObject = stream; // never a blob: URL (the CSP has none)
+      ui.preview.hidden = false;
+      ui.preview.play().catch(() => { /* autoplay+muted plays anyway */ });
+      this.policy.setOn(true);
+      this.show(true);
+    },
+    stop() {
+      this.policy.setOn(false);
+      if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+      this.stream = null;
+      if (ui.preview) { ui.preview.pause(); ui.preview.srcObject = null; ui.preview.hidden = true; }
+      this.show(false);
+    },
+    show(on) {
+      if (!ui.camera) return;
+      ui.camera.setAttribute("aria-pressed", String(on));
+      ui.frame.hidden = !on;
+      ui.cameraOn.hidden = !on;
+      ui.view.classList.toggle("camera-on", on);
+      this.showPinned(false);
+    },
+    showPinned(pinned) {
+      ui.frame.setAttribute("aria-pressed", String(pinned));
+      ui.view.classList.toggle("frame-pinned", pinned);
+      if (!pinned && ui.preview && this.stream) ui.preview.play().catch(() => {});
+    },
+    // The live picture now, as JPEG bytes under the server's cap.
+    async grab() {
+      const v = ui.preview;
+      if (!this.stream || !v || !v.videoWidth) return null;
+      const size = VC.frameSize(v.videoWidth, v.videoHeight, settings.camera_max_side ?? 1024);
+      if (!size.width) return null;
+      const c = this.canvas || (this.canvas = document.createElement("canvas"));
+      c.width = size.width;
+      c.height = size.height;
+      c.getContext("2d").drawImage(v, 0, 0, size.width, size.height);
+      return VC.encodeFrame(c, { maxBytes: settings.camera_max_bytes ?? 400 * 1024 });
+    },
+    // "Send this frame": freeze the picture; it goes with the next turn.
+    async pin() {
+      if (!this.stream) return;
+      if (this.policy.pinned) { this.policy.unpin(); this.showPinned(false); return; }
+      let jpeg = null;
+      try { jpeg = await this.grab(); } catch (e) { caption("status", CAMERA_TEXT.tooBig); return; }
+      if (!jpeg || !this.stream) return;
+      this.policy.pin(jpeg);
+      ui.preview.pause(); // the frozen frame stays on screen
+      this.showPinned(true);
+      caption("status", CAMERA_TEXT.pinned);
+    },
+    // The frame for this utterance: null at once (camera off, an answer),
+    // else a promise of the JPEG bytes (null if it couldn't be made).
+    forTurn(awaitingAnswer) {
+      const pick = this.policy.take(awaitingAnswer);
+      if (!pick) return null;
+      if (pick.kind === "pinned") { this.showPinned(false); return Promise.resolve(pick.frame); }
+      return this.grab().catch(() => { caption("status", CAMERA_TEXT.tooBig); return null; });
+    },
+  };
 
   // --- playback: decoded chunks scheduled back to back ---
   const playback = {
@@ -72,9 +179,7 @@
         node.onended = () => {
           this.sources = this.sources.filter((s) => s !== entry);
           // A yes/no question only counts as asked once it was heard to the end.
-          if (header.question && ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: "played", turn: header.turn, index: header.index }));
-          }
+          if (header.question) sendJson({ type: "played", turn: header.turn, index: header.index });
           if (!this.sources.length) controller.onPlaybackIdle();
         };
       });
@@ -160,7 +265,7 @@
       t.reported = true;
       const out = { type: "client_timings", turn, vad: vadName };
       for (const [k] of rows) if (t[k] !== undefined) out[k] = Math.round(t[k] - base);
-      ws.send(JSON.stringify(out));
+      sendJson(out);
     }
   }
 
@@ -364,11 +469,25 @@
     });
   }
 
+  // The words and (camera on) one frame, as one message, in order with
+  // everything else sent. Without a frame it goes out at once. With one,
+  // it waits for the frame, and is dropped if the turn was cancelled or
+  // the conversation paused or ended meanwhile (the page's "interrupt" for
+  // it is queued behind it, so the server never runs a dropped turn).
   function sendUtterance(turn, audio) {
-    if (!ws || ws.readyState !== 1) return;
+    if (!sender || !ws || ws.readyState !== 1) return;
     const pcm = VC.floatToPcm16(audio);
-    ws.send(VC.packFrame({ type: "utterance", turn, sample_rate: VC.SAMPLE_RATE, vad: vadName }, pcm));
-    mark("sent", turn);
+    const ctl = controller;
+    const answering = !!(ctl && ctl.awaitingAnswer); // never with a frame
+    const frame = camera.forTurn(answering);
+    const build = (jpeg, waited) => {
+      if (waited && (controller !== ctl || !ctl || !ctl.stillWanted(turn))) return null;
+      mark("sent", turn);
+      return VC.packUtterance({ type: "utterance", turn, sample_rate: VC.SAMPLE_RATE,
+        vad: vadName }, pcm, jpeg);
+    };
+    sender.push(frame ? () => frame.then((j) => build(j, true), () => build(null, true))
+      : () => build(null, false));
   }
 
   // --- wake lock / interruptions ---
@@ -398,10 +517,14 @@
     controller.resume();
   }
 
+  // In the background the camera is turned off (and stays off until tapped
+  // again): a hidden page never keeps it live.
   document.addEventListener("visibilitychange", () => {
     if (!running) return;
-    if (document.visibilityState === "hidden") pause("Paused while the app was in the background.");
-    else keepAwake();
+    if (document.visibilityState === "hidden") {
+      camera.stop();
+      pause("Paused while the app was in the background.");
+    } else keepAwake();
   });
 
   // The chat pane shows a stored conversation (app.js, history.js): voice
@@ -494,10 +617,17 @@
       if (cancelled()) return;
       await connect();
       if (cancelled()) return;
+      const sock = ws;
+      sender = new VC.OrderedSender((data) => { if (ws === sock && sock.readyState === 1) sock.send(data); });
       if (settings.debug_panel && !debugOn && ui.debugToggle) ui.debugToggle.click();
+      // a cap of 0 means no camera (the server says camera: false then too)
+      if (ui.camera) {
+        ui.camera.hidden = settings.camera !== true || !navigator.mediaDevices
+          || !(settings.camera_max_side > 0) || !(settings.camera_max_bytes > 0);
+      }
       controller = new VC.TurnController({
         setState, caption, sendUtterance,
-        send: (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); },
+        send: sendJson,
         stopPlayback: () => playback.stop(),
         mark, followUp,
         // the end of a sentence still echoes: it mustn't start an utterance
@@ -558,9 +688,12 @@
     playback.stop();
     earcons.play("ended");
     if (ws) { try { ws.close(1000); } catch (e) { /* closed */ } ws = null; }
+    sender = null;
     if (capture) { capture.port.onmessage = null; capture.disconnect(); capture = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
     if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
+    camera.stop();
+    if (ui.camera) ui.camera.hidden = true;
     if (ctx) ctx.onstatechange = null;
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
     controller = null;
@@ -594,6 +727,15 @@
   ui.mute.addEventListener("click", () => toggleMute());
   ui.ccToggle.addEventListener("click", () => setCaptions(ui.ccToggle.getAttribute("aria-pressed") !== "true"));
   ui.resume.addEventListener("click", resume);
+  // No hash navigation here while the camera is on: in an iPhone home-screen
+  // app a navigation can drop the camera grant and ask again.
+  if (ui.camera) {
+    ui.camera.addEventListener("click", () => {
+      if (camera.stream) camera.stop();
+      else camera.start();
+    });
+    ui.frame.addEventListener("click", () => camera.pin());
+  }
   ui.orb.addEventListener("click", () => { if (controller && controller.state === "paused") resume(); });
   if (ui.debugToggle) {
     ui.debugToggle.addEventListener("click", () => {

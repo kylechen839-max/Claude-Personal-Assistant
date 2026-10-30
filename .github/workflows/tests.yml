@@ -162,7 +162,9 @@ jobs:
         run: python -m pytest -rs tests/test_contract.py
 
   # The phone app's backend router (Pi -> PC -> cloud failover, FAILOVER.md):
-  # node:test, no packages needed.
+  # node:test, no packages needed. voice-core.test.js (the voice view's
+  # turn-taking and camera frames) is CommonJS; pytest runs it too when the
+  # runner has node (test_voice_ws.py), this runs it whatever.
   backend-router:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -171,7 +173,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test tests/js/*.test.mjs
+      - run: node --test tests/js/*.test.mjs tests/js/voice-core.test.js
 
   # The Pinecone MCP connector (deployed separately, see render.yaml):
   # type-check, build, and check the server starts and answers its health check.

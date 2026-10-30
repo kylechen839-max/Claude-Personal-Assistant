@@ -8,7 +8,10 @@ cancels the Claude stream and the TTS right away.
 
 Binary frames, both ways: 4-byte big-endian header length, a UTF-8 JSON
 header, then the payload (16 kHz mono PCM16 up, a WAV per sentence down).
-Text frames are JSON control messages.
+With the Camera button on, an utterance's header has `"image": n` and its
+payload is the PCM followed by an n-byte JPEG frame (one message, so the
+frame can't arrive without its words). Text frames are JSON control
+messages.
 
 Security: the handshake needs the same signed session cookie as the rest of
 the API and a same-origin Origin header (browsers always send one on a
@@ -123,15 +126,51 @@ def voice_settings(voice: dict | None) -> dict:
     return {**DEFAULTS["voice"], **(voice or {})}
 
 
+def camera_max_bytes(v: dict) -> int:
+    """The largest camera frame an utterance may carry ([voice] camera_max_kb)."""
+    return int(float(v["camera_max_kb"]) * 1024)
+
+
+def camera_on(v: dict) -> bool:
+    """`[voice] camera` on, with caps a frame can meet: a camera_max_kb or
+    camera_max_side of 0 (or less) turns the camera off rather than
+    refusing or dropping every frame."""
+    try:
+        return v["camera"] is True and float(v["camera_max_kb"]) > 0 \
+            and int(v["camera_max_side"]) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def split_image(header: dict, payload: bytes, v: dict) -> tuple[bytes, bytes | None]:
+    """An utterance's (PCM, JPEG frame or None). ValueError for a bad
+    length, OverflowError for a frame over the cap, PermissionError when
+    `[voice] camera` is off."""
+    if header.get("image") is None:
+        return payload, None
+    n = header["image"]
+    if isinstance(n, bool) or not isinstance(n, int) or n <= 0 or n > len(payload):
+        raise ValueError("bad image length")
+    if not camera_on(v):
+        raise PermissionError("the camera is turned off")
+    if n > camera_max_bytes(v):
+        raise OverflowError("camera frame too large")
+    return payload[:-n], payload[-n:]
+
+
 def client_settings(v: dict) -> dict:
-    """What the page needs to run its VAD and turn-taking."""
+    """What the page needs to run its VAD and turn-taking (and the camera)."""
+    camera = camera_on(v)
     return {"vad": v["vad"], "silence_ms": v["silence_ms"],
             "min_utterance_ms": v["min_utterance_ms"],
             "max_utterance_ms": int(v["max_utterance_s"] * 1000),
             "barge_in": v["barge_in"] not in ("off", False),  # "voice" or "off"
             "barge_in_ms": v["barge_in_ms"], "vad_threshold": v["vad_threshold"],
             "follow_up_ms": int(float(v["follow_up_seconds"]) * 1000),
-            "idle_timeout": v["idle_timeout"], "debug_panel": v["debug_panel"]}
+            "idle_timeout": v["idle_timeout"], "debug_panel": v["debug_panel"],
+            "camera": camera,
+            "camera_max_side": int(v["camera_max_side"]) if camera else 0,
+            "camera_max_bytes": camera_max_bytes(v) if camera else 0}
 
 
 # --- routes --------------------------------------------------------------------
@@ -149,7 +188,10 @@ def add_voice_routes(app, assistant, allowed_origins=(),
 
     v = voice_settings(voice)
     allowed = tuple(o.rstrip("/") for o in allowed_origins)
-    max_utterance_bytes = int(v["max_utterance_s"] * SAMPLE_RATE * 2) + 4096
+    max_audio_bytes = int(v["max_utterance_s"] * SAMPLE_RATE * 2) + 4096
+    max_utterance_bytes = max_audio_bytes  # the whole message...
+    if camera_on(v):  # ...with one frame riding along with the words
+        max_utterance_bytes += camera_max_bytes(v)
     live: dict[str, tuple[VoiceConversation, WebSocket]] = {}
     limits: dict[str, tuple[RateLimit, RateLimit]] = {}
     gz_cache: dict[str, bytes] = {}
@@ -220,7 +262,9 @@ def add_voice_routes(app, assistant, allowed_origins=(),
             lambda text: assistant.synthesize(text, session, language),  # their own voice
             send, clock=clock, idle_timeout=v["idle_timeout"],
             max_session=v["max_session_minutes"] * 60, language=language,
-            limit=limit)
+            limit=limit, camera_max_bytes=camera_max_bytes(v),
+            camera_max_side=int(v["camera_max_side"]),
+            camera_keep=int(v["camera_keep_frames"]))
         live[sid] = (conv, ws)
         if old is not None and old[0] is not None:  # one per browser
             await run_in_threadpool(old[0].end, "replaced")
@@ -288,10 +332,22 @@ def add_voice_routes(app, assistant, allowed_origins=(),
                                 int(header.get("sample_rate", 0)) != SAMPLE_RATE:
                             raise ValueError("expected 16 kHz utterance")
                         turn = int(header["turn"])
+                        pcm, image = split_image(header, payload, v)
+                    except OverflowError:
+                        await refuse(1009, "camera frame too large")
+                        break
+                    except PermissionError:
+                        await refuse(1008, "the camera is turned off")
+                        break
                     except (ValueError, KeyError, TypeError) as e:
                         await refuse(1003, f"bad audio frame: {e}")
                         break
-                    conv.utterance(turn, pcm16_to_float(payload))
+                    if len(pcm) > max_audio_bytes:  # the words alone, frame or not
+                        await refuse(1009, "utterance too large")
+                        break
+                    if image is not None:  # its size only, never its bytes
+                        log.info("Voice turn %s: camera frame %d bytes", turn, len(image))
+                    conv.utterance(turn, pcm16_to_float(pcm), image=image)
                     continue
                 text = msg.get("text") or ""
                 if len(text) > MAX_TEXT_MESSAGE:

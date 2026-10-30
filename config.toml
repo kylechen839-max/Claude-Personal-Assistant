@@ -186,6 +186,11 @@ idle_timeout = 120            # seconds of quiet before the conversation ends
 max_session_minutes = 30
 utterances_per_minute = 30
 debug_panel = false           # latency timings on the voice screen
+camera = true                 # the Camera button: each spoken turn carries one back-camera frame
+camera_max_side = 1024        # px, the frame's long side (the phone shrinks it before sending)
+camera_max_kb = 400           # a bigger frame is refused (the socket closes)
+camera_keep_frames = 1        # frames Claude still sees; older ones become "(earlier photo...)"
+                              # frames are never saved, even with [history] on: history keeps "[photo]"
 
 [update]                      # automatic updates on the home host (PC tasks / Pi service)
 enabled = false               # set true in config.local.toml, after signing is set up (README)

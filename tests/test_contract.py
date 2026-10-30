@@ -23,6 +23,7 @@ import pytest
 from kwil import smoke, webapp
 from kwil.chat import DEFAULT_MODEL, ClaudeChat
 from kwil.tools import Tool, ToolRegistry
+from kwil.voice_session import ChatBackend, VoiceConversation
 from tests.contract_fakes import ContractClient
 
 pytest.importorskip("fastapi")
@@ -390,6 +391,48 @@ def test_a_pdf_attached_then_a_past_chat_read(tmp_path):
         store.close()
 
 
+def test_a_two_turn_camera_conversation(api):
+    """The voice view's Camera button: two spoken turns, each with a
+    frame (re-encoded by voice_session, as on the phone), through
+    VoiceConversation and ChatBackend. The second request holds the first
+    frame only as a note (camera_keep 1) and the new one as an image block
+    with no extra keys; the frames taint the conversation."""
+    import numpy as np
+
+    from tests.test_tutor import photo
+    from tests.voice_fakes import Events, FakeSynth, FakeTranscriber
+
+    make, model = api
+    client = make()
+    chat = ClaudeChat(client=client, model=model, tools=calendar_tools([]),
+                      max_tokens=1024)
+    backend = ChatBackend(chat)
+    chat.tools.confirm = backend.confirm
+    events = Events()
+    conv = VoiceConversation(backend, FakeTranscriber(
+        "What colour is this square? One word.", "And this one? One word."),
+        FakeSynth(), events, camera_keep=1)
+    speech = np.zeros(16000, dtype=np.float32)
+    conv.utterance(1, speech, image=photo("JPEG", size=(1280, 960), color=(220, 20, 20)))
+    events.wait_for("turn_done", turn=1, timeout=90)
+    conv.utterance(2, speech, image=photo("JPEG", size=(1280, 960), color=(20, 20, 220)))
+    events.wait_for("turn_done", turn=2, timeout=90)
+    assert not events.of("error"), events.of("error")
+    assert "".join(e["delta"] for e in events.of("text")).strip()
+    assert chat.untrusted_attachments is True  # changes now ask first
+    live = [b for m in chat.history if isinstance(m["content"], list)
+            for b in m["content"] if b.get("type") == "image"]
+    assert len(live) == 1 and set(live[0]) == {"type", "source"}
+    sent = getattr(client, "requests", None)
+    if sent is not None:  # the fake: what its last validated request held
+        last = sent[-1]["messages"]
+        imgs = [b for m in last if isinstance(m["content"], list) for b in m["content"]
+                if b.get("type") == "image"]
+        assert len(imgs) == 1
+        assert "(earlier photo, no longer attached)" in str(last[0]["content"])
+    conv.end("user")
+
+
 def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
     """Bring your own key (family.UserApi): a beta tester's chat reaches the
     client through a per-call lookup of their key, never the owner's. A
@@ -685,6 +728,20 @@ def _request(**overrides):
     ({"tools": [{"type": "web_fetch_20260209", "name": "web_search"}]}, "name"),
     ({"tools": [{"type": "web_fetch_20260209", "name": "web_fetch",
                  "user_location": {"type": "approximate"}}]}, "Extra inputs"),
+    # image blocks (camera frames, "+" photos): the SDK's fields only
+    ({"messages": [{"role": "user", "content": [
+        {"type": "image", "camera": True, "source": {
+            "type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}}]}]},
+     "Extra inputs"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                     "data": "/9j/4AAQ", "frame": 1}}]}]}, "Extra inputs"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/heic",
+                                     "data": "/9j/4AAQ"}}]}]}, "media_type"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                     "data": "iVBORw0KGgo="}}]}]}, "does not match"),
 ])
 def test_the_fake_refuses_what_the_api_refuses(overrides, error):
     """Judge LOW 6: the fake was looser than the API."""

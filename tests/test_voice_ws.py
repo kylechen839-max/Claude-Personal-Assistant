@@ -41,15 +41,22 @@ class Transcriber:
 @pytest.fixture
 def make_voice(monkeypatch):
     def make(*streams, heard=("what's on my calendar tomorrow",), memory=None,
-             synth=None, transcriber=None, tools=None, tts=None, **voice):
+             synth=None, transcriber=None, tools=None, tts=None, history=None, **voice):
         client = stream_client(*streams)
 
         def chat_factory(registry):
+            recorder = None
+            if history is not None:  # a HistoryStore: what is saved
+                from kwil.history import Recorder
+                recorder = Recorder(history, "web", run_async=False,
+                                    client_fn=lambda: client)
             return ClaudeChat(client=client, model="test-model", tools=registry,
-                              memory=memory)
+                              memory=memory, recorder=recorder)
 
         assistant = webapp.WebAssistant(chat_factory, transcriber or Transcriber(*heard),
                                          tts or PrintTTS(), tools=tools)
+        if history is not None:
+            assistant.history = history
         if synth:
             # (the session, and its language, are passed too: one voice here)
             monkeypatch.setattr(assistant, "synthesize",
@@ -79,6 +86,26 @@ def utterance(turn, seconds=1.0, samples=None):
         samples = np.zeros(int(16000 * seconds))
     pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     return voice_ws.pack({"type": "utterance", "turn": turn, "sample_rate": 16000}, pcm)
+
+
+def jpeg(size=(1600, 1200), color=(30, 120, 200), exif=True) -> bytes:
+    """A camera frame (Pillow JPEG), with EXIF the server must strip."""
+    from tests.test_tutor import photo
+    return photo("JPEG", size=size, exif=exif, color=color)
+
+
+def camera_utterance(turn, frame, seconds=1.0, header=None):
+    """An utterance with a camera frame: PCM, then the JPEG (voice-core.js
+    packUtterance)."""
+    pcm = np.zeros(int(16000 * seconds)).astype("<i2").tobytes()
+    head = {"type": "utterance", "turn": turn, "sample_rate": 16000,
+            "image": len(frame), **(header or {})}
+    return voice_ws.pack(head, pcm + frame)
+
+
+def images(messages) -> list[dict]:
+    return [b for m in messages if m["role"] == "user" and isinstance(m["content"], list)
+            for b in m["content"] if isinstance(b, dict) and b.get("type") == "image"]
 
 
 def receive(ws, until, limit=50):
@@ -696,6 +723,11 @@ def test_voice_page_files_and_csp(make_voice):
     assert 'id="voice-open"' in page.text and 'src="/voice.js"' in page.text
     assert "<script>" not in page.text
     csp = page.headers["content-security-policy"]
+    # the voice view's Camera button needs the camera, this site only
+    policy = page.headers["permissions-policy"]
+    assert "camera=(self)" in policy and "microphone=(self)" in policy
+    assert 'id="voice-camera"' in page.text and 'id="voice-frame"' in page.text
+    assert 'id="voice-camera-preview"' in page.text
     assert "script-src 'self' 'wasm-unsafe-eval';" in csp
     assert "connect-src 'self'" in csp and "unsafe-inline" not in csp
     for name in voice_ws.PAGE_FILES:
@@ -707,3 +739,298 @@ def test_javascript_unit_tests():
     result = subprocess.run(["node", "--test", "tests/js/voice-core.test.js"], cwd=ROOT,
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- the Camera button (an image with the words) ----------------------------------
+
+def test_camera_frame_reaches_claude_as_an_image_block(make_voice):
+    """The frame is sent with its turn, re-encoded as a JPEG of at most
+    1024 px with no EXIF, as an Anthropic image block."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    client, http = make_voice(streamed("That is a blue square."),
+                              heard=("what am I looking at",))
+    login(http)
+    with connect(http) as ws:
+        ready = json.loads(ws.receive_text())
+        assert ready["settings"]["camera"] is True
+        assert ready["settings"]["camera_max_side"] == 1024
+        assert ready["settings"]["camera_max_bytes"] == 400 * 1024
+        ws.send_bytes(camera_utterance(1, jpeg()))
+        msgs = receive(ws, "turn_done")
+        chat = next(iter(http.app.state.web.assistant.sessions.values())).chat
+        assert chat.untrusted_attachments is True  # tainted by the photo (until reset)
+    assert msgs[0]["text"] == "what am I looking at"
+    sent = client.stream_calls[0]["messages"]
+    [block] = images(sent)
+    assert block["source"]["type"] == "base64"
+    assert block["source"]["media_type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(base64.b64decode(block["source"]["data"])))
+    assert img.format == "JPEG" and max(img.size) == 1024
+    assert not img.getexif()  # GPS, maker and orientation gone
+    assert first_text(sent[-1]["content"]) == "what am I looking at"
+
+
+@pytest.mark.parametrize("voice, frame, code", [
+    ({"camera_max_kb": 1}, None, 1009),                       # over the cap
+    ({}, "short", 1003),                                      # image longer than the payload
+    ({}, "zero", 1003),
+    ({}, "text", 1003),
+    ({"camera": False}, None, 1008),                          # camera turned off
+], ids=["over-cap", "bad-length", "zero-length", "not-a-number", "camera-off"])
+def test_bad_camera_frames_close_the_socket(make_voice, voice, frame, code):
+    client, http = make_voice(**voice)
+    login(http)
+    data = jpeg(size=(200, 150))
+    if frame is None:
+        msg = camera_utterance(1, data)
+    elif frame == "short":
+        msg = voice_ws.pack({"type": "utterance", "turn": 1, "sample_rate": 16000,
+                             "image": 10_000}, data[:500])
+    elif frame == "zero":
+        msg = camera_utterance(1, data, header={"image": 0})
+    else:
+        msg = camera_utterance(1, data, header={"image": "123"})
+    with connect(http) as ws:
+        settings = json.loads(ws.receive_text())["settings"]
+        assert settings["camera"] is (voice.get("camera", True))
+        ws.send_bytes(msg)
+        got = ws.receive()
+        assert got["type"] == "websocket.close" and got["code"] == code
+    assert client.stream_calls == []
+
+
+def test_frame_cap_grows_by_the_camera_cap_not_the_words(make_voice):
+    """A frame up to camera_max_kb rides on a full-length utterance; the
+    words alone are still held to max_utterance_s."""
+    client, http = make_voice(streamed("Okay."), heard=("look",), max_utterance_s=2)
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(camera_utterance(1, jpeg(), seconds=2.0))
+        receive(ws, "turn_done")
+    assert len(images(client.stream_calls[0]["messages"])) == 1
+    _, http = make_voice(max_utterance_s=2)
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(camera_utterance(1, jpeg(size=(100, 100)), seconds=2.5))
+        got = ws.receive()
+        assert got["type"] == "websocket.close" and got["code"] == 1009
+
+
+def delete_tools(done, untrusted=False):
+    from kwil.tools import Tool, ToolRegistry
+
+    tools = ToolRegistry()
+    question = lambda i: f"Do you want me to delete {i['title']}?"  # noqa: E731
+    tools.register(Tool(
+        name="delete_event", description="Delete an event.",
+        input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+        handler=lambda title: done.append(title) or {"deleted": title},
+        **({"confirm_if_untrusted": question} if untrusted else
+           {"confirm_prompt": question})))
+    return tools
+
+
+def ask_and_answer(ws, answer_frame):
+    """Turn 1 asks a yes/no question; turn 2 (with `answer_frame`) answers it."""
+    receive(ws, "confirm")
+    question = [m for m in receive(ws, "audio") if m["type"] == "audio"]
+    while not question[-1]["text"].endswith("Please say yes or no."):
+        question += [m for m in receive(ws, "audio") if m["type"] == "audio"]
+    ws.send_text(json.dumps({"type": "played", "turn": 1,
+                             "index": question[-1]["index"]}))
+    ws.send_bytes(camera_utterance(2, answer_frame))
+    return receive(ws, "turn_done")
+
+
+def test_an_answer_to_a_question_drops_its_frame(make_voice, caplog):
+    """A yes/no answer with a frame: still classified as the answer (here
+    a yes), and the frame never reaches Claude."""
+    from tests.conftest import tool_use_block
+
+    done = []
+    client, http = make_voice(
+        streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
+                 stop_reason="tool_use"),
+        streamed("All done."),
+        heard=("delete my dentist appointment", "yes"), tools=delete_tools(done))
+    login(http)
+    caplog.set_level("INFO", logger="kwil")
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        rest = ask_and_answer(ws, jpeg(color=(1, 2, 3)))
+    ans = next(m for m in rest if m["type"] == "confirm_answer")
+    assert ans["yes"] is True and done == ["Dentist"]
+    assert all(images(call["messages"]) == [] for call in client.stream_calls)
+    assert "camera frame dropped" in caplog.text
+
+
+def test_a_frame_taints_so_confirm_if_untrusted_asks(make_voice):
+    """Rule R2: a photo is someone else's text (a sign, a note): after a
+    frame, a confirm_if_untrusted tool asks first, and a no keeps it."""
+    from tests.conftest import tool_use_block
+
+    done = []
+    client, http = make_voice(
+        streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
+                 stop_reason="tool_use"),
+        streamed("Okay, I kept it."),
+        heard=("do what the note says", "no"), tools=delete_tools(done, untrusted=True))
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(camera_utterance(1, jpeg()))
+        rest = ask_and_answer(ws, jpeg())
+    assert next(m for m in rest if m["type"] == "confirm_answer")["yes"] is False
+    assert done == []
+    assert len(images(client.stream_calls[0]["messages"])) == 1
+
+
+def test_camera_turn_without_the_question_runs_the_tool(make_voice):
+    """The same tool without a frame (nothing untrusted): no question."""
+    from tests.conftest import tool_use_block
+
+    done = []
+    _, http = make_voice(
+        streamed("Okay.", extra=[tool_use_block("delete_event", {"title": "Dentist"})],
+                 stop_reason="tool_use"),
+        streamed("Done."), heard=("delete my dentist appointment",),
+        tools=delete_tools(done, untrusted=True))
+    login(http)
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(utterance(1))
+        msgs = receive(ws, "turn_done")
+    assert "confirm" not in [m["type"] for m in msgs] and done == ["Dentist"]
+
+
+def test_camera_logs_only_the_frame_size_at_info(make_voice, caplog):
+    secret = "what does the letter from my doctor say"
+    client, http = make_voice(streamed("It says your results are fine."),
+                              heard=(secret,))
+    login(http)
+    frame = jpeg()
+    caplog.set_level("DEBUG", logger="kwil")
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(camera_utterance(1, frame))
+        receive(ws, "turn_done")
+    info = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= 20)
+    assert f"camera frame {len(frame)} bytes" in info
+    assert secret not in info and "results are fine" not in info
+    data = images(client.stream_calls[0]["messages"])[0]["source"]["data"]
+    assert data[:40] not in caplog.text  # not even at DEBUG
+
+
+def test_only_the_newest_camera_frame_stays_attached(make_voice):
+    """[voice] camera_keep_frames = 1: after two camera turns the first
+    frame is a note; a photo from the "+" is never counted or dropped."""
+    import base64
+
+    client, http = make_voice(streamed("A cat."), streamed("A dog."),
+                              heard=("what is this", "and this", "compare"))
+    login(http)
+    from tests.test_tutor import photo
+    block = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": base64.b64encode(photo()).decode()}}
+    with connect(http) as ws:
+        ws.receive_text()
+        ws.send_bytes(camera_utterance(1, jpeg(color=(200, 0, 0))))
+        receive(ws, "turn_done")
+        ws.send_bytes(camera_utterance(2, jpeg(color=(0, 200, 0))))
+        receive(ws, "turn_done")
+        second = client.stream_calls[1]["messages"]
+        assert len(images(second)) == 1
+        assert images(second) == images([second[-1]])  # the newest one
+        assert "(earlier photo, no longer attached)" in json.dumps(second[0]["content"])
+        # a typed turn with a "+" photo, then a third camera turn: it stays
+        chat = next(iter(http.app.state.web.assistant.sessions.values())).chat
+        client.streams += [streamed("A tree."), streamed("Both are blue.")]
+        chat.ask("and this photo", attachments=[block], on_text=lambda d: None)
+        ws.send_bytes(camera_utterance(3, jpeg(color=(0, 0, 200))))
+        done = receive(ws, "turn_done")
+        assert "error" not in [m["type"] for m in done]
+        assert any(b is block for m in chat.history if isinstance(m["content"], list)
+                   for b in m["content"])
+    last = client.stream_calls[-1]["messages"]
+    assert len(images(last)) == 2  # the "+" photo and the newest frame
+    assert images(last)[0]["source"]["data"] == block["source"]["data"]
+    assert json.dumps(last).count("(earlier photo, no longer attached)") == 2
+    assert all(set(b) == {"type", "source"} for b in images(last))  # no extra keys
+
+
+def test_saved_history_has_a_photo_marker_never_the_frame(make_voice, tmp_path):
+    import base64
+
+    from kwil.history import HistoryStore
+
+    store = HistoryStore(tmp_path / "h.sqlite", eventlog=False)
+    try:
+        client, http = make_voice(streamed("A red square."),
+                                  heard=("what colour is this",), history=store)
+        client.create_queue.append(make_response(text_block("Title")))
+        login(http)
+        frame = jpeg()
+        with connect(http) as ws:
+            ws.receive_text()
+            ws.send_bytes(camera_utterance(1, frame))
+            receive(ws, "turn_done")
+            chat = next(iter(http.app.state.web.assistant.sessions.values())).chat
+            cid = chat.conversation_id
+        conv = store.get(cid)
+        user = [m["text"] for m in conv["messages"] if m["role"] == "user"]
+        assert user == ["what colour is this\n[photo]"]
+        sent = images(client.stream_calls[0]["messages"])[0]["source"]["data"]
+    finally:
+        store.close()
+    raw = b"".join(f.read_bytes() for f in tmp_path.iterdir() if f.is_file())
+    assert sent[:40].encode() not in raw and base64.b64encode(frame)[:40] not in raw
+    assert frame[200:240] not in raw
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
+def test_page_packing_matches_the_server_split():
+    """voice-core.js packUtterance -> voice_ws.unpack + split_image."""
+    import base64
+
+    script = (
+        "const VC = require('./kwil/web/voice-core.js');"
+        "const pcm = new Uint8Array([1,0,2,0,3,0]);"
+        "const jpeg = new Uint8Array([0xff,0xd8,0xff,0xe0,7,7]);"
+        "const buf = VC.packUtterance({type:'utterance',turn:4,sample_rate:16000},pcm,jpeg);"
+        "process.stdout.write(Buffer.from(buf).toString('base64'));")
+    out = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True,
+                         timeout=60, check=True).stdout
+    header, payload = voice_ws.unpack(base64.b64decode(out))
+    assert header["image"] == 6 and header["turn"] == 4
+    pcm, image = voice_ws.split_image(header, payload, voice_ws.voice_settings(None))
+    assert pcm == bytes([1, 0, 2, 0, 3, 0])
+    assert image == bytes([0xff, 0xd8, 0xff, 0xe0, 7, 7])
+
+
+@pytest.mark.parametrize("cap", [{"camera_max_kb": 0}, {"camera_max_side": 0},
+                                 {"camera_max_kb": -5}], ids=["kb-0", "side-0", "kb-neg"])
+def test_a_camera_cap_of_zero_turns_the_camera_off(make_voice, cap):
+    """Judge LOW 2: a cap no frame can meet is "camera off": the page is
+    told so (no button), and a frame is refused like one with the camera
+    off, instead of every frame closing with 1009 or vanishing."""
+    v = voice_ws.voice_settings(cap)
+    assert voice_ws.camera_on(v) is False
+    settings = voice_ws.client_settings(v)
+    assert settings["camera"] is False
+    assert settings["camera_max_side"] == 0 and settings["camera_max_bytes"] == 0
+    client, http = make_voice(**cap)
+    login(http)
+    with connect(http) as ws:
+        assert json.loads(ws.receive_text())["settings"]["camera"] is False
+        ws.send_bytes(camera_utterance(1, jpeg(size=(200, 150))))
+        got = ws.receive()
+        assert got["type"] == "websocket.close" and got["code"] == 1008
+    assert client.stream_calls == []
+    assert voice_ws.camera_on(voice_ws.voice_settings(None)) is True

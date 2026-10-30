@@ -623,3 +623,26 @@ test('every string of the "Your Anthropic API key" settings is translated', () =
   assert.equal(t('Your key ending in wxyz is saved.'), '你的密钥（结尾 wxyz）已保存。');
   assert.equal(t('About $1.25 this month on your key.'), '这个月用你的密钥大约花了 $1.25。');
 });
+
+test('the voice view\'s Camera button and its messages are all in Chinese', () => {
+  const { win } = page('zh-CN');
+  const t = (s) => win.KwilI18n.translate(s);
+  // every message voice.js shows about the camera (its CAMERA_TEXT)...
+  const voice = readFileSync(new URL('../../kwil/web/voice.js', import.meta.url), 'utf8');
+  const block = voice.match(/const CAMERA_TEXT = \{([\s\S]*?)\n  \};/)[1];
+  const messages = [...block.matchAll(/:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(messages.length >= 5, messages.join('|'));
+  // ...and the new markup: the pill, the frame button, the camera button's label
+  const html = readFileSync(new URL('../../kwil/web/index.html', import.meta.url), 'utf8');
+  const section = html.match(/<section id="voice"[\s\S]*?<\/section>/)[0];
+  const texts = [section.match(/id="voice-camera-on"[^>]*>([^<]+)</)[1],
+    section.match(/id="voice-frame"[^>]*>([^<]+)</)[1],
+    section.match(/id="voice-camera"[^>]*aria-label="([^"]+)"/)[1]];
+  assert.deepEqual(texts, ['Camera on', 'Send this frame', 'Camera']);
+  for (const en of [...messages, ...texts]) {
+    const zh = t(en);
+    assert.notEqual(zh, en, en);
+    assert.match(zh, /[一-鿿]/, en);
+  }
+  assert.ok(t(messages.find((m) => m.includes('reopen'))).includes('重新打开'));
+});

@@ -705,7 +705,7 @@ never sent to Claude as a new request.
 
 - Buttons: **End**, **Mute** (stops listening; the reply still plays),
   **CC** (captions of what it heard and what it is saying, remembered on
-  this phone) and a stopwatch for the latency panel (also on by default with
+  this phone), the camera (see **Camera** below) and a stopwatch for the latency panel (also on by default with
   `debug_panel = true`).
 - Hearing itself: the page asks the browser for echo cancellation, noise
   suppression and auto gain, and needs a more confident detection while a
@@ -748,6 +748,38 @@ never sent to Claude as a new request.
    `http://`.
 5. Locking the phone, switching apps, a call or Siri pauses it; tap **Tap to
    continue** when you're back.
+
+**Camera** (show Kwil what you're looking at): tap the camera button next
+to **CC**. The back camera's live picture fills the screen, a red **Camera
+on** pill shows while it is live, and the orb moves to a corner (it still
+shows listening and speaking). While the camera is on, each question you
+ask carries one picture of what the camera sees at the moment you stop
+talking, and the answer is spoken as usual ("what does this sign say?",
+"which of these is the 10 mm bolt?"). **Send this frame** freezes the
+picture; that frozen frame goes with your next question instead (tap it
+again to unfreeze). An answer to a yes/no question never carries a
+picture. Tap the camera button again to turn it off; backgrounding the app
+or ending the conversation turns it off too.
+- The phone shrinks each frame to `[voice] camera_max_side` (1024 px) on
+  its long side and JPEG-encodes it under `[voice] camera_max_kb` (400 KB);
+  the server checks the bytes, re-encodes it (dropping EXIF: location,
+  camera serial) and refuses anything bigger. `[voice] camera = false`
+  (or a cap of 0) hides the button and the server refuses frames.
+- Only the newest `[voice] camera_keep_frames` (1) frames stay with the
+  conversation; older ones become "(earlier photo, no longer attached)", so
+  a long camera conversation doesn't grow. Photos from the **+** are not
+  affected.
+- Frames are never saved, even with History on: the history keeps
+  "[photo]" in their place. A picture counts as someone else's text (a
+  sign, a letter), so after one Kwil asks before changing anything, as
+  after an attached photo.
+- iPhone: the camera is asked for when you tap the button (the home-screen
+  app asks again each time it is launched). If you tapped **Don't Allow**,
+  close Kwil completely (swipe it away) and open it again, then allow; or
+  **Settings -> Apps -> Safari -> Camera** -> Ask. The microphone keeps
+  listening while the camera is on.
+- Invited people can use it too; each picture turn counts against their
+  own limits and key like any other turn.
 
 Other `[voice]` settings: `min_utterance_ms` (300, shorter sounds are
 ignored), `max_utterance_s` (30), `max_session_minutes` (30) and

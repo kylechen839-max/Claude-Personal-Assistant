@@ -35,7 +35,12 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
   mixed with other blocks there), each with a source, a title and
   non-empty text blocks, citations enabled on all or none of them and of
   the request's document blocks together, on all when web_search is
-  offered, and never with output_config.format.
+  offered, and never with output_config.format;
+- image blocks (the "+" photos and the voice view's camera frames): only
+  the fields the SDK's ImageBlockParam lists, a base64 source with only
+  Base64ImageSourceParam's fields, one of its media types, and data that
+  decodes and starts like that type (a camera frame with an extra key, or
+  a PNG sent as image/jpeg, is refused).
 
 Sources for the thinking, effort and search_result rules (fetched
 2026-10-30): platform.claude.com/docs/en/build-with-claude/thinking (the
@@ -192,6 +197,7 @@ class ContractClient:
         self.validate_output_config(kwargs)
         self.validate_thinking(kwargs)
         self.validate_search_results(kwargs)
+        self.validate_images(kwargs)
         self.validate_tools(kwargs)
         if not msgs or msgs[0]["role"] != "user":
             raise bad_request("messages: the first message must use the user role")
@@ -222,6 +228,55 @@ class ContractClient:
             if not before or before[0].get("type") not in ("thinking", "redacted_thinking"):
                 raise bad_request("messages: with thinking on, the assistant message "
                                   "before tool results must start with a thinking block")
+
+    @staticmethod
+    def validate_images(kwargs: dict) -> None:
+        """Image blocks as the SDK's ImageBlockParam / Base64ImageSourceParam."""
+        import base64
+        import binascii
+        import typing
+
+        from anthropic.types import Base64ImageSourceParam, ImageBlockParam
+
+        block_keys = set(ImageBlockParam.__annotations__)
+        source_keys = set(Base64ImageSourceParam.__annotations__)
+        media = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG",
+                 "image/gif": b"GIF8", "image/webp": b"RIFF"}
+        def literals(t):
+            # Python 3.10 wraps the hint as Required[Literal[...]]: unwrap to the strings
+            out = set()
+            for a in typing.get_args(t):
+                out |= {a} if isinstance(a, str) else literals(a)
+            return out
+
+        allowed = literals(typing.get_type_hints(Base64ImageSourceParam)["media_type"])
+        for i, m in enumerate(kwargs.get("messages") or []):
+            for j, b in enumerate(_blocks(m)):
+                if not isinstance(b, dict) or b.get("type") != "image":
+                    continue
+                where = f"messages.{i}.content.{j}"
+                extra = sorted(set(b) - block_keys)
+                if extra:
+                    raise bad_request(f"{where}.{extra[0]}: Extra inputs are not permitted")
+                src = b.get("source") or {}
+                if src.get("type") != "base64":
+                    raise bad_request(f"{where}.source: Input tag does not match 'base64'")
+                extra = sorted(set(src) - source_keys)
+                if extra:
+                    raise bad_request(f"{where}.source.{extra[0]}: Extra inputs are not "
+                                      "permitted")
+                kind = src.get("media_type")
+                if kind not in allowed:
+                    raise bad_request(f"{where}.source.media_type: Input should be "
+                                      "'image/jpeg', 'image/png', 'image/gif' or 'image/webp'")
+                try:
+                    data = base64.b64decode(src.get("data") or "", validate=True)
+                except (binascii.Error, ValueError):
+                    data = b""
+                if not data.startswith(media.get(kind, b"\0")):
+                    raise bad_request(f"{where}.source: Image does not match the provided "
+                                      "media type" if data else
+                                      f"{where}.source.data: invalid base64 data")
 
     @staticmethod
     def validate_system(system) -> None:

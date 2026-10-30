@@ -8144,3 +8144,91 @@ The four LOW items, each with a test that fails with its fix reverted:
   test checks `recall.delete`.
 - N4: `ResearchRunner.run`'s docstring and SECURITY's "Failing safe" say
   a failed step fails the job when nothing was found.
+
+## Camera in voice mode (2026-10-30)
+A **Camera** button in the phone app's hands-free voice view: the back
+camera's live picture on screen, and each spoken question carries one frame
+of it, so Kwil answers out loud with the picture in context ("what does
+this sign say?"). **Send this frame** freezes the picture for the next
+question.
+
+- **Page** (`web/voice-core.js`, `web/voice.js`, `index.html`, `voice.css`):
+  pure helpers `frameSize` (long side at most `camera_max_side`, aspect
+  kept, never upscaled), `encodeFrame` (JPEG at quality 0.8, 0.7, 0.6, 0.5
+  until it is under `camera_max_bytes`, else rejected; the turn goes
+  without it), `packUtterance` (one binary message: header with
+  `"image": n`, the PCM, then the JPEG) and `CameraPolicy` (off: nothing;
+  a pinned frame once; never with the answer to a yes/no question). The
+  camera is a video-only `getUserMedia` inside the button's tap (the mic is
+  never asked again), shown with `srcObject`; it stops on a second tap, in
+  the background, at End and when its track ends. Utterances go out in
+  order even while a frame encodes. A denial says to close and reopen Kwil.
+  English and Chinese strings (`i18n.js`). `sw.js` `kwil-shell-v21`.
+- **Server** (`voice_ws.py`): `split_image` checks `n` (a positive integer
+  within the payload: else 1003; over `[voice] camera_max_kb`: 1009;
+  `[voice] camera = false`: 1008). The message cap grows by the camera cap
+  only; the words are still held to `max_utterance_s`. `ready` tells the
+  page `camera`, `camera_max_side` and `camera_max_bytes`. Only the byte
+  count is logged at INFO. `Permissions-Policy` is now `camera=(self)`.
+- **Turn** (`voice_session.py`): `VoiceTurn.image`; on the worker, after the
+  transcript and the person's limits, `attachments.sniff` (JPEG only) and
+  `tutor.prepare_image` (re-encoded, EXIF dropped, at most
+  `camera_max_side`), then an image block to `backend.ask(...,
+  attachments=, camera_keep=)`. An answer to a pending question, a
+  superseded, cancelled, refused or failed turn drops its frame. `WebBackend`
+  goes through `WebAssistant.chat_stream(attachments=, camera_keep=)`,
+  which uses `_ask_with_files` (a 400 is "Claude couldn't read that file.").
+- **Chat** (`chat.py`): frames are attachments (taint, `[photo]` in saved
+  history, the 20 MB budget). New: `ask(camera_keep=N)` keeps only the
+  newest N camera frames attached (`_drop_old_frames`, tracked by identity
+  in `_camera_blocks`, put back if the turn fails, cleared by `reset()`);
+  "+" photos are never counted. API blocks carry no extra key.
+- **Config:** `[voice] camera, camera_max_side, camera_max_kb,
+  camera_keep_frames` (DEFAULTS, config.toml).
+- `tests/contract_fakes.py` now checks image blocks against the SDK's
+  `ImageBlockParam` / `Base64ImageSourceParam` (no extra field, a known
+  media type, bytes that match it).
+
+**Tests:** `tests/test_voice_ws.py` +10 (14 cases; a Pillow JPEG reaches Claude as an
+image block, re-encoded, no EXIF; over cap 1009, bad lengths 1003,
+camera off 1008; the cap grows by the camera only; an answer drops its
+frame and is still a yes; a frame makes a `confirm_if_untrusted` tool ask;
+INFO has only the size; after two camera turns only the newest is live and
+a "+" photo stays; saved history has `[photo]` and no base64; the page's
+packing matches `voice_ws.unpack` + `split_image` via node;
+Permissions-Policy in the CSP test). `tests/test_voice.py` +9 (10
+cases; VoiceConversation and `ClaudeChat.ask(camera_keep=)`).
+`tests/test_contract.py` +1 two-turn camera conversation (offline fake, and
+`live` variants), +4 fake refusal cases. `tests/test_docs.py` +1 (config
+keys mirrored, README names them). JS: `voice-core.test.js` +6 (48, run by
+pytest and now by CI's node job too), `i18n.test.mjs` +1. Each new test
+was run with the source changes reverted: 26 Python tests and the 7 new JS
+tests failed, the rest are controls (a tool that runs without asking when
+no frame was sent) or check the fake itself.
+Full suite: 3988 passed, 53 skipped (baseline about 3958 passed); JS
+`tests/js/*.test.mjs` 364 passed (baseline 363), `voice-core.test.js` 48
+(baseline 42). Frame sizes and timing on a real iPhone not measured (no
+hardware here): MANUAL_TEST "Voice conversation on the phone".
+
+### Camera in voice mode, judge round 1 (2026-10-30)
+- MED 1: leaving the app while a frame was still encoding sent the
+  "interrupt" before its utterance, so the server ran a turn the page had
+  dropped. Everything the page sends now goes through one
+  `VoiceCore.OrderedSender` (in order; at once when nothing waits), and a
+  delayed utterance is sent only if `TurnController.stillWanted(turn)`
+  (not cancelled, not paused or ended). Tests (`voice-core.test.js`):
+  `leaving the app while a camera frame encodes: that utterance is never
+  sent`, `a frame that finished first: the utterance goes, then the
+  interrupt`, `OrderedSender sends at once when nothing waits, and keeps
+  the order`. All three fail with the source reverted; the first also
+  fails with only `stillWanted` made to return true.
+- LOW 2: a `camera_max_kb` or `camera_max_side` of 0 or less is "camera
+  off" (`voice_ws.camera_on`: `ready` says `camera: false`, frames are
+  refused with 1008); the page uses `??` and hides the button for a 0 cap.
+  `test_a_camera_cap_of_zero_turns_the_camera_off` (3 cases) fails with the
+  source reverted and with `client_settings` / `split_image` back on
+  `[voice] camera` alone.
+- Both node-driven pytest tests skip cleanly without node ("node is not
+  installed"), checked with node off the PATH.
+- Full suite: 3991 passed, 53 skipped (round 0: 3988); JS `*.test.mjs` 364,
+  `voice-core.test.js` 51 (round 0: 48).

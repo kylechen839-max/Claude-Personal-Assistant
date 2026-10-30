@@ -229,6 +229,12 @@ DEFAULTS: dict = {
         "max_session_minutes": 30,
         "utterances_per_minute": 30,  # per connection; more closes it
         "debug_panel": False,       # show latency timings on the page
+        # The Camera button: each spoken turn while it is on carries one
+        # frame from the back camera (never saved; history keeps "[photo]")
+        "camera": True,
+        "camera_max_side": 1024,    # px, the frame's long side
+        "camera_max_kb": 400,       # a bigger frame closes the socket
+        "camera_keep_frames": 1,    # frames Claude still sees; older become a note
     },
     "update": {
         "enabled": False,       # host supervisor: update from `channel`

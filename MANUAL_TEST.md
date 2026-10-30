@@ -559,7 +559,7 @@ phone (or yours signed in as her test user).
 - [ ] Say "再见".
   - Should: "再见！" and the conversation ends.
 
-## Voice conversation on the phone (optional, ~12 min)
+## Voice conversation on the phone (optional, ~20 min)
 In the phone web app, tap **Voice conversation**. Turn the latency panel on
 with the stopwatch button.
 - [ ] iPhone permission: from the home-screen app, tap Voice conversation.
@@ -650,6 +650,44 @@ with the stopwatch button.
     saved to memory" (if anything memorable was said).
 - [ ] Leave it open and silent for over 2 minutes.
   - Should: it ends by itself ("Ended after a quiet stretch").
+- [ ] **Camera, iPhone home-screen app:** close Kwil fully, open it from
+      the home screen, start Voice conversation and tap the camera button
+      (next to CC). Allow the camera.
+  - Should: iOS asks for the camera at that tap (the home-screen app asks
+    again on each launch; that is iOS, not Kwil). The **back** camera's
+    live picture fills the screen, a red **Camera on** pill shows, and the
+    orb sits in a corner. No second microphone prompt.
+- [ ] Camera, a question about what it sees: point it at a sign, a label or
+      a page and ask "What does this say?", then point it elsewhere and ask
+      "And this one?".
+  - Should: both are answered out loud about the right picture; the mic
+    stays live the whole time (the orb moves with your voice); answers start
+    about as fast as without the camera. In History the turns show
+    "[photo]", never a picture.
+- [ ] Send this frame: point at something, tap **Send this frame**, move the
+      phone away and ask "What was that?".
+  - Should: the picture freezes (outlined) when tapped and the answer is
+    about the frozen picture; after that turn the live picture moves again.
+- [ ] Camera and a yes/no question: with the camera on, ask to delete a
+      test event and answer "yes".
+  - Should: it asks out loud first (a picture counts as someone else's
+    text, so it may also ask before a move), and the "yes" works as usual.
+- [ ] Camera, background and return: with the camera on, switch to another
+      app (or lock the phone), then come back.
+  - Should: the green camera dot in the iPhone status bar goes away while
+    you're out; back in Kwil the picture is gone, the camera button is off,
+    and "Tap to continue" resumes the voice conversation. Tap the camera
+    button again to turn it back on. End also turns it off.
+- [ ] Camera with VoiceOver on: swipe to the camera button and to **Send
+      this frame**, double-tap each.
+  - Should: they read as "Camera, toggle button" (with pressed / not
+    pressed) and "Send this frame"; the live picture itself isn't read out.
+- [ ] Camera denied: tap the camera button and choose **Don't Allow**.
+  - Should: the caption says Kwil can't use the camera and to close and
+    reopen Kwil; the voice conversation keeps working. Close Kwil fully
+    (swipe it away), reopen it, start voice, tap the camera button: iOS asks
+    again and Allow works. (If it doesn't ask: **Settings -> Apps ->
+    Safari -> Camera** -> Ask.)
 
 ## Cloud server on Render (optional, ~30 min)
 Setup is in README.md ("Run it in the cloud (Render)"). Your PC can be off

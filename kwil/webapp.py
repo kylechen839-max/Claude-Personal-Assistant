@@ -106,7 +106,7 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": "microphone=(self), camera=(), geolocation=()",
+    "Permissions-Policy": "microphone=(self), camera=(self), geolocation=()",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
 }
@@ -1531,14 +1531,20 @@ class WebAssistant:
                 return
 
     def chat_stream(self, s: Session, text: str,
-                    cancel: threading.Event | None = None, on_event=None):
+                    cancel: threading.Event | None = None, on_event=None,
+                    attachments: list[dict] | None = None,
+                    camera_keep: int | None = None):
         """Ask Claude in this session's conversation and yield the reply's
         text deltas as they arrive. Setting `cancel` stops it (barge-in);
         what was said so far stays in the conversation. Tool calls and
         confirmations work as in a normal turn (a confirmation is answered
         with `answer()`). With `on_event`, this turn's tool, confirm and status
         events go to it rather than to the session's queue (which a page may
-        be reading). Raises RuntimeError if a turn is already running."""
+        be reading). `attachments` (the voice view's camera frame, as image
+        blocks) go with the words as in a typed turn with files, a refusal
+        becoming its sentence (_ask_with_files); `camera_keep`: they are
+        camera frames, and only that many of the newest stay attached
+        (ClaudeChat.ask). Raises RuntimeError if a turn is already running."""
         from kwil.cli import get_reply
 
         if not s.busy.acquire(timeout=2):
@@ -1557,8 +1563,12 @@ class WebAssistant:
         def run():
             try:
                 with i18n.using(s.language):  # error sentences, tool questions
-                    reply = get_reply(s.chat, text, output_fn=lambda m: None,
-                                      on_text=on_text, cancel=cancel)
+                    if attachments:
+                        reply = self._ask_with_files(s, text, attachments, on_text,
+                                                     cancel, camera_keep=camera_keep)
+                    else:
+                        reply = get_reply(s.chat, text, output_fn=lambda m: None,
+                                          on_text=on_text, cancel=cancel)
                 if not streamed and reply:  # an error sentence
                     deltas.put(reply)
             finally:
