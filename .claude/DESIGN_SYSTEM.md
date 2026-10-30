@@ -96,6 +96,16 @@ CSP forbids them).
   queue holds at most about two bubbles of height before it scrolls.
 - **Stop** sits in the composer, left of Send: the same 44px circle on
   `--surface-2` with a filled square glyph.
+- **Think harder** sits left of Send (and Stop): a 44px circle with no
+  fill and a 22px line bulb in `--text-2`; pressed (`aria-pressed="true"`)
+  it takes `--surface-2` with the bulb in `--accent-ink`. It is a toggle
+  for the next message only; holding Send does the same.
+- **Sources** under a reply: `--t-cap`, muted. Kwil's own sources are one
+  wrapping line ("Sources" then items joined by a middle dot), each a
+  plain accent-ink text button; web pages are rows of a small numbered
+  `--surface-2` pill, the title in `--accent-ink` and the site muted. Every
+  item is at least 44px tall; the superscripts in the text are
+  `--accent-ink` at .7em and not tappable.
 
 ## Settings menu sections
 - Below the plain switch rows, each section is a band of `--bg` holding a

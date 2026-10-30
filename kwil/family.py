@@ -1012,7 +1012,7 @@ class Family:
 
             recall.attach(store, self.config)  # their own index, in their file
 
-        from kwil import projects
+        from kwil import projects, thinkhard
 
         bounds = projects.limits(self.config)  # their project files' budget
         project_options = {"project_inline_tokens": bounds["inline_tokens"],
@@ -1034,7 +1034,10 @@ class Family:
                               user_name=user["name"],
                               timezone=user.get("timezone") or None,
                               fast_model=a["fast_model"], router=a["router"],
-                              local_memory=memory, **project_options)
+                              local_memory=memory, **project_options,
+                              **thinkhard.options_from_config(self.config),
+                              # their own daily count (quotas.py)
+                              think_gate=lambda: self.quotas.admit_think(user["id"]))
 
         return UserContext(user, registry, store, chat_factory, memory)
 

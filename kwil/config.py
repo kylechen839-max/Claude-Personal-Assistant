@@ -45,6 +45,12 @@ DEFAULTS: dict = {
         # simple turns go to fast_model (router.py); "off" = always `model`
         "fast_model": "claude-haiku-5-5",
         "router": "auto",
+        # "think harder" turns (thinkhard.py): on `model`, with this ceiling
+        # and effort ("" = the model's default), at most this many per
+        # person per day (0 = no limit)
+        "think_max_tokens": 16000,
+        "think_effort": "xhigh",
+        "think_per_day": 30,
         "usage_file": "data/usage.json",  # monthly token totals ("" = not kept)
     },
     "tts": {

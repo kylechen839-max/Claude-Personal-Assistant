@@ -13,6 +13,7 @@ const els = {
   urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
   backendsSave: $("backends-save"), backendStatus: $("backend-status"),
   editBar: $("edit-bar"), editCancel: $("edit-cancel"),
+  think: $("think"), send: $("send"),
 };
 
 let busy = false;
@@ -23,7 +24,19 @@ let live = null;  // the reply bubble that streamed text is going into
 // and sent in order, one turn at a time, once the reply is done. Kept in
 // this page's memory only (never stored), a few at most.
 const MAX_QUEUE = 3;
-const queue = [];  // {text, el, cid, epoch}
+const queue = [];  // {text, el, cid, epoch, think}
+// "Think harder" (thinkhard.py) for the next message only: the toggle left of
+// Send, or a long press on Send (it then sends). Never sticky: any message
+// sent or queued turns it off again, and a yes/no answer never carries it.
+let thinkNext = false;
+function setThink(on) {
+  thinkNext = Boolean(on);
+  if (els.think) {
+    els.think.setAttribute("aria-pressed", String(thinkNext));
+    els.think.classList.toggle("on", thinkNext);
+  }
+}
+function takeThink() { const on = thinkNext; setThink(false); return on; }
 // The chat pane: `cid` is the stored conversation it shows (history.js's
 // Continue binds it; null for a new chat). Every turn typed into it carries
 // that id, so the server continues that conversation however long ago it
@@ -222,7 +235,7 @@ function setBusy(value) {
 }
 
 // --- queued messages ---
-function enqueue(text, cid = pane.cid, epoch = pane.epoch) {
+function enqueue(text, cid = pane.cid, epoch = pane.epoch, think = false) {
   if (queue.length >= MAX_QUEUE) {
     addMessage("note", `You can queue up to ${MAX_QUEUE} messages.`);
     return false;
@@ -239,7 +252,7 @@ function enqueue(text, cid = pane.cid, epoch = pane.epoch) {
   remove.className = "queued-remove";
   remove.setAttribute("aria-label", "Remove queued message");
   remove.textContent = "×";
-  const item = { text, el, cid, epoch };  // sent into, and drawn in, the pane it was typed in
+  const item = { text, el, cid, epoch, think };  // sent into, and drawn in, the pane it was typed in
   remove.addEventListener("click", () => { unqueue(item); els.text.focus(); });
   el.appendChild(words);
   el.appendChild(tag);
@@ -339,7 +352,7 @@ function sendQueued() {
   if (!els.login.hidden) { clearQueue(); return; }  // signed out: nothing goes
   const item = queue[0];
   unqueue(item);
-  sendMessage(item.text, item.cid, item.epoch);
+  sendMessage(item.text, item.cid, item.epoch, item.think);
 }
 
 // Files picked with "+" (attachments.js) go with the next message, never
@@ -374,7 +387,9 @@ function stopSpeaking() {
 function speakInBrowser(text) {
   if (!("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
-  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  // never a web address (sources.js lists the pages instead)
+  const words = window.KwilSources ? window.KwilSources.speakable(text) : text;
+  speechSynthesis.speak(new SpeechSynthesisUtterance(words));
 }
 
 let audioUrl = null;  // object URL of the last reply fetched with a token
@@ -616,7 +631,14 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
         setStatus("");
         break;
       }
-      if (live) { live.textContent = ev.text; live = null; } else addMessage("claude", ev.text);
+      {
+        const bubble = live || addMessage("claude", ev.text);
+        live = null;
+        bubble.textContent = ev.text;
+        if (ev.citations && window.KwilSources) {  // sources.js: textContent, http(s) only
+          window.KwilSources.render(document, bubble, ev.text, ev.citations, sourceLinks);
+        }
+      }
       setStatus("");
       speak(ev.text, ev.audio);
       if (ev.ended) addMessage("note", "Conversation ended.");
@@ -644,13 +666,22 @@ function handleEvent(ev, epoch = pane.epoch, cid = null) {
   }
 }
 
-async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
+// What a source under a reply opens (sources.js): the chat it came from
+// (history.js's transcript) or the project of a project file.
+const sourceLinks = {
+  openConversation: (id) => { if (typeof window.openTranscript === "function") window.openTranscript(id); },
+  openProject: (id) => { if (window.KwilProjects && window.KwilProjects.open) window.KwilProjects.open(id); },
+};
+
+async function send(body, sentFiles, cid = pane.cid, from = pane.epoch, think = false) {
   // body: {text} | FormData with "audio" and/or "text" and "attachment"s.
   // sentFiles: called once the server took the turn (clears the chips).
   // cid: the conversation it goes into (the pane's when it was typed); a
   // yes/no answer belongs to its question's turn and never carries one.
   // from: the pane it was typed in (a queued message's may be gone).
+  // think: "think harder" for this message (never for an answer).
   const answering = confirming;
+  think = think === true && !answering;
   const question = els.question.textContent;
   const asked = confirmEpoch;
   const epoch = answering ? asked : from;  // an answer's turn: its question's pane
@@ -661,11 +692,13 @@ async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
   if (body instanceof FormData) {
     if (into) body.append("conversation_id", into);
     if (project !== undefined) body.append("project_id", project);
+    if (think) body.append("think", "1");
     options = { method: "POST", body };
   } else {
     const payload = answering ? { answer: body.text } : { text: body.text };
     if (into) payload.conversation_id = into;
     if (project !== undefined) payload.project_id = project;
+    if (think) payload.think = true;
     options = { method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload) };
     if (epoch === pane.epoch) {
@@ -677,7 +710,8 @@ async function send(body, sentFiles, cid = pane.cid, from = pane.epoch) {
   // another answer. A failed answer brings the question back.
   if (answering) setConfirm(null);
   setBusy(true);
-  setStatus(body instanceof FormData && body.has("audio") ? "Listening back…" : "Thinking…");
+  setStatus(body instanceof FormData && body.has("audio") ? "Listening back…"
+    : think ? "Thinking harder…" : "Thinking…");
   if (router) router.beginTurn();  // no backend switch until the reply is done
   try {
     const res = await request(url, options);
@@ -807,14 +841,14 @@ $("logout-all").addEventListener("click", () => {
 });
 
 // --- text ---
-els.textForm.addEventListener("submit", (e) => {
-  e.preventDefault();
+function submitText() {
   const text = els.text.value.trim();
   if (editing) {  // the edited words replace Kyle's last message
     if (busy || confirming) { addMessage("note", "Wait for the reply to finish first."); return; }
     if (!text) return;
     unlockAudio();
     cancelEdit();
+    setThink(false);  // an edit is answered the usual way
     redo(text);
     return;
   }
@@ -822,20 +856,53 @@ els.textForm.addEventListener("submit", (e) => {
   if ((busy || confirming) && !answersHere()) {
     // Still answering: the message waits its turn. Picked files stay in
     // the tray and go with the next message that is sent.
-    if (text && enqueue(text)) { unlockAudio(); els.text.value = ""; }
+    if (text && enqueue(text, pane.cid, pane.epoch, thinkNext)) {
+      unlockAudio(); els.text.value = ""; setThink(false);
+    }
     return;
   }
   if (!text && !pendingFiles()) return;
   unlockAudio();
   els.text.value = "";
-  sendMessage(text);
-});
+  const think = takeThink();  // off again either way: one message only
+  sendMessage(text, pane.cid, pane.epoch, think && !answersHere());
+}
+els.textForm.addEventListener("submit", (e) => { e.preventDefault(); submitText(); });
+
+if (els.think) els.think.addEventListener("click", () => { setThink(!thinkNext); els.text.focus(); });
+
+// A long press on Send: think harder about this message, sent on release.
+const LONG_PRESS_MS = 500;
+let pressTimer = null, longPressed = false;
+if (els.send) {
+  els.send.addEventListener("pointerdown", () => {
+    longPressed = false;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => { longPressed = true; setThink(true); }, LONG_PRESS_MS);
+  });
+  els.send.addEventListener("pointerup", (e) => {
+    clearTimeout(pressTimer);
+    if (!longPressed) return;  // a tap: the form's submit sends it
+    e.preventDefault();
+    submitText();
+    // the click that may follow sends nothing more; Enter later still sends
+    setTimeout(() => { longPressed = false; }, 400);
+  });
+  for (const type of ["pointerleave", "pointercancel"]) {
+    els.send.addEventListener(type, () => clearTimeout(pressTimer));
+  }
+  els.send.addEventListener("click", (e) => {
+    if (longPressed) { e.preventDefault(); longPressed = false; }  // sent on release already
+  });
+  els.send.addEventListener("contextmenu", (e) => e.preventDefault());
+}
 
 // A typed message (or a yes/no answer while asked), with any picked files,
-// into conversation `cid` (the pane's when it was typed).
-async function sendMessage(text, cid = pane.cid, epoch = pane.epoch) {
+// into conversation `cid` (the pane's when it was typed). `think`: "think
+// harder" for this one message.
+async function sendMessage(text, cid = pane.cid, epoch = pane.epoch, think = false) {
   if (!pendingFiles()) {
-    send({ text }, undefined, cid, epoch);
+    send({ text }, undefined, cid, epoch, think);
     return;
   }
   setBusy(true);  // no second send while photos are still being shrunk
@@ -848,7 +915,7 @@ async function sendMessage(text, cid = pane.cid, epoch = pane.epoch) {
   if (epoch === pane.epoch) {
     beginTurn(addMessage("me", [text, tray().summary()].filter(Boolean).join("\n")), text);
   }
-  send(form, () => tray().clear(), cid, epoch);
+  send(form, () => tray().clear(), cid, epoch, think);
 }
 
 // Stop: the server ends the turn where it is (POST /api/stop), its stream
@@ -994,15 +1061,16 @@ async function startRecording() {
     if (blob.size < 1000) { setStatus("Too short. Try again."); return; }
     const form = new FormData();
     form.append("audio", blob, `speech.${extensionFor(type)}`);
+    const think = takeThink();  // a lit bulb goes with a spoken message too
     if (pendingFiles()) {  // push-to-talk takes the pending files along
       tray().whenReady().then(() => {
         tray().appendTo(form);
         if (tray().count()) addMessage("me", tray().summary());
-        send(form, () => tray().clear());
+        send(form, () => tray().clear(), undefined, undefined, think);
       });
       return;
     }
-    send(form);
+    send(form, undefined, undefined, undefined, think);
   });
   recorder.start();
   startMeter(s);

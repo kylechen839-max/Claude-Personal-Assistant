@@ -444,6 +444,13 @@
     "couldn't reach your projects; try again": "无法读取你的项目，请重试",
     "bad request (one file at a time)": "请求有误（一次只能上传一个文件）",
     "send a form with one file": "请上传一个文件",
+    // "think harder" and a reply's sources (app.js, sources.js, thinkhard.py)
+    "Think harder": "仔细想想",
+    "Send (hold to think harder)": "发送（按住可仔细想想）",
+    "Thinking harder…": "正在仔细想…",
+    "Sources": "来源",
+    "That's all your think-harder replies for today, so this one was answered the usual way.":
+      "今天的“仔细想想”次数已经用完了，这次按平常的方式回答。",
     // study mode (study.js, memory.js, study.py)
     "Study mode": "学习模式",
     "Stop studying": "停止学习",
@@ -645,6 +652,7 @@
     [/^You have (\d+) projects: delete one first$/, "你已经有 $1 个项目了：请先删除一个"],
     [/^Studying ([^\n.!?]{1,80})$/, "正在学习 $1"],  // study.js's pill (a course name)
     [/^Missed (\d+) times$/, "错过 $1 次"],  // memory.js's study list
+    [/^Source ([\d, ]{1,20})$/, "来源 $1"],  // sources.js's superscripts (aria-label)
     [/^Working: (.+)…$/, "正在处理：$1…"],
     [/^Error (\d+)$/, "错误 $1"],
     [/^Microphone unavailable: (.*)$/, "麦克风不可用：$1"],

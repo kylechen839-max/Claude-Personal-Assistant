@@ -161,6 +161,15 @@ as the work. Never put secrets, tokens or personal data in this file.
   `request_messages` strips. Trim and count by whole turns
   (`is_user_turn` starts), never raw messages.
 
+- Lesson (2026-10-30, think harder and citations): the Claude 5 models
+  take only `thinking={"type": "adaptive"}` (it's on by default) and
+  `output_config={"effort": ...}`; `budget_tokens` is a 400. Kwil's own
+  data the model should cite goes as `search_result` blocks (a tool
+  result's whole content, citations on for all); contract_fakes checks
+  both, with the docs pages named in its docstring. Check the docs pages
+  (platform.claude.com/docs/en/build-with-claude/...) with `.md` appended:
+  they fetch from the sandbox.
+
 ## Environment (Linux cloud sandbox)
 - Setup:
   - `sudo apt-get install -y espeak-ng libportaudio2 ffmpeg shellcheck`

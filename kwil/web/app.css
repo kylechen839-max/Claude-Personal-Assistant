@@ -404,6 +404,29 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
   display: grid; place-items: start end; padding: 4px 6px 0 0; background: none; color: var(--text);
   font-size: 1.1rem; line-height: 1; }
 .attach-chip img + .attach-remove { color: #fff; text-shadow: 0 0 3px #000a; }
+/* "Think harder" (app.js): a quiet toggle left of Send; on, it takes the accent */
+#text-form .think-btn { background: none; color: var(--text-2); }
+#text-form .think-btn svg { width: 22px; height: 22px; stroke-width: 1.8; }
+#text-form .think-btn[aria-pressed="true"] { background: var(--surface-2); color: var(--accent-ink); }
+#text-form .think-btn:active { background: var(--surface-2); }
+/* A reply's sources (sources.js): superscripts in the text, then the list */
+.cite-ref { font-size: .7em; line-height: 0; margin-left: 1px; color: var(--accent-ink); font-weight: 500; }
+.sources { display: flex; flex-direction: column; gap: var(--s1); margin-top: var(--s2);
+  white-space: normal; font-size: var(--t-cap); line-height: 1.35; color: var(--muted); }
+.sources-head { font-weight: 500; }
+.sources-own { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s1); }
+.sources-web { display: flex; flex-direction: column; }
+.source { min-height: 44px; display: inline-flex; align-items: center; gap: var(--s2); color: var(--text-2);
+  font: inherit; text-decoration: none; overflow-wrap: anywhere; }
+button.source { padding: 0 var(--s1); background: none; border: 0; border-radius: var(--r-sm); color: var(--accent-ink); }
+button.source:active { background: var(--surface-2); }
+.source-web { padding: 0 var(--s1); border-radius: var(--r-sm); }
+.source-web:active { background: var(--surface-2); }
+.source-n { flex: none; min-width: 1.4em; height: 1.4em; display: inline-grid; place-items: center;
+  border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font-size: .75rem; }
+.source-title { color: var(--accent-ink); }
+.source-domain { color: var(--muted); }
+.source:focus-visible { outline: none; box-shadow: var(--ring); }
 /* Typing while Kwil answers (app.js): Stop, and "Queued" bubbles under the log */
 #text-form .stop-btn { background: var(--surface-2); color: var(--text); }
 #text-form .stop-btn[hidden] { display: none; }

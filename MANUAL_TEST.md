@@ -1701,6 +1701,35 @@ In the Home Screen app, with a syllabus PDF on the phone.
   pages fit, read "项目" and "在这个项目里开始新对话", and their Projects
   list doesn't show yours.
 
+## Think harder and sources (~10 min, iPhone and desktop)
+In the Home Screen app.
+- [ ] Tap the light bulb left of Send, then type "should I take PHYS 361 or
+  CS 171 next term?" and send.
+  - Should: the bulb lights up when tapped and goes dark as soon as the
+    message is sent; the status reads "Thinking harder…" and the reply
+    takes a little longer. The next message is answered as usual.
+- [ ] Press and hold Send on a typed message (about half a second), then
+  let go.
+  - Should: it is sent on release, thinking harder, and only once.
+- [ ] Ask "search the web for the date of the next SpaceX launch".
+  - Should: small numbers after the sentences that used a page, and under
+    the reply "Sources" with numbered rows (title and site, each a
+    comfortable tap); a row opens the page in a new tab, the app stays.
+- [ ] With the phone's voice on (and once with it off), let that reply be
+  read aloud.
+  - Should: no web address and no numbers are read out.
+- [ ] Ask "what did we decide about my physics schedule last week?" (a chat
+  from last week about it).
+  - Should: Kwil says it came from your chat on that day, and the reply
+    ends with "Sources: Chat on <day>"; tapping it opens that chat.
+- [ ] Open the conversation in History, then delete it.
+  - Should: the transcript shows the same sources under the reply; after
+    the delete they are gone with it.
+- [ ] Say in the voice view "think hard about how to split my study week".
+  - Should: a slower, more careful answer; nothing about the bulb.
+- [ ] In a Chinese family member's app: the bulb's label reads "仔细想想",
+  the list's head "来源".
+
 ## Model routing and prompt caching (~5 min)
 Needs a real `ANTHROPIC_API_KEY`; nothing here changes your data.
 - [ ] In text mode (`python -m kwil --mode text`), ask "what time is

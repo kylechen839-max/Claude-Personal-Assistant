@@ -108,6 +108,8 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/study.js",
               # Settings, Projects and the header's project name (/api/projects needs sign-in)
               "/projects.js",
+              # a reply's sources list (page code only; the sources come with the turn)
+              "/sources.js",
               # the owner's "Connect Spotify" button (its routes need sign-in)
               "/spotify.js",
               # Google's redirect back after a family member's sign-in: the

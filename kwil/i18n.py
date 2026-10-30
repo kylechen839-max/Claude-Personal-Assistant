@@ -49,6 +49,9 @@ EN = {
     "redo_busy": "Wait for the reply to finish first.",
     "redo_confirming": "Answer the question first.",
     "redo_stopped": "Stopped. The earlier reply stays.",
+    # "think harder" over [assistant] think_per_day (thinkhard.py)
+    "think_limit": "That's all your think-harder replies for today, so this "
+                   "one was answered the usual way.",
     # "Branch from here": the new conversation's title (history_web.py)
     "branch_title": "{title} (branch)",
     "wont_delete": "OK, I won't delete it.",
@@ -186,6 +189,7 @@ ZH = {
     "redo_busy": "请等回复结束后再试。",
     "redo_confirming": "请先回答这个问题。",
     "redo_stopped": "已停止，之前的回复保留。",
+    "think_limit": "今天的“仔细想想”次数已经用完了，这次按平常的方式回答。",
     "branch_title": "{title}（分支）",
     "wont_delete": "好的，我不删除了。",
     "wont_do": "好的，我不做了。",

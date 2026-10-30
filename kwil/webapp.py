@@ -72,6 +72,7 @@ from starlette.requests import HTTPConnection
 from kwil import audio, canvas_helper, i18n, usage
 from kwil.attachments import MAX_ATTACHMENTS
 from kwil.chat import is_user_turn
+from kwil.sentences import without_urls
 from kwil.projects_web import available as projects_available
 from kwil.study import available as study_available, public as study_public
 from kwil.tools import READ_ONLY_TOOLS, ToolRegistry
@@ -1138,7 +1139,8 @@ class WebAssistant:
     def start_turn(self, s: Session, text: str | None = None,
                    recording: np.ndarray | None = None,
                    attachments: list[dict] | None = None,
-                   resume: str | None = None, project: str | None = None) -> bool:
+                   resume: str | None = None, project: str | None = None,
+                   think: bool = False) -> bool:
         """Start a turn in the background. False if one is already running.
         `attachments`: content blocks of files sent with it (attachments.py).
         `resume`: the stored conversation the page's chat is showing (its
@@ -1148,6 +1150,7 @@ class WebAssistant:
         conversation is in, "" for none (the route checks it is this
         person's); a conversation in another one is ended first and the
         turn starts a new one there. None: whatever the chat is in.
+        `think`: the page's "think harder" for this turn only (thinkhard.py).
 
         Waits briefly for the lock: a turn puts "done" just before releasing
         it, so a page that starts the next turn right away isn't refused."""
@@ -1173,7 +1176,7 @@ class WebAssistant:
         s.cancel = threading.Event()
         s.thread = threading.Thread(target=self._run_turn,
                                     args=(s, text, recording, attachments, resume,
-                                          False, project),
+                                          False, project, think),
                                     name=f"web-turn-{s.sid[:6]}", daemon=True)
         s.thread.start()
         return True
@@ -1262,12 +1265,13 @@ class WebAssistant:
 
     def _run_turn(self, s: Session, text, recording, attachments=None,
                   resume: str | None = None, redo: bool = False,
-                  project: str | None = None) -> None:
+                  project: str | None = None, think: bool = False) -> None:
         rec = s.chat.recorder
         if rec is not None and rec.conversation_id is None:
             rec.source = "web"  # a new conversation started with push-to-talk
         with i18n.using(s.language):  # its sentences and tool questions
-            self._turn_body(s, text, recording, attachments, resume, redo, project)
+            self._turn_body(s, text, recording, attachments, resume, redo, project,
+                            think)
 
     @staticmethod
     def project_of(s: Session) -> dict | None:
@@ -1312,7 +1316,7 @@ class WebAssistant:
 
     def _turn_body(self, s: Session, text, recording, attachments=None,
                    resume: str | None = None, redo: bool = False,
-                   project: str | None = None) -> None:
+                   project: str | None = None, think: bool = False) -> None:
         from kwil.cli import get_reply, is_exit, loggable_reply
 
         cancel = s.cancel
@@ -1349,12 +1353,16 @@ class WebAssistant:
                 s.chat.end_conversation()
                 self._reply(s, i18n.t("goodbye"), ended=True)
                 return
+            options = {"think": True} if think else {}  # never sent when off
             if attachments:
-                reply = self._ask_with_files(s, text, attachments, on_text, cancel)
+                reply = self._ask_with_files(s, text, attachments, on_text, cancel,
+                                             **options)
             else:
                 reply = get_reply(  # it logs errors itself
                     s.chat, text, output_fn=lambda m: None, on_text=on_text,
-                    cancel=cancel)
+                    cancel=cancel, **options)
+            if getattr(s.chat, "think_refused", False) is True:  # today's are used up
+                s.events.put({"type": "status", "text": i18n.t("think_limit", s.language)})
             log.info("Web replied %d chars", len(reply))
             log.debug("Web replied: %r", loggable_reply(s.chat, reply))
             self._reply(s, reply, stopped=cancel is not None and cancel.is_set())
@@ -1400,7 +1408,7 @@ class WebAssistant:
 
     @staticmethod
     def _ask_with_files(s: Session, text: str, attachments: list[dict], on_text,
-                        cancel: threading.Event | None = None) -> str:
+                        cancel: threading.Event | None = None, **options) -> str:
         """get_reply for a turn with files: Claude refusing the request gets
         a sentence about the file instead of the generic API error, "too
         long" when its reason is about length (a PDF over 100 pages, a file
@@ -1413,7 +1421,7 @@ class WebAssistant:
 
         try:
             return s.chat.ask(text, on_text=on_text, attachments=attachments,
-                              cancel=cancel)
+                              cancel=cancel, **options)
         except anthropic.BadRequestError as e:
             log.warning("Claude refused a turn with %d attachment(s) (HTTP %s)",
                         len(attachments), e.status_code)
@@ -1429,6 +1437,12 @@ class WebAssistant:
                  "audio": f"/api/audio/{self.remember(text, s)}", "ended": ended}
         if stopped:  # the Stop button: the page shows it and doesn't speak it
             event["stopped"] = True
+        cites = getattr(s.chat, "last_citations", None) if not ended else None
+        if isinstance(cites, dict) and cites.get("sources"):
+            # shown under the reply (web/sources.js); never in the spoken text
+            event["citations"] = cites
+        if getattr(s.chat, "think_turn", False) is True and not ended:
+            event["think"] = True
         s.events.put(event)
 
     def stop(self, s: Session) -> bool:
@@ -1625,6 +1639,7 @@ class WebAssistant:
         """`text` spoken in `session`'s voice (see tts_for), as WAV bytes.
         Every voice renders on the one TTS thread. A picked voice that
         fails falls back to the language's (or the configured) one."""
+        text = without_urls(text)  # never read out a web address
         engine = self.tts_for(session, language)
         default = self._language_tts(language if language is not None
                                      else getattr(session, "language", None))
@@ -2164,7 +2179,8 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                         ("ui.js", "text/javascript"),
                         ("brief.js", "text/javascript"),
                         ("study.js", "text/javascript"),
-                        ("projects.js", "text/javascript")):
+                        ("projects.js", "text/javascript"),
+                        ("sources.js", "text/javascript")):
         app.add_api_route(f"/{name}", _static_route(name, media), methods=["GET"])
 
     @app.get("/manifest.webmanifest")
@@ -2397,10 +2413,13 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if recording is None and not blocks and not (
                 isinstance(text, str) and text.strip()):
             return error("send text or audio", 400)
+        # "think harder", this turn only: JSON true, or a form's "1"; nothing else
+        form = request.headers.get("content-type", "").startswith("multipart/form-data")
+        think = fields.get("think") == "1" if form else fields.get("think") is True
         if not await run_in_threadpool(
                 assistant.start_turn, s,
                 text if recording is None else None, recording, blocks,
-                resume=cid, project=project):
+                resume=cid, project=project, think=think):
             return error("still working on the last request", 409)
         return stream(s)
 

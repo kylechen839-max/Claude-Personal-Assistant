@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 from datetime import datetime
 
-from kwil import projects, usage
+from kwil import citations, projects, thinkhard, usage
 from kwil.memory_store import EMPTY as EMPTY_MEMORY
 from kwil.router import needs_main_for
 from kwil.tools.timeutil import TURN_NOW, zone_name
@@ -252,7 +252,9 @@ class ClaudeChat:
                  meter=None, max_tokens_tools: int = 4000,
                  max_history_chars: int = 300_000, thinking_turns: int = 3,
                  local_memory=None, project_inline_tokens: int = 40000,
-                 project_inline_bytes: int = 4_000_000):
+                 project_inline_bytes: int = 4_000_000,
+                 think_max_tokens: int = thinkhard.DEFAULT_MAX_TOKENS,
+                 think_effort: str = thinkhard.DEFAULT_EFFORT, think_gate=None):
         self._client = client
         # Where this chat's API usage is counted: None = usage.METER (the
         # owner's bill); a family member's own key counts on theirs (family.py)
@@ -360,6 +362,19 @@ class ClaudeChat:
         self._project_inline = False
         self._project_tagged: str | None = None  # the conversation set_project wrote
         self.untrusted_project_files = False
+        # "Think harder" (thinkhard.py): a turn flagged by the app or by
+        # "think hard about..." goes to `model` with think_max_tokens and
+        # adaptive thinking at think_effort. `think_gate()` says whether
+        # one more is allowed today and counts it (the per-person cap);
+        # None = never. think_turn / think_refused describe the last turn.
+        self.think_max_tokens = think_max_tokens
+        self.think_effort = think_effort
+        self.think_gate = think_gate
+        self.think_turn = False
+        self.think_refused = False
+        # The last reply's sources (citations.py): {"sources", "marks"} or None
+        self.last_citations: dict | None = None
+        self._sources: citations.Sources | None = None
         self._load_memory()
 
     def _count_usage(self, model: str, response) -> None:
@@ -672,6 +687,9 @@ class ClaudeChat:
                 parts.append(RECALL_PROMPT)
         if self.local_memory is not None:
             parts.append(LOCAL_MEMORY_PROMPT)
+        if self.local_memory is not None or (self.tools and any(
+                self.tools.has(n) for n in citations.CITABLE_TOOLS)):
+            parts.append(citations.CITE_PROMPT)
         if self.memory:
             parts.append(MEMORY_PROMPT)
         if self.language == "zh":
@@ -777,7 +795,8 @@ class ClaudeChat:
         return self.stable_system() + "\n\n" + self.turn_context(notes, nudge)
 
     def ask(self, user_text: str, on_text=None, cancel=None,
-            attachments: list[dict] | None = None, record_user: bool = True) -> str:
+            attachments: list[dict] | None = None, record_user: bool = True,
+            think: bool = False) -> str:
         """Send one user turn, run any tool calls, and return the text reply.
 
         With `on_text`, replies are streamed and each text delta is passed to
@@ -786,11 +805,17 @@ class ClaudeChat:
         returned. `attachments`: image/document content blocks (the phone's
         "+", attachments.py) sent before the text; saved history gets only
         a marker such as "[photo]" (attachment_marker). `record_user`
-        False: Kyle's message is already in saved history (regenerate)."""
+        False: Kyle's message is already in saved history (regenerate).
+        `think` (the app's "think harder"; "think hard about..." in the
+        words does the same): this turn only, on the main model with more
+        room to think (thinkhard.py), if think_gate allows one more today."""
         token = _CURRENT_CHAT.set(self)
         # "Now" is read once per turn: the prompt's date and the tools'
         # "today"/"tomorrow" must agree even if midnight passes mid-turn.
         clock = TURN_NOW.set(_now(self.timezone))
+        # this turn's alone (never carried over): "think harder" and sources
+        self.think_turn = self.think_refused = False
+        self.last_citations = None
         try:
             if not self.history:  # a new conversation: today's instructions and memories
                 self._load_memory()
@@ -800,6 +825,10 @@ class ClaudeChat:
             self._switched = False
             notes = self.recall(user_text)
             nudge = self._nudge() if not self.history else None
+            self._start_think(think or thinkhard.asked(user_text))
+            self._sources = citations.Sources(
+                self.language, TURN_NOW.get().tzinfo,
+                self.project_id if isinstance(self.project_id, str) else None)
             self._turn_model = self._route(user_text, attachments)
             self.private_turn = False
             start = len(self.history)
@@ -851,10 +880,12 @@ class ClaudeChat:
                 if self.recorder:  # the retry saves it again
                     self.recorder.retract(saved, new_thread)
                 raise
+            self.last_citations = self._sources.finish()
             if self.recorder:
                 self.recorder.assistant(reply or "(interrupted)",
                                         tool_events=self._turn_events,
-                                        interrupted=interrupted)
+                                        interrupted=interrupted,
+                                        citations=self.last_citations)
             if self._pending_resume and not interrupted:
                 self._switch_to(self._pending_resume, recorded, reply, new_thread)
             self._trim_history()
@@ -868,8 +899,24 @@ class ClaudeChat:
         finally:
             self._pending_resume = None
             self._turn_model = None
+            self._sources = None
             TURN_NOW.reset(clock)
             _CURRENT_CHAT.reset(token)
+
+    def _start_think(self, wanted: bool) -> None:
+        """This turn thinks harder if asked and think_gate allows one more
+        today (it counts it); never carried to the next turn."""
+        self.think_turn = self.think_refused = False
+        if not wanted:
+            return
+        try:
+            allowed = self.think_gate is not None and bool(self.think_gate())
+        except Exception:  # a broken counter: the cap holds
+            log.exception("Think harder: the daily count failed")
+            allowed = False
+        self.think_turn, self.think_refused = allowed, not allowed
+        log.info("Think harder: %s for this turn", "on" if allowed else
+                 "refused (daily limit)")
 
     def _route(self, user_text: str, attachments) -> str:
         """The model for this turn (router.py), picked before the request and
@@ -1296,6 +1343,7 @@ class ClaudeChat:
         # cache breakpoint after them; request_messages adds a second one at
         # the end of the conversation so the next request reads it back.
         model = self._turn_model or self.model
+        think = thinkhard.request_options(self) if self.think_turn else {}
         if model != self._thinking_model:
             # Another model (the router's pick, or an escalation from the fast
             # model) can't read the earlier turns' thinking: none is resent.
@@ -1308,10 +1356,18 @@ class ClaudeChat:
             while True:
                 tag = self._thinking_tag(model)
                 kwargs = dict(model=model, max_tokens=self._max_tokens(model),
-                              system=system, messages=self._with_project_docs(
-                                  request_messages(self.history, cache=True,
-                                                   thinking=tag,
-                                                   thinking_turns=self.thinking_turns)))
+                              system=system, messages=cite_documents(
+                                  self._with_project_docs(request_messages(
+                                      self.history, cache=True, thinking=tag,
+                                      thinking_turns=self.thinking_turns))))
+                if self._sources is not None:  # what a document citation points at
+                    self._sources.set_documents(kwargs["messages"], [
+                        fid for fid, _b in self._project_docs])
+                if think:  # "think harder": more room, thinking asked for
+                    kwargs.update(think)
+                    if on_text is None and cancel is None:  # not streamed
+                        kwargs["max_tokens"] = min(kwargs["max_tokens"],
+                                                   thinkhard.MAX_UNSTREAMED_TOKENS)
                 if self.tools:
                     kwargs["tools"] = self.tools.schemas(model)
                 try:
@@ -1389,7 +1445,9 @@ class ClaudeChat:
                 blocks or [{"type": "text", "text": "(no reply)"}], tag,
                 response.stop_reason))
             if done:
-                text = "".join(b.text for b in response.content if b.type == "text")
+                text = (self._sources.reply(response.content) if self._sources
+                        else "".join(b.text for b in response.content
+                                     if b.type == "text"))
                 if response.stop_reason == "refusal":
                     return text.strip() or "Sorry, I can't help with that one."
                 return text.strip()
@@ -1414,6 +1472,10 @@ class ClaudeChat:
                 if not private:
                     log.debug("Tool input for %s: %s", call.name, call.input)
                 content, is_error = self._dispatch(call, untrusted)
+                if not is_error and self._sources is not None:
+                    # Kwil's own data goes as search_result blocks, so the
+                    # reply can cite it (citations.py)
+                    content = self._sources.offer(call.name, content) or content
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})
             self.history.append({"role": "user", "content": results})
@@ -1712,6 +1774,38 @@ def request_messages(history: list[dict], cache: bool = False,
 # Blocks a cache_control marker may go on (thinking and server tool blocks
 # may not).
 CACHEABLE_TYPES = ("text", "image", "document", "tool_use", "tool_result")
+
+
+def cite_documents(messages: list[dict]) -> list[dict]:
+    """`messages` (as sent) with citations on for every document block (an
+    attached file, a project's file): the API wants citations on for all
+    or none of a request's documents, and the search_result blocks Kwil's
+    own data goes in (citations.py) always have them on. The same bytes on
+    every request, so the prompt cache holds. Copies; history keeps none."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if m.get("role") == "user" and isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "document"
+                and b.get("citations") != {"enabled": True} for b in content):
+            m = {**m, "content": [_cited_document(b)
+                                  if isinstance(b, dict) and b.get("type") == "document"
+                                  else b for b in content]}
+        out.append(m)
+    return out
+
+
+def _cited_document(block: dict) -> dict:
+    """A document block with citations on; a plain-text one with no text
+    (an empty project file) can't be cited from, so it goes as a short
+    text note instead (its cache breakpoint kept)."""
+    source = block.get("source") or {}
+    if source.get("type") == "text" and not str(source.get("data") or "").strip():
+        note = {"type": "text", "text": f"[file: {block.get('title') or 'file'} (empty)]"}
+        if "cache_control" in block:
+            note["cache_control"] = block["cache_control"]
+        return note
+    return {**block, "citations": {"enabled": True}}
 
 
 def _with_context(message: dict, current: bool = False) -> dict:

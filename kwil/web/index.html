@@ -32,6 +32,7 @@
 <script src="/brief.js" defer></script>
 <script src="/study.js" defer></script>
 <script src="/projects.js" defer></script>
+<script src="/sources.js" defer></script>
 <script src="/ui.js" defer></script>
 <script src="/app.js" defer></script>
 <script src="/voice-core.js" defer></script>
@@ -325,7 +326,10 @@
       <button id="stop" class="stop-btn" type="button" aria-label="Stop" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg>
       </button>
-      <button type="submit" aria-label="Send">
+      <button id="think" class="think-btn" type="button" aria-pressed="false" aria-label="Think harder" title="Think harder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5 1.1 1.3 1.1 2.2h5c0-.9.5-1.7 1.1-2.2A6 6 0 0 0 12 3z"/></svg>
+      </button>
+      <button id="send" type="submit" aria-label="Send" title="Send (hold to think harder)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
       </button>
     </form>

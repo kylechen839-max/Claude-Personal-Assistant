@@ -23,6 +23,10 @@ Once a conversation needed the main model it stays there until it is reset
 (chat.ClaudeChat.escalated): the prompt cache is per model, and the fast
 model can't read the main model's thinking.
 
+A "think harder" turn (thinkhard.py) goes to the main model whatever
+the words (reason "think"), and like any main-model turn the
+conversation stays there afterwards.
+
 While study mode is on (study.py, ClaudeChat.studying) every turn goes to
 the main model: a tutor's questions, hints and explanations are where
 quality matters, and "quiz me" / "study" words send the turn that starts
@@ -122,7 +126,9 @@ def choose_model(chat, text: str, attachments=None) -> tuple[str, str]:
     from kwil.chat import has_attachments
 
     main, fast = chat.model, getattr(chat, "fast_model", None)
-    if getattr(chat, "router", "off") == "off":
+    if getattr(chat, "think_turn", False) is True:
+        reason = "think"
+    elif getattr(chat, "router", "off") == "off":
         reason = "off"
     elif not fast or fast == main:
         reason = "no_fast_model"

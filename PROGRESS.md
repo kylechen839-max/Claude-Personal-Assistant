@@ -7843,3 +7843,197 @@ unfiltered, the summary untagged).
 
 Counts (Linux sandbox): 3828 passed, 45 skipped, 1 deselected after the [auto-review] braces fix (+4) and judge round 3's Pinecone over-fetch test (+1) (3823 before them; 16cf97d:
 3817 / 45; +6). JavaScript 343 passed (unchanged).
+
+## Think harder and citations (2026-10-30)
+Two items from Kyle's ChatGPT/Claude roadmap, in one PR.
+
+**API shapes, checked first** (the docs fetched from the sandbox on
+2026-10-30, `.md` pages): `build-with-claude/thinking` (the per-model
+`thinking` table: on Opus/Sonnet/Haiku 5.5 no `thinking` field already
+means adaptive thinking; `{"type": "adaptive"}` is accepted; `"enabled"`
+with `budget_tokens` is a 400; `"disabled"` a 400 on Opus/Sonnet 5.5),
+`.../extended-thinking` (budget_tokens deprecated, a 400 on Claude 4.7 and
+later), `.../effort` (`output_config.effort`: low, medium, high, xhigh,
+max on all three 5.5 models; Sonnet 5.5 defaults to high, Opus/Haiku 5.5
+to medium; a top-level effort change misses the prompt cache once) and
+`.../search-results` (GA, no beta header; `search_result` blocks in user
+messages or as a tool result's whole content; citations all on or all
+off, on when web_search is offered). The installed SDK's own
+`ThinkingConfigAdaptiveParam` and `OutputConfigParam` types agree.
+`tests/contract_fakes.py` now refuses everything else in those shapes
+(and a `search_result` in an assistant message, mixed into a tool result,
+with empty text, or with citations off next to web search), and its
+structured-output script now needs `output_config.format`, not just any
+`output_config`.
+
+- **Think harder** (`thinkhard.py`, `chat.py`, `router.py`, `quotas.py`):
+  `ClaudeChat.ask(think=True)` (the page's toggle or a long press on Send:
+  `/api/turn {"think": true}` or the form field `think=1`), or a message
+  starting "think hard about...", "think it through", "仔细想想",
+  "认真想一想" (typed or spoken: the CLI, push-to-talk and the voice view
+  all go through `ask`). That turn: the router's reason "think" sends it
+  to `[assistant] model`; `max_tokens` = `think_max_tokens` (16000, never
+  under the turn's usual ceiling; 21000 at most when not streamed, the
+  SDK's limit); `thinking={"type": "adaptive"}` and
+  `output_config={"effort": think_effort}` ("xhigh"; "" sends none).
+  Never sticky: reset at the start of every turn. Capped per person per
+  day (`think_per_day`, 30) by `UserQuotas.admit_think`: an invited
+  person's in `Family.quotas` (their chat's `think_gate`), the owner's in
+  one UserQuotas per process (`thinkhard.owner_gate`, his `[assistant]
+  timezone`'s day, UTC when unset); no gate or a failing one means an
+  ordinary turn. Over the cap the turn is ordinary and the page gets a
+  "status" note (`think_limit`, English and Chinese). Tiers: the turn
+  uses the chat's own model (an invited person's chat has the configured
+  one), so nobody gets a model beyond their chat's. Kept thinking (#84):
+  a think turn after a fast-model turn is a model switch (the earlier
+  thinking is forgotten, as for any switch); after it the conversation
+  stays on the main model (the router's existing rule), and the next turn
+  gets the think turn's thinking back.
+- **Citations** (`citations.py`, `chat.py`): web_search's
+  `web_search_result_location` citations become numbered web sources (a
+  page cited twice is one number) with a mark (character offset) after
+  each cited text block of the final reply. `read_conversation`,
+  `search_project_files`, `read_project_file`, `search_course_files` and
+  `read_course_file` results go to Claude as `search_result` blocks
+  (`Sources.offer`; errors and empty results stay JSON text) with a
+  `kwil:<kind>/<id>` source, so a `search_result_location` citation maps
+  back to the chat ("Chat on Tue 27 Oct", "10月27日的聊天"), project file
+  or course file; a source id no tool of this turn returned is ignored. A
+  read tool that ran is listed even when not cited. A system prompt line
+  asks Claude to say in words where an answer came from (chats, files,
+  memories) and never to read web addresses. Bounds: 20 sources, titles
+  200, URLs 2000 (http/https with a host only), cited text 300, 50 marks
+  of at most 5 numbers, 12 KB stored. INFO logs counts and kinds only.
+- **History** (`history.py`, `history_web.py`): the message event's
+  `cites` and a `messages.citations` column, added with `ALTER TABLE`
+  when missing (not a numbered migration: an older Kwil after a rollback
+  still opens the file and its inserts leave it NULL). `get`, the History
+  detail route, JSON and Markdown export, import (checked again), branch
+  and `mark_interrupted` (sources kept, marks dropped) carry them; a
+  delete, a message delete and a supersede remove them with the row.
+- **Web** (`webapp.py`, `web/sources.js` new, `app.js`, `history.js`,
+  `projects.js`, `index.html`, `app.css`, `i18n.js`): the reply event
+  has `citations` (and `think` for a think turn). `sources.js` draws the
+  superscripts (web pages only, renumbered 1..n) and the list (own data
+  as one "Sources: ... · ..." line of buttons opening the chat or the
+  project; web pages as numbered rows, `target="_blank"`,
+  `rel="noopener noreferrer"`), textContent only, URLs checked again. The
+  composer has a 44px light-bulb toggle (`#think`, `aria-pressed`) left
+  of Send (`#send`; holding it 500 ms turns think on and sends on
+  release); a queued message keeps its own flag, a yes/no answer never
+  has one. `sources.js` is in the static routes, `SHELL` and `PUBLIC_GET`;
+  `sw.js` `kwil-shell-v19`. DESIGN_SYSTEM.md has both components.
+- **Speech:** `sentences.without_urls` in `WebAssistant.synthesize` and
+  `cli.speak`; the voice view's splitter already dropped URLs; the
+  phone's own voice uses `KwilSources.speakable`.
+
+Tests: `tests/test_thinkhard.py` (25: the main model, 16000 and the
+adaptive/effort shape through the contract fake with the router on; not
+sticky; the phrases and non-phrases; the per-day cap and the shared owner
+count; no gate and a failing gate; per-person day rollover and a removed
+person; kept thinking across the switch; the unstreamed ceiling; no
+effort; config defaults; a family member on the chat's model with her own
+count; the page's flag, status note and form field; no words at INFO),
+`tests/test_citations.py` (35: unsafe URLs, bounds, control characters,
+uncited/unknown sources, each tool's search_result blocks, the fake
+accepting them with web search on, a read listed without a citation,
+web citations numbered and marked, reset per turn, no text at INFO,
+history storage, export/import cleaning, supersede and delete, try
+again, interrupted, branch, the rollback-safe column, URLs never spoken
+by `cli.speak` or the web audio, the phone's reply event), contract tests
+(`test_a_think_harder_turn_the_api_accepts` and
+`test_kwils_own_data_as_search_results_the_api_accepts`, both live-capable
+in CI's api-contract job; `test_a_web_search_reply_brings_its_cited_pages`;
+11 new refusals in `test_the_fake_refuses_what_the_api_refuses`; the
+recall contract test now checks the search_result blocks and the stored
+source), `tests/js/sources.test.mjs` (5) and `tests/js/app-think.test.mjs`
+(5). Existing tests updated for the new result shape
+(`test_recall.py`, `test_projects.py`: read_conversation and the project
+file tools now send search_result blocks), the `sw.js` v19 pins and the
+public file list; two JS fake DOMs got `setAttribute`.
+
+Failing first (scratch copies, never git stash): on 8a50a9d's source the
+new Python test files error (no modules), the four new contract tests and
+all ten JS tests fail; the old contract fake accepts all 11 new refusals.
+Single mutations each fail their tests: no "think" route, budget_tokens
+instead of adaptive (the fake's 400), no cap, no family gate, the flag
+kept across turns, no search_result conversion, any URL scheme, no
+storage, TTS reading URLs, no citations on the reply event, no marks;
+JS: `javascript:` allowed.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3902 passed, 49 skipped, 1 deselected (8a50a9d in a `git archive` copy:
+3826 passed, 46 skipped, plus `test_design_skills` failing there only
+because the archive leaves its data out; +75 passed). The new skips are
+the live contract runs (no key here). JavaScript 353 passed (343; +10).
+
+### Think harder and citations, judge round 2 (2026-10-30)
+1. **Marks after an emoji.** Marks were Python code points; the page
+   slices UTF-16 units, so after an emoji a superscript landed one unit
+   early (inside the next character, or splitting a surrogate pair). The
+   server now counts UTF-16 units (`citations.utf16_len`), and
+   `sources.js` moves a mark that would split a surrogate pair past it.
+   No stored marks need converting: no release ever wrote code-point
+   marks (the feature was only on this branch). Tests: an emoji before
+   the mark in Python and JS, and a mark inside a pair in JS.
+2. PRIVACY: the master's row.
+3. **The think flag** is now only JSON `true` or a form's `"1"` (it also
+   took `"true"` in any case); SECURITY.md says so; the web test sends
+   `"true"`, `"TRUE"`, `"1"`, `1`, `"yes"` and an object as JSON and
+   `"true"`, `"True"`, `"on"`, `"yes"` as a form, and none counts.
+4. **Citations all or none.** The citations doc
+   (build-with-claude/citations, fetched 2026-10-30) says citations must
+   be on for all or none of a request's documents, and calls both
+   `document` and `search_result` blocks documents; the search-results
+   page says the same for search results. So every document block (an
+   attached file, a project file) now goes with citations on
+   (`chat.cite_documents`, at request time, copies; history unchanged,
+   cache breakpoints kept, the same bytes each request). The doc also
+   says citations can't be combined with `output_config.format` (the
+   chat never sends one). `contract_fakes` enforces both across
+   documents and search results, and a new contract test attaches a PDF,
+   then reads a past chat (`test_a_pdf_attached_then_a_past_chat_read`).
+
+Failing first (scratch copy): code-point marks fail the Python emoji
+test, the old JS fails the surrogate test, the old flag parsing fails the
+web test, no `cite_documents` fails the new contract test (the fake's
+400), and the old fake accepts both new refusals.
+
+Counts (Linux sandbox, not real hardware): 3907 passed, 49 skipped, 1
+deselected (ee6acb6: 3902 / 49; +5). JavaScript 354 passed (353; +1).
+
+### Think harder and citations, judge round 3 (2026-10-30)
+1. **LOW: inline files never listed.** Answers from a project file sent
+   in full, or from an attached file, came back with
+   `char_location` / `page_location` / `content_block_location`
+   citations, which `Sources.cite` ignored. Each request now maps its
+   document blocks in `document_index` order (`Sources.set_documents`,
+   from the messages as sent): the project's files, which come first in
+   the first message with known ids, become `project_file` sources (with
+   the conversation's project; a tap opens it). Attached files become a
+   new kind, `attachment`, named "plan.pdf (attached)" / "plan.pdf（附件）"
+   and not clickable: the file isn't kept, so there is nothing to open.
+   They have the same bounds, and an index out of range is ignored.
+   `sources.js` accepts the kind and draws it as plain text.
+2. **Edge: an empty text document with citations on.** The store already
+   refuses zero bytes, but a file that is only a byte-order mark or blanks
+   decodes to no text. Rather than guess whether the API takes it,
+   `chat.cite_documents` sends such a document as a
+   "[file: name (empty)]" text note (its cache breakpoint kept), so it is
+   never a citable document and never counts in `document_index`.
+
+Tests: `test_an_answer_from_an_inline_file_lists_it` (and the out-of-range
+index) and `test_an_empty_text_file_goes_as_a_note_not_a_document` in
+`test_projects.py`, `test_an_attached_file_is_named_not_linked` in
+`test_citations.py`, and a JS test for the attachment kind. Failing first
+(scratch copy): document citations ignored, no document map, empty text
+cited, no range check, and the JS kind missing each fail their tests.
+
+Counts (Linux sandbox, not real hardware): 3910 passed, 49 skipped, 1
+deselected (51e82fc: 3907 / 49; +3). JavaScript 355 passed (354; +1).
+
+### Think harder and sources, judge round 4 (2026-10-30)
+- MED, fixed by the master: an attachment cited more than once was listed
+  once per citation (`Sources._number` compared without the title fallback
+  its key used), which could fill MAX_SOURCES and drop later web pages. Test
+  `test_an_attachment_cited_twice_is_listed_once`; fails without the fix.

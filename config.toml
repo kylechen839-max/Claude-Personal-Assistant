@@ -24,6 +24,14 @@ language = "en"               # "zh": Mandarin replies, speech and phone page (c
 # sends everything to `model`. CLAUDE_FAST_MODEL overrides fast_model.
 # fast_model = "claude-haiku-5-5"
 # router = "auto"
+# "Think harder" (the app's toggle or long-press on Send, or saying "think hard
+# about..."): that one turn goes to `model` with more room to think. Ceiling in
+# tokens (only what's used is billed), thinking effort ("low" ... "xhigh", "max";
+# "" = the model's default), and how many such turns each person (you and each
+# invited person) gets per day (0 = no limit).
+# think_max_tokens = 16000
+# think_effort = "xhigh"
+# think_per_day = 30
 # Monthly token counts and a rough cost estimate (owner only); "" = not kept.
 # usage_file = "data/usage.json"
 

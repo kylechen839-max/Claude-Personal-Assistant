@@ -25,6 +25,7 @@ class El {
   get lastElementChild() { return this.children.at(-1) ?? null; }
   appendChild(c) { this.children.push(c); return c; }
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  setAttribute(k, v) { (this.attrs ??= {})[k] = String(v); }
   async fire(type) { for (const fn of this.listeners[type] || []) await fn({ preventDefault() {} }); }
 }
 

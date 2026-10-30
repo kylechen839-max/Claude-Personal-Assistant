@@ -2631,6 +2631,70 @@ network code of its own.
   search queries never (the file tools are `private`). A caplog test
   checks it.
 
+## Think harder and sources (`thinkhard.py`, `citations.py`, `web/sources.js`)
+
+- **Cost (rule 7).** A think-harder turn costs more (a larger `max_tokens`,
+  thinking at `think_effort`), so each person gets `[assistant]
+  think_per_day` (30) a day, counted in `quotas.UserQuotas` (an invited
+  person's in `Family.quotas` under their id, the owner's in a process-wide
+  one); past it the turn runs as an ordinary one. With no counter
+  (`think_gate` None) or one that fails, the turn is ordinary: the cap
+  fails closed. It is still an ordinary turn for the per-minute and
+  per-day turn limits. Counts are in memory: a restart resets them, like
+  the other limits (accepted for now, not fixed on purpose).
+- **Models.** The turn goes to the chat's own `model`, the one the
+  conversation already uses (an invited person's chat is built with the
+  configured model); the page's flag can't name a model, so no tier gets
+  one it doesn't already have. The flag is per turn (`ask(think=...)`,
+  reset at the start of every turn) and only JSON `true` or a form's
+  `"1"` count (not `"true"`, `"yes"`, `1` or a JSON `"1"`; a test checks).
+- **Request shape.** Only `thinking={"type": "adaptive"}` and
+  `output_config={"effort": ...}` (documented for the Claude 5 models;
+  `budget_tokens` is a 400 there); `tests/contract_fakes.py` refuses the
+  rest.
+- **Untrusted display text.** Citation titles, URLs and cited text come
+  from web pages, files and saved chats. Server side (`citations.clean`):
+  http(s) URLs with a host only, no spaces or control characters, at most
+  2000 characters; titles at most 200 and cited text 300 characters, one
+  line; at most 20 sources and 50 marks a reply, 12 KB stored (history
+  events are 64 KB); unknown kinds dropped; Kwil's own sources only for an
+  id a tool of this turn returned (a citation naming another conversation
+  is ignored). Page side (`sources.js`): checked again the same way,
+  drawn with `textContent` only, links `target="_blank"` with
+  `rel="noopener noreferrer"`, no inline handlers (the CSP), no
+  `innerHTML` (a test checks the file). Stored and imported citations go
+  through the same check, so an export edited to carry `javascript:`
+  comes back without it.
+- **Citations on documents.** The API wants citations on for all or none
+  of a request's documents, and the citations doc counts `search_result`
+  blocks as documents too, so every attached file and project file goes
+  with `citations: {"enabled": true}` (`chat.cite_documents`, at request
+  time: history keeps the blocks as they were; the same bytes every
+  request, so the cache holds; the input grows slightly, and a project
+  whose files then no longer fit still falls back to search through the
+  existing "prompt is too long" safety net). Citations can't go with
+  structured outputs: the chat never uses `output_config.format`, and the
+  fake refuses the pair. A plain-text file with no text (a byte-order mark
+  or only blanks: the store already refuses zero bytes) goes as a short
+  "[file: name (empty)]" note, never as a citable document. A document
+  citation is mapped by `document_index` to that request's own documents
+  only (an index out of range is ignored); an attached file is named,
+  never linked.
+- **Taint.** Results sent as `search_result` blocks are the same tools'
+  results as before (`untrusted_output`, `private`): changes still ask
+  first once one is read.
+- **Logs (rule 1).** INFO says "Sources: 2 (chat, web)" and "Think harder:
+  on for this turn"; titles, URLs, cited text and the words never appear
+  above DEBUG (caplog tests).
+- **Deletes (rule 4).** Sources live in the message's event and row: a
+  conversation delete, a message delete and a supersede (try again, edit)
+  remove them with the text; an interrupted reply keeps its sources but
+  not the marks of words never said.
+- **Speech.** Sources are never part of the reply text, and the server's
+  TTS (`WebAssistant.synthesize`), the PC's (`cli.speak`), the voice view
+  (its sentence splitter) and the phone's own voice (`sources.js`
+  `speakable`) drop any web address Claude still wrote.
+
 ## Reminders and scheduled tasks (`reminders.py`, `tools/reminders.py`)
 
 - **One file per person.** The owner's reminders are in `[reminders]

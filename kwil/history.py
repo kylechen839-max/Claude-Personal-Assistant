@@ -34,6 +34,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable
 
+from kwil import citations
+
 log = logging.getLogger(__name__)
 
 SOURCES = ("wake", "text", "web", "voice")
@@ -144,6 +146,15 @@ CREATE INDEX IF NOT EXISTS conversation_projects_project
     ON conversation_projects(project_id);
 """
 PROJECT_ID_RE = re.compile(r"^prj-[0-9a-f]{12}$")  # memory_store.PROJECT_RE
+
+# A reply's sources (citations.py): the web pages and Kwil's own chats and
+# files it cited, as JSON {"sources", "marks"} in the message event's
+# "cites" and in this column. Added in place (not a numbered migration),
+# as recall_vectors is, so an older Kwil that a rollback brings back still
+# opens the file: its inserts name their columns and leave this one NULL.
+# A deleted or superseded message's row goes, and its event is redacted,
+# like its text.
+CITATIONS_COLUMN = "ALTER TABLE messages ADD COLUMN citations TEXT"
 
 # Recall reads at most this many vectors per search (brute-force cosine);
 # past that, a Postgres + pgvector Retriever is the way (recall.py).
@@ -351,6 +362,9 @@ class HistoryStore:
         with self._lock:
             self._con.executescript(RECALL_SQL)
             self._con.executescript(PROJECTS_SQL)
+            if "citations" not in {r[1] for r in self._con.execute(
+                    "PRAGMA table_info(messages)")}:
+                self._con.execute(CITATIONS_COLUMN)
         if use_fts is None:
             use_fts = fts5_available()
         self.fts = self._ensure_fts() if use_fts else self._drop_fts_triggers()
@@ -532,14 +546,17 @@ class HistoryStore:
         if role not in ("user", "assistant"):
             return
         tools = d.get("tools") or None
+        cites = citations.stored(d.get("cites")) if role == "assistant" else None
         inserted = self._con.execute(
             "INSERT OR IGNORE INTO messages (event_id, conversation_id, ev_ts, role, "
-            "kind, text, created_at, interrupted, tool_events) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "kind, text, created_at, interrupted, tool_events, citations) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (e.id, e.conv, e.ts, role,
              d.get("kind") if d.get("kind") in MESSAGE_KINDS else "chat",
              str(d.get("text", "")), e.ts / 1000, int(bool(d.get("interrupted"))),
-             json.dumps(tools, separators=(",", ":")) if tools else None)).rowcount
+             json.dumps(tools, separators=(",", ":")) if tools else None,
+             json.dumps(cites, separators=(",", ":"), ensure_ascii=False)
+             if cites else None)).rowcount
         if inserted:
             self._con.execute(
                 "UPDATE conversations SET started_at = min(started_at, ?), "
@@ -621,9 +638,10 @@ class HistoryStore:
 
     def add_message(self, conversation_id: str, role: str, text: str, *,
                     kind: str = "chat", interrupted: bool = False,
-                    tool_events: list[dict] | None = None) -> str:
+                    tool_events: list[dict] | None = None,
+                    cites: dict | None = None) -> str:
         """Add one message (a "message" event, committed at once). Returns
-        its event id."""
+        its event id. `cites`: an assistant reply's sources (citations.py)."""
         if role not in ("user", "assistant"):
             raise sqlite3.IntegrityError("role must be user or assistant")
         with self._lock:
@@ -637,6 +655,9 @@ class HistoryStore:
                 data["interrupted"] = True
             if tool_events:
                 data["tools"] = tool_events
+            cites = citations.stored(cites) if role == "assistant" else None
+            if cites:
+                data["cites"] = cites
             return self._record("message", conversation_id, data).id
 
     def retract(self, conversation_id: str, event_id: str) -> None:
@@ -708,7 +729,8 @@ class HistoryStore:
             for m in copied:
                 self.add_message(cid, m["role"], m["text"], kind=m["kind"],
                                  interrupted=bool(m["interrupted"]),
-                                 tool_events=m["tool_events"] or None)
+                                 tool_events=m["tool_events"] or None,
+                                 cites=m.get("citations"))
             self.update(cid, title=title.format(title=base[:110]))
             if conv.get("project"):  # a branch stays in its project
                 self.set_project(cid, conv["project"])
@@ -723,7 +745,7 @@ class HistoryStore:
         with self._lock:
             self._own(conversation_id)
             row = self._con.execute(
-                "SELECT event_id, ev_ts, kind, text, tool_events FROM messages "
+                "SELECT event_id, ev_ts, kind, text, tool_events, citations FROM messages "
                 "WHERE conversation_id = ? AND role = 'assistant' "
                 "ORDER BY ev_ts DESC, event_id DESC LIMIT 1",
                 (conversation_id,)).fetchone()
@@ -737,6 +759,11 @@ class HistoryStore:
                 data["kind"] = row["kind"]
             if row["tool_events"]:
                 data["tools"] = json.loads(row["tool_events"])
+            if row["citations"]:  # the sources stay; the marks were for the whole text
+                kept = citations.stored({"sources": json.loads(row["citations"]).get(
+                    "sources")})
+                if kept:
+                    data["cites"] = kept
             self._record("delete_message", conversation_id,
                          {"target": row["event_id"]})
             self._record("message", conversation_id, data, ts=row["ev_ts"])
@@ -1130,7 +1157,7 @@ class HistoryStore:
                 conv["messages"] = [_msg_dict(r, n) for n, r in enumerate(
                     self._con.execute(
                         "SELECT event_id, role, kind, text, created_at, interrupted, "
-                        "tool_events FROM messages WHERE conversation_id = ? "
+                        "tool_events, citations FROM messages WHERE conversation_id = ? "
                         "ORDER BY ev_ts, event_id", (conversation_id,)), 1)]
             return conv
 
@@ -1353,7 +1380,19 @@ def _msg_dict(row, seq: int) -> dict:
     return {"seq": seq, "id": row["event_id"], "role": row["role"], "kind": row["kind"],
             "text": row["text"], "created_at": row["created_at"],
             "interrupted": bool(row["interrupted"]),
-            "tool_events": json.loads(row["tool_events"]) if row["tool_events"] else []}
+            "tool_events": json.loads(row["tool_events"]) if row["tool_events"] else [],
+            "citations": _row_citations(row)}
+
+
+def _row_citations(row) -> dict | None:
+    """A message row's sources ({"sources", "marks"}), or None."""
+    raw = row["citations"] if "citations" in row.keys() else None
+    if not raw:
+        return None
+    try:
+        return citations.stored(json.loads(raw))
+    except ValueError:
+        return None
 
 
 def _truncate(text: str, n: int) -> str:
@@ -1440,6 +1479,9 @@ def _import_plan(conv, now: float) -> dict:
         tools = _import_tools(m.get("tool_events"))
         if tools:
             data["tools"] = tools
+        cites = citations.stored(m.get("citations")) if m["role"] == "assistant" else None
+        if cites:  # checked like a live reply's: http(s) links only, bounded
+            data["cites"] = cites
         events.append(("message", data, ts))
     # finish(): the title and summary, and "ended" at the original time
     title, summary = conv.get("title"), conv.get("summary")
@@ -1718,9 +1760,11 @@ class Recorder:
         return self._append("user", text, kind=kind)
 
     def assistant(self, text: str, tool_events: list[dict] | None = None,
-                  kind: str = "chat", interrupted: bool = False) -> str | None:
+                  kind: str = "chat", interrupted: bool = False,
+                  citations: dict | None = None) -> str | None:
         return self._append("assistant", text or "(no reply)", kind=kind,
-                            tool_events=tool_events, interrupted=interrupted)
+                            tool_events=tool_events, interrupted=interrupted,
+                            cites=citations)
 
     def retract(self, event_id: str | None, whole: bool = False) -> None:
         """Take back a message saved for a turn that then failed (the user
@@ -1977,7 +2021,9 @@ def export(conv: dict, fmt: str = "md") -> str:
     messages = [{"role": m["role"], "text": redact(m["text"]), "kind": m["kind"],
                  "created_at": _iso(m["created_at"]),
                  "interrupted": m["interrupted"],
-                 "tool_events": m["tool_events"]} for m in conv["messages"]]
+                 "tool_events": m["tool_events"],
+                 **({"citations": m["citations"]} if m.get("citations") else {})}
+                for m in conv["messages"]]
     if fmt == "json":
         return json.dumps({
             "id": conv["id"], "title": redact(conv["title"]),
@@ -2005,6 +2051,9 @@ def export(conv: dict, fmt: str = "md") -> str:
         lines.append(f"**{who}:** {text}")
         if m["tool_events"]:
             lines.append(f"<sub>tools: {describe_events(m['tool_events'])}</sub>")
+        if m.get("citations"):
+            lines.append("<sub>sources: " + "; ".join(
+                citations.export_line(s) for s in m["citations"]["sources"]) + "</sub>")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

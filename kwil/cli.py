@@ -12,7 +12,7 @@ from pathlib import Path
 
 import anthropic
 
-from kwil import audio, i18n, usage
+from kwil import audio, i18n, thinkhard, usage
 from kwil.chat import ClaudeChat
 from kwil.timing import TurnTimer
 from kwil.stt import Transcriber, record_push_to_talk
@@ -535,7 +535,11 @@ def report_timings(timer: TurnTimer, output_fn=None) -> None:
 
 def speak(tts, text: str, timer: TurnTimer | None = None) -> None:
     """Speak, marking the moment sound starts. Engines that report it
-    (on_audio_start) are exact; for others the call time is used."""
+    (on_audio_start) are exact; for others the call time is used. Web
+    addresses are never read out (sentences.without_urls)."""
+    from kwil.sentences import without_urls
+
+    text = without_urls(text)
     if timer is None:
         tts.speak(text)
         return
@@ -1148,7 +1152,9 @@ def build_chat(config: dict, tools=None, memory=None,
                       recorder=recorder, language=a["language"],
                       fast_model=a["fast_model"], router=a["router"],
                       timezone=a["timezone"] or None,
-                      local_memory=local_memory, **project_chat_options(config))
+                      local_memory=local_memory, **project_chat_options(config),
+                      **thinkhard.options_from_config(config),
+                      think_gate=thinkhard.owner_gate(config))
     if review is not None:  # [memory] weekly_review (off by default)
         chat.review_nudge = review.nudge
     if recorder is not None and recorder.client_fn is None:
