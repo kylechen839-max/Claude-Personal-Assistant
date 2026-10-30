@@ -142,3 +142,11 @@ test('marks count UTF-16 units, so they land after an emoji, never inside one', 
   assert.equal(parts[3], '[2]');
   for (const p of parts) assert.ok(!/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/.test(p), 'no half emoji');
 });
+
+test('an attached file is named, never a link or a button', () => {
+  const { S, doc } = load();
+  const box = S.render(doc, new Node('div'), 'Mondays.', {
+    sources: [{ kind: 'attachment', title: 'plan.pdf (attached)' }, { kind: 'attachment', title: '' }] });
+  const items = box.all().filter((n) => n.className === 'source source-own');
+  assert.deepEqual(items.map((n) => [n.tagName, n.textContent]), [['span', 'plan.pdf (attached)']]);
+});

@@ -615,9 +615,11 @@ Kwil restarts.
 **Sources.** When Kwil searched the web, the reply shows small numbered
 superscripts and, under it, the pages it cited (title and site; tap to open
 in a new tab). When it answered from your own data (a past chat it read, a
-project file, a Canvas course file) it says so in words ("from your chat on
-Tuesday") and the reply lists "Sources: Chat on Tue 28 Oct · syllabus.pdf";
-tap a chat to open it, a project file to open its project. Sources are saved
+project file, a Canvas course file, a file you attached) it says so in
+words ("from your chat on Tuesday") and the reply lists "Sources: Chat on
+Tue 28 Oct · syllabus.pdf"; tap a chat to open it, a project file to open
+its project. An attached file is only named ("plan.pdf (attached)"): it
+isn't kept, so there's nothing to open. Sources are saved
 with the reply, so History, transcripts and exports show them; deleting,
 trying again or editing removes them with the reply. Spoken replies never
 read a web address.

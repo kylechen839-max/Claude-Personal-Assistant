@@ -8001,3 +8001,33 @@ web test, no `cite_documents` fails the new contract test (the fake's
 
 Counts (Linux sandbox, not real hardware): 3907 passed, 49 skipped, 1
 deselected (ee6acb6: 3902 / 49; +5). JavaScript 354 passed (353; +1).
+
+### Think harder and citations, judge round 3 (2026-10-30)
+1. **LOW: inline files never listed.** Answers from a project file sent
+   in full, or from an attached file, came back with
+   `char_location` / `page_location` / `content_block_location`
+   citations, which `Sources.cite` ignored. Each request now maps its
+   document blocks in `document_index` order (`Sources.set_documents`,
+   from the messages as sent): the project's files, which come first in
+   the first message with known ids, become `project_file` sources (with
+   the conversation's project; a tap opens it). Attached files become a
+   new kind, `attachment`, named "plan.pdf (attached)" / "plan.pdf（附件）"
+   and not clickable: the file isn't kept, so there is nothing to open.
+   They have the same bounds, and an index out of range is ignored.
+   `sources.js` accepts the kind and draws it as plain text.
+2. **Edge: an empty text document with citations on.** The store already
+   refuses zero bytes, but a file that is only a byte-order mark or blanks
+   decodes to no text. Rather than guess whether the API takes it,
+   `chat.cite_documents` sends such a document as a
+   "[file: name (empty)]" text note (its cache breakpoint kept), so it is
+   never a citable document and never counts in `document_index`.
+
+Tests: `test_an_answer_from_an_inline_file_lists_it` (and the out-of-range
+index) and `test_an_empty_text_file_goes_as_a_note_not_a_document` in
+`test_projects.py`, `test_an_attached_file_is_named_not_linked` in
+`test_citations.py`, and a JS test for the attachment kind. Failing first
+(scratch copy): document citations ignored, no document map, empty text
+cited, no range check, and the JS kind missing each fail their tests.
+
+Counts (Linux sandbox, not real hardware): 3910 passed, 49 skipped, 1
+deselected (51e82fc: 3907 / 49; +3). JavaScript 355 passed (354; +1).

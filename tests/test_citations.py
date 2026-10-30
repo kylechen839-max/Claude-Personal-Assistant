@@ -405,3 +405,16 @@ def test_documents_get_citations_on_keeping_their_cache_breakpoint():
     assert out[0]["content"][0] == {**doc, "citations": {"enabled": True}}
     assert "citations" not in doc  # a copy: history keeps none
     assert out[1] is sent[1] and cite_documents(out) == out  # same bytes every request
+
+
+def test_an_attached_file_is_named_not_linked(fake_client):
+    from tests.test_projects import _doc_cited
+
+    chat = chat_with(fake_client, None)
+    pdf = {"type": "document", "title": "plan.pdf", "source": {
+        "type": "base64", "media_type": "application/pdf", "data": "JVBERi0x"}}
+    fake_client.queue = [_doc_cited("Mondays at 7.", 0, "page_location")]
+    chat.ask("what does my plan say?", attachments=[pdf])
+    assert chat.last_citations["sources"] == [{"kind": "attachment",
+                                               "title": "plan.pdf (attached)"}]
+    assert citations.stored(chat.last_citations) == chat.last_citations  # kept in history

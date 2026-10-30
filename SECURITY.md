@@ -2674,7 +2674,12 @@ network code of its own.
   whose files then no longer fit still falls back to search through the
   existing "prompt is too long" safety net). Citations can't go with
   structured outputs: the chat never uses `output_config.format`, and the
-  fake refuses the pair.
+  fake refuses the pair. A plain-text file with no text (a byte-order mark
+  or only blanks: the store already refuses zero bytes) goes as a short
+  "[file: name (empty)]" note, never as a citable document. A document
+  citation is mapped by `document_index` to that request's own documents
+  only (an index out of range is ignored); an attached file is named,
+  never linked.
 - **Taint.** Results sent as `search_result` blocks are the same tools'
   results as before (`untrusted_output`, `private`): changes still ask
   first once one is read.

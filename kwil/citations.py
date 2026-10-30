@@ -13,7 +13,13 @@ Two kinds:
   so the API cites them the same way (search_result_location: source,
   title, cited_text). Their `source` is a kwil: id this module made for
   the turn (`Sources.offer`), so a citation can only name something a tool
-  really returned. A read tool that ran but wasn't cited still lists its
+  really returned. Files sent in full as document blocks (a project's
+  files, a file attached to a message) are cited by `document_index`
+  (char/page/content_block_location; `set_documents` maps each request's
+  documents in order): a project file is listed (opening its project), an
+  attached file only named ("plan.pdf (attached)": the file isn't kept, so
+  there is nothing to open); an index past the request's documents is
+  ignored. A read tool that ran but wasn't cited still lists its
   conversation or file (the model may have paraphrased it); the system
   prompt asks Claude to say in words where an answer came from.
 
@@ -42,7 +48,11 @@ MAX_CITED = 300
 MAX_MARKS = 50        # superscript positions per reply
 MAX_MARK_REFS = 5     # source numbers per position
 MAX_STORED_BYTES = 12_000  # a message's citations as JSON (history events are 64 KB)
-KINDS = ("web", "chat", "project_file", "course_file")
+KINDS = ("web", "chat", "project_file", "course_file", "attachment")
+# the citations Claude gives for document blocks (a project's file sent in
+# full, a file attached to a message); `document_index` counts the
+# request's document blocks in order
+DOCUMENT_CITATIONS = ("char_location", "page_location", "content_block_location")
 # the tools whose results go to Claude as search_result blocks
 CITABLE_TOOLS = ("read_conversation", "search_project_files", "read_project_file",
                  "search_course_files", "read_course_file")
@@ -95,6 +105,9 @@ def clean(items) -> list[dict]:
             item["title"] = item["title"] or _text(urlsplit(url).hostname, MAX_TITLE)
             if s.get("cited_text"):
                 item["cited_text"] = _text(s["cited_text"], MAX_CITED)
+        elif kind == "attachment":  # a file sent with a message: named only
+            if not item["title"]:
+                continue
         else:
             ref = s.get("ref")
             if isinstance(ref, int) and not isinstance(ref, bool):
@@ -174,6 +187,8 @@ class Sources:
         self.marks: list[list] = []
         self._offered: dict[str, dict] = {}  # kwil: source id -> source
         self._read: list[str] = []           # ids a read tool returned
+        # the latest request's document blocks, in order (set_documents)
+        self.documents: list[dict] = []
 
     # ---------- own data: tool results -> search_result blocks ----------
     def _own(self, kind: str, ref: str, title: str, **extra) -> str:
@@ -288,9 +303,34 @@ class Sources:
             f"{r.get('note', '')} (doc_id {int(r['doc_id'])}, from character "
             f"{r.get('offset', 0)}).{tail}".strip(), r["text"]])]
 
+    def set_documents(self, messages: list[dict], project_files: list[str]) -> None:
+        """The sources of the document blocks in `messages` (a request, as
+        sent), in the order `document_index` counts them: the project's
+        files first in the first message (their ids `project_files`, as
+        ClaudeChat._with_project_docs put them), then files attached to
+        messages, named "plan.pdf (attached)" (not clickable: the file
+        itself isn't kept). At most 4 * MAX_SOURCES are kept."""
+        out = []
+        for i, m in enumerate(messages):
+            content = m.get("content")
+            if m.get("role") != "user" or not isinstance(content, list):
+                continue
+            for j, b in enumerate(content):
+                if not isinstance(b, dict) or b.get("type") != "document":
+                    continue
+                name = _text(b.get("title") or "file", MAX_TITLE - 12)
+                if i == 0 and j < len(project_files):
+                    out.append({"kind": "project_file", "ref": project_files[j],
+                                "title": name, **({"project": self.project}
+                                                  if self.project else {})})
+                else:
+                    out.append({"kind": "attachment", "title": (
+                        f"{name}（附件）" if self.language == "zh" else f"{name} (attached)")})
+        self.documents = out[:4 * MAX_SOURCES]
+
     # ---------- what the reply cites ----------
     def _number(self, item: dict) -> int | None:
-        key = (item["kind"], item.get("url") or item.get("ref"))
+        key = (item["kind"], item.get("url") or item.get("ref") or item["title"])
         for n, s in enumerate(self.items, 1):
             if (s["kind"], s.get("url") or s.get("ref")) == key:
                 return n
@@ -308,6 +348,13 @@ class Sources:
         if kind == "web_search_result_location":
             item = clean([{"kind": "web", "url": c.get("url"), "title": c.get("title"),
                            "cited_text": c.get("cited_text")}])
+            return self._number(item[0]) if item else None
+        if kind in DOCUMENT_CITATIONS:
+            index = c.get("document_index")
+            if not isinstance(index, int) or isinstance(index, bool) \
+                    or not 0 <= index < len(self.documents):
+                return None  # not a document this request sent
+            item = clean([self.documents[index]])
             return self._number(item[0]) if item else None
         if kind == "search_result_location":
             offered = self._offered.get(str(c.get("source") or ""))

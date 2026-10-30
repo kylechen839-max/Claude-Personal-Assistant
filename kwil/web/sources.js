@@ -18,7 +18,7 @@
   const MAX_TITLE = 200;
   const MAX_URL = 2000;
   const MAX_MARKS = 50;
-  const KINDS = ["web", "chat", "project_file", "course_file"];
+  const KINDS = ["web", "chat", "project_file", "course_file", "attachment"];
   const TEXT = { sources: "Sources", source: "Source" };
 
   // `url` if it is an http(s) address with a host; else null.
@@ -55,6 +55,8 @@
         item.url = safeUrl(s.url);
         if (!item.url) return;
         item.title = item.title || domain(item.url);
+      } else if (s.kind === "attachment") {  // a file sent with a message: named only
+        if (!item.title) return;
       } else {
         if (typeof s.ref !== "string" || !item.title) return;
         item.ref = s.ref;

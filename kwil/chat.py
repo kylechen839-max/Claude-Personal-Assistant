@@ -1360,6 +1360,9 @@ class ClaudeChat:
                                   self._with_project_docs(request_messages(
                                       self.history, cache=True, thinking=tag,
                                       thinking_turns=self.thinking_turns))))
+                if self._sources is not None:  # what a document citation points at
+                    self._sources.set_documents(kwargs["messages"], [
+                        fid for fid, _b in self._project_docs])
                 if think:  # "think harder": more room, thinking asked for
                     kwargs.update(think)
                     if on_text is None and cancel is None:  # not streamed
@@ -1785,11 +1788,24 @@ def cite_documents(messages: list[dict]) -> list[dict]:
         if m.get("role") == "user" and isinstance(content, list) and any(
                 isinstance(b, dict) and b.get("type") == "document"
                 and b.get("citations") != {"enabled": True} for b in content):
-            m = {**m, "content": [{**b, "citations": {"enabled": True}}
+            m = {**m, "content": [_cited_document(b)
                                   if isinstance(b, dict) and b.get("type") == "document"
                                   else b for b in content]}
         out.append(m)
     return out
+
+
+def _cited_document(block: dict) -> dict:
+    """A document block with citations on; a plain-text one with no text
+    (an empty project file) can't be cited from, so it goes as a short
+    text note instead (its cache breakpoint kept)."""
+    source = block.get("source") or {}
+    if source.get("type") == "text" and not str(source.get("data") or "").strip():
+        note = {"type": "text", "text": f"[file: {block.get('title') or 'file'} (empty)]"}
+        if "cache_control" in block:
+            note["cache_control"] = block["cache_control"]
+        return note
+    return {**block, "citations": {"enabled": True}}
 
 
 def _with_context(message: dict, current: bool = False) -> dict:
