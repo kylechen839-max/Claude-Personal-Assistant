@@ -1335,8 +1335,11 @@ sign in on the phone or a computer as the owner and open
   while the app keeps running),
 - `users/users.json` and `users/<id>/history.sqlite`: the family list and
   each member's own history,
+- `memory.sqlite` and `users/<id>/memory.sqlite`: everyone's memory and
+  projects (instructions and memories; the project files themselves are
+  left out, see Projects),
 - `waitlist.json`, if there is one, and `MANIFEST.json` (when, which
-  version, each file's size).
+  version, each file's size, how many project files were left out).
 
 It never holds Google tokens, keys or any `.enc` file, signed-in sessions,
 `.env`, logs or lecture audio, or anyone already removed, so the zip is
@@ -1719,7 +1722,11 @@ deadlines and (for you, the owner) your Notion Assignments' Course options:
   Bounds: `max_files` (20) per project, `max_file_mb` (10, never over
   `[webapp] max_upload_mb`: 4 on Render) each, `max_person_mb` (50; 20 on
   Render) for all of one person's project files; at most 30 projects and
-  100 memories per project.
+  100 memories per project; a PDF at most 100 pages. The estimate counts
+  2,000 tokens a PDF page and, for text, about a token per three bytes (so
+  Chinese counts about a token a character); a PDF whose page count can't
+  be read is always searched. If Claude still says the files are too
+  long, that chat switches to searching them by itself.
 - **Outside text:** a handout or a PDF is usually written by someone else,
   so a chat with project files in it asks first before changing anything
   (as with a chat attachment), and what it remembers there is marked
@@ -1730,8 +1737,13 @@ deadlines and (for you, the owner) your Notion Assignments' Course options:
 - **Where it's kept:** in your memory file (`[memory] local_path`; an
   invited person's own `<[family] dir>/<id>/memory.sqlite`), so each
   person has their own projects (nobody can open anyone else's), they are
-  in the owner's backup and an invited person's "Download my data" (with
-  the files themselves under `projects/`), and deleted with the account.
+  in an invited person's "Download my data" (with the files themselves
+  under `projects/`, on top of its size cap) and deleted with the account.
+  The owner's backup has every project, its instructions and memories,
+  but not the files themselves (keep your originals): with them it would
+  be everyone's `max_person_mb` together, over `backup_max_mb`. With
+  `[memory] backend = "pinecone"`, a project chat's summary is recalled
+  only in that project's chats.
   Deletes are real (overwritten, not just unlinked). Each backend
   (Pi/PC/cloud) keeps its own projects, like memory. Never the Anthropic
   Files API (it belongs to one workspace, not one person).

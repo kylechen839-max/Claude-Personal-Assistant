@@ -877,18 +877,7 @@ class SqliteMemoryStore(MemoryStore):
         file_id = FILE_PREFIX + secrets.token_hex(6)
 
         def write(db):
-            if db.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
-                raise NoSuchProject(project_id)
-            count = db.execute("SELECT COUNT(*) FROM project_files WHERE project = ?",
-                               (project_id,)).fetchone()[0]
-            if count >= max_files:
-                raise FileRefused(f"A project holds at most {max_files} files")
-            used = db.execute("SELECT COALESCE(SUM(size), 0) FROM project_files"
-                              ).fetchone()[0]
-            if used + size > max_total_bytes:
-                raise FileRefused("Your project files are at their limit "
-                                  f"({max_total_bytes / 1_000_000:g} MB in all): "
-                                  "delete one first")
+            self._room(db, project_id, size, max_files, max_total_bytes)
             now = self.clock()
             db.execute("INSERT INTO project_files (id, project, name, kind, size, pages, "
                        "data, text, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -902,6 +891,41 @@ class SqliteMemoryStore(MemoryStore):
         log.info("Projects: file %s added to %s (%s, %d bytes, %d chars of text)",
                  file_id, project_id, kind, size, len(text))
         return saved
+
+    @staticmethod
+    def _room(db, project_id: str, size: int, max_files: int, max_total_bytes: int) -> None:
+        """NoSuchProject or FileRefused unless a file of `size` bytes fits."""
+        if db.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise NoSuchProject(project_id)
+        count = db.execute("SELECT COUNT(*) FROM project_files WHERE project = ?",
+                           (project_id,)).fetchone()[0]
+        if count >= max_files:
+            raise FileRefused(f"A project holds at most {max_files} files")
+        used = db.execute("SELECT COALESCE(SUM(size), 0) FROM project_files").fetchone()[0]
+        if used + size > max_total_bytes:
+            raise FileRefused("Your project files are at their limit "
+                              f"({max_total_bytes / 1_000_000:g} MB in all): "
+                              "delete one first")
+
+    def check_room(self, project_id: str, size: int, *, max_files: int,
+                   max_total_bytes: int) -> None:
+        """Before an upload is read (projects_web): would a file of `size`
+        bytes fit? Read-only; add_file checks again in its transaction."""
+        if not valid_project_id(project_id):
+            raise NoSuchProject(project_id)
+        with self._lock:
+            self._room(self._con, project_id, int(size), max_files, max_total_bytes)
+
+    def file_texts(self, project_id: str) -> list[dict]:
+        """[{"id", "name", "text"}] of a project's files, oldest first, for
+        search_project_files: never their bytes."""
+        if not valid_project_id(project_id):
+            return []
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT id, name, text FROM project_files WHERE project = ? "
+                "ORDER BY created, rid", (project_id,)).fetchall()
+        return [{"id": r["id"], "name": r["name"], "text": r["text"]} for r in rows]
 
     def files(self, project_id: str) -> list[dict]:
         if not valid_project_id(project_id):

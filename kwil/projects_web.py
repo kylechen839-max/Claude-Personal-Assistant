@@ -267,7 +267,14 @@ def register(app, assistant, session_of, error) -> None:
         if upload is None or not hasattr(upload, "read"):
             return error("send a form with one file", 400)
         data = await upload.read(b["max_bytes"] + 1)
+        # the cheap checks first (size, then a read-only count and total),
+        # before any file is parsed; add_file checks again in its transaction
+        if len(data) > b["max_bytes"]:
+            return error(f"A project file is at most {b['max_bytes'] / 1_000_000:g} MB", 400)
         try:
+            await run_in_threadpool(lambda: store.check_room(
+                project_id, len(data), max_files=b["max_files"],
+                max_total_bytes=b["max_total_bytes"]))
             kind, name, text, pages = await run_in_threadpool(
                 projects.prepare_file, data, upload.filename, max_bytes=b["max_bytes"])
             saved = await run_in_threadpool(lambda: store.add_file(

@@ -2556,16 +2556,25 @@ network code of its own.
   memories and that project's only (another project's memory is "no
   memory with that id"; outside any project every project memory is).
 - **Uploads (rule 7).** One file per request, read up to the cap plus one
-  byte, then checked by `attachments.prepare` (the type from the bytes,
-  never the name; PDFs at most 100 pages by their page tree; text must be
-  UTF-8 without control bytes); photos are refused. Bounds: `[projects]
-  max_files` per project, `max_file_mb` per file (never above `[webapp]
-  max_upload_mb`, which the middleware enforces on the whole request),
-  `max_person_mb` for one person's files together, 30 projects and 100
-  memories per project; each checked inside the write transaction. A
-  PDF's text is extracted once for search (pypdf, page and time capped;
-  `textextract.py`'s limits); a PDF it can't read is still stored and
-  attached whole when it fits.
+  byte. The cheap checks come first and read only: the size, then whether
+  the project exists, has room for another file and the person's total
+  has room for these bytes (`check_room`); only then is the file parsed:
+  `attachments.prepare` (the type from the bytes, never the name; text
+  must be UTF-8 without control bytes; photos are refused before they are
+  decoded) and the page count. A PDF over 100 pages is refused (the API's
+  limit): `pdf_pages` reads the page tree, and when that sits in a
+  compressed object stream (pdfTeX's default) pypdf counts. Bounds:
+  `[projects] max_files` per project, `max_file_mb` per file (never above
+  `[webapp] max_upload_mb`, which the middleware enforces on the whole
+  request), `max_person_mb` for one person's files together, 30 projects
+  and 100 memories per project; checked again inside the write
+  transaction. A PDF's text is extracted once for search (pypdf, page and
+  time capped; `textextract.py`'s limits). Not fixed, on purpose: the 20 s
+  extraction deadline is checked between pages, so one hostile page can
+  hold a worker thread longer (on a slow Pi, too); the upload runs in the
+  thread pool, never the event loop, the file is size-capped, and a
+  subprocess with a hard kill would cost a Python start per upload on the
+  Pi.
 - **Deleted means gone (rule 4).** `secure_delete=ON` and a
   `wal_checkpoint(TRUNCATE)` after deleting a file, a project (its
   memories and files go in the same transaction) or editing its
@@ -2594,7 +2603,29 @@ network code of its own.
   conversation; the contract fake refuses a fifth and a test checks).
   Files are attached whole only while they fit `inline_tokens` and
   `inline_mb` (the API's 32 MB request cap with the chat attachments'
-  20 MB budget). Never the Anthropic Files API (workspace-scoped).
+  20 MB budget). The estimate: a PDF's pages x 2000 tokens, and a PDF
+  whose page count is unknown is never attached (searched instead); text
+  the larger of characters / 4 and UTF-8 bytes / 3, so Chinese (about a
+  token a character) isn't under-counted. If the API still refuses a
+  request with the files attached ("prompt is too long", or "A maximum of
+  100 PDF pages"), the conversation stops attaching them, says so in its
+  system prompt (search instead), retries once and logs a warning; tests
+  cover both. Never the Anthropic Files API (workspace-scoped).
+- **Search reads text only.** `search_project_files` reads the files'
+  extracted text (`file_texts`), never their bytes.
+- **Export and backup.** An invited person's export puts each project
+  file under `projects/`, counted against `[projects] max_person_mb` (which
+  uploads already keep them under), not `[family] export_max_mb`, so files
+  never push the rest of an export over its cap. The owner's backup leaves
+  every project file out (each memory.sqlite copy has its `project_files`
+  rows deleted and is vacuumed; MANIFEST.json gives the count, never the
+  names): with them it would be everyone's `max_person_mb` together (11
+  people x 20 MB on Render's 1 GB disk), above `backup_max_mb`, and there
+  would be no backup at all. Projects, instructions and memories are in
+  it; the files are each person's own uploads.
+- **Pinecone summaries.** With `[memory] backend = "pinecone"`, a project
+  chat's summary is stored with its `project_id` and recalled (before a
+  reply, or by `search_memory`) only in that project's chats.
 - **Logs (rule 1).** INFO says ids, counts, kinds, sizes and lengths; a
   project's name, instructions, memories, file names, file text and
   search queries never (the file tools are `private`). A caplog test

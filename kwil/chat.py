@@ -526,6 +526,15 @@ class ClaudeChat:
             self.untrusted_project_files = True
             log.info("Projects: %d file(s) attached to this conversation", len(docs))
 
+    def _search_project_files_instead(self) -> None:
+        """The API refused the request with the files attached: none are
+        sent again in this conversation; the system prompt lists them for
+        search_project_files (one cache miss). Taint stays (they were in)."""
+        dropped = len(self._project_docs)
+        self._project_docs, self._project_inline = [], False
+        log.warning("Projects: the request was refused with %d file(s) attached; "
+                    "searching them instead in this conversation", dropped)
+
     def project_public(self) -> dict | None:
         """For the page (/api/state, a turn's "done"): {"id", "name"}."""
         project = self.memory_snapshot.project
@@ -1041,7 +1050,8 @@ class ClaudeChat:
             previous, untrusted = list(self.history), self.tainted()
             cid = self.recorder.finish()
             if self.memory and not self.incognito:
-                _background().submit(self._remember, previous, cid, untrusted)
+                _background().submit(self._remember, previous, cid, untrusted,
+                                     self.project_id)
         self.history = rebuild_history(conv, self.max_history)
         # study mode was the other conversation's (per conversation)
         self.study = self._study_on = None
@@ -1160,7 +1170,8 @@ class ClaudeChat:
         if not self.memory or self.check_mode:  # a health check: no Pinecone query
             return []
         try:
-            notes = self.memory.retrieve(user_text)
+            # a project's summaries only in that project's conversations
+            notes = self.memory.retrieve(user_text, project=self.project_id)
             matches = getattr(self.memory, "last_matches", None)
             if isinstance(matches, list):
                 self._recalled.update(
@@ -1189,15 +1200,15 @@ class ClaudeChat:
         """Summarize the conversation into long-term memory, then reset.
 
         Returns the stored summary, or None if nothing was stored."""
-        previous, untrusted = self.history, self.tainted()
+        previous, untrusted, project = self.history, self.tainted(), self.project_id
         self.reset()
         cid = self.recorder.finish() if self.recorder else None
         if self.incognito:
             return None  # incognito: no history and no long-term memory
-        return self._remember(previous, cid, untrusted)
+        return self._remember(previous, cid, untrusted, project)
 
     def _remember(self, history: list[dict], conversation_id: str | None = None,
-                  untrusted: bool = False):
+                  untrusted: bool = False, project: str | None = None):
         from kwil.memory import SUMMARY_PROMPT, transcript
 
         # With untrusted text in the conversation (see tainted()), Claude's
@@ -1221,6 +1232,8 @@ class ClaudeChat:
             stamp = _now(self.timezone).strftime("%Y-%m-%d")  # Kyle's date
             summary = f"{stamp}: {summary}"
             extra = {"from_user_only": True, "untrusted": True} if untrusted else {}
+            if project:  # recalled only in that project's conversations (recall)
+                extra["project_id"] = project
             # The conversation id links a semantic search hit back to the
             # full conversation in history.
             if conversation_id:
@@ -1289,7 +1302,7 @@ class ClaudeChat:
             self._forget_thinking()
             self._thinking_model = model
         system = self._system_blocks()
-        retried = shortened = False
+        retried = shortened = docs_dropped = False
         before_shorten = None  # (history, thinking epoch) until a retry works
         for _ in range(self.max_tool_rounds + 1):
             while True:
@@ -1306,6 +1319,16 @@ class ClaudeChat:
                     before_shorten = None
                     break
                 except Exception as e:
+                    # The project's files are the likely cause of "too long"
+                    # or "too many PDF pages" (an estimate that was wrong):
+                    # from now on this conversation searches them instead,
+                    # and the request goes once more without them.
+                    if self._project_docs and not docs_dropped and (
+                            _prompt_too_long(e) or _pdf_pages_refused(e)):
+                        docs_dropped = True
+                        self._search_project_files_instead()
+                        system = self._system_blocks()
+                        continue
                     if before_shorten is not None:
                         # Shorter didn't help: the earlier turns weren't the
                         # cause, so they come back (ask() then undoes only
@@ -1629,6 +1652,12 @@ def _thinking_floor(history: list[dict], thinking_turns: int | None) -> int:
 def _signature_refused(error: Exception) -> bool:
     """The API's 400 "Invalid `signature` in `thinking` block"."""
     return getattr(error, "status_code", None) == 400 and "signature" in str(error)
+
+
+def _pdf_pages_refused(error: Exception) -> bool:
+    """The API's 400 "A maximum of 100 PDF pages may be provided"."""
+    return getattr(error, "status_code", None) == 400 \
+        and "pdf pages" in str(error).lower()
 
 
 def _prompt_too_long(error: Exception) -> bool:

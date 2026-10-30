@@ -316,7 +316,7 @@ def test_other_projects_memories_are_unknown_ids(fake_client, store):
 def test_files_within_the_budget_go_as_cached_documents_and_taint(fake_client, store):
     p = store.create_project("PHYS 361")
     add_text(store, p["id"])
-    store.add_file(p["id"], "notes.pdf", "pdf", PDF, text="", pages=None, **BOUNDS)
+    store.add_file(p["id"], "notes.pdf", "pdf", PDF, text="", pages=1, **BOUNDS)
     asked = []
     chat = chat_for(fake_client, store, asked=asked)
     chat.set_project(p["id"])
@@ -383,14 +383,145 @@ def test_the_file_tools_keep_to_the_conversations_project(fake_client, store):
 def test_the_budget_counts_tokens_and_bytes():
     small = {"kind": "text", "chars": 400, "size": 400}
     pdf = {"kind": "pdf", "pages": 3, "size": 90_000}
-    assert projects.estimate_tokens(small) == 100
+    assert projects.estimate_tokens(small) == 134  # max(chars / 4, bytes / 3)
     assert projects.estimate_tokens(pdf) == 3 * projects.PDF_PAGE_TOKENS
-    assert projects.estimate_tokens({"kind": "pdf", "pages": None, "size": 120_000}) == \
-        3 * projects.PDF_PAGE_TOKENS
+    unknown = {"kind": "pdf", "pages": None, "size": 12_000}
+    assert projects.estimate_tokens(unknown) is None
+    assert not projects.fits([small, unknown], 10**9, 10**9)  # never attached
     assert projects.fits([small, pdf], 10_000, 1_000_000)
     assert not projects.fits([small, pdf], 6000, 1_000_000)
     assert not projects.fits([small, pdf], 10_000, 50_000)
     assert not projects.fits([], 10_000, 1_000_000)
+
+
+def object_stream_pdf(pages: int) -> bytes:
+    """A PDF whose Catalog and page tree root sit in a compressed object
+    stream with a cross-reference stream (pdfTeX's and LuaTeX's default):
+    attachments.pdf_pages can't see its page count."""
+    import struct
+    import zlib
+
+    objs, kids, nxt = {}, [], 5
+    for i in range(pages):
+        page, content = nxt, nxt + 1
+        nxt += 2
+        kids.append(page)
+        text = f"BT /F1 12 Tf 72 720 Td (Lecture page {i + 1} Lagrangian notes) Tj ET".encode()
+        objs[content] = b"<< /Length %d >>\nstream\n" % len(text) + text + b"\nendstream"
+        objs[page] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources "
+                      b"<< /Font << /F1 4 0 R >> >> /Contents %d 0 R >>" % content)
+    objs[4] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    inner = [b"<< /Type /Catalog /Pages 2 0 R >>",
+             b"<< /Type /Pages /Count %d /Kids [%s] >>" % (
+                 pages, b" ".join(b"%d 0 R" % k for k in kids))]
+    head, body = [], b""
+    for num, obj in zip((1, 2), inner):
+        head.append(b"%d %d" % (num, len(body)))
+        body += obj + b"\n"
+    hdr = b" ".join(head) + b"\n"
+    packed = zlib.compress(hdr + body)
+    objs[3] = (b"<< /Type /ObjStm /N 2 /First %d /Filter /FlateDecode /Length %d >>\nstream\n"
+               % (len(hdr), len(packed)) + packed + b"\nendstream")
+    out, offsets = b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n", {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        out += b"%d 0 obj\n" % num + objs[num] + b"\nendobj\n"
+    rows = b""
+    for num in range(nxt + 1):
+        if num == 0:
+            rows += struct.pack(">BIH", 0, 0, 65535)
+        elif num in (1, 2):
+            rows += struct.pack(">BIH", 2, 3, num - 1)
+        else:
+            rows += struct.pack(">BIH", 1, len(out) if num == nxt else offsets[num], 0)
+    packed = zlib.compress(rows)
+    xref = len(out)
+    return out + (b"%d 0 obj\n<< /Type /XRef /Size %d /W [1 4 2] /Root 1 0 R /Filter "
+                  b"/FlateDecode /Length %d >>\nstream\n" % (nxt, nxt + 1, len(packed))
+                  + packed + b"\nendstream\nendobj\nstartxref\n%d\n%%%%EOF\n" % xref)
+
+
+def test_a_pdf_with_its_page_tree_in_an_object_stream_is_counted(store):
+    """pdf_pages can't see the count there: pypdf counts at upload, over
+    100 pages is refused, and a count that stays unknown is never attached."""
+    from kwil import attachments
+    from kwil.attachments import AttachmentRejected
+
+    big = object_stream_pdf(150)
+    assert attachments.pdf_pages(big) is None
+    with pytest.raises(AttachmentRejected, match="over 100 pages"):
+        projects.prepare_file(big, "lectures.pdf", max_bytes=10_000_000)
+    kind, _name, text, pages = projects.prepare_file(object_stream_pdf(3), "l.pdf",
+                                                     max_bytes=10_000_000)
+    assert (kind, pages) == ("pdf", 3) and "Lagrangian" in text
+    p = store.create_project("PHYS 361")
+    store.add_file(p["id"], "unknown.pdf", "pdf", PDF, text="", pages=None, **BOUNDS)
+    assert not projects.fits(store.files(p["id"]), 10**9, 10**9)
+
+
+def test_chinese_text_is_not_under_counted():
+    """A character of Chinese is about a token, not a quarter of one: 150k
+    characters is far over a 40k-token budget."""
+    zh = "拉格朗日力学笔记。" * 17000
+    kind, _name, text, _pages = projects.prepare_file(zh.encode(), "notes.txt",
+                                                      max_bytes=10_000_000)
+    f = {"kind": kind, "chars": len(text), "size": len(zh.encode())}
+    assert projects.estimate_tokens(f) >= len(zh) * 0.9
+    assert not projects.fits([f], 40000, 4_000_000)
+    english = {"kind": "text", "chars": 4000, "size": 4000}
+    assert projects.estimate_tokens(english) == 1334  # bytes / 3 is the larger here too
+
+
+def test_a_refused_request_with_the_files_attached_searches_them_instead(
+        fake_client, store, caplog):
+    """The safety net: "prompt is too long" (or "A maximum of 100 PDF pages
+    may be provided") with the files attached drops them for this
+    conversation, says so in the system prompt, and retries once."""
+    from tests.conftest import api_bad_request
+
+    p = store.create_project("PHYS 361")
+    add_text(store, p["id"])
+    chat = chat_for(fake_client, store)
+    chat.set_project(p["id"])
+    caplog.set_level(logging.WARNING)
+    for refusal in ("prompt is too long: 250000 tokens > 200000 maximum",
+                    "A maximum of 100 PDF pages may be provided."):
+        chat.reset()
+        chat.set_project(p["id"])
+        fake_client.queue.clear()
+        fake_client.calls.clear()
+        state = {"n": 0}
+        create = fake_client.messages.create.side_effect
+
+        def refuse_once(**kwargs):
+            state["n"] += 1
+            if state["n"] == 1:
+                fake_client.calls.append({**kwargs, "messages": list(kwargs["messages"])})
+                raise api_bad_request(refusal)
+            return create(**kwargs)
+        fake_client.messages.create.side_effect = refuse_once
+        reply(fake_client, "Ten percent a day.", "Still searching.")
+        assert chat.ask("What's the late policy?") == "Ten percent a day."
+        first, second = fake_client.calls
+        assert first["messages"][0]["content"][0]["type"] == "document"
+        assert all(b.get("type") != "document" for b in second["messages"][0]["content"])
+        assert projects.FILES_SEARCH in system_text(second)
+        assert chat.tainted()  # they were in it
+        chat.ask("and the midterm?")  # the rest of the conversation: searched
+        assert projects.FILES_SEARCH in system_text(fake_client.calls[-1])
+        fake_client.messages.create.side_effect = create
+    assert "searching them instead" in caplog.text
+
+
+def test_search_reads_the_text_never_the_files_bytes(fake_client, store, monkeypatch):
+    p = store.create_project("PHYS 361")
+    add_text(store, p["id"])
+    monkeypatch.setattr(store, "file", lambda *a: pytest.fail("loaded a file's bytes"))
+    chat = chat_for(fake_client, store, project_inline_tokens=10)
+    chat.set_project(p["id"])
+    tool_then_text(fake_client, "search_project_files", {"query": "late policy"})
+    chat.ask("What's the late policy?")
+    assert tool_result(fake_client.calls[-1])["results"]
 
 
 def test_at_most_four_breakpoints_with_files_study_mode_and_attachments(store):
@@ -606,6 +737,9 @@ def test_the_project_routes(env, owner, tmp_path):
     assert page["project"]["instructions"] == INSTRUCTIONS
     assert owner.get("/api/projects/prj-000000000000").status_code == 404
     assert owner.get("/api/projects/nope").status_code == 404
+    other = owner.post("/api/projects", json={"name": "CS 171"}).json()["project"]["id"]
+    assert owner.post(f"/api/projects/{other}/files/{f['id']}/delete").status_code == 404
+    assert len(mine.files(pid)) == 1  # another project's URL never deletes it
     assert owner.post(f"/api/projects/{pid}/files/{f['id']}/delete").json() == {"ok": True}
     assert mine.files(pid) == []
     assert owner.post(f"/api/projects/{pid}/delete", json={}).status_code == 400
@@ -640,6 +774,13 @@ def test_uploads_are_validated_and_bounded(env, owner, tmp_path, monkeypatch):
     assert owner.post(f"/api/projects/{pid}/files", json={"file": "x"}).status_code == 415
     assert upload(owner, "prj-000000000000", b"x").status_code == 404
     assert len(mine.files(pid)) == 2
+    # a full project is refused before the file is parsed at all
+    monkeypatch.setattr(projects, "prepare_file",
+                        lambda *a, **kw: pytest.fail("parsed a file that can't fit"))
+    assert upload(owner, pid, b"fourth", "c.txt").status_code == 409
+    env.assistant.project_limits = {**projects.limits({}), "max_total_bytes": 1}
+    other = owner.post("/api/projects", json={"name": "CS 171"}).json()["project"]["id"]
+    assert upload(owner, other, b"too much", "d.txt").status_code == 409
 
 
 def test_a_new_chat_in_a_project_from_the_page(env, owner, tmp_path):
@@ -783,14 +924,71 @@ def test_their_export_and_the_backup_include_projects(env, owner, tmp_path):
             copy = tmp_path / "copy.sqlite"
             copy.write_bytes(z.read("memory.sqlite"))
             con = sqlite3.connect(copy)
-            assert con.execute("SELECT name FROM projects").fetchall() == [("PHYS 361",)]
-            assert con.execute("SELECT data FROM project_files").fetchone()[0] == \
-                SYLLABUS.encode()
+            assert con.execute("SELECT name, instructions FROM projects").fetchall() == [
+                ("PHYS 361", INSTRUCTIONS)]
+            # the files themselves are left out (each person has them; with
+            # them the backup would be everyone's max_person_mb together)
+            assert con.execute("SELECT COUNT(*) FROM project_files").fetchone()[0] == 0
             con.close()
+            assert SYLLABUS.encode() not in z.read("memory.sqlite")
             member = [n for n in z.namelist() if n.endswith("memory.sqlite") and "users/" in n]
             assert member  # hers, as her own file
+            assert b"Grandma" not in z.read(member[0])
+            manifest = json.loads(z.read("MANIFEST.json"))
+            left = {f["name"]: f.get("project_files_left_out") for f in manifest["files"]}
+            assert left["memory.sqlite"] == 1 and left[member[0]] == 1
+        assert mine.files(pid)  # the live files are untouched
     finally:
         backup_mod.cleanup(folder)
+
+
+def test_project_files_never_push_the_rest_of_an_export_over_its_cap(env, owner, tmp_path):
+    """They have their own allowance ([projects] max_person_mb, which
+    uploads keep them under), not [family] export_max_mb."""
+    with_projects(env, tmp_path)
+    mom, _ = env.member(owner, name="Mom", language="en", tier="family")
+    hers = mom.post("/api/projects", json={"name": "Cooking"}).json()["project"]["id"]
+    big = b"Recipe line.\n" * 15_000  # 195 KB (a text file is at most 200k characters)
+    assert upload(mom, hers, big, "recipes.txt").status_code == 200
+    env.config["family"]["export_max_mb"] = 0.1  # the rest still fits, the file alone doesn't
+    env.app.state.account.clock = lambda: env.clock.now
+    r = mom.get("/api/me/export")
+    assert r.status_code == 200, r.text
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    (name,) = [n for n in zf.namelist() if n.startswith(f"projects/{hers}/")]
+    assert zf.read(name) == big
+    env.config["projects"] = {"max_person_mb": 0.1}  # over their own allowance: refused
+    assert mom.get("/api/me/export").status_code in (413, 429)
+
+
+def test_a_project_chats_pinecone_summary_is_recalled_only_in_that_project(fake_client, store):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from kwil.memory import PineconeMemory
+
+    pc = MagicMock()
+    pc.inference.embed.return_value = SimpleNamespace(data=[{"values": [0.1] * 1024}])
+    index = MagicMock()
+    index.query.return_value = SimpleNamespace(matches=[
+        SimpleNamespace(id="v1", score=0.9, metadata={"text": "PHYS summary",
+                                                      "project_id": "prj-aaaaaaaaaaaa"}),
+        SimpleNamespace(id="v2", score=0.9, metadata={"text": "CS summary",
+                                                      "project_id": "prj-bbbbbbbbbbbb"}),
+        SimpleNamespace(id="v3", score=0.9, metadata={"text": "general summary"})])
+    mem = PineconeMemory(pc=pc, index=index)
+    mem.search_namespaces = ["voice-assistant"]
+    assert mem.retrieve("x") == ["general summary"]
+    assert mem.retrieve("x", project="prj-aaaaaaaaaaaa") == ["PHYS summary", "general summary"]
+    # a project chat's summary is stored with its project
+    p = store.create_project("PHYS 361")
+    chat = chat_for(fake_client, store, memory=mem)
+    chat.set_project(p["id"])
+    reply(fake_client, "Sure.", "Lagrangians were covered.")
+    chat.ask("Explain Lagrangians")
+    chat.end_conversation()
+    metadata = index.upsert.call_args.kwargs["vectors"][0]["metadata"]
+    assert metadata["project_id"] == p["id"] and chat.project_id is None
 
 
 def test_deleting_her_account_deletes_her_projects(env, owner, tmp_path):

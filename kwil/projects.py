@@ -65,7 +65,6 @@ SNIPPET_CHARS = 300     # around a match
 MAX_READ = 6000         # characters one read_project_file returns
 MAX_SUGGESTIONS = 20
 PDF_PAGE_TOKENS = 2000  # about what one PDF page costs (text plus its image)
-PDF_PAGE_BYTES = 50_000  # a page, when the page count can't be read
 EXTRACT_SECONDS = 20     # reading one uploaded PDF's text
 PHOTO_REFUSED = "A project file is a PDF or a text file (attach photos to a message instead)"
 
@@ -90,20 +89,28 @@ FILES_SEARCH = (
 )
 
 
-def estimate_tokens(f: dict) -> int:
-    """About how many input tokens one file costs when attached."""
+def estimate_tokens(f: dict) -> int | None:
+    """About how many input tokens one file costs when attached (None: a
+    PDF whose page count isn't known, never attached). Text: the larger of
+    a character per four (English) and a UTF-8 byte per three (Chinese,
+    Japanese: about a token a character), so other scripts aren't
+    under-counted."""
     if f.get("kind") == "pdf":
-        pages = f.get("pages") or max(1, math.ceil(int(f.get("size") or 0) / PDF_PAGE_BYTES))
-        return int(pages) * PDF_PAGE_TOKENS
-    return math.ceil(int(f.get("chars") or f.get("size") or 0) / 4)
+        pages = f.get("pages")
+        return int(pages) * PDF_PAGE_TOKENS if pages else None
+    return max(math.ceil(int(f.get("chars") or 0) / 4),
+               math.ceil(int(f.get("size") or 0) / 3))
 
 
 def fits(files, inline_tokens: int, inline_bytes: int) -> bool:
-    """Are the project's files sent in full (all of them, or none)?"""
+    """Are the project's files sent in full (all of them, or none)? Never
+    with a PDF of unknown length: the API refuses one over MAX_PDF_PAGES,
+    and every request of the conversation would fail."""
     files = list(files or ())
     if not files:
         return False
-    return (sum(estimate_tokens(f) for f in files) <= int(inline_tokens)
+    tokens = [estimate_tokens(f) for f in files]
+    return (None not in tokens and sum(tokens) <= int(inline_tokens)
             and sum(int(f.get("size") or 0) for f in files) <= int(inline_bytes))
 
 
@@ -165,14 +172,37 @@ def prepare_file(data: bytes, name: str | None, *, max_bytes: int):
     the size cap, a PDF's page cap); photos are refused before they are
     decoded. Raises attachments.AttachmentRejected with a sentence for the
     page."""
-    from kwil.attachments import IMAGE_TYPES, AttachmentRejected, pdf_pages, prepare, sniff
+    from kwil.attachments import (IMAGE_TYPES, MAX_PDF_PAGES, AttachmentRejected,
+                                  pdf_pages, prepare, sniff)
 
     if data and sniff(data) in IMAGE_TYPES:  # refused before it is ever decoded
         raise AttachmentRejected(PHOTO_REFUSED)
     att = prepare(data, name, max_image_bytes=max_bytes, max_file_bytes=max_bytes)
     if att.kind == "pdf":
-        return "pdf", att.name, pdf_text(att.data), pdf_pages(att.data)
+        # the page tree may sit in a compressed object stream (pdfTeX's
+        # default), where pdf_pages can't see it: pypdf counts then
+        pages = pdf_pages(att.data) or pdf_page_count(att.data)
+        if pages and pages > MAX_PDF_PAGES:
+            raise AttachmentRejected(f"A PDF is over {MAX_PDF_PAGES} pages")
+        return "pdf", att.name, pdf_text(att.data), pages
     return "text", att.name, att.data.decode("utf-8-sig"), None
+
+
+def pdf_page_count(data: bytes) -> int | None:
+    """A PDF's page count from pypdf (None when it can't be read: such a
+    file is stored, searched, and never attached in full)."""
+    import io
+
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            return None
+        return len(reader.pages) or None
+    except Exception as e:  # no pypdf, or a broken file
+        log.info("Projects: a PDF's pages couldn't be counted (%s)", type(e).__name__)
+        return None
 
 
 def pdf_text(data: bytes) -> str:

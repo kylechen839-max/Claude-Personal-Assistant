@@ -40,7 +40,7 @@ def test_search_memory_only_with_pinecone(store):
     result, is_error = tools.dispatch("search_memory", {"query": "Apple interview"})
     assert not is_error
     assert json.loads(result)["notes"] == ["Apple interview is Oct 28"]
-    memory.retrieve.assert_called_once_with("Apple interview")
+    memory.retrieve.assert_called_once_with("Apple interview", project=None)
     memory.retrieve.return_value = []
     assert json.loads(tools.dispatch("search_memory", {"query": "x"})[0])["notes"] == []
 

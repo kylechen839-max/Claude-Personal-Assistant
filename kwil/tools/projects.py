@@ -38,8 +38,8 @@ def project_tools(store) -> list[Tool]:
         project = _project()
         if project is None or store.project(project) is None:
             return NOT_IN_PROJECT
-        files = [store.file(f["id"]) for f in store.files(project)]
-        hits = projects.search([f for f in files if f], str(query or "")[:300])
+        files = store.file_texts(project)  # their text only, never the bytes
+        hits = projects.search(files, str(query or "")[:300])
         log.info("Project files searched: %d hit(s) in %d file(s)", len(hits), len(files))
         if not hits:
             return {"results": [], "message": "Nothing in this project's files matches.",

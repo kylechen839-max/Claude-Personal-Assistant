@@ -131,19 +131,21 @@ class PineconeMemory:
             self._quota_logged = True
             raise PineconeOverQuota("Pinecone is over quota") from None
 
-    def retrieve(self, query: str) -> list[str]:
+    def retrieve(self, query: str, project: str | None = None) -> list[str]:
         """Return the text of notes relevant to `query`, best first (none
-        while Pinecone is over quota)."""
+        while Pinecone is over quota). A summary of a project's conversation
+        (metadata project_id, projects.py) is returned only for that
+        `project`, never elsewhere."""
         self.last_untrusted = False
         self.last_matches = []
         if not query.strip():
             return []
         try:
-            return self._guarded(self._retrieve, query)
+            return self._guarded(self._retrieve, query, project)
         except PineconeOverQuota:
             return []
 
-    def _retrieve(self, query: str) -> list[str]:
+    def _retrieve(self, query: str, project: str | None = None) -> list[str]:
         vector = self.embed(query, "query")
         namespaces = self.namespaces()
         if len(namespaces) == 1:
@@ -161,6 +163,8 @@ class PineconeMemory:
             meta = match.metadata or {}
             text = next((str(meta[f]) for f in self.text_fields if meta.get(f)),
                         "").strip()
+            if meta.get("project_id") not in (None, project):
+                continue  # another project's (or, outside one, any project's)
             if match.score >= self.min_score and text:
                 notes.append(text[: self.max_note_chars])
                 self.last_matches.append((getattr(match, "id", ""), notes[-1]))

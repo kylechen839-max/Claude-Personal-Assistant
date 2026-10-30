@@ -27,7 +27,7 @@ SAVE_RULE = ("Don't save health, religion or politics unless the user asks "
 
 def search_memory_tool(memory) -> Tool:
     def search_memory(query: str) -> dict:
-        notes = memory.retrieve(query)
+        notes = memory.retrieve(query, project=_project(_chat()))
         if not notes:
             return {"notes": [], "message": "No matching notes in long-term memory."}
         return mark_untrusted({"notes": notes},

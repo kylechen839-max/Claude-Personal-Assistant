@@ -7794,3 +7794,52 @@ HTML or shown when off, a file delete without asking, a 404 kept).
 Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3817 passed, 45 skipped, 1 deselected (b539432: 3782 / 45; +35).
 JavaScript 343 passed (334; +9).
+
+### Projects, judge round 2 (2026-10-30)
+1. **M1, the inline budget.** A PDF whose page tree sits in a compressed
+   object stream (pdfTeX's default) had no page count, so a 150-page one
+   was attached and every turn of its chats failed. Now pypdf counts when
+   `pdf_pages` can't, over 100 pages is refused at upload, and a count that
+   stays unknown is never attached (searched). Text is estimated as
+   max(chars / 4, UTF-8 bytes / 3) (Chinese was 4x under). Safety net: a
+   project chat's request refused with the files attached ("prompt is too
+   long", "A maximum of 100 PDF pages") stops attaching them for that
+   conversation, switches its system prompt to search, retries once and
+   logs a warning. SECURITY.md and README corrected.
+2. **L1:** `search_project_files` reads `file_texts` (id, name, text), never
+   the BLOBs.
+3. **L2:** uploads check the size, then (read-only `check_room`) the
+   project, its file count and the person's total, before any parsing;
+   `add_file` checks again in its transaction.
+4. **L3:** a test deletes project A's file through project B's URL: 404,
+   the file stays.
+5. **L4:** an invited person's export counts project files against
+   `[projects] max_person_mb`, not `[family] export_max_mb` (simplest: the
+   upload bound already holds them). The owner's backup leaves project
+   files out of every memory.sqlite copy (rows deleted, vacuumed, the count
+   in MANIFEST.json): with them it would be everyone's `max_person_mb`
+   together (11 x 20 MB on Render's 1 GB disk), over `backup_max_mb`, so
+   there would be no backup at all; raising the cap would need disk the
+   server doesn't have. Projects, instructions and memories stay in it.
+6. **L5:** with Pinecone, a project chat's summary carries `project_id`
+   and is recalled (before a reply and by `search_memory`) only in that
+   project's chats.
+7. **Extraction deadline:** left as is and documented in SECURITY.md (not
+   fixed, on purpose): it runs in the thread pool, size-capped; a killable
+   subprocess would cost a Python start per upload on the Pi.
+
+Tests: 6 new (object-stream PDF built in the test, CJK, the safety net for
+both refusals, search without bytes, the export allowance, Pinecone
+tagging and filtering) and 4 extended (unknown pages never fit, the
+upload precheck before parsing, cross-project file delete, the backup
+without files). Existing fakes updated for `retrieve(query, project=)`
+(test_memory_tools, test_routing_caching). Failing first: 15 single
+mutations each fail their test (no pypdf count, no 100-page refusal,
+unknown pages attached, chars/4 only, no safety net, the page-limit 400
+not recognised, the prompt not switched, search loading bytes, no
+precheck, the file deleted through another project's URL, files under the
+export cap, no files allowance, the backup keeping files, recall
+unfiltered, the summary untagged).
+
+Counts (Linux sandbox): 3823 passed, 45 skipped, 1 deselected (16cf97d:
+3817 / 45; +6). JavaScript 343 passed (unchanged).
