@@ -217,3 +217,19 @@ test('shrinkImage keeps photos within 1600 px as JPEG', async () => {
   assert.equal(canvas.height, 1200);
   assert.equal(blob.type, 'image/jpeg');
 });
+
+test('the chips keep their styles: one horizontal row of 56px tiles (judge: the block was deleted)', () => {
+  const css = readFileSync(new URL('../../kwil/web/app.css', import.meta.url), 'utf8');
+  const rule = (sel) => {
+    const m = css.match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`));
+    assert.ok(m, `no rule for ${sel}`);
+    return m[1];
+  };
+  assert.match(rule('.attach-chips'), /display: flex/);
+  assert.match(rule('.attach-chips'), /overflow-x: auto/);
+  assert.match(rule('.attach-chip'), /flex: none/);
+  const img = rule('.attach-chip img');
+  assert.match(img, /width: 56px/);
+  assert.match(img, /height: 56px/);
+  assert.match(rule('.attach-remove'), /position: absolute/);
+});

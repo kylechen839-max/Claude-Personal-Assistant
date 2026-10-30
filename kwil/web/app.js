@@ -50,7 +50,7 @@ function takeThink() { const on = thinkNext; setThink(false); return on; }
 // in a pane opened after it was sent. `project` ({id, name}, projects.js):
 // the project a new chat's pane is in; its turns carry "project_id" (the
 // server starts the conversation there), and `leaving` sends "" once after
-// the header's × (the next turn starts a chat in no project). A turn's
+// the project pill's × (the next turn starts a chat in no project). A turn's
 // "done" says which project the pane's conversation is in.
 const pane = { cid: null, epoch: 0, project: null, leaving: false };
 let confirmEpoch = 0;  // the pane the open yes/no question was asked in
@@ -324,12 +324,12 @@ function bindPane(cid) {
   cancelEdit();
 }
 
-// The header's project name (projects.js) for this pane.
+// The project name on the composer's modes line (projects.js) for this pane.
 function showProject() {
   if (window.KwilProjects) window.KwilProjects.pill(pane.project);
 }
 
-// A new chat (projects.js's "New chat in this project", or the header's ×
+// A new chat (projects.js's "New chat in this project", or the project pill's ×
 // with `project` null): a fresh pane in that project, the log cleared.
 function newChat(project) {
   bindPane(null);
@@ -929,7 +929,10 @@ if (els.thinkChip) els.thinkChip.addEventListener("click", () => setThink(false)
 const LONG_PRESS_MS = 500;
 let pressTimer = null, longPressed = false;
 if (els.send) {
-  els.send.addEventListener("pointerdown", () => {
+  els.send.addEventListener("pointerdown", (e) => {
+    // no focus move off the field, so the iPhone keyboard stays up after
+    // Send (the click, and so the form's submit, still follows)
+    e.preventDefault();
     longPressed = false;
     clearTimeout(pressTimer);
     pressTimer = setTimeout(() => { longPressed = true; setThink(true); }, LONG_PRESS_MS);
@@ -1188,11 +1191,18 @@ syncComposer();
 
 // iPhone keyboard: the page keeps the height that is visible above it
 // (--app-h, app.css), so the composer sits on the keyboard and the log
-// scrolls; Safari's own scroll of the whole page is undone.
+// scrolls; Safari's own scroll of the whole page is undone. Not while the
+// page is pinch-zoomed: the smaller visible area is then the zoom, not a
+// keyboard, so the app keeps its full height and the zoomed view stays put.
 const vv = window.visualViewport;
 if (vv && typeof vv.addEventListener === "function") {
   const fitViewport = () => {
     const root = document.documentElement;
+    if (typeof vv.scale === "number" && Math.abs(vv.scale - 1) > 0.01) {
+      if (root && root.style && typeof root.style.removeProperty === "function") root.style.removeProperty("--app-h");
+      if (root && root.classList) root.classList.toggle("kb-open", false);
+      return;
+    }
     if (root && root.style) root.style.setProperty("--app-h", `${vv.height}px`);
     if (root && root.classList) root.classList.toggle("kb-open", vv.height < window.innerHeight - 120);
     if (vv.offsetTop > 0) window.scrollTo(0, 0);

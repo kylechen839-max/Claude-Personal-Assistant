@@ -8351,3 +8351,26 @@ interaction only; nothing on the server changed.
   + `voice-core.test.js` 434 passed (baseline 422). The keyboard, the
   safe area, the Chinese IME and the long press on a real iPhone: MANUAL_TEST
   "The one-row composer".
+
+### One-row composer, judge round 1 (2026-10-30)
+- HIGH, fixed: the attachment chip rules (`.attach-chips`, `.attach-chip`,
+  its `img`, the photo placeholder, `.attach-name`, `.attach-remove`) had
+  been cut with the old composer block, so picked files stacked as 96x72
+  images and pushed the chat up. Restored from 9935872 into the composer
+  section (`.5rem` -> `var(--s2)`). Pinned by an `attachments.test.mjs`
+  CSS test. Measured in Chromium at 390x844 with 2 photos and a PDF:
+  56x56 tiles in one 60px-high row.
+- LOW, fixed: pinch-zoom no longer squashes the app. While
+  `visualViewport.scale` isn't 1, `--app-h` and `kb-open` are removed and
+  the page isn't scrolled back.
+- LOW, fixed: the comments in `app.js`, `study.js` and `projects.js` that
+  still placed the pills and the study button in the header.
+- Asked for too: Send's `pointerdown` prevents the default, so focus stays
+  in the field and the iPhone keyboard stays up after Send. Checked in
+  Chromium with a mouse and with touch: a tap sends once with focus still
+  on `#text`, and a 650 ms hold sends once with think on.
+- Tests: `attachments.test.mjs` +1 (the chip CSS), `app-composer.test.mjs`
+  +3 (pinch-zoom with scale 2; Send's pointerdown is prevented while a tap
+  and a long press each still send once; no "header" left in the three
+  scripts' comments). Each failed before its fix.
+- Full suite: 3994 passed, 53 skipped; JS 438 passed (was 434).

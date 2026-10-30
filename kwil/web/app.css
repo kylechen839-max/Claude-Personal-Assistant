@@ -405,6 +405,18 @@ html.kb-open .app > footer { padding-bottom: var(--s2); }
 #text-form .attach-btn { background: none; color: var(--text-2); }
 #text-form .attach-btn svg { width: 22px; height: 22px; stroke-width: 2; }
 #text-form .attach-btn:active:not(:disabled) { background: var(--surface-2); }
+.attach-chips { display: flex; gap: var(--s2); width: 100%; margin-bottom: var(--s2); overflow-x: auto; padding: 2px; }
+.attach-chips[hidden] { display: none; }
+.attach-chip { position: relative; flex: none; display: flex; align-items: center; height: 56px; max-width: 12rem;
+  border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line-strong); overflow: hidden; }
+.attach-chip img { width: 56px; height: 56px; object-fit: cover; display: block; }
+.attach-chip.image:not(:has(img))::before { content: ""; width: 56px; height: 56px; background: var(--surface-2); }
+.attach-name { padding: 0 2.4rem 0 .75rem; font-size: .8125rem; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-remove { position: absolute; top: 0; right: 0; width: 44px; height: 44px; min-height: 0;
+  display: grid; place-items: start end; padding: 4px 6px 0 0; background: none; color: var(--text);
+  font-size: 1.1rem; line-height: 1; }
+.attach-chip img + .attach-remove { color: #fff; text-shadow: 0 0 3px #000a; }
 /* the mic: a quiet 44px line icon; red with a ripple while recording */
 #text-form .mic { position: relative; isolation: isolate; background: none; color: var(--text-2);
   touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

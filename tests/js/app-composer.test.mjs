@@ -112,7 +112,7 @@ function load({ files = 0, viewport = null } = {}) {
   win.window = win;
   if (viewport) {  // iPhone Safari's visualViewport and <html>
     const props = {}, classes = new Set();
-    document.documentElement = { style: { setProperty: (k, v) => { props[k] = v; } },
+    document.documentElement = { style: { setProperty: (k, v) => { props[k] = v; }, removeProperty: (k) => { delete props[k]; } },
       classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) } };
     win.innerHeight = 844;
     win.scrolled = [];
@@ -308,6 +308,54 @@ test('the iPhone keyboard: --app-h follows the visible height, kb-open, no page 
   assert.equal(p.win.rootClasses.has('kb-open'), false);
 });
 
+test('pinch-zoom: a zoomed visualViewport leaves the app its full height (judge round 1)', async () => {
+  const listeners = {};
+  const vv = { height: 844, offsetTop: 0, scale: 1, addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); } };
+  const p = load({ viewport: vv });
+  await p.flush();
+  vv.height = 500; vv.offsetTop = 120;  // the keyboard
+  for (const fn of listeners.resize) fn();
+  assert.equal(p.win.rootClasses.has('kb-open'), true);
+  const scrolls = p.win.scrolled.length;
+  vv.height = 422; vv.offsetTop = 200; vv.scale = 2;  // pinched in: a smaller visible area, not a keyboard
+  for (const fn of listeners.resize) fn();
+  assert.equal(p.win.rootProps['--app-h'], undefined);  // the app keeps 100%
+  assert.equal(p.win.rootClasses.has('kb-open'), false);
+  assert.equal(p.win.scrolled.length, scrolls);  // and the zoomed page isn't scrolled back
+  vv.height = 844; vv.offsetTop = 0; vv.scale = 1;  // zoomed out again
+  for (const fn of listeners.resize) fn();
+  assert.equal(p.win.rootProps['--app-h'], '844px');
+});
+
+test('a tap on Send keeps the keyboard up (pointerdown default prevented); tap and long press still send', async () => {
+  const p = load();
+  await p.flush();
+  const send = p.$('send');
+  const press = (type) => {
+    let prevented = false;
+    for (const fn of send.listeners[type] || []) fn({ preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  p.$('text').focus();
+  await p.type('first');
+  assert.equal(press('pointerdown'), true);  // no focus move: the field (and keyboard) stay
+  press('pointerup');
+  await p.$('text-form').fire('submit');  // the tap's click submits the form as before
+  await send.fire('click');
+  await p.flush();
+  assert.deepEqual(p.turns().map((t) => t.body), [{ text: 'first' }]);
+  assert.equal(p.document.activeElement, p.$('text'));
+  await p.finish(p.streams[0], { type: 'reply', text: 'Ok.' });
+  await p.type('second');
+  assert.equal(press('pointerdown'), true);
+  p.fireTimers();  // held 500 ms
+  press('pointerup');
+  await send.fire('click');
+  await p.flush();
+  assert.deepEqual(p.turns()[1].body, { text: 'second', think: true });
+  assert.equal(p.turns().length, 2);  // once
+});
+
 test('the page: one row in order, every button but Send is type=button, Think and Study in the sheet', () => {
   const footer = HTML.slice(HTML.indexOf('<footer>'), HTML.indexOf('</footer>'));
   const form = footer.slice(footer.indexOf('<form id="text-form"'), footer.indexOf('</form>'));
@@ -340,4 +388,12 @@ test('the page: one row in order, every button but Send is type=button, Think an
   assert.ok(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])), String(order));
   assert.match(sheet, /<button id="think" class="think-btn" type="button" aria-pressed="false" aria-label="Think harder"[^>]* data-close>/);
   assert.match(sheet, /<button id="study-toggle" [^>]*type="button"[^>]* data-close hidden>/);
+});
+
+test('the scripts no longer say the pills or the study button live in the header (judge round 1)', () => {
+  for (const name of ['app.js', 'study.js', 'projects.js']) {
+    const src = readFileSync(new URL(`../../kwil/web/${name}`, import.meta.url), 'utf8');
+    const comments = src.split('\n').filter((l) => /^\s*\/\//.test(l)).join('\n');
+    assert.doesNotMatch(comments, /chat header|header's|in the header/i, name);
+  }
 });

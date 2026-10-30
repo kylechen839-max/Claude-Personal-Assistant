@@ -494,6 +494,11 @@ In the Home Screen app.
 - [ ] Press **return** on the keyboard.
   - Should: the message is sent (return never adds a blank line). On a
     desktop browser Shift+Enter adds a new line and Enter sends.
+- [ ] Type a message and tap Send.
+  - Should: the keyboard stays up, ready for the next message.
+- [ ] Pinch to zoom into the chat, then zoom back out.
+  - Should: the app isn't squashed while zoomed, and after zooming out the
+    row sits at the bottom again.
 - [ ] Press and hold Send for a second.
   - Should: no copy/share callout and no text selection; the message goes
     with Think harder (see that section).

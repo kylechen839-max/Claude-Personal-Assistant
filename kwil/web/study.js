@@ -1,7 +1,7 @@
-// Study mode in the chat header (study.py): when /api/state says
-// {"study_mode": true}, a study button (a book) turns it on
-// (POST /api/study {"on": true}); while it is on, a small "Studying PHYS 361"
-// pill takes the button's place, and its × turns it off ({"on": false}).
+// Study mode (study.py): when /api/state says {"study_mode": true}, the +
+// sheet's Study mode row turns it on (POST /api/study {"on": true}); while
+// it is on, a small "Studying PHYS 361" pill shows on the composer's modes
+// line (the row hides), and its × turns it off ({"on": false}).
 // The server applies a change from the next turn. Kwil itself turns it on
 // ("quiz me on PHYS 361": start_study) or off ("stop studying"), so every
 // /api/state and every turn's "done" event ({"study": {"course", "topic"}},
