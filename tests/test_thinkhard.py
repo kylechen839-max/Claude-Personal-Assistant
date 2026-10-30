@@ -256,3 +256,10 @@ def test_the_page_asks_for_one_think_turn_and_hears_when_its_over(caplog):
     assert len(gate_calls) == 2
     events(client.post("/api/turn", files={"text": (None, "hello"), "think": (None, "1")}))
     assert len(gate_calls) == 3
+    # only JSON true or a form's "1" ask for it (SECURITY.md)
+    for json_value in ("true", "TRUE", "1", 1, "yes", {"on": True}):
+        events(client.post("/api/turn", json={"text": "hello", "think": json_value}))
+    for form_value in ("true", "True", "on", "yes"):
+        events(client.post("/api/turn", files={"text": (None, "hello"),
+                                                "think": (None, form_value)}))
+    assert len(gate_calls) == 3

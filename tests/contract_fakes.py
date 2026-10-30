@@ -30,8 +30,9 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
 - search_result blocks (Kwil's own data, cited like web results): only in
   user messages, top level or as a tool_result's whole content (never
   mixed with other blocks there), each with a source, a title and
-  non-empty text blocks, citations enabled on all or none, and on all when
-  web_search is offered.
+  non-empty text blocks, citations enabled on all or none of them and of
+  the request's document blocks together, on all when web_search is
+  offered, and never with output_config.format.
 
 Sources for the thinking, effort and search_result rules (fetched
 2026-10-30): platform.claude.com/docs/en/build-with-claude/thinking (the
@@ -347,6 +348,15 @@ class ContractClient:
                     found += [(f"{where}.content.{k}", c) for k, c in enumerate(inner)
                               if c.get("type") == "search_result"]
         enabled = set()
+        # documents share the rule (citations on for all or none of a
+        # request's documents; docs: build-with-claude/citations, which
+        # calls both document and search_result blocks documents)
+        for i, m in enumerate(kwargs.get("messages") or []):
+            for b in _blocks(m):
+                inner = b.get("content") if b.get("type") == "tool_result" else [b]
+                for c in inner if isinstance(inner, list) else []:
+                    if isinstance(c, dict) and c.get("type") == "document":
+                        enabled.add(bool((c.get("citations") or {}).get("enabled")))
         for where, b in found:
             extra = sorted(set(b) - {"type", "source", "title", "content", "citations",
                                      "cache_control"})
@@ -370,7 +380,11 @@ class ContractClient:
             enabled.add(bool((citations or {}).get("enabled")))
         if len(enabled) > 1:
             raise bad_request("Citations must be enabled or disabled on all search results "
-                              "in a request")
+                              "and documents in a request")
+        if True in enabled and ((kwargs.get("output_config") or {}).get("format")
+                                or kwargs.get("output_format")):
+            raise bad_request("Citations are not supported with structured outputs "
+                              "(output_config.format)")
         web = any(t.get("name") == "web_search" for t in kwargs.get("tools") or [])
         if web and False in enabled:
             raise bad_request("When web search is enabled, citations must be enabled on "

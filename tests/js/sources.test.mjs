@@ -123,3 +123,22 @@ test("the phone's own voice never reads a URL", () => {
   assert.equal(S.speakable('See [the page](https://a.example/x) or https://b.example now.'),
     'See the page or now.');
 });
+
+test('marks count UTF-16 units, so they land after an emoji, never inside one', () => {
+  const { S, doc } = load();
+  const text = 'Party 🎉 on Friday. Then 📅 Monday.';
+  const bubble = new Node('div');
+  const first = 'Party 🎉 on Friday.'.length;  // the server's utf16_len
+  // the second mark splits 📅's surrogate pair (one unit too early)
+  const split = text.indexOf('📅') + 1;
+  S.render(doc, bubble, text, {
+    sources: [{ kind: 'web', url: 'https://a.example/', title: 'A' },
+              { kind: 'web', url: 'https://b.example/', title: 'B' }],
+    marks: [[first, [1]], [split, [2]]],
+  });
+  const parts = bubble.children.map((c) => (c.tagName === 'sup' ? `[${c.textContent}]` : c.textContent));
+  assert.deepEqual(parts.slice(0, 2), ['Party 🎉 on Friday.', '[1]']);
+  assert.equal(parts[2], ' Then 📅');  // whole emoji kept before the mark
+  assert.equal(parts[3], '[2]');
+  for (const p of parts) assert.ok(!/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/.test(p), 'no half emoji');
+});

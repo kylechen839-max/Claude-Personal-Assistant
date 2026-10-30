@@ -349,6 +349,47 @@ def test_recall_searches_then_reads_a_past_chat(tmp_path):
         store.close()
 
 
+def test_a_pdf_attached_then_a_past_chat_read(tmp_path):
+    """Judge round 2: citations are on for all or none of a request's
+    documents and search results. A chat with a PDF attached (a document
+    block, kept in the history) then reads a past chat (search_result
+    blocks with citations on): every request must have citations on the
+    PDF too (chat.cite_documents), or the API refuses it."""
+    import base64
+    import time
+
+    from kwil.history import HistoryStore, Recorder
+    from kwil.tools.history import history_tools
+
+    store = HistoryStore(tmp_path / "history.sqlite", eventlog=False,
+                         clock=lambda: time.time() - 6 * 86400)
+    try:
+        old = store.create("web")
+        store.append(old, "user", "Let's lock the physics schedule: Mondays at 7.")
+        store.append(old, "assistant", "Done, Mondays at 7.")
+        store.finish(old, "Physics study schedule", "Mondays at 7.")
+        store.clock = time.time
+        client = ContractClient()
+        tools = calendar_tools([])
+        tools.register(*history_tools(store))
+        chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools, max_tokens=1024,
+                          recorder=Recorder(store, "web", run_async=False))
+        pdf = {"type": "document", "title": "plan.pdf", "source": {
+            "type": "base64", "media_type": "application/pdf",
+            "data": base64.b64encode(b"%PDF-1.4 a study plan").decode()}}
+        assert chat.ask("Here's my plan.", attachments=[pdf]).strip()
+        answer = chat.ask("What did we decide about my physics schedule last week?")
+        assert "Mondays" in answer
+        last = client.requests[-1]["messages"]
+        docs = [b for m in last if isinstance(m["content"], list) for b in m["content"]
+                if b.get("type") == "document"]
+        assert docs and all(d["citations"] == {"enabled": True} for d in docs)
+        assert "citations" not in chat.history[0]["content"][0]  # history keeps none
+        assert chat.last_citations["sources"][0]["ref"] == old
+    finally:
+        store.close()
+
+
 def test_a_beta_testers_own_key_conversation(api, tmp_path, monkeypatch):
     """Bring your own key (family.UserApi): a beta tester's chat reaches the
     client through a per-call lookup of their key, never the owner's. A
@@ -624,6 +665,18 @@ def _request(**overrides):
             {"type": "search_result", "source": "s", "title": "t",
              "content": [{"type": "text", "text": "a"}]},
             {"type": "text", "text": "and more"}]}]}]}, "may hold nothing else"),
+    # documents and search results share citations on-or-off; never with a format
+    ({"messages": [{"role": "user", "content": [
+        {"type": "document", "source": {"type": "text", "media_type": "text/plain",
+                                        "data": "a plan"}},
+        {"type": "search_result", "source": "s", "title": "t", "citations": {"enabled": True},
+         "content": [{"type": "text", "text": "a"}]}]}]}, "search results and documents"),
+    ({"output_config": {"format": {"type": "json_schema", "schema": {
+        "type": "object", "properties": {}, "additionalProperties": False}}},
+      "messages": [{"role": "user", "content": [
+          {"type": "document", "citations": {"enabled": True}, "source": {
+              "type": "text", "media_type": "text/plain", "data": "a plan"}}]}]},
+     "structured outputs"),
 ])
 def test_the_fake_refuses_what_the_api_refuses(overrides, error):
     """Judge LOW 6: the fake was looser than the API."""

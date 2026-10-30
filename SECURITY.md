@@ -2646,7 +2646,8 @@ network code of its own.
   conversation already uses (an invited person's chat is built with the
   configured model); the page's flag can't name a model, so no tier gets
   one it doesn't already have. The flag is per turn (`ask(think=...)`,
-  reset at the start of every turn) and only `true` / `"1"` count.
+  reset at the start of every turn) and only JSON `true` or a form's
+  `"1"` count (not `"true"`, `"yes"`, `1` or a JSON `"1"`; a test checks).
 - **Request shape.** Only `thinking={"type": "adaptive"}` and
   `output_config={"effort": ...}` (documented for the Claude 5 models;
   `budget_tokens` is a 400 there); `tests/contract_fakes.py` refuses the
@@ -2664,6 +2665,16 @@ network code of its own.
   `innerHTML` (a test checks the file). Stored and imported citations go
   through the same check, so an export edited to carry `javascript:`
   comes back without it.
+- **Citations on documents.** The API wants citations on for all or none
+  of a request's documents, and the citations doc counts `search_result`
+  blocks as documents too, so every attached file and project file goes
+  with `citations: {"enabled": true}` (`chat.cite_documents`, at request
+  time: history keeps the blocks as they were; the same bytes every
+  request, so the cache holds; the input grows slightly, and a project
+  whose files then no longer fit still falls back to search through the
+  existing "prompt is too long" safety net). Citations can't go with
+  structured outputs: the chat never uses `output_config.format`, and the
+  fake refuses the pair.
 - **Taint.** Results sent as `search_result` blocks are the same tools'
   results as before (`untrusted_output`, `private`): changes still ask
   first once one is read.

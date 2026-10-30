@@ -74,11 +74,16 @@
     return { sources, marks };
   }
 
-  // The reply's text with a superscript after each cited part.
+  // The reply's text with a superscript after each cited part. Marks count
+  // UTF-16 code units (the server's citations.utf16_len, the same as
+  // `length` here); one that would split an emoji's surrogate pair moves
+  // past its second half.
   function drawText(doc, bubble, text, marks) {
     let at = 0;
     for (const [offset, refs] of marks) {
-      const end = Math.min(Math.max(offset, at), text.length);
+      let end = Math.min(Math.max(offset, at), text.length);
+      if (end > 0 && end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])
+          && /[\uDC00-\uDFFF]/.test(text[end])) end += 1;
       if (end > at) bubble.appendChild(doc.createTextNode(text.slice(at, end)));
       at = end;
       const sup = doc.createElement("sup");

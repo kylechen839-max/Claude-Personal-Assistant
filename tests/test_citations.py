@@ -381,3 +381,27 @@ def test_the_phone_gets_the_sources_with_the_reply_never_in_its_words():
     assert all("http" not in t and "example" not in t for t in spoken.values())
     evs = events(client.post("/api/turn", json={"text": "thanks"}))
     assert "citations" not in next(e for e in evs if e["type"] == "reply")
+
+
+def test_marks_count_utf16_units_after_an_emoji(fake_client):
+    """Judge round 2: an emoji is one Python character but two in the
+    page's strings, so a mark counted in code points landed one early."""
+    chat = chat_with(fake_client, None)
+    reply = cited_reply(fake_client, chat, "🎉 Friday at 9 📅.", [web_cite("https://a.example/")])
+    assert reply == "Here it is: 🎉 Friday at 9 📅."
+    (at, refs), = chat.last_citations["marks"]
+    assert at == len(reply.encode("utf-16-le")) // 2 == len(reply) + 2 and refs == [1]
+    assert citations.utf16_len("a😀b") == 4
+
+
+def test_documents_get_citations_on_keeping_their_cache_breakpoint():
+    from kwil.chat import cite_documents
+
+    doc = {"type": "document", "title": "syllabus.pdf", "cache_control": {"type": "ephemeral"},
+           "source": {"type": "text", "media_type": "text/plain", "data": "Late work: -10%"}}
+    sent = [{"role": "user", "content": [doc, {"type": "text", "text": "late policy?"}]},
+            {"role": "assistant", "content": "Ten percent."}]
+    out = cite_documents(sent)
+    assert out[0]["content"][0] == {**doc, "citations": {"enabled": True}}
+    assert "citations" not in doc  # a copy: history keeps none
+    assert out[1] is sent[1] and cite_documents(out) == out  # same bytes every request

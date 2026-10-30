@@ -56,6 +56,12 @@ def _text(value, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
+def utf16_len(text: str) -> int:
+    """`text`'s length in UTF-16 code units (JavaScript's `length`): the
+    unit marks are counted in, so the page puts them where they belong."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 def safe_url(url) -> str | None:
     """`url` if it is an http(s) address with a host, no spaces or control
     characters and at most MAX_URL characters; None otherwise (javascript:,
@@ -314,7 +320,9 @@ class Sources:
     def reply(self, blocks) -> str:
         """The reply text of a final response's `blocks` (text blocks
         joined, then stripped, as ClaudeChat returns it), noting a mark
-        after each text block that cites something."""
+        after each text block that cites something. Marks count UTF-16
+        code units, as the page's strings do (an emoji is two), and a mark
+        always falls between whole characters."""
         text, marks = "", []
         for b in blocks:
             if getattr(b, "type", None) != "text":
@@ -326,11 +334,12 @@ class Sources:
                 if n is not None and n not in refs:
                     refs.append(n)
             if refs:
-                marks.append([len(text.rstrip()), refs[:MAX_MARK_REFS]])
-        lead = len(text) - len(text.lstrip())
+                marks.append([utf16_len(text.rstrip()), refs[:MAX_MARK_REFS]])
+        lead = utf16_len(text) - utf16_len(text.lstrip())
         out = text.strip()
+        end = utf16_len(out)
         for at, refs in marks:
-            at = max(0, min(len(out), at - lead))
+            at = max(0, min(end, at - lead))
             if self.marks and self.marks[-1][0] == at:
                 self.marks[-1][1] = (self.marks[-1][1] + [
                     n for n in refs if n not in self.marks[-1][1]])[:MAX_MARK_REFS]

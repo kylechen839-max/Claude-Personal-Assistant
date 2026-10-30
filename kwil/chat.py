@@ -1356,10 +1356,10 @@ class ClaudeChat:
             while True:
                 tag = self._thinking_tag(model)
                 kwargs = dict(model=model, max_tokens=self._max_tokens(model),
-                              system=system, messages=self._with_project_docs(
-                                  request_messages(self.history, cache=True,
-                                                   thinking=tag,
-                                                   thinking_turns=self.thinking_turns)))
+                              system=system, messages=cite_documents(
+                                  self._with_project_docs(request_messages(
+                                      self.history, cache=True, thinking=tag,
+                                      thinking_turns=self.thinking_turns))))
                 if think:  # "think harder": more room, thinking asked for
                     kwargs.update(think)
                     if on_text is None and cancel is None:  # not streamed
@@ -1771,6 +1771,25 @@ def request_messages(history: list[dict], cache: bool = False,
 # Blocks a cache_control marker may go on (thinking and server tool blocks
 # may not).
 CACHEABLE_TYPES = ("text", "image", "document", "tool_use", "tool_result")
+
+
+def cite_documents(messages: list[dict]) -> list[dict]:
+    """`messages` (as sent) with citations on for every document block (an
+    attached file, a project's file): the API wants citations on for all
+    or none of a request's documents, and the search_result blocks Kwil's
+    own data goes in (citations.py) always have them on. The same bytes on
+    every request, so the prompt cache holds. Copies; history keeps none."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if m.get("role") == "user" and isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "document"
+                and b.get("citations") != {"enabled": True} for b in content):
+            m = {**m, "content": [{**b, "citations": {"enabled": True}}
+                                  if isinstance(b, dict) and b.get("type") == "document"
+                                  else b for b in content]}
+        out.append(m)
+    return out
 
 
 def _with_context(message: dict, current: bool = False) -> dict:

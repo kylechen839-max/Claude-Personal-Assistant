@@ -7966,3 +7966,38 @@ Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
 3826 passed, 46 skipped, plus `test_design_skills` failing there only
 because the archive leaves its data out; +75 passed). The new skips are
 the live contract runs (no key here). JavaScript 353 passed (343; +10).
+
+### Think harder and citations, judge round 2 (2026-10-30)
+1. **Marks after an emoji.** Marks were Python code points; the page
+   slices UTF-16 units, so after an emoji a superscript landed one unit
+   early (inside the next character, or splitting a surrogate pair). The
+   server now counts UTF-16 units (`citations.utf16_len`), and
+   `sources.js` moves a mark that would split a surrogate pair past it.
+   No stored marks need converting: no release ever wrote code-point
+   marks (the feature was only on this branch). Tests: an emoji before
+   the mark in Python and JS, and a mark inside a pair in JS.
+2. PRIVACY: the master's row.
+3. **The think flag** is now only JSON `true` or a form's `"1"` (it also
+   took `"true"` in any case); SECURITY.md says so; the web test sends
+   `"true"`, `"TRUE"`, `"1"`, `1`, `"yes"` and an object as JSON and
+   `"true"`, `"True"`, `"on"`, `"yes"` as a form, and none counts.
+4. **Citations all or none.** The citations doc
+   (build-with-claude/citations, fetched 2026-10-30) says citations must
+   be on for all or none of a request's documents, and calls both
+   `document` and `search_result` blocks documents; the search-results
+   page says the same for search results. So every document block (an
+   attached file, a project file) now goes with citations on
+   (`chat.cite_documents`, at request time, copies; history unchanged,
+   cache breakpoints kept, the same bytes each request). The doc also
+   says citations can't be combined with `output_config.format` (the
+   chat never sends one). `contract_fakes` enforces both across
+   documents and search results, and a new contract test attaches a PDF,
+   then reads a past chat (`test_a_pdf_attached_then_a_past_chat_read`).
+
+Failing first (scratch copy): code-point marks fail the Python emoji
+test, the old JS fails the surrogate test, the old flag parsing fails the
+web test, no `cite_documents` fails the new contract test (the fake's
+400), and the old fake accepts both new refusals.
+
+Counts (Linux sandbox, not real hardware): 3907 passed, 49 skipped, 1
+deselected (ee6acb6: 3902 / 49; +5). JavaScript 354 passed (353; +1).

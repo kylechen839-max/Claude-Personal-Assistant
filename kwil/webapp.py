@@ -2413,8 +2413,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         if recording is None and not blocks and not (
                 isinstance(text, str) and text.strip()):
             return error("send text or audio", 400)
-        think = fields.get("think")  # "think harder": this turn only
-        think = think is True or (isinstance(think, str) and think.lower() in ("1", "true"))
+        # "think harder", this turn only: JSON true, or a form's "1"; nothing else
+        form = request.headers.get("content-type", "").startswith("multipart/form-data")
+        think = fields.get("think") == "1" if form else fields.get("think") is True
         if not await run_in_threadpool(
                 assistant.start_turn, s,
                 text if recording is None else None, recording, blocks,
