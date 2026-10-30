@@ -8374,3 +8374,123 @@ interaction only; nothing on the server changed.
   and a long press each still send once; no "header" left in the three
   scripts' comments). Each failed before its fix.
 - Full suite: 3994 passed, 53 skipped; JS 438 passed (was 434).
+
+## Today screen (redesign phase 5, 2026-10-30)
+- **What:** a read-only, per-person **Today** view. The header's new
+  calendar button (`#open-today`, before History) or `/#today` opens it;
+  `/api/state` says `"today": true` for everyone listed. Sections: the
+  brief (opens `#brief`), today's and tomorrow's events on the primary
+  calendar ("Ask Kwil"), what's due by tomorrow or overdue (deadline store,
+  at most 14 days back, classes left out; Notion `list_assignments`
+  days_ahead=1; opens Settings), today's reminders (opens `#reminders`),
+  the latest 3 research jobs (a finished one opens its conversation; a
+  running one has a breathing `.state` dot) and the 5 most missed study
+  concepts ("Ask Kwil"). At most 10 rows a section.
+- **Server:** `kwil/today.py`, `GET /api/today` (registered after
+  `proactive_mod.register`). One `chat._now(tz)` reading, set as
+  `timeutil.TURN_NOW` while the sections run; calendar and Notion run side
+  by side in a 4-thread pool (`contextvars.copy_context().run`, 8 s wait
+  each). The calendar handler is called directly (never `dispatch`), and
+  skipped with state `reconnect` while `google_auth.needs_reconnect`.
+  `outside` = the event's `from_others` or the result's untrusted mark;
+  every deadline and Notion row is outside; reminders and study rows by
+  their `untrusted` flag. Each section is `{state, items}`, and one
+  failure stays in its section. 401 signed out, 404 for a member removed
+  mid-request, `Cache-Control: no-store`. INFO logs one line of section
+  names, states and counts; warnings carry exception type names only.
+- **Client:** `kwil/web/today.js` (`KwilToday = {configure, onState,
+  setup, question, TEXT}`), everything by `textContent`. Reads only when
+  the view opens; offline shows a line and Retry. "Ask Kwil" calls
+  `newChat()` then app.js's `prefill` (text in `#text`, `syncComposer()`,
+  focus); it never sends. An outside item's question names it by kind and
+  time only. Chinese for every fixed string and question (`i18n.js`; the
+  question templates are translated before the time/title go in). CSS in
+  `app.css` (tokens only, light/dark, reduced motion); `sw.js`
+  `kwil-shell-v24` with `/today.js`; `webapp.py` static route and
+  `cloud.py` `PUBLIC_GET`.
+- **Tests:** `tests/test_today.py` (14): 401 signed out; the owner's full
+  screen and no-store; invites outside and own events not, every deadline
+  outside; Notion outside with days_ahead=1; a family member sees only her
+  own and a removed one gets 404; caplog (no titles or text at INFO);
+  a calendar error, a sign-in error, a timeout and `needs_reconnect` stay
+  in the calendar section (and `needs_reconnect` makes no Calendar call);
+  a broken deadline store stays in its section; one clock reading across
+  midnight (23:59:59 then 00:00:01: one `_now` call, Thursday's and
+  Friday's items under the right day); only `events().list` on `primary`
+  and no taint on the open chat; rows capped at 10; off sections say off.
+  `tests/js/today.test.mjs` (11): the button only with `today`, no read
+  until opened; textContent rendering of every section; Ask Kwil prefills
+  without sending and an outside row's question has no title; rows open
+  their places; `/#today` opens and Back returns; off/reconnect/empty
+  lines and actions; offline + Retry; Chinese page; zh for every TEXT
+  string; page/app.js/sw.js wiring. Fail-first: 9 source mutations of
+  `today.py` (outside forced off/on, a title in the INFO line, no
+  reconnect skip, no per-section try, a second clock read, every
+  calendar, no 404, no cap) each fail their test; 10 of `today.js`,
+  `i18n.js`, `index.html` and `sw.js` each fail theirs. The no-store
+  assertion also holds without the route's header (the app's middleware
+  sets it on every `/api/` answer), so it is a guard, not a regression
+  test.
+- **Screenshots** (Playwright Chromium with a mocked `/api/today`, not a
+  real iPhone): 390x844 and 1280x900, light and dark, English and Chinese,
+  top and scrolled to the end, plus empty (Google not connected) and
+  offline.
+- Full suite: 4008 passed, 53 skipped (baseline 3994 + 14); JS
+  `tests/js/*.test.mjs` + `voice-core.test.js` 449 passed (baseline 438 +
+  11).
+
+### Today screen, judge round 1 (2026-10-30)
+- MED, fixed (1): slow reads are bounded. Calendar and Notion each run on
+  a thread of their own (`today.Reads`), never queued, so nothing waits to
+  start after its screen gave up; one shared wait of `SLOW_SECONDS` (8 s)
+  for both. Per person: one screen in flight (`today.Gate`; a second
+  request gets the same answer), one calendar and one Notion read alive
+  (a new screen while one hangs shows that section as an error, no second
+  call), 20 new screens a minute (429). At most 16 reads alive in all.
+  SECURITY.md reworded.
+- LOW, fixed (2): reminders "today" runs local midnight to midnight (23-
+  and 25-hour days).
+- LOW, fixed (3): the calendar is capped 10 a day, deadlines and Notion 10
+  each (the page no longer cuts the merged list); `more` when cut.
+- LOW, fixed (4): times and dates go as local ISO and the page words them
+  (`toLocaleTimeString`): "3:00 PM" in English, "15:00" in Chinese, in rows
+  and in Ask Kwil's question. Notion rows show Today / Tomorrow / Overdue
+  like deadlines.
+- LOW, fixed (5): each Ask Kwil has `aria-describedby` pointing at its
+  row's title and time.
+- LOW, fixed (6): the family test gives the owner a calendar tool with a
+  distinctive event; the member never sees it (fails with
+  `registry = assistant.tools`).
+- LOW, fixed (7): README's Ask Kwil wording.
+- Tests: `test_today.py` +7 (clock-change days; one person's hung Notion
+  vs another's calendar; one shared wait; a second request joins the one
+  in flight with one Calendar call; a hung calendar isn't asked again; 429
+  past the rate; a full today keeps tomorrow) and 3 updated (ISO times,
+  Notion day, `more`, the owner's event in the family test); with
+  9912ce7's `today.py` 10 fail. `today.test.mjs` +3 (no AM/PM on a
+  Chinese page; deadlines and Notion each keep their rows; each Ask Kwil
+  names its row) and 4 updated; with 9912ce7's `today.js` 7 fail.
+- Full suite: 4015 passed, 53 skipped (was 4008); JS 452 passed (was
+  449). zh phone screenshot retaken (Chromium, not a real iPhone): times
+  read 15:00, 23:59, no "PM".
+
+### Today screen, judge round 2 LOWs (2026-10-30)
+- (1) `wallTime` builds and prints in UTC, so a time in the phone's own
+  clock-change gap (2027-03-14 02:30 in New York) stays 2:30.
+- (2) An event that started before today comes with `continues` and no
+  start time: "until 1:00 AM" (timed) or "All day", and Ask Kwil says
+  "...which continues today" with no time (zh too).
+- (3) A request joining the screen in flight waits with
+  `asyncio.wait_for(shield(wrap_future(...)))` on the event loop, no
+  worker thread; a timeout or the first request's failure or cancellation
+  is a plain 503; at most `MAX_WAITERS` (4) wait per person, then 429. The
+  page shows a 429 as "Too many requests; try again in a minute." (zh too).
+- (4) A test for the all-people cap (`Reads(limit=2)`: a third person is
+  refused, then gets a slot once one ends).
+- (5) `Reads.start` removes its entry and fails the future if the thread
+  can't start.
+- Tests: `test_today.py` +5, `today.test.mjs` +3. With 44db255's
+  `today.py`, `today.js` and `i18n.js`, 4 Python and 3 JS of them fail;
+  the cap test (4) passes there (the code was right, only untested) and
+  fails with the cap check removed.
+- Full suite: 4020 passed, 53 skipped (was 4015); JS 455 passed (was 452).

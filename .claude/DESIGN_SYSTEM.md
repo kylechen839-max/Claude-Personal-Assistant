@@ -163,6 +163,24 @@ CSP forbids them).
 - Words drawn with CSS `content` (the empty chat, "Summary") can't be
   reached by `i18n.js`: give each a `:root:lang(zh)` rule beside it.
 
+## Today screen (redesign phase 5)
+- A full-screen view like History (`#today-view`, Back top left), opened
+  by the header's 22px line calendar glyph (`#open-today`, before
+  History). Content is a centred column of at most 40rem.
+- Sections are `.group-head` + `.group[role=list]`; each row sits in a
+  `role=listitem` wrapper so a row that opens something stays a real
+  `<button class="row">` with a `.row-chevron`. Title `--t-body`,
+  subtitle `--t-cap` muted (an overdue one `--bad-ink`).
+- The date headings ("Today", "Tomorrow", 700, with the date muted
+  beside them) are the screen's one bold moment; the bar title is 500.
+- "Ask Kwil" is a 44px `.btn.plain` at the row's right edge; such rows
+  have no chevron.
+- Empty or off: one calm muted line and at most one `.btn.plain` action
+  ("Connect Google", "Reconnect Google", "Retry"). Sections with nothing
+  to say (no brief, no research, no study items) are left out.
+- A running research job shows a `.state` dot in `--accent-ink` that
+  breathes (none with reduced motion); finished is `.state.on`.
+
 ## Every change
 - Light and dark, phone (390x844) and desktop screenshots, English and
   Chinese (every new string in `i18n.js`); keep ids and hooks the scripts

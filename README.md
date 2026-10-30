@@ -2138,6 +2138,38 @@ spoken mode (`python -m kwil`) doesn't have it.
   card says so. On a Pi/PC/cloud setup the job runs on the backend you
   asked, once.
 
+### Today (one look at your day)
+The calendar button in the chat's header (or the link `/#today`) opens
+**Today**: a read-only screen with, in order, your study brief, today's
+and tomorrow's events (your primary Google calendar), what's due by
+tomorrow and what's overdue (school deadlines from the last two weeks,
+and Notion assignments), today's reminders, your latest research (up to
+3) and the study-mode concepts you missed most (up to 5). Everyone signed
+in sees their own: the owner's, or an invited person's own calendar,
+deadlines, reminders, research and study list.
+
+- **Each row opens its place:** the brief opens the brief, a reminder
+  opens Settings, Reminders, a deadline opens its connection in Settings,
+  a finished research report opens its conversation. Events and study
+  items have **Ask Kwil**: it starts a new chat with a question in the
+  message box ("Tell me about “Dentist” at 3:00 PM today.") and waits for you
+  to send it; it never sends by itself.
+- **Outside titles stay out of the question.** Events and study items
+  have Ask Kwil; for an invite, or a study item saved while outside text
+  was in the chat, the question names it by time or list position, never
+  its title ("What's my 3:00 PM event today about?"), so someone else's
+  wording never goes to Kwil as if you had typed it.
+- **Read-only and fresh:** opening the screen reads everything once
+  (Google Calendar and Notion are read live, side by side, about 8
+  seconds at most for both); opening it again while it loads waits for
+  the same answer, and more than 20 opens a minute are refused for a
+  minute; nothing
+  is written, nothing is cached, and it doesn't refresh in the background.
+  A section that fails says so on its own line; the rest still show. Not
+  connected to Google: "Connect Google" opens it in Settings; a refused
+  sign-in says "Reconnect Google". Offline: an error line and **Retry**.
+- No setting: it is there for everyone signed in.
+
 ## Smart home (Home Assistant)
 
 "Turn off the bedroom lights", "set the living room light to 50%", "is the

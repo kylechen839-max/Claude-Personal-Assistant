@@ -2916,6 +2916,47 @@ network code of its own.
   returns is kept. The question leaves the server for Anthropic's web
   search (PRIVACY.md).
 
+## Today screen (`today.py`, `web/today.js`)
+
+- **Read-only.** `GET /api/today` calls the `list_calendar_events`
+  handler itself (primary calendar, today and tomorrow, `events().list`
+  only; a test fails on any other Calendar call) and `list_assignments`;
+  it never goes through `dispatch`, so the open conversation gets no tool
+  event and no taint, and no state-changing tool can run. It never calls
+  Claude.
+- **Per person.** Every section is the signed-in session's own: the
+  owner's, or an invited person's own calendar tool, deadline store,
+  reminder store, research jobs and study list. Signed out is a 401; a
+  family member removed while their session still stands gets a 404 (the
+  check runs after the session lookup), never anyone's data.
+- **Outside titles are never prefilled.** Rows someone else could have
+  worded (invites and every event in a result that has one, every
+  deadline and Notion assignment, reminders and study items marked
+  `untrusted`) carry `outside: true`; the page's "Ask Kwil" question then
+  names them by kind and time only. Text is put in with `textContent`.
+- **No caching, small logs.** The answer is `Cache-Control: no-store`
+  (and the service worker never caches `/api/`). INFO logs carry section
+  names, counts, states and exception type names, never a title or text
+  (caplog test). Each section is capped at 10 rows (the calendar 10 a
+  day; deadlines and Notion 10 each), with `more` when rows were cut.
+- **Bounded reads** (judge round 1). The calendar and Notion reads each
+  run on a thread of their own, never in a queue, and share one wait of
+  about 8 s. A person has at most one screen in flight (a second request
+  gets the same answer, waiting on the event loop with no worker thread;
+  at most 4 wait, and a failed or abandoned first request gives them a
+  plain 503, never its own cancellation), at most one
+  calendar and one Notion read alive (while their last one still hangs,
+  a new screen shows that section as an error instead of asking again),
+  and at most 20 new screens a minute (then 429). All people together
+  have at most 16 reads alive. So one person's hung Notion can't delay
+  anyone else's calendar, and nothing queued waits to start after its
+  screen gave up (tests for each). A read whose thread can't start
+  leaves no entry behind (its section just errors).
+- **Not fixed, on purpose:** a read that outlasts the wait keeps its
+  thread until Google or Notion answers (Python can't stop a thread). The
+  limits above cap how many such threads there can be: 2 per person, 16
+  in all.
+
 ## Memory review (`memory_review.py`, `memory_web.py`)
 
 - **Owner only.** `/api/memory`, `/api/memory/{id}/delete` and

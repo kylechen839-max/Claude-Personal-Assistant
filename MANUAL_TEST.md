@@ -1754,6 +1754,34 @@ Home Screen app.
   - Should: the question, card and notification are in Chinese and the
     report is written in Chinese.
 
+## Today (~10 min, iPhone)
+In the Home Screen app, with Google connected and a few events today and
+tomorrow (one of them an invite from someone else), a reminder due later
+today, and a deadline due tomorrow.
+- [ ] Tap the calendar button in the chat's header (left of History).
+  - Should: **Today** opens fast; VoiceOver starts on the "Today" title.
+    The brief, then "Today" and "Tomorrow" in bold with their dates, then
+    Due, Reminders, Research and To review (the last two only if you have
+    any). Nothing else is bold.
+- [ ] Tap **Ask Kwil** on your own event, then go back and on the invite.
+  - Should: each time a new chat opens with a question in the message box
+    and the keyboard up; nothing is sent until you tap Send. Your own
+    event's question has its title; the invite's says only the time
+    ("What's my 9:00 AM event tomorrow about?").
+- [ ] Tap the reminder, the deadline, and a finished research report.
+  - Should: Settings, Reminders; Settings with the Canvas sheet; the
+    report's conversation.
+- [ ] Turn on Airplane mode and open Today again.
+  - Should: one line saying it couldn't load, and **Retry**; with the
+    network back, Retry fills the screen.
+- [ ] Switch the phone to Dark mode, and open Today as a family member
+  with Chinese.
+  - Should: readable in dark; in Chinese the heads say 今天, 明天, 待交,
+    提醒, 研究, 要复习, the button says 问 Kwil and its questions are in
+    Chinese, with times like 15:00 (no "PM" anywhere). VoiceOver on an
+    Ask Kwil button reads that row's title and time after it. The family
+    member sees only their own day, never yours.
+
 ## Study mode (~10 min, iPhone)
 In the Home Screen app, with Canvas course content synced if you have it.
 - [ ] Open the voice view and say "quiz me on PHYS 361".
