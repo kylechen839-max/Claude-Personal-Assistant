@@ -133,7 +133,14 @@ DEFAULTS: dict = {
                "text_fields": ["text", "chunk_text", "content", "summary"],
                # once a week, offer to review this week's notes (memory_review.py)
                "weekly_review": False,
-               "review_state_file": "data/memory_review.json"},
+               "review_state_file": "data/memory_review.json",
+               # finding past conversations (recall.py): "off" = keyword
+               # search (FTS5); "fastembed" = also a summary vector per
+               # conversation, in the same history file (optional package)
+               "embeddings": "off",
+               "embedding_model": "BAAI/bge-small-en-v1.5",
+               "embedding_dir": "models/fastembed",
+               "embedding_min_score": 0.5},
     "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
         "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
         "app_origin": "",           # where the phone app is installed from

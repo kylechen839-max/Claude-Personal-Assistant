@@ -950,6 +950,9 @@ class Family:
                                  max_mb=self.max_history_mb,
                                  origin=origin_of(self.config),
                                  eventlog=False)
+            from kwil import recall
+
+            recall.attach(store, self.config)  # their own index, in their file
 
         def chat_factory(session_registry):
             # their own key (or, for family, the owner's), looked up per call

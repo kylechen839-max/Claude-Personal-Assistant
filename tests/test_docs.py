@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from kwil import cli, deploy, family_import, preflight, smoke, tts, tts_kokoro, watch
+from kwil import (cli, deploy, family_import, preflight, recall, smoke, tts, tts_kokoro,
+                  watch)
 from kwil.config import DEFAULTS
 
 if sys.version_info >= (3, 11):
@@ -26,7 +27,7 @@ OTHER_FLAGS = {"--no-deps", "--only-binary", "--platform", "--python-version",
                "--test",  # node --test
                "--cloud",  # claude -p --cloud (the dev team voice link)
                "--build-arg"}  # docker build (FAMILY_ZH=0)
-OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations",
+OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations", "read_conversation",
                      "resume_conversation",  # tool names, not settings
                      "email_summary", "read_email", "draft_reply",
                      "remember_note", "recall_notes", "list_recent_notes",
@@ -70,6 +71,7 @@ def code_flags(monkeypatch):
             | _parser_flags(monkeypatch, lambda: watch.main([]))
             | _parser_flags(monkeypatch, lambda: deploy.main([]))
             | _parser_flags(monkeypatch, lambda: family_import.main([]))
+            | _parser_flags(monkeypatch, lambda: recall.main([]))
             | _parser_flags(monkeypatch, lambda: runpy.run_module(
                 "kwil.tools.calendar", run_name="__main__")))
 

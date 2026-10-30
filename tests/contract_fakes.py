@@ -29,7 +29,10 @@ list_calendar_events when offered, a tool result gets a short summary,
 earlier user message actually sent (so lost history fails the check), and
 "get rid of ... on my calendar" lists the events, then deletes one with
 delete_calendar_event when offered, "from now on ..." / "always ..." is
-saved with remember when offered, and a structured-output request (the
+saved with remember when offered, "what did we decide about <topic>"
+searches past chats with search_conversations, reads the first hit with
+read_conversation and answers from its matching message (when offered),
+and a structured-output request (the
 student deadlines' extractor) gets one deadline per "<Title> is due
 <YYYY-MM-DD>" sentence in its <text> blocks.
 """
@@ -73,6 +76,27 @@ def _blocks(message: dict) -> list[dict]:
 def _is_user_turn(message: dict) -> bool:
     return message["role"] == "user" and not any(
         b.get("type") == "tool_result" for b in _blocks(message))
+
+
+def _topic(asked: str) -> str:
+    """'what did we decide about my physics schedule last week?' -> 'physics schedule'"""
+    m = re.search(r"about (?:my |the |our )?([\w ]+?)(?: last week| yesterday)?[?.]",
+                  asked, re.I)
+    return m.group(1) if m else asked[:40]
+
+
+def _tool_json(message: dict) -> dict:
+    """The JSON of the first tool result in `message` ({} if not JSON)."""
+    for b in _blocks(message):
+        if b.get("type") == "tool_result":
+            content = b.get("content")
+            if isinstance(content, list):
+                content = " ".join(c.get("text", "") for c in content)
+            try:
+                return json.loads(content)
+            except (TypeError, ValueError):
+                return {}
+    return {}
 
 
 def _text_of(message: dict) -> str:
@@ -229,8 +253,33 @@ class ContractClient:
                             "input": {"note": next(b["text"] for b in _blocks(last)
                                                    if b.get("type") == "text").strip()}})
             stop = "tool_use"
+        elif not _is_user_turn(last) and called == {"search_conversations"} \
+                and "read_conversation" in tools:
+            found = _tool_json(last).get("conversations") or []
+            if found:
+                content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                                "name": "read_conversation",
+                                "input": {"conversation_id": found[0]["id"],
+                                          "query": _topic(asked)}})
+                stop = "tool_use"
+            else:
+                content.append({"type": "text", "text": "I couldn't find that chat."})
+        elif not _is_user_turn(last) and called == {"read_conversation"}:
+            read, words = _tool_json(last), _topic(asked).lower().split()
+            matches = [m["said"] for m in read.get("messages") or [] if m.get("match")]
+            said = max(matches, default="",  # the one with the most topic words
+                       key=lambda t: sum(w in t.lower() for w in words))
+            content.append({"type": "text", "text": (
+                f"In your chat on {read.get('date', 'that day')}: {said}"
+                if said else "I couldn't find that in the chat.")})
         elif not _is_user_turn(last):  # tool results came back
             content.append({"type": "text", "text": "Tomorrow you have two events."})
+        elif "what did we decide" in asked.lower() \
+                and "search_conversations" in tools:
+            content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
+                            "name": "search_conversations",
+                            "input": {"query": _topic(asked)}})
+            stop = "tool_use"
         elif "calendar" in asked.lower() and "list_calendar_events" in tools:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
                             "name": "list_calendar_events", "input": {"day": "tomorrow"}})

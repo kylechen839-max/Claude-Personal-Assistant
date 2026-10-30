@@ -53,7 +53,7 @@ READ_ONLY_TOOLS = frozenset({
     "recall_notes", "list_recent_notes",  # notes.py
     "search_memory", "list_memories",     # tools/memory_tools.py
     "review_memory",                      # memory_review.py
-    "search_conversations",               # tools/history.py
+    "search_conversations", "read_conversation",  # tools/history.py
     "check_dev_team",                     # devteam.py
     "ha_list", "ha_state",                # home_assistant.py
     "spotify_now_playing", "spotify_devices",  # spotify.py

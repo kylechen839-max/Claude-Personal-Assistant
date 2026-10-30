@@ -817,7 +817,9 @@ def tool_chat(store, fake_client, answer=True, memory=None):
     return chat, asked
 
 
-def test_search_tool_returns_titles_dates_snippets_only(store, fake_client):
+def test_search_tool_returns_titles_dates_summaries_snippets(store, fake_client):
+    """Memory layer 2: each hit also has its date (in the configured zone)
+    and its short summary, so Claude can pick which one to read."""
     old = add_conv(store, "wake", ["How do error bars work in my lab report?",
                                    "Standard error, and here is my secret answer."],
                    title="Lab report error bars", summary="Private summary.",
@@ -830,8 +832,11 @@ def test_search_tool_returns_titles_dates_snippets_only(store, fake_client):
     chat.ask("what did we talk about the lab report")
     result = json.loads(fake_client.calls[1]["messages"][-1]["content"][0]["content"])
     [hit] = result["conversations"]
-    assert set(hit) == {"id", "title", "when", "where", "snippet"}
+    assert set(hit) == {"id", "title", "when", "date", "where", "summary", "snippet"}
     assert hit["id"] == old and hit["title"] == "Lab report error bars"
+    assert hit["summary"] == "Private summary."
+    assert hit["date"] == history.local_dt(NOW - 2 * DAY).strftime("%A, %B ") + \
+        f"{history.local_dt(NOW - 2 * DAY).day}, 2026"
     assert hit["when"].startswith(history.spoken_date(NOW - 2 * DAY))
     assert "lab report" in hit["snippet"].lower() and MARK_START not in hit["snippet"]
 
@@ -840,7 +845,7 @@ def test_search_tool_by_date_for_yesterday(store, fake_client):
     yesterday = add_conv(store, turns=["pizza order", "ok"], title="Pizza",
                          at=time.time() - DAY)
     add_conv(store, turns=["older", "ok"], title="Old", at=time.time() - 9 * DAY)
-    [search, _] = history_tools(store)
+    search = history_tools(store)[0]
     day = datetime.fromtimestamp(time.time() - DAY).strftime("%Y-%m-%d")
     result = search.handler(since=day, until=day)
     assert [c["id"] for c in result["conversations"]] == [yesterday]

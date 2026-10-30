@@ -308,6 +308,21 @@ short, quick "yes" (or "yeah").
     `--history show ID` shows both parts in one conversation.
 - [ ] "Hey Claude, what did we talk about yesterday?" (or "today").
   - Should: a one or two sentence answer naming the topics.
+- [ ] On a day before, plan something in a chat ("Help me fit physics
+      into my week" ... "Let's do Mondays and Thursdays at 7"), then say
+      goodbye. Today: "Hey Claude, what did we decide about my physics
+      schedule?"
+  - Should: the answer gives the decision ("Mondays and Thursdays at 7")
+    and says which chat it came from ("in your chat on Tuesday"), and
+    `--history list` shows no switch: today's question is its own
+    conversation and the old one has no new messages.
+- [ ] Optional, meaning search: `pip install fastembed`, set `[memory]
+      embeddings = "fastembed"` in `config.local.toml`, restart, then
+      `python -m kwil.recall --download` (meaning search starts only after
+      this). Ask "what did we decide about my mechanics revision
+      timetable?" (other words than the old chat used).
+  - Should: within a few seconds of the download (no restart) the same
+    chat is found; before the download, only keyword matches.
 - [ ] `python -m kwil --history search error bars`
   - Should: the conversation, with "error" and "bars" highlighted.
 - [ ] Ctrl+C, run `python -m kwil --mode text --incognito`, type

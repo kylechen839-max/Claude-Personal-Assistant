@@ -290,6 +290,44 @@ def test_a_family_member_cannot_see_the_owners_conversations(env, owner):
     assert owner.get(f"/api/conversations/{mine[0]['id']}").status_code == 404
 
 
+def test_recall_with_embeddings_stays_in_each_persons_own_store(env, owner, monkeypatch):
+    """Memory layer 2 with [memory] embeddings on: a family member's store
+    gets its own index (vectors in her own file), and a search by meaning
+    finds neither Kyle's conversations from hers nor hers from his."""
+    from kwil import history, recall
+    from tests.test_recall import FakeEmbedder
+
+    embedder = FakeEmbedder()
+    monkeypatch.setattr(recall, "embedder_from_config", lambda config: embedder)
+    recall.attach(env.owner_store, env.config)
+    env.owner_store.recall.run_async = False
+    kyle = env.owner_store.create("wake")
+    env.owner_store.append(kyle, "user", "help me plan physics study")
+    env.owner_store.finish(kyle, "Physics timetable", "Study mechanics Mondays.")
+    env.owner_store.recall.backfill()
+    mom, link = env.member(owner, tier="family")
+    env.fake_client.queue += [make_response(text_block("好")),
+                              make_response(text_block('{"title": "Guitar music", '
+                                                       '"summary": "Guitar lessons."}'))]
+    assert mom.post("/api/turn", json={"text": "guitar practice"}).status_code == 200
+    ctx = env.family.context(link["user"]["id"])
+    assert isinstance(ctx.history.recall, recall.HybridRetriever)
+    assert ctx.history.recall is not env.owner_store.recall
+    ctx.history.recall.run_async = False
+    ctx.history.recall.backfill()
+    [theirs] = mom.get("/api/conversations").json()["conversations"]
+    for q in ("physics", "mechanics revision", "timetable"):
+        assert mom.get(f"/api/conversations?q={q}").json()["conversations"] == []
+    for q in ("guitar", "music lessons"):
+        assert [c["id"] for c in history.search_conversations(
+            env.owner_store, q, None)] == []
+    assert [c["id"] for c in history.search_conversations(
+        env.owner_store, "physics revision", None)] == [kyle]
+    # by meaning, in her own index: "music" is never said in it
+    [hit] = mom.get("/api/conversations?q=music").json()["conversations"]
+    assert hit["id"] == theirs["id"] and hit["match"] == "semantic"
+
+
 def test_a_turn_cant_go_into_someone_elses_conversation(env, owner):
     """/api/turn's conversation_id is checked against the person's own
     store, like the conversations routes: the owner's id is unknown to a

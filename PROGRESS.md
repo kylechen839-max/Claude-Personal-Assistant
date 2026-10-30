@@ -7180,3 +7180,141 @@ JavaScript 303 passed (was 302).
   tainted until `reset()`.
 - Test: `test_trimming_the_email_turn_keeps_the_conversation_tainted`
   (count and size); both fail without the fix.
+
+## Memory layer 2: search and read past chats, without Pinecone (2026-10-29)
+
+"What did we decide about my physics schedule last week?" now works with
+the default `[memory] backend = "local"`.
+
+- **`kwil/recall.py`**: a `Retriever` interface (`index`, `search`,
+  `delete`, plus `index_soon`), attached per store (`store.recall`,
+  `recall.attach` in `cli.add_history_tools` and `family._build`).
+  - `FtsRetriever` wraps `HistoryStore.search` (FTS5 over titles,
+    summaries and messages). Ranking: a conversation whose title or
+    summary matches now always comes before one that only mentions the
+    words in a message (`_rank`'s `topical` tier, FTS and LIKE alike),
+    then bm25 (titles 4.0, summaries 1.5, plus the best message), then the
+    newest. Hits are conversation-level: title, date, summary and the best
+    snippet (24 words for `search_conversations`; the phone's History
+    search keeps 12: `snippet_tokens`, judge round 2).
+  - `HybridRetriever` (`[memory] embeddings = "fastembed"`, off by
+    default): one unit float32 vector per conversation (title + summary,
+    or the first thing said before there is a summary) in the person's own
+    history file, table `recall_vectors` (created IF NOT EXISTS like the
+    FTS tables, so a rollback to an older Kwil still opens the file; ON
+    DELETE CASCADE, so every delete path removes the vector). Brute-force
+    cosine with numpy (at most `MAX_RECALL_SCAN` = 20000 vectors), min
+    score 0.5, fused with the keyword hits by reciprocal rank fusion
+    (k = 60). Vector-only hits are `match = "semantic"` with the summary as
+    snippet. Pluggable `Embedder`; `FastEmbedder` imports fastembed lazily
+    and opens the model with `local_files_only` (download once with
+    `python -m kwil.recall --download`). A failing or missing embedder
+    logs one warning (type name only) and search stays keyword-only.
+  - Backfill: at startup, after a conversation's title and summary are
+    written (`Recorder._title` -> `index_soon`), and on a search that finds
+    vectors missing; on a background thread, 16 per batch, 500 per run,
+    each batch saved as it is made, so it resumes after a crash or restart.
+    A vector is stale when the title or summary changed (`title_order |
+    summary_order`). Logs counts only.
+  - The module docstring says how to add a Postgres + pgvector Retriever.
+- **Wiring**: `history.search_conversations` uses the store's Retriever
+  when there is no Pinecone memory (backend local); the Pinecone path is
+  unchanged for `backend = "pinecone"`. `delete_conversation` also tells
+  the Retriever (first, as with Pinecone).
+- **`read_conversation(conversation_id, query="")`** (tools/history.py):
+  read-only, never switches the conversation. With a query, the messages
+  around the best matches (each window centered on its match, +/- 3), else
+  the summary and the last messages; at most 20 messages of 500
+  characters (long ones clipped around the match). Taints like a resume
+  (`chat.HISTORY_TOOLS`, and `untrusted_output=True`), `private=True`. In
+  both read-only lists (`tools.READ_ONLY_TOOLS`, `router.READ_ONLY_TOOLS`).
+  Only the store it was built with.
+- **`search_conversations`** results: id, title, when, date (in
+  `[assistant] timezone`), where, summary (300 chars), snippet (240), at
+  most 5; archived conversations are included.
+- **Prompt**: `RECALL_PROMPT`, added to `stable_system` only when
+  `read_conversation` is registered (same bytes every turn): search, read
+  the best hit, cite it briefly ("in your chat on Tuesday").
+- **Config**: `[memory] embeddings`, `embedding_model`, `embedding_dir`,
+  `embedding_min_score` (DEFAULTS and config.toml).
+
+Measured (Linux sandbox, not real hardware; 5000 conversations where every
+one matches the words, i.e. the worst case, fake 384-dim embedder):
+keyword search 58-87 ms median, hybrid 117-127 ms median; backfill of
+5000 with the fake embedder 3.4 s (a real model's time is not measured:
+Hugging Face is blocked here).
+
+Tests: new `tests/test_recall.py` (27, 1 skipped: the real fastembed model,
+`slow`, needs the package and a download): local search by summary words
+and message words with Pinecone not importable; title/summary hits above
+body-only hits; archived found by the tool; `read_conversation` bounded,
+window centered on the match (and cut at the end), long messages clipped,
+bad ids; it keeps `chat.conversation_id`, adds nothing to the old one,
+taints (a later move asks); both read-only lists; the prompt only with the
+tool and byte-stable; hybrid finds a paraphrase FTS misses; fusion;
+re-index after a new summary; indexed after finish; backfill resumes after
+a crash mid-run and is bounded per run; a search never waits for it; an
+embedder failure or no fastembed falls back to keywords; delete (and
+prune) removes vectors and nothing comes back; a Retriever with its own
+index is told about a delete; incognito never indexed; owner and member
+stores isolated both ways; no conversation text at INFO (and the private
+tool's input not even at DEBUG); the CLI attaches recall.
+`test_family.py` +1 (with embeddings on, a member's own index finds her
+paraphrase over the web route and never the owner's, and the owner's
+never hers). `test_contract.py` +1 (search, then read, then a follow-up
+turn through `contract_fakes`, whose script learned "what did we decide
+about ..."). `test_history.py`: the search-tool shape test now expects
+`date` and `summary` (renamed), and one test takes the first tool instead
+of unpacking two.
+
+Failing first (scratch copies, restored after each): with all source
+files back at 62ed940, `test_recall.py` fails to import, and the family,
+contract and search-shape tests fail. One mutation at a time: dropping the
+title tier, the CASCADE, the taint (HISTORY_TOOLS + untrusted_output),
+either read-only list entry, `archived=None`, the Retriever path, the
+centered window, the "already indexed" condition, the prompt, the 500-char
+clip, adding the query at INFO, incognito in `Recorder.active`, the
+embedder fallback, the background thread, the delete hook or the summary
+field each makes its test fail.
+`test_docs.py` now also reads `python -m kwil.recall`'s flags and knows
+the `read_conversation` tool name.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3656 passed, 42 skipped, 1 deselected (62ed940: about 3628 / 41; +28
+passed, +1 skipped: the fastembed model test). JavaScript 303 passed
+(unchanged; no JS in this change).
+
+### Memory layer 2, judge round 2 (2026-10-29)
+1. **Health checks can't read past chats.** `read_conversation` left
+   `tools.READ_ONLY_TOOLS` (that list is for tools that read nothing
+   private); it stays in `router.READ_ONLY_TOOLS`. Test: in the router set,
+   not the check set, and a `SessionTools` check session neither offers
+   nor runs it.
+2. **Phone snippets stay at 12 words.** `history.search_conversations`,
+   `Retriever.search` and `HybridRetriever.search` take `snippet_tokens`
+   (default 12, what history_web and the CLI get); only
+   `search_conversations` the tool asks for `recall.TOOL_SNIPPET_TOKENS`
+   (24). Test with embeddings off and on.
+3. **Deep pages with embeddings on.** Fused results stop at `FUSE_MAX`
+   (200); when `offset + k` is past it, the page is keyword search with the
+   offset (meaning hits are on the first pages). Test: 230 matching
+   conversations, limit 20, offset 210 returns 20 (the same as keyword
+   paging), and paging through all of them sees 220+ distinct ones.
+4. **A failed embedder is retried.** The `_broken` flag is now a time
+   (injectable `clock`): cleared after `RETRY_AFTER` (600 s), or at once
+   when the model folder's modification time changes (`--download` ran).
+   README and MANUAL_TEST say meaning search starts after `--download`.
+   Test with a fake clock: not retried at 599 s, retried at 601 s, and
+   retried at once when the folder appears.
+
+Failing first (scratch copies, restored after each): with the four source
+files back at 6c8513e all four new tests fail. One change at a time: the
+tool back in `tools.READ_ONLY_TOOLS`, the phone default back at 24, and
+never clearing the failure (by time or by folder) each fail their test.
+Removing only the deep-page fallback while keeping the uncapped candidate
+list still passes (vectors then cover the deep pages), so the 6c8513e run is
+that test's evidence.
+
+Counts (Linux sandbox, not real hardware), `-k "not live_pinecone"`:
+3659 passed, 42 skipped, 1 deselected (6c8513e: 3656 / 42; +3). JavaScript
+303 passed (unchanged).
