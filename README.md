@@ -2046,6 +2046,61 @@ on first: Settings -> **Enable notifications**).
   off). On a Pi/PC/cloud setup each backend keeps its own reminders (like
   memory); set them through the backend that is normally in use.
 
+### Research (deep dives)
+Ask for research and Kwil works on it in the background, then sends a
+notification when the report is ready (turn notifications on first:
+Settings -> **Enable notifications**). It runs in the web app (the phone
+app, typed or by voice, on the PC/Pi host or the cloud); the PC's own
+spoken mode (`python -m kwil`) doesn't have it.
+
+- "Research the best internships for physics majors this summer", "do a
+  deep dive on lithium-sulfur batteries". Kwil asks first, with how long
+  it takes and how many searches it may do ("Start research on: ...? It
+  takes about 5 to 10 minutes and does up to 10 web searches"), then
+  answers at once; say "a deep one" for the larger budget (about 10 to 20
+  minutes, up to 25 searches).
+- **What it does:** plans an outline (up to 3 parts, 5 for a deep one),
+  researches each part with Anthropic's web search and web fetch, then
+  writes a Markdown report: a short summary first, then sections, with
+  numbered sources (the same sources list and superscripts as a web
+  answer in the chat). It uses the main model with adaptive thinking at
+  `[research] effort` ("high").
+- **While it runs** a small card above the message box says
+  "Researching… (3/10 searches)", with **Cancel** (asks first; what it
+  found so far isn't kept). "Is my research done?" works by voice too.
+- **When it's ready:** the notification "Your research on ... is ready"
+  opens the report. It is a conversation in History titled "Research:
+  <question>", with your question and the report and its sources: open,
+  continue, export or delete it like any other. Continuing it counts as
+  outside text (web pages), so Kwil asks before changing anything. The
+  card's **Save to Notion** (only when your Notion is connected) files it
+  in a "Research" database next to your Assignments, once per report.
+- **Cost and limits:** web search costs about $10 per 1000 searches plus
+  Claude's tokens. One job runs at a time per person, at most
+  `[research] per_day` (3) a day each (you too), up to
+  `standard_searches` / `deep_searches` searches and `standard_fetches` /
+  `deep_fetches` pages per job. Each job also has a time and token budget
+  (`standard_minutes` / `standard_tokens`, `deep_minutes` / `deep_tokens`);
+  past it (or if a search step fails) Kwil writes the report from what it
+  found and says it is partial. Invited people's research runs on their own key if they saved
+  one; a family member without one uses yours (as their chats do), so
+  their research is on your bill, within the same 3 a day per person; a
+  beta tester without one is told to add it.
+- **What the research can see:** only the question, exactly as you
+  confirmed it (Kwil shows it whole before it starts). None of your
+  memories, instructions, projects, files, history, calendar or email is
+  sent with it, and it has no tool but web search and fetch, so nothing
+  it reads on the web can change anything or slip your data into a
+  search. Put everything it needs in the question.
+- **Needs** `[web] enabled` with web search on and History on (the report
+  is saved there; it doesn't run in an incognito conversation). Job
+  files (the question, counts and times, no report) are kept for 2 days
+  in `[research] dir` (`data/research`, Render: `/data/research`) and an
+  invited person's `<[family] dir>/<id>/research/`. A job cut off by a
+  restart isn't run again (it would pay for its searches twice); its
+  card says so. On a Pi/PC/cloud setup the job runs on the backend you
+  asked, once.
+
 ## Smart home (Home Assistant)
 
 "Turn off the bedroom lights", "set the living room light to 50%", "is the
@@ -2813,7 +2868,7 @@ kwil/
                 static/ features.js/css, vendored KaTeX
   tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
                 notion.py, notes.py, web.py, history.py, spotify.py, deadlines.py,
-                reminders.py, tool registry
+                reminders.py, research.py, tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)
   deadlines.py  each person's school deadlines (SQLite): sync upserts, conflicts, deletes
   canvas.py     Canvas calendar feed, REST API, school lookup, Claude date extraction
@@ -2821,6 +2876,7 @@ kwil/
   push.py       phone notifications: VAPID key, sealed subscriptions, Web Push
   proactive.py  study briefings: deadline rules, scheduler thread, /api/student/brief
   reminders.py  reminders and scheduled tasks: store, RRULE subset, scheduler, routes
+  research.py   deep research: job files, the research session, the report, routes
 scripts/        install_pi.sh, install_service.sh  (Raspberry Pi)
                 install_windows_service.ps1               (PC as the always-on host)
                 preflight.ps1/.sh, cloud_smoke.ps1/.sh; ci/ (the arm64 Pi simulation)

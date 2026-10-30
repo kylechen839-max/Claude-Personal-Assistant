@@ -198,6 +198,20 @@ class Sources:
                                   "title": _text(title, MAX_TITLE), **extra}
         return sid
 
+    def offer_web(self, url: str, title: str = "") -> str | None:
+        """A web page sent back to Claude as a search_result block (deep
+        research's write step, research.py): its `source` is the page's
+        address, and a search_result_location citation of it is listed as
+        that web page. None for an address safe_url refuses."""
+        url = safe_url(url)
+        if url is None:
+            return None
+        if len(self._offered) < 4 * MAX_SOURCES or url in self._offered:
+            self._offered[url] = {"kind": "web", "url": url,
+                                  "title": _text(title, MAX_TITLE)}
+            return url
+        return None
+
     def offer(self, tool: str, content: str) -> list[dict] | None:
         """The search_result blocks to send for `tool`'s result `content`
         (its JSON text), or None to send the text as it is (an error, no
@@ -360,6 +374,8 @@ class Sources:
             offered = self._offered.get(str(c.get("source") or ""))
             if offered is None:  # not one this turn's tools returned
                 return None
+            if offered["kind"] == "web" and c.get("cited_text"):  # offer_web
+                offered = {**offered, "cited_text": c["cited_text"]}
             item = clean([offered])
             return self._number(item[0]) if item else None
         return None

@@ -677,6 +677,14 @@ def _request(**overrides):
           {"type": "document", "citations": {"enabled": True}, "source": {
               "type": "text", "media_type": "text/plain", "data": "a plan"}}]}]},
      "structured outputs"),
+    # server tools (research.py caps max_uses): the SDK's fields, the right name
+    ({"tools": [{"type": "web_search_20260209", "name": "web_search", "max_uses": 0}]},
+     "greater than 0"),
+    ({"tools": [{"type": "web_search_20260209", "name": "web_search", "max_searches": 3}]},
+     "Extra inputs"),
+    ({"tools": [{"type": "web_fetch_20260209", "name": "web_search"}]}, "name"),
+    ({"tools": [{"type": "web_fetch_20260209", "name": "web_fetch",
+                 "user_location": {"type": "approximate"}}]}, "Extra inputs"),
 ])
 def test_the_fake_refuses_what_the_api_refuses(overrides, error):
     """Judge LOW 6: the fake was looser than the API."""
@@ -768,6 +776,35 @@ def test_a_web_search_reply_brings_its_cited_pages():
     assert cites["marks"] == [[len(reply), [1, 2]]]
     assert "http" not in reply  # the spoken words never carry the links
     assert chat.ask("Thanks!").strip()  # the server tool blocks go back valid
+
+
+def test_a_research_job_the_api_accepts(api):
+    """Deep research (research.py): a structured-output plan, research steps
+    with only web_search / web_fetch (max_uses capped to what is left,
+    fetch citations on), and the write with the findings as search_result
+    blocks (citations on, web search not offered), all with adaptive
+    thinking and an effort. Live: a two-search budget (about $0.02)."""
+    import threading
+
+    from kwil import research as R
+
+    make, model = api
+    client = make()
+    s = R.Settings(budgets={"standard": R.Budget(2, 1, 300, 200_000),
+                            "deep": R.Budget(2, 1, 300, 200_000)}, report_tokens=4000)
+    runner = R.ResearchRunner(client, model, s.budgets["standard"], s)
+    report = runner.run("Which US national labs run summer internships for "
+                        "undergraduate physics majors?", "standard", threading.Event())
+    assert report is not None and report.markdown.strip()
+    assert report.searches <= 2 and report.fetches <= 1
+    if isinstance(client, ContractClient):
+        steps = [r for r in client.requests if r.get("tools")]
+        assert steps and all(r["thinking"] == {"type": "adaptive"}
+                             and r["output_config"] == {"effort": "high"} for r in steps)
+        write = client.requests[-1]
+        assert "tools" not in write and any(
+            b.get("type") == "search_result" for b in write["messages"][0]["content"])
+        assert report.cites and {x["kind"] for x in report.cites["sources"]} == {"web"}
 
 
 def test_the_fake_binds_thinking_signatures_to_the_model():

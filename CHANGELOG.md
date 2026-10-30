@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Deep research: say "research …" or "do a deep dive on …" and Kwil
+  searches and reads the web in the background (after asking, with the time
+  and number of searches), then sends a notification. The cited report is
+  saved to History as "Research: <question>", with a progress card, Cancel,
+  and Save to Notion when connected. Limits: one job at a time, 3 per day;
+  capped searches, time and tokens per job.
 - Think harder: tap the light bulb by Send (or hold Send, or start with
   "think hard about...") and that one message gets the main model with
   more time to think; 30 a day each. Sources: replies that searched the web

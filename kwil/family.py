@@ -32,6 +32,9 @@ Their own reminders and scheduled tasks ([reminders] enabled;
 reminders.py) in `<dir>/<id>/reminders.sqlite` (reminders_of), with the
 create / list / update / cancel tools and Settings, Reminders; they arrive
 on their own devices (push.py) in their own time zone.
+Their own deep research ([research] enabled; research.py): start_research
+on their own key, the jobs in `<dir>/<id>/research/`, the reports in their
+own History, Save to Notion into their own Notion.
 Nothing else: no Kyle's Notion, Pinecone memory or notes, Kyle's Google,
 dev team, lecture recorder or tutor, and no way to see anyone else's
 history. Removing someone signs them out and deletes their folder, Google
@@ -244,6 +247,9 @@ class Family:
         # uid -> does someone have a phone with notifications on? (set by
         # webapp.build_assistant from push.Push.has_devices; None = unknown)
         self.devices: Callable[[str], bool] | None = None
+        # research.Research (set by webapp.build_assistant): their own
+        # start_research tool and jobs in <dir>/<id>/research; None = none
+        self.research = None
         # their turns and speech per minute and day (in memory), never the
         # owner's; a day in their own time zone (users.json is swapped
         # whole, so reading it without the lock is safe)
@@ -480,6 +486,11 @@ class Family:
             registry.register(*reminder_tools(
                 reminders, user.get("timezone") or self.config["assistant"]["timezone"]
                 or None, devices=lambda: self.devices is None or self.devices(uid)))
+        if self.research is not None:
+            from kwil.tools.research import research_tools
+
+            # deep research on their own key and History (research.py)
+            registry.register(*research_tools(self.research, user["id"]))
         web = self.config["web"]
         if not web["enabled"]:
             return

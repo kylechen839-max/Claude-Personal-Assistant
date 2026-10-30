@@ -46,6 +46,9 @@ review_state_file = "data/mom/memory_review.json"
 [reminders]
 path = "data/mom/reminders.sqlite"  # her own reminders (Settings -> Reminders)
 
+[research]
+dir = "data/mom/research"     # her own research jobs (the reports are in her History)
+
 [notes]
 enabled = false
 

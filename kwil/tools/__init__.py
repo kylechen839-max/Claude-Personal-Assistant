@@ -40,7 +40,8 @@ REDO_SAFE_TOOLS = frozenset(READ_ONLY_TOOLS) | {
     "find_free_time", "list_deadlines", "list_reminders", "list_recent_notes",
     "recall_notes", "search_memory", "search_conversations", "read_conversation",
     "read_email", "email_summary", "chat_channels", "chat_files", "chat_read",
-    "chat_read_file", "chat_search", "list_missed", "web_search", "web_fetch"}
+    "chat_read_file", "chat_search", "list_missed", "web_search", "web_fetch",
+    "research_status"}
 
 
 def changing_tools(names) -> list[str]:

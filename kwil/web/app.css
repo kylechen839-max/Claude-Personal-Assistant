@@ -443,6 +443,32 @@ button.source:active { background: var(--surface-2); }
 .queued-remove { position: absolute; top: 0; right: 0; width: 44px; height: 44px; min-height: 0; padding: 0;
   display: grid; place-items: center; background: none; color: var(--text-2); font-size: 1.1rem; line-height: 1; }
 .queued-remove:focus-visible { box-shadow: var(--ring); border-radius: var(--r-pill); }
+/* Deep research's card above the composer (research.js): one tone step, a
+   status line with a dot (pulsing while it runs), the question clamped to
+   two lines, then its actions */
+.research-cards { flex: none; display: flex; flex-direction: column; gap: var(--s2);
+  max-height: min(30vh, 14rem); overflow-y: auto; overscroll-behavior: contain; padding: var(--s1) var(--pad) var(--s2); }
+.research-cards[hidden] { display: none; }
+.research-card { flex: none; padding: var(--s2) var(--s3) var(--s2) var(--s4); border-radius: var(--r-lg);
+  background: var(--surface); }
+.research-head { display: flex; align-items: center; gap: var(--s2); min-height: 44px; }
+.research-state { flex: 1; min-width: 0; font-size: var(--t-sub); color: var(--text); }
+.research-state::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: var(--s2);
+  border-radius: var(--r-pill); background: var(--ok); vertical-align: .1em; }
+.research-card[data-status="queued"] .research-state::before,
+.research-card[data-status="planning"] .research-state::before,
+.research-card[data-status="researching"] .research-state::before,
+.research-card[data-status="writing"] .research-state::before { background: var(--accent); animation: research-pulse 1.4s ease-in-out infinite; }
+.research-card[data-status="failed"] .research-state::before,
+.research-card[data-status="cancelled"] .research-state::before,
+.research-card[data-status="elsewhere"] .research-state::before { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.research-question { margin: 0; font-size: var(--t-cap); color: var(--muted); display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.research-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s2); }
+.research-actions a.btn { text-decoration: none; }
+.research-dismiss { flex: none; width: 44px; height: 44px; }
+@keyframes research-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .research-state::before { animation: none !important; } }
 @keyframes ripple { from { opacity: .35; transform: scale(1); } to { opacity: 0; transform: scale(1.75); } }
 #mic-hint { margin-top: .6rem; }
 @media (max-height: 700px) {

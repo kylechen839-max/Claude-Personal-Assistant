@@ -163,6 +163,32 @@ EN = {
     # made while outside text (a web page, an email) was in the conversation
     "reminder_title_untrusted": "Reminder (from outside text)",
     "reminder_task_title_untrusted": "Kwil (from outside text)",
+    # research.py / tools/research.py: deep research
+    "research_confirm": "Start research on: {question}? It takes about {low} to {high} "
+                        "minutes and does up to {searches} web searches ({cost}).",
+    "research_cost_standard": "a small cost",
+    "research_cost_deep": "a higher cost",
+    "research_busy": "A research job is already running. I'll let you know when it's "
+                     "ready; you can cancel it on its card in the chat.",
+    "research_limit": "You've started today's {per_day} research jobs. You can start "
+                      "another tomorrow.",
+    "research_full": "Too many research jobs are running right now. Try again in a "
+                     "few minutes.",
+    "research_no_key": "Add your Anthropic API key in Settings to use research.",
+    "research_off": "Research reports are saved to History, so research needs "
+                    "history on and doesn't run in incognito.",
+    "research_bad": "Say what to research, in at most {chars} characters.",
+    "research_ready_title": "Research ready",
+    "research_ready": "Your research on {topic} is ready.",
+    "research_conversation": "Research: {question}",
+    "research_partial": "Partial report: the research stopped early{why}. It covers "
+                        "{done} of {total} parts.",
+    "research_why_time": " (time limit)",
+    "research_why_tokens": " (token budget)",
+    "research_why_searches": " (search limit)",
+    "research_why_length": " (length limit)",
+    "research_why_write": " (the write-up failed, so these are the findings as gathered)",
+    "research_why_error": " (a search step failed)",
 }
 
 ZH = {
@@ -280,6 +306,26 @@ ZH = {
     "reminder_task_skipped": "已跳过：今天的定时任务太多了。",
     "reminder_title_untrusted": "提醒（来自外部内容）",
     "reminder_task_title_untrusted": "Kwil（来自外部内容）",
+    "research_confirm": "开始研究：{question}？大约需要 {low} 到 {high} 分钟，最多搜索 "
+                        "{searches} 次网页（{cost}）。",
+    "research_cost_standard": "费用较低",
+    "research_cost_deep": "费用较高",
+    "research_busy": "已经有一个研究在进行了。完成后我会通知你；也可以在聊天里的卡片上取消它。",
+    "research_limit": "你今天的 {per_day} 次研究已经用完了，明天可以再开始。",
+    "research_full": "现在进行中的研究太多了，请过几分钟再试。",
+    "research_no_key": "请先在设置里添加你的 Anthropic API 密钥，才能使用研究功能。",
+    "research_off": "研究报告会保存在对话记录里，所以需要打开对话记录，无痕模式下不能用。",
+    "research_bad": "请说出要研究的内容，最多 {chars} 个字。",
+    "research_ready_title": "研究完成",
+    "research_ready": "你关于“{topic}”的研究完成了。",
+    "research_conversation": "研究：{question}",
+    "research_partial": "部分报告：研究提前结束了{why}。涵盖了 {total} 个部分中的 {done} 个。",
+    "research_why_time": "（时间用完）",
+    "research_why_tokens": "（用量上限）",
+    "research_why_searches": "（搜索次数上限）",
+    "research_why_length": "（长度上限）",
+    "research_why_write": "（整理报告失败，以下是收集到的内容）",
+    "research_why_error": "（有一步搜索出错了）",
 }
 
 

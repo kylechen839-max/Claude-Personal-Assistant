@@ -8037,3 +8037,110 @@ deselected (51e82fc: 3907 / 49; +3). JavaScript 355 passed (354; +1).
   once per citation (`Sources._number` compared without the title fallback
   its key used), which could fill MAX_SOURCES and drop later web pages. Test
   `test_an_attachment_cited_twice_is_listed_once`; fails without the fix.
+
+## Deep research (2026-10-30)
+"Research the best internships for physics majors this summer" / "do a
+deep dive on X": a background job that plans, searches and reads the web
+in several rounds and writes a cited report (`research.py`,
+`tools/research.py`, `web/research.js`).
+
+**API shapes, checked first** (docs fetched from the sandbox, `.md`
+pages): `agents-and-tools/tool-use/web-search-tool` (`max_uses` is per
+request; `max_uses_exceeded` past it; `usage.server_tool_use.
+web_search_requests`; `pause_turn` is continued by sending the paused
+assistant content back as it came), `.../web-fetch-tool` (`citations`
+optional and off by default; fetched pages cited by `char_location`
+`document_index`; `web_fetch_requests`) and `.../server-tools`. The SDK's
+`WebSearchTool20260209Param` / `WebFetchTool20260209Param` list the
+fields; `tests/contract_fakes.py` now refuses any other field, a wrong
+name or a `max_uses` under 1, and scripts the research plan, steps and
+write.
+
+- **start_research(question, depth)** always asks first ("Start research
+  on: ...? It takes about 5 to 10 minutes and does up to 10 web searches
+  (a small cost)."), the whole question when the conversation is tainted;
+  returns at once. Bounds: one job queued or running per person,
+  `[research] per_day` (3) started in any 24 hours (from the job files, so
+  a restart keeps the count), 10 waiting or running across everyone, 2 at
+  once. Refused without asking when it would be refused anyway; refused
+  with History off or in incognito (the report goes there) and for a beta
+  tester without a key. **research_status** (read-only) for "is my
+  research done?".
+- **The session** (`ResearchRunner`): the main model, adaptive thinking,
+  `[research] effort` "high". Plan (structured output, at most 3 / 5
+  parts) -> one step per part with only web_search and web_fetch (fetch
+  citations on), `max_uses` = what is left of the job's cap divided over
+  the parts left (a paused step goes on with the remainder, the whole turn
+  so far sent back, or stops) -> write with the findings as one
+  search_result block per page (source = its address; `Sources.offer_web`
+  added to citations.py) so the report's citations become the
+  conversation's web sources. Time and token budgets keep their last 25%
+  for the write; past that no more parts, and the report ends "Partial
+  report: ...". A failed write saves the findings as they are.
+- **Nothing of the person's** reaches it: its own requests with only the
+  question, no ToolRegistry, no client tools.
+- **Delivery:** a History conversation "Research: <question>" (title kept
+  as the person's), the report with its sources, untrusted when continued
+  (resume taints); a push "Your research on X is ready" opening
+  `/#research=<id>`; the card's Save to Notion (`ResearchNotesDB`, the
+  lecture database pattern, the job id as "Research ID") only when the
+  person's Notion is connected. Owner jobs run under the failover
+  JobRunner (`research:owner:<id>`); a job cut off by a restart is marked
+  failed, not rerun.
+- **UI:** a card above the composer ("Researching… (3/10 searches)",
+  polls every 4 s while a job runs, Cancel asks first; Open report opens
+  the History transcript with its sources; Save to Notion; dismiss), in
+  English and Chinese. `sw.js` `kwil-shell-v20`.
+- **Config:** `[research] enabled, dir, per_day, standard_searches,
+  standard_fetches, standard_minutes, standard_tokens, deep_*, effort,
+  report_tokens` (DEFAULTS, config.toml, the server profile's
+  `/data/research`, config.mom.toml's own folder).
+
+**Tests:** `tests/test_research.py` (31), `tests/js/research.test.mjs`
+(8), `tests/test_contract.py` (+4 refusal cases, +1 research request
+test, live variants marked `live`). Each new behaviour was checked to
+fail with its source change reverted (a scratch copy, 27 mutations). Cost
+not measured on the real API (no key in the sandbox).
+Full suite: 3947 passed, 51 skipped (baseline 3911 passed); JS 363 passed (baseline 355).
+
+### Deep research, judge round 1 (2026-10-30)
+All eight findings fixed, each with a test that fails with its fix reverted:
+- MED 1: research_status is `untrusted_output` and marks its result
+  untrusted (a tainted job's question can't enter a clean chat as trusted).
+  `test_research_status_is_outside_text`.
+- MED 2: a failed research step ends the research there; the report is
+  written from what was found, partial "error" ("a search step failed",
+  en/zh). `test_a_failed_step_keeps_what_was_found`.
+- MED 3: the confirmation always shows the whole question (never cut);
+  the tool description says not to include personal details unless asked;
+  README/SECURITY say "only the question, exactly as you confirmed it".
+  `test_the_question_is_always_shown_whole`.
+- LOW 4: a confirmation skipped because the job would be refused makes
+  that call refuse with the same reason, and the handler starts only the
+  question that was confirmed. `test_a_refusal_that_clears_never_starts_unasked`.
+- LOW 5: a cancel landing during the save deletes the saved conversation
+  and sends nothing. `test_cancel_while_saving_keeps_and_sends_nothing`.
+- LOW 6: research requests time out by the 75% mark; the write gets at
+  least its 25% share and one retry at most. `test_timeouts_keep_the_write_its_share`.
+- LOW 7 (docs only, code kept): a family member without a key runs on the
+  owner's key and bill, within the per-person limits.
+  `test_docs_say_whose_key_family_research_uses`.
+- LOW 8: job files go with the retrying unlink (`family._unlink`), and a
+  failed prune never stops a new job. `test_a_failed_prune_never_stops_a_new_job`,
+  `test_prune_retries_a_file_windows_holds`.
+
+### Deep research, judge round 2 (2026-10-30)
+The four LOW items, each with a test that fails with its fix reverted:
+- N1: a research step that fails before anything was found fails the job
+  (no empty report, no History conversation, no push).
+  `test_a_failed_first_step_fails_the_job`.
+- N2: tests for the two untested branches: `MissingKey` in step 2 fails
+  the job with `no_key` and saves nothing
+  (`test_a_missing_key_mid_research_fails_the_job`); a cancel followed by a
+  failing step stays a cancel, saves nothing and logs no failure
+  (`test_cancel_then_a_failed_step_is_cancelled`).
+- N3: a report saved while a cancel landed is removed with
+  `history.delete_conversation` (its recall vector too); the cancel-in-save
+  test checks `recall.delete`.
+- N4: `ResearchRunner.run`'s docstring and SECURITY's "Failing safe" say
+  a failed step fails the job when nothing was found.
