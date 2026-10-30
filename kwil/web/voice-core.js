@@ -532,6 +532,8 @@
   // With nothing pending, an item is sent at once (synchronously).
   class OrderedSender {
     constructor(send) { this.send = send; this.queue = []; this.draining = null; }
+    // a send that throws (socket gone) never wedges the items behind it
+    _out(d) { try { this.send(d); } catch (e) { /* dropped */ } }
     push(item) {
       this.queue.push(item);
       if (!this.draining) this.draining = this._drain();
@@ -546,12 +548,12 @@
         try { data = typeof item === "function" ? item() : item; } catch (e) { data = null; }
         if (data && typeof data.then === "function") {
           return data.then((d) => d, () => null).then((d) => {
-            if (d !== null && d !== undefined) this.send(d);
+            if (d !== null && d !== undefined) this._out(d);
             this.draining = this._drain();
             return this.draining;
           });
         }
-        if (data !== null && data !== undefined) this.send(data);
+        if (data !== null && data !== undefined) this._out(data);
       }
       this.draining = null;
       return null;

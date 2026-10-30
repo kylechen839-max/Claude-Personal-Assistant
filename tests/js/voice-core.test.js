@@ -966,3 +966,16 @@ test("OrderedSender sends at once when nothing waits, and keeps the order", asyn
   await s.idle();
   assert.deepEqual(out, ["a", "b", "c", "d", "e"]);
 });
+
+test("OrderedSender: a send that throws never wedges the queue", async () => {
+  const out = [];
+  const s = new VC.OrderedSender((d) => { if (d === "boom") throw new Error("closed"); out.push(d); });
+  let release;
+  s.push(() => new Promise((r) => { release = r; }));
+  s.push("after");
+  release("boom");
+  await s.idle();
+  s.push("later");
+  await s.idle();
+  assert.deepEqual(out, ["after", "later"]);
+});
