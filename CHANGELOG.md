@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Phone app: a tab bar at the bottom (Chat, Today, History, Settings)
+  replaces the calendar, clock and gear at the top on phones; it hides with
+  the keyboard and in voice mode. The desktop layout is unchanged.
 - Today screen: a calendar button in the header (or /#today) opens a
   read-only look at your day: your brief, today's and tomorrow's events,
   what's due by tomorrow or overdue (deadlines and Notion), today's

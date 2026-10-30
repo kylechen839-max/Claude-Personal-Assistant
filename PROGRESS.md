@@ -8494,3 +8494,51 @@ interaction only; nothing on the server changed.
   the cap test (4) passes there (the code was right, only untested) and
   fails with the cap check removed.
 - Full suite: 4020 passed, 53 skipped (was 4015); JS 455 passed (was 452).
+
+## Phone tab bar (redesign phase 6, 2026-10-30)
+- **What:** below 48rem the phone app has a fixed bottom bar, Chat ·
+  Today · History · Settings (`<nav id="tabbar" aria-label="Main
+  navigation">`, four `button.tabbar-item`s with a 22px line glyph and a
+  label; no `role=tab`). It shows only on the root screens (the chat with
+  its Settings page, Today, History), never on a screen reached with Back
+  (transcript, Memory, Projects, a project, Reminders, the brief) or the
+  sign-in, and CSS hides it with the keyboard (`html.kb-open`), in voice
+  mode (`body.voice-open`) and at 48rem and wider, where nothing changes.
+  On a phone the header's calendar, clock and gear and the Back of Today
+  and History are hidden. No backend change; Lecture and Tutor stay in
+  the segmented control.
+- **Client:** `app.js` `syncTabs(view)` after every `show()`, after the
+  `onState` calls in `refreshState` and on the menu's `toggle`: the bar's
+  `hidden`, exactly one `aria-current="page"` (Settings while the menu is
+  open), and Today/History mirror `#open-today`/`#open-history`'s
+  `hidden`. Each tab works through the header's own control: Today and
+  History click their buttons (closing Settings first), Settings shows the
+  chat and opens the menu, Chat closes the menu and shows the chat without
+  focusing the field; from Today both go through `#today-back` so a
+  `/#today` link is cleared. The current tab does nothing. `ui.js`: a
+  pointerdown inside `#tabbar` doesn't close Settings; Done/Esc focus the
+  Settings tab on a phone (`matchMedia("(max-width: 47.99rem)")`, guarded),
+  else the gear. CSS (`app.css`, `--tabbar-h: 49px` incl. the hairline;
+  tokens only, light/dark, reduced motion): while the bar shows, `.app`,
+  `.history`, the Settings page and `.panel` (`features.css`) leave room
+  for it and the composer drops its own safe-area gap. `i18n.js` zh
+  "Main navigation" 主导航; `sw.js` `kwil-shell-v25`.
+- **Tests:** `tests/js/tabbar.test.mjs` (10): aria-current per root view;
+  hidden on every Back-reached view and login; Settings current while the
+  menu is open; the Settings tab opens the menu (from History and Today,
+  via Today's Back); Chat closes the menu and never focuses `#text`;
+  Today/History click their header buttons and the current tab does
+  nothing; tab-today/tab-history follow `/api/state`; markup (order,
+  hidden, no tab roles, body level, ids kept); the CSS hide/room rules;
+  zh. `tests/js/ui.test.mjs` +2: a tap in the bar keeps Settings open;
+  Done focuses `tab-settings` on a phone and the gear otherwise (wide,
+  bar hidden, tab hidden, no matchMedia). Fail-first: with 4d00c12's
+  `app.js`, `ui.js`, `index.html`, `app.css`, `features.css` and `i18n.js`
+  all 12 fail. Cache pins moved to v25 in six test files.
+- **Screenshots** (Playwright Chromium, mocked APIs, not a real iPhone):
+  390x844 and 1280x800, light and dark, English and Chinese, on Chat,
+  Today, History and Settings, plus the keyboard open (bar hidden) and a
+  transcript (bar hidden). Measured in the page: the bar is 49px, hidden
+  (`display: none`) on desktop, with kb-open and on the transcript.
+- Full suite: 4020 passed, 53 skipped (baseline 4020; no Python change,
+  only the v25 pins); JS 467 passed (baseline 455 + 12).

@@ -1,7 +1,8 @@
 // Small touch behaviours the phone page should have, like other apps:
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
 // - it is a full-screen Settings page: opening it moves focus to its title,
-//   and Done (like Escape) closes it and gives focus back to the gear;
+//   and Done (like Escape) closes it and gives focus back to the gear (on a
+//   phone, to the tab bar's Settings: the header's gear is hidden there);
 // - swiping down while the keyboard is open closes the keyboard (not when
 //   the swipe scrolls a message long enough to scroll inside its field).
 // And the owner's health banner (state.health from /api/state, written by
@@ -15,13 +16,24 @@
     const find = (sel) => (typeof menu.querySelector === "function" ? menu.querySelector(sel) : null);
     const byId = (id) => (typeof doc.getElementById === "function" ? doc.getElementById(id) : null);
     const focus = (el) => { if (el && typeof el.focus === "function") el.focus(); };
+    // the phone's tab bar (app.css shows it below 48rem): its Settings tab
+    // stands in for the gear there
+    const phone = () => typeof root.matchMedia === "function"
+      && root.matchMedia("(max-width: 47.99rem)").matches;
+    const tabbar = () => byId("tabbar");
     // close the page and hand focus back to the gear (VoiceOver lands there)
     const close = () => {
       menu.open = false;
-      focus(find("summary"));
+      const tab = byId("tab-settings"), bar = tabbar();
+      focus(tab && !tab.hidden && bar && !bar.hidden && phone() ? tab : find("summary"));
+    };
+    // a tap in the tab bar is its own (app.js): Settings stays open for it
+    const inBar = (target) => {
+      const bar = tabbar();
+      return !!bar && typeof bar.contains === "function" && bar.contains(target);
     };
     const onDown = (e) => {
-      if (menu.open && !menu.contains(e.target)) menu.open = false;
+      if (menu.open && !menu.contains(e.target) && !inBar(e.target)) menu.open = false;
     };
     const onKey = (e) => {
       // with a Connections sheet open (connections.js), Escape closes only it

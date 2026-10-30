@@ -86,6 +86,79 @@ function show(view) {
     const el = $(id);
     if (el) el.hidden = view !== id;
   }
+  syncTabs(view);
+}
+
+// --- the phone's tab bar (#tabbar; app.css shows it below 48rem only) ---
+// Chat · Today · History · Settings on the root screens; a screen reached
+// with Back (a transcript, Memory, ...) and the sign-in have none. Each tab
+// works through the top bar's own button (#open-today, #open-history, the
+// gear; hidden on a phone), so Today and History show only when theirs would.
+const TAB_FOR = { app: "tab-chat", "today-view": "tab-today", "history-view": "tab-history" };
+const settingsMenu = () => (typeof document.querySelector === "function"
+  ? document.querySelector("details.menu") : null);
+function shownView() {
+  if (!els.app.hidden) return "app";
+  if (!els.login.hidden) return "login";
+  return VIEWS.find((id) => $(id) && !$(id).hidden) || null;
+}
+function currentTab(view) {
+  const menu = settingsMenu();
+  if (view === "app" && menu && menu.open) return "tab-settings";
+  return TAB_FOR[view] || null;
+}
+function syncTabs(view) {
+  const bar = $("tabbar");
+  if (!bar) return;
+  if (view === undefined) view = shownView();
+  bar.hidden = !TAB_FOR[view];
+  const now = currentTab(view);
+  for (const id of ["tab-chat", "tab-today", "tab-history", "tab-settings"]) {
+    const tab = $(id);
+    if (!tab) continue;
+    if (id === now) tab.setAttribute("aria-current", "page");
+    else if (typeof tab.removeAttribute === "function") tab.removeAttribute("aria-current");
+  }
+  for (const [tab, head] of [["tab-today", "open-today"], ["tab-history", "open-history"]]) {
+    if ($(tab) && $(head)) $(tab).hidden = $(head).hidden;
+  }
+}
+// Back to the chat screen without focusing the field (no keyboard pops up);
+// from Today through its Back, which also clears a /#today link.
+function tabToChat() {
+  const today = $("today-view"), back = $("today-back");
+  if (today && !today.hidden && back && typeof back.click === "function") back.click();
+  if (els.app.hidden) show("app");
+}
+function onTab(id, go) {
+  const tab = $(id);
+  if (!tab) return;
+  tab.addEventListener("click", () => {
+    if (currentTab(shownView()) === id) return;  // already there
+    go(settingsMenu());
+  });
+}
+onTab("tab-chat", (menu) => {
+  if (menu) menu.open = false;
+  tabToChat();
+  syncTabs();
+});
+onTab("tab-today", (menu) => {
+  if (menu) menu.open = false;
+  $("open-today").click();
+});
+onTab("tab-history", (menu) => {
+  if (menu) menu.open = false;
+  $("open-history").click();
+});
+onTab("tab-settings", (menu) => {
+  tabToChat();
+  if (menu) menu.open = true;
+  syncTabs();
+});
+{
+  const menu = settingsMenu();
+  if (menu && typeof menu.addEventListener === "function") menu.addEventListener("toggle", () => syncTabs());
 }
 
 function addMessage(kind, text) {
@@ -791,6 +864,7 @@ async function refreshState() {
     if (window.KwilProjects) window.KwilProjects.onState(state);  // projects.js
     if (window.KwilResearch) window.KwilResearch.onState(state);  // research.js
     if (window.KwilToday) window.KwilToday.onState(state);  // today.js
+    syncTabs();  // #open-today and #open-history may have changed
     // a fresh pane takes the chat's project (one a voice "continue" moved
     // into), unless the person just chose one or left one
     if (!pane.cid && !pane.project && !pane.leaving && state.project) pane.project = state.project;

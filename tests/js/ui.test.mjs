@@ -2,7 +2,9 @@
 // kwil/web/ui.js in node:vm with a minimal fake document: the settings
 // menu closes on a tap outside it (not inside) and on Escape; a downward
 // swipe while typing blurs the field (hides the keyboard), a short one or a
-// swipe when not typing does nothing. The owner's health banner: its
+// swipe when not typing does nothing. The phone's tab bar: a tap in it
+// leaves Settings to its tabs, and Done hands focus to its Settings tab on a
+// phone (the header's gear is hidden there). The owner's health banner: its
 // lines (an app down, one failing, stale checks, events) and the element.
 
 import test from 'node:test';
@@ -86,7 +88,7 @@ function setupPage() {
   const fire = (type, ev) => (listeners[type] || []).forEach((fn) => fn(ev));
   const toggle = () => (menuListeners.toggle || []).forEach((fn) => fn({}));
   const tapDone = () => (done.listeners.click || []).forEach((fn) => fn({}));
-  return { menu, focused, fire, toggle, tapDone };
+  return { menu, focused, fire, toggle, tapDone, doc, win };
 }
 
 test('settings page: opening it focuses the title; Done closes it and focuses the gear', () => {
@@ -107,6 +109,40 @@ test('settings page: Escape gives focus back to the gear too', () => {
   t.fire('keydown', { key: 'Escape' });
   assert.equal(t.menu.open, false);
   assert.deepEqual(t.focused, ['summary']);
+});
+
+test('menu: a tap inside the tab bar keeps Settings open (its tabs handle it)', () => {
+  const t = setup();
+  const tab = { id: 'tab-settings' };
+  const bar = { id: 'tabbar', hidden: false, contains: (n) => n === tab || n === bar };
+  t.doc.getElementById = (id) => (id === 'tabbar' ? bar : null);
+  t.fire('pointerdown', { target: tab });
+  assert.equal(t.menu.open, true);
+  t.fire('pointerdown', { target: t.outside });
+  assert.equal(t.menu.open, false);
+});
+
+// Done on a phone (matchMedia matches) with the tab bar showing focuses its
+// Settings tab; on a wide screen, with the bar hidden or no matchMedia, the gear.
+function doneFocus({ phone, barHidden = false, tabHidden = false, media = true }) {
+  const t = setupPage();
+  const bar = { id: 'tabbar', hidden: barHidden };
+  const tab = { id: 'tab-settings', hidden: tabHidden, focus() { t.focused.push('tab-settings'); } };
+  const byId = t.doc.getElementById;
+  t.doc.getElementById = (id) => ({ tabbar: bar, 'tab-settings': tab })[id] || byId(id);
+  if (media) t.win.matchMedia = (q) => ({ matches: phone && q === '(max-width: 47.99rem)' });
+  t.menu.open = true;
+  t.tapDone();
+  assert.equal(t.menu.open, false);
+  return t.focused.at(-1);
+}
+
+test('settings page: Done focuses the Settings tab on a phone, the gear otherwise', () => {
+  assert.equal(doneFocus({ phone: true }), 'tab-settings');
+  assert.equal(doneFocus({ phone: false }), 'summary');
+  assert.equal(doneFocus({ phone: true, barHidden: true }), 'summary');
+  assert.equal(doneFocus({ phone: true, tabHidden: true }), 'summary');
+  assert.equal(doneFocus({ phone: true, media: false }), 'summary');  // no matchMedia
 });
 
 const touch = (y) => ({ touches: [{ clientY: y }] });
