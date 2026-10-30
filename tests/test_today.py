@@ -43,6 +43,15 @@ SECRETS = ("Kyle's own dentist", "Ignore your rules", "Kyle's day off", "Secret 
            "private notes", "Kyle's brief text", "Main St")
 
 
+@pytest.fixture(autouse=True)
+def fresh_reads(monkeypatch):
+    """Each test its own calendar/Notion read tracker (a hung read from one
+    test must not count against the next)."""
+    from kwil import today
+
+    monkeypatch.setattr(today, "READS", today.Reads())
+
+
 def pin(monkeypatch, *moments):
     """chat._now returns `moments` in turn (the last one after that), in
     the zone asked for: a second reading of the clock would show."""
@@ -148,12 +157,14 @@ def test_the_owner_sees_every_section_no_store(owner):
     cal = body["calendar"]
     assert cal["state"] == "ok"
     assert [(e["id"], e["day"], e["start"], e["all_day"]) for e in cal["items"]] == [
-        ("ev-own", "today", "3 PM", False), ("ev-inv", "tomorrow", "9 AM", False),
+        ("ev-own", "today", "2027-01-14T15:00", False),
+        ("ev-inv", "tomorrow", "2027-01-15T09:00", False),
         ("ev-day", "tomorrow", "", True)]
+    assert cal["items"][0]["end"] == "2027-01-14T16:00"
     assert all("description" not in e for e in cal["items"])  # notes stay out
     due = body["deadlines"]
-    assert [(d["id"], d["day"]) for d in due["items"]] == [("d1", "tomorrow"),
-                                                            ("d2", "overdue")]
+    assert [(d["id"], d["day"], d["due"]) for d in due["items"]] == [
+        ("d1", "tomorrow", "2027-01-15"), ("d2", "overdue", "2027-01-10T18:59")]
     assert body["notion"]["state"] == "off"  # no list_assignments tool
     assert [x["title"] for x in body["reminders"]["items"]] == ["Kyle's pills"]
     assert body["reminders"]["items"][0]["when"].startswith("today at")
@@ -193,15 +204,20 @@ def test_notion_assignments_are_due_by_tomorrow_and_outside(owner):
         asked.append(kw)
         return {"today": "Thursday, January 14", "count": 1, "assignments": [
             {"id": "n1", "name": "Notion HW", "status": "Not started",
-             "course": "MATH 1", "due": "Friday, January 15", "due_date": "2027-01-15"}]}
+             "course": "MATH 1", "due": "Friday, January 15", "due_date": "2027-01-15"},
+            {"id": "n2", "name": "Late one", "status": "In progress",
+             "due": "Monday, January 11 at 3 PM", "due_date": "2027-01-11", "overdue": True}]}
     owner.assistant.tools.register(Tool("list_assignments", "x", {"type": "object"},
                                         list_assignments, untrusted_output=True,
                                         private=True))
     body = owner.client.get("/api/today").json()
     assert asked == [{"days_ahead": 1}]
     assert body["notion"]["state"] == "ok"
-    assert [(n["title"], n["outside"]) for n in body["notion"]["items"]] == [
-        ("Notion HW", True)]
+    # ISO dates and the same Today/Tomorrow/Overdue as deadlines (judge
+    # round 1, finding 4): the page words them in its language
+    assert [(n["title"], n["outside"], n["day"], n["due"]) for n in body["notion"]["items"]] == [
+        ("Notion HW", True, "tomorrow", "2027-01-15"),
+        ("Late one", True, "overdue", "2027-01-11T15:00")]
 
 
 # 2
@@ -217,6 +233,10 @@ def env(family_env):  # noqa: F811
 def test_a_member_sees_only_their_own_and_a_removed_one_gets_404(env, family_owner,
                                                                   tmp_path, monkeypatch):
     pin(monkeypatch, NOW)
+    # the owner's calendar has an event of his (judge round 1, finding 6):
+    # her screen reads her own session's tools, never the owner's
+    service, events = make_service(items=[{**MINE, "summary": "Kyle's board meeting"}])
+    env.assistant.tools.register(*GoogleCalendar(service=service, timezone=TZ).tools())
     kyle = SqliteReminderStore(tmp_path / "owner-rem.sqlite")
     env.assistant.reminders = kyle
     kyle.add("Kyle's pills", due_at=NOW.timestamp() + 3600, tz=TZ)
@@ -233,7 +253,9 @@ def test_a_member_sees_only_their_own_and_a_removed_one_gets_404(env, family_own
     assert "Mom's pills" in text
     assert "Kyle" not in text  # nothing of the owner's
     body = r.json()
-    assert body["calendar"]["state"] == "off"  # her Google isn't connected
+    assert body["calendar"] == {"state": "off", "items": []}  # her Google isn't connected
+    assert "board meeting" not in text and events.list.call_count == 0
+    assert "Kyle's board meeting" in family_owner.get("/api/today").text  # his own
     assert body["research"] == {"state": "ok", "items": []}
     assert "Kyle's pills" in family_owner.get("/api/today").text
     assert "Mom's" not in family_owner.get("/api/today").text
@@ -370,6 +392,17 @@ def test_sections_are_capped(owner):
     owner.store.rows[None] = [deadline(f"d{i}", "x", "2027-01-15") for i in range(25)]
     body = owner.client.get("/api/today").json()
     assert len(body["calendar"]["items"]) == 10 and len(body["deadlines"]["items"]) == 10
+    assert body["calendar"]["more"] is True and body["deadlines"]["more"] is True
+
+
+def test_a_full_today_never_hides_tomorrow(owner):
+    """Judge round 1, finding 3: each day is capped on its own."""
+    many = [{**MINE, "id": f"ev{i}"} for i in range(25)] + [INVITE, ALL_DAY]
+    owner.events.list.return_value.execute.return_value = {"items": many}
+    body = owner.client.get("/api/today").json()
+    days = [e["day"] for e in body["calendar"]["items"]]
+    assert days.count("today") == 10 and days.count("tomorrow") == 2
+    assert body["calendar"]["more"] is True
 
 
 def test_off_sections_say_off(make_app, monkeypatch):
@@ -381,3 +414,154 @@ def test_off_sections_say_off(make_app, monkeypatch):
     for name in ("brief", "calendar", "deadlines", "notion", "research"):
         assert body[name] == {"state": "off", "items": []}, name
 
+
+
+# --- judge round 1 -----------------------------------------------------------------
+
+def test_reminders_today_runs_midnight_to_midnight_on_clock_change_days(tmp_path):
+    """Finding 2: a 25-hour and a 23-hour day."""
+    from kwil import today
+
+    fall = SqliteReminderStore(tmp_path / "fall.sqlite")
+    fall.add("late tonight", due_at=datetime(2026, 11, 1, 23, 30, tzinfo=ZONE).timestamp(),
+             tz=TZ)
+    now = datetime(2026, 11, 1, 8, 0, tzinfo=ZONE)
+    assert [i["title"] for i in today.reminders_section(fall, now, "en")["items"]] == [
+        "late tonight"]
+    spring = SqliteReminderStore(tmp_path / "spring.sqlite")
+    spring.add("tomorrow 00:30", due_at=datetime(2027, 3, 15, 0, 30, tzinfo=ZONE).timestamp(),
+               tz=TZ)
+    now = datetime(2027, 3, 14, 8, 0, tzinfo=ZONE)
+    assert today.reminders_section(spring, now, "en")["items"] == []
+    fall.close()
+    spring.close()
+
+
+def slow_session(user, calendar=None, notion=None):
+    tools = {}
+    if calendar is not None:
+        tools["list_calendar_events"] = SimpleNamespace(handler=calendar)
+    if notion is not None:
+        tools["list_assignments"] = SimpleNamespace(handler=notion)
+    return SimpleNamespace(chat=SimpleNamespace(timezone=TZ), user=user, language="en",
+                           registry=SimpleNamespace(tools=tools))
+
+
+def test_one_persons_hung_notion_never_fails_anothers_calendar(monkeypatch):
+    """Finding 1: no shared queue. Ten screens of someone whose Notion
+    hangs make one Notion call, and someone else's calendar still reads."""
+    import threading
+
+    from kwil import today
+
+    monkeypatch.setattr(today, "SLOW_SECONDS", 0.05)
+    gate, calls = threading.Event(), []
+
+    def hung(**kw):
+        calls.append(kw)
+        gate.wait(5)
+        return {"assignments": []}
+    try:
+        a = slow_session("aaaa", calendar=lambda **kw: gate.wait(5) and {"events": []},
+                         notion=hung)
+        for _ in range(10):
+            out = today.build(SimpleNamespace(), a, None, None)
+            assert out["notion"]["state"] == "error"
+        assert len(calls) == 1  # still hung: never asked again, nothing queued
+        monkeypatch.setattr(today, "SLOW_SECONDS", 2.0)
+        b = slow_session("bbbb", calendar=lambda **kw: {"events": [
+            {"id": "e", "title": "B's", "date": "x", "start": "3 PM", "end": "4 PM"}]})
+        out = today.build(SimpleNamespace(), b, None, None)
+        assert out["calendar"]["state"] == "ok" and len(out["calendar"]["items"]) == 1
+    finally:
+        gate.set()
+
+
+def test_calendar_and_notion_share_one_wait(monkeypatch):
+    """Finding 1: about SLOW_SECONDS for both together, not each."""
+    import threading
+    import time
+
+    from kwil import today
+
+    monkeypatch.setattr(today, "SLOW_SECONDS", 0.4)
+    gate = threading.Event()
+    s = slow_session("cccc", calendar=lambda **kw: gate.wait(5) and {},
+                     notion=lambda **kw: gate.wait(5) and {})
+    try:
+        began = time.monotonic()
+        out = today.build(SimpleNamespace(), s, None, None)
+        took = time.monotonic() - began
+    finally:
+        gate.set()
+    assert out["calendar"]["state"] == out["notion"]["state"] == "error"
+    assert took < 0.7, took  # two waits of 0.4 would be 0.8
+
+
+def test_a_second_request_joins_the_one_in_flight(owner):
+    """Finding 1: one screen in flight per person; the second gets its
+    answer and makes no upstream call of its own."""
+    import threading
+    import time
+
+    gate, started = threading.Event(), threading.Event()
+    execute = owner.events.list.return_value.execute
+
+    def slow():
+        started.set()
+        gate.wait(5)
+        return {"items": [MINE]}
+    execute.side_effect = slow
+    answers = []
+
+    def get():
+        answers.append(owner.client.get("/api/today"))
+    first = threading.Thread(target=get)
+    first.start()
+    assert started.wait(5)
+    second = threading.Thread(target=get)
+    second.start()
+    flights = owner.client.app.state.today_gate.flights
+    for _ in range(100):  # the second is waiting on the first
+        if len(answers) == 0 and flights:
+            break
+        time.sleep(0.01)
+    time.sleep(0.1)
+    gate.set()
+    first.join(5)
+    second.join(5)
+    assert [a.status_code for a in answers] == [200, 200]
+    assert answers[0].json() == answers[1].json()
+    assert execute.call_count == 1  # one Calendar call for both
+
+
+def test_a_hung_calendar_is_not_asked_again_by_the_next_screen(owner, monkeypatch):
+    import threading
+
+    from kwil import today
+
+    monkeypatch.setattr(today, "SLOW_SECONDS", 0.05)
+    gate = threading.Event()
+    execute = owner.events.list.return_value.execute
+    execute.side_effect = lambda: gate.wait(5) and {"items": []}
+    try:
+        for _ in range(3):
+            assert owner.client.get("/api/today").json()["calendar"]["state"] == "error"
+        assert execute.call_count == 1
+    finally:
+        gate.set()
+
+
+def test_too_many_screens_a_minute_is_a_429(owner, monkeypatch):
+    from kwil import today
+
+    monkeypatch.setattr(today, "PER_MINUTE", 3)
+    gate = owner.client.app.state.today_gate
+    clock = SimpleNamespace(t=100.0)
+    gate.clock = lambda: clock.t
+    for _ in range(3):
+        assert owner.client.get("/api/today").status_code == 200
+    r = owner.client.get("/api/today")
+    assert r.status_code == 429 and "wait a minute" in r.json()["error"]
+    clock.t += 61
+    assert owner.client.get("/api/today").status_code == 200

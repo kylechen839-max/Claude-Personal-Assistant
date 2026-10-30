@@ -4,8 +4,11 @@
                     "notion", "reminders", "research", "study"}
 
 Each section is {"state": "ok" | "off" | "reconnect" | "error", "items"}
-with at most MAX_ROWS rows, and one failing section never hides the
-others. Everything is the signed-in person's own (the owner's, or an
+with at most MAX_ROWS rows (the calendar MAX_ROWS a day; "more": true when
+rows were cut), and one failing section never hides the others. Times and
+dates are local ISO ("2027-01-14T15:00", "2027-01-15"); the page words
+them in its own language. One screen in flight per person (Gate), and
+the calendar and Notion reads are bounded per person and in all (Reads). Everything is the signed-in person's own (the owner's, or an
 invited person's: their own calendar tool, deadline store, reminders,
 research jobs and study list); someone no longer listed gets a 404, and
 the answer is never cached (no-store).
@@ -27,9 +30,13 @@ section names, counts, states and exception type names only.
 
 import contextvars
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import re
+import threading
+import time as time_mod
+from collections import OrderedDict, deque
+from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from kwil.tools import UNTRUSTED_MARK
 
@@ -39,18 +46,120 @@ MAX_ROWS = 10        # per section
 MAX_RESEARCH = 3
 MAX_STUDY = 5
 OVERDUE_DAYS = 14    # older overdue deadlines stay in Settings, not on Today
-SLOW_SECONDS = 8.0   # a calendar or Notion read longer than this: "error"
+SLOW_SECONDS = 8.0   # calendar and Notion together: past this, "error"
+PER_MINUTE = 20      # screens a person may load a minute (joining one in flight is free)
+MAX_LIVE = 16        # calendar/Notion reads alive at once, everyone together
+MAX_PEOPLE = 1000    # rate-limit entries kept
 RUNNING = ("queued", "planning", "researching", "writing")
 # exception names that mean "sign in again" (as student_web._code)
 RECONNECT = ("MissingScopes", "GoogleSignInError", "RefreshError", "NotionReconnect")
 
-# calendar and Notion reads run side by side here: bounded, and a stuck
-# call can hold at most this many threads
-_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="today")
 
 
-def section(state: str, items=()) -> dict:
-    return {"state": state, "items": list(items)[:MAX_ROWS]}
+class Reads:
+    """The calendar and Notion reads, each on a thread of its own, never in
+    a queue: a person has at most one read of each alive (a new screen
+    while their last one still hangs gets "error" for it, no second call),
+    and at most MAX_LIVE are alive for everyone together. So one person's
+    hung Notion can't hold up anyone else's calendar, and nothing waits to
+    start after its screen gave up. A hung read keeps its thread until
+    Google or Notion answers (Python can't stop a thread)."""
+
+    def __init__(self, limit: int = MAX_LIVE):
+        self.limit = limit
+        self.lock = threading.Lock()
+        self.live: dict = {}  # (person, section) -> Future
+
+    def start(self, key: tuple, fn, *args) -> Future | None:
+        """A Future for fn(*args) run in a copy of this context (TURN_NOW,
+        the language), or None: this person's last one is still running,
+        or MAX_LIVE are."""
+        with self.lock:
+            last = self.live.get(key)
+            if last is not None and not last.done():
+                return None
+            if len(self.live) >= self.limit:
+                return None
+            future: Future = Future()
+            self.live[key] = future
+        ctx = contextvars.copy_context()
+
+        def run():
+            try:
+                future.set_result(ctx.run(fn, *args))
+            except BaseException as e:  # noqa: BLE001 - handed to the screen
+                future.set_exception(e)
+            finally:
+                with self.lock:
+                    if self.live.get(key) is future:
+                        del self.live[key]
+        future.set_running_or_notify_cancel()
+        threading.Thread(target=run, name=f"today-{key[1]}", daemon=True).start()
+        return future
+
+
+class Gate:
+    """One screen in flight per person (a second request gets the same
+    answer), and at most PER_MINUTE new ones a minute."""
+
+    def __init__(self, clock=time_mod.monotonic):
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.flights: dict = {}  # person -> Future of the screen
+        self.recent: OrderedDict = OrderedDict()  # person -> deque of times
+
+    def join_or_lead(self, key: str):
+        """(future, leads): the screen in flight, or a new one this caller
+        builds; (None, False) past the rate limit."""
+        with self.lock:
+            running = self.flights.get(key)
+            if running is not None:
+                return running, False
+            now = self.clock()
+            times = self.recent.setdefault(key, deque())
+            self.recent.move_to_end(key)
+            while times and now - times[0] > 60:
+                times.popleft()
+            if len(times) >= PER_MINUTE:
+                return None, False
+            times.append(now)
+            while len(self.recent) > MAX_PEOPLE:
+                self.recent.popitem(last=False)
+            future: Future = Future()
+            self.flights[key] = future
+            return future, True
+
+    def land(self, key: str, future: Future) -> None:
+        with self.lock:
+            if self.flights.get(key) is future:
+                del self.flights[key]
+
+
+READS = Reads()
+
+
+def section(state: str, items=(), cap: int = MAX_ROWS) -> dict:
+    items = list(items)
+    out = {"state": state, "items": items[:cap]}
+    if len(items) > cap:
+        out["more"] = True
+    return out
+
+
+# "3 PM" / "3:30 PM" (timeutil.spoken_time) -> "15:00"; "" if it isn't one
+_SPOKEN = re.compile(r"^(\d{1,2})(?::(\d\d))? ([AP]M)$")
+
+
+def clock_of(spoken: str) -> str:
+    m = _SPOKEN.match(str(spoken or "").strip())
+    if not m:
+        return ""
+    hour = int(m.group(1)) % 12 + (12 if m.group(3) == "PM" else 0)
+    return f"{hour:02d}:{m.group(2) or '00'}"
+
+
+def _day_of(left: int) -> str:
+    return "overdue" if left < 0 else "today" if left == 0 else "tomorrow"
 
 
 def _state_of(error: Exception) -> str:
@@ -73,21 +182,31 @@ def calendar_section(registry, account, today) -> dict:
     if not isinstance(result, dict):
         return section("error")
     tainted = bool(result.get(UNTRUSTED_MARK))
-    tomorrow = spoken_date(today + timedelta(days=1))
-    items = []
+    tomorrow = today + timedelta(days=1)
+    days = {"today": [], "tomorrow": []}
     for e in result.get("events") or []:
         if not isinstance(e, dict):
             continue
-        items.append({
+        day = tomorrow if e.get("date") == spoken_date(tomorrow) else today
+        # local wall times as ISO ("2027-01-14T15:00"): the page words them
+        # in its own language
+        start, end = clock_of(e.get("start")), clock_of(e.get("end"))
+        days["tomorrow" if day == tomorrow else "today"].append({
             "id": str(e.get("id", "")), "title": str(e.get("title", "")),
-            "day": "tomorrow" if e.get("date") == tomorrow else "today",
-            "start": e.get("start", ""), "end": e.get("end", ""),
+            "day": "tomorrow" if day == tomorrow else "today",
+            "start": f"{day.isoformat()}T{start}" if start else "",
+            "end": f"{day.isoformat()}T{end}" if end else "",
             "all_day": bool(e.get("all_day")), "location": e.get("location", ""),
             "outside": bool(e.get("from_others")) or tainted})
-    return section("ok", items)
+    # each day its own MAX_ROWS: a full today never hides tomorrow
+    out = section("ok", days["today"][:MAX_ROWS] + days["tomorrow"][:MAX_ROWS],
+                  cap=2 * MAX_ROWS)
+    if any(len(v) > MAX_ROWS for v in days.values()):
+        out["more"] = True
+    return out
 
 
-def notion_section(registry) -> dict:
+def notion_section(registry, today) -> dict:
     """Notion assignments due by tomorrow, overdue ones too (not Done)."""
     tool = registry.tools.get("list_assignments") if registry is not None else None
     if tool is None:
@@ -95,11 +214,22 @@ def notion_section(registry) -> dict:
     result = tool.handler(days_ahead=1)
     if not isinstance(result, dict):
         return section("error")
-    items = [{"id": str(a.get("id", "")), "title": str(a.get("name", "")),
-              "course": a.get("course", ""), "due": a.get("due", ""),
-              "due_date": a.get("due_date", ""), "overdue": bool(a.get("overdue")),
-              "outside": True}  # Notion titles are untrusted (family._notion_tools)
-             for a in result.get("assignments") or [] if isinstance(a, dict)]
+    items = []
+    for a in result.get("assignments") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            due = date.fromisoformat(str(a.get("due_date") or ""))
+        except ValueError:
+            continue
+        # "Friday, January 15 at 3 PM" (NotionAssignments._summarize)
+        at = clock_of(str(a.get("due") or "").rpartition(" at ")[2]) \
+            if " at " in str(a.get("due") or "") else ""
+        items.append({"id": str(a.get("id", "")), "title": str(a.get("name", "")),
+                      "course": a.get("course", ""),
+                      "due": f"{due.isoformat()}T{at}" if at else due.isoformat(),
+                      "day": _day_of((due - today).days),
+                      "outside": True})  # Notion titles are untrusted (family._notion_tools)
     return section("ok", items)
 
 
@@ -107,7 +237,6 @@ def deadlines_section(sync, uid, now: datetime) -> dict:
     """The deadline store's work due by tomorrow, and overdue (at most
     OVERDUE_DAYS back): every title came from Canvas, email or a page."""
     from kwil.proactive import parse_due
-    from kwil.tools.timeutil import spoken_time
 
     if sync is None or not sync.listed(uid):
         return section("off")
@@ -125,8 +254,10 @@ def deadlines_section(sync, uid, now: datetime) -> dict:
         timed = len(str(row.get("due") or "").strip()) > 10
         items.append({"id": row.get("id"), "title": row.get("title", ""),
                       "course": row.get("course", ""), "kind": row.get("kind", ""),
-                      "day": "overdue" if left < 0 else "today" if left == 0 else "tomorrow",
-                      "time": spoken_time(due) if timed else "",
+                      "day": _day_of(left),
+                      # local, for the page to word: a date, or a date and time
+                      "due": due.strftime("%Y-%m-%dT%H:%M") if timed
+                      else due.date().isoformat(),
                       "outside": True})
     return section("ok", items)
 
@@ -137,8 +268,9 @@ def reminders_section(store, now: datetime, lang: str) -> dict:
 
     if store is None:
         return section("off")
+    # local midnight to midnight: 23 or 25 hours on a clock-change day
     start = datetime.combine(now.date(), time.min, now.tzinfo).timestamp()
-    end = start + 86400
+    end = datetime.combine(now.date() + timedelta(days=1), time.min, now.tzinfo).timestamp()
     items = []
     for r in store.list(finished=False):
         ts = r.get("next_ts")
@@ -195,12 +327,11 @@ def build(assistant, s, scheduler, student) -> dict:
     registry = getattr(s, "registry", None)
     clock = TURN_NOW.set(now)
     try:
-        def start(fn, *args):
-            # each in its own copy of this context (TURN_NOW, the language)
-            return _POOL.submit(contextvars.copy_context().run, fn, *args)
-
-        slow = {"calendar": start(calendar_section, registry, uid, today),
-                "notion": start(notion_section, registry)}
+        person = uid or ""
+        slow = {"calendar": READS.start((person, "calendar"), calendar_section,
+                                        registry, uid, today),
+                "notion": READS.start((person, "notion"), notion_section, registry, today)}
+        deadline = time_mod.monotonic() + SLOW_SECONDS  # one wait for both
 
         def read(name, fn, *args):
             try:
@@ -223,8 +354,12 @@ def build(assistant, s, scheduler, student) -> dict:
                 memory(s) if callable(memory) else None)),
         }
         for name, future in slow.items():
+            if future is None:
+                log.warning("Today: %s not read (one still running)", name)
+                out[name] = section("error")
+                continue
             try:
-                out[name] = future.result(timeout=SLOW_SECONDS)
+                out[name] = future.result(timeout=max(0.0, deadline - time_mod.monotonic()))
             except FutureTimeout:
                 log.warning("Today: %s took over %.0f s", name, SLOW_SECONDS)
                 out[name] = section("error")
@@ -248,6 +383,8 @@ def register(app, assistant, session_of, error, scheduler) -> None:
     from starlette.concurrency import run_in_threadpool
 
     family = getattr(assistant, "family", None)
+    gate = Gate()
+    app.state.today_gate = gate  # tests
 
     @app.get("/api/today")
     async def today(request: Request):
@@ -257,5 +394,20 @@ def register(app, assistant, session_of, error, scheduler) -> None:
         if s.user is not None and (family is None or family.get(s.user) is None):
             return error("not found", 404)  # removed meanwhile: nothing of theirs
         student = getattr(app.state, "student", None)
-        data = await run_in_threadpool(build, assistant, s, scheduler, student)
+        key = s.user or ""
+        future, leads = gate.join_or_lead(key)
+        if future is None:
+            log.warning("Today: %s over %d a minute", s.user or "owner", PER_MINUTE)
+            return error("too many requests; wait a minute", 429)
+        if leads:
+            try:
+                data = await run_in_threadpool(build, assistant, s, scheduler, student)
+                future.set_result(data)
+            except BaseException as e:
+                future.set_exception(e)
+                raise
+            finally:
+                gate.land(key, future)
+        else:  # the same person's screen in flight: its answer, no second read
+            data = await run_in_threadpool(future.result, SLOW_SECONDS + 5)
         return JSONResponse(data, headers={"Cache-Control": "no-store"})

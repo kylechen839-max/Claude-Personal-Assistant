@@ -2152,15 +2152,18 @@ deadlines, reminders, research and study list.
   opens Settings, Reminders, a deadline opens its connection in Settings,
   a finished research report opens its conversation. Events and study
   items have **Ask Kwil**: it starts a new chat with a question in the
-  message box ("Tell me about “Dentist” at 3 PM today.") and waits for you
+  message box ("Tell me about “Dentist” at 3:00 PM today.") and waits for you
   to send it; it never sends by itself.
-- **Outside titles stay out of the question.** For an invite, every
-  deadline, and anything made while a web page or email was in the
-  conversation, the question names the item by kind and time instead
-  ("What's my 3 PM event today about?"), so someone else's wording never
-  goes to Kwil as if you had typed it.
+- **Outside titles stay out of the question.** Events and study items
+  have Ask Kwil; for an invite, or a study item saved while outside text
+  was in the chat, the question names it by time or list position, never
+  its title ("What's my 3:00 PM event today about?"), so someone else's
+  wording never goes to Kwil as if you had typed it.
 - **Read-only and fresh:** opening the screen reads everything once
-  (calendar and Notion side by side, up to about 8 seconds each); nothing
+  (Google Calendar and Notion are read live, side by side, about 8
+  seconds at most for both); opening it again while it loads waits for
+  the same answer, and more than 20 opens a minute are refused for a
+  minute; nothing
   is written, nothing is cached, and it doesn't refresh in the background.
   A section that fails says so on its own line; the rest still show. Not
   connected to Google: "Connect Google" opens it in Settings; a refused

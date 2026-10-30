@@ -8438,3 +8438,38 @@ interaction only; nothing on the server changed.
 - Full suite: 4008 passed, 53 skipped (baseline 3994 + 14); JS
   `tests/js/*.test.mjs` + `voice-core.test.js` 449 passed (baseline 438 +
   11).
+
+### Today screen, judge round 1 (2026-10-30)
+- MED, fixed (1): slow reads are bounded. Calendar and Notion each run on
+  a thread of their own (`today.Reads`), never queued, so nothing waits to
+  start after its screen gave up; one shared wait of `SLOW_SECONDS` (8 s)
+  for both. Per person: one screen in flight (`today.Gate`; a second
+  request gets the same answer), one calendar and one Notion read alive
+  (a new screen while one hangs shows that section as an error, no second
+  call), 20 new screens a minute (429). At most 16 reads alive in all.
+  SECURITY.md reworded.
+- LOW, fixed (2): reminders "today" runs local midnight to midnight (23-
+  and 25-hour days).
+- LOW, fixed (3): the calendar is capped 10 a day, deadlines and Notion 10
+  each (the page no longer cuts the merged list); `more` when cut.
+- LOW, fixed (4): times and dates go as local ISO and the page words them
+  (`toLocaleTimeString`): "3:00 PM" in English, "15:00" in Chinese, in rows
+  and in Ask Kwil's question. Notion rows show Today / Tomorrow / Overdue
+  like deadlines.
+- LOW, fixed (5): each Ask Kwil has `aria-describedby` pointing at its
+  row's title and time.
+- LOW, fixed (6): the family test gives the owner a calendar tool with a
+  distinctive event; the member never sees it (fails with
+  `registry = assistant.tools`).
+- LOW, fixed (7): README's Ask Kwil wording.
+- Tests: `test_today.py` +7 (clock-change days; one person's hung Notion
+  vs another's calendar; one shared wait; a second request joins the one
+  in flight with one Calendar call; a hung calendar isn't asked again; 429
+  past the rate; a full today keeps tomorrow) and 3 updated (ISO times,
+  Notion day, `more`, the owner's event in the family test); with
+  9912ce7's `today.py` 10 fail. `today.test.mjs` +3 (no AM/PM on a
+  Chinese page; deadlines and Notion each keep their rows; each Ask Kwil
+  names its row) and 4 updated; with 9912ce7's `today.js` 7 fail.
+- Full suite: 4015 passed, 53 skipped (was 4008); JS 452 passed (was
+  449). zh phone screenshot retaken (Chromium, not a real iPhone): times
+  read 15:00, 23:59, no "PM".

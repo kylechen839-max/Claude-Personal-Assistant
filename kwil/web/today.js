@@ -11,7 +11,7 @@
 // focuses it; it never sends. A row marked `outside` (an invite, every
 // deadline, anything made while outside text was in the conversation)
 // never puts its title in that question: it says which item by kind and
-// time instead ("What's my 3 PM event today about?").
+// time instead ("What's my 3:00 PM event today about?").
 // Text goes in with textContent only; fixed words are translated here for
 // a Chinese page (i18n.js), since lines are put together from parts.
 // app.js calls configure({ request, show, newChat, prefill }) and
@@ -78,19 +78,32 @@
   const URL_HASH = "#today";
   const SECTIONS = ["brief", "today", "tomorrow", "due", "reminders", "research", "study"];
 
+  // A local wall time the server sent as ISO ("2027-01-14T15:00") in the
+  // page's language ("3:00 PM", "15:00"); "" for a date alone. Built from
+  // its parts, so the device's own zone never moves it.
+  function wallTime(iso, lang = "en-US") {
+    const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(String(iso || ""));
+    if (!m) return "";
+    const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+    try {
+      return at.toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" });
+    } catch (e) { return `${m[4]}:${m[5]}`; }
+  }
+
   // "Ask Kwil"'s question for a row (exported for tests): `outside` rows
-  // never carry their title, nor anything else from the item's text.
-  function question(kind, item, tr = (s) => s) {
+  // never carry their title, nor anything else from the item's text; the
+  // time is worded in the page's language (`lang`).
+  function question(kind, item, tr = (s) => s, lang = "en-US") {
     const fill = (key, values) => tr(TEXT[key]).replace(/\{(\w+)\}/g,
       (all, name) => (name in values ? String(values[name]) : all));
     if (kind === "event") {
       const day = item.day === "tomorrow" ? "Tomorrow" : "Today";
       if (item.outside) {
         return item.all_day || !item.start ? fill(`askAllDay${day}`, {})
-          : fill(`askEvent${day}`, { time: item.start });
+          : fill(`askEvent${day}`, { time: wallTime(item.start, lang) });
       }
       return item.all_day || !item.start ? fill(`askOwnAllDay${day}`, { title: item.title })
-        : fill(`askOwn${day}`, { title: item.title, time: item.start });
+        : fill(`askOwn${day}`, { title: item.title, time: wallTime(item.start, lang) });
     }
     if (kind === "study") {
       return item.outside ? fill("askStudyOutside", { n: item.position })
@@ -112,6 +125,9 @@
     const i18n = root.KwilI18n || win.KwilI18n;
     const zh = () => Boolean(i18n && typeof i18n.isActive === "function" && i18n.isActive(doc));
     const tr = (s) => (zh() ? i18n.translate(s) : s);
+    const lang = () => (zh() ? "zh-CN" : "en-US");
+    const at = (iso) => wallTime(iso, lang());
+    let rowIds = 0;  // ids for aria-describedby
 
     function el(tag, cls, text) {
       const e = doc.createElement(tag);
@@ -173,8 +189,15 @@
     }
     function texts(row, main, sub, subCls) {
       const box = el("span", "today-text");
+      const id = `today-r${++rowIds}`;
       box.appendChild(el("span", "today-main", main || ""));
-      if (sub) box.appendChild(el("span", `today-sub${subCls ? ` ${subCls}` : ""}`, sub));
+      box.lastChild.id = `${id}-main`;
+      box.ids = [`${id}-main`];
+      if (sub) {
+        box.appendChild(el("span", `today-sub${subCls ? ` ${subCls}` : ""}`, sub));
+        box.lastChild.id = `${id}-sub`;
+        box.ids.push(`${id}-sub`);
+      }
       row.appendChild(box);
       return box;
     }
@@ -189,8 +212,10 @@
     }
     function asker(main, sub, text) {
       const row = el("div", "row today-row");
-      texts(row, main, sub);
+      const box = texts(row, main, sub);
       const btn = el("button", "btn plain today-ask", tr(TEXT.ask));
+      // each "Ask Kwil" says which row it is about (VoiceOver reads them)
+      btn.setAttribute("aria-describedby", box.ids.join(" "));
       btn.type = "button";
       btn.addEventListener("click", () => ask(text));
       row.appendChild(btn);
@@ -232,8 +257,7 @@
     function dayHeads(d) {
       const date = (iso) => {
         try {
-          const lang = zh() ? "zh-CN" : "en-US";
-          return new win.Date(`${iso}T12:00:00`).toLocaleDateString(lang,
+          return new win.Date(`${iso}T12:00:00`).toLocaleDateString(lang(),
             { weekday: "long", month: "long", day: "numeric" });
         } catch (e) { return ""; }
       };
@@ -245,8 +269,8 @@
 
     function eventRow(e) {
       const time = e.all_day || !e.start ? tr(TEXT.allDay)
-        : e.end ? `${e.start} – ${e.end}` : e.start;
-      return asker(e.title, join(time, e.location), question("event", e, tr));
+        : e.end ? `${at(e.start)} – ${at(e.end)}` : at(e.start);
+      return asker(e.title, join(time, e.location), question("event", e, tr, lang()));
     }
 
     function render() {
@@ -276,18 +300,14 @@
       // due: the deadline store's, then Notion's; each opens Settings
       const dl = d.deadlines || { state: "off", items: [] };
       const nt = d.notion || { state: "off", items: [] };
-      const dueRows = [];
-      for (const x of dl.items || []) {
-        const when = x.day === "overdue" ? tr(TEXT.overdue)
-          : `${tr(x.day === "today" ? TEXT.title : TEXT.tomorrow)} ${x.time || ""}`.trim();
-        dueRows.push(opener(x.title, join(x.course, when), () => settings("conn-canvas-head"),
-          x.day === "overdue" ? "today-late" : ""));
-      }
-      for (const x of nt.items || []) {
-        dueRows.push(opener(x.title, join(x.course, x.overdue ? tr(TEXT.overdue) : x.due),
-          () => settings("conn-notion-head"), x.overdue ? "today-late" : ""));
-      }
-      fill("due", dueRows.slice(0, 10));
+      // deadlines and Notion: each its own up-to-10 rows, worded alike
+      const dueRow = (x, rowId) => opener(x.title, join(x.course, x.day === "overdue"
+        ? tr(TEXT.overdue)
+        : `${tr(x.day === "today" ? TEXT.title : TEXT.tomorrow)} ${at(x.due)}`.trim()),
+      () => settings(rowId), x.day === "overdue" ? "today-late" : "");
+      const dueRows = [...(dl.items || []).map((x) => dueRow(x, "conn-canvas-head")),
+        ...(nt.items || []).map((x) => dueRow(x, "conn-notion-head"))];
+      fill("due", dueRows);
       if (dl.state === "error" || nt.state === "error") note("due", TEXT.dueError);
       else if (nt.state === "reconnect") note("due", TEXT.notionReconnect, TEXT.openSettings, () => settings("conn-notion-head"));
       else note("due", dueRows.length ? "" : TEXT.nothingDue);
@@ -389,5 +409,5 @@
     return screen ? screen.enable(Boolean(state && state.today)) : null;
   }
 
-  root.KwilToday = { configure, onState, setup, question, TEXT };
+  root.KwilToday = { configure, onState, setup, question, wallTime, TEXT };
 })(typeof window !== "undefined" ? window : globalThis);

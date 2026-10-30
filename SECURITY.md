@@ -2937,12 +2937,22 @@ network code of its own.
 - **No caching, small logs.** The answer is `Cache-Control: no-store`
   (and the service worker never caches `/api/`). INFO logs carry section
   names, counts, states and exception type names, never a title or text
-  (caplog test). Each section is capped at 10 rows; the calendar and
-  Notion reads run in a 4-thread pool with an 8 s wait each.
-- **Not fixed, on purpose:** a calendar or Notion read that outlasts the
-  8 s wait keeps its pool thread until Google or Notion answers (Python
-  can't stop a thread); the screen shows that section as an error and the
-  pool's 4 threads bound how many can pile up.
+  (caplog test). Each section is capped at 10 rows (the calendar 10 a
+  day; deadlines and Notion 10 each), with `more` when rows were cut.
+- **Bounded reads** (judge round 1). The calendar and Notion reads each
+  run on a thread of their own, never in a queue, and share one wait of
+  about 8 s. A person has at most one screen in flight (a second request
+  gets the same answer, with no second upstream call), at most one
+  calendar and one Notion read alive (while their last one still hangs,
+  a new screen shows that section as an error instead of asking again),
+  and at most 20 new screens a minute (then 429). All people together
+  have at most 16 reads alive. So one person's hung Notion can't delay
+  anyone else's calendar, and nothing queued waits to start after its
+  screen gave up (tests for each).
+- **Not fixed, on purpose:** a read that outlasts the wait keeps its
+  thread until Google or Notion answers (Python can't stop a thread). The
+  limits above cap how many such threads there can be: 2 per person, 16
+  in all.
 
 ## Memory review (`memory_review.py`, `memory_web.py`)
 

@@ -1767,7 +1767,7 @@ today, and a deadline due tomorrow.
   - Should: each time a new chat opens with a question in the message box
     and the keyboard up; nothing is sent until you tap Send. Your own
     event's question has its title; the invite's says only the time
-    ("What's my 9 AM event tomorrow about?").
+    ("What's my 9:00 AM event tomorrow about?").
 - [ ] Tap the reminder, the deadline, and a finished research report.
   - Should: Settings, Reminders; Settings with the Canvas sheet; the
     report's conversation.
@@ -1778,7 +1778,9 @@ today, and a deadline due tomorrow.
   with Chinese.
   - Should: readable in dark; in Chinese the heads say 今天, 明天, 待交,
     提醒, 研究, 要复习, the button says 问 Kwil and its questions are in
-    Chinese. The family member sees only their own day, never yours.
+    Chinese, with times like 15:00 (no "PM" anywhere). VoiceOver on an
+    Ask Kwil button reads that row's title and time after it. The family
+    member sees only their own day, never yours.
 
 ## Study mode (~10 min, iPhone)
 In the Home Screen app, with Canvas course content synced if you have it.
