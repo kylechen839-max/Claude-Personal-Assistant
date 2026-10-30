@@ -1166,7 +1166,7 @@ function micHelp(e) {
 
 async function startRecording() {
   if (!navigator.mediaDevices || !window.MediaRecorder) {
-    addMessage("note", "This browser can't record. It needs HTTPS (see the README's Tailscale steps).");
+    addMessage("note", "This browser can't record here. Open Kwil from its https:// address.");
     return;
   }
   let s;

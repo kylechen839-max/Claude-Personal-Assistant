@@ -1,7 +1,8 @@
 // Small touch behaviours the phone page should have, like other apps:
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
 // - it is a full-screen Settings page: opening it moves focus to its title,
-//   and Done (like Escape) closes it and gives focus back to the gear (on a
+//   makes the chat behind it inert (#app's parts outside the header, so
+//   VoiceOver and Tab stay on the page; the tab bar is outside #app), and Done (like Escape) closes it and gives focus back to the gear (on a
 //   phone, to the tab bar's Settings: the header's gear is hidden there);
 // - swiping down while the keyboard is open closes the keyboard (not when
 //   the swipe scrolls a message long enough to scroll inside its field).
@@ -53,10 +54,17 @@
       if (canResize) vv.addEventListener("resize", onResize);
       if (raf) raf(tick);
     };
+    // the chat behind the open page, and the header around the menu: out of
+    // reach for VoiceOver and Tab
+    const behind = (on) => {
+      if (typeof doc.querySelectorAll !== "function") return;
+      for (const el of doc.querySelectorAll("#app > :not(header), #app > header > :not(details.menu)")) el.inert = on;
+    };
     // close the page and hand focus back to the gear (VoiceOver lands there),
     // on a phone to the tab bar's Settings
     const close = () => {
       menu.open = false;
+      behind(false);
       const tab = byId("tab-settings"), bar = tabbar();
       if (!(tab && !tab.hidden && bar && !bar.hidden && phone())) focus(find("summary"));
       else if (rendered(tab)) focus(tab);
@@ -75,7 +83,10 @@
       const sheet = find("dialog[open]");
       if (e.key === "Escape" && menu.open && !sheet) close();
     };
-    const onToggle = () => { if (menu.open) focus(byId("settings-title")); };
+    const onToggle = () => {
+      behind(!!menu.open);
+      if (menu.open) focus(byId("settings-title"));
+    };
     const done = byId("settings-done");
     if (done && typeof done.addEventListener === "function") done.addEventListener("click", close);
     if (typeof menu.addEventListener === "function") menu.addEventListener("toggle", onToggle);

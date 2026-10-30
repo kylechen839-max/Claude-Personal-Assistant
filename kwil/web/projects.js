@@ -32,7 +32,7 @@
   }
 
   const TEXT = {
-    empty: "No projects yet. Make one per class: its own instructions, files and chats.",
+    empty: "No projects yet.",
     suggestionsEmpty: "Connect Canvas or add deadlines, and your courses show here.",
     create: "Create",
     open: "Open",
@@ -243,7 +243,7 @@
       row.setAttribute("role", "listitem");
       const top = el("div", "mem-top");
       top.appendChild(el("span", "mem-when", new Date(m.created).toLocaleDateString()));
-      if (m.untrusted) top.appendChild(el("span", "badge mem-untrusted", "Untrusted"));
+      if (m.untrusted) top.appendChild(el("span", "badge mem-untrusted", "Outside source"));
       top.appendChild(button("mem-delete danger", "Delete", async () => {
         if (!win.confirm(TEXT.memoryAsk)) return;
         try {

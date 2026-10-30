@@ -8561,3 +8561,66 @@ interaction only; nothing on the server changed.
   removes its listener; reopened Settings keeps focus; gives up). With
   0bd3cdd's `app.js` and `ui.js` both fail.
 - Full suite: 4020 passed, 53 skipped (unchanged); JS 469 passed (was 467).
+
+## Copy and polish pass (redesign phase 7, 2026-10-30)
+A copy, Chinese and small-visual pass over `kwil/web`; no API or server
+change, every id and hook kept.
+- **Bugs:** Reminders' list head said "Active" (People's word, 已加入 in
+  Chinese): now "Upcoming" (即将提醒). No hairline above "New project"
+  with no projects (`.projects-list:not([hidden]) + .projects-new`).
+  Memory: space between a card's footnote and the next card
+  (`.mem-local .group-foot + .group`); "Long-term notes" no longer shows
+  History's clock empty state (that rule is now `#history-list:empty`),
+  and `#memory-status` reads like a `.group-foot` (left, `--t-cap`,
+  `--muted`, under its head). The first-run guide says "tap Settings"
+  (点“设置”) instead of the gear at the top right, which the phone no
+  longer has.
+- **Copy:** no exclamation marks ("Welcome." / 欢迎。); "Notes in
+  Pinecone" → "Long-term notes" (长期笔记); the "Untrusted" badge →
+  "Outside source" (外部来源) in Memory, Reminders and Projects; one-line
+  empty states "No reminders yet." and "No projects yet." (the examples
+  stay in the footers); "This browser can't record here. Open Kwil from its
+  https:// address."; "For example, Asia/Shanghai"; "This app's address";
+  "Leave empty to use the address the server suggests.". Every ZH key is
+  the new English byte for byte.
+- **Chinese gaps:** "Course files" 课程文件, "Source" 来源, "This is the
+  conversation you're in now." 这就是你现在所在的对话。, "Disconnect this
+  service?" 要断开这个服务吗？. A garbled `"Auto"` key (a merge leftover;
+  the real "Auto: Pi, then PC, then cloud" key stays) is removed. History
+  rows lose their English-only template aria-label: the row's own text
+  (source icon label, title, "Pinned", time) names it, all translated.
+- **Accessibility:** while Settings is open, `ui.js` sets `inert` on
+  `#app > :not(header)` (the tab bar is outside `#app`), cleared by Done,
+  Escape and the menu's toggle; guarded for a document without
+  `querySelectorAll`. The invite form's language options carry
+  `lang="en"`/`lang="zh"`.
+- **Visual and tokens:** a History row with no snippet centres its icon;
+  day heads look like `.group-head` (`--t-cap`, 500, `--muted`); both sheet
+  backdrops read `var(--scrim)` (the Safari < 17.4 literal fallback on
+  `.conn-sheet::backdrop` is dropped: raw scrim hex lives only in
+  `:root`); the two red buttons' white text is `var(--on-accent)`.
+  `sw.js` `kwil-shell-v26`. DESIGN_SYSTEM: "empty state = one line;
+  examples live in the footer".
+- **Tests:** new `tests/js/i18n-coverage.test.mjs` (10): runs `i18n.js` in
+  node:vm and checks every text node, aria-label, placeholder and title in
+  `index.html` (script, style, svg stripped) and every string in the
+  `TEXT`/`*_TEXT`/`SOURCES`/`KIND` maps translates (allowlist: Kwil,
+  Google, Notion, Canvas, Home Assistant, Spotify, Anthropic, WEB_TOKEN,
+  .env, sk-ant-…, the console URL, English, 中文 and https:// placeholders;
+  an unused entry fails); "Source 1" is Chinese but a reply starting
+  "Source of…" isn't touched; no template aria-label in history.js; the
+  Reminders head; the renamed strings match their ZH keys; no "!"/"！".
+  `ui.test.mjs` +2 (inert on open, cleared by Done and by the toggle; a
+  fake DOM without `querySelectorAll`). `test_theme.py` +4: `--text-2` and
+  `--muted` ≥ 4.5:1 on bg, surface and surface-2 in light and dark
+  (already true: a guard); scrim hex only in `:root` and `--on-accent` on
+  the red buttons; the P1 selectors. Fail-first at c6df6bd: 7 of the 10
+  coverage tests, the inert test, and 2 of the theme tests fail; the
+  history test fails again with only c6df6bd's `history.js` restored.
+  Pins moved: v26 in six test files, "Outside source", "Long-term notes",
+  "Upcoming", 欢迎。.
+- **Screenshots** (Playwright Chromium 390x844, light, mocked APIs, not a
+  real iPhone): Memory, Reminders, Projects and History in English and
+  Chinese, before and after.
+- Full suite: 4024 passed, 53 skipped (baseline 4020 + 4); JS 481 passed
+  (baseline 469 + 12).

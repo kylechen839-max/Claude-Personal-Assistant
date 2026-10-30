@@ -132,9 +132,9 @@ function convNode(c) {
   top.appendChild(el("span", "conv-time", timeLabel(c.updated_at)));
   body.appendChild(top);
   if (c.snippet && c.snippet.length) body.appendChild(snippetNode(c.snippet));
+  // no aria-label: the row's own text names it (the source icon's label,
+  // the title, "Pinned", the time), so i18n.js translates every part of it
   main.append(icon, body);
-  main.setAttribute("aria-label", `${c.title}, ${src.label}, ${timeLabel(c.updated_at)}` +
-    (c.pinned ? ", pinned" : ""));
   main.addEventListener("click", () => {
     if (row.dataset.suppress) { delete row.dataset.suppress; return; }
     if (row.classList.contains("open")) { row.classList.remove("open"); return; }

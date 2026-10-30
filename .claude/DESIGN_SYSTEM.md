@@ -80,6 +80,10 @@ CSP forbids them).
 - Say what will appear and how to get it, in one calm line, centred, muted;
   offer the one action that fills it (a `.btn.secondary` or `.btn.plain`).
   No illustrations, no exclamation marks.
+- Empty state = one line; examples live in the footer ("No reminders
+  yet." over a `.group-foot` that says what to say). A list inside a
+  settings-style page (Memory's long-term notes) says it like a
+  `.group-foot`: left-aligned, `--t-cap`, `--muted`.
 
 ## Bold is spent once
 - Each screen gets one bold moment: the voice orb on the voice view, the

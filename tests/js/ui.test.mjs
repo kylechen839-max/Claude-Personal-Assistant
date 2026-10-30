@@ -4,7 +4,8 @@
 // swipe while typing blurs the field (hides the keyboard), a short one or a
 // swipe when not typing does nothing. The phone's tab bar: a tap in it
 // leaves Settings to its tabs, and Done hands focus to its Settings tab on a
-// phone (the header's gear is hidden there). The owner's health banner: its
+// phone (the header's gear is hidden there); while Settings is open the
+// chat behind it is inert. The owner's health banner: its
 // lines (an app down, one failing, stale checks, events) and the element.
 
 import test from 'node:test';
@@ -101,6 +102,31 @@ test('settings page: opening it focuses the title; Done closes it and focuses th
   assert.deepEqual(t.focused, ['settings-title', 'summary']);
   t.toggle();  // the close's own toggle event moves nothing
   assert.deepEqual(t.focused, ['settings-title', 'summary']);
+});
+
+test('settings page: the chat behind it is inert while it is open, and only then', () => {
+  const t = setupPage();
+  const parts = [{ id: 'log' }, { id: 'footer' }];
+  const asked = [];
+  t.doc.querySelectorAll = (sel) => { asked.push(sel); return parts; };
+  t.menu.open = true;
+  t.toggle();
+  assert.deepEqual(asked, ['#app > :not(header), #app > header > :not(details.menu)']);
+  assert.deepEqual(parts.map((p) => p.inert), [true, true]);
+  t.tapDone();  // Done clears it at once, before the toggle event
+  assert.deepEqual(parts.map((p) => p.inert), [false, false]);
+  t.menu.open = true;
+  t.toggle();
+  t.menu.open = false;  // a tap outside or the gear: only the toggle event
+  t.toggle();
+  assert.deepEqual(parts.map((p) => p.inert), [false, false]);
+});
+
+test('settings page: a page without querySelectorAll (the old fake DOM) still opens', () => {
+  const t = setupPage();
+  t.menu.open = true;
+  t.toggle();
+  assert.deepEqual(t.focused, ['settings-title']);
 });
 
 test('settings page: Escape gives focus back to the gear too', () => {

@@ -186,12 +186,9 @@ def test_connections_css_uses_tokens_motion_and_no_soft_shadow():
     css = (WEB / "app.css").read_text(encoding="utf-8")
     block = css[css.index("/* ---------- design-system primitives"):
                 css.index("/* reply-voice picker (voice-picker.js) */")]
-    # the one literal: --scrim's fallback on ::backdrop, which inherits no
-    # custom properties before Safari 17.4; it must be the light token
-    fallback = re.search(r"::backdrop \{ background: var\(--scrim, (#[0-9a-f]+)\);", block)
-    assert fallback and fallback.group(1) == tokens(css, False)["scrim"]
-    rest = block.replace(fallback.group(0), "")
-    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", rest) == []
+    # no literal at all: ::backdrop reads the token (Safari 17.4 and later)
+    assert ".conn-sheet::backdrop { background: var(--scrim);" in block
+    assert re.findall(r"#[0-9a-fA-F]{3,8}\b", block) == []
     assert "html.conn-sheet-open, html.conn-sheet-open body" in block and "overflow: hidden" in block
     assert "rgb(" not in block and "rgba(" not in block
     rules = dict(re.findall(r"\n([^{}\n]+)\{([^{}]*)\}", block))
@@ -252,3 +249,49 @@ def test_settings_page_css_is_full_screen_tokens_only_and_calm():
     assert "animation: pop" not in css and "@keyframes pop" not in css
     assert ".menu-body > " not in css
     assert not re.search(r"#family \{[^}]*background", css) and ".conns {" not in css
+
+
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+def test_secondary_text_meets_4_5_to_1_on_every_surface(dark):
+    """Captions, group heads and empty states use --muted or --text-2; both
+    sit on the page, a card and a pressed or grouped row."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    t = {**tokens(css, False), **tokens(css, dark)}
+    for fg in ("text-2", "muted"):
+        for bg in ("bg", "surface", "surface-2"):
+            assert contrast(t[fg], t[bg]) >= 4.5, (fg, bg)
+
+
+def test_scrim_and_on_accent_colours_come_from_tokens():
+    """The scrim's raw colour lives only in the :root blocks (a sheet's
+    backdrop reads var(--scrim)), and white text on a red or accent button
+    reads var(--on-accent)."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    light, dark = tokens(css, False)["scrim"], tokens(css, True)["scrim"]
+    outside = re.sub(r":root\s*\{.*?\}", "", css, flags=re.S)
+    assert light not in outside and dark not in outside
+    assert "dialog.sheet::backdrop { background: var(--scrim);" in css
+    assert ".conn-sheet::backdrop { background: var(--scrim);" in css
+    assert ".account-self form .danger { background: var(--bad); color: var(--on-accent); }" in css
+    assert ".conv-actions .danger { background: var(--bad); color: var(--on-accent); }" in css
+
+
+def test_polish_pass_selectors():
+    """Phase 7's fixes: no hairline above "New project" when there are no
+    projects; space between a Memory card's footnote and the next card;
+    History's clock empty state stays on History (Memory's long-term
+    notes say one quiet line like a group foot); a History row with no
+    snippet centres its icon; day heads look like group heads."""
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    assert ".projects-list:not([hidden]) + .projects-new { border-top: 1px solid var(--line); }" in css
+    assert ".projects-list + .projects-new" not in css
+    assert ".mem-local .group-foot + .group { margin-top: var(--s4); }" in css
+    assert ".conv-list:empty + .status.center" not in css
+    assert "#history-list:empty + .status.center:not(:empty) {" in css
+    assert "#history-list:empty + .status.center:not(:empty)::before {" in css
+    rules = dict(re.findall(r"\n([^{}\n@]+)\{([^{}]*)\}", css))
+    memo = rules["#memory-status "]
+    assert "text-align: left" in memo and "font-size: var(--t-cap)" in memo and "color: var(--muted)" in memo
+    assert "align-items: center" in rules[".conv-main:not(:has(.conv-snippet)) "]
+    head = rules[".conv-group h2 "]
+    assert "font-size: var(--t-cap)" in head and "font-weight: 500" in head and "color: var(--muted)" in head

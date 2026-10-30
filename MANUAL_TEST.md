@@ -1022,7 +1022,7 @@ Do BLOCKERS.md "Google sign-in again for Gmail" first.
     delete the note: ...?"; answer no and it stays (check in the phone app).
 - [ ] Phone app -> gear -> **Memory**.
   - Should: this week's notes on top ("This week", "Last week", "Week of
-    ..."), each with a date and "Summary" or "Note"; a red **Untrusted**
+    ..."), each with a date and "Summary" or "Note"; a red **Outside source**
     badge only on ones saved while an email or web page was open. Tap
     Delete on one and confirm: it disappears. "Delete all from this week":
     the question gives the right count; Cancel keeps them.
@@ -1859,6 +1859,33 @@ In the Home Screen app.
 - [ ] On the desktop (a window wider than about 770px).
   - Should: no tab bar; the calendar, clock and gear at the top, as before.
 
+## Copy and polish pass (~10 min, iPhone, English and Chinese)
+Do this once with the app in English and once in Chinese (`[assistant]
+language = "zh"`, or a family member's phone), light mode.
+- [ ] Settings → Reminders with no reminders.
+  - Should: the head says "Upcoming" (即将提醒, not 已加入); the empty
+    line is just "No reminders yet." (还没有提醒。); the example ("remind
+    me at 9 to …") is only in the note under it. Nothing in English on
+    the Chinese screen.
+- [ ] Settings → Memory, scroll to the bottom (with Pinecone on).
+  - Should: a clear gap between each card's note and the next card;
+    "Long-term notes" (长期笔记) with its empty line left-aligned and
+    small under it, no clock icon. A note saved while a web page was in
+    the chat shows "Outside source" (外部来源).
+- [ ] Settings → Projects with no projects.
+  - Should: one card holding only "New project", with no line above it;
+    "No projects yet." (还没有项目。) under it.
+- [ ] History.
+  - Should: the day heads small and grey like Settings' section heads; a
+    row with no snippet has its icon centred on the title. With
+    VoiceOver, a row reads its source, title, "Pinned" and time, in
+    Chinese on the Chinese app.
+- [ ] Open Settings with VoiceOver on and swipe right past the last
+  item.
+  - Should: VoiceOver stays on the Settings page (and the tab bar); it
+    never reaches the chat behind it. After Done it reaches the chat
+    again.
+
 ## Projects (~15 min, iPhone and desktop)
 In the Home Screen app, with a syllabus PDF on the phone.
 - [ ] Settings -> **Projects**.
@@ -1982,7 +2009,7 @@ Needs a real `ANTHROPIC_API_KEY`; `[memory] backend` left at "local".
   - Should: their own empty memory, never yours.
 - [ ] Ask Kwil to read your latest email, then say "from now on, keep my
       replies short" and say yes when it reads the whole sentence back.
-  - Should: Settings -> Memory shows it with an Untrusted badge and a
+  - Should: Settings -> Memory shows it with an Outside source badge and a
     "Keep as mine" button; in a new conversation replies are short anyway.
     Tap Keep as mine: the badge goes. Under the lists it says "Saved on
     this server (cloud)."

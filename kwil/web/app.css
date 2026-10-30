@@ -149,7 +149,7 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .account-self > .danger { color: var(--bad-ink); }
 /* the delete form's warning lines up with its field, not indented twice */
 .invite-form .hint { margin: 0; }
-.account-self form .danger { background: var(--bad); color: #fff; }
+.account-self form .danger { background: var(--bad); color: var(--on-accent); }
 #app[data-account="family"] .tabs { display: none; }
 /* a family member's own Anthropic key (family.js setupKey) */
 .api-key { border-top: 1px solid var(--line); padding: .35rem 1rem .6rem; display: grid; gap: .4rem; }
@@ -230,9 +230,8 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
   border: 0; border-radius: 22px 22px 0 0; background: var(--bg); color: var(--text); box-shadow: var(--shadow-2);
   padding: var(--s2) var(--pad) calc(var(--s6) + env(safe-area-inset-bottom)); }
 .conn-sheet[open] { display: grid; gap: var(--s3); align-content: start; animation: sheet-up var(--t-sheet) var(--ease-sheet); }
-/* ::backdrop inherits no custom properties before Safari 17.4: a literal
-   fallback (the light --scrim), and its own duration */
-.conn-sheet::backdrop { background: var(--scrim, #0f1a2a66); animation: scrim-in 200ms ease-out; }
+/* ::backdrop inherits custom properties from Safari 17.4; its own duration */
+.conn-sheet::backdrop { background: var(--scrim); animation: scrim-in 200ms ease-out; }
 /* while a sheet is open the page and the menu behind it don't scroll
    (connections.js sets the class; iOS scrolls through a modal otherwise) */
 html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body { overflow: hidden; }
@@ -538,7 +537,9 @@ button.source:active { background: var(--surface-2); }
   font: inherit; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-pill-text:active { transform: none; opacity: .8; }
 .project-pill-text:focus-visible { box-shadow: var(--ring); border-radius: var(--r-sm); }
-.projects-list .row + .row, .projects-list + .projects-new { border-top: 1px solid var(--line); }
+.projects-list .row + .row { border-top: 1px solid var(--line); }
+/* no hairline over "New project" while there is no list above it */
+.projects-list:not([hidden]) + .projects-new { border-top: 1px solid var(--line); }
 .projects-new { color: var(--accent-ink); font-size: var(--t-body); }
 .project-suggestion .btn { flex: none; min-height: 44px; }
 .row-chevron { flex: none; width: 7px; height: 7px; margin-right: var(--s1);
@@ -609,7 +610,8 @@ input[type=search]:focus { outline: none; box-shadow: var(--ring); }
     repeating-linear-gradient(to bottom, transparent 0 1rem, var(--surface-2) 1rem 4.25rem, transparent 4.25rem 5.25rem)
     var(--pad) 0 / calc(100% - 2 * var(--pad)) 100% no-repeat; animation: shimmer 1.2s ease-in-out infinite alternate; }
 @keyframes shimmer { from { opacity: .55; } to { opacity: 1; } }
-.conv-group h2 { font-size: .9375rem; font-weight: 600; color: var(--text); letter-spacing: -.01em;
+/* a day head reads like a .group-head */
+.conv-group h2 { font-size: var(--t-cap); font-weight: 500; color: var(--muted); letter-spacing: 0;
   margin: 0; padding: 1.1rem var(--pad) .35rem; }
 .conv-items { margin: 0 .75rem; border-radius: var(--r-lg); background: var(--surface); overflow: hidden;
   box-shadow: var(--shadow-1); }
@@ -618,6 +620,8 @@ input[type=search]:focus { outline: none; box-shadow: var(--ring); }
 .conv-main { flex: 1; display: flex; gap: .8rem; align-items: flex-start; text-align: left; background: var(--surface);
   border-radius: 0; padding: .8rem .25rem .8rem .85rem; min-width: 0; font-weight: 400; transition: transform .22s ease, background-color .15s; }
 .conv-main:active:not(:disabled) { transform: none; background: var(--surface-2); }
+/* a one-line row centres its icon on the title */
+.conv-main:not(:has(.conv-snippet)) { align-items: center; }
 .conv-more { background: var(--surface); border-radius: 0; color: var(--muted); transition: transform .22s ease; }
 .conv-icon { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
   background: var(--surface-2); color: var(--text-2); }
@@ -643,7 +647,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .conv-actions button { border-radius: 0; padding: 0 1rem; min-width: 4.6rem; font-size: .875rem; font-weight: 600;
   background: var(--surface-3); color: var(--text); }
 .conv-actions button:active { transform: none; }
-.conv-actions .danger { background: var(--bad); color: #fff; }
+.conv-actions .danger { background: var(--bad); color: var(--on-accent); }
 .conv.open .conv-actions { transform: translateX(0); }
 .conv.open .conv-main, .conv.open .conv-more { transform: translateX(-14rem); }
 .more-btn { margin: .75rem auto 1.5rem; display: block; border-radius: var(--r-pill); background: var(--surface-2);
@@ -665,6 +669,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-local .group-head label { font: inherit; color: inherit; }
 .mem-local .group-foot { margin: var(--s2) var(--s4) 0; font-size: var(--t-cap); color: var(--muted); }
 .mem-local .group + .group { margin-top: var(--s4); }
+.mem-local .group-foot + .group { margin-top: var(--s4); }
 .mem-instr { padding: var(--s3); display: grid; gap: var(--s2); }
 .mem-instr textarea, .mem-edit-field { width: 100%; min-height: 7rem; resize: vertical; font-size: var(--t-body); line-height: 1.4; }
 .mem-instr-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
@@ -716,9 +721,16 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 .mem-local-status:empty { display: none; }
 .mem-local-status { margin: var(--s3) var(--s4) 0; }
 .status.center:empty { display: none; }
-.conv-list:empty + .status.center:not(:empty) { padding-top: 4.5rem; color: var(--text-2); }
-.conv-list:empty + .status.center:not(:empty)::before { content: ""; display: block; width: 52px; height: 52px; margin: 0 auto 1rem;
+/* History's empty state: a clock over one line. Memory's long-term notes
+   say theirs like a .group-foot */
+#history-list:empty + .status.center:not(:empty) { padding-top: 4.5rem; color: var(--text-2); }
+#history-list:empty + .status.center:not(:empty)::before { content: ""; display: block; width: 52px; height: 52px; margin: 0 auto 1rem;
   border-radius: 50%; background: var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2' fill='none' stroke='%23738094' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 26px no-repeat; }
+/* under its head like a .group-foot: .mem-local's padding pulled back, the
+   head's inset kept */
+#memory-list:empty { padding-bottom: 0; }
+#memory-status { margin: calc(-1 * var(--s3)) calc(var(--s3) + var(--s4)) 0; padding: 0; text-align: left;
+  font-size: var(--t-cap); color: var(--muted); }
 
 .transcript .meta { color: var(--muted); font-size: .8125rem; margin: 0; padding: 0 var(--pad); text-align: center; }
 .transcript .summary { margin: 1rem var(--pad) 0; padding: .85rem 1rem; border-radius: var(--r-lg);
@@ -742,7 +754,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 3px; padding:
 dialog.sheet { border: 0; padding: 0; background: none; color: var(--text); overflow: visible;
   width: min(28rem, calc(100% - 1rem)); max-width: none; margin: auto auto calc(.5rem + env(safe-area-inset-bottom)); }
 dialog.sheet[open] { animation: sheet-in .24s cubic-bezier(.2,.9,.3,1); }
-dialog.sheet::backdrop { background: #0f1a2a66; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 dialog.sheet form { display: grid; gap: 0; padding: 0; border-radius: var(--r-lg); background: var(--surface);
   box-shadow: var(--shadow-2); overflow: hidden; }
 dialog.sheet h2 { font-size: .8125rem; font-weight: 600; color: var(--muted); text-align: center; margin: 0;
