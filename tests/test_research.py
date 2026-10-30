@@ -482,6 +482,56 @@ def test_a_failed_step_keeps_what_was_found(tmp_path, history):
     assert i18n.t("research_why_error", "zh") != i18n.t("research_why_error", "en")
 
 
+def test_a_failed_first_step_fails_the_job(tmp_path, history):
+    """Judge round 2, N1: nothing found at all is a failed job, not an
+    empty report."""
+    def fail_step_one(n, kw):
+        if n == 2:
+            raise RuntimeError("overloaded")
+    push = FakePush()
+    service, _ = make(tmp_path, history, client=Hooked(before=fail_step_one), push=push)
+    job = service.start(None, QUESTION)
+    saved = service.person(None).store.get(job["id"])
+    assert saved["status"] == "failed" and saved["error"] == "failed"
+    assert history.list() == [] and push.sent == []
+
+
+def test_a_missing_key_mid_research_fails_the_job(tmp_path, history):
+    """Judge round 2, N2: MissingKey in step 2 is not written up as partial."""
+    from kwil.userkeys import MissingKey
+
+    def no_key(n, kw):
+        if n == 3:
+            raise MissingKey("no key")
+    push = FakePush()
+    service, _ = make(tmp_path, history, client=Hooked(before=no_key), push=push)
+    job = service.start(None, QUESTION)
+    saved = service.person(None).store.get(job["id"])
+    assert saved["status"] == "failed" and saved["error"] == "no_key"
+    assert history.list() == [] and push.sent == []
+
+
+def test_cancel_then_a_failed_step_is_cancelled(tmp_path, history, caplog):
+    """Judge round 2, N2: cancelled while step 2 runs, which then fails:
+    a cancel, not a failure (nothing written up, no failure logged)."""
+    caplog.set_level(logging.INFO, logger="kwil")
+    holder = {}
+
+    def cancel_and_fail(n, kw):
+        if n == 3:
+            store = holder["s"].person(None).store
+            assert holder["s"].cancel(None, store.active()["id"])
+            raise RuntimeError("connection reset")
+    push = FakePush()
+    client = Hooked(before=cancel_and_fail)
+    service, _ = make(tmp_path, history, client=client, push=push)
+    holder["s"] = service
+    job = service.start(None, QUESTION)
+    assert service.person(None).store.get(job["id"])["status"] == "cancelled"
+    assert client.n == 3 and history.list() == [] and push.sent == []
+    assert not [r for r in caplog.records if "failed" in r.getMessage()]
+
+
 def test_timeouts_keep_the_write_its_share():
     """Judge round 1, LOW 6: research requests end by the 75% mark; the
     write gets at least its 25% share and one retry at most."""
@@ -632,9 +682,12 @@ def test_cancel_while_saving_keeps_and_sends_nothing(tmp_path, history):
         assert service.cancel(None, job["id"])
         return cid
     service._save = cancel_then_save
+    deleted = []
+    history.recall = SimpleNamespace(delete=deleted.append)  # an index of its own
     job = service.start(None, QUESTION)
     assert service.person(None).store.get(job["id"])["status"] == "cancelled"
     assert history.list() == [] and push.sent == []
+    assert len(deleted) == 1  # deleted as any conversation is: its recall vector too
 
 
 def test_cancel_a_queued_job(tmp_path, history):

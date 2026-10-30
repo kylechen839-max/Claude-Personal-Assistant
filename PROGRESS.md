@@ -8128,3 +8128,19 @@ All eight findings fixed, each with a test that fails with its fix reverted:
 - LOW 8: job files go with the retrying unlink (`family._unlink`), and a
   failed prune never stops a new job. `test_a_failed_prune_never_stops_a_new_job`,
   `test_prune_retries_a_file_windows_holds`.
+
+### Deep research, judge round 2 (2026-10-30)
+The four LOW items, each with a test that fails with its fix reverted:
+- N1: a research step that fails before anything was found fails the job
+  (no empty report, no History conversation, no push).
+  `test_a_failed_first_step_fails_the_job`.
+- N2: tests for the two untested branches: `MissingKey` in step 2 fails
+  the job with `no_key` and saves nothing
+  (`test_a_missing_key_mid_research_fails_the_job`); a cancel followed by a
+  failing step stays a cancel, saves nothing and logs no failure
+  (`test_cancel_then_a_failed_step_is_cancelled`).
+- N3: a report saved while a cancel landed is removed with
+  `history.delete_conversation` (its recall vector too); the cancel-in-save
+  test checks `recall.delete`.
+- N4: `ResearchRunner.run`'s docstring and SECURITY's "Failing safe" say
+  a failed step fails the job when nothing was found.

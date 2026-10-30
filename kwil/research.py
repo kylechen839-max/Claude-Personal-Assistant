@@ -660,7 +660,9 @@ class ResearchRunner:
     # ---------- the whole job ----------
     def run(self, question: str, depth: str, cancel: threading.Event,
             progress: Callable[..., None] = lambda **f: None) -> Report | None:
-        """The report, or None when cancelled."""
+        """The report, or None when cancelled. A research step that fails
+        ends the research: the report is written from what was found
+        (partial "error"), or fails the job when nothing was found."""
         self.started = self.clock()
         self.progress = progress
         progress(status="planning")
@@ -687,6 +689,8 @@ class ResearchRunner:
 
                 if isinstance(e, MissingKey):
                     raise
+                if done == 0 and not self.sources and not self.notes:
+                    raise  # nothing found at all: the job fails, nothing saved
                 log.warning("Research: part %d of %d failed (%s); writing the "
                             "report from what was found", i + 1, len(outline),
                             type(e).__name__)
@@ -1039,7 +1043,10 @@ class Research:
             # cancelled (or gone) while it was being saved: nothing kept or sent
             if cid is not None:
                 try:
-                    person.history.delete(cid)
+                    from kwil.history import delete_conversation
+
+                    # with its recall vector too (recall.py), as any delete
+                    delete_conversation(person.history, cid)
                 except Exception as e:  # noqa: BLE001
                     log.warning("Research: removing %s's report failed (%s)", job_id,
                                 type(e).__name__)

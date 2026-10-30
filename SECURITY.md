@@ -2851,7 +2851,8 @@ network code of its own.
   and the report only at DEBUG (caplog test).
 - **Failing safe.** A research step that fails (an API error) ends the
   research there and the report is written from what was found, marked
-  partial; a cancel that lands while the report is being saved deletes
+  partial, or fails the job when nothing was found (nothing saved or
+  sent); a cancel that lands while the report is being saved deletes
   the saved conversation and sends no notification. Research requests
   time out by the 75% mark of the time budget; the write gets at least
   its own 25% share and at most one retry. Job files are deleted with the
