@@ -103,7 +103,8 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .login .error { margin: 1rem 0 0; padding: .7rem .9rem; border-radius: var(--r-md); background: var(--bad-soft); }
 
 /* ---------- main chat ---------- */
-.app { display: flex; flex-direction: column; height: 100%;
+/* --app-h: the height above the iPhone keyboard (app.js, visualViewport) */
+.app { display: flex; flex-direction: column; height: var(--app-h, 100%);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 .app > header { display: flex; align-items: center; gap: .25rem; min-height: 52px;
   padding: .25rem .5rem .25rem var(--pad); }
@@ -376,44 +377,35 @@ html:has(.menu[open]), html:has(.menu[open]) body { overflow: hidden; }
 .yes { background: var(--accent); color: var(--on-accent); }
 .no { background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 
-.app > footer { padding: .5rem var(--pad) calc(.85rem + env(safe-area-inset-bottom));
+/* ---------- the composer: one row (app.js syncComposer) ----------
+   [+] [field, 1 to about 6 lines] [mic, or Stop while busy] [Voice, or Send
+   when there is something to send]; the buttons stay on the last line as the
+   field grows. Above it: the edit bar, picked files and the modes line. */
+.app > footer { padding: var(--s2) var(--pad) calc(var(--s3) + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; align-items: center; }
-#text-form { display: flex; align-items: center; gap: .25rem; width: 100%; margin-bottom: 1.25rem;
-  padding: 3px 3px 3px 1.1rem; border-radius: var(--r-pill); background: var(--surface);
+/* the keyboard covers the home indicator: no safe-area gap above it */
+html.kb-open .app > footer { padding-bottom: var(--s2); }
+#text-form { display: flex; align-items: flex-end; gap: var(--s1); width: 100%;
+  padding: 3px; border-radius: var(--r-lg); background: var(--surface);
   border: 1px solid var(--line-strong); box-shadow: var(--shadow-1); transition: border-color .15s, box-shadow .15s; }
 #text-form:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
-#text-form input { flex: 1; min-width: 0; min-height: 44px; padding: 0; border: 0; background: none; box-shadow: none; }
-#text-form button { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center;
-  background: var(--accent); color: var(--on-accent); }
+/* the field: overrides the generic textarea (border, radius, 48px, ring) */
+#text-form textarea { flex: 1; width: auto; min-width: 0; min-height: 44px; max-height: calc(5 * 1.47em + 44px);
+  padding: calc((44px - 1.47em) / 2) var(--s1); border: 0; border-radius: 0; background: none; box-shadow: none;
+  line-height: 1.47; field-sizing: content; resize: none; overflow-y: auto; overscroll-behavior: contain; }
+#text-form textarea:focus { box-shadow: none; }
+#text-form button { flex: none; width: 44px; height: 44px; min-height: 0; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; background: var(--accent); color: var(--on-accent); }
 #text-form button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2;
   stroke-linecap: round; stroke-linejoin: round; }
-.mic { position: relative; width: 84px; height: 84px; min-height: 0; border-radius: 50%; padding: 0;
-  display: grid; place-items: center; isolation: isolate;
-  background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--accent) 55%, #fff), var(--accent) 60%, var(--accent-strong));
-  box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--accent) 70%, transparent), inset 0 1px 0 #ffffff40, inset 0 -2px 6px #0000001f;
-  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-  transition: transform .18s cubic-bezier(.3,1.4,.5,1), box-shadow .2s; }
-.mic svg { width: 38px; height: 38px; pointer-events: none; fill: none; stroke: #fff; stroke-width: 2;
-  stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 1px #0000002e); }
-.mic svg rect { fill: #fff; }
-.mic::before, .mic::after { content: ""; position: absolute; inset: 0; border-radius: 50%; z-index: -1;
-  background: var(--accent); opacity: 0; pointer-events: none; }
-.mic:active:not(:disabled) { transform: scale(.94); }
-.mic.recording { transform: scale(1.06); background: radial-gradient(circle at 50% 30%, #e46d5d, var(--bad) 65%, #8f2a20);
-  box-shadow: 0 10px 28px -6px color-mix(in srgb, var(--bad) 75%, transparent); }
-.mic.recording::before, .mic.recording::after { background: var(--bad); animation: ripple 1.8s cubic-bezier(.2,.6,.4,1) infinite; }
-.mic.recording::after { animation-delay: .9s; }
-.mic:disabled { opacity: .45; filter: saturate(.4); }
-.mic:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent-ink), 0 8px 22px -6px color-mix(in srgb, var(--accent) 70%, transparent); }
 #text-form button:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 5px var(--accent-ink); }
+/* Send: held for think harder, so no iOS callout or text selection */
+#send { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 /* "+" (attachments.js): left of the field; chips for the picked files above it */
-#text-form { padding-left: 3px; }
-#text-form input { padding-left: .25rem; }
 #text-form .attach-btn { background: none; color: var(--text-2); }
 #text-form .attach-btn svg { width: 22px; height: 22px; stroke-width: 2; }
 #text-form .attach-btn:active:not(:disabled) { background: var(--surface-2); }
-#text-form .attach-btn:disabled { opacity: .35; }
-.attach-chips { display: flex; gap: .5rem; width: 100%; margin-bottom: .5rem; overflow-x: auto; padding: 2px; }
+.attach-chips { display: flex; gap: var(--s2); width: 100%; margin-bottom: var(--s2); overflow-x: auto; padding: 2px; }
 .attach-chips[hidden] { display: none; }
 .attach-chip { position: relative; flex: none; display: flex; align-items: center; height: 56px; max-width: 12rem;
   border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line-strong); overflow: hidden; }
@@ -425,11 +417,38 @@ html:has(.menu[open]), html:has(.menu[open]) body { overflow: hidden; }
   display: grid; place-items: start end; padding: 4px 6px 0 0; background: none; color: var(--text);
   font-size: 1.1rem; line-height: 1; }
 .attach-chip img + .attach-remove { color: #fff; text-shadow: 0 0 3px #000a; }
-/* "Think harder" (app.js): a quiet toggle left of Send; on, it takes the accent */
-#text-form .think-btn { background: none; color: var(--text-2); }
-#text-form .think-btn svg { width: 22px; height: 22px; stroke-width: 1.8; }
-#text-form .think-btn[aria-pressed="true"] { background: var(--surface-2); color: var(--accent-ink); }
-#text-form .think-btn:active { background: var(--surface-2); }
+/* the mic: a quiet 44px line icon; red with a ripple while recording */
+#text-form .mic { position: relative; isolation: isolate; background: none; color: var(--text-2);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#text-form .mic svg { width: 22px; height: 22px; stroke-width: 2; pointer-events: none; }
+#text-form .mic:active:not(:disabled) { background: var(--surface-2); }
+.mic::before, .mic::after { content: ""; position: absolute; inset: 0; border-radius: 50%; z-index: -1;
+  background: var(--bad); opacity: 0; pointer-events: none; }
+#text-form .mic.recording { background: var(--bad); color: var(--on-accent); }
+.mic.recording::before, .mic.recording::after { animation: ripple 1.8s cubic-bezier(.2,.6,.4,1) infinite; }
+.mic.recording::after { animation-delay: .9s; }
+.mic:disabled { opacity: .45; }
+/* Voice conversation: a 44px accent circle with the waveform */
+#text-form .voice-open-btn::before { content: ""; width: 18px; height: 14px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cg stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 5v4M5 2v10M9 4v6M13 1v12M17 5v4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cg stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 5v4M5 2v10M9 4v6M13 1v12M17 5v4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; }
+#text-form .voice-open-btn:active:not(:disabled), #send:active:not(:disabled) { background: var(--accent-strong); }
+#mic-hint { margin: var(--s2) 0 0; }
+/* the modes line above the row: the project, study mode, think harder */
+.composer-modes { display: flex; flex-wrap: wrap; gap: var(--s2); width: 100%; margin-bottom: var(--s2); }
+.composer-modes:not(:has(> :not([hidden]))) { display: none; }
+.composer-modes .study-pill { max-width: 100%; }
+.think-chip { min-height: 44px; padding: 0 var(--s3); gap: var(--s2); }
+.think-chip svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+.think-chip:active:not(:disabled) { transform: none; background: var(--mark); }
+.think-chip:focus-visible { box-shadow: var(--ring); }
+/* The "+" sheet's toggle rows (Think harder, Study mode): an icon and a
+   label; pressed, they take the accent */
+dialog.sheet :is(.think-btn, .sheet-toggle) { display: flex; align-items: center; justify-content: center; gap: var(--s2); }
+dialog.sheet :is(.think-btn, .sheet-toggle) svg { flex: none; width: 22px; height: 22px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+dialog.sheet :is(.think-btn, .sheet-toggle)[aria-pressed="true"] { color: var(--accent-ink); font-weight: 600; }
 /* A reply's sources (sources.js): superscripts in the text, then the list */
 .cite-ref { font-size: .7em; line-height: 0; margin-left: 1px; color: var(--accent-ink); font-weight: 500; }
 .sources { display: flex; flex-direction: column; gap: var(--s1); margin-top: var(--s2);
@@ -450,7 +469,6 @@ button.source:active { background: var(--surface-2); }
 .source:focus-visible { outline: none; box-shadow: var(--ring); }
 /* Typing while Kwil answers (app.js): Stop, and "Queued" bubbles under the log */
 #text-form .stop-btn { background: var(--surface-2); color: var(--text); }
-#text-form .stop-btn[hidden] { display: none; }
 #text-form .stop-btn svg rect { fill: currentColor; stroke: none; }
 #text-form .stop-btn:disabled { opacity: .45; }
 .queue { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s2);
@@ -491,27 +509,14 @@ button.source:active { background: var(--surface-2); }
 @keyframes research-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .research-state::before { animation: none !important; } }
 @keyframes ripple { from { opacity: .35; transform: scale(1); } to { opacity: 0; transform: scale(1.75); } }
-#mic-hint { margin-top: .6rem; }
 @media (max-height: 700px) {
   .app > header { min-height: 48px; }
   .log { gap: .85rem; padding-top: .75rem; }
-  #text-form { margin-bottom: .75rem; }
-  .mic { width: 72px; height: 72px; }
-  .mic svg { width: 32px; height: 32px; }
-  #mic-hint { margin-top: .4rem; }
-  .voice-open-btn { margin-top: .5rem; }
   .confirm { padding: .85rem; }
   .confirm p { margin-bottom: .7rem; }
   .confirm .hint { margin-top: .5rem; }
 }
-.voice-open-btn { margin-top: .7rem; display: inline-flex; align-items: center; gap: .5rem; border-radius: var(--r-pill);
-  padding: 0 1.2rem; background: var(--surface-2); color: var(--text); font-size: .9375rem; }
-.voice-open-btn::before { content: ""; width: 18px; height: 14px; background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cg stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 5v4M5 2v10M9 4v6M13 1v12M17 5v4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cg stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 5v4M5 2v10M9 4v6M13 1v12M17 5v4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
-  color: var(--accent-graphic); }
-
-/* ---------- study mode's pill in the chat header (study.js) ---------- */
+/* ---------- study mode's pill on the composer's modes line (study.js) ---------- */
 .study-pill { display: inline-flex; align-items: center; gap: var(--s1); min-width: 0; max-width: 46vw;
   padding-left: var(--s3); border-radius: var(--r-pill); background: var(--accent-soft);
   color: var(--accent-ink); font-size: var(--t-cap); font-weight: 600; }
@@ -525,7 +530,7 @@ button.source:active { background: var(--surface-2); }
 .study-stop:focus-visible { box-shadow: var(--ring); }
 #study-toggle[aria-pressed=true] { color: var(--accent-ink); }
 /* ---------- projects (projects.js) ---------- */
-/* the header's project name: the study pill's shape; its name opens the page */
+/* the chat's project name (modes line): the study pill's shape; its name opens the page */
 .project-pill { max-width: 38vw; }
 .project-pill-text { min-width: 0; min-height: 44px; padding: 0; background: none; color: inherit;
   font: inherit; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -728,6 +733,7 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
     transition-duration: .01ms !important; }
   .mic.recording::before { opacity: .25; transform: scale(1.25); }
   .mic.recording::after { opacity: 0; }
+  #text-form, #text-form button { transition: none; }
   .msg.claude:empty::before { opacity: .7; }
   .study-stop:active { transform: none; }
 }

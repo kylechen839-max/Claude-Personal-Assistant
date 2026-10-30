@@ -8,9 +8,9 @@
 // conversations), its files (Add file: one PDF or text file at a time;
 // Delete asks first), its memories (Delete asks first), its conversations
 // (open one in History), Rename and Delete project (asks; its chats stay).
-// The chat header shows the project the chat is in (#project-pill: its
-// name opens its page, × leaves it: the next message starts a chat in no
-// project). app.js owns the pane: newChat(project) starts a chat in a
+// The composer's modes line shows the project the chat is in
+// (#project-pill: its name opens its page, × leaves it: the next message
+// starts a chat in no project). app.js owns the pane: newChat(project) starts a chat in a
 // project (or none) and onDone / onState keep the pill right. Text goes in
 // with textContent only.
 // app.js calls configure({ request, show, newChat, openConversation }),
@@ -318,7 +318,7 @@
       } catch (e) { say(pageStatus, e.message || String(e)); }
     }
 
-    // ---------- the chat header's pill ----------
+    // ---------- the pill on the composer's modes line ----------
     function pill(project) {
       if (!pillEl || !pillText) return;
       const on = enabled && Boolean(project && project.name);

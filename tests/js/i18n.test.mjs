@@ -42,7 +42,8 @@ function page(lang, { gstatus = { enabled: true, connected: false }, connect, go
   const unlink = new El('button', { id: 'google-disconnect', hidden: '' }, ['Disconnect Google account']);
   const hint = new El('p', { id: 'google-status', hidden: '' });
   const menu = new El('details', { class: 'menu' }, [google, hint]);
-  const input = new El('input', { id: 'text', placeholder: 'Type a message' });
+  // the composer's field, as on the page (a textarea since the one-row composer)
+  const input = new El('textarea', { id: 'text', rows: '1', 'aria-label': 'Message', placeholder: 'Type a message' });
   const mic = new El('button', { 'aria-label': 'Hold to talk, or tap to start and stop', title: 'Send' });
   const status = new El('p', { id: 'status' }, ['']);
   const reply = new El('div', { class: 'msg claude' }, ['Mute']);  // looks like a label
@@ -449,6 +450,24 @@ test('Chinese page: queued messages and Stop are translated', () => {
   assert.equal(t('Stop'), '停止');
   assert.equal(t('Stopped.'), '已停止。');
   assert.equal(t('You can queue up to 3 messages.'), '最多可以排队 3 条消息。');
+});
+
+test('Chinese page: the one-row composer (its textarea, the think chip) is translated', async () => {
+  const t = (s) => page('zh-CN').win.KwilI18n.translate(s);
+  assert.equal(t('Message'), '消息');
+  assert.equal(t('Think harder is on'), '已开启仔细想想');
+  assert.equal(t('Turn off think harder'), '关闭仔细想想');
+  assert.equal(t('Voice conversation'), '语音对话');  // now the Voice button's aria-label and title
+  // the textarea's placeholder and aria-label, at load and when app.js swaps the placeholder
+  const p = page('zh-CN');
+  await p.flush();
+  const field = p.input;
+  assert.equal(field.tagName, 'TEXTAREA');
+  assert.equal(field.getAttribute('placeholder'), '输入消息');
+  assert.equal(field.getAttribute('aria-label'), '消息');
+  field.setAttribute('placeholder', 'Type "yes" or "no"');
+  p.mutate([{ type: 'attributes', target: field }]);
+  assert.equal(field.getAttribute('placeholder'), '输入“是”或“不”');
 });
 
 test('Chinese page: typing into an old conversation: its messages are translated', () => {

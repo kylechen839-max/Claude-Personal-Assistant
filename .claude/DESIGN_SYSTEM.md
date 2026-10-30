@@ -94,12 +94,34 @@ CSP forbids them).
   on `--surface` with a dashed `--line-strong` edge, `--t-sub` text clamped
   to two lines, a `--t-cap` "Queued" under it and a 44px remove button. The
   queue holds at most about two bubbles of height before it scrolls.
-- **Stop** sits in the composer, left of Send: the same 44px circle on
-  `--surface-2` with a filled square glyph.
-- **Think harder** sits left of Send (and Stop): a 44px circle with no
-  fill and a 22px line bulb in `--text-2`; pressed (`aria-pressed="true"`)
-  it takes `--surface-2` with the bulb in `--accent-ink`. It is a toggle
-  for the next message only; holding Send does the same.
+- **The composer is one row** (redesign phase 4): `[+] [field] [mic, or
+  Stop while busy] [Voice, or Send]` inside one `--surface` card with
+  `--r-lg` corners and a `--line-strong` edge (the ring while focused).
+  The buttons sit on the field's last line (`align-items: flex-end`). The
+  field is a `<textarea rows="1">` that grows with `field-sizing: content`
+  to about 6 lines, then scrolls; it never has its own border or ring.
+  `app.js` `syncComposer()` decides what shows: Send (a 44px `--accent`
+  circle with an arrow) only when there is something to send (words, files
+  or an edit), otherwise Voice conversation (the same circle with the
+  waveform mask); Stop (a 44px `--surface-2` circle with a filled square)
+  replaces the mic while Kwil answers, and the mic comes back for a yes/no
+  question. A control that hides while focused hands focus to the field.
+  The mic is a quiet 44px line icon in `--text-2`, `--bad` with a ripple
+  while recording; its level bar and hint show under the row only then.
+- **Modes line** (`#composer-modes`) just above the row: the project pill,
+  the study pill and the "Think harder is on" chip, all the study pill's
+  shape (`--accent-soft`, `--accent-ink`, `--t-cap`, 44px tall). The line
+  disappears when they are all hidden (`:has`). Nothing mode-like goes in
+  the header any more.
+- **Think harder and Study mode** are toggle rows in the "+" sheet, after
+  the pickers and before Cancel (icon plus label; pressed, `--accent-ink`).
+  Choosing one closes the sheet (`data-close`). At 4 files only the
+  pickers are disabled, never "+". Holding Send still thinks harder (no
+  callout: `-webkit-touch-callout: none`).
+- **Keyboard:** `.app` takes `--app-h` (the visualViewport height, set by
+  `app.js`), so the row sits on the iPhone keyboard; `html.kb-open` drops
+  the safe-area padding under it. A swipe down closes the keyboard, except
+  one that scrolls a long message inside the field.
 - **Sources** under a reply: `--t-cap`, muted. Kwil's own sources are one
   wrapping line ("Sources" then items joined by a middle dot), each a
   plain accent-ink text button; web pages are rows of a small numbered

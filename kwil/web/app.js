@@ -13,7 +13,7 @@ const els = {
   urlPi: $("url-pi"), urlPc: $("url-pc"), urlCloud: $("url-cloud"),
   backendsSave: $("backends-save"), backendStatus: $("backend-status"),
   editBar: $("edit-bar"), editCancel: $("edit-cancel"),
-  think: $("think"), send: $("send"),
+  think: $("think"), send: $("send"), thinkChip: $("think-chip"), voiceOpen: $("voice-open"),
 };
 
 let busy = false;
@@ -25,15 +25,21 @@ let live = null;  // the reply bubble that streamed text is going into
 // this page's memory only (never stored), a few at most.
 const MAX_QUEUE = 3;
 const queue = [];  // {text, el, cid, epoch, think}
-// "Think harder" (thinkhard.py) for the next message only: the toggle left of
-// Send, or a long press on Send (it then sends). Never sticky: any message
-// sent or queued turns it off again, and a yes/no answer never carries it.
+// "Think harder" (thinkhard.py) for the next message only: its row in the
+// "+" sheet, or a long press on Send (it then sends). While it is on, a chip
+// above the field says so (tapping it turns it off). Never sticky: any
+// message sent or queued turns it off again, and a yes/no answer never
+// carries it.
 let thinkNext = false;
 function setThink(on) {
   thinkNext = Boolean(on);
   if (els.think) {
     els.think.setAttribute("aria-pressed", String(thinkNext));
     els.think.classList.toggle("on", thinkNext);
+  }
+  if (els.thinkChip) {
+    if (!thinkNext && document.activeElement === els.thinkChip) els.text.focus();
+    els.thinkChip.hidden = !thinkNext;
   }
 }
 function takeThink() { const on = thinkNext; setThink(false); return on; }
@@ -44,7 +50,7 @@ function takeThink() { const on = thinkNext; setThink(false); return on; }
 // in a pane opened after it was sent. `project` ({id, name}, projects.js):
 // the project a new chat's pane is in; its turns carry "project_id" (the
 // server starts the conversation there), and `leaving` sends "" once after
-// the header's × (the next turn starts a chat in no project). A turn's
+// the project pill's × (the next turn starts a chat in no project). A turn's
 // "done" says which project the pane's conversation is in.
 const pane = { cid: null, epoch: 0, project: null, leaving: false };
 let confirmEpoch = 0;  // the pane the open yes/no question was asked in
@@ -153,6 +159,7 @@ function startEdit() {
   els.editBar.hidden = false;
   els.text.value = shown.text || "";
   els.text.focus();
+  syncComposer();
 }
 
 function cancelEdit() {
@@ -160,9 +167,9 @@ function cancelEdit() {
   editing = false;
   els.editBar.hidden = true;
   els.text.value = "";
+  syncComposer();
 }
 els.editCancel.addEventListener("click", () => { cancelEdit(); els.text.focus(); });
-els.text.addEventListener("keydown", (e) => { if (e.key === "Escape" && editing) cancelEdit(); });
 
 // Answer the pane's last turn again (`text` undefined: try again; else the
 // edited words). The server refuses while busy or asked, and a turn that
@@ -232,6 +239,36 @@ function setBusy(value) {
   els.stop.hidden = hide;
   els.stop.disabled = stopping;
   updateTurnTools();
+  syncComposer();
+}
+
+// --- the composer: one row, [+] [field] [mic or Stop] [Voice or Send] ---
+// Send shows only when there is something to send (words, picked files, or
+// an edit); otherwise Voice conversation takes its place. Stop takes the
+// mic's place while Kwil answers (the mic comes back for a yes/no question:
+// "hold the mic and say yes"). A control that hides while it has focus
+// hands it to the field. Called on every change that can move them (input,
+// submit, edit, busy, a question, the "+" tray: attachments.js).
+// The field grows with its text (CSS field-sizing, up to about 6 lines);
+// browsers without it get the height set here.
+const fitByScript = typeof CSS === "undefined" || typeof CSS.supports !== "function"
+  || !CSS.supports("field-sizing", "content");
+function fitText() {
+  const st = els.text.style;
+  if (!fitByScript || !st) return;
+  st.height = "auto";
+  st.height = `${els.text.scrollHeight}px`;  // the CSS max-height caps it; then it scrolls
+}
+
+function syncComposer() {
+  const has = els.text.value.trim() !== "" || pendingFiles() || editing;
+  const focused = document.activeElement;
+  if (els.send) els.send.hidden = !has;
+  if (els.voiceOpen) els.voiceOpen.hidden = has;
+  els.mic.hidden = !els.stop.hidden;
+  if (focused && focused !== els.text && focused.hidden &&
+      [els.send, els.voiceOpen, els.mic, els.stop].includes(focused)) els.text.focus();
+  fitText();
 }
 
 // --- queued messages ---
@@ -287,12 +324,12 @@ function bindPane(cid) {
   cancelEdit();
 }
 
-// The header's project name (projects.js) for this pane.
+// The project name on the composer's modes line (projects.js) for this pane.
 function showProject() {
   if (window.KwilProjects) window.KwilProjects.pill(pane.project);
 }
 
-// A new chat (projects.js's "New chat in this project", or the header's ×
+// A new chat (projects.js's "New chat in this project", or the project pill's ×
 // with `project` null): a fresh pane in that project, the log cleared.
 function newChat(project) {
   bindPane(null);
@@ -366,7 +403,7 @@ function setConfirm(question, epoch = pane.epoch) {
   els.confirm.hidden = !confirming;
   els.question.textContent = question || "";
   els.text.placeholder = confirming ? 'Type "yes" or "no"' : "Type a message";
-  setBusy(busy);
+  setBusy(busy);  // and syncComposer(): files never go with an answer
 }
 
 // --- audio out ---
@@ -844,6 +881,10 @@ $("logout-all").addEventListener("click", () => {
 
 // --- text ---
 function submitText() {
+  try { submitTyped(); } finally { syncComposer(); }
+}
+
+function submitTyped() {
   const text = els.text.value.trim();
   if (editing) {  // the edited words replace Kyle's last message
     if (busy || confirming) { addMessage("note", "Wait for the reply to finish first."); return; }
@@ -870,14 +911,28 @@ function submitText() {
   sendMessage(text, pane.cid, pane.epoch, think && !answersHere());
 }
 els.textForm.addEventListener("submit", (e) => { e.preventDefault(); submitText(); });
+els.text.addEventListener("input", syncComposer);
+// Enter sends, Shift+Enter is a new line. Never while an IME is composing
+// (Chinese pinyin: Enter picks the letters), which Safari reports as
+// keyCode 229 rather than isComposing.
+els.text.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && editing) { cancelEdit(); return; }
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  submitText();
+});
 
 if (els.think) els.think.addEventListener("click", () => { setThink(!thinkNext); els.text.focus(); });
+if (els.thinkChip) els.thinkChip.addEventListener("click", () => setThink(false));
 
 // A long press on Send: think harder about this message, sent on release.
 const LONG_PRESS_MS = 500;
 let pressTimer = null, longPressed = false;
 if (els.send) {
-  els.send.addEventListener("pointerdown", () => {
+  els.send.addEventListener("pointerdown", (e) => {
+    // no focus move off the field, so the iPhone keyboard stays up after
+    // Send (the click, and so the form's submit, still follows)
+    e.preventDefault();
     longPressed = false;
     clearTimeout(pressTimer);
     pressTimer = setTimeout(() => { longPressed = true; setThink(true); }, LONG_PRESS_MS);
@@ -1059,6 +1114,7 @@ async function startRecording() {
     stopMeter();
     els.mic.classList.remove("recording");
     els.micHint.textContent = "Hold to talk, or tap to start and stop";
+    els.micHint.hidden = true;
     releaseStream();
     if (blob.size < 1000) { setStatus("Too short. Try again."); return; }
     const form = new FormData();
@@ -1078,6 +1134,7 @@ async function startRecording() {
   startMeter(s);
   els.mic.classList.add("recording");
   els.micHint.textContent = "Listening… release or tap to send";
+  els.micHint.hidden = false;
   maxTimer = setTimeout(stopRecording, MAX_RECORD_MS);
   if (releaseStops) stopRecording();  // released before the mic was ready
 }
@@ -1128,7 +1185,31 @@ window.KwilApp = {
   newChat,
   idle: () => !busy && !confirming,  // e.g. "Branch from here" waits for it
   request,
+  syncComposer,  // attachments.js: the tray changed
 };
+syncComposer();
+
+// iPhone keyboard: the page keeps the height that is visible above it
+// (--app-h, app.css), so the composer sits on the keyboard and the log
+// scrolls; Safari's own scroll of the whole page is undone. Not while the
+// page is pinch-zoomed: the smaller visible area is then the zoom, not a
+// keyboard, so the app keeps its full height and the zoomed view stays put.
+const vv = window.visualViewport;
+if (vv && typeof vv.addEventListener === "function") {
+  const fitViewport = () => {
+    const root = document.documentElement;
+    if (typeof vv.scale === "number" && Math.abs(vv.scale - 1) > 0.01) {
+      if (root && root.style && typeof root.style.removeProperty === "function") root.style.removeProperty("--app-h");
+      if (root && root.classList) root.classList.toggle("kb-open", false);
+      return;
+    }
+    if (root && root.style) root.style.setProperty("--app-h", `${vv.height}px`);
+    if (root && root.classList) root.classList.toggle("kb-open", vv.height < window.innerHeight - 120);
+    if (vv.offsetTop > 0) window.scrollTo(0, 0);
+  };
+  vv.addEventListener("resize", fitViewport);
+  fitViewport();
+}
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});

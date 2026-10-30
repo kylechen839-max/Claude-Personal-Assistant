@@ -532,9 +532,13 @@ kwil.earcons` rewrites `kwil/web/earcons/*.wav`).
 memory, web search, delete confirmations) as a private web page for your
 phone. You talk into the phone's own mic; the PC transcribes with Whisper,
 asks Claude, and sends back the reply as text and audio (in the voice from
-[Voices](#voices); or tick "Use the phone's voice" in the page's settings). Hold the big mic button to talk (or tap once to start
-and again to stop), or type. You can keep typing while Kwil is
-answering: Send then queues the message (up to 3, each with an × to
+[Voices](#voices); or tick "Use the phone's voice" in the page's settings). The composer is one row: **+**
+(photos, files, Think harder, Study mode), the text field (it grows to
+about 6 lines, then scrolls), the mic, and on the right **Voice
+conversation** while the field is empty or **Send** once there is
+something to send. Hold the mic to talk (or tap once to start and again to
+stop), or type; Enter sends and Shift+Enter starts a new line. You can keep
+typing while Kwil is answering (Stop takes the mic's place): Send then queues the message (up to 3, each with an × to
 remove it) and it goes as soon as the reply is done; **Stop** ends the
 reply early and sends the queue. ↻ under the last reply tries again and
 the pencil edits your last message (see
@@ -598,9 +602,9 @@ conversation. The hands-free voice view doesn't take attachments.
 
 ### Think harder, and where an answer came from
 
-**Think harder** is for one message: tap the light bulb left of Send (it
-lights up; the next typed or push-to-talk message takes it), or press and
-hold Send, and that message goes to the main model
+**Think harder** is for one message: tap **+**, then **Think harder** (a
+"Think harder is on" chip shows above the field; tap it to turn it off; the
+next typed or push-to-talk message takes it), or press and hold Send, and that message goes to the main model
 (`[assistant] model`, even when the router would have picked the fast one)
 with more room (`think_max_tokens`, 16000) and thinking asked for explicitly
 (adaptive thinking at `think_effort`, "xhigh"). The status line says
@@ -677,7 +681,8 @@ true}` without signing in. Scripts can send `Authorization: Bearer
 
 ### Voice conversation (hands-free)
 
-Tap **Voice conversation** under the mic button and just talk, like voice
+Tap **Voice conversation** (the round waveform button at the right of the
+composer while the field is empty) and just talk, like voice
 mode in the Claude apps. A full-screen orb shows what it is doing: it moves
 with your voice while **listening**, pulses while **thinking**, and moves with
 the reply while **speaking**. When you stop talking for `[voice]
@@ -1722,9 +1727,9 @@ plain text, so the Tutor tab is still the place for drawn equations.
   it checks what's coming up for "what's on the midterm". Without them it
   quizzes at a college level from what it knows. (Lecture Notes pages in
   Notion aren't read yet.)
-- **The header:** a small "Studying PHYS 361" pill shows while it's on; its
-  x turns it off. When it's off, the book button next to it turns it on
-  (Kwil then asks what to study). "Stop studying" or "I'm done" works too.
+- **Above the text field:** a small "Studying PHYS 361" pill shows while
+  it's on; its x turns it off. When it's off, **+** then **Study mode**
+  turns it on (Kwil then asks what to study). "Stop studying" or "I'm done" works too.
   A change applies from your next message.
 - **What you missed:** each wrong or half-right answer is noted (the
   concept in a few words, its course, how often, when last). Say "review
@@ -1765,7 +1770,7 @@ deadlines and (for you, the owner) your Notion Assignments' Course options:
   asks), its chats (tap one to read or continue it), **Rename** and
   **Delete project** (asks; its files and memories go, its chats stay in
   History, in no project).
-- **The header** shows the project's name while a chat is in one: tap it
+- **Above the text field** the project's name shows while a chat is in one: tap it
   for the project's page, its x leaves the project (your next message
   starts a chat in none). Continuing a chat from History brings its
   project with it; so do "try again", "edit" and "Branch from here".

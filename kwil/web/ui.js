@@ -2,7 +2,8 @@
 // - the settings menu closes on a tap anywhere outside it (and on Escape);
 // - it is a full-screen Settings page: opening it moves focus to its title,
 //   and Done (like Escape) closes it and gives focus back to the gear;
-// - swiping down while the keyboard is open closes the keyboard.
+// - swiping down while the keyboard is open closes the keyboard (not when
+//   the swipe scrolls a message long enough to scroll inside its field).
 // And the owner's health banner (state.health from /api/state, written by
 // the watchdog, kwil/watch.py): "Mom's app is down since 06:13".
 "use strict";
@@ -44,8 +45,15 @@
       const el = doc.activeElement;
       return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
     };
+    // the composer's field once its text is taller than it (about 6 lines)
+    const scrollsText = (target) => {
+      const field = typeof doc.getElementById === "function" ? doc.getElementById("text") : null;
+      if (!field || !target) return false;
+      const inside = target === field || (typeof field.contains === "function" && field.contains(target));
+      return inside && field.scrollHeight > field.clientHeight;
+    };
     const onStart = (e) => {
-      startY = e.touches && e.touches.length === 1 ? e.touches[0].clientY : null;
+      startY = e.touches && e.touches.length === 1 && !scrollsText(e.target) ? e.touches[0].clientY : null;
     };
     const onMove = (e) => {
       if (startY === null || !e.touches || !e.touches.length || !typing()) return;

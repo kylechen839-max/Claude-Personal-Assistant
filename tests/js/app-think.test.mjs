@@ -2,7 +2,7 @@
 //
 // Runs the phone page's kwil/web/app.js in node:vm (the fake DOM of
 // app-queue.test.mjs) and checks "think harder" (thinkhard.py): the toggle
-// left of Send and a long press on Send ask for it on the next message
+// (a row in the "+" sheet) and a long press on Send ask for it on the next message
 // only ({"think": true} on /api/turn), never sticky, a queued message keeps
 // its own, a yes/no answer never carries it; and a reply's citations go to
 // sources.js (KwilSources.render) with the reply's own words.
@@ -207,7 +207,7 @@ test("a reply's citations go to sources.js with its words", async () => {
   assert.equal(p.rendered.length, 1);  // none without citations
 });
 
-test('the page has the toggle, a 44px Send to hold, and loads sources.js before app.js', () => {
+test('the page has the toggle (in the "+" sheet), a 44px Send to hold, and loads sources.js before app.js', () => {
   assert.match(HTML, /<button id="think" class="think-btn" type="button" aria-pressed="false" aria-label="Think harder"/);
   assert.match(HTML, /<button id="send" type="submit"/);
   assert.ok(HTML.indexOf('/sources.js') > 0 && HTML.indexOf('/sources.js') < HTML.indexOf('/app.js'));

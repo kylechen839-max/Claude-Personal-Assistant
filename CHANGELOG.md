@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Phone app: the chat's composer is one row, like the Claude app: + (photos,
+  files, Think harder, Study mode), a text field that grows to about 6 lines,
+  the mic (Stop while Kwil answers), and Voice conversation, which turns into
+  Send once there is something to send. Enter sends and Shift+Enter adds a
+  line. The project, study and think harder pills sit just above the field.
 - Settings is now a full-screen page, like iOS Settings: a large title and
   Done, with grouped sections (Voice, Memory and projects, Notifications,
   Connections, Privacy and data, People, Backends, Your account). Done and

@@ -131,6 +131,28 @@ test('keyboard: swiping up, or when nothing is focused, does nothing', () => {
   assert.equal(t.input.blurred, 0);
 });
 
+test('keyboard: a swipe that scrolls a long message inside the text field does not hide it', () => {
+  const t = setup();
+  const field = { id: 'text', tagName: 'TEXTAREA', scrollHeight: 300, clientHeight: 150, blurred: 0,
+    contains: (n) => n === field, blur() { this.blurred++; t.doc.activeElement = null; } };
+  t.doc.getElementById = (id) => (id === 'text' ? field : null);
+  t.doc.activeElement = field;
+  const drag = (y, target) => ({ touches: [{ clientY: y }], target });
+  t.fire('touchstart', drag(300, field));
+  t.fire('touchmove', drag(400, field));
+  assert.equal(field.blurred, 0);  // it scrolled the text instead
+  // a swipe that starts elsewhere still hides the keyboard
+  t.fire('touchstart', drag(300, t.outside));
+  t.fire('touchmove', drag(400, t.outside));
+  assert.equal(field.blurred, 1);
+  // a short message (nothing to scroll): the swipe on it hides the keyboard too
+  t.doc.activeElement = field;
+  field.scrollHeight = 150;
+  t.fire('touchstart', drag(300, field));
+  t.fire('touchmove', drag(400, field));
+  assert.equal(field.blurred, 2);
+});
+
 // The owner's health banner (state.health from /api/state, kwil/watch.py).
 const at = (iso) => (iso ? iso.slice(11, 16) : '');
 
