@@ -24,8 +24,8 @@ CSP forbids them).
   (cards, groups), `--r-pill`; sheets 22 at the top.
 - **Sizes:** list rows `--row-h` 52px; every tap target at least 44px.
 - **Depth:** a group is a tone step (`--surface` on `--bg`), never a soft
-  shadow. Only floating layers (sheets, the menu popover) get
-  `--shadow-2`.
+  shadow. Only floating layers (sheets) get
+  `--shadow-2`; the Settings page is a full-screen layer with no shadow.
 - **Motion:** sheets slide in over `--t-sheet` 240ms on `--ease-sheet`
   `cubic-bezier(.32,.72,0,1)`; the scrim fades in over `--t-scrim` 200ms; a
   pressed row turns `--surface-2`; a pressed button scales to .97. Every

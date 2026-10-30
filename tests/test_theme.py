@@ -240,6 +240,10 @@ def test_settings_page_css_is_full_screen_tokens_only_and_calm():
     assert "max-width: 40rem; margin: 0 auto;" in rules[".settings-page "]
     assert re.search(r"\.set-sec:not\(:has\(> \.group > \.row:not\(\[hidden\]\)[^{]*\{ display: none; \}", block)
     assert "html:has(.menu[open])" in block and "overflow: hidden" in block
+    # a Connections sheet still locks the page's own scroller, and the lock
+    # comes after (and outranks) the page's overflow-y: auto
+    lock = "html.conn-sheet-open .menu[open] .menu-body { overflow: hidden; }"
+    assert lock in block and block.index(lock) > block.index(".menu[open] .menu-body {")
     assert "min-width: 44px" in rules["#settings-done "]
     assert "box-shadow: var(--ring)" in rules["#settings-done:focus-visible "]
     reduced = block[block.index("@media (prefers-reduced-motion: reduce)"):]

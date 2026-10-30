@@ -310,6 +310,8 @@ html.conn-sheet-open, html.conn-sheet-open body, html.conn-sheet-open .menu-body
   -webkit-overflow-scrolling: touch; background: var(--bg); color: var(--text);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   animation: settings-in var(--t-scrim) ease-out; }
+/* a Connections sheet over the page: the page behind it doesn't scroll (outranks the rule above) */
+html.conn-sheet-open .menu[open] .menu-body { overflow: hidden; }
 /* nothing scrolls behind it */
 html:has(.menu[open]), html:has(.menu[open]) body { overflow: hidden; }
 .settings-page { max-width: 40rem; margin: 0 auto; padding: 0 var(--s4) var(--s6); }
