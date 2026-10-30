@@ -63,7 +63,9 @@ def detail(conv: dict, active: bool = False) -> dict:
                           "created_at": m["created_at"],
                           "interrupted": m["interrupted"],
                           "tools": [{"tool": e.get("tool"), "status": e.get("status")}
-                                    for e in m["tool_events"]]}
+                                    for e in m["tool_events"]],
+                          # the reply's sources (citations.py), checked again
+                          **({"citations": m["citations"]} if m.get("citations") else {})}
                          for m in conv["messages"]]}
 
 

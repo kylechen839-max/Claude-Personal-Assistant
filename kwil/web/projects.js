@@ -414,5 +414,11 @@
     if (s) s.pill(project || null);
   }
 
-  root.KwilProjects = { configure, onState, pill, setup, summary, TEXT };
+  // A project file named under a reply (sources.js): open its project.
+  function open(id, win = root, doc = root.document) {
+    const s = ensure(win, doc);
+    if (s && typeof id === "string") s.openProject(id);
+  }
+
+  root.KwilProjects = { configure, onState, pill, open, setup, summary, TEXT };
 })(typeof window !== "undefined" ? window : globalThis);

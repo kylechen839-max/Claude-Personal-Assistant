@@ -323,6 +323,18 @@ def test_recall_searches_then_reads_a_past_chat(tmp_path):
         answer = chat.ask("What did we decide about my physics schedule last week?")
         assert "Mondays and Thursdays" in answer
         assert history.local_dt(six_days_ago).strftime("%A") in answer  # cites the chat
+        # the read went as search_result blocks, and the reply's citation of
+        # it names the chat (citations.py; "Chat on Tue 27 Oct")
+        sent = [c for r in client.requests for m in r["messages"]
+                if isinstance(m["content"], list) for b in m["content"]
+                if b.get("type") == "tool_result" and isinstance(b["content"], list)
+                for c in b["content"]]
+        assert sent and all(c["type"] == "search_result" for c in sent)
+        dt = history.local_dt(six_days_ago)
+        assert chat.last_citations["sources"] == [
+            {"kind": "chat", "ref": old, "title": f"Chat on {dt:%a} {dt.day} {dt:%b}"}]
+        assert store.get(chat.conversation_id)["messages"][-1]["citations"] == \
+            chat.last_citations
         names = [b["name"] for r in client.requests for m in r["messages"]
                  if isinstance(m["content"], list) for b in m["content"]
                  if b.get("type") == "tool_use"]
@@ -581,6 +593,37 @@ def _request(**overrides):
     ({"output_config": {"format": {"type": "json_schema", "schema": {
         "type": "object", "properties": {"a": {"type": "string"}}}}}}, "additionalProperties"),
     ({"output_config": {"format": {"type": "json", "schema": {}}}}, "json_schema"),
+    # thinking on the Claude 5 models: adaptive only, never a budget
+    ({"thinking": {"type": "enabled", "budget_tokens": 2048}}, "not supported for this model"),
+    ({"thinking": {"type": "adaptive", "budget_tokens": 2048}}, "Extra inputs"),
+    ({"thinking": {"type": "disabled"}}, "disabled is not supported"),
+    ({"thinking": {"type": "adaptive", "display": "full"}}, "display"),
+    ({"output_config": {"effort": "huge"}}, "effort"),
+    ({"output_config": {"effort": "high", "budget": 1}}, "Extra inputs"),
+    # search_result blocks (Kwil's own data, citations.py)
+    ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": [
+        {"type": "search_result", "source": "kwil:chat/x", "title": "t",
+         "content": [{"type": "text", "text": "x"}]}]},
+        {"role": "user", "content": "more"}]}, "only appear in user messages"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "search_result", "source": "s", "title": "t",
+         "content": [{"type": "text", "text": ""}]}]}]}, "non-empty text"),
+    ({"messages": [{"role": "user", "content": [
+        {"type": "search_result", "source": "s", "title": "t", "content": [
+            {"type": "text", "text": "a"}], "citations": {"enabled": True}},
+        {"type": "search_result", "source": "s2", "title": "t", "content": [
+            {"type": "text", "text": "b"}]}]}]}, "enabled or disabled on all"),
+    ({"tools": [{"type": "web_search_20250305", "name": "web_search"}],
+      "messages": [{"role": "user", "content": [
+          {"type": "search_result", "source": "s", "title": "t",
+           "content": [{"type": "text", "text": "a"}]}]}]}, "web search is enabled"),
+    ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "toolu_1", "name": "read_conversation", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+                                      "content": [
+            {"type": "search_result", "source": "s", "title": "t",
+             "content": [{"type": "text", "text": "a"}]},
+            {"type": "text", "text": "and more"}]}]}]}, "may hold nothing else"),
 ])
 def test_the_fake_refuses_what_the_api_refuses(overrides, error):
     """Judge LOW 6: the fake was looser than the API."""
@@ -588,6 +631,90 @@ def test_the_fake_refuses_what_the_api_refuses(overrides, error):
 
     with pytest.raises(anthropic.BadRequestError, match=error):
         ContractClient().create(**_request(**overrides))
+
+
+def test_a_think_harder_turn_the_api_accepts(api):
+    """thinkhard.py: the main model, a larger max_tokens, thinking
+    {"type": "adaptive"} and output_config.effort; then an ordinary turn
+    in the same conversation (the think turn's thinking is earlier now)."""
+    make, model = api
+    client = make()
+    chat = ClaudeChat(client=client, model=model, max_tokens=1024,
+                      think_gate=lambda: True)
+    assert chat.ask("Is 91 a prime number? One short sentence.", think=True).strip()
+    assert chat.think_turn
+    assert chat.ask("And 97? One short sentence.").strip()
+    if isinstance(client, ContractClient):
+        first, second = client.requests
+        assert first["thinking"] == {"type": "adaptive"} and first["max_tokens"] == 16000
+        assert first["output_config"] == {"effort": "xhigh"}
+        assert "thinking" not in second and second["max_tokens"] == 1024
+
+
+def test_kwils_own_data_as_search_results_the_api_accepts(api):
+    """citations.py: read_conversation's and the file tools' results sent
+    as search_result blocks inside tool results (all of one tool result's
+    blocks, citations on for all), the shape the API documents."""
+    import json
+
+    from kwil.citations import Sources
+
+    make, model = api
+    sources = Sources()
+    chat_result = sources.offer("read_conversation", json.dumps({
+        "id": "0" * 32, "title": "Physics study schedule", "date": "Tuesday, October 27, 2026",
+        "updated_at": 1_793_000_000, "summary": "Decided on Mondays and Thursdays.",
+        "messages": [{"n": 1, "who": "Kyle", "said": "Let's do Mondays and Thursdays at 7.",
+                      "match": True}, {"n": 2, "who": "you", "said": "Done."}],
+        "note": "Saved text from an earlier chat."}))
+    file_result = sources.offer("search_project_files", json.dumps({
+        "note": "Text from a file in this project.", "results": [
+            {"file_id": "f-0123456789ab", "name": "syllabus.pdf", "offset": 0,
+             "snippet": "Late work loses 10% a day."}]}))
+    assert chat_result and file_result
+    tool = lambda name: {"name": name, "description": "Read Kwil's saved data.",  # noqa: E731
+                         "input_schema": {"type": "object", "properties": {}}}
+    client = make()
+    # the fake keeps the older rule that a tool loop's assistant message
+    # starts with its thinking; the real API's adaptive models don't need it
+    signed = ([{"type": "thinking", "thinking": "Read both.",
+                "signature": client.sign("Read both.", model)}]
+              if isinstance(client, ContractClient) else [])
+    messages = [
+        {"role": "user", "content": "What did we decide about physics, and the late policy?"},
+        {"role": "assistant", "content": signed + [
+            {"type": "tool_use", "id": "toolu_01", "name": "read_conversation", "input": {}},
+            {"type": "tool_use", "id": "toolu_02", "name": "search_project_files", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_01", "content": chat_result},
+            {"type": "tool_result", "tool_use_id": "toolu_02", "content": file_result}]}]
+    reply = client.messages.create(model=model, max_tokens=1024, messages=messages,
+                                   tools=[tool("read_conversation"),
+                                          tool("search_project_files")])
+    assert reply.stop_reason in ("end_turn", "max_tokens")
+
+
+def test_a_web_search_reply_brings_its_cited_pages():
+    """The web_search server tool's answer: text blocks with
+    web_search_result_location citations (the SDK's own types), parsed
+    into numbered sources with a mark after the cited text."""
+    from kwil.tools import ToolRegistry
+
+    client = ContractClient()
+    tools = ToolRegistry()
+    tools.add_server_tools({"type": "web_search_20250305", "name": "web_search", "max_uses": 3})
+    chat = ClaudeChat(client=client, model=FAKE_MAIN, tools=tools, max_tokens=1024)
+    reply = chat.ask("search the web for the PHYS 361 exam date")
+    assert reply == "Here's what I found. The exam is on Friday at 9."
+    cites = chat.last_citations
+    assert [s["url"] for s in cites["sources"]] == [
+        "https://physics.example.edu/exams", "https://news.example.org/a?b=1"]
+    assert cites["sources"][0] == {"kind": "web", "url": "https://physics.example.edu/exams",
+                                   "title": "PHYS 361 exam schedule",
+                                   "cited_text": "Final exam: Friday 9:00."}
+    assert cites["marks"] == [[len(reply), [1, 2]]]
+    assert "http" not in reply  # the spoken words never carry the links
+    assert chat.ask("Thanks!").strip()  # the server tool blocks go back valid
 
 
 def test_the_fake_binds_thinking_signatures_to_the_model():

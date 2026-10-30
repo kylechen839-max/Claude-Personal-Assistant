@@ -23,6 +23,12 @@ view; any browser or phone). Where it is checked (webapp.py, voice_ws.py):
 Someone removed (Family.remove) is forgotten, and nothing is counted for
 them afterwards: a turn still in flight can't bring their counters back.
 
+"Think harder" turns (thinkhard.py) are counted here too, per person per
+day ([assistant] think_per_day, 0 = no limit; admit_think): for invited
+people in Family.quotas, and for the owner in a UserQuotas of his own
+(thinkhard.owner_gate) whose other limits are off. A think turn is still
+an ordinary turn for turns_per_minute / turns_per_day.
+
 A refusal is a key of a sentence in i18n.py ("limit_minute", "limit_day",
 "limit_speech"), said in their language; nothing is sent to Claude and
 their conversation and history are not touched.
@@ -57,6 +63,7 @@ class _Usage:
     day: str = ""          # the person's calendar day these counts are for
     turns: int = 0         # turns that day
     speech: float = 0.0    # seconds of audio transcribed that day
+    think: int = 0         # "think harder" turns that day (thinkhard.py)
 
 
 class UserQuotas:
@@ -69,8 +76,10 @@ class UserQuotas:
                  stt_seconds_per_day: float = 1800, clock=time.time,
                  timezone_of: Callable[[str], str | None] | None = None,
                  max_tracked: int = 1000,
-                 is_listed: Callable[[str], bool] | None = None):
+                 is_listed: Callable[[str], bool] | None = None,
+                 think_per_day: int = 0):
         self.turns_per_minute = int(turns_per_minute)
+        self.think_per_day = int(think_per_day)
         self.turns_per_day = int(turns_per_day)
         self.stt_seconds_per_day = float(stt_seconds_per_day)
         self.clock = clock
@@ -85,6 +94,7 @@ class UserQuotas:
     @classmethod
     def from_config(cls, config: dict, **kw) -> "UserQuotas":
         f = config["family"]
+        kw.setdefault("think_per_day", config["assistant"].get("think_per_day", 0))
         return cls(f["turns_per_minute"], f["turns_per_day"],
                    f["stt_seconds_per_day"], **kw)
 
@@ -130,7 +140,7 @@ class UserQuotas:
             u.minute.popleft()
         today = self.day(uid, now)
         if u.day != today:
-            u.day, u.turns, u.speech = today, 0, 0.0
+            u.day, u.turns, u.speech, u.think = today, 0, 0.0, 0
         return u
 
     def _prune(self, now: float) -> None:
@@ -183,6 +193,23 @@ class UserQuotas:
                 u.minute.append(now)
                 u.turns += 1
             return why
+
+    def admit_think(self, uid: str) -> bool:
+        """One more "think harder" turn for `uid` today? Counts it when
+        yes. Someone no longer listed gets none (they can't talk anyway)."""
+        with self.lock:
+            if not self._listed(uid):
+                return False
+            u = self._get(uid, self.clock())
+            if self.think_per_day > 0 and u.think >= self.think_per_day:
+                allowed = False
+            else:
+                u.think += 1
+                allowed = True
+            count = u.think
+        log.info("Limits: think harder %s for %s (%d today)",
+                 "allowed" if allowed else "refused", uid, count)
+        return allowed
 
     def add_speech(self, uid: str, seconds: float) -> None:
         """Count `seconds` of audio transcribed for them."""

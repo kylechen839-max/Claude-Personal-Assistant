@@ -836,6 +836,7 @@ PUBLIC = ["/", "/app.js", "/history.js", "/app.css", "/sw.js", "/manifest.webman
           "/reminders.js",  # Settings, Reminders (its routes need sign-in)
           "/study.js",  # the chat header's study button and pill (its route needs sign-in)
           "/projects.js",  # Settings, Projects and the header's project name (routes need sign-in)
+          "/sources.js",  # a reply's sources list (page code only)
           "/student.js",  # the "School deadlines" card (routes need sign-in)
           "/notion.js",  # an invited person's "Connect Notion" button (routes need sign-in)
           "/connect.js",  # the owner's own sign-ins (routes need the owner)
@@ -1508,7 +1509,7 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v18" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v19" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw and '"/reminders.js"' in sw and '"/study.js"' in sw
     assert '"/projects.js"' in sw

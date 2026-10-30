@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Think harder: tap the light bulb by Send (or hold Send, or start with
+  "think hard about...") and that one message gets the main model with
+  more time to think; 30 a day each. Sources: replies that searched the web
+  show numbered links to the pages they used, and answers from your past
+  chats, project files or course files say where they came from, with a
+  tap to open the chat or project. Saved with the reply in History and
+  exports; never read aloud.
 - Projects, one per class: each with its own instructions, files (PDF/text,
   sent in full while small, searched when large), memories and chats;
   suggested from your Canvas, deadline and Notion courses; History filters

@@ -216,6 +216,7 @@ class AppEl {
   }
   appendChild(c) { this.children.push(c); return c; }
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  setAttribute(k, v) { (this.attrs ??= {})[k] = String(v); }
   async fire(type) { for (const fn of this.listeners[type] || []) await fn({ preventDefault() {} }); }
   focus() {}
 }
@@ -349,5 +350,5 @@ test('every fixed string has Chinese, and the page, app.js and sw.js wire it up'
   assert.match(APP, /KwilProjects\.onState\(state\)/);
   assert.match(APP, /KwilProjects\.configure\(/);
   assert.match(APP, /KwilProjects\.pill\(pane\.project\)/);
-  assert.ok(SW.includes('"/projects.js"') && SW.includes('kwil-shell-v18'));
+  assert.ok(SW.includes('"/projects.js"') && SW.includes('kwil-shell-v19'));
 });

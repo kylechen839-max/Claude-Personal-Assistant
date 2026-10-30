@@ -315,6 +315,12 @@ function messageNode(m, index) {
     wrap = el("div", "msg note", m.role === "assistant" ? `Asked: ${m.text}` : `Answered: ${m.text}`);
   } else {
     wrap = el("div", `msg ${m.role === "user" ? "me" : "claude"}`, m.text);
+    if (m.citations && window.KwilSources) {  // its sources (sources.js; a chat opens here)
+      window.KwilSources.render(document, wrap, m.text, m.citations, {
+        openConversation: (id) => openTranscript(id),
+        openProject: (id) => { if (window.KwilProjects && window.KwilProjects.open) window.KwilProjects.open(id); },
+      });
+    }
     if (m.interrupted) wrap.appendChild(el("span", "tag", " (interrupted)"));
     if (m.tools && m.tools.length) {
       const t = el("span", "tools", m.tools.map((x) =>

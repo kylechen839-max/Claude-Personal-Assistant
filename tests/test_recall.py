@@ -252,8 +252,10 @@ def test_read_conversation_keeps_the_conversation_and_taints(store, fake_client)
                       stop_reason="tool_use"),
         make_response(text_block("In your chat on Sunday: Mondays and Thursdays."))]
     chat.ask("what did we decide about physics?")
-    result = json.loads(fake_client.calls[-1]["messages"][-1]["content"][0]["content"])
-    assert result["title"] == "Weekly study plan" and result["messages"]
+    # sent as a search_result block (citations.py), so the reply can cite it
+    [result] = fake_client.calls[-1]["messages"][-1]["content"][0]["content"]
+    assert result["type"] == "search_result" and result["source"] == f"kwil:chat/{old}"
+    assert result["title"].endswith(": Weekly study plan") and len(result["content"]) > 1
     assert chat.conversation_id == current != old  # not switched
     assert store.get(old)["message_count"] == 4   # nothing added to the old one
     assert chat.tainted() and chat.untrusted_context

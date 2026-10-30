@@ -174,6 +174,17 @@ def _clean(sentence: str) -> str:
     return s if re.search(r"\w", s) else ""
 
 
+_MD_LINK = re.compile(r"\[([^\]\n]{1,200})\]\((?:https?://|www\.)[^)\s]*\)", re.IGNORECASE)
+
+
+def without_urls(text: str) -> str:
+    """`text` for speech: a markdown link becomes its words and a bare web
+    address goes (the phone and the PC never read one out; the sources
+    list shows them)."""
+    text = _MD_LINK.sub(r"\1", str(text or ""))
+    return re.sub(r"[ \t]{2,}", " ", _URL.sub("", text))
+
+
 def split_sentences(text: str) -> list[str]:
     """All sentences of a finished text."""
     splitter = SentenceSplitter(first_clause_words=0)  # whole sentences only

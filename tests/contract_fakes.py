@@ -21,7 +21,24 @@ ThinkingBlock, ToolUseBlock, TextBlock), streamed or not:
   messages together), never on a thinking or server tool block, never on
   an empty text block;
 - output_config: a json_schema format whose objects all say
-  additionalProperties false, never with a forced tool_choice.
+  additionalProperties false, never with a forced tool_choice; an `effort`
+  of low / medium / high / xhigh / max; no other key;
+- thinking: {"type": "adaptive"} (optionally "display": "summarized" or
+  "omitted"); "enabled" with budget_tokens is the API's 400 on the Claude 5
+  models Kwil uses (only the 4.6 and older models took it), as is
+  "disabled" on Opus/Sonnet 5.5 (Haiku 5.5 only up to high effort);
+- search_result blocks (Kwil's own data, cited like web results): only in
+  user messages, top level or as a tool_result's whole content (never
+  mixed with other blocks there), each with a source, a title and
+  non-empty text blocks, citations enabled on all or none, and on all when
+  web_search is offered.
+
+Sources for the thinking, effort and search_result rules (fetched
+2026-10-30): platform.claude.com/docs/en/build-with-claude/thinking (the
+per-model `thinking` table), .../extended-thinking (budget_tokens is
+deprecated and a 400 on Claude 4.7 and later), .../effort
+(output_config.effort levels) and .../search-results; the SDK's own
+ThinkingConfigAdaptiveParam and OutputConfigParam types agree.
 
 Its answers are scripted from the request: a calendar question calls
 list_calendar_events when offered, a tool result gets a short summary,
@@ -34,6 +51,10 @@ one with create_reminder and says back the time it gives, "what did we
 decide about <topic>"
 searches past chats with search_conversations, reads the first hit with
 read_conversation and answers from its matching message (when offered),
+"search the web for ..." (when web_search is offered) runs one server-side
+search and answers with web_search_result_location citations, a
+read_conversation result made of search_result blocks is answered with
+a search_result_location citation of its best message,
 "quiz me on <course>" turns study mode on with start_study and asks a
 first question, and in study mode (its block in `system`) an answer that
 starts "I think" is a wrong one: noted with note_missed (the course from
@@ -59,7 +80,12 @@ from anthropic.types import Message
 
 KNOWN_BLOCKS = {"text", "image", "document", "tool_use", "tool_result", "thinking",
                 "redacted_thinking", "server_tool_use", "web_search_tool_result",
-                "web_fetch_tool_result"}
+                "web_fetch_tool_result", "search_result"}
+# what a tool_result's content list may hold
+TOOL_RESULT_BLOCKS = {"text", "image", "document", "search_result"}
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# models that still took thinking {"type": "enabled", "budget_tokens"}
+_LEGACY_THINKING = re.compile(r"claude-(?:opus|sonnet|haiku)-4-[0-6]")
 # blocks that may not carry cache_control
 NOT_CACHEABLE = {"thinking", "redacted_thinking", "server_tool_use",
                  "web_search_tool_result", "web_fetch_tool_result"}
@@ -105,6 +131,24 @@ def _tool_json(message: dict) -> dict:
     return {}
 
 
+# what the fake's web search finds (url, title)
+WEB_RESULTS = (("https://physics.example.edu/exams", "PHYS 361 exam schedule"),
+               ("https://news.example.org/a?b=1", "Campus news"))
+
+
+def _search_results(msgs: list[dict]) -> list[tuple[int, dict]]:
+    """(search_result_index, block) of every search_result block sent, in
+    request order (top level and inside tool results)."""
+    out = []
+    for m in msgs:
+        for b in _blocks(m):
+            inner = b.get("content") if b.get("type") == "tool_result" else [b]
+            for c in inner if isinstance(inner, list) else []:
+                if isinstance(c, dict) and c.get("type") == "search_result":
+                    out.append((len(out), c))
+    return out
+
+
 def _text_of(message: dict) -> str:
     return " ".join(b.get("text", "") for b in _blocks(message) if b.get("type") == "text")
 
@@ -131,6 +175,8 @@ class ContractClient:
         self.validate_system(kwargs.get("system"))
         self.validate_cache_control(kwargs)
         self.validate_output_config(kwargs)
+        self.validate_thinking(kwargs)
+        self.validate_search_results(kwargs)
         if not msgs or msgs[0]["role"] != "user":
             raise bad_request("messages: the first message must use the user role")
         for i, m in enumerate(msgs):
@@ -203,6 +249,14 @@ class ContractClient:
         config = kwargs.get("output_config")
         if config is None:
             return
+        extra = sorted(set(config or {}) - {"format", "effort"})
+        if extra:
+            raise bad_request(f"output_config.{extra[0]}: Extra inputs are not permitted")
+        if "effort" in config and config["effort"] not in EFFORTS:
+            raise bad_request("output_config.effort: Input should be 'low', 'medium', "
+                              "'high', 'xhigh' or 'max'")
+        if "format" not in config:
+            return
         fmt = (config or {}).get("format") or {}
         if fmt.get("type") != "json_schema" or not isinstance(fmt.get("schema"), dict):
             raise bad_request("output_config.format: Input tag does not match 'json_schema'")
@@ -224,6 +278,103 @@ class ContractClient:
                 check(node.get("items") or {}, f"{where}.items")
 
         check(fmt["schema"], "output_config.format.schema")
+
+    @staticmethod
+    def validate_thinking(kwargs: dict) -> None:
+        """The `thinking` parameter as the Claude 5 models take it: adaptive
+        (the default when it is left out), never a budget."""
+        thinking = kwargs.get("thinking")
+        if thinking is None:
+            return
+        model = str(kwargs.get("model", ""))
+        effort = (kwargs.get("output_config") or {}).get("effort")
+        if not isinstance(thinking, dict):
+            raise bad_request("thinking: Input should be a valid dictionary")
+        kind = thinking.get("type")
+        allowed = {"adaptive": {"type", "display"}, "disabled": {"type"},
+                   "enabled": {"type", "budget_tokens", "display"},
+                   "between_tools": {"type", "display"}}
+        if kind not in allowed:
+            raise bad_request("thinking.type: Input tag does not match any of the expected "
+                              "tags: 'adaptive', 'enabled', 'disabled', 'between_tools'")
+        extra = sorted(set(thinking) - allowed[kind])
+        if extra:
+            raise bad_request(f"thinking.{kind}.{extra[0]}: Extra inputs are not permitted")
+        if thinking.get("display", "omitted") not in ("summarized", "omitted"):
+            raise bad_request("thinking.display: Input should be 'summarized' or 'omitted'")
+        legacy = bool(_LEGACY_THINKING.search(model))
+        if kind == "enabled" and not legacy:
+            raise bad_request('"thinking.type.enabled" is not supported for this model. '
+                              'Use "thinking.type.adaptive" and "output_config.effort" '
+                              "to control thinking behavior.")
+        if kind == "enabled" and not isinstance(thinking.get("budget_tokens"), int):
+            raise bad_request("thinking.enabled.budget_tokens: Field required")
+        if kind == "adaptive" and re.search(r"claude-(?:opus|sonnet|haiku)-4-5", model):
+            raise bad_request("adaptive thinking is not supported on this model")
+        high = effort in ("xhigh", "max")
+        if kind == "disabled" and not legacy and ("haiku" not in model or high):
+            raise bad_request("thinking.type.disabled is not supported for this model"
+                              + (" at this effort" if "haiku" in model else ""))
+        if kind == "between_tools" and ("sonnet-5-5" not in model or high):
+            raise bad_request("thinking.type.between_tools is not supported for this model"
+                              + (" at this effort" if "sonnet-5-5" in model else ""))
+
+    @staticmethod
+    def validate_search_results(kwargs: dict) -> None:
+        """search_result blocks (docs: build-with-claude/search-results)."""
+        found = []  # (where, block)
+        for i, m in enumerate(kwargs.get("messages") or []):
+            for j, b in enumerate(_blocks(m)):
+                where = f"messages.{i}.content.{j}"
+                if b.get("type") == "search_result":
+                    if m["role"] != "user":
+                        raise bad_request(f"{where}: search_result blocks can only appear "
+                                          "in user messages")
+                    found.append((where, b))
+                elif b.get("type") == "tool_result" and isinstance(b.get("content"), list):
+                    inner = b["content"]
+                    if not all(isinstance(c, dict) for c in inner):
+                        raise bad_request(f"{where}.content: Input should be a valid "
+                                          "dictionary")
+                    kinds = {c.get("type") for c in inner}
+                    unknown = kinds - TOOL_RESULT_BLOCKS
+                    if unknown:
+                        raise bad_request(f"{where}.content: unknown type "
+                                          f"{sorted(map(str, unknown))[0]!r}")
+                    if "search_result" in kinds and kinds != {"search_result"}:
+                        raise bad_request(f"{where}.content: a tool_result holding "
+                                          "search_result blocks may hold nothing else")
+                    found += [(f"{where}.content.{k}", c) for k, c in enumerate(inner)
+                              if c.get("type") == "search_result"]
+        enabled = set()
+        for where, b in found:
+            extra = sorted(set(b) - {"type", "source", "title", "content", "citations",
+                                     "cache_control"})
+            if extra:
+                raise bad_request(f"{where}.{extra[0]}: Extra inputs are not permitted")
+            for key in ("source", "title"):
+                if not isinstance(b.get(key), str) or not b[key]:
+                    raise bad_request(f"{where}.{key}: Field required")
+            content = b.get("content")
+            if not isinstance(content, list) or not content:
+                raise bad_request(f"{where}.content: Field required")
+            for k, c in enumerate(content):
+                if not isinstance(c, dict) or c.get("type") != "text" \
+                        or not isinstance(c.get("text"), str) or not c["text"]:
+                    raise bad_request(f"{where}.content.{k}: search results hold "
+                                      "non-empty text blocks only")
+            citations = b.get("citations")
+            if citations is not None and (not isinstance(citations, dict)
+                                          or set(citations) - {"enabled"}):
+                raise bad_request(f"{where}.citations: Extra inputs are not permitted")
+            enabled.add(bool((citations or {}).get("enabled")))
+        if len(enabled) > 1:
+            raise bad_request("Citations must be enabled or disabled on all search results "
+                              "in a request")
+        web = any(t.get("name") == "web_search" for t in kwargs.get("tools") or [])
+        if web and False in enabled:
+            raise bad_request("When web search is enabled, citations must be enabled on "
+                              "all search_result blocks")
 
     # --- the script ---
     def respond(self, kwargs: dict) -> Message:
@@ -314,6 +465,24 @@ class ContractClient:
                 stop = "tool_use"
             else:
                 content.append({"type": "text", "text": "I couldn't find that chat."})
+        elif not _is_user_turn(last) and called == {"read_conversation"} \
+                and _search_results(msgs):
+            # search_result blocks: the best message, cited (the API's
+            # search_result_location: index among all search results sent)
+            words = _topic(asked).lower().split()
+            index, result = _search_results(msgs)[-1]
+            blocks = result["content"]
+            k = max(range(len(blocks)), key=lambda n: (
+                n > 0, sum(w in blocks[n]["text"].lower() for w in words)))
+            said = blocks[k]["text"].split(": ", 1)[-1]
+            date = re.search(r"from (\w+day, \w+ \d+, \d{4})", blocks[0]["text"])
+            content.append({"type": "text", "text": "In your chat on "
+                            f"{date.group(1) if date else 'that day'}: "})
+            content.append({"type": "text", "text": said, "citations": [{
+                "type": "search_result_location", "cited_text": blocks[k]["text"],
+                "source": result["source"], "title": result["title"],
+                "search_result_index": index, "start_block_index": k,
+                "end_block_index": k + 1}]})
         elif not _is_user_turn(last) and called == {"read_conversation"}:
             read, words = _tool_json(last), _topic(asked).lower().split()
             matches = [m["said"] for m in read.get("messages") or [] if m.get("match")]
@@ -324,6 +493,23 @@ class ContractClient:
                 if said else "I couldn't find that in the chat.")})
         elif not _is_user_turn(last):  # tool results came back
             content.append({"type": "text", "text": "Tomorrow you have two events."})
+        elif _is_user_turn(last) and "web_search" in tools \
+                and re.search(r"\bsearch the web for\b", words, re.I):
+            # one server-side search (the API runs it), then a cited answer
+            query = re.search(r"search the web for (.+?)[.?!]?$", words, re.I).group(1)
+            content += [
+                {"type": "server_tool_use", "id": f"srvtoolu_{n:04d}",
+                 "name": "web_search", "input": {"query": query}},
+                {"type": "web_search_tool_result", "tool_use_id": f"srvtoolu_{n:04d}",
+                 "content": [{"type": "web_search_result", "url": url, "title": title,
+                              "encrypted_content": "enc", "page_age": None}
+                             for url, title in WEB_RESULTS]},
+                {"type": "text", "text": "Here's what I found. "},
+                {"type": "text", "text": "The exam is on Friday at 9.", "citations": [
+                    {"type": "web_search_result_location", "url": url, "title": title,
+                     "encrypted_index": "ei", "cited_text": "Final exam: Friday 9:00."}
+                    for url, title in WEB_RESULTS]},
+            ]
         elif "what did we decide" in asked.lower() \
                 and "search_conversations" in tools:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
@@ -334,7 +520,7 @@ class ContractClient:
             content.append({"type": "tool_use", "id": f"toolu_{n:04d}",
                             "name": "list_calendar_events", "input": {"day": "tomorrow"}})
             stop = "tool_use"
-        elif kwargs.get("output_config") is not None:
+        elif (kwargs.get("output_config") or {}).get("format") is not None:
             # structured output (student deadlines' extractor): one deadline
             # per "<title> is due <YYYY-MM-DD>" sentence in each <text>
             items = [{"text_index": int(i), "title": title, "course": "",
