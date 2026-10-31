@@ -161,6 +161,12 @@ class ToolRegistry:
             log.info("Tool %s ok", name)
             if not tool.private:
                 log.debug("Tool %s(%s) ok", name, tool_input)
+            if tool.untrusted_output and isinstance(result, dict):
+                # other people's text, said in the result itself: the
+                # conversation stays tainted even if this tool later leaves
+                # the registry (a Google disconnect or reconnect without it).
+                # A copy: a handler may hand back a cached dict.
+                result = {**result, UNTRUSTED_MARK: True}
             return (result if isinstance(result, str)
                     else json.dumps(result, default=str)), False
         except Exception as e:  # report the error to Claude, don't crash

@@ -216,5 +216,5 @@ test('every fixed string has Chinese, and the page, app.js and sw.js wire it up'
   assert.match(APP, /KwilResearch\.onState\(state\)/);
   assert.match(APP, /KwilResearch\.onDone\(ev\)/);
   assert.match(APP, /KwilResearch\.configure\(\{ request \}\)/);
-  assert.ok(SW.includes('"/research.js"') && SW.includes('kwil-shell-v27'));
+  assert.ok(SW.includes('"/research.js"') && SW.includes('kwil-shell-v29'));
 });

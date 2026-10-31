@@ -204,7 +204,18 @@ Files in Kyle's Drive can be written or shared by anyone (a shared Doc, a
 file a classmate dropped in a shared folder), so `search_drive` and
 `read_doc` (`tools/drive.py`) are `untrusted_output` and `private`, like
 the email tools: once one ran, every tool that changes something asks for
-a spoken yes first, and file names, queries and text never reach the log
+a spoken yes first for the rest of the conversation, even if the Drive
+(or Gmail) tools later leave the registry (a Disconnect that falls back
+to a token without the scope, or a Reconnect with the box unticked
+rebuilds the tools in place). Two things keep it: the chat sets its sticky
+`untrusted_context` when it dispatches any tool the registry lists as
+untrusted at that moment (only `reset()` clears it), and the registry
+adds `"untrusted_content": true` to every dict result of an
+`untrusted_output` tool, which `has_marked_results` finds in the history
+with or without the tool (and with an empty registry). The mark doesn't
+reach a result sent as `search_result` blocks (course and project files,
+`citations.py`) or a plain-text result; the flag covers those. File
+names, queries and text never reach the log
 (INFO says counts and lengths only; Google's errors, whose text holds the
 request URL and so the query, are replaced by plain ones before the
 registry logs them). The scope is `drive.readonly` only, asked for only

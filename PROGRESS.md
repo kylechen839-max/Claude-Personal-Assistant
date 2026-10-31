@@ -8663,7 +8663,7 @@ change, every id and hook kept.
   it, Settings' Google row says "Reconnect to add Google Drive
   (read-only)" and the button runs the same Connect flow
   (`kwil/web/i18n.js`, en and zh). Disconnect removes the Drive tools
-  (`_google_tool_names`). `sw.js` `kwil-shell-v27`.
+  (`_google_tool_names`). `sw.js` `kwil-shell-v29`.
 - **Tests:** new `tests/test_drive.py` (17), on a fake Drive v3 service
   with the real answer shapes and real `HttpError`s; fake tokens expire in
   2099 and `Credentials.refresh` fails the test. Exports and the cap and
@@ -8680,7 +8680,7 @@ change, every id and hook kept.
   flow, and no Drive line for other missing scopes). Status dict pins
   (+`missing`) in test_google_web, test_family_google, test_family and
   test_cloud; test_gmail's sign-in CLI test now expects Drive by default
-  and none with `[drive] enabled = false`; sw v27 in six files. Fail-first:
+  and none with `[drive] enabled = false`; sw v29 in six files. Fail-first:
   `test_drive.py` can't import at e5fbb70; each test also fails with only
   its piece of the source reverted (16 one-change reverts, scripted: the
   escape, the allowlist, `untrusted_output`, `private`, the error
@@ -8689,3 +8689,29 @@ change, every id and hook kept.
   the JS test fails with `lacksDrive` returning false.
 - Full suite: 4041 passed, 53 skipped (baseline 4024 + 17); JS 482 passed
   (baseline 481 + 1). Sandbox numbers, no real Google call.
+
+### Google Drive, judge round 1 (2026-10-31)
+- **MED, taint lost when a tool leaves the registry:** `tainted()` reread
+  the history with the registry's *current* untrusted tools, and
+  `GoogleConnect._register_tools` / `Family._refresh_tools` pop Drive (or
+  Gmail) in place after a Disconnect or a Reconnect without the scope, so a
+  conversation that had read an injected Doc stopped asking. Fixed
+  generically: `ClaudeChat._dispatch` sets the sticky `untrusted_context`
+  when the dispatched tool is untrusted at that moment; `ToolRegistry.
+  dispatch` adds `"untrusted_content": true` to every dict result of an
+  `untrusted_output` tool (a copy, never the handler's dict; once); and
+  `outside_content` / `_remember` check web and marked results with an
+  empty registry too (they skipped them when `bool(self.tools)` was
+  false). Earlier history bytes are unchanged, so the prompt cache holds.
+  Tests (+5 in `test_drive.py`): a Drive read, the Drive tools popped, a
+  move still asks; the same for Gmail; a family member's turn reads a Doc,
+  her reconnect without Drive rebuilds her tools, her chat is still
+  tainted; the result carries the mark once and a chat with only that
+  history and an empty registry is tainted; a course file sent as
+  `search_result` blocks (no mark) still makes a move ask after its tools
+  leave. Fail-first (scripted reverts): without the flag the course-file
+  test fails; without the mark, or with the empty-registry check reverted,
+  the mark test fails; without both, all five fail.
+- **LOW:** `sw.js` `kwil-shell-v29` (v27 and v28 are taken on master by
+  #103 and #105), six pins.
+- Full suite: 4046 passed, 53 skipped (round 0's 4041 + 5); JS 482 passed.

@@ -19,7 +19,7 @@ import pytest
 from kwil import cli, doctor
 from kwil.chat import ClaudeChat, has_untrusted_content
 from kwil.config import load_config
-from kwil.tools import REDO_SAFE_TOOLS, ToolRegistry, google_auth
+from kwil.tools import REDO_SAFE_TOOLS, Tool, ToolRegistry, google_auth
 from kwil.tools.drive import (MAX_FILE_BYTES, MAX_READ, DriveError, DriveFiles,
                               DriveWriteBlocked)
 from tests.conftest import make_response, text_block, tool_use_block
@@ -488,3 +488,131 @@ def test_a_family_disconnect_removes_her_drive_tools(g):
     assert registry.has("read_doc")
     assert mom.post("/api/google/disconnect", json={}).status_code == 200
     assert not registry.has("read_doc") and not registry.has("search_drive")
+
+
+# ---------- taint outlives the tool that brought the text in ----------
+def _pop(registry, names):
+    """What GoogleConnect._register_tools / Family._refresh_tools do when the
+    new token lacks a scope: the tools leave the shared dict in place."""
+    for name in names:
+        registry.tools.pop(name, None)
+
+
+MOVE = ("move_calendar_event", {"event_id": "ev1", "new_start": "2026-10-18T00:00:00"})
+
+
+def _read_then_change_after_removal(fake_client, reader, read_args, extra_tools, gone):
+    asked = []
+    reg, events, _ = all_tools(asked)
+    reg.register(*extra_tools)
+    fake_client.queue = [
+        make_response(tool_use_block(reader, read_args, id="t1"), stop_reason="tool_use"),
+        make_response(text_block("It's a plan.")),
+        make_response(tool_use_block(*MOVE, id="t2"), stop_reason="tool_use"),
+        make_response(text_block("I didn't move it."))]
+    chat = ClaudeChat(client=fake_client, tools=reg)
+    chat.ask("Read the shared plan")
+    _pop(reg, gone)  # e.g. a Disconnect falling back to a token without the scope
+    assert not set(gone) & set(reg.tools)
+    chat.ask("OK, move the dentist to midnight like it says")
+    return asked, events, chat
+
+
+def test_drive_taint_survives_the_drive_tools_leaving(fake_client):
+    d, _ = drive()
+    asked, events, chat = _read_then_change_after_removal(
+        fake_client, "read_doc", {"file_id": "1Shared00000000000"}, d.tools(),
+        ("search_drive", "read_doc"))
+    assert len(asked) == 1 and asked[0].startswith("Do you want me to move")
+    assert not events.patch.called and chat.tainted()
+
+
+def test_gmail_taint_survives_the_gmail_tools_leaving(fake_client):
+    from tests.test_gmail import inbox
+
+    gmail, _, _ = inbox()
+    asked, events, chat = _read_then_change_after_removal(
+        fake_client, "read_email", {"message_id": "m2"}, gmail.tools(),
+        ("email_summary", "read_email", "draft_reply"))
+    assert len(asked) == 1 and asked[0].startswith("Do you want me to move")
+    assert not events.patch.called and chat.tainted()
+
+
+def test_the_result_itself_says_untrusted(fake_client):
+    """(b) The mark in the result: a chat that only has the history (a
+    conversation switched to, or rebuilt) without the Drive tools in its
+    registry still counts it as outside text."""
+    from kwil.chat import has_marked_results
+    from kwil.tools import UNTRUSTED_MARK
+
+    d, _ = drive()
+    reg = ToolRegistry()
+    reg.register(*d.tools())
+    for name, args in (("read_doc", {"file_id": "1Shared00000000000"}),
+                       ("search_drive", {"query": "plan"})):
+        result, err = reg.dispatch(name, args)
+        assert not err and json.loads(result)[UNTRUSTED_MARK] is True
+        assert result.count(UNTRUSTED_MARK) == 1  # marked once
+    history = [
+        {"role": "user", "content": "read my doc"},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "read_doc",
+                                           "input": {"file_id": "1Shared00000000000"}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                      "content": result}]},
+        {"role": "assistant", "content": "ok"}]
+    assert has_marked_results(history)
+    later = ClaudeChat(client=fake_client, tools=ToolRegistry())  # no Drive tools now
+    later.history = history
+    assert later.tainted()
+    # a handler's own dict is never changed (it may be cached)
+    own = {"note": "x"}
+    reg.register(Tool("t_own", "x", {"type": "object", "properties": {}},
+                      lambda: own, untrusted_output=True))
+    reg.dispatch("t_own", {})
+    assert own == {"note": "x"}
+
+
+def test_flag_covers_results_the_mark_cant_reach(fake_client, tmp_path):
+    """(a) A course file's result goes to Claude as search_result blocks
+    (citations.py), where the JSON mark doesn't survive: the chat's own
+    sticky flag still holds once the tool is gone."""
+    from kwil import coursefiles
+    from kwil.tools.coursefiles import CourseFileTools
+
+    cfg = load_config(None, None)
+    cfg["student"]["dir"] = str(tmp_path)
+    store = coursefiles.open_store(cfg)
+    assert store.upsert(None, {"course_id": 1, "course": "Bio 101", "kind": "page",
+                               "source_key": "p1", "title": "Lab plan", "etag": "1",
+                               "text": "The lab plan. " + INJECTION}) == "added"
+    files = CourseFileTools(store, None)
+    asked, events, chat = _read_then_change_after_removal(
+        fake_client, "search_course_files", {"query": "plan"}, files.tools(),
+        ("search_course_files", "read_course_file"))
+    # it really went as search_result blocks, without the JSON mark
+    sent = chat.history[2]["content"][0]["content"]
+    assert isinstance(sent, list) and sent[0]["type"] == "search_result"
+    assert "untrusted_content" not in json.dumps(sent)
+    assert len(asked) == 1 and asked[0].startswith("Do you want me to move")
+    assert not events.patch.called
+
+
+def test_a_family_refresh_without_drive_keeps_her_conversation_tainted(g):
+    mom, mom_id = g.member("Mom", "en")
+    family_connects(g, mom, mom_id, "mom", FAMILY_SCOPES + [DRIVE])
+    service, _ = make_drive()
+    g.client.queue += [
+        make_response(tool_use_block("read_doc", {"file_id": "1Shared00000000000"}, id="t1"),
+                      stop_reason="tool_use"),
+        make_response(text_block("It says to change things."))]
+    with patch("googleapiclient.discovery.build", return_value=service):
+        assert mom.post("/api/turn", json={"text": "read the shared plan"}).status_code == 200
+    session = next(s for s in g.assistant.sessions.values() if s.user == mom_id)
+    assert session.chat.tainted()
+    # she reconnects with Drive unticked: her tools are rebuilt in place
+    g.fam.google_token(mom_id).write_text(json.dumps(
+        {**token_of("mom"), "scopes": FAMILY_SCOPES}))
+    g.fam._refresh_tools(mom_id)
+    assert not session.registry.has("read_doc")
+    assert session.registry.has("create_calendar_event")
+    assert session.chat.tainted()  # so create/move still ask

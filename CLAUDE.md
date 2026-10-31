@@ -1,5 +1,7 @@
 # Project: "Kwil" (formerly "Hey Claude") Personal Voice Assistant
 
+Every session: read @.claude/SESSION_START.md first (mailbox, hard rules, workflow, token use).
+
 ## Goal
 Build an Echo-style voice assistant in Python on top of the Anthropic API.
 I say "Hey Claude", ask something, and it answers out loud. It runs on my
