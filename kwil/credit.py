@@ -24,8 +24,9 @@ reserved in one step under the lock:
   - everyone's: total used + every reservation in flight + this one must
     fit `beta_credit_total_usd`, so the global cap is never passed;
   - each person's: something must be left after their calls in flight,
-    and at most MAX_IN_FLIGHT of their calls run at once (a third waits
-    for one to end). Requiring a whole worst case to fit would leave the
+    and at most MAX_IN_FLIGHT of their calls run at once. Held up only by
+    calls in flight (not by money used), a call waits for them to end
+    instead of being told the credit is used up. Requiring a whole worst case to fit would leave the
     last $1.80 or so of a $5 credit unusable, so a person's credit can be
     passed by at most what their last MAX_IN_FLIGHT calls cost over it
     (each at most its reservation; usually cents).
@@ -283,33 +284,43 @@ class CreditLedger:
         return (self.per_person - self.people.get(uid, 0.0) - mine,
                 self.cap - self.total - everyone)
 
+    def _spent(self, uid: str, usd: float = 0.0) -> bool:
+        """Does the money already used (not what's in flight) rule out a
+        call of `usd` for `uid`? Under the lock."""
+        if self.broken or not self.enabled:
+            return True
+        return (self.people.get(uid, 0.0) >= self.per_person
+                or self.total + usd > self.cap + 1e-9 or self.total >= self.cap)
+
     def check(self, uid: str) -> bool:
-        """Is anything of `uid`'s credit (and everyone's) left now?"""
+        """Is anything of `uid`'s credit (and everyone's) left, not counting
+        the calls in flight (a call waits for those, admit)?"""
         with self._lock:
             self._expire(self.monotonic())
-            return min(self._left(uid)) > 0
+            return not self._spent(uid)
 
     def admit(self, uid: str, usd: float, wait: float | None = None) -> int | None:
         """Reserve `usd` (a call's worst case, request_reserve) for `uid`: a
         token for settle(), or None if it doesn't fit (their credit, or
-        everyone's, is used up). With MAX_IN_FLIGHT of theirs running, waits
-        up to `wait` seconds (default the call timeout) for one to end."""
+        everyone's, is used up). When only calls in flight are in the way
+        (their reservations, or MAX_IN_FLIGHT of theirs running), waits up
+        to `wait` seconds (default the call timeout) for them to end."""
         usd = max(0.0, float(usd))
         deadline = time.monotonic() + (self.ttl if wait is None else wait)
         with self._lock:
             while True:
                 now = self.monotonic()
                 self._expire(now)
-                mine, everyone = self._left(uid)
-                if mine <= 0 or everyone + 1e-9 < usd or everyone <= 0:
+                if self._spent(uid, usd):  # the money used: CreditSpent
                     return None
+                mine, everyone = self._left(uid)
                 count = sum(1 for who, _, _ in self._held.values() if who == uid)
-                if count < MAX_IN_FLIGHT:
+                if mine > 0 and everyone + 1e-9 >= usd and count < MAX_IN_FLIGHT:
                     break
                 remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    log.warning("Credit: %s has %d calls in flight; not another", uid,
-                                count)
+                if remaining <= 0:  # still held up by calls in flight
+                    log.warning("Credit: %s's call waited for %d in flight; not sent",
+                                uid, count)
                     return None
                 self._lock.wait(min(remaining, 1.0))
             token = next(self._ids)

@@ -927,7 +927,7 @@ def test_research_never_runs_on_the_beta_starter_credit(env, owner):
     mom, link = env.member(owner, name="Mom", language="en")  # beta, no key
     uid = link["user"]["id"]
     assert env.family.credit.enabled
-    assert env.family.api_for(uid)[1] is False  # her chats: the owner's key, on credit
+    assert env.family.api_for(uid, credit=True)[1] is False  # her chats: the owner's key, on credit
     with pytest.raises(R.ResearchRefused) as e:
         service.start(uid, QUESTION)
     assert e.value.key == "research_no_key"

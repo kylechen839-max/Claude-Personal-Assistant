@@ -449,7 +449,7 @@ def test_a_beta_tester_on_the_starter_credit_still_gets_no_paid_voices(env, owne
     env.picker.catalog.family_paid = True
     tester, tester_id = env.member(owner, "Tester", "en")
     assert env.family.credit.enabled
-    assert env.family.api_for(tester_id)[1] is False  # on the owner's key
+    assert env.family.api_for(tester_id, credit=True)[1] is False  # on the owner's key
     assert env.picker.catalog.paid_ok(tester_id) is False
     assert not [v for v in tester.get("/api/voices").json()["voices"] if v["paid"]]
     r = tester.post("/api/voices", json={"voice": f"elevenlabs:{RACHEL}"})

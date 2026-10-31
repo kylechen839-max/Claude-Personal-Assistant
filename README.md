@@ -1011,7 +1011,11 @@ the response's usage; for a stream cut short by Stop, a barge-in or a
 dropped connection, the input it reported plus its whole `max_tokens` of
 output; with no usage at all (a timeout) the whole reservation. A call
 Anthropic answered with an error, or never received, costs nothing. A
-reservation left unsettled past the call timeout is charged in full. A
+reservation left unsettled past the call timeout is charged in full.
+Retries after a timeout, 429 or 5xx are made by the credit itself (the SDK's
+rules and backoff), each try charged on its own, and a call held up only by
+another one in flight (a title while a reply streams) waits instead of being
+refused. A
 model without a price in `usage.PRICES` (`[assistant] model`, `fast_model`,
 `[history] title_model`) turns the credit off, logged at ERROR. The book is
 `<dir>/beta_credit.json` (kept across restarts; removing someone drops their

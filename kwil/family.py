@@ -1045,7 +1045,10 @@ class Family:
 
         def chat_factory(session_registry):
             # their own key (or, for family, the owner's), looked up per call
-            chat_api, title_api = UserApi(self, user["id"]), UserApi(self, user["id"])
+            # on the starter credit too (credit.py): their chats, titles and
+            # scheduled reminder tasks (which run on this factory)
+            chat_api = UserApi(self, user["id"], credit=True)
+            title_api = UserApi(self, user["id"], credit=True)
             recorder = Recorder(store, "web", client_fn=title_api.client_or_none,
                                 title_model=h["title_model"], meter=title_api)
             return ClaudeChat(client=chat_api, meter=chat_api, model=a["model"],
@@ -1069,7 +1072,8 @@ class Family:
     def client(self, uid: str | None = None):
         """The owner's client (uid None), else the one `uid`'s calls use:
         their own key's, the owner's for a "family" person without one, or
-        MissingKey (a beta tester without a key, or someone no longer listed)."""
+        MissingKey (a beta tester without a key, or someone no longer listed;
+        never the starter credit: a bare client's calls can't be reserved)."""
         if uid is not None:
             return self.api_for(uid)[0]
         if self._client is None:
@@ -1089,12 +1093,12 @@ class Family:
         return user_client(key, max_retries=a["api_max_retries"],
                            timeout=a["api_timeout"])
 
-    def api_for(self, uid: str, credit: bool = True) -> tuple[object, bool]:
+    def api_for(self, uid: str, credit: bool = False) -> tuple[object, bool]:
         """(client, True if it is on their own key) for `uid`'s next call."""
         client, own, _ = self.api_of(uid, credit)
         return client, own
 
-    def api_of(self, uid: str, credit: bool = True) -> tuple[object, bool, bool]:
+    def api_of(self, uid: str, credit: bool = False) -> tuple[object, bool, bool]:
         """api_for, and whether the call is on the starter credit. A beta
         tester without a key gets the owner's client while some of their
         starter credit is left (credit.py; `credit=False`: never, e.g. deep
@@ -1221,7 +1225,7 @@ class UserApi:
     A call on the beta's starter credit goes through CreditMessages, which
     reserves and settles it (credit.py). `with_options` keeps the wrapper."""
 
-    def __init__(self, family: "Family", uid: str, credit: bool = True,
+    def __init__(self, family: "Family", uid: str, credit: bool = False,
                  options: dict | None = None):
         self._family = family
         self._uid = uid
@@ -1258,12 +1262,22 @@ class UserApi:
         client = self.resolve()
         if not self.on_credit:
             return client.messages
-        return CreditMessages(self._family, self._uid, client.messages)
+        # the SDK's own retries would bill each timed-out try and settle one:
+        # CreditMessages retries itself, reserving and settling every try
+        retries = getattr(client, "max_retries", 0)
+        retries = retries if isinstance(retries, int) and not isinstance(retries, bool) \
+            else 0
+        if callable(getattr(client, "with_options", None)):
+            client = client.with_options(max_retries=0)
+        return CreditMessages(self._family, self._uid, client.messages, retries)
 
     def __getattr__(self, name):  # anything else the SDK client has
         if name.startswith("_"):
             raise AttributeError(name)
-        return getattr(self.resolve(), name)
+        client = self.resolve()
+        if self.on_credit:  # only .messages is reserved and settled
+            raise AttributeError(f"{name} isn't available on the starter credit")
+        return getattr(client, name)
 
     def record(self, model: str, usage) -> None:
         """The bill's meter (the credit is settled by CreditMessages)."""
@@ -1293,16 +1307,66 @@ def _reached_anthropic(error: BaseException) -> bool:
     return True
 
 
+def _retry_delay(error: BaseException, attempt: int) -> float | None:
+    """Seconds before trying again after `error` (try number `attempt`,
+    from 0), or None (not worth another try). The SDK's own rules
+    (anthropic._base_client): timeouts, connection errors, 408, 409, 429
+    and 5xx, an `x-should-retry` header winning; a `retry-after(-ms)` of at
+    most 60 s, else 0.5 s doubling up to 8 s, less up to 25% jitter."""
+    import random
+
+    import anthropic
+
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None) or {}
+    if isinstance(error, anthropic.APIStatusError):
+        should = str(headers.get("x-should-retry", "")).lower()
+        if should == "false":
+            return None
+        status = error.status_code
+        if should != "true" and status not in (408, 409, 429) and status < 500:
+            return None
+        for name, scale in (("retry-after-ms", 0.001), ("retry-after", 1.0)):
+            try:
+                wait = float(headers.get(name)) * scale
+            except (TypeError, ValueError):
+                continue
+            if 0 < wait <= 60:
+                return wait
+    elif not isinstance(error, anthropic.APIConnectionError):  # timeouts too
+        return None
+    return min(0.5 * 2 ** attempt, 8.0) * (1 - 0.25 * random.random())
+
+
+_sleep = time.sleep  # a seam for tests
+
+
 class CreditMessages:
     """`client.messages` for a call on the starter credit: right before it
     is sent, the request's worst case is reserved (credit.request_reserve;
     CreditSpent if it doesn't fit), and when it ends, however it ends, the
-    reservation is settled in a `finally` (credit.py says with what)."""
+    reservation is settled in a `finally` (credit.py says with what). The
+    client under it doesn't retry: each of the `retries` tries this makes
+    (the SDK's rules and backoff, _retry_delay) is reserved and settled on
+    its own, so a timed-out try that was billed is charged too."""
 
-    def __init__(self, family: "Family", uid: str, messages):
+    def __init__(self, family: "Family", uid: str, messages, retries: int = 0):
         self._family = family
         self._uid = uid
         self._messages = messages
+        self._retries = max(0, int(retries))
+
+    def _again(self, error: BaseException, attempt: int) -> bool:
+        """After a failed try: wait and say True if another one is due."""
+        if attempt >= self._retries:
+            return False
+        delay = _retry_delay(error, attempt)
+        if delay is None:
+            return False
+        log.info("Credit: %s's call failed (%s); try %d of %d in %.1f s", self._uid,
+                 type(error).__name__, attempt + 2, self._retries + 1, delay)
+        _sleep(delay)
+        return True
 
     def _admit(self, kwargs: dict):
         from kwil.credit import request_reserve
@@ -1330,6 +1394,16 @@ class CreditMessages:
         self._family.credit.settle(self._uid, usd, token)
 
     def create(self, **kwargs):
+        attempt = 0
+        while True:
+            try:
+                return self._try_create(kwargs)
+            except Exception as e:
+                if not self._again(e, attempt):
+                    raise
+            attempt += 1
+
+    def _try_create(self, kwargs: dict):
         token, reserve = self._admit(kwargs)
         usage, error = None, None
         try:
@@ -1345,8 +1419,10 @@ class CreditMessages:
     def stream(self, **kwargs):
         return _CreditStream(self, kwargs)
 
-    def __getattr__(self, name):  # count_tokens, ... (not billed)
-        return getattr(self._messages, name)
+    def __getattr__(self, name):
+        if name == "count_tokens":  # free; anything else would bill unreserved
+            return self._messages.count_tokens
+        raise AttributeError(f"messages.{name} isn't available on the starter credit")
 
 
 class _CreditStream:
@@ -1361,14 +1437,18 @@ class _CreditStream:
         self._reserve = 0.0
 
     def __enter__(self):
-        self._token, self._reserve = self._owner._admit(self._kwargs)
-        try:
-            self._manager = self._owner._messages.stream(**self._kwargs)
-            self._stream = self._manager.__enter__()
-        except BaseException as e:
-            self._owner._settle(self._token, self._reserve, self._model(), error=e)
-            raise
-        return self._stream
+        attempt = 0
+        while True:  # the request itself, retried like create (once streaming: never)
+            self._token, self._reserve = self._owner._admit(self._kwargs)
+            try:
+                self._manager = self._owner._messages.stream(**self._kwargs)
+                self._stream = self._manager.__enter__()
+                return self._stream
+            except BaseException as e:
+                self._owner._settle(self._token, self._reserve, self._model(), error=e)
+                if not isinstance(e, Exception) or not self._owner._again(e, attempt):
+                    raise
+            attempt += 1
 
     def _model(self) -> str:
         return str(self._kwargs.get("model") or "")

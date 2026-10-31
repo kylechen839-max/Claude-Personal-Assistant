@@ -963,7 +963,15 @@ server (`[family] enabled`, on in the server profile).
   `max_tokens`; with no usage (a timeout) the whole reservation; nothing
   only for an HTTP error answer or a connection never made. A reservation
   unsettled past `api_timeout * (api_max_retries + 1)` is charged in full
-  (a late settle corrects it). The bounds, checked and reserved in one
+  (a late settle corrects it). The owner's client under it doesn't retry
+  (`max_retries=0`): CreditMessages makes the same tries with the SDK's
+  rules and backoff itself, each reserved and settled, so a billed
+  timed-out try is charged. Nothing else of the client is reachable on the
+  credit (`beta`, `batches`, `with_raw_response`... raise; only `messages`
+  and `count_tokens`), and `Family.client(uid)` / `api_for(uid)` never
+  return the owner's client for the credit unless asked (`credit=True`,
+  only the chat, title and reminder calls). A call held up only by calls
+  in flight waits for them instead of being refused. The bounds, checked and reserved in one
   step under a lock (8 threads on a Barrier in the tests): everyone's calls
   in flight plus the new one must fit `beta_credit_total_usd`, so the
   global cap is never passed. A person's call needs only something left of

@@ -8668,7 +8668,16 @@ change, every id and hook kept.
   (i18n `invite_family`, `invite_beta`, `invite_credit`, `invite_template`,
   `invite_chat`; the invitee's language). config.toml carries Kyle's
   published Notion template link; the DEFAULTS value stays "".
-- **Tests:** new `test_credit.py` (25), `test_feedback.py` (9),
+- **Round 3 (judge):** credit calls run on `with_options(max_retries=0)`
+  and CreditMessages retries itself (the SDK's rules: timeouts, connection
+  errors, 408/409/429/5xx, `x-should-retry`, `retry-after`; 0.5 s doubling
+  to 8 s with jitter), each try admitted and settled; on the credit only
+  `messages` / `count_tokens` / `with_options` work (anything else raises);
+  `UserApi`, `api_for` and `client(uid)` default to `credit=False` and
+  `_build`'s chat and title UserApi pass `credit=True` (reminders use that
+  factory); `admit` refuses (CreditSpent) only when money used blocks, and
+  otherwise waits on the Condition for calls in flight.
+- **Tests:** new `test_credit.py` (29), `test_feedback.py` (9),
   `test_invite_message.py` (5); +1 each in `test_research.py`,
   `test_voice_picker.py`; `test_userkeys.py`'s app is now `build_env`
   (credit off in its fixture); `test_proactive` and `test_student_web`'s
@@ -8676,5 +8685,5 @@ change, every id and hook kept.
   Fail-first: with the source changes reverted (new modules kept), 30 of
   the new/changed tests fail; the pure ledger tests need `credit.py`
   itself.
-- Full suite: 4065 passed, 53 skipped (baseline 4024 + 41); JS 481 passed
+- Full suite: 4069 passed, 53 skipped (baseline 4024 + 45); JS 481 passed
   (unchanged; no web files touched).

@@ -8,6 +8,7 @@ answering with usage in the SDK's shape, so each call's cost is known."""
 import json
 import logging
 import threading
+import time
 
 import pytest
 
@@ -65,7 +66,7 @@ def test_a_beta_turn_runs_on_the_owners_key_until_five_dollars(env, owner, caplo
     assert "$5 starter credit is used up" in said and "Settings" in said
     assert len(env.owner_api.calls) == 5
     with pytest.raises(userkeys.CreditSpent):
-        env.fam.client(tess_id)
+        env.fam.api_for(tess_id, credit=True)
     # their Settings
     st = tess.get("/api/me/anthropic-key").json()
     assert st["credit_usd"] == 5 and st["credit_left_usd"] == 0
@@ -470,7 +471,7 @@ def test_create_calls_are_reserved_and_settled_too(env, owner):
     from kwil.family import CreditMessages, UserApi
 
     tess, tess_id = env.member(owner, "Tess")
-    api = UserApi(env.fam, tess_id).client_or_none()
+    api = UserApi(env.fam, tess_id, credit=True).client_or_none()
     assert isinstance(api, UserApi)
     messages = api.with_options(max_retries=1, timeout=20).messages
     assert isinstance(messages, CreditMessages)
@@ -483,3 +484,133 @@ def test_create_calls_are_reserved_and_settled_too(env, owner):
         messages.create(model="claude-haiku-5-5", max_tokens=100,
                         messages=[{"role": "user", "content": "x"}])
     assert env.fam.credit.used(tess_id) > 1.0 and not env.fam.credit._held
+
+
+# --- retries, other paths, and waiting for calls in flight ------------------------------
+
+def message_json(model):
+    return {"id": "msg_1", "type": "message", "role": "assistant", "model": model,
+            "content": [{"type": "text", "text": "Hi"}], "stop_reason": "end_turn",
+            "stop_sequence": None, "usage": {"input_tokens": 1000, "output_tokens": 20}}
+
+
+SMALL = {"model": "claude-haiku-5-5", "max_tokens": 100,
+         "messages": [{"role": "user", "content": "x"}]}
+
+
+def done_cost():
+    return credit_mod.call_cost("claude-haiku-5-5", {
+        "input": 1000, "output": 20, "cache_read": 0, "cache_write": 0, "web_searches": 0})
+
+
+def retrying_owner(env, answers):
+    """The owner's key as the real SDK with 2 retries (as [assistant]
+    api_max_retries would give it); `answers` answer the tries in turn."""
+    import anthropic
+
+    tries = []
+
+    def handler(request, http):
+        tries.append(request)
+        return answers[len(tries) - 1](request, http)
+
+    client = sdk_client(handler).with_options(max_retries=2)
+    assert isinstance(client, anthropic.Anthropic) and client.max_retries == 2
+    env.fam._client = client
+    return tries
+
+
+def test_a_timed_out_try_is_charged_and_retried_by_the_credit(env, owner, monkeypatch):
+    """The SDK's own retries would bill each timed-out try and settle only the
+    last: the credit makes every try itself, each reserved and settled."""
+    from kwil import family as fam
+
+    tess, tess_id = env.member(owner, "Tess")
+    slept = []
+    monkeypatch.setattr(fam, "_sleep", slept.append)
+
+    def timeout(request, http):
+        raise http.ReadTimeout("no answer", request=request)
+
+    tries = retrying_owner(env, [timeout, lambda r, http: http.Response(
+        200, json=message_json("claude-haiku-5-5"))])
+    api = fam.UserApi(env.fam, tess_id, credit=True)
+    assert api.messages.create(**SMALL).content[0].text == "Hi"
+    assert len(tries) == 2 and len(slept) == 1 and 0.3 <= slept[0] <= 0.5
+    reserve = credit_mod.request_reserve(SMALL)
+    assert env.fam.credit.used(tess_id) == pytest.approx(round(reserve + done_cost(), 4))
+    assert not env.fam.credit._held
+
+
+def test_a_429_then_success_charges_only_the_success(env, owner, monkeypatch):
+    from kwil import family as fam
+
+    tess, tess_id = env.member(owner, "Tess")
+    slept = []
+    monkeypatch.setattr(fam, "_sleep", slept.append)
+    limited = lambda r, http: http.Response(  # noqa: E731
+        429, headers={"retry-after": "2"},
+        json={"type": "error", "error": {"type": "rate_limit_error", "message": "slow"}})
+    tries = retrying_owner(env, [limited, lambda r, http: http.Response(
+        200, json=message_json("claude-haiku-5-5"))])
+    fam.UserApi(env.fam, tess_id, credit=True).messages.create(**SMALL)
+    assert len(tries) == 2 and slept == [2.0]  # Anthropic's retry-after
+    assert env.fam.credit.used(tess_id) == pytest.approx(round(done_cost(), 4))
+    # a 400 isn't tried again (nor charged)
+    bad = lambda r, http: http.Response(  # noqa: E731
+        400, json={"type": "error", "error": {"type": "invalid_request_error",
+                                              "message": "no"}})
+    tries = retrying_owner(env, [bad, bad, bad])
+    import anthropic
+
+    with pytest.raises(anthropic.BadRequestError):
+        fam.UserApi(env.fam, tess_id, credit=True).messages.create(**SMALL)
+    assert len(tries) == 1
+    assert env.fam.credit.used(tess_id) == pytest.approx(round(done_cost(), 4))
+
+
+def test_nothing_but_messages_reaches_the_owners_key_on_the_credit(env, owner):
+    from kwil.family import UserApi
+
+    tess, tess_id = env.member(owner, "Tess")
+    api = UserApi(env.fam, tess_id, credit=True)
+    for name in ("beta", "completions", "models"):
+        with pytest.raises(AttributeError):
+            getattr(api, name)
+    messages = api.messages
+    for name in ("batches", "with_raw_response", "with_streaming_response"):
+        with pytest.raises(AttributeError):
+            getattr(messages, name)
+    assert messages.count_tokens is env.owner_api.messages.count_tokens  # free
+    assert api.with_options(timeout=5).messages is not None
+    # a bare client never comes from the credit: MissingKey, not the owner's
+    with pytest.raises(userkeys.MissingKey) as e:
+        env.fam.client(tess_id)
+    assert not isinstance(e.value, userkeys.CreditSpent)
+    with pytest.raises(userkeys.MissingKey):
+        env.fam.api_for(tess_id)
+    with pytest.raises(userkeys.MissingKey):
+        UserApi(env.fam, tess_id).messages
+    assert env.owner_api.calls == [] and env.fam.credit.total == 0
+    # a family member on the owner's key still gets the whole client
+    mom, mom_id = env.member(owner, "Mom", tier="family")
+    assert UserApi(env.fam, mom_id).beta is env.owner_api.beta
+
+
+def test_a_title_overlapping_a_reply_waits_instead_of_being_refused(tmp_path):
+    """$1.50 left and a reply's $1.80 reservation in flight: the title call
+    waits for the reply to settle, then runs; it is never "used up"."""
+    book = ledger(tmp_path, per_person=5)
+    book.settle(U, 3.5, book.admit(U, 0.1))  # $3.50 of their $5 used
+    reply = book.admit(U, 1.8)
+    assert reply is not None
+    assert book.check(U)  # what's spent still leaves $1.50
+    threading.Timer(0.2, book.settle, args=(U, 0.03, reply)).start()
+    started = time.monotonic()
+    title = book.admit(U, 0.46, wait=5)
+    assert title is not None and 0.15 < time.monotonic() - started < 4
+    # money actually used up: refused at once, no waiting
+    book.settle(U, 1.5, title)
+    started = time.monotonic()
+    assert not book.check(U) and book.admit(U, 0.01, wait=5) is None
+    assert time.monotonic() - started < 1
