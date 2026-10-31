@@ -848,7 +848,8 @@ def test_google_callback_passes_the_guard_without_a_session(fake_client, tmp_pat
     status = client.get("/api/google/status", headers=via_proxy(PUBLIC)).json()
     assert status == {"enabled": True, "connected": False, "disconnect": True,
                       "gmail": True, "note": None,
-                      "needs_reconnect": False, "server_owner": False}
+                      "needs_reconnect": False, "missing": [],
+                      "server_owner": False}
     fam.close()
 
 

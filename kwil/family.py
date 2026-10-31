@@ -13,7 +13,8 @@ server tools), their own history at `<dir>/<id>/history.sqlite` (never
 synced to the Pi or PC), replies, server sentences and speech in their
 language (webapp.WebAssistant picks the Chinese Whisper model and voice),
 and, once they tap "Connect Google account" on their own phone, their own
-Google Calendar and Gmail (read, drafts only; deletes ask first) from
+Google Calendar, Gmail (read, drafts only; deletes ask first) and Drive
+(read-only: search and read their files) from
 `<dir>/<id>/google_token.json` (google_web.py signs them in). Their token
 is only ever read from that file, never from GOOGLE_TOKEN_JSON (Kyle's),
 and Kyle's tools never read theirs. Once they tap "Connect Notion"
@@ -43,11 +44,12 @@ Google and Notion grants are revoked first, best effort).
 
 Each person has a tier (`tier` in users.json, chosen at invite): "family"
 (the above; people listed before tiers existed load as this) or "beta" (an
-invite-only public beta tester): Calendar only, never Gmail tools or Gmail
-scopes, signed in through a separate OAuth client ([family]
+invite-only public beta tester): Calendar only, never Gmail or Drive
+tools or scopes, signed in through a separate OAuth client ([family]
 public_google_client / GOOGLE_PUBLIC_CLIENT_JSON) whose consent screen asks
 for nothing else. Without that client a beta tester can't connect Google;
-they never fall back to the family client (its consent screen lists Gmail).
+they never fall back to the family client (its consent screen lists Gmail
+and Drive).
 
 Whose Claude bill (bring your own key, userkeys.py): someone who saved
 their own Anthropic key in the app (PUT /api/me/anthropic-key,
@@ -582,6 +584,12 @@ class Family:
         """May `uid` have Gmail at all? Never a beta tester."""
         return bool(self.config["gmail"]["enabled"]) and self.tier(uid) == "family"
 
+    def drive_allowed(self, uid: str | None) -> bool:
+        """May `uid` have Google Drive (read-only) at all? Never a beta
+        tester: the public client's project never lists the Drive scope."""
+        return bool(self.config.get("drive", {}).get("enabled", True)) \
+            and self.tier(uid) == "family"
+
     def google_connected(self, uid: str) -> bool:
         return valid_id(uid) and self._google_info(uid) is not None
 
@@ -594,7 +602,8 @@ class Family:
             return None
 
     def _google_tools(self, user: dict) -> list:
-        """Calendar and Gmail on their own token (none until they connect).
+        """Calendar, Gmail and Drive (read-only) on their own token (none
+        until they connect; Drive only with its scope granted).
         Never Kyle's: `environ={}` hides GOOGLE_TOKEN_JSON/GOOGLE_CLIENT_JSON,
         `save_token=False` never starts a sign-in on the server, `in_app`
         makes an expired or revoked token say "reconnect in the app", and
@@ -619,6 +628,9 @@ class Family:
         inbox = self.gmail_inbox(user, info)
         if inbox is not None:
             tools += inbox.tools()
+        drive = self.drive_files(user, info)
+        if drive is not None:
+            tools += drive.tools()
         # the descriptions say "Kyle's calendar": make them about this person
         name = "the user" if user.get("language") == "zh" else user["name"]
         return [replace(t, description=t.description.replace("Kyle's", f"{name}'s")
@@ -641,6 +653,26 @@ class Family:
         return GmailInbox(credentials_path="", token_path=self.google_token(user["id"]),
                           timezone=user.get("timezone") or None,
                           max_summary=self.config["gmail"]["max_summary"],
+                          save_token=False, environ={}, in_app=True,
+                          account=user["id"])
+
+    def drive_files(self, user: dict, info: dict | None = None):
+        """Their own Google Drive (read-only; never Kyle's), or None: a beta
+        tester, Drive off, not connected, or no Drive scope granted (a token
+        from before Drive: Settings says "Reconnect to add Google Drive")."""
+        from kwil.tools.google_auth import DRIVE_SCOPES, granted_scopes
+
+        if not (self.config["family"]["google"]
+                and self.config.get("drive", {}).get("enabled", True)
+                and tier_of(user) == "family" and valid_id(user.get("id"))):
+            return None
+        info = self._google_info(user["id"]) if info is None else info
+        if info is None or not set(DRIVE_SCOPES) <= granted_scopes(info):
+            return None
+        from kwil.tools.drive import DriveFiles
+
+        return DriveFiles(credentials_path="", token_path=self.google_token(user["id"]),
+                          timezone=user.get("timezone") or None,
                           save_token=False, environ={}, in_app=True,
                           account=user["id"])
 

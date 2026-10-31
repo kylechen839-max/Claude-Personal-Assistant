@@ -55,6 +55,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 | `test_gmail.py` | 28 | Gmail tools, scopes, email as untrusted input |
+| `test_drive.py` | 17 | read-only Google Drive tools, the scope, an old token, Drive text as untrusted input |
 | `test_notes.py` | 9 | quick-capture notes |
 | `test_lecture.py` | 28 | lecture uploads, pipeline, Notion database |
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
@@ -8687,3 +8688,250 @@ change, every id and hook kept.
   itself.
 - Full suite: 4069 passed, 53 skipped (baseline 4024 + 45); JS 481 passed
   (unchanged; no web files touched).
+## Google Drive, read-only (2026-10-31)
+"Summarize my essay draft": two new private, untrusted-output tools in
+`kwil/tools/drive.py`, on the same Google sign-in as Calendar and Gmail.
+- **`search_drive(query, max_results<=10)`:** `files.list` with
+  `(name contains '…' or fullText contains '…') and mimeType != folder
+  and trashed = false` (`\` and `'` escaped, the query capped at 200
+  characters), the fields `files(id,name,mimeType,modifiedTime,
+  owners(displayName,me),size)`; with no words, the newest files first
+  (`orderBy=modifiedTime desc`, which Drive refuses with fullText).
+- **`read_doc(file_id, offset=0)`:** 6000 characters a call with
+  `next_offset`. Docs and Slides through `files.export_media`
+  (`text/plain`), Sheets `text/csv`; uploaded PDF, .docx, .pptx and .txt
+  refused over 10 MB by Drive's size, downloaded with a `Range` cap, then
+  `textextract.extract`. Anything else, and Google's export limit, get a
+  plain "too large" / "can't read this kind of file". File ids are checked
+  before they reach Drive.
+- **Read-only twice over:** the `drive.readonly` scope (no Docs scope),
+  and `ReadOnlyDrive`, an allowlist of `files().list/get/export/
+  export_media/get_media`; anything else raises `DriveWriteBlocked`.
+  Google's `HttpError` (its text holds the request URL, so the query) is
+  replaced by a plain `DriveError` before the registry logs it. INFO says
+  counts and lengths only. Both tools are in `REDO_SAFE_TOOLS`.
+- **Scope and registration:** `google_auth.DRIVE_SCOPES`,
+  `sign_in_scopes(gmail_enabled, drive_enabled=False)`; the sign-in CLI,
+  the phone's Connect (`GoogleConnect.drive/scopes`) and the family
+  client ask for it with `[drive] enabled` (new, default on). The public
+  beta client never does, and `Family.drive_allowed` / `drive_files`
+  are family tier only. `cli.register_drive` / `owner_drive` (Gmail's
+  pattern): a token without the scope keeps Calendar and Gmail and prints
+  `(Drive tools off: … python -m kwil.tools.google_auth …)`, which
+  preflight's parser reads; `doctor` has a "Google Drive access" line. A
+  Drive call on such a token raises `MissingScopes`; in the app its words
+  are the new `drive_reconnect` (en, zh). `/api/google/status` has
+  `missing` (the asked-for scopes the saved token lacks); with Drive's in
+  it, Settings' Google row says "Reconnect to add Google Drive
+  (read-only)" and the button runs the same Connect flow
+  (`kwil/web/i18n.js`, en and zh). Disconnect removes the Drive tools
+  (`_google_tool_names`). `sw.js` `kwil-shell-v29`.
+- **Tests:** new `tests/test_drive.py` (17), on a fake Drive v3 service
+  with the real answer shapes and real `HttpError`s; fake tokens expire in
+  2099 and `Credentials.refresh` fails the test. Exports and the cap and
+  paging, CSV, uploaded text and .docx, too large (never downloaded),
+  unsupported, the export limit, 404, bad ids; the query escaping (a quote
+  can't close the string), caps and orderBy; only read methods reachable;
+  a shared Doc's injection makes calendar and Notion changes ask (6
+  cases); nothing of the query, names or text at INFO, nor at DEBUG, nor
+  in an error's traceback; an old token (Drive off with the preflight
+  line, doctor, `MissingScopes` on the PC and in the app); sign-in scopes;
+  beta never asked and never given Drive; status `missing` for the owner
+  and a family member; Disconnect removes the tools for both.
+  `tests/js/i18n.test.mjs` +1 (the row, the sheet line, zh, the Connect
+  flow, and no Drive line for other missing scopes). Status dict pins
+  (+`missing`) in test_google_web, test_family_google, test_family and
+  test_cloud; test_gmail's sign-in CLI test now expects Drive by default
+  and none with `[drive] enabled = false`; sw v29 in six files. Fail-first:
+  `test_drive.py` can't import at e5fbb70; each test also fails with only
+  its piece of the source reverted (16 one-change reverts, scripted: the
+  escape, the allowlist, `untrusted_output`, `private`, the error
+  replacement, the cap, the Range header, the scope check, the drive flag,
+  both tier gates, `missing`, the Drive tool names, the flow's scopes);
+  the JS test fails with `lacksDrive` returning false.
+- Full suite: 4041 passed, 53 skipped (baseline 4024 + 17); JS 482 passed
+  (baseline 481 + 1). Sandbox numbers, no real Google call.
+
+### Google Drive, judge round 1 (2026-10-31)
+- **MED, taint lost when a tool leaves the registry:** `tainted()` reread
+  the history with the registry's *current* untrusted tools, and
+  `GoogleConnect._register_tools` / `Family._refresh_tools` pop Drive (or
+  Gmail) in place after a Disconnect or a Reconnect without the scope, so a
+  conversation that had read an injected Doc stopped asking. Fixed
+  generically: `ClaudeChat._dispatch` sets the sticky `untrusted_context`
+  when the dispatched tool is untrusted at that moment; `ToolRegistry.
+  dispatch` adds `"untrusted_content": true` to every dict result of an
+  `untrusted_output` tool (a copy, never the handler's dict; once); and
+  `outside_content` / `_remember` check web and marked results with an
+  empty registry too (they skipped them when `bool(self.tools)` was
+  false). Earlier history bytes are unchanged, so the prompt cache holds.
+  Tests (+5 in `test_drive.py`): a Drive read, the Drive tools popped, a
+  move still asks; the same for Gmail; a family member's turn reads a Doc,
+  her reconnect without Drive rebuilds her tools, her chat is still
+  tainted; the result carries the mark once and a chat with only that
+  history and an empty registry is tainted; a course file sent as
+  `search_result` blocks (no mark) still makes a move ask after its tools
+  leave. Fail-first (scripted reverts): without the flag the course-file
+  test fails; without the mark, or with the empty-registry check reverted,
+  the mark test fails; without both, all five fail.
+- **LOW:** `sw.js` `kwil-shell-v29` (v27 and v28 are taken on master by
+  #103 and #105), six pins.
+- Full suite: 4046 passed, 53 skipped (round 0's 4041 + 5); JS 482 passed.
+## Cloud-only, stage 1: failover off on the cloud (2026-10-31)
+Kyle approved making Kwil cloud-only. Stage 1 is reversible: nothing is
+deleted, the cloud just stops being part of a failover setup.
+- **`[failover] enabled`** (new, default true; `config.toml` documents it)
+  and `SERVER_PROFILE` sets it false. With it false,
+  `peers.settings_from_config` returns no role and no backends, whatever
+  `[failover]`, `ASSISTANT_ROLE`, `APP_ORIGIN` or `FAILOVER_BACKENDS` say,
+  and logs one WARNING per process naming those settings (never their
+  values), only while one of them is still set. So `cloud.build_app`
+  mounts no `EdgeMiddleware`: no `hc1.` access tokens or
+  `/api/auth/token`, no `/api/sync` (404 once signed in), no public
+  `/backend-router.js` (401 before sign-in), and `/healthz` has no `role`,
+  so the app shows no Backends section. Every other reader of `[failover]`
+  (proactive, research, reminders, student_web, family) goes through the
+  same function.
+- **`history.origin_of`** is "cloud" under the server profile even
+  without `ASSISTANT_ROLE` (events would otherwise say "pc").
+- **The phone app** (`app.js` `detectFailover`) no longer trusts a cached
+  `failover` flag when `/healthz` can't be reached; whenever failover is
+  off it removes `failover`, `backendsCache`, `backendSettings` and
+  `backendOverride` from localStorage. `sw.js` `kwil-shell-v28` (v27 is
+  the desktop-layout branch's). The Backends fieldset in `index.html`
+  stays until stage 2.
+- **Render:** `render.yaml` drops `ASSISTANT_ROLE`, `APP_ORIGIN` and
+  `FAILOVER_BACKENDS`. Without failover, `APP_ORIGIN` no longer stands in
+  for `PUBLIC_ORIGIN` (Google, Notion, push and invite links); Kyle
+  confirmed `PUBLIC_ORIGIN` = https://heykwil.com.
+- **Docs:** README's phone app, iPhone, Mom's PC copy, failover, Home
+  Assistant and Windows-host text point at https://heykwil.com and cloud
+  family invites instead of Tailscale; FAILOVER.md and PI_MIGRATION.md
+  carry a "retired" banner; MANUAL_TEST's phone and failover checks;
+  SECURITY "Failover: off on the cloud"; BLOCKERS (Kyle's Render, ruleset
+  and optional PC/Pi steps, heykwil.com URLs, Mom on the cloud, the PC
+  watchdog no longer needed for the cloud).
+- **Kept:** `eventlog.py`, sync.py's `Event`/`revoke_event`/
+  `revoked_before`, `smoke.py`, the check session, `update-watch.js`,
+  `kwil/router.py` and the canvas helper; a PC or Pi with `[failover]
+  role` still runs the failover code.
+- **Tests:** `test_failover_cloud.py` +2 (the server profile with
+  `ASSISTANT_ROLE=cloud`, `APP_ORIGIN` and `FAILOVER_BACKENDS` set: no
+  role, router 401, `hc1.` app and sync bearers refused, token sign-in 401,
+  `/api/sync` 404 signed in, cookies work, one WARNING without values; the
+  warning only once and only when something is set), `test_failover_config`
+  +1 (on by default, off in the profile), `test_history` +1 (origin),
+  `test_google_reconnect` +1 (without failover only `PUBLIC_ORIGIN` gives
+  the cloud its address), new `tests/js/app-failover-off.test.mjs` (4:
+  `/healthz` unreachable with a cached `failover=true` never imports the
+  router and clears the four keys, also with no role, and a server with a
+  role still imports it). Existing failover tests opt in with `enabled =
+  true`. Fail-first: with only the source reverted (config.py, peers.py,
+  history.py, app.js) every new test fails except the two JS guard tests
+  (the single import site, and the role case that already worked).
+- **Judge round 1's three LOW findings, fixed:**
+  1. An old phone's `hc1.` bearer on the cloud (failover off) was counted
+     as a wrong `WEB_TOKEN` and could lock that address out. CloudGuard
+     (HTTP and the voice socket) and `WebAuth.sid` now answer it "not
+     signed in" without counting, as for a Canvas helper key (unless
+     `WEB_TOKEN` itself starts with `hc1.`). Tests: 8 old-token requests
+     plus 3 more, then a login works and the address isn't blocked, a
+     socket with one isn't counted, a real wrong token still is
+     (`test_failover_cloud.py`); the same on the plain web app
+     (`test_webapp.py`).
+  2. The old access token in IndexedDB (`hey-claude`, backend-router.js
+     `TOKEN_DB`) was never deleted: `detectFailover` now deletes that
+     database too when failover is off (guarded: no IndexedDB, private
+     mode). JS tests: the database is deleted with `/healthz` down or
+     roleless, kept with a role, the keys are still cleared without
+     IndexedDB, and the page's name matches the router's export.
+  3. "Sign out everywhere" labelled its revoke event "pc" on the cloud:
+     `WebAuth.revoke_tokens` now uses the history store's origin (else
+     "pc"). Test: a server-profile app's revoke event says "cloud".
+  Fail-first: with only `cloud.py` and `webapp.py` reverted the three
+  Python tests fail (`sign-in failed` instead of `not signed in`, origin
+  'pc', the address blocked); with only `app.js` reverted 3 of the 6 JS
+  tests fail.
+- Full suite: 4032 passed, 53 skipped (baseline e5fbb70 4024 + 8); JS 487
+  passed (baseline 481 + 6).
+## Desktop layout v1 (2026-10-31)
+- **What:** at 48rem and up a 4.5rem rail (`<nav id="rail">`, the body's
+  first element): Search (its shortcut under it, "Ctrl K" or "⌘K"), Chat,
+  Today, History, Settings at the bottom; on every screen but the sign-in
+  and voice mode. Like the phone's tab bar each item clicks the header's
+  own control (`app.js` `onTab` now wires `tab-*` and `rail-*` alike;
+  `syncTabs` marks `aria-current="page"` and mirrors `#open-today` /
+  `#open-history`'s `hidden`), and the header's calendar, clock and gear
+  hide while the rail shows. `body:has(#rail:not([hidden]))` is a grid
+  (rail, then every `<main>` in row 1 column 2); the chat is a centred
+  46rem column; the Settings page starts right of the rail, which stays on
+  top. Below 48rem nothing changes.
+- **Two panes at 64rem and up:** `show()` sets `body.dataset.split`: Today
+  beside the chat, a transcript beside the History list (its row
+  `aria-current="true"`, `history.js` `markOpen`; the transcript's Back
+  hidden, Escape still goes back). `currentView` is kept and `show()` runs
+  again on the media query's `change`. No `document.body` or no
+  `matchMedia` (the vm test DOMs): one screen at a time, as before.
+- **Ctrl+K / Cmd+K switcher** (`ui.js` `KwilUI.switcher`, no new script):
+  a `<dialog id="switcher">` with a combobox over a listbox. Mac uses
+  `metaKey`, others `ctrlKey`; no Alt/Shift; works while typing; again
+  closes it; ignored on the sign-in, in voice mode and over any other open
+  dialog. Up/Down wrap, Home/End jump, Enter or a click picks, Esc closes
+  it (only it) and gives focus back. Commands (Chat, New chat when
+  `KwilApp.idle()`, Today, History, Settings, Memory, Projects, Reminders,
+  Start voice conversation) are listed only while their control is not
+  `[hidden]`, filtered by a case-insensitive substring of the translated
+  label, and click that control. With a query, up to 6 conversations from
+  `GET /api/conversations?q=&limit=6` (150 ms debounce, the previous
+  request aborted, a sequence number drops stale answers), opened through
+  the new `window.KwilHistory.openTranscript`.
+- **Voice mode:** still a full-window overlay; `voice.js` now calls
+  `KwilUI.voice.opened()`/`closed()`: the screens, rail and tab bar behind
+  it are `inert`, focus goes to the orb, Escape ends it (`#voice-end`;
+  not over an open dialog), focus returns to `#voice-open` or `#text`.
+  Captions widen to 40rem from 64rem. On a desktop, Settings' Done (and
+  Escape) focus the rail's Settings; a click in the rail doesn't close
+  Settings first.
+- `sw.js` `kwil-shell-v27`; zh: 搜索, 前往, 前往页面或对话, 没有匹配项,
+  新对话, 开始语音对话, 对话 ("Results" already had 搜索结果).
+  DESIGN_SYSTEM: "Desktop layout" section, Tab bar and sheet notes.
+- **Tests:** new `tests/js/desktop.test.mjs` (29 with judge round 1): app.js in node:vm with a
+  matchMedia stub (rail visibility and `aria-current` on every screen,
+  mirroring after /api/state, item clicks, both splits, narrow widths
+  unchanged, a resize re-laying out, no matchMedia/body), app.js +
+  history.js (the open row), ui.js (shortcut on Windows and Mac, ignored
+  cases, ARIA, filter in English and Chinese, keys, Esc focus return and
+  stopPropagation, conversation debounce/abort/stale answer/6 cap),
+  voice.js + ui.js (inert, orb focus, Esc ends, focus return), markup, CSS
+  (rail and grid only from 48rem, splits only from 64rem, tokens only) and
+  zh. `ui.test.mjs` +1 (desktop Done/Escape focus the rail's Settings; a
+  tap in the rail keeps Settings open). Fail-first against e5fbb70's
+  sources: 22 of the 25 and the ui case fail (the 3 that pass are the
+  "nothing changes" guards: narrow widths, the old fake DOM, the ignored
+  shortcut). Mutations: dropping the sequence check, the abort, the
+  debounce, Esc's stopPropagation or the `change` listener each fail their
+  test. v27 pinned in six test files.
+- **Screenshots** (Playwright Chromium, mocked APIs, not real hardware):
+  1280x800 and 1440x900, light and dark, English and Chinese: chat, the
+  Today split, History + transcript, Settings, the switcher open; plus
+  390x844 (rail not drawn, tab bar shown). The same run checked in the
+  browser: Esc returns focus to the message field, Settings' Esc focuses
+  the rail's Settings, a resize to 900 drops the split and back restores it.
+- **Judge round 1 (4 fixes, each fail-first: 4 new tests fail at
+  f5dc4b2):** the switcher's keys do nothing while an IME is composing
+  (`isComposing` or keyCode 229: Enter, Escape and the arrows pick the
+  pinyin candidate); after a pick, if focus was left on something not
+  drawn (Chat from History left it on History's hidden title) it moves to
+  the command's own place (`#text` for Chat, the rail item for Today and
+  History, the screen's title for Memory, Projects and Reminders); a
+  picked command whose control went `[hidden]` or `disabled`, or New chat
+  once a reply started, runs nothing and the list is redrawn (disabled
+  controls aren't listed); `#switcher-status` styles are scoped
+  `dialog.switcher .switcher-status` so `dialog.sheet p` no longer
+  overrides them. The judge's Playwright probes now show Enter during
+  composition doing nothing, focus on `#text` after Chat, and the status
+  padded.
+- Full suite: 4024 passed, 53 skipped, as at e5fbb70 (no Python test
+  added; a `git archive` copy of e5fbb70 runs 4022 passed, 54 skipped and
+  1 git-only failure, `test_ui_ux_pro_max_data_is_committed`, outside a
+  repo); JS 511 passed (baseline 481 + 30).

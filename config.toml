@@ -109,6 +109,10 @@ color_labels = {}
 enabled = true                # needs the Gmail scopes: python -m kwil.tools.google_auth
 max_summary = 15              # most emails in one spoken summary
 
+[drive]
+enabled = true                # read-only Google Drive (search, read Docs/Sheets/Slides/PDFs);
+                              # needs the drive.readonly scope: python -m kwil.tools.google_auth
+
 [notion]
 enabled = true
 database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments
@@ -147,7 +151,7 @@ embedding_dir = "models/fastembed"     # where --download puts the model (read o
 embedding_min_score = 0.5     # how close a past chat's summary must be to count as a match
 
 [webapp]                      # python -m kwil --mode web (phone page)
-host = "127.0.0.1"            # keep this: reach it through `tailscale serve`
+host = "127.0.0.1"            # keep this: only this computer (the cloud's profile uses 0.0.0.0)
 port = 8765
 confirm_timeout = 120         # seconds to wait for a yes before treating it as no
 max_upload_mb = 10
@@ -156,7 +160,7 @@ max_attachment_mb = 10        # per PDF/text file attached with "+" (photos: [tu
 max_audio_seconds = 60        # longest recording accepted
 sessions_file = "data/web_sessions.json"  # signed-in phones (sign-out revokes them)
 trusted_proxy = 0             # 0 = none; 1 behind a TLS proxy such as Render; or the proxy's
-                              # address, e.g. "127.0.0.1" for tailscale serve (TRUSTED_PROXY)
+                              # address, e.g. "127.0.0.1" (TRUSTED_PROXY)
 google_connect = false        # true: a "connect Google" button in the phone app signs in to
                               # Calendar and Gmail (needs a Web application OAuth client)
 owner_google = false          # true (the cloud server's profile): the owner's "Connect Google
@@ -200,7 +204,8 @@ check_minutes = 15
 [watch]                       # health checks: python -m kwil.watch (README "Health checks")
 enabled = true                # false = don't check this instance (also per config.<name>.toml)
 label = ""                    # its name in alerts and the banner; "" = "Your app" / "Mom's app"
-public_url = "auto"           # the phone's address: "auto" = public_origin or `tailscale serve`; "" = none
+public_url = "auto"           # the phone's address: "auto" = public_origin (https://heykwil.com),
+                              # else a local HTTPS proxy entry if one is found; "" = none
 functional_hours = 6          # the full test conversation this often (and after every restart or update)
 retry_minutes = 30            # a failed test conversation is tried again after this long
 gate = true                   # new code must pass the test conversation on a side port before going live
@@ -226,7 +231,9 @@ max_mb = 500                  # size guard: the oldest unpinned conversations ar
 incognito = false             # true = save nothing (also no Pinecone summary); or run with --incognito
 title_model = "claude-haiku-5-5"  # fast model that writes each conversation's title and summary
 
-[failover]                    # Pi -> PC -> cloud for the phone app (see FAILOVER.md)
+[failover]                    # retired 2026-10-31: Kwil is cloud-only (FAILOVER.md, kept for reference)
+enabled = true                # false = no failover whatever role, backends, ASSISTANT_ROLE or
+                              # FAILOVER_BACKENDS say; the cloud server's profile sets false
 role = ""                     # "pi", "pc" or "cloud" (--role overrides); "" = not in a failover setup
 app_origin = ""               # where the phone app is installed from, e.g. "https://hey-claude.onrender.com"
 sync_interval = 30            # seconds between history syncs with the other backends

@@ -79,14 +79,33 @@ if (!("speechSynthesis" in window)) els.phoneVoice.disabled = true;
 // --- views ---
 const VIEWS = ["history-view", "transcript-view", "memory-view", "brief-view", "reminders-view",
                "projects-view", "project-view", "today-view"];
+// The desktop layout (app.css): 64rem and up, Today opens beside the chat
+// and a transcript beside the History list (body[data-split] says which);
+// narrower, or with no matchMedia (the tests' DOMs), one screen at a time.
+// `currentView` is the screen asked for, so a resize lays it out again.
+const SPLIT_WITH = { "today-view": "app", "transcript-view": "history-view" };
+let currentView = null;
+const wideMedia = typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 64rem)") : null;
 function show(view) {
+  currentView = view;
+  const split = wideMedia && wideMedia.matches && SPLIT_WITH[view] ? view : "";
+  const also = split ? SPLIT_WITH[view] : null;
   els.login.hidden = view !== "login";
-  els.app.hidden = view !== "app";
+  els.app.hidden = view !== "app" && also !== "app";
   for (const id of VIEWS) {  // history.js, memory.js, brief.js, reminders.js, projects.js, today.js
     const el = $(id);
-    if (el) el.hidden = view !== id;
+    if (el) el.hidden = view !== id && also !== id;
+  }
+  const body = document.body;
+  if (body && body.dataset) {
+    if (split) body.dataset.split = split; else delete body.dataset.split;
   }
   syncTabs(view);
+}
+if (wideMedia) {
+  const relayout = () => { if (currentView) show(currentView); };
+  if (typeof wideMedia.addEventListener === "function") wideMedia.addEventListener("change", relayout);
+  else if (typeof wideMedia.addListener === "function") wideMedia.addListener(relayout);  // older Safari
 }
 
 // --- the phone's tab bar (#tabbar; app.css shows it below 48rem only) ---
@@ -94,32 +113,46 @@ function show(view) {
 // with Back (a transcript, Memory, ...) and the sign-in have none. Each tab
 // works through the top bar's own button (#open-today, #open-history, the
 // gear; hidden on a phone), so Today and History show only when theirs would.
+// The desktop rail (#rail; 48rem and up) has the same items (and Search,
+// ui.js) on every screen but the sign-in; a transcript is under History.
 const TAB_FOR = { app: "tab-chat", "today-view": "tab-today", "history-view": "tab-history" };
+const RAIL_FOR = { app: "rail-chat", "today-view": "rail-today", "history-view": "rail-history",
+                   "transcript-view": "rail-history" };
 const settingsMenu = () => (typeof document.querySelector === "function"
   ? document.querySelector("details.menu") : null);
 function shownView() {
+  const el = currentView === "app" ? els.app : currentView === "login" ? els.login : currentView && $(currentView);
+  if (el && !el.hidden) return currentView;
   if (!els.app.hidden) return "app";
   if (!els.login.hidden) return "login";
   return VIEWS.find((id) => $(id) && !$(id).hidden) || null;
 }
-function currentTab(view) {
+function currentTab(view, map = TAB_FOR) {
   const menu = settingsMenu();
-  if (view === "app" && menu && menu.open) return "tab-settings";
-  return TAB_FOR[view] || null;
+  if (view === "app" && menu && menu.open) return map === RAIL_FOR ? "rail-settings" : "tab-settings";
+  return map[view] || null;
+}
+function markCurrent(ids, now) {
+  for (const id of ids) {
+    const tab = $(id);
+    if (!tab) continue;
+    if (id === now) tab.setAttribute("aria-current", "page");
+    else if (typeof tab.removeAttribute === "function") tab.removeAttribute("aria-current");
+  }
 }
 function syncTabs(view) {
   const bar = $("tabbar");
   if (!bar) return;
   if (view === undefined) view = shownView();
   bar.hidden = !TAB_FOR[view];
-  const now = currentTab(view);
-  for (const id of ["tab-chat", "tab-today", "tab-history", "tab-settings"]) {
-    const tab = $(id);
-    if (!tab) continue;
-    if (id === now) tab.setAttribute("aria-current", "page");
-    else if (typeof tab.removeAttribute === "function") tab.removeAttribute("aria-current");
+  markCurrent(["tab-chat", "tab-today", "tab-history", "tab-settings"], currentTab(view));
+  const rail = $("rail");
+  if (rail) {
+    rail.hidden = !view || view === "login";
+    markCurrent(["rail-chat", "rail-today", "rail-history", "rail-settings"], currentTab(view, RAIL_FOR));
   }
-  for (const [tab, head] of [["tab-today", "open-today"], ["tab-history", "open-history"]]) {
+  for (const [tab, head] of [["tab-today", "open-today"], ["tab-history", "open-history"],
+                             ["rail-today", "open-today"], ["rail-history", "open-history"]]) {
     if ($(tab) && $(head)) $(tab).hidden = $(head).hidden;
   }
 }
@@ -131,16 +164,21 @@ function leaveToday() {
 }
 // Back to the chat screen without focusing the field (no keyboard pops up).
 function tabToChat() {
-  if (els.app.hidden) show("app");
+  if (shownView() !== "app") show("app");
 }
+// a tab and its rail item do the same
 function onTab(id, go) {
-  const tab = $(id);
-  if (!tab) return;
-  tab.addEventListener("click", () => {
-    if (currentTab(shownView()) === id) return;  // already there
-    leaveToday();
-    go(settingsMenu());
-  });
+  for (const [item, map] of [[id, TAB_FOR], [id.replace(/^tab-/, "rail-"), RAIL_FOR]]) {
+    const tab = $(item);
+    if (!tab) continue;
+    tab.addEventListener("click", () => {
+      const at = shownView();
+      // already there (from a transcript, History goes back to its list)
+      if (currentTab(at, map) === item && at !== "transcript-view") return;
+      leaveToday();
+      go(settingsMenu());
+    });
+  }
 }
 onTab("tab-chat", (menu) => {
   if (menu) menu.open = false;
@@ -543,14 +581,28 @@ function writeJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
 }
 
+// What an older failover setup left behind (Kwil is cloud-only since 2026-10-31):
+// these keys, and the access token in backend-router.js's TOKEN_DB (named
+// here: the router is never imported while failover is off).
+const FAILOVER_KEYS = ["failover", "backendsCache", "backendSettings", "backendOverride"];
+const TOKEN_DB = "hey-claude";
+
 async function detectFailover() {
-  let on = readJSON("failover", false);
+  let on = false;
   try {
     const res = await fetch("/healthz", { cache: "no-store", credentials: "omit" });
     on = Boolean((await res.json()).role);
-    writeJSON("failover", on);
-  } catch (e) { /* the cloud is down: the cached answer decides */ }
-  if (!on) return;
+  } catch (e) { /* unreachable: no failover (a cached "on" is never trusted) */ }
+  if (!on) {
+    for (const key of FAILOVER_KEYS) {
+      try { localStorage.removeItem(key); } catch (e) { /* private mode */ }
+    }
+    try {
+      if (window.indexedDB) window.indexedDB.deleteDatabase(TOKEN_DB);
+    } catch (e) { /* private mode, or no IndexedDB */ }
+    return;
+  }
+  writeJSON("failover", on);
   routerMod = await import("/backend-router.js");
   tokens = routerMod.tokenStore();
   router = new routerMod.BackendRouter({

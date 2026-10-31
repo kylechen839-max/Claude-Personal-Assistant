@@ -171,6 +171,36 @@ test('settings page: Done focuses the Settings tab on a phone, the gear otherwis
   assert.equal(doneFocus({ phone: true, media: false }), 'summary');  // no matchMedia
 });
 
+// On a desktop (48rem and up) the rail shows and its Settings item stands
+// in for the gear: Done (and Escape) focus it; with the rail hidden (the
+// sign-in) or narrower, as before; a tap in the rail keeps Settings open.
+test('settings page: on a desktop Done focuses the rail\'s Settings; a tap in the rail keeps the page open', () => {
+  const run = ({ wide, railHidden = false, itemHidden = false, escape = false }) => {
+    const t = setupPage();
+    const rail = { id: 'rail', hidden: railHidden, contains: (n) => n === item || n === rail };
+    const item = { id: 'rail-settings', hidden: itemHidden, focus() { t.focused.push('rail-settings'); } };
+    const byId = t.doc.getElementById;
+    t.doc.getElementById = (id) => ({ rail, 'rail-settings': item })[id] || byId(id);
+    t.win.matchMedia = (q) => ({ matches: wide ? q === '(min-width: 48rem)' : q === '(max-width: 47.99rem)' });
+    t.menu.open = true;
+    if (escape) t.fire('keydown', { key: 'Escape' }); else t.tapDone();
+    assert.equal(t.menu.open, false);
+    return { last: t.focused.at(-1), t, item };
+  };
+  assert.equal(run({ wide: true }).last, 'rail-settings');
+  assert.equal(run({ wide: true, escape: true }).last, 'rail-settings');
+  assert.equal(run({ wide: false }).last, 'summary');  // no tab bar in this fake: the gear
+  assert.equal(run({ wide: true, railHidden: true }).last, 'summary');
+  assert.equal(run({ wide: true, itemHidden: true }).last, 'summary');
+  const { t, item } = run({ wide: true });
+  t.menu.open = true;
+  t.menu.contains = () => false;
+  t.fire('pointerdown', { target: item });
+  assert.equal(t.menu.open, true);
+  t.fire('pointerdown', { target: { id: 'log' } });  // a tap anywhere else still closes it
+  assert.equal(t.menu.open, false);
+});
+
 // With the keyboard up (html.kb-open) the bar is display:none but not
 // [hidden]: the tab has no client rects and can't take focus (judge LOW 2).
 function kbDone({ raf = false, vv = false } = {}) {

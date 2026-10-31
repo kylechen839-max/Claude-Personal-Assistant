@@ -45,6 +45,32 @@
 <script src="/static/features.js" defer></script>
 </head>
 <body>
+<!-- the desktop rail (48rem and up, app.js syncTabs): every screen but the
+     sign-in and voice mode; like the phone's tab bar, each item works
+     through the header's own buttons. Search opens the switcher (ui.js). -->
+<nav id="rail" class="rail" aria-label="Main navigation" hidden>
+  <button id="rail-search" class="rail-item" type="button" aria-haspopup="dialog" aria-controls="switcher">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>
+    <span class="rail-label">Search</span>
+    <kbd id="rail-search-key" class="rail-key"></kbd>
+  </button>
+  <button id="rail-chat" class="rail-item" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.8a8 8 0 1 1 15.6-3.7z"/></svg>
+    <span class="rail-label">Chat</span>
+  </button>
+  <button id="rail-today" class="rail-item" type="button" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+    <span class="rail-label">Today</span>
+  </button>
+  <button id="rail-history" class="rail-item" type="button" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 7v5l3 2"/></svg>
+    <span class="rail-label">History</span>
+  </button>
+  <button id="rail-settings" class="rail-item rail-settings" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    <span class="rail-label">Settings</span>
+  </button>
+</nav>
 <main id="login" class="login" hidden>
   <img class="login-icon" src="/icon.svg" alt="">
   <h1>Kwil</h1>
@@ -745,6 +771,14 @@
       <button value="delete" class="danger">Delete</button>
     </div>
   </form>
+</dialog>
+<!-- Ctrl+K / Cmd+K (ui.js KwilUI.switcher): go to a screen or a conversation -->
+<dialog id="switcher" class="sheet switcher" aria-label="Go to">
+  <input id="switcher-input" class="switcher-input" type="text" role="combobox" aria-controls="switcher-list"
+         aria-autocomplete="list" aria-expanded="false" aria-label="Go to a screen or conversation"
+         placeholder="Go to a screen or conversation" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <ul id="switcher-list" class="switcher-list" role="listbox" aria-label="Results"></ul>
+  <p id="switcher-status" class="switcher-status" role="status"></p>
 </dialog>
 </body>
 </html>

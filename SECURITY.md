@@ -44,6 +44,30 @@ headers, OAuth fields (`access_token`, `refresh_token`, `client_secret`, ...)
 and OAuth sign-in `code=` values, tracebacks included. At the default INFO
 level nothing secret was found being logged.
 
+## Failover: off on the cloud (2026-10-31)
+
+Kwil is cloud-only. The cloud server's profile sets `[failover] enabled =
+false`, so even with `ASSISTANT_ROLE`, `APP_ORIGIN` or `FAILOVER_BACKENDS`
+still set in Render, `cloud.build_app` mounts no `EdgeMiddleware`: no CORS
+for another origin, no `hc1.` access tokens (an old phone's `hc1.` bearer
+gets 401 "not signed in" and, like a Canvas helper key, is not counted
+toward the lockout: it can't match `WEB_TOKEN`, so it is no guess, and
+counting it would let a phone lock its own address out; if `WEB_TOKEN`
+itself starts with `hc1.` it is counted as before), no `/api/auth/token`,
+no `/api/sync` (404 once signed in) and no public `/backend-router.js` (401 before sign-in),
+and `/healthz` has no `role` (`tests/test_failover_cloud.py::
+test_server_profile_turns_failover_off_even_with_the_old_env`). It logs one
+WARNING naming those settings, never their values (tailnet addresses). The
+phone app no longer trusts a cached `failover` flag when `/healthz` can't
+be reached, and clears the old failover keys from localStorage. History
+events made on the cloud stay `origin = "cloud"` without `ASSISTANT_ROLE`,
+and so does "Sign out everywhere"'s revoke event (labelled with the history
+store's origin). The app also deletes the old access token's IndexedDB
+database (`hey-claude`, backend-router.js `TOKEN_DB`).
+Kept on purpose: the sync event log and its sign-out-everywhere revoke
+events (history and sign-out read them), and the failover code a PC or Pi
+with `[failover] role` still uses. The section below describes that code.
+
 ## Cross-origin backends (Pi -> PC -> cloud failover)
 
 The phone app is installed from the cloud host but also talks to the Pi and
@@ -198,6 +222,44 @@ revoke it at myaccount.google.com -> Security -> Third-party connections
 `python -m kwil.tools.google_auth` (Calendar only). The draft question names the real reply address
 ("Prof. Smith at smith@uni.edu") and warns when Reply-To differs from the
 sender, since a display name can say anything.
+
+### Google Drive is untrusted input, and read-only (Drive tools)
+Files in Kyle's Drive can be written or shared by anyone (a shared Doc, a
+file a classmate dropped in a shared folder), so `search_drive` and
+`read_doc` (`tools/drive.py`) are `untrusted_output` and `private`, like
+the email tools: once one ran, every tool that changes something asks for
+a spoken yes first for the rest of the conversation, even if the Drive
+(or Gmail) tools later leave the registry (a Disconnect that falls back
+to a token without the scope, or a Reconnect with the box unticked
+rebuilds the tools in place). Two things keep it: the chat sets its sticky
+`untrusted_context` when it dispatches any tool the registry lists as
+untrusted at that moment (only `reset()` clears it), and the registry
+adds `"untrusted_content": true` to every dict result of an
+`untrusted_output` tool, which `has_marked_results` finds in the history
+with or without the tool (and with an empty registry). The mark doesn't
+reach a result sent as `search_result` blocks (course and project files,
+`citations.py`) or a plain-text result; the flag covers those. File
+names, queries and text never reach the log
+(INFO says counts and lengths only; Google's errors, whose text holds the
+request URL and so the query, are replaced by plain ones before the
+registry logs them). The scope is `drive.readonly` only, asked for only
+while `[drive] enabled` is on, and no Docs API scope (`files.export` needs
+only a Drive scope). On top of that the service is wrapped
+(`drive.ReadOnlyDrive`): an allowlist lets through only `files().list`,
+`get`, `export`, `export_media` and `get_media`; everything else
+(create, update, delete, copy, emptyTrash, permissions, comments, batch
+requests) raises `DriveWriteBlocked`, and a test checks it. Uploaded files
+are refused over 10 MB by Drive's size before any download, the download
+itself asks for at most that many bytes (a `Range` header), and the bytes
+go to `textextract` (zip-bomb and XML-bomb guards, a page cap and a time
+limit). Each read returns at most 6000 characters. Beta testers never get
+Drive: their consent screen (the public project) doesn't list the scope,
+and a beta token that somehow carried it still gets no Drive tools.
+Deliberate non-fix: read_doc downloads the whole file again for each
+6000-character page instead of caching other people's text in memory.
+
+The Google token is more powerful with Drive on: a stolen `token.json` (or
+`GOOGLE_TOKEN_JSON`) could also read every file in Kyle's Drive.
 
 Email (and web) text also stays out of long-term memory: when a
 conversation contained any, its summary is written from Kyle's own words

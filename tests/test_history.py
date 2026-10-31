@@ -1186,3 +1186,14 @@ def test_history_tools_registered_by_cli(tmp_path):
     assert cli.build_recorder(cfg, s, "wake", incognito=True).incognito
     assert cli.build_recorder(cfg, None, "wake") is None
     s.close()
+
+
+def test_origin_is_cloud_under_the_server_profile_without_assistant_role(monkeypatch):
+    """Cloud-only (2026-10-31): Render's ASSISTANT_ROLE is going away, and
+    the cloud's events must not start saying "pc"."""
+    monkeypatch.delenv("ASSISTANT_ROLE", raising=False)
+    assert history.origin_of(load_config(None, None, profile="server")) == "cloud"
+    assert history.origin_of(load_config(None, None, profile="")) == "pc"
+    monkeypatch.setenv("ASSISTANT_ROLE", "pi")  # the env never makes the cloud a Pi
+    assert history.origin_of(load_config(None, None, profile="server")) == "cloud"
+    assert history.origin_of(load_config(None, None, profile="")) == "pi"

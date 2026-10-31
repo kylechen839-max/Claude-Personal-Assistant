@@ -8,7 +8,8 @@
 // shown only when /api/google/status says it is set up, and "Disconnect
 // Google account" when the status allows it (family members). When Google
 // refused the saved sign-in (needs_reconnect) the row says it expired and
-// the button reconnects.
+// the button reconnects. A token without the Drive scope (status
+// "missing") says "Reconnect to add Google Drive (read-only)" there too.
 "use strict";
 
 (function (root) {
@@ -24,6 +25,15 @@
     "Conversation history": "对话记录",
     "Settings": "设置",
     "Main navigation": "主导航",  // the phone's tab bar (aria-label)
+    // the desktop rail's Search and the Ctrl+K switcher (ui.js); "Results"
+    // (its list's label) is History's, below
+    "Search": "搜索",
+    "Go to": "前往",
+    "Go to a screen or conversation": "前往页面或对话",
+    "No matches": "没有匹配项",
+    "New chat": "新对话",
+    "Start voice conversation": "开始语音对话",
+    "Conversation": "对话",
     // the Settings page's section heads (Voice, Connections, People and
     // Backends are below; "Account" is the invite form's field, not a head)
     "Memory and projects": "记忆和项目",
@@ -121,6 +131,9 @@
     // Google refused the saved sign-in (google_web.py needs_reconnect)
     "Google sign-in expired. Reconnect to keep using it.": "Google 登录已过期。请重新连接后继续使用。",
     "Google sign-in expired.": "Google 登录已过期。",
+    // a token from before Google Drive (google_web.py status "missing")
+    "Reconnect to add Google Drive (read-only)": "重新连接以添加 Google 云端硬盘（只读）",
+    "Reconnect to add Google Drive (read-only).": "重新连接以添加 Google 云端硬盘（只读）。",
     "Opening Google…": "正在打开 Google…",
     "Couldn't start the Google sign-in.": "无法开始 Google 登录。",
     "Connect Spotify": "连接 Spotify",
@@ -908,6 +921,12 @@
     box.hidden = false;
   }
 
+  // the saved token lacks the Drive scope (a sign-in from before Drive)
+  function lacksDrive(st) {
+    return Array.isArray(st.missing) &&
+      st.missing.some((s) => typeof s === "string" && s.endsWith("/auth/drive.readonly"));
+  }
+
   // --- "Connect Google account" (google_web.py) ---
   function setupGoogle(win, doc) {
     const btn = doc.getElementById("google-connect");
@@ -938,6 +957,11 @@
       if (st.connected && st.needs_reconnect === true) {
         return { state: "attention", status: "Sign-in expired", sub,
                  ...(st.enabled ? { action: "Reconnect" } : {}) };
+      }
+      if (st.enabled && st.connected && lacksDrive(st)) {
+        // Calendar and Gmail still work; the same Connect flow adds Drive
+        return { state: "connected", status: "Connected", action: "Reconnect",
+                 sub: "Reconnect to add Google Drive (read-only)" };
       }
       if (st.enabled && st.connected) return { state: "connected", status: "Connected", action: "Manage", sub };
       if (st.enabled) return { state: "available", status: "Not connected", action: "Connect", sub };
@@ -971,6 +995,9 @@
           hint.hidden = false;
           hint.textContent = say(st.enabled ? "Google sign-in expired. Reconnect to keep using it."
                                             : "Google sign-in expired.");
+        } else if (hint && st.enabled && st.connected && lacksDrive(st)) {
+          hint.hidden = false;
+          hint.textContent = say("Reconnect to add Google Drive (read-only).");
         } else if (hint && !st.enabled && st.note) {  // e.g. not set up for beta accounts yet
           hint.hidden = false;
           hint.textContent = say(String(st.note));

@@ -119,10 +119,25 @@ class FailoverSettings:
         return [b for b in self.backends if b.role != self.role]
 
 
+_warned_disabled = False  # settings_from_config's warning, once per process
+
+
 def settings_from_config(config: dict) -> FailoverSettings:
     """[failover] from config.toml, validated. The cloud backend's URL
-    defaults to app_origin (the app is installed from the cloud host)."""
+    defaults to app_origin (the app is installed from the cloud host).
+    With [failover] enabled = false (the server profile): no role and no
+    backends, whatever the rest of the section or the environment says."""
+    global _warned_disabled
     f = config.get("failover", {})
+    if not f.get("enabled", True):
+        left = (f.get("role") or f.get("app_origin") or f.get("backends")
+                or os.environ.get("FAILOVER_BACKENDS", "").strip())
+        if left and not _warned_disabled:
+            _warned_disabled = True
+            # names only: the values are tailnet addresses
+            log.warning("[failover] enabled is false: ASSISTANT_ROLE, APP_ORIGIN, "
+                        "FAILOVER_BACKENDS and [failover] role/backends are ignored")
+        return FailoverSettings("", None, ())
     role = str(f.get("role", "") or "").strip().lower()
     if role and role not in ROLES:
         raise ValueError(f"[failover] role must be pi, pc or cloud, not {role!r}")

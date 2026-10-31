@@ -170,7 +170,8 @@ def test_owner_can_connect_with_only_the_servers_own_address(server, monkeypatch
     s = server
     monkeypatch.setenv("FAILOVER_BACKENDS", "pi=https://pi.t.ts.net,pc=https://pc.t.ts.net")
     s.config["webapp"]["public_origin"] = ""
-    s.config["failover"].update(role="cloud", app_origin="https://kwil.example")
+    # failover opts in: the server profile turns it off (Kwil is cloud-only)
+    s.config["failover"].update(enabled=True, role="cloud", app_origin="https://kwil.example")
     assert s.connect.enabled(None) is True
     assert s.connect.redirect_uri == "https://kwil.example/google/callback"
     assert s.connect._redirect("a-member") == "https://kwil.example/google/callback"
@@ -180,6 +181,20 @@ def test_owner_can_connect_with_only_the_servers_own_address(server, monkeypatch
     assert q["redirect_uri"] == ["https://kwil.example/google/callback"]
     s.config["failover"].update(role="", app_origin="")
     assert s.connect.enabled(None) is False
+
+
+def test_without_failover_the_cloud_needs_public_origin_for_google(server, monkeypatch):
+    """Cloud-only (2026-10-31): the server profile's [failover] enabled =
+    false means APP_ORIGIN no longer gives the cloud its address; only
+    PUBLIC_ORIGIN does (Render: https://heykwil.com)."""
+    s = server
+    monkeypatch.setattr("kwil.failover.peers._warned_disabled", True, raising=False)
+    s.config["failover"].update(enabled=False, role="cloud", app_origin="https://kwil.example")
+    s.config["webapp"]["public_origin"] = ""
+    assert s.connect.enabled(None) is False  # never a stale APP_ORIGIN
+    s.config["webapp"]["public_origin"] = "https://heykwil.com"
+    assert s.connect.enabled(None) is True
+    assert s.connect.redirect_uri == "https://heykwil.com/google/callback"
 
 
 def test_owner_disconnect_falls_back_to_a_refused_env_token_and_says_so(
