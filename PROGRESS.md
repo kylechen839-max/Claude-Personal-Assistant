@@ -9022,4 +9022,4 @@ the tag step now says 1.2.0 (v1.1.0 is tagged).
   `test_readme_says_kwil_is_proprietary_and_vendored_parts_keep_theirs`.
   Updated on purpose: `/silence.wav` left the "needs the cookie" list, the
   export's file set and profile gained `research.json` and `credit_used_usd`.
-- Full suite (Linux sandbox, not real hardware): RESULT_PY; JS 538 passed.
+- Full suite (Linux sandbox, not real hardware): 4110 passed, 53 skipped, 1 deselected (`-k "not live_pinecone"`; baseline + 4); JS 538 passed (no JS test added, four sw pins bumped).
