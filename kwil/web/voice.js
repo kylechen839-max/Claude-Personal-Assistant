@@ -550,6 +550,11 @@
   }
 
   // --- start / stop ---
+  // voice mode covers the whole window (KwilUI.voice in ui.js; Escape ends it)
+  function overlay(step) {
+    const v = window.KwilUI && window.KwilUI.voice;
+    if (v && typeof v[step] === "function") v[step]();
+  }
   async function start() {
     if (running) return;
     running = true;
@@ -565,6 +570,7 @@
     timings = {};
     ui.view.hidden = false;
     document.body.classList.add("voice-open");
+    overlay("opened");  // ui.js: the page behind is inert, focus on the orb
     setState("connecting");
     ui.user.textContent = "";
     ui.reply.textContent = "";
@@ -701,6 +707,7 @@
     document.body.classList.remove("voice-open");
     ui.view.hidden = true;
     ui.resume.hidden = true;
+    overlay("closed");  // ui.js: the page back, focus on the Voice button
     if (message) {
       const status = $("status");
       if (status) status.textContent = message;

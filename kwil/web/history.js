@@ -33,6 +33,7 @@ let nextOffset = 0;
 let seq = 0;            // ignore responses to older searches
 let controller = null;  // aborts the previous search
 let items = new Map();  // id -> conversation shown in the list
+let rows = new Map();   // id -> its row's button (the open one is aria-current)
 let current = null;     // the conversation open in the transcript view
 let incognitoOn = false;
 
@@ -135,6 +136,7 @@ function convNode(c) {
   // no aria-label: the row's own text names it (the source icon's label,
   // the title, "Pinned", the time), so i18n.js translates every part of it
   main.append(icon, body);
+  rows.set(c.id, main);
   main.addEventListener("click", () => {
     if (row.dataset.suppress) { delete row.dataset.suppress; return; }
     if (row.classList.contains("open")) { row.classList.remove("open"); return; }
@@ -196,7 +198,7 @@ function closeSwipes(except) {
 }
 
 function render(convs, append) {
-  if (!append) { hist.list.textContent = ""; items = new Map(); }
+  if (!append) { hist.list.textContent = ""; items = new Map(); rows = new Map(); }
   for (const c of convs) {
     items.set(c.id, c);
     // When searching, results stay in relevance order under one heading.
@@ -212,6 +214,17 @@ function render(convs, append) {
       hist.list.appendChild(section);
     }
     section.lastElementChild.appendChild(convNode(c));
+  }
+  markOpen();
+}
+
+// On a wide screen the list stays beside the open transcript (app.js
+// show()): its row says so.
+function markOpen() {
+  const open = !hist.tView.hidden && current ? current.id : null;
+  for (const [id, main] of rows) {
+    if (id === open) main.setAttribute("aria-current", "true");
+    else main.removeAttribute("aria-current");
   }
 }
 
@@ -304,6 +317,7 @@ async function openTranscript(id) {
   hist.contHint.textContent = incognitoOn ? "Turn incognito off to continue it." :
     current.active ? "This is the conversation you're in now." : "";
   show("transcript-view");
+  markOpen();
   hist.tView.scrollTop = 0;
   hist.tTitle.focus({ preventScroll: true });
 }
@@ -411,6 +425,7 @@ function openInChat(data, note) {
 
 hist.tBack.addEventListener("click", () => {
   show("history-view");
+  markOpen();
   load(false);  // titles, pins and order may have changed
 });
 hist.tActions.addEventListener("click", () => current && openSheet(current.id));
@@ -556,3 +571,6 @@ document.addEventListener("keydown", (e) => {
   if (!hist.tView.hidden && !document.querySelector("dialog[open]")) hist.tBack.click();
   else if (!hist.view.hidden && !document.querySelector("dialog[open]")) hist.back.click();
 });
+
+// For ui.js's switcher (Ctrl+K): a past conversation it found.
+window.KwilHistory = { openTranscript };

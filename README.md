@@ -202,7 +202,9 @@ never saved. Like a resumed conversation, what was read counts as
 untrusted, so changes later in that conversation ask first.
 
 **On the phone:** the **History** tab in the bar at the bottom (on a wider
-screen, the clock button at the top of the app) opens History:
+screen, **History** in the rail on the left, where a conversation opens
+beside the list; **Ctrl+K**, or **Cmd+K** on a Mac, jumps to any screen or
+past conversation) opens History:
 a search bar (results update as you type, matching words highlighted),
 filters (Pinned, Phone, Voice, PC, Typed, Archived), and conversations
 grouped by Today / Yesterday / This week / Older with a source icon, time
