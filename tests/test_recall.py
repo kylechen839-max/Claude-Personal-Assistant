@@ -174,6 +174,24 @@ def test_hybrid_paging_past_the_fused_list(store):
     assert len(seen) >= 220 and seen <= set(many)
 
 
+def test_paging_never_skips_when_meaning_reorders_the_first_pages(store):
+    """The fused first pages and the keyword-only deep pages are one list:
+    every conversation shows exactly once, however the vectors rank them
+    (on the Pi, tied similarities came back in a different order)."""
+    many = [add_conv(store, turns=[f"physics question {i}", "ok"], title=f"Q {i}",
+                     at=NOW - i * 60) for i in range(230)]
+    r = hybrid(store)
+    r.backfill(limit=1000)
+    keyword = ids(recall.FtsRetriever(store).search("physics", k=230))
+    # meaning ranks them in the reverse of the keyword order
+    r._vector_search = lambda q, k, f: [(cid, 0.9) for cid in reversed(keyword)][:k]
+    pages = []
+    for offset in range(0, 240, 20):
+        pages += ids(history.search_conversations(store, "physics", None,
+                                                  limit=20, offset=offset))
+    assert len(pages) == len(set(pages)) == 230 and set(pages) == set(many)
+
+
 # ---------- read_conversation ----------
 def read_tool(store, tz=None):
     return next(t for t in history_tools(store, tz=tz) if t.name == "read_conversation")
