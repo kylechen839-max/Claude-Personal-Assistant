@@ -117,7 +117,7 @@ def test_cloud_server(fake_client, tmp_path, monkeypatch, role):
     config["cloud"]["trusted_proxies"] = ["10.0.0.0/8"]
     config["webapp"]["sessions_file"] = str(tmp_path / "sessions.json")
     config["webapp"]["max_upload_mb"] = 4  # as in the server profile
-    config["failover"].update(role=role, app_origin=APP if role else "",
+    config["failover"].update(enabled=True, role=role, app_origin=APP if role else "",
                               backends=[{"role": "pi", "url": PI}] if role else [])
     assistant = make_assistant(fake_client)
     built = {}

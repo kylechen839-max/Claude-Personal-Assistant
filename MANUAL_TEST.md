@@ -366,20 +366,18 @@ Note anything that failed or any setting you changed in BLOCKERS.md.
 ---
 
 ## Phone web app (optional, ~10 min)
-Setup is in README.md ("Phone web app"): Tailscale on the PC and phone.
-- [ ] `python -m kwil --mode web --show-token`, then in another window
-      `tailscale serve --bg --https=443 http://127.0.0.1:8765`.
-  - Should: `.env` now has a `WEB_TOKEN` line; `logs/assistant.log` does not
-    contain the token.
-- [ ] With the phone on mobile data (Wi-Fi off) and Tailscale on, open the
-      `https://<pc>.<tailnet>.ts.net` address. Enter a wrong token, then the
-      right one.
-  - Should: "wrong token", then the chat page. Turn Tailscale off on the phone
-    and reload: the page doesn't load at all (it's not on the internet).
+Setup is in README.md ("Phone web app"): Kwil is cloud-only, so the phone
+uses https://heykwil.com.
+- [ ] With the phone on mobile data (Wi-Fi off), open https://heykwil.com.
+      Enter a wrong token, then the right one (the cloud's `WEB_TOKEN`).
+  - Should: "wrong token", then the chat page.
+- [ ] If the phone used the old Pi/PC failover: open the app once.
+  - Should: Settings shows no Backends section and no Pi/PC/Cloud badge,
+    and replies come from the cloud (it cleared the old setup itself).
 - [ ] iPhone install: in Safari, Share -> Add to Home Screen -> Add. Open it
-      from the new "Claude" icon and enter the token once (the home-screen
+      from the new "Kwil" icon and enter the token once (the home-screen
       app has its own cookies, so it asks again even if Safari was signed in).
-  - Should: opens full screen (no Safari bars) with the Claude mic icon.
+  - Should: opens full screen (no Safari bars) with the Kwil icon.
     Close it, reopen from the icon: still signed in.
 - [ ] Tap the mic in the installed app and allow the microphone.
   - Should: the orange mic dot in the status bar disappears after each
@@ -1397,37 +1395,11 @@ Setup is in README.md ("Raspberry Pi").
 
 ---
 
-## Phone app failover: Pi -> PC -> cloud (optional, ~15 min)
-Setup is in README.md ("Phone app failover") and FAILOVER.md. You need the
-Pi, the PC and the cloud host running with the same `WEB_TOKEN`, and the
-phone app installed from the cloud URL with Tailscale on.
-- [ ] Open the app. Settings -> Backends lists Pi, PC and Cloud, all
-      healthy, mode Auto.
-  - Should: the badge in the header says **Pi**.
-- [ ] Start a conversation ("what's on my calendar tomorrow?"), then
-      **unplug the Pi** and ask a follow-up in the same conversation.
-  - Should: the reply comes from the PC (badge **PC**) within a few seconds.
-    If the Pi died while a question was being sent, the app says "Pi didn't
-    answer; tap to try again" instead of sending it twice; tap once.
-  - Should: the conversation's earlier messages are still there.
-- [ ] **Turn the PC off** (or quit the assistant on it) and ask again.
-  - Should: badge **Cloud**, and an answer (the first one may take a few
-    seconds if Render was asleep).
-- [ ] **Airplane mode, then Wi-Fi off and cellular on** (Tailscale still
-      on), with the Pi and PC back on.
-  - Should: within about two minutes the badge goes back to **Pi** (it
-    waits for two good checks in a row), but never in the middle of a
-    reply or while you are speaking.
-- [ ] Turn Tailscale off on the phone (cellular only).
-  - Should: badge **Cloud**; Settings shows Pi and PC as unreachable.
-- [ ] Settings -> force **PC**, ask something, then back to **Auto**.
-  - Should: the badge follows the setting.
-- [ ] Open the history on another backend (force Cloud, then Pi).
-  - Should: the same conversations everywhere (give it 30 s to sync), and
-    a conversation deleted on one backend is gone from all of them.
-- [ ] From a laptop browser *not* on the app: open
-      `https://<pi>.<tailnet>.ts.net/healthz`.
-  - Should: only `{"ok":true,"api":1,"role":"pi"}`.
+## Phone app failover (retired 2026-10-31)
+Kwil is cloud-only: there is no Pi -> PC -> cloud failover to check any
+more (README "Phone app failover (retired 2026-10-31)", FAILOVER.md).
+- [ ] From a laptop browser, open https://heykwil.com/healthz.
+  - Should: `{"ok":true,"version":"..."}` with no `role` and no `api`.
 
 ## Agent run dashboard (optional, ~10 min)
 The dev team's run list at https://claude.ai/artifact/BWYCUWxJxBvG6MJvnsaqvn

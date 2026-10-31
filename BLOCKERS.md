@@ -18,6 +18,25 @@ Only what is still open for Kyle. None of it blocks the code.
          (the row says "Reconnect to add Google Drive (read-only)"); on the
          PC, run `python -m kwil.tools.google_auth`. Then the Drive checks
          in MANUAL_TEST.md.
+- [ ] **Cloud-only, stage 1 (2026-10-31): the steps only Kyle can do.**
+      Kwil is cloud-only: the cloud's server profile now sets `[failover]
+      enabled = false` (README "Phone app failover (retired 2026-10-31)").
+      1. **Render -> hey-claude -> Environment:** `PUBLIC_ORIGIN` is
+         exactly `https://heykwil.com` (Kyle confirmed it on 2026-10-31;
+         invite links, Google and Notion sign-in return there, and without
+         failover `APP_ORIGIN` no longer stands in for it), so delete
+         `ASSISTANT_ROLE`, `APP_ORIGIN` and `FAILOVER_BACKENDS` and Save. Until then the log shows one
+         warning at start-up that they are ignored; nothing else changes.
+      2. **Before stage 2:** GitHub -> the repo -> Settings -> Rules
+         (ruleset for master) -> Require status checks: remove
+         `windows-latest / Python 3.12` and `Debian Bookworm arm64 / Python
+         3.11`, so stage 2 can drop those CI jobs without blocking merges.
+      3. **Optional:** on the PC stop `tailscale serve` (`tailscale serve
+         reset`) and the PC Kwil tasks (`.\scripts\install_windows_service.ps1
+         -Uninstall`, `.\scripts\install_family_tasks.ps1 -Uninstall`); on the
+         Pi stop the units (`systemctl --user disable --now kwil.service
+         kwil-watch.timer`). Move Mom to a cloud family invite (README "Move
+         a PC family copy to the cloud").
 - [ ] **Canvas helper extension: the steps only Kyle can do (2026-10-27).**
       The code is in `tools/canvas-helper/` (its README).
       1. Load it unpacked in Chrome or Edge on your computer and run the
@@ -57,9 +76,9 @@ Only what is still open for Kyle. None of it blocks the code.
       2. **Render display name:** Dashboard -> `hey-claude` -> Settings ->
          Name -> "Kwil". Leave `render.yaml`'s `name: hey-claude` and the
          disk `hey-claude-data` alone: a renamed Blueprint service is a
-         new service with an empty disk. The URL stays
-         `hey-claude.onrender.com` (a custom domain is the way to change it,
-         see the launch item below).
+         new service with an empty disk. Render's own `*.onrender.com`
+         URL keeps the old name; the app is at the custom domain
+         `https://heykwil.com` (`PUBLIC_ORIGIN`).
       3. **Optional: re-register the PC tasks** so they are under `\Kwil\`
          and run `python -m kwil`: `.\scripts\install_windows_service.ps1`,
          then `.\scripts\install_family_tasks.ps1` and
@@ -89,11 +108,12 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Public beta launch (in this order; each step points to its own
       item below rather than repeating it).** Nothing in code is missing;
       these are Render, Google, Notion and wording steps only Kyle can do.
-      1. **Render environment.** `USER_DATA_KEY` exists (item
-         "`USER_DATA_KEY` on Render") and is never changed again: a new
+      1. **Done (2026-10-31): Kyle confirmed USER_DATA_KEY and
+         PUBLIC_ORIGIN.** **Render environment.** `USER_DATA_KEY` exists
+         (item "`USER_DATA_KEY` on Render") and is never changed again: a new
          value makes every tester's stored key and Notion token unreadable.
-         `PUBLIC_ORIGIN` is the exact https origin people open (no
-         trailing slash). Decide on a custom domain *now*: changing it
+         `PUBLIC_ORIGIN` is the exact https origin people open, no trailing
+         slash (`https://heykwil.com`, the custom domain): changing it
          later changes the Google and Notion redirect URIs and the cookies
          (everyone signs in again).
       2. **Done (2026-10-22): Kyle approved the wording; support email
@@ -108,8 +128,10 @@ Only what is still open for Kyle. None of it blocks the code.
          `/privacy` and `/terms` answer 404, and Google's consent screen
          and Notion's integration form both need those URLs, so it must be
          live before steps 4 and 6.
-      4. **Google for beta testers:** item "Beta testers' Google" below: a
-         *new* GCP project, consent screen with only `calendar.events`,
+      4. **Done (2026-10-31): project "Kwil Beta", its Web client and
+         `GOOGLE_PUBLIC_CLIENT_JSON` on Render (item "Beta testers'
+         Google").** **Google for beta testers:** item "Beta testers'
+         Google" below: a *new* GCP project, consent screen with only `calendar.events`,
          `calendar.calendarlist.readonly` and `calendar.calendars.readonly`,
          published "In production" unverified (100-user cap), a Web
          client with redirect `<PUBLIC_ORIGIN>/google/callback`, then its
@@ -119,7 +141,9 @@ Only what is still open for Kyle. None of it blocks the code.
          with a custom domain), then submit the project for
          verification with a demo video (consent, then a calendar
          question). Lifts the warning screen and the 100-user cap.
-      6. **Notion:** item "Testers' Notion" below: the public integration,
+      6. **Done (2026-10-31): the public "Kwil" integration is reused and
+         its client ID and secret are on Render (item "Testers' Notion").**
+         **Notion:** item "Testers' Notion" below: the public integration,
          then `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET`.
       7. **Optional:** item "Cloud uptime alerts and error tracking"
          (UptimeRobot on `/healthz`, Sentry's `SENTRY_DSN`).
@@ -137,7 +161,10 @@ Only what is still open for Kyle. None of it blocks the code.
       11. **Tag 1.1.0** in the GitHub UI after the judge's final GO on
           that exact SHA (the version bump and CHANGELOG date land in the
           release PR first).
-- [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
+- [ ] **Install the watchdog on the PC (~1 min). No longer needed for the
+      cloud (2026-10-31): Kwil is cloud-only, the phone uses
+      https://heykwil.com, and Render restarts the cloud server itself; the
+      PC watchdog only watches apps running on the PC.** In PowerShell in the
       project folder: `.\scripts\install_watch_task.ps1` (or
       `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden
       `\Kwil\Watch` task (every 5 minutes) that checks your app and
@@ -165,9 +192,9 @@ Only what is still open for Kyle. None of it blocks the code.
       family" -> "Their own Google").** Only you can: (1) in
       console.cloud.google.com, project `hey-claude-511904`, create an OAuth
       client of type **Web application** with redirect URI
-      `https://hey-claude.onrender.com/google/callback` (your real Render
-      address); (2) in Render -> hey-claude -> Environment set
-      `PUBLIC_ORIGIN` to that address and paste the client's JSON into
+      `https://heykwil.com/google/callback` (the address in
+      `PUBLIC_ORIGIN`); (2) in Render -> hey-claude -> Environment set
+      `PUBLIC_ORIGIN` to `https://heykwil.com` and paste the client's JSON into
       `GOOGLE_WEB_CLIENT_JSON`; (3) make sure the consent screen is
       **published** (Testing mode allows only listed test users, for 7
       days). Until then invites work and the Connect button stays hidden.
@@ -193,21 +220,29 @@ Only what is still open for Kyle. None of it blocks the code.
       one project together), run `python -m kwil.tools.google_auth` there
       again.
 - [ ] **Beta testers' Google: a Calendar-only OAuth client (~20 min plus
-      Google's review; README "Invite family" -> "Account types").** Only
-      you can: (1) create a *new* Google Cloud project (e.g. "Hey Claude
+      Google's review; README "Invite family" -> "Account types").**
+      Steps (1) to (3) done (2026-10-31): project 'Kwil Beta' has only the
+      Calendar API enabled and exactly the three Calendar scopes. It is
+      published In production, unverified (100-user cap). Its Web client
+      has the redirect https://heykwil.com/google/callback, and
+      GOOGLE_PUBLIC_CLIENT_JSON is set on Render. Still open: (a) a sign-in
+      test with a non-family Google account, as part of the step 9 dry run;
+      (b) optionally, remove the old hey-claude-tgml.onrender.com redirect
+      URI and authorized domain; (c) step (4)/step 5, verification, stays
+      optional. The original steps: (1) create a *new* Google Cloud project (e.g. "Hey Claude
       Beta"), enable the Calendar API, and set up its OAuth consent screen
       with only the `calendar.events`, `calendar.calendarlist.readonly` and
       `calendar.calendars.readonly` scopes, a support email and the privacy
       policy link; publish it ("In production", unverified: up to 100
       users see a warning screen); (2) create a **Web application** client
-      there with redirect URI `https://hey-claude.onrender.com/google/callback`;
+      there with redirect URI `https://heykwil.com/google/callback`;
       (3) paste its JSON into `GOOGLE_PUBLIC_CLIENT_JSON` in Render ->
       Environment; (4) submit the project for verification (demo video of
       the consent and a calendar question). Never add Gmail scopes to that
       project. Until (3), beta testers can't connect Google (the app says
       so); family members are unaffected.
-- [ ] **`USER_DATA_KEY` on Render (~2 min; README "Invite family" -> "Their
-      own Anthropic key").** It encrypts the testers' own Anthropic keys.
+- [x] **`USER_DATA_KEY` on Render (~2 min; README "Invite family" -> "Their
+      own Anthropic key").** Done (2026-10-31): Kyle confirmed it is set. It encrypts the testers' own Anthropic keys.
       `render.yaml` has Render generate it; if the service isn't synced from
       the Blueprint, add it in Render -> hey-claude -> Environment yourself:
       a random value of 32+ characters (e.g. the output of
@@ -216,14 +251,24 @@ Only what is still open for Kyle. None of it blocks the code.
       enter their key again). Until it is set, beta testers can't save a key
       (the app says why) and so can't talk to Claude; family members keep
       using your key.
-- [ ] **Testers' Notion: a public Notion integration (~10 min; README
-      "Invite family" -> "Notion for beta testers").** Only you can: (1) at
+- [x] **Testers' Notion: a public Notion integration (~10 min; README
+      "Invite family" -> "Notion for beta testers").** Done (2026-10-31):
+      reused the public 'Kwil' integration (Oct 27). It has
+      Read/Update/Insert content and no user information. The redirect is
+      https://heykwil.com/notion/callback, and NOTION_OAUTH_CLIENT_ID/SECRET
+      are set on Render. Kyle's own cloud Notion connects and answers
+      assignments. Still open: (a) a tester account checks that Connect
+      Notion appears (part of the step 9 dry run); (b) Kyle may remove the
+      old hey-claude-tgml.onrender.com redirect URI. Note: Notion's current
+      Developer tools UI has no privacy policy or terms fields unless the
+      integration has a Marketplace listing, so step (2)'s privacy and terms
+      links below only apply with a listing. The original steps: (1) at
       notion.so/profile/integrations create a **Public** integration ("Any
       workspace"), capabilities Read content + Update content, no user
       information with email; (2) fill in the company name, website, privacy
-      policy `https://hey-claude.onrender.com/privacy`, terms
-      `https://hey-claude.onrender.com/terms` and a support email, and the
-      redirect URI `https://hey-claude.onrender.com/notion/callback`;
+      policy `https://heykwil.com/privacy`, terms
+      `https://heykwil.com/terms` and a support email, and the
+      redirect URI `https://heykwil.com/notion/callback`;
       (3) paste its OAuth client ID and secret (shown once) into
       `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET` in Render ->
       Environment. Optional: publish an "Assignments" template page and set
@@ -239,17 +284,12 @@ Only what is still open for Kyle. None of it blocks the code.
       hey-claude -> Metrics (memory peak) and note it in PROGRESS.md
       ("Family invites, piece B"); if it nears 2 GB, set `FAMILY_ZH=0` or
       a larger plan.
-- [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
-      someone else").** Only you can: (1) create a **Web application** OAuth
-      client in console.cloud.google.com with redirect URI
-      `https://<pc-name>.<tailnet>.ts.net:8443/google/callback`, save its
-      JSON as `data/mom/google_client.json`, and add her Gmail address as a
-      test user on the consent screen; (2) create `.env.mom` with
-      `ANTHROPIC_API_KEY`; (3) put the address in `config.mom.local.toml`
-      (`[webapp] public_origin`); (4) `tailscale serve --bg --https=8443
-      http://127.0.0.1:8766` and share the PC with her in the Tailscale
-      admin console; (5) `python -m kwil --download-voice
-      zh_CN-huayan-medium`. Then MANUAL_TEST.md "Chinese instance for Mom".
+- [ ] **Mom on the cloud (~5 min; replaces the PC "Chinese instance for
+      Mom", retired 2026-10-31: Kwil is cloud-only).** Only you can: at
+      https://heykwil.com, ⚙ -> **Invite someone**, account type
+      **Family**, language Chinese, her time zone; send her the link. If
+      she already has a PC copy, follow README "Move a PC family copy to
+      the cloud" to bring her history over and retire it.
 - [ ] **Google sign-in again for Gmail (one time, ~1 min).** The current
       `token.json` only allows Calendar, so the email tools stay off until
       you grant Gmail access:
@@ -376,7 +416,7 @@ Only what is still open for Kyle. None of it blocks the code.
       (README "Spotify by voice"). Until then the Spotify tools stay off.
 - [ ] **Cloud uptime alerts and error tracking (optional, free, ~10 min).**
       Only you can sign up: an UptimeRobot monitor on
-      `https://<your service>.onrender.com/healthz`, and (if you want crash
+      `https://heykwil.com/healthz`, and (if you want crash
       reports) a Sentry Python project whose DSN goes into Render's
       `SENTRY_DSN` (README "Uptime, error tracking and backups"). Without them nothing changes: no reports
       are sent and the PC watchdog's `[watch] cloud_url` still works.

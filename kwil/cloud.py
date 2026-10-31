@@ -441,6 +441,8 @@ class CloudGuard:
         if not self.same_site(scope):
             return await refuse("origin is not this site")
         bearer = _bearer(scope)
+        if bearer is not None and self.stale_access_token(bearer):
+            return await refuse("not signed in")
         if bearer is not None and self.derived(bearer):
             if self.authority.verify(bearer, scope="app") is None:
                 return await refuse("bad access token")
@@ -491,6 +493,14 @@ class CloudGuard:
         """A failover access token (hc1....), not WEB_TOKEN itself."""
         return self.failover_role is not None and bearer.startswith("hc1.")
 
+    def stale_access_token(self, bearer: str) -> bool:
+        """With failover off: an old phone's access token (hc1....). Not a
+        guess at WEB_TOKEN (it can't match one), so "not signed in" and not
+        counted, like a Canvas helper key, or the phone could lock its own
+        address out before the owner signs in again."""
+        return (self.failover_role is None and bearer.startswith("hc1.")
+                and not self.token.startswith("hc1."))
+
     async def __call__(self, scope, receive, send):
         if scope["type"] == "websocket":
             return await self.websocket(scope, receive, send)
@@ -533,6 +543,8 @@ class CloudGuard:
         public = ((method in ("GET", "HEAD") and path in public_get)
                   or (method == "POST" and path in public_post) or invite or waitlist)
         bearer = _bearer(scope)
+        if bearer is not None and self.stale_access_token(bearer):
+            return await _json(send, 401, {"error": "not signed in"}, extra)
         helper = False
         if bearer is not None and bearer.startswith(canvas_helper.KEY_PREFIX):
             if not (method == "POST" and path in HELPER_POST):

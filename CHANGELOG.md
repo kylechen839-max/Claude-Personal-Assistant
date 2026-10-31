@@ -9,6 +9,14 @@
   (changes ask first) and is never logged. Reconnect Google once to add Drive
   (Settings shows "Reconnect to add Google Drive (read-only)"). Not for beta
   testers.
+- Kwil is cloud-only (stage 1): the cloud server no longer takes part in
+  Pi/PC failover (`[failover] enabled = false` in the server profile, so
+  `ASSISTANT_ROLE`, `APP_ORIGIN` and `FAILOVER_BACKENDS` are ignored); the
+  phone app stops trusting a cached failover setup and clears it; history
+  events on the cloud stay "cloud". Owner devices that used failover sign
+  in once more; an old phone's failover token is deleted and no longer
+  counts toward the sign-in lockout; Sign out everywhere on the cloud is
+  labelled cloud.
 - Desktop layout: a side rail on wide windows (Search, Chat, Today, History,
   Settings); Today beside the chat and conversations beside History from
   1024px; a Ctrl+K / Cmd+K switcher to jump to any screen or past

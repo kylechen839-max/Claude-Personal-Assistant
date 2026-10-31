@@ -320,6 +320,9 @@ def test_windows_signers_folder(tmp_path, monkeypatch):
 ALLOWED = [re.compile(p, re.IGNORECASE) for p in (
     r"say[^.\n]{0,20}hey claude",            # the wake-phrase note
     r"hey claude[^.\n]{0,40}until",          # "... until a Hey Kwil model ships"
+    # the failover token database's kept name (backend-router.js TOKEN_DB),
+    # which app.js deletes on the cloud: a storage key, never shown
+    r"^const TOKEN_DB = \"hey-claude\";$",
 )]
 OLD_NAME = re.compile(r"hey[ _-]?claude", re.IGNORECASE)
 SPLIT_NAME = re.compile(r"\bhey[ \t]*\n[ \t]*claude\b", re.IGNORECASE)  # wrapped across two lines

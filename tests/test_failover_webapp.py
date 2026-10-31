@@ -25,7 +25,8 @@ CROSS = {"origin": APP, "sec-fetch-site": "cross-site", "sec-fetch-mode": "cors"
 
 
 def settings(role="pi"):
-    cfg = {**DEFAULTS, "failover": {"role": role, "app_origin": APP, "sync_interval": 30,
+    cfg = {**DEFAULTS, "failover": {"enabled": True, "role": role, "app_origin": APP,
+                                   "sync_interval": 30,
                                    "backends": [{"role": "pi", "url": PI},
                                                 {"role": "pc", "url": PC}]}}
     return settings_from_config(cfg)

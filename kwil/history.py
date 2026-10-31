@@ -1920,8 +1920,11 @@ def record_event(conversation_id: str | None, kind: str, text: str) -> bool:
 
 
 def origin_of(config: dict) -> str:
-    """This backend's role for events: [failover] role / ASSISTANT_ROLE,
-    or "pc" when it runs on its own."""
+    """This backend's role for events: "cloud" under the server profile
+    (Render no longer sets ASSISTANT_ROLE), else [failover] role /
+    ASSISTANT_ROLE, or "pc" when it runs on its own."""
+    if config.get("profile") == "server":
+        return "cloud"
     role = (config.get("failover", {}).get("role")
             or os.environ.get("ASSISTANT_ROLE") or "pc")
     return role if role in ("pi", "pc", "cloud") else "pc"

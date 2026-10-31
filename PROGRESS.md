@@ -8715,6 +8715,83 @@ change, every id and hook kept.
 - **LOW:** `sw.js` `kwil-shell-v29` (v27 and v28 are taken on master by
   #103 and #105), six pins.
 - Full suite: 4046 passed, 53 skipped (round 0's 4041 + 5); JS 482 passed.
+## Cloud-only, stage 1: failover off on the cloud (2026-10-31)
+Kyle approved making Kwil cloud-only. Stage 1 is reversible: nothing is
+deleted, the cloud just stops being part of a failover setup.
+- **`[failover] enabled`** (new, default true; `config.toml` documents it)
+  and `SERVER_PROFILE` sets it false. With it false,
+  `peers.settings_from_config` returns no role and no backends, whatever
+  `[failover]`, `ASSISTANT_ROLE`, `APP_ORIGIN` or `FAILOVER_BACKENDS` say,
+  and logs one WARNING per process naming those settings (never their
+  values), only while one of them is still set. So `cloud.build_app`
+  mounts no `EdgeMiddleware`: no `hc1.` access tokens or
+  `/api/auth/token`, no `/api/sync` (404 once signed in), no public
+  `/backend-router.js` (401 before sign-in), and `/healthz` has no `role`,
+  so the app shows no Backends section. Every other reader of `[failover]`
+  (proactive, research, reminders, student_web, family) goes through the
+  same function.
+- **`history.origin_of`** is "cloud" under the server profile even
+  without `ASSISTANT_ROLE` (events would otherwise say "pc").
+- **The phone app** (`app.js` `detectFailover`) no longer trusts a cached
+  `failover` flag when `/healthz` can't be reached; whenever failover is
+  off it removes `failover`, `backendsCache`, `backendSettings` and
+  `backendOverride` from localStorage. `sw.js` `kwil-shell-v28` (v27 is
+  the desktop-layout branch's). The Backends fieldset in `index.html`
+  stays until stage 2.
+- **Render:** `render.yaml` drops `ASSISTANT_ROLE`, `APP_ORIGIN` and
+  `FAILOVER_BACKENDS`. Without failover, `APP_ORIGIN` no longer stands in
+  for `PUBLIC_ORIGIN` (Google, Notion, push and invite links); Kyle
+  confirmed `PUBLIC_ORIGIN` = https://heykwil.com.
+- **Docs:** README's phone app, iPhone, Mom's PC copy, failover, Home
+  Assistant and Windows-host text point at https://heykwil.com and cloud
+  family invites instead of Tailscale; FAILOVER.md and PI_MIGRATION.md
+  carry a "retired" banner; MANUAL_TEST's phone and failover checks;
+  SECURITY "Failover: off on the cloud"; BLOCKERS (Kyle's Render, ruleset
+  and optional PC/Pi steps, heykwil.com URLs, Mom on the cloud, the PC
+  watchdog no longer needed for the cloud).
+- **Kept:** `eventlog.py`, sync.py's `Event`/`revoke_event`/
+  `revoked_before`, `smoke.py`, the check session, `update-watch.js`,
+  `kwil/router.py` and the canvas helper; a PC or Pi with `[failover]
+  role` still runs the failover code.
+- **Tests:** `test_failover_cloud.py` +2 (the server profile with
+  `ASSISTANT_ROLE=cloud`, `APP_ORIGIN` and `FAILOVER_BACKENDS` set: no
+  role, router 401, `hc1.` app and sync bearers refused, token sign-in 401,
+  `/api/sync` 404 signed in, cookies work, one WARNING without values; the
+  warning only once and only when something is set), `test_failover_config`
+  +1 (on by default, off in the profile), `test_history` +1 (origin),
+  `test_google_reconnect` +1 (without failover only `PUBLIC_ORIGIN` gives
+  the cloud its address), new `tests/js/app-failover-off.test.mjs` (4:
+  `/healthz` unreachable with a cached `failover=true` never imports the
+  router and clears the four keys, also with no role, and a server with a
+  role still imports it). Existing failover tests opt in with `enabled =
+  true`. Fail-first: with only the source reverted (config.py, peers.py,
+  history.py, app.js) every new test fails except the two JS guard tests
+  (the single import site, and the role case that already worked).
+- **Judge round 1's three LOW findings, fixed:**
+  1. An old phone's `hc1.` bearer on the cloud (failover off) was counted
+     as a wrong `WEB_TOKEN` and could lock that address out. CloudGuard
+     (HTTP and the voice socket) and `WebAuth.sid` now answer it "not
+     signed in" without counting, as for a Canvas helper key (unless
+     `WEB_TOKEN` itself starts with `hc1.`). Tests: 8 old-token requests
+     plus 3 more, then a login works and the address isn't blocked, a
+     socket with one isn't counted, a real wrong token still is
+     (`test_failover_cloud.py`); the same on the plain web app
+     (`test_webapp.py`).
+  2. The old access token in IndexedDB (`hey-claude`, backend-router.js
+     `TOKEN_DB`) was never deleted: `detectFailover` now deletes that
+     database too when failover is off (guarded: no IndexedDB, private
+     mode). JS tests: the database is deleted with `/healthz` down or
+     roleless, kept with a role, the keys are still cleared without
+     IndexedDB, and the page's name matches the router's export.
+  3. "Sign out everywhere" labelled its revoke event "pc" on the cloud:
+     `WebAuth.revoke_tokens` now uses the history store's origin (else
+     "pc"). Test: a server-profile app's revoke event says "cloud".
+  Fail-first: with only `cloud.py` and `webapp.py` reverted the three
+  Python tests fail (`sign-in failed` instead of `not signed in`, origin
+  'pc', the address blocked); with only `app.js` reverted 3 of the 6 JS
+  tests fail.
+- Full suite: 4032 passed, 53 skipped (baseline e5fbb70 4024 + 8); JS 487
+  passed (baseline 481 + 6).
 ## Desktop layout v1 (2026-10-31)
 - **What:** at 48rem and up a 4.5rem rail (`<nav id="rail">`, the body's
   first element): Search (its shortcut under it, "Ctrl K" or "⌘K"), Chat,
