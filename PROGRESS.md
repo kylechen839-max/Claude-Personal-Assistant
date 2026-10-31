@@ -8666,7 +8666,7 @@ change, every id and hook kept.
 - `sw.js` `kwil-shell-v27`; zh: 搜索, 前往, 前往页面或对话, 没有匹配项,
   新对话, 开始语音对话, 对话 ("Results" already had 搜索结果).
   DESIGN_SYSTEM: "Desktop layout" section, Tab bar and sheet notes.
-- **Tests:** new `tests/js/desktop.test.mjs` (25): app.js in node:vm with a
+- **Tests:** new `tests/js/desktop.test.mjs` (29 with judge round 1): app.js in node:vm with a
   matchMedia stub (rail visibility and `aria-current` on every screen,
   mirroring after /api/state, item clicks, both splits, narrow widths
   unchanged, a resize re-laying out, no matchMedia/body), app.js +
@@ -8688,7 +8688,21 @@ change, every id and hook kept.
   390x844 (rail not drawn, tab bar shown). The same run checked in the
   browser: Esc returns focus to the message field, Settings' Esc focuses
   the rail's Settings, a resize to 900 drops the split and back restores it.
+- **Judge round 1 (4 fixes, each fail-first: 4 new tests fail at
+  f5dc4b2):** the switcher's keys do nothing while an IME is composing
+  (`isComposing` or keyCode 229: Enter, Escape and the arrows pick the
+  pinyin candidate); after a pick, if focus was left on something not
+  drawn (Chat from History left it on History's hidden title) it moves to
+  the command's own place (`#text` for Chat, the rail item for Today and
+  History, the screen's title for Memory, Projects and Reminders); a
+  picked command whose control went `[hidden]` or `disabled`, or New chat
+  once a reply started, runs nothing and the list is redrawn (disabled
+  controls aren't listed); `#switcher-status` styles are scoped
+  `dialog.switcher .switcher-status` so `dialog.sheet p` no longer
+  overrides them. The judge's Playwright probes now show Enter during
+  composition doing nothing, focus on `#text` after Chat, and the status
+  padded.
 - Full suite: 4024 passed, 53 skipped, as at e5fbb70 (no Python test
   added; a `git archive` copy of e5fbb70 runs 4022 passed, 54 skipped and
   1 git-only failure, `test_ui_ux_pro_max_data_is_committed`, outside a
-  repo); JS 507 passed (baseline 481 + 26).
+  repo); JS 511 passed (baseline 481 + 30).

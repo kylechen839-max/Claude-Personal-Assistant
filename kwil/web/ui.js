@@ -176,15 +176,17 @@
   // Its commands each click the control that is already on the page, and are
   // listed only while that control is (not [hidden]); with a query, up to 6
   // past conversations from the History search come after them.
+  // `focus`: where focus goes after it if the control left it on nothing
+  // drawn (the switcher hands focus back to what had it, maybe now hidden)
   const COMMANDS = [
-    { label: "Chat", id: "rail-chat" },
+    { label: "Chat", id: "rail-chat", focus: "text" },
     { label: "New chat", run: (app) => app.newChat(null), when: (app) => !!app && app.idle() },
-    { label: "Today", id: "rail-today" },
-    { label: "History", id: "rail-history" },
+    { label: "Today", id: "rail-today", focus: "rail-today" },
+    { label: "History", id: "rail-history", focus: "rail-history" },
     { label: "Settings", id: "rail-settings", keepMenu: true },
-    { label: "Memory", id: "memory-open" },
-    { label: "Projects", id: "projects-open" },
-    { label: "Reminders", id: "reminders-open" },
+    { label: "Memory", id: "memory-open", focus: "memory-title" },
+    { label: "Projects", id: "projects-open", focus: "projects-title" },
+    { label: "Reminders", id: "reminders-open", focus: "reminders-title" },
     { label: "Start voice conversation", id: "voice-open" },
   ];
   const MAX_CONVERSATIONS = 6;
@@ -207,6 +209,11 @@
     const say = (text) => (i18n() && i18n().isActive(doc) ? i18n().translate(text) : text);
     const app = () => win.KwilApp || null;
     const shown = (el) => !!el && !el.hidden;
+    // a command's control can still be used (not [hidden], not disabled)
+    const usable = (c) => (c.id ? shown(byId(c.id)) && !byId(c.id).disabled : c.when(app()));
+    // laid out on the page (an element in a hidden screen has no boxes)
+    const drawn = (el) => !!el && el !== doc.body
+      && (typeof el.getClientRects !== "function" || el.getClientRects().length > 0);
     const menu = () => (typeof doc.querySelector === "function" ? doc.querySelector("details.menu") : null);
     let options = [];   // [{label, kind, act}]
     let active = -1;
@@ -224,10 +231,10 @@
       const needle = q.toLowerCase();
       const out = [];
       for (const c of COMMANDS) {
-        if (c.id ? !shown(byId(c.id)) : !c.when(app())) continue;
+        if (!usable(c)) continue;
         const label = say(c.label);
         if (needle && !label.toLowerCase().includes(needle)) continue;
-        out.push({ label, kind: "", act: () => {
+        out.push({ label, kind: "", cmd: c, act: () => {
           if (!c.keepMenu) { const m = menu(); if (m && m.open) m.open = false; }
           if (c.run) c.run(app()); else byId(c.id).click();
         } });
@@ -340,10 +347,19 @@
     function pick(n) {
       const o = options[n];
       if (!o) return;
+      // the page may have changed since the list was drawn (a reply started,
+      // a control went away): then nothing runs, and the list is redrawn
+      if (o.cmd && !usable(o.cmd)) { render(true); return; }
       close(false);
       o.act();
+      // the dialog's close gave focus back to what had it; if the command
+      // hid that (Chat from History), focus its own place instead
+      const target = o.cmd && o.cmd.focus ? byId(o.cmd.focus) : null;
+      if (target && !drawn(doc.activeElement) && typeof target.focus === "function") target.focus();
     }
     function onKey(e) {
+      // a Chinese (pinyin) candidate being picked: its keys are the IME's
+      if (e.isComposing || e.keyCode === 229) return;
       const key = e.key;
       if (key === "ArrowDown" || key === "ArrowUp") setActive(active + (key === "ArrowDown" ? 1 : -1));
       else if (key === "Home") setActive(0);

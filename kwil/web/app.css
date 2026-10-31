@@ -946,8 +946,9 @@ dialog.switcher { width: min(32rem, calc(100% - 1rem)); margin: calc(var(--s4) +
 .switcher-opt[aria-selected=true] { background: var(--accent-soft); color: var(--accent-ink); }
 .switcher-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .switcher-kind { flex: none; font-size: var(--t-cap); color: var(--muted); }
-.switcher-status { margin: 0; padding: var(--s3) var(--s4); text-align: center; color: var(--muted); font-size: var(--t-sub); }
-.switcher-status:empty { display: none; }
+/* (dialog.switcher: over dialog.sheet p's own margin, padding and colour) */
+dialog.switcher .switcher-status { margin: 0; padding: var(--s3) var(--s4); text-align: center; color: var(--muted); font-size: var(--t-sub); }
+dialog.switcher .switcher-status:empty { display: none; }
 @media (min-width: 48rem) { dialog.switcher { margin-top: 12vh; } }
 @media (min-width: 64rem) {
   body:has(#rail:not([hidden]))[data-split=today-view] {

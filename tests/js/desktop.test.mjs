@@ -348,15 +348,22 @@ class Node2 {
   }
   focus() { this.doc.activeElement = this; }
   click() { this.clicks++; this.dispatch('click'); }
-  showModal() { this.open = true; }
-  close() { this.open = false; this.dispatch('close'); }
+  // laid out unless a test says it is in a hidden screen
+  getClientRects() { return { length: this.undrawn ? 0 : 1 }; }
+  // like a browser's modal dialog: closing it gives focus back to its opener
+  showModal() { this.open = true; this.opener = this.doc.activeElement; }
+  close() {
+    this.open = false;
+    if (this.opener) { this.doc.activeElement = this.opener; this.opener = null; }
+    this.dispatch('close');
+  }
   pause() {}
 }
 
 const SWITCHER_IDS = {
   dialog: ['switcher', 'sheet'],
   input: ['switcher-input'], textarea: ['text'], ul: ['switcher-list'],
-  p: ['switcher-status'], kbd: ['rail-search-key'], main: ['app', 'login', 'history-view'],
+  p: ['switcher-status'], kbd: ['rail-search-key'], h1: ['history-title', 'memory-title'], main: ['app', 'login', 'history-view'],
   nav: ['rail', 'tabbar'], section: ['voice'],
   button: ['rail-search', 'rail-chat', 'rail-today', 'rail-history', 'rail-settings', 'memory-open',
     'projects-open', 'reminders-open', 'voice-open', 'voice-orb', 'voice-end', 'voice-mute', 'voice-cc',
@@ -820,4 +827,92 @@ test('zh: the rail, the switcher and its commands are translated', () => {
   vm.createContext(ctx);
   vm.runInContext(UI, ctx);
   for (const c of ctx.KwilUI.COMMANDS) assert.notEqual(tr(c.label), c.label, c.label);
+});
+
+// ---------- judge round 1 ----------
+
+test('switcher: keys picking a Chinese (pinyin) candidate are the IME\'s, not the switcher\'s', () => {
+  const t = ui();
+  t.$('text').focus();
+  t.shortcut('k', { ctrlKey: true });
+  for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+    const enter = t.key('Enter', composing);
+    assert.equal(enter.defaultPrevented, false);
+    assert.equal(t.$('switcher').open, true);
+    assert.equal(t.$('rail-chat').clicks, 0);
+    const esc = t.key('Escape', composing);
+    assert.equal(esc.stopped, false);
+    assert.equal(t.$('switcher').open, true);
+    t.key('ArrowDown', composing);
+    assert.equal(t.$('switcher-input').getAttribute('aria-activedescendant'), 'switcher-opt-0');
+  }
+  t.key('Enter');  // the candidate chosen: Enter picks again
+  assert.equal(t.$('rail-chat').clicks, 1);
+});
+
+test('switcher: a pick that hides the focused element moves focus to its own place', () => {
+  // History's title had focus; Chat hides the History screen
+  const t = ui();
+  t.$('rail-chat').addEventListener('click', () => { t.$('history-title').undrawn = true; });
+  t.$('history-title').focus();
+  t.shortcut('k', { ctrlKey: true });
+  t.key('Enter');  // Chat
+  assert.equal(t.$('rail-chat').clicks, 1);
+  assert.equal(t.doc.activeElement, t.$('text'));
+  // History from the hidden chat: the rail's History
+  t.$('text').undrawn = true;
+  t.shortcut('k', { ctrlKey: true });
+  t.type('hist');
+  t.key('Enter');
+  assert.equal(t.doc.activeElement, t.$('rail-history'));
+  // Memory: its screen's title
+  t.$('rail-history').focus();
+  t.$('rail-history').undrawn = true;
+  t.shortcut('k', { ctrlKey: true });
+  t.type('mem');
+  t.key('Enter');
+  assert.equal(t.doc.activeElement, t.$('memory-title'));
+  // still drawn (or moved by the command itself): left where it is
+  const u = ui();
+  u.$('rail-history').addEventListener('click', () => u.$('history-title').focus());
+  u.$('text').focus();
+  u.shortcut('k', { ctrlKey: true });
+  u.type('hist');
+  u.key('Enter');
+  assert.equal(u.doc.activeElement, u.$('history-title'));
+});
+
+test('switcher: a command whose control went away or is disabled does nothing when picked', () => {
+  const t = ui();
+  t.shortcut('k', { ctrlKey: true });
+  t.type('mem');
+  assert.deepEqual(t.options(), ['Memory']);
+  t.$('memory-open').hidden = true;  // gone since the list was drawn
+  t.key('Enter');
+  assert.equal(t.$('memory-open').clicks, 0);
+  assert.equal(t.$('switcher').open, true);
+  assert.deepEqual(t.options(), []);  // the list redrawn
+  // New chat while a reply started meanwhile
+  let idle = true;
+  t.app.idle = () => idle;
+  t.type('new');
+  assert.deepEqual(t.options(), ['New chat']);
+  idle = false;
+  t.key('Enter');
+  assert.deepEqual(t.app.newChats, []);
+  // a disabled control is not listed at all
+  t.$('voice-open').disabled = true;
+  t.type('voice');
+  assert.deepEqual(t.options(), []);
+  t.$('voice-open').disabled = false;
+  t.type('voice');
+  assert.deepEqual(t.options(), ['Start voice conversation']);
+});
+
+test('CSS: the switcher\'s status keeps its own styles over dialog.sheet p', () => {
+  const flat = CSS.replace(/\s+/g, ' ');
+  assert.match(flat, /dialog\.switcher \.switcher-status \{ margin: 0; padding: var\(--s3\) var\(--s4\); text-align: center; color: var\(--muted\);/);
+  assert.match(flat, /dialog\.switcher \.switcher-status:empty \{ display: none; \}/);
+  assert.doesNotMatch(flat, /(^|\} )\.switcher-status \{/);  // a bare one loses to dialog.sheet p
+  assert.match(flat, /dialog\.sheet p \{/);  // (what it has to outrank)
 });
