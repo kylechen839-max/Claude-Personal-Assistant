@@ -2388,6 +2388,16 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
             out["month_usd"] = usage.month_usd()
         elif family is not None:  # their own key: "required" (beta) or "optional"
             out["api_key"] = "required" if family.tier(s.user) == "beta" else "optional"
+        if family is not None:
+            from kwil import feedback
+            from kwil.family import https_url
+
+            # the one-time survey (feedback.py), and the beta's links (https only)
+            out["feedback_due"] = feedback.due(family, s.user, assistant.history_of(s)[0])
+            for name in ("notion_template_url", "beta_chat_url"):
+                link = https_url(family.config["family"].get(name))
+                if link:
+                    out[name] = link
         return out
 
     def research_available(s: Session) -> bool:
@@ -2668,6 +2678,9 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
     from kwil import userkeys_web
 
     userkeys_web.register(app, family, error)  # a person's own Anthropic key
+    from kwil import feedback
+
+    feedback.register(app, family, error)  # beta feedback and the one-time survey
     from kwil import notion_web
 
     notion_web.register(app, family, web, error)  # a person's own Notion

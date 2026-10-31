@@ -56,6 +56,17 @@ class MissingKey(Exception):
         super().__init__(message)
 
 
+class CreditSpent(MissingKey):
+    """A beta tester's starter credit (credit.py) is used up, or everyone's
+    is: said as i18n "credit_spent" (cli.friendly_error). `usd` is their
+    credit; `help_url` the key guide ("" = none to link)."""
+
+    def __init__(self, usd: float = 0.0, help_url: str = ""):
+        super().__init__("the starter credit is used up")
+        self.usd = usd
+        self.help_url = help_url
+
+
 class KeyProblem(ValueError):
     """A key that can't be saved; `status` is the HTTP answer (400 a bad
     key, 503 the server can't store or check keys right now). The message

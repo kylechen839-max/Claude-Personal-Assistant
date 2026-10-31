@@ -8624,3 +8624,50 @@ change, every id and hook kept.
   Chinese, before and after.
 - Full suite: 4024 passed, 53 skipped (baseline 4020 + 4); JS 481 passed
   (baseline 469 + 12).
+
+## Beta starter credit and feedback (PR-A, backend, 2026-10-31)
+
+- **Starter credit** (`kwil/credit.py`, `CreditLedger`): a beta tester
+  without their own key now runs on the owner's key until they have used
+  `[family] beta_credit_usd` ($5), all testers together at most
+  `beta_credit_total_usd` ($50); then `userkeys.CreditSpent` (a MissingKey)
+  and the new i18n `credit_spent` / `credit_spent_help` sentence (en, zh;
+  the key guide's link when `[webapp] public_site` is on and the origin is
+  known), in text, voice (`cli.user_error_text`) and files. Hook:
+  `Family.api_for(uid, credit=True, hold=None)`; `UserApi.resolve` reserves
+  one call's worst case (about $0.39 with the defaults) and `UserApi.record`
+  settles the real cost (usage.cost plus $0.01 a web search). Book:
+  `<dir>/beta_credit.json` (`write_private`, under a lock); Remove drops a
+  row, never the total. Reservations expire after `api_timeout *
+  (api_max_retries + 1)` (120 s). An unreadable book fails closed. Never on
+  the credit: deep research (`credit=False`), briefings (proactive.py) and
+  "Sync now"'s email extraction (student_web.py). Unchanged: paid voices,
+  quotas. `key_status` adds `credit_usd`/`credit_left_usd` (beta, credit
+  on); `/api/users` adds each person's `credit_used_usd` and
+  `credit_total_used`/`credit_total_cap`. `beta_credit_usd = 0` is off.
+- **Price fix:** Sonnet 5.5 cache reads are $0.10/MTok (0.05x, checked on
+  platform.claude.com/docs/en/about-claude/pricing), not $0.20.
+- **Feedback** (`kwil/feedback.py`): `POST /api/me/feedback`, `POST
+  /api/me/feedback/dismiss`, owner-only `GET /api/feedback`; sealed per
+  person (`kwil/feedback/v1`) in `<dir>/<id>/feedback.enc` (the owner's in
+  `[connect] dir`), in the export as `feedback.json`, deleted with the
+  folder; 8 KB, 2,000 characters, 50 notes, 5 an hour; INFO id/kind/lengths
+  only. `/api/state.feedback_due` for a beta tester after
+  `feedback_after_days` (3) since `joined` (new, set at redeem) or
+  `feedback_after_conversations` (10); answered or dismissed (users.json
+  `survey`) ends it. `/api/state` also gets `notion_template_url` and
+  `beta_chat_url` when https.
+- **Invite text:** `POST /api/invites` and a new link answer with `message`
+  (i18n `invite_family`, `invite_beta`, `invite_credit`, `invite_template`,
+  `invite_chat`; the invitee's language). config.toml carries Kyle's
+  published Notion template link; the DEFAULTS value stays "".
+- **Tests:** new `test_credit.py` (15), `test_feedback.py` (9),
+  `test_invite_message.py` (5); +1 each in `test_research.py`,
+  `test_voice_picker.py`; `test_userkeys.py`'s app is now `build_env`
+  (credit off in its fixture); `test_routing_caching` price;
+  `test_docs` allows only `notion_template_url` to differ from DEFAULTS.
+  Fail-first: with the source changes reverted (new modules kept), 30 of
+  the new/changed tests fail; the pure ledger tests need `credit.py`
+  itself.
+- Full suite: 4055 passed, 53 skipped (baseline 4024 + 31); JS 481 passed
+  (unchanged; no web files touched).

@@ -1213,13 +1213,14 @@ def from_config(config: dict, assistant, client=None) -> "Research | None":
             return None
         from kwil.family import UserApi
 
-        api = UserApi(family, uid)
+        # never the beta's starter credit (credit.py): a job is many calls
+        api = UserApi(family, uid, credit=False)
 
         def ready():
             from kwil.userkeys import MissingKey
 
             try:
-                family.api_for(uid)
+                family.api_for(uid, credit=False)
             except MissingKey:
                 return "research_no_key"
             return None

@@ -28,6 +28,23 @@ EN = {
     "bad_key": "Sorry, my Anthropic API key isn't working. Please check it.",
     "no_key": "Add your Anthropic API key in Settings to start.",
     "bad_user_key": "Your Anthropic API key was rejected. Check it in Settings.",
+    # a beta tester's starter credit (credit.py) is used up
+    "credit_spent": "Your ${usd} starter credit is used up. Add your own Anthropic "
+                    "API key in Settings to keep going.",
+    "credit_spent_help": "Your ${usd} starter credit is used up. Add your own "
+                         "Anthropic API key in Settings to keep going; here's how: {url}",
+    # the invite message the owner sends (family.py link())
+    "invite_family": "Hi {name}! You're invited to Kwil, my voice assistant. Open this "
+                     "link on your phone to sign in (it works once): {url}",
+    "invite_beta": "Hi {name}! You're invited to the Kwil beta, a voice assistant "
+                   "powered by Claude. Open this link on your phone to sign in (it "
+                   "works once): {url}\n"
+                   "Google will say the app is unverified: tap Advanced \u2192 Go to "
+                   "Kwil (that's expected).\n"
+                   "Your own Anthropic API key, step by step: {help}",
+    "invite_credit": "Your first ${usd} of Claude is on me; after that, add your own key.",
+    "invite_template": "The Notion Assignments template: {url}",
+    "invite_chat": "The beta testers' chat: {url}",
     "rate_limited": "I'm getting too many requests right now. Try again in a minute.",
     "api_error": "Sorry, something went wrong talking to Claude.",
     "claude_down": "Claude is unreachable right now. I retried a few times; "
@@ -198,6 +215,20 @@ ZH = {
     "bad_key": "抱歉，Anthropic 密钥不能用了，请检查一下。",
     "no_key": "请先在设置里添加你的 Anthropic API 密钥。",
     "bad_user_key": "你的 Anthropic API 密钥被拒绝了，请到设置里检查一下。",
+    "credit_spent": "你的 {usd} 美元试用额度已经用完了。请在设置里添加你自己的 "
+                    "Anthropic API 密钥继续使用。",
+    "credit_spent_help": "你的 {usd} 美元试用额度已经用完了。请在设置里添加你自己的 "
+                         "Anthropic API 密钥继续使用，步骤见：{url}",
+    "invite_family": "{name}你好！邀请你使用 Kwil 语音助手。请在手机上打开这个链接登录"
+                     "（只能用一次）：{url}",
+    "invite_beta": "{name}你好！邀请你参加 Kwil 语音助手（由 Claude 驱动）的测试。请在"
+                   "手机上打开这个链接登录（只能用一次）：{url}\n"
+                   "Google 会提示这个应用未经验证：点“高级”\u2192“前往 Kwil”"
+                   "（这是正常的）。\n"
+                   "如何获取你自己的 Anthropic API 密钥：{help}",
+    "invite_credit": "前 {usd} 美元的 Claude 用量由我来付，之后请添加你自己的密钥。",
+    "invite_template": "Notion 作业模板：{url}",
+    "invite_chat": "测试者交流群：{url}",
     "rate_limited": "现在请求太多了，请过一分钟再试。",
     "api_error": "抱歉，连接 Claude 时出了点问题。",
     "claude_down": "现在连不上 Claude，已经重试了几次，请过一分钟再试。",

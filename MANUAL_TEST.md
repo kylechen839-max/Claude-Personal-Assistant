@@ -2047,3 +2047,25 @@ Only what a person can see or click; the old names are covered by tests.
     work as before.
 - [ ] Say "Hey Claude" to the PC.
   - Should: it still wakes (the "Hey Kwil" model isn't trained yet).
+
+## Beta starter credit and feedback (~10 min, iPhone)
+
+- [ ] Signed in as you on the cloud: ⚙ -> **Invite someone**, Beta tier,
+      English. Copy the invite's message (curl `POST /api/invites` until
+      the page shows it, PR-B).
+  - Should: it has the link, the key guide, "Google will say the app is
+    unverified: tap Advanced → Go to Kwil (that's expected)", "$5", and
+    the Notion template link; it reads naturally in a text message.
+- [ ] Open the link on a second phone (no Anthropic key) and ask a few
+      questions by voice and by typing.
+  - Should: Kwil answers; `GET /api/me/anthropic-key` on that phone shows
+    `credit_left_usd` going down by about what the answers cost.
+- [ ] Spend it: set `[family] beta_credit_usd = 0.5`, restart, keep asking.
+  - Should: within a few turns Kwil says "Your $0.50 starter credit is used
+    up..." out loud and in text, and the Anthropic console shows no request
+    for that turn. Set it back to 5.
+- [ ] Send a note (`POST /api/me/feedback`), then as you open
+      `https://<cloud>/api/feedback`.
+  - Should: the note is there under the tester's name, and the log
+    (Render -> Logs) has their id and lengths only, never the words.
+

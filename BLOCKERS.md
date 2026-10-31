@@ -3,6 +3,22 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Beta starter credit and feedback: the steps only Kyle can do (2026-10-31).**
+      The code is done (README "Starter credit" and "Feedback").
+      1. **Fund the key:** the server's `ANTHROPIC_API_KEY` pays for every
+         beta tester's first $5 (`[family] beta_credit_usd`), up to $50 for
+         all of them (`beta_credit_total_usd`). Add credits at
+         console.anthropic.com -> Billing.
+      2. **Spend limit:** console.anthropic.com -> Limits: set a monthly
+         spend limit of at least $50 (the credit's cap, plus your own use)
+         as a second guard beside Kwil's own book.
+      3. **Notion template:** published, and its link is in config.toml
+         (`notion_template_url`). If you publish a new copy, paste its
+         `https://` link there (without `?source=copy_link`).
+      4. **Testers' chat:** create the group chat (e.g. a Discord or
+         WhatsApp invite link) and paste its `https://` link into
+         `[family] beta_chat_url` in config.toml (or `config.local.toml`).
+         Empty, beta invites leave the line out.
 - [ ] **Canvas helper extension: the steps only Kyle can do (2026-10-27).**
       The code is in `tools/canvas-helper/` (its README).
       1. Load it unpacked in Chrome or Edge on your computer and run the

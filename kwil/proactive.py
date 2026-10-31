@@ -566,7 +566,8 @@ class Scheduler:
             return None
         from kwil.family import UserApi
 
-        return UserApi(self.family, uid)
+        # never the beta's starter credit (credit.py): it pays for what they ask
+        return UserApi(self.family, uid, credit=False)
 
     def compose(self, uid: str | None, fires: list[Fire], now: datetime) -> str:
         """One short message from the facts: Claude once, else the template."""

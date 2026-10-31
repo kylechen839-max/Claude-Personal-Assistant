@@ -963,10 +963,9 @@ while the cloud is the active backend.
   client, whose consent screen lists Gmail.
 
 **Their own Anthropic key (bring your own key).** Beta testers pay for their
-own Claude use: until a tester adds their own key, every turn answers "Add
-your Anthropic API key in Settings to start" and nothing is sent to
-Anthropic on your key. Family members may add one too (then their use is on
-their bill); without one they use yours, as before. What to tell a tester:
+own Claude use, after a starter credit on yours (below). Family members may
+add a key too (then their use is on their bill); without one they use
+yours, as before. What to tell a tester:
 
 1. Make an account at **console.anthropic.com**, add a payment method or
    credits under Billing (you can set a monthly spend limit there), then
@@ -984,6 +983,41 @@ with a server secret, `USER_DATA_KEY`, which `render.yaml` has Render
 generate. Keep that value: if it changes, every tester has to enter their key
 again (nothing else breaks). Without it the server stores no keys and says
 why.
+
+**Starter credit.** So a tester can try Kwil before making an Anthropic
+account, their chats and voice turns run on *your* key until they have used
+`[family] beta_credit_usd` ($5), and all testers together at most
+`beta_credit_total_usd` ($50). Then a turn answers "Your $5 starter credit
+is used up. Add your own Anthropic API key in Settings to keep going" (with
+a link to the key guide, `/help/anthropic-key`, when the public site is on)
+and nothing is sent. Settings shows them `credit_left_usd`; your ⚙ -> people
+list shows what each has used and the total (`GET /api/users`:
+`credit_used_usd`, `credit_total_used`, `credit_total_cap`). How it is
+bounded: before each call the worst case for one call (a full
+`max_history_chars` prompt, `think_max_tokens` of output and `[web]
+max_searches` searches on `[assistant] model`, about $0.39) is reserved, and
+the call goes ahead only if it fits both budgets with every other call in
+flight; the real cost (tokens at list price plus $0.01 a web search)
+replaces it when the answer comes. So neither budget is overshot by more than
+one call's difference from its estimate. The book is
+`<dir>/beta_credit.json` (kept across restarts; removing someone drops their
+row, never everyone's total, so re-inviting can't reset the cap). Deep
+research, background briefings and the email step of "Sync now" never use
+the credit (they need the tester's own key). Paid voices and the per-person
+limits don't change. Set a spend limit on your own key in the Anthropic
+console as well (at least the total, $50). `beta_credit_usd = 0` turns the
+credit off.
+
+**Feedback.** Anyone signed in can send a note (`POST /api/me/feedback`:
+what broke, what confused them, what they'd pay; at most 2,000 characters an
+answer, 50 notes a person, 5 an hour). A beta tester also gets a one-time
+survey, due `feedback_after_days` (3) after their first sign-in or after
+`feedback_after_conversations` (10) conversations; answering or dismissing it
+ends it for good (`/api/state` `feedback_due`). Notes are sealed with
+`USER_DATA_KEY` in `<dir>/<id>/feedback.enc` (yours in `[connect]
+dir`), go with their folder and are in "Download my data"; only you can
+read them all, as JSON: `curl -H "Authorization: Bearer $WEB_TOKEN"
+https://<cloud>/api/feedback`.
 
 What they get: chat and voice with Claude, web search, their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
@@ -1055,6 +1089,10 @@ my essay done" (`update_assignment_status`, which asks first once the
 conversation holds Notion text). Nothing else of Notion: no lecture recorder,
 no new assignments, and never your `NOTION_TOKEN`.
 
+- The template: `[family] notion_template_url` (Kyle's published copy is
+  in config.toml) is linked in every beta invite and in `/api/state`, so a
+  tester can duplicate it into their workspace and share that copy. Only an
+  `https://` link is shown; `""` hides it.
 - If they shared no Assignments database, or more than one, Settings says so
   ("share only your Assignments database") and the tools stay off; they tap
   **Reconnect Notion** and share just that one. There is no picker.
@@ -1192,8 +1230,12 @@ Settings (`[webapp]` in `config.toml`):
    `https://<cloud>/waitlist`. It lists each address, its note and date
    (only you can see it; a family member gets "not found").
 2. In the app, ⚙ -> **Invite someone** (see "Invite family (cloud)" above)
-   makes their link. Email it to them yourself; nothing is sent
-   automatically.
+   makes their link and a ready-to-send message in their language (the
+   answer's `message`: the link and, for a beta tester, the key guide,
+   "Google will say the app is unverified: tap Advanced → Go to Kwil (that's
+   expected)", the starter credit, and the Notion template and
+   `beta_chat_url` chat links when set). Email it to them yourself; nothing is
+   sent automatically.
 3. Back on `/waitlist`, **Remove** their entry. Remove is also how you
    delete someone who asks.
 

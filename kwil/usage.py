@@ -28,9 +28,10 @@ KEEP_MONTHS = 12
 
 # $ per million tokens: input, output, cache read, cache write (5-minute TTL).
 # From the Claude API model notes (claude-api skill, shared/models.md and
-# prompt-caching.md: writes 1.25x input, reads 0.1x).
+# prompt-caching.md: writes 1.25x input, reads 0.1x, except Sonnet 5.5's
+# 0.05x: $0.10, platform.claude.com/docs/en/about-claude/pricing).
 PRICES: dict[str, tuple[float, float, float, float]] = {
-    "claude-sonnet-5-5": (2.0, 10.0, 0.20, 2.50),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10, 2.50),
     "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
 }
 # Claude Haiku 5.5 costs 5x as much when the prompt is over 100K tokens

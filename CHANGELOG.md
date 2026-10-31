@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Beta testers: a $5 starter credit on the owner's key (at most $50 for all
+  testers together), then "add your own key"; feedback notes and a one-time
+  3-question survey; invites come with ready-to-send text (key guide, the
+  expected Google "unverified app" note, the Notion template and the testers'
+  chat). Fix: Sonnet 5.5 cache-read price $0.10 per million tokens.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no

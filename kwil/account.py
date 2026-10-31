@@ -9,7 +9,8 @@ and "Delete my account" in their own Settings (web/family.js).
                         under projects/, counted against [projects]
                         max_person_mb, not export_max_mb) and reminders
                         (reminders.json: their
-                        reminders and scheduled tasks); never tokens,
+                        reminders and scheduled tasks) and the feedback
+                        they sent (feedback.json); never tokens,
                         keys or their Canvas link
   POST /api/me/delete   {"confirm": "DELETE" or their name}: revoke their
                         Notion and Google grants (best effort), then
@@ -342,6 +343,13 @@ class Account:
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             add(zf, "profile.json", json.dumps(profile(user), indent=2,
                                                ensure_ascii=False))
+            if hasattr(self.family, "keys"):  # their feedback notes (feedback.py)
+                from kwil import feedback
+
+                found = feedback.entries(self.family, user["id"])
+                if found:
+                    add(zf, "feedback.json", json.dumps(found, indent=2,
+                                                        ensure_ascii=False))
             due = getattr(self.family, "deadlines", None)
             if due is not None:  # their school deadlines; never their Canvas link
                 add(zf, "deadlines.json", json.dumps(due.export(user["id"]), indent=2,

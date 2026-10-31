@@ -169,11 +169,14 @@ def tier_of(user: dict | None) -> str:
     return tier if tier in TIERS else "beta"
 
 
-def public(user: dict) -> dict:
-    """A user as the owner's page sees it (never the invite hash)."""
+def public(user: dict, credit_used: float | None = None) -> dict:
+    """A user as the owner's page sees it (never the invite hash), with
+    `credit_used` ($ of the starter credit, credit.py) when given."""
     out = {k: user.get(k) for k in ("id", "name", "language", "timezone",
                                     "created", "status", "invite_expires")}
     out["tier"] = tier_of(user)
+    if credit_used is not None:
+        out["credit_used_usd"] = credit_used
     return out
 
 
@@ -226,6 +229,10 @@ class Family:
         # anthropic.Anthropic for a person's own key (a seam for tests)
         self._user_client = user_client or self._new_user_client
         self.keys = KeyStore(self.dir, environ)  # their Anthropic keys, encrypted
+        from kwil.credit import CreditLedger
+
+        # the beta's starter credit on the owner's key (<dir>/beta_credit.json)
+        self.credit = CreditLedger(config, self.dir)
         # uid -> their client, or None (no usable key of their own); filled
         # on first use, dropped when they save or remove a key
         self._user_clients: dict[str, object] = {}
@@ -356,8 +363,8 @@ class Family:
     def members(self) -> list[dict]:
         self._finish_deletes()
         with self.lock:
-            return [public(u) for u in sorted(self.users.values(),
-                                              key=lambda u: u.get("created", 0))]
+            return [public(u, self.credit.used(u["id"]))
+                    for u in sorted(self.users.values(), key=lambda u: u.get("created", 0))]
 
     def get(self, uid: str | None) -> dict | None:
         with self.lock:
@@ -382,7 +389,9 @@ class Family:
                     or found.get("invite_expires", 0) < now:
                 return None
             found = {**found, "status": "active", "invite_hash": None,
-                     "invite_expires": None}
+                     "invite_expires": None,
+                     # when they first signed in (feedback.py's survey)
+                     "joined": found.get("joined") or int(now)}
             users = {**self.users, found["id"]: found}
             self._save(users)
             self.users = users
@@ -404,6 +413,7 @@ class Family:
             reminders = self._reminders.pop(uid, None)
             self._user_clients.pop(uid, None)
             self._meters.pop(uid, None)
+            self.credit.forget(uid)  # their row; everyone's total stays
             self._drop_notion_api(uid)
             self._notion_locks.pop(uid, None)
             self.quotas.forget(uid)
@@ -1075,9 +1085,15 @@ class Family:
         return user_client(key, max_retries=a["api_max_retries"],
                            timeout=a["api_timeout"])
 
-    def api_for(self, uid: str) -> tuple[object, bool]:
-        """(client, True if it is on their own key) for `uid`'s next call."""
-        from kwil.userkeys import MissingKey
+    def api_for(self, uid: str, credit: bool = True,
+                hold: list | None = None) -> tuple[object, bool]:
+        """(client, True if it is on their own key) for `uid`'s next call.
+        A beta tester without a key gets the owner's client while their
+        starter credit lasts (credit.py; `credit=False`: never, e.g. deep
+        research): with `hold` (UserApi's list) one call's worst case is
+        reserved and its token appended there, else it is only checked.
+        CreditSpent once it is used up, MissingKey with the credit off."""
+        from kwil.userkeys import CreditSpent, MissingKey
 
         with self.lock:
             user = self.users.get(uid)
@@ -1091,7 +1107,19 @@ class Family:
             return own, True
         if tier_of(user) == "family":
             return self.client(), False
-        raise MissingKey()
+        if not (credit and self.credit.enabled):
+            raise MissingKey()
+        if hold is None:
+            admitted = self.credit.check(uid)
+        else:
+            token = self.credit.admit(uid)
+            admitted = token is not None
+            if admitted:
+                hold.append(token)
+        if not admitted:
+            log.info("Credit: %s's starter credit is used up", uid)
+            raise CreditSpent(self.credit.per_person, self.credit.help_url(self.config))
+        return self.client(), False
 
     # ---------- their own Anthropic key (userkeys_web.py) ----------
     def key_status(self, uid: str) -> dict:
@@ -1108,6 +1136,9 @@ class Family:
                "required": tier == "beta", "available": self.keys.problem() is None}
         if key is not None:  # their own estimate (usage.py prices)
             out["month_usd"] = self.meter(uid).month_usd()
+        if tier == "beta" and self.credit.enabled:  # the starter credit (credit.py)
+            out["credit_usd"] = self.credit.per_person
+            out["credit_left_usd"] = self.credit.left(uid)
         return out
 
     def set_key(self, uid: str, key: str) -> bool:
@@ -1146,6 +1177,21 @@ class Family:
             if uid in self.users:
                 self.meter(uid).record(model, usage)
 
+    def set_survey(self, uid: str, state: str) -> bool:
+        """Mark their one-time survey (feedback.py) "answered" or
+        "dismissed" in users.json (a flag, never their answers). False if
+        they aren't listed."""
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or not valid_id(uid):
+                return False
+            if user.get("survey") == state:
+                return True
+            users = {**self.users, uid: {**user, "survey": state}}
+            self._save(users)
+            self.users = users
+        return True
+
     def close(self) -> None:
         with self.lock:
             contexts, self._contexts = list(self._contexts.values()), {}
@@ -1166,13 +1212,25 @@ class UserApi:
     usage on their own key goes on their meter, on the owner's key to the
     owner's (usage.METER). Raises MissingKey on use when they have none."""
 
-    def __init__(self, family: "Family", uid: str):
+    def __init__(self, family: "Family", uid: str, credit: bool = True):
+        from collections import deque
+
         self._family = family
         self._uid = uid
+        self._credit = credit  # may a beta tester's call use the starter credit?
         self.own_key = False  # whose key the last call used (cli.friendly_error)
+        self.on_credit = False  # ... and whether that was the starter credit
+        # the credit's reservations for calls made and not yet recorded,
+        # oldest first (one per call: a call that fails leaves one, which
+        # expires on its own); bounded so a run of failures can't grow it
+        self._held = deque(maxlen=64)
 
     def resolve(self):
-        client, self.own_key = self._family.api_for(self._uid)
+        held: list = []
+        client, self.own_key = self._family.api_for(self._uid, credit=self._credit,
+                                                      hold=held)
+        self.on_credit = bool(held)
+        self._held.extend(held)
         return client
 
     def client_or_none(self):
@@ -1193,10 +1251,17 @@ class UserApi:
     def record(self, model: str, usage) -> None:
         if self.own_key:
             self._family.record_usage(self._uid, model, usage)
-        else:
-            from kwil import usage as owner_usage
+            return
+        from kwil import usage as owner_usage
+        from kwil.credit import call_cost
 
-            owner_usage.record(model, usage)
+        counts = owner_usage.record(model, usage)
+        if self._held:  # a call on the starter credit: its real cost
+            try:
+                token = self._held.popleft()
+            except IndexError:
+                return
+            self._family.credit.settle(self._uid, call_cost(model, counts), token)
 
 
 def _unlink(path: Path, attempts: int = 20) -> None:
@@ -1232,6 +1297,47 @@ def invite_url(origin: str, token: str) -> str:
     """The link to send: the token rides in the #fragment, which browsers
     never send to a server (family.js reads it, clears it and POSTs it)."""
     return f"{origin.rstrip('/')}/#invite={token}"
+
+
+def https_url(value) -> str:
+    """`value` if it is an https:// link with a host (and no spaces), else
+    "" (a setting left empty or mistyped is never shown)."""
+    from urllib.parse import urlsplit
+
+    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+        return ""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return ""
+    return value if parts.scheme == "https" and parts.netloc else ""
+
+
+def invite_message(family: "Family", user: dict, url: str, origin: str) -> str:
+    """The invite text in their language: the link, and for a beta tester
+    the key guide, Google's "unverified app" step, the starter credit, and
+    the Notion template and chat links when set (https only)."""
+    from kwil import i18n
+
+    lang = user.get("language") or "en"
+    name = user.get("name") or ""
+    if tier_of(user) != "beta":
+        return i18n.t("invite_family", lang, name=name, url=url)
+    from kwil.credit import HELP_PATH
+
+    f = family.config["family"]
+    lines = [i18n.t("invite_beta", lang, name=name, url=url,
+                    help=f"{origin.rstrip('/')}{HELP_PATH}")]
+    if family.credit.enabled:
+        usd = family.credit.per_person
+        lines.append(i18n.t("invite_credit", lang,
+                            usd=f"{usd:.0f}" if float(usd).is_integer() else f"{usd:.2f}"))
+    for key, setting in (("invite_template", "notion_template_url"),
+                         ("invite_chat", "beta_chat_url")):
+        link = https_url(f.get(setting))
+        if link:
+            lines.append(i18n.t(key, lang, url=link))
+    return "\n".join(lines)
 
 
 def own_origin(config: dict) -> str:
@@ -1287,8 +1393,10 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         return own_origin(family.config) or f"https://{request.url.netloc}"
 
     def link(request: Request, user: dict, token: str):
-        return {"user": user, "url": invite_url(origin_of(request), token),
-                "expires_at": user["invite_expires"]}
+        url = invite_url(origin_of(request), token)
+        return {"user": user, "url": url, "expires_at": user["invite_expires"],
+                # the text to send them (PR-B's page shares it)
+                "message": invite_message(family, user, url, origin_of(request))}
 
     def off():
         return error("not found", 404) if family is None else None
@@ -1310,7 +1418,8 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
     def list_users(session=Depends(webapp.require_owner)):
         if (e := off()) is not None:
             return e
-        return {"users": family.members(), "max_users": family.max_users}
+        return {"users": family.members(), "max_users": family.max_users,
+                **family.credit.totals()}
 
     @app.post("/api/users/{uid}/invite")
     async def new_link(uid: str, request: Request,

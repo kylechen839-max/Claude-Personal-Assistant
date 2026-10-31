@@ -855,7 +855,7 @@ def attach(env, family_client=None):
     env.config["research"]["dir"] = str(env.tmp / "research")
     service = R.from_config(env.config, env.assistant, client=ContractClient())
     if family_client is not None:  # a "family" person on the owner's key
-        env.family.api_for = lambda uid: (family_client, False)
+        env.family.api_for = lambda uid, **kw: (family_client, False)
     service._worker = None  # run in the caller's thread
     env.assistant.research = service
     env.family.research = service
@@ -918,6 +918,27 @@ def test_a_beta_tester_without_a_key_is_told_to_add_one(env, owner):
         service.start(uid, QUESTION)
     assert e.value.key == "research_no_key"
     assert service.refusal(uid) == "research_no_key"
+
+
+def test_research_never_runs_on_the_beta_starter_credit(env, owner):
+    """A beta tester whose chats run on the starter credit (credit.py) still
+    can't start research: a job is many calls (api_for(uid, credit=False))."""
+    service = attach(env)
+    mom, link = env.member(owner, name="Mom", language="en")  # beta, no key
+    uid = link["user"]["id"]
+    assert env.family.credit.enabled
+    assert env.family.api_for(uid)[1] is False  # her chats: the owner's key, on credit
+    with pytest.raises(R.ResearchRefused) as e:
+        service.start(uid, QUESTION)
+    assert e.value.key == "research_no_key"
+    from kwil.family import UserApi
+    from kwil.userkeys import CreditSpent, MissingKey
+
+    with pytest.raises(MissingKey) as e:
+        service.person(uid).client.resolve()
+    assert not isinstance(e.value, CreditSpent)
+    assert env.family.credit.total == 0 and not env.family.credit._held
+    assert isinstance(service.person(uid).client, UserApi)
 
 
 def test_from_config_is_off_with_research_or_web_search_off(env):

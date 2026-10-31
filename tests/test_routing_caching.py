@@ -251,7 +251,7 @@ def test_usage_is_logged_as_numbers_only(fake_client, caplog):
 
 def test_cost_uses_the_list_prices():
     sonnet = usage.counts(make_usage(1_000_000, 1_000_000, 1_000_000, 1_000_000))
-    assert usage.cost(MAIN, sonnet) == pytest.approx(2 + 10 + 2.5 + 0.2)
+    assert usage.cost(MAIN, sonnet) == pytest.approx(2 + 10 + 2.5 + 0.1)  # reads $0.10
     haiku = usage.counts(make_usage(10_000, 1_000_000))
     assert usage.cost(FAST, haiku) == pytest.approx(0.001 + 0.5)
     long = usage.counts(make_usage(100_001, 0))  # over 100K: 5x

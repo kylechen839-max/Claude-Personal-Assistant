@@ -949,6 +949,40 @@ server (`[family] enabled`, on in the server profile).
     one-off migration. A conversation over ~3.5 MB on its own is left out
     and counted, not split.
 
+- **Starter credit (`credit.py`): a bound on what beta testers spend on the
+  owner's key.** A beta tester without a key runs on the owner's client only
+  while `admit` can reserve one call's worst case (a full
+  `max_history_chars` prompt, `think_max_tokens` of output and `[web]
+  max_searches` searches, on `[assistant] model`) within both their
+  `beta_credit_usd` and everyone's `beta_credit_total_usd`, counting every
+  call in flight; the check and the reservation are one step under a lock,
+  so parallel turns can't overshoot (tested with 8 threads on a Barrier).
+  The real cost replaces the reservation when the answer comes; a failed
+  call's reservation expires after `api_timeout * (api_max_retries + 1)`.
+  Used amounts persist in `<dir>/beta_credit.json` (written privately and
+  atomically); removing someone drops their row but never the total, so
+  re-inviting can't reset the cap. An unreadable book fails closed (no
+  credit for anyone). Deep research, briefings and "Sync now"'s email step
+  never use it; paid voices stay family-only, and the quotas are unchanged.
+  Not covered, on purpose: one process keeps the book (the cloud runs one);
+  the estimate is list prices, so the owner should also set a spend limit
+  on the key in the Anthropic console (BLOCKERS.md). One call can cost a
+  little more than its reserve (a prompt written to the cache costs 1.25x
+  input; attached files and project documents can make a prompt bigger
+  than the history trim), so a budget can be passed by at most that one
+  call's difference; the next call is then refused.
+- **Feedback (`feedback.py`).** Notes are sealed per person
+  (`userkeys.seal`, label `kwil/feedback/v1`, the person's id inside the
+  ciphertext) in their folder, so Remove and "Delete my account" delete
+  them and an export includes them; without `USER_DATA_KEY` nothing is
+  stored (503). Bounded: 8 KB a request, 2,000 characters an answer, 50
+  notes a person, 5 an hour per person (cloud.RateLimiter, at most 1,000
+  people tracked). Their words are never logged (INFO: the id, kind and
+  lengths). Only the owner reads them (`GET /api/feedback`, 404 for anyone
+  else). The survey flag in users.json is "answered" or "dismissed", never
+  the answers. The beta's links (`notion_template_url`, `beta_chat_url`)
+  reach `/api/state` and invites only as `https://` URLs.
+
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).
