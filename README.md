@@ -1035,7 +1035,7 @@ keys -> Create key, paste it into Kwil) and an estimate of about $0.02 a
 message on Sonnet: about $3 a month at 5 messages a day, $6 at 10, $18 at
 30. Your People list shows each tester's credit used ("$4.21 used") and
 the total ("Starter credit: $12.40 of $50 used"). "Invite someone" and
-"New link" hand the invite's `message` to the share sheet (`{text, url}`)
+"New link" hand the invite's `message` to the share sheet (as `{text}` alone: it already holds the link)
 or copy it. A tester's first chat screen shows "Things to try" (connect
 Canvas or Notion, with the template link; ask "What's due this week?";
 try voice mode; the testers' chat when `beta_chat_url` is set), ticked by

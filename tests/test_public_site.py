@@ -227,14 +227,31 @@ def test_key_guide_has_the_steps_links_and_an_estimate(site_env):
     assert page.count("<!-- SCREENSHOT:") == 5
 
 
-def test_key_guide_numbers_match_the_price_table():
-    """$0.02 a message: 30 days at 5, 10 and 30 a day gives the table."""
+# What one typical message is assumed to cost (the key guide's "about
+# $0.02"): two API calls (a tool use and the answer), each reading the
+# cached system prompt and tool definitions, writing the new turn to the
+# cache and producing a short spoken-style reply.
+TURN_CALLS = 2
+CALL_TOKENS = {"input": 0, "cache_read": 12_000, "cache_write": 1_500, "output": 400}
+
+
+def test_key_guide_estimate_is_computed_from_the_price_table(site_env):
+    """The ~$0.02 a message and the monthly table follow from usage.PRICES
+    and the token counts above; the footnote quotes the same four prices."""
     from kwil import usage
 
-    inp, out, cache_read, _write = usage.PRICES["claude-sonnet-5-5"]
-    assert (inp, out, cache_read) == (2.0, 10.0, 0.20)
+    model = "claude-sonnet-5-5"
+    per_message = TURN_CALLS * usage.cost(model, CALL_TOKENS)
+    assert per_message == pytest.approx(0.02, abs=0.0025), per_message
     for day, month in ((5, 3), (10, 6), (30, 18)):
+        assert round(per_message * day * 30) == pytest.approx(month, abs=1), day
         assert round(0.02 * day * 30) == month
+    page = " ".join(site_env().client.get("/help/anthropic-key",
+                                          headers=via_proxy(PUBLIC)).text.split())
+    p_in, p_out, p_read, p_write = usage.PRICES[model]
+    for price in (p_in, p_out, p_read, p_write):
+        shown = f"${price:g}" if float(price).is_integer() else f"${price:.2f}"
+        assert shown in page, shown
 
 
 def test_state_says_whether_the_key_guide_is_here(site_env):

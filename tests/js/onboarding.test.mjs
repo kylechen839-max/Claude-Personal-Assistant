@@ -65,6 +65,7 @@ const IDS = [
   'feedback-list-sheet', 'feedback-list', 'feedback-list-status',
   // the chat screen's checklist
   'checklist', 'checklist-items', 'checklist-title', 'checklist-hide',
+  'text',  // the composer's message field
 ];
 const HIDDEN = new Set(['api-key', 'api-key-remove', 'api-key-cost', 'api-key-credit', 'api-key-help',
   'family', 'invite-form', 'invite-link', 'family-credit', 'feedback-send', 'feedback-read', 'feedback-due',
@@ -236,7 +237,7 @@ test("the owner's list shows each tester's credit used and everyone's total", as
 
 // --- the invite's message ----------------------------------------------------------
 
-test('the share sheet gets the invite text and the link; the clipboard gets the text', async () => {
+test('the share sheet gets the invite text alone (it holds the link); the clipboard gets the text', async () => {
   const url = 'https://x.example/#invite=hcinv.abc';
   const message = `Hi Ada, here's your Kwil beta invite: ${url}\nYou have $5 of starter credit.`;
   const responses = {
@@ -248,7 +249,8 @@ test('the share sheet gets the invite text and the link; the clipboard gets the 
   s.api.onState({ owner: true, family: true }, s.win, s.win.document);
   s.els['invite-name'].value = 'Ada';
   await s.els['invite-form'].fire('submit');
-  assert.equal(JSON.stringify(s.shared), JSON.stringify([{ text: message, url }]));
+  // {text, url} would show the link twice: the message already ends with it
+  assert.equal(JSON.stringify(s.shared), JSON.stringify([{ text: message }]));
   assert.equal(s.els['invite-status'].textContent, 'Invite message ready.');
   const c = load({ responses });
   c.api.onState({ owner: true, family: true }, c.win, c.win.document);
@@ -490,4 +492,53 @@ test('the page has the new controls, each labelled, and the sheets are dialogs',
   }
   // the guide's link is same-site and opens apart from the app
   assert.match(HTML, /<a id="api-key-help" class="api-key-help" href="\/help\/anthropic-key" target="_blank" rel="noopener" hidden>/);
+});
+
+// --- judge round 1 ---------------------------------------------------------------
+
+test('a second submit while the POST is out sends nothing more', async () => {
+  let release;
+  const pending = new Promise((r) => { release = r; });
+  const t = load({ responses: { '/api/me/feedback': () => ({ status: 200, body: { ok: true } }) } });
+  const realFetch = t.win.fetch;
+  t.win.fetch = async (url, opts) => { if (url === '/api/me/feedback') await pending; return realFetch(url, opts); };
+  t.api.onState(BETA, t.win, t.win.document);
+  await t.els['feedback-send'].fire('click');
+  t.els['feedback-broke'].value = 'twice?';
+  const first = t.els['feedback-form'].fire('submit');
+  const second = t.els['feedback-form'].fire('submit');  // Enter again, before the answer
+  release();
+  await Promise.all([first, second]);
+  assert.equal(t.fetches.filter((f) => f.url === '/api/me/feedback').length, 1);
+  assert.equal(t.els['feedback-status'].textContent, 'Thanks. Your feedback was sent.');
+  // and once it is back, another note can go
+  t.els['feedback-broke'].value = 'again';
+  await t.els['feedback-form'].fire('submit');
+  assert.equal(t.fetches.filter((f) => f.url === '/api/me/feedback').length, 2);
+});
+
+test('a card that hides with focus in it hands focus to the message field', async () => {
+  const d = load({ responses: { '/api/me/feedback/dismiss': { status: 200, body: { ok: true } } } });
+  d.api.onState({ ...BETA, feedback_due: true }, d.win, d.win.document);
+  d.els['feedback-due-dismiss'].focus();
+  await d.els['feedback-due-dismiss'].fire('click');
+  assert.equal(d.win.document.activeElement, d.els.text, 'No thanks');
+
+  const h = load();
+  h.i18n.renderChecklist(h.win, h.win.document, BETA);
+  h.els['checklist-hide'].focus();
+  await h.els['checklist-hide'].fire('click');
+  assert.equal(h.win.document.activeElement, h.els.text, 'Hide');
+
+  const t = load();
+  t.i18n.renderChecklist(t.win, t.win.document, BETA);
+  const boxes = t.els['checklist-items'].querySelectorAll('input[data-step]');
+  for (const b of boxes.slice(0, -1)) { b.checked = true; await b.fire('change'); }
+  const last = boxes.at(-1);
+  last.focus();
+  assert.equal(t.win.document.activeElement, last);  // not moved before the card goes
+  last.checked = true;
+  await last.fire('change');
+  assert.equal(t.els.checklist.hidden, true);
+  assert.equal(t.win.document.activeElement, t.els.text, 'the last tick');
 });

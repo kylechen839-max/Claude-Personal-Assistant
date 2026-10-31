@@ -997,6 +997,12 @@
   }
   const httpsLink = (v) => (typeof v === "string" && /^https:\/\/[^\s"<>]+$/.test(v) ? v : "");
 
+  // the card hid with focus in it: give it to the message field, not <body>
+  function focusText(doc) {
+    const field = doc.getElementById("text");
+    if (field && typeof field.focus === "function") field.focus();
+  }
+
   function renderChecklist(win, doc, state) {
     const box = doc.getElementById("checklist");
     const list = doc.getElementById("checklist-items");
@@ -1049,7 +1055,7 @@
         const now = readTicks(win).filter((k) => k !== key);
         if (box2.checked) now.push(key);
         saveTicks(win, now);
-        if (steps.every((k) => now.includes(k))) box.hidden = true;  // all done
+        if (steps.every((k) => now.includes(k))) { box.hidden = true; focusText(doc); }  // all done
       });
       list.appendChild(li);
     }
@@ -1062,6 +1068,7 @@
       hide.addEventListener("click", () => {
         try { win.localStorage?.setItem(CHECK_HIDDEN, "1"); } catch (e) { /* private */ }
         box.hidden = true;
+        focusText(doc);
       });
     }
   }

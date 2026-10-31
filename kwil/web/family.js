@@ -140,7 +140,8 @@
       const ready = text ? BETA_TEXT.messageReady : "Invite link ready.";
       const nav = win.navigator || {};
       if (typeof nav.share === "function") {
-        try { await nav.share(text ? { text, url } : { url }); status.textContent = ready; return; }
+        // the message already holds the link: {text, url} would put it in twice
+        try { await nav.share(text ? { text } : { url }); status.textContent = ready; return; }
         catch (e) { if (e && e.name === "AbortError") { status.textContent = ready; return; } }
       }
       try {
@@ -454,6 +455,12 @@
   };
   const FIELDS = ["broke", "confused", "pay"];
 
+  // After a card over the chat hides with focus in it: the message field.
+  function focusComposer(win, doc) {
+    const field = doc.getElementById("text");
+    if (field && typeof field.focus === "function") field.focus();
+  }
+
   function setupFeedback(win, doc) {
     const $ = (id) => doc.getElementById(id);
     const sheet = $("feedback-sheet");
@@ -503,11 +510,14 @@
       openSheet(sheet, fields.broke);
     }
 
+    let sending = false;  // one POST at a time (Enter again while it is out)
     async function onSubmit(e) {
       if (e && e.preventDefault) e.preventDefault();
+      if (sending) return;
       const body = { kind };
       for (const k of FIELDS) body[k] = fields[k] ? String(fields[k].value || "").trim() : "";
       if (!FIELDS.some((k) => body[k])) { say(FEEDBACK_TEXT.empty); return; }
+      sending = true;
       if (submit) submit.disabled = true;
       say(FEEDBACK_TEXT.sending);
       let res = null;
@@ -515,6 +525,7 @@
         res = await send("/api/me/feedback", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       } catch (err) { /* shown below */ }
+      sending = false;
       if (submit) submit.disabled = false;
       if (res && res.ok) {
         for (const k of FIELDS) if (fields[k]) fields[k].value = "";
@@ -536,6 +547,7 @@
     async function dismiss() {
       dismissed = true;  // gone from this page now, whatever the server says
       showDue(false);
+      focusComposer(win, doc);  // its button is gone: never leave focus on <body>
       try {
         await send("/api/me/feedback/dismiss", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });

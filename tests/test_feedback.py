@@ -71,7 +71,7 @@ def test_caps_on_answers_body_and_entries(env, owner):
     tess, tess_id = env.member(owner, "Tess")
     assert send(tess, broke="x" * 2001).status_code == 400
     assert send(tess, broke="x" * 2000).status_code == 200
-    big = json.dumps({"kind": "general", "broke": "y" * 9000}).encode()
+    big = json.dumps({"kind": "general", "broke": "y" * (feedback.MAX_BODY + 1)}).encode()
     assert tess.post(URL, content=big,
                      headers={"Content-Type": "application/json"}).status_code == 413
     assert send(tess).status_code == 400  # nothing written
@@ -83,6 +83,22 @@ def test_caps_on_answers_body_and_entries(env, owner):
         feedback.add(env.fam, tess_id, {"broke": "one too many"})
     assert e.value.status == 409
     assert len(feedback.entries(env.fam, tess_id)) == feedback.MAX_ENTRIES
+
+
+def test_three_full_answers_in_chinese_fit(env, owner):
+    """The page sends UTF-8 JSON (JSON.stringify keeps Chinese as is: 3
+    bytes a character), so three 2,000-character answers are about 18 KB;
+    under the old 8 KB cap they got a 413."""
+    tess, tess_id = env.member(owner, "Tess")
+    answer = "日历按钮坏了" * 333 + "了一"  # 2,000 characters
+    assert len(answer) == feedback.MAX_ANSWER
+    body = json.dumps({"kind": "survey", "broke": answer, "confused": answer, "pay": answer},
+                      ensure_ascii=False).encode("utf-8")
+    assert len(body) > 18_000
+    r = tess.post(URL, content=body, headers={"Content-Type": "application/json"})
+    assert r.status_code == 200, r.text
+    (entry,) = feedback.entries(env.fam, tess_id)
+    assert entry["pay"] == answer
 
 
 def test_five_an_hour_per_person(env, owner):

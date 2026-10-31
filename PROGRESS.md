@@ -8703,7 +8703,7 @@ change, every id and hook kept.
   credit left" (and as the Anthropic row's subtitle, unflagged until it is
   used up) and the guide link; the owner's People rows show "$1.20 used"
   per tester and "Starter credit: $12.40 of $50 used" under the card.
-- **Invites:** the share sheet gets `{text: message, url}`; the clipboard
+- **Invites:** the share sheet gets `{text: message}` (the message holds the link; a separate `url` showed it twice); the clipboard
   copy is the message (the link alone when the server sent none).
 - **First-run checklist** (i18n.js `renderChecklist`, beta testers only,
   called from family.js on every `/api/state`): connect Canvas or Notion
