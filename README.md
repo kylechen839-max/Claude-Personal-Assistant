@@ -1024,6 +1024,27 @@ dir`), go with their folder and are in "Download my data"; only you can
 read them all, as JSON: `curl -H "Authorization: Bearer $WEB_TOKEN"
 https://<cloud>/api/feedback`.
 
+**On the phone (PR-B).** A beta tester on the credit sees "$3.62 of $5
+starter credit left" in Settings -> Connections -> Anthropic (and as that
+row's subtitle; the row isn't flagged "Key needed" until the credit is
+gone), with a "How to get a key and what it costs" link to
+`/help/anthropic-key` when the public site is on (`/api/state` says
+where it is). That page is public (like /privacy, English only): the
+console steps (account, Billing -> add credit, a monthly spend limit, API
+keys -> Create key, paste it into Kwil) and an estimate of about $0.02 a
+message on Sonnet: about $3 a month at 5 messages a day, $6 at 10, $18 at
+30. Your People list shows each tester's credit used ("$4.21 used") and
+the total ("Starter credit: $12.40 of $50 used"). "Invite someone" and
+"New link" hand the invite's `message` to the share sheet (`{text, url}`)
+or copy it. A tester's first chat screen shows "Things to try" (connect
+Canvas or Notion, with the template link; ask "What's due this week?";
+try voice mode; the testers' chat when `beta_chat_url` is set), ticked by
+hand and kept in that browser's localStorage until all are ticked or
+Hide. Settings -> Your account -> **Send feedback** opens the three
+questions; when the survey is due a card over the chat asks once (Answer,
+or No thanks, which dismisses it for good). Your People card has a
+**Feedback** row that lists everyone's notes, newest first.
+
 What they get: chat and voice with Claude, web search, their own
 history (in `<dir>/<id>/history.sqlite`, `/data/users` on Render, never
 synced to your Pi or PC; each person's is capped at `[family]

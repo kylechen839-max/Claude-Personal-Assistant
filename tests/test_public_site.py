@@ -1,10 +1,11 @@
-"""The public site (kwil/public_site.py): /welcome, /privacy, /terms and
-the waitlist, behind CloudGuard as on Render. Offline: the web app runs on
+"""The public site (kwil/public_site.py): /welcome, /privacy, /terms, the
+key guide (/help/anthropic-key) and the waitlist, behind CloudGuard as on Render. Offline: the web app runs on
 the mocked Anthropic client and the waitlist file is in tmp_path."""
 
 import json
 import logging
 import os
+import re
 import sys
 from html.parser import HTMLParser
 
@@ -74,7 +75,7 @@ def stored(env):
 
 # --- pages --------------------------------------------------------------------
 
-PAGES = ["/welcome", "/privacy", "/terms"]
+PAGES = ["/welcome", "/privacy", "/terms", "/help/anthropic-key"]
 
 
 @pytest.mark.parametrize("path", PAGES + ["/site.css"])
@@ -187,6 +188,62 @@ def test_a_malformed_support_email_is_not_put_in_the_page(site_env):
     page = site_env(support_email='x@y.z"><b>').client.get(
         "/privacy", headers=via_proxy(PUBLIC)).text
     assert "<b>" not in page and "mailto:" not in page
+
+
+# --- the key guide (/help/anthropic-key) ---------------------------------------
+
+def test_key_guide_is_public_and_is_the_path_the_credit_links_to(site_env):
+    """The page beta invites and the "starter credit is used up" sentence
+    link to (credit.HELP_PATH) is served signed out, through CloudGuard."""
+    from kwil.credit import HELP_PATH
+
+    assert HELP_PATH in public_site.PAGES and HELP_PATH in cloud.PUBLIC_GET
+    env = site_env()
+    r = env.client.get(HELP_PATH, headers=via_proxy(PUBLIC))
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert env.client.get(HELP_PATH + ".html", headers=via_proxy(PUBLIC)).status_code == 401
+    assert env.client.get("/help-anthropic-key.html", headers=via_proxy(PUBLIC)).status_code == 401
+
+
+def test_key_guide_has_the_steps_links_and_an_estimate(site_env):
+    page = site_env().client.get("/help/anthropic-key", headers=via_proxy(PUBLIC)).text
+    flat = " ".join(page.split())
+    for words in ('href="https://console.anthropic.com/"', "Billing", "Add credit",
+                  "monthly spend limit", "API keys", "Create key", "<strong>Connections</strong>",
+                  "<strong>Anthropic</strong>", "Save key", 'href="/privacy"', 'href="/terms"',
+                  'href="/welcome"', 'href="/"', 'href="/site.css"', '<meta name="viewport"',
+                  'lang="en"'):
+        assert words in flat, words
+    # the cost is an estimate, with the README's numbers
+    assert "An estimate, not a price" in flat and "$0.02" in flat
+    for day, month in (("5", "$3"), ("10", "$6"), ("30", "$18")):
+        assert f'<th scope="row">{day}</th><td>{month}</td>' in flat, day
+    assert "$0.20" in flat  # Sonnet's cache-read price (usage.PRICES)
+    # every link is a page of this site or the Anthropic console, nothing else
+    links = re.findall(r'href="([^"]+)"', page)
+    outside = {u for u in links if not u.startswith("/")}
+    assert outside == {"https://console.anthropic.com/"}, outside
+    # the spots for Kyle's screenshots are marked
+    assert page.count("<!-- SCREENSHOT:") == 5
+
+
+def test_key_guide_numbers_match_the_price_table():
+    """$0.02 a message: 30 days at 5, 10 and 30 a day gives the table."""
+    from kwil import usage
+
+    inp, out, cache_read, _write = usage.PRICES["claude-sonnet-5-5"]
+    assert (inp, out, cache_read) == (2.0, 10.0, 0.20)
+    for day, month in ((5, 3), (10, 6), (30, 18)):
+        assert round(0.02 * day * 30) == month
+
+
+def test_state_says_whether_the_key_guide_is_here(site_env):
+    """Settings links the guide only where it is served (`key_help` in
+    /api/state): with the public site off it would be a 404."""
+    on = site_env().client.get("/api/state", headers=OWNER).json()
+    assert on["key_help"] == "/help/anthropic-key"
+    off = site_env(public_site=False).client.get("/api/state", headers=OWNER).json()
+    assert "key_help" not in off
 
 
 # --- the waitlist -------------------------------------------------------------
@@ -465,7 +522,7 @@ def test_build_app_without_the_public_site(fake_client, tmp_path):
                                     FakeTranscriber(), PrintTTS())
     client = TestClient(cloud.build_app(cfg, assistant, TOKEN),
                         base_url="https://testserver")
-    for path in ("/welcome", "/privacy", "/terms", "/site.css"):
+    for path in ("/welcome", "/privacy", "/terms", "/help/anthropic-key", "/site.css"):
         assert client.get(path).status_code == 404, path
     assert client.post("/api/waitlist", json={"email": "a@example.com"}).status_code == 404
     assert not (tmp_path / "w.json").exists()
@@ -478,7 +535,8 @@ def test_build_app_without_the_public_site(fake_client, tmp_path):
 def test_site_off_means_404_and_no_link(site_env, language):
     env = site_env(public_site=False)
     for method, path in (("GET", "/welcome"), ("GET", "/privacy"), ("GET", "/terms"),
-                         ("GET", "/site.css"), ("POST", "/api/waitlist")):
+                         ("GET", "/help/anthropic-key"), ("GET", "/site.css"),
+                         ("POST", "/api/waitlist")):
         r = env.client.request(method, path, headers=via_proxy(PUBLIC))
         assert r.status_code == 404, path
     assert env.client.get("/api/waitlist", headers=OWNER).status_code == 404

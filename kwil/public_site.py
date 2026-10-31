@@ -1,7 +1,12 @@
-"""The public site: a landing page, privacy and terms, and the waitlist.
+"""The public site: a landing page, privacy and terms, the key guide, and
+the waitlist.
 
   GET    /welcome                    what Kwil is, the waitlist form
   GET    /privacy, /terms            the beta's privacy notice and terms
+  GET    /help/anthropic-key         how to get an Anthropic API key, and
+                                     what it costs (credit.HELP_PATH: linked
+                                     from beta invites, the "starter credit
+                                     is used up" sentence and Settings)
   GET    /site.css                   their stylesheet (no inline CSS or JS:
                                      the app's strict CSP holds here too)
   POST   /api/waitlist               {email, note?} as a form or JSON (public)
@@ -47,7 +52,7 @@ log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).resolve().parent / "web"
 PAGES = {"/welcome": "landing.html", "/privacy": "privacy.html",
-         "/terms": "terms.html"}
+         "/terms": "terms.html", "/help/anthropic-key": "help-anthropic-key.html"}
 MAX_ENTRIES = 2000
 MAX_NOTE = 300
 PER_HOUR = 5               # waitlist posts per address an hour
@@ -270,7 +275,7 @@ def register(app, site: PublicSite, web, error) -> None:
             return Response(site.page(path, waitlist if path == "/welcome" else ""),
                             media_type="text/html; charset=utf-8",
                             headers={"Cache-Control": "no-cache"})
-        serve_page.__name__ = f"public_{path.strip('/')}"
+        serve_page.__name__ = "public_" + path.strip("/").replace("/", "_").replace("-", "_")
         return serve_page
 
     for path in PAGES:

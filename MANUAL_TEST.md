@@ -2087,8 +2087,11 @@ Only what a person can see or click; the old names are covered by tests.
 ## Beta starter credit and feedback (~10 min, iPhone)
 
 - [ ] Signed in as you on the cloud: ⚙ -> **Invite someone**, Beta tier,
-      English. Copy the invite's message (curl `POST /api/invites` until
-      the page shows it, PR-B).
+      English, on the iPhone.
+  - Should: the share sheet opens with the whole invite message, not just
+    the link (in Messages it reads as one text). On a desktop browser
+    without a share sheet, "Invite message copied." and the paste is the
+    message.
   - Should: it has the link, the key guide, "Google will say the app is
     unverified: tap Advanced → Go to Kwil (that's expected)", "$5", and
     the Notion template link; it reads naturally in a text message.
@@ -2100,8 +2103,31 @@ Only what a person can see or click; the old names are covered by tests.
   - Should: within a few turns Kwil says "Your $0.50 starter credit is used
     up..." out loud and in text, and the Anthropic console shows no request
     for that turn. Set it back to 5.
-- [ ] Send a note (`POST /api/me/feedback`), then as you open
-      `https://<cloud>/api/feedback`.
-  - Should: the note is there under the tester's name, and the log
-    (Render -> Logs) has their id and lengths only, never the words.
+- [ ] On the tester's phone, Settings -> Connections -> Anthropic.
+  - Should: "$x.xx of $5 starter credit left" (also under the row's
+    name, and no red "Key needed"); "How to get a key and what it costs"
+    opens `/help/anthropic-key` in a new tab, readable in light and dark.
+    In Chinese the line reads "新手额度还剩 $x.xx（共 $5）".
+- [ ] Open `/help/anthropic-key` signed out on the phone and follow the
+      steps in the real Anthropic console.
+  - Should: every step matches what the console shows today (Billing,
+    Limits, API keys, Create key); Kyle adds the screenshots at the
+    `<!-- SCREENSHOT -->` spots.
+- [ ] The tester's chat screen, first time.
+  - Should: after "Got it" on the Google guide, "Things to try" shows
+    (four steps with the chat link set); the Notion template link opens
+    Notion; ticks survive a reload; Hide removes it for good. VoiceOver
+    reads each step as a checkbox.
+- [ ] Settings -> Your account -> **Send feedback**, fill one answer, Send.
+  - Should: "Thanks. Your feedback was sent."; Esc or the Close button (and
+    a tap above the sheet) closes it and VoiceOver lands back on the row.
+    Six sends in an hour: the sixth says "That's plenty for this hour".
+- [ ] Set `feedback_after_conversations = 1`, restart, have one
+      conversation on the tester's phone, reload.
+  - Should: the survey card shows over the chat; "No thanks" removes it,
+    and it doesn't come back after a reload. Set the setting back.
+- [ ] As you: ⚙ -> People.
+  - Should: each beta tester's "$x.xx used", the total under the card,
+    and **Feedback** opens the notes, newest first, under the tester's
+    name; the log (Render -> Logs) has ids and lengths only.
 

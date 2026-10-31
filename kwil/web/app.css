@@ -162,6 +162,30 @@ input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--ring); }
 .api-key-row button { min-height: 36px; padding: 0 .7rem; font-weight: 400; }
 .api-key-row .danger { color: var(--bad-ink); }
 .api-key-link { user-select: all; -webkit-user-select: all; }
+/* a beta tester's starter credit, and the key guide (family.js setupKey) */
+.api-key-credit { margin: 0; font-size: var(--t-body); font-weight: 600; font-variant-numeric: tabular-nums; }
+.api-key-help { display: inline-flex; align-items: center; min-height: 44px; justify-self: start;
+  font-size: var(--t-sub); font-weight: 500; }
+.api-key-help[hidden] { display: none; }
+/* People: the owner's Feedback row under "Invite someone", and the credit used */
+#feedback-read { position: relative; }
+#invite-open + #feedback-read:not([hidden])::before { content: ""; position: absolute; top: 0;
+  left: var(--s4); right: 0; border-top: 1px solid var(--line); }
+#feedback-read .row-label { flex: 1; }
+.credit-used { font-variant-numeric: tabular-nums; }
+/* beta feedback (family.js setupFeedback): the questions, and the owner's list */
+.fb-form { display: grid; gap: var(--s2); }
+.fb-form label { margin-top: var(--s2); font-size: var(--t-sub); font-weight: 600; }
+.fb-form textarea { min-height: 5.5rem; font-size: var(--t-body); line-height: 1.4; resize: vertical; }
+.fb-form .btn.primary { margin-top: var(--s3); }
+.fb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.fb-list:empty { display: none; }
+.fb-item { display: grid; gap: var(--s1); padding: var(--s3) var(--s4); border-radius: var(--r-lg); background: var(--surface); }
+.conn-sheet .fb-head { font-size: var(--t-cap); color: var(--muted); }
+.fb-who { color: var(--text); font-weight: 600; }
+.conn-sheet .fb-q { margin-top: var(--s2); font-size: var(--t-cap); color: var(--muted); }
+.conn-sheet .fb-a { font-size: var(--t-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
+.conn-sheet #feedback-list-status:empty, .conn-sheet #feedback-status:empty { display: none; }
 /* ---------- design-system primitives (.claude/DESIGN_SYSTEM.md) ---------- */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
@@ -807,6 +831,34 @@ dialog.sheet input { margin: 0 1.25rem 1rem; width: calc(100% - 2.5rem); }
 .guide-text { min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 0 var(--s3);
   white-space: pre-line; line-height: 1.45; align-self: stretch; }
 #guide-done { flex: none; }
+/* at most one card over the chat (index.html): the survey, then the guide,
+   then a beta tester's checklist */
+#feedback-due:not([hidden]) ~ :is(#guide, #checklist), #guide:not([hidden]) ~ #checklist { display: none; }
+/* the checklist comes before the first message: it may take a little more room */
+.guide.checklist { max-height: min(46vh, 22rem); }
+/* the one-time survey's card (family.js setupFeedback) */
+.fb-due-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--s2); }
+/* a beta tester's first-run checklist (i18n.js renderChecklist) */
+.checklist-title { flex: none; margin: 0 0 var(--s1); font-size: var(--t-sub); font-weight: 600; }
+.checklist-items { min-height: 0; overflow-y: auto; overscroll-behavior: contain; align-self: stretch;
+  list-style: none; margin: 0 0 var(--s1); padding: 0; display: grid; }
+.check-item { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s2); }
+.check-row { flex: 1 1 12rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); min-height: 44px;
+  line-height: 1.35; cursor: pointer; }
+/* a round tick, not the settings switch */
+.check-row input[type=checkbox] { width: 24px; height: 24px; border-radius: 50%; background: none;
+  box-shadow: inset 0 0 0 2px var(--line-strong); }
+.check-row input[type=checkbox]::after { top: 5px; left: 8px; width: 6px; height: 11px; border-radius: 0;
+  background: none; box-shadow: none; border: solid var(--on-accent); border-width: 0 2px 2px 0;
+  transform: rotate(45deg); opacity: 0; transition: opacity .15s; }
+.check-row input[type=checkbox]:checked { background: var(--accent); box-shadow: none; }
+.check-row input[type=checkbox]:checked::after { transform: rotate(45deg); opacity: 1; }
+.check-row input[type=checkbox]:focus-visible { box-shadow: var(--ring); }
+.check-row input:checked + span { color: var(--muted); }
+.check-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--s1);
+  margin-left: calc(24px + var(--s3) - var(--s1)); font-weight: 500; }
+#checklist-hide { flex: none; padding: 0 var(--s2); margin-left: calc(-1 * var(--s2)); }
+@media (prefers-reduced-motion: reduce) { .check-row input[type=checkbox]::after { transition: none; } }
 
 /* The owner's health banner: an app down, checks stopped (ui.js renderHealth) */
 .health-banner { flex: none; max-height: 30vh; overflow-y: auto; margin: var(--s2) var(--pad) 0; padding: .6rem .85rem; border-radius: 12px;

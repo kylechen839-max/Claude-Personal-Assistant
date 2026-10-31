@@ -34,8 +34,8 @@ for the public internet with no Tailscale in front:
   cookie isn't sent on it, and google_web.py accepts only a pending,
   one-time state from the browser that started it (family members connect
   their own Google from their phones).
-- The public site (public_site.py: /welcome, /privacy, /terms and their
-  stylesheet) needs no sign-in, nor does joining its waitlist (POST
+- The public site (public_site.py: /welcome, /privacy, /terms, the key
+  guide /help/anthropic-key and their stylesheet) needs no sign-in, nor does joining its waitlist (POST
   /api/waitlist), which gets a body pool of its own with the sign-in
   call's short deadline; the waitlist's owner routes need the owner.
 - The Canvas helper (canvas_helper.py): pairing (POST
@@ -130,8 +130,9 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/ha/callback", "/connect.js",
               "/student.js",  # the "School deadlines" card (its API needs sign-in)
               "/connections.js",  # the menu's Connections rows (page code only)
-              # the public site (public_site.py): landing, privacy, terms
-              "/welcome", "/privacy", "/terms", "/site.css",
+              # the public site (public_site.py): landing, privacy, terms,
+              # the key guide (credit.HELP_PATH)
+              "/welcome", "/privacy", "/terms", "/help/anthropic-key", "/site.css",
               # "Enable notifications" and the study brief's page code (its
               # /api/push and /api/student/brief routes need sign-in)
               "/brief.js"}
