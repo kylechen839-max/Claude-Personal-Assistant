@@ -3,6 +3,24 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Cloud-only, stage 1 (2026-10-31): the steps only Kyle can do.**
+      Kwil is cloud-only: the cloud's server profile now sets `[failover]
+      enabled = false` (README "Phone app failover (retired 2026-10-31)").
+      1. **Render -> hey-claude -> Environment:** confirm `PUBLIC_ORIGIN` is
+         exactly `https://heykwil.com` (invite links, Google and Notion
+         sign-in return there), then delete `ASSISTANT_ROLE`, `APP_ORIGIN`
+         and `FAILOVER_BACKENDS` and Save. Until then the log shows one
+         warning at start-up that they are ignored; nothing else changes.
+      2. **Before stage 2:** GitHub -> the repo -> Settings -> Rules
+         (ruleset for master) -> Require status checks: remove
+         `windows-latest / Python 3.12` and `Debian Bookworm arm64 / Python
+         3.11`, so stage 2 can drop those CI jobs without blocking merges.
+      3. **Optional:** on the PC stop `tailscale serve` (`tailscale serve
+         reset`) and the PC Kwil tasks (`.\scripts\install_windows_service.ps1
+         -Uninstall`, `.\scripts\install_family_tasks.ps1 -Uninstall`); on the
+         Pi stop the units (`systemctl --user disable --now kwil.service
+         kwil-watch.timer`). Move Mom to a cloud family invite (README "Move
+         a PC family copy to the cloud").
 - [ ] **Canvas helper extension: the steps only Kyle can do (2026-10-27).**
       The code is in `tools/canvas-helper/` (its README).
       1. Load it unpacked in Chrome or Edge on your computer and run the
@@ -42,9 +60,9 @@ Only what is still open for Kyle. None of it blocks the code.
       2. **Render display name:** Dashboard -> `hey-claude` -> Settings ->
          Name -> "Kwil". Leave `render.yaml`'s `name: hey-claude` and the
          disk `hey-claude-data` alone: a renamed Blueprint service is a
-         new service with an empty disk. The URL stays
-         `hey-claude.onrender.com` (a custom domain is the way to change it,
-         see the launch item below).
+         new service with an empty disk. Render's own URL stays
+         `hey-claude.onrender.com`; the app is at the custom domain
+         `https://heykwil.com` (`PUBLIC_ORIGIN`).
       3. **Optional: re-register the PC tasks** so they are under `\Kwil\`
          and run `python -m kwil`: `.\scripts\install_windows_service.ps1`,
          then `.\scripts\install_family_tasks.ps1` and
@@ -74,10 +92,10 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Public beta launch (in this order; each step points to its own
       item below rather than repeating it).** Nothing in code is missing;
       these are Render, Google, Notion and wording steps only Kyle can do.
-      1. **Render environment.** `USER_DATA_KEY` exists (item
-         "`USER_DATA_KEY` on Render") and is never changed again: a new
-         value makes every tester's stored key and Notion token unreadable.
-         `PUBLIC_ORIGIN` is the exact https origin people open (no
+      1. **Render environment.** **Done (2026-10-31): Kyle confirmed
+         `USER_DATA_KEY` is set** (item "`USER_DATA_KEY` on Render"); never
+         change it again: a new value makes every tester's stored key and
+         Notion token unreadable. Still open: `PUBLIC_ORIGIN` is the exact https origin people open (no
          trailing slash). Decide on a custom domain *now*: changing it
          later changes the Google and Notion redirect URIs and the cookies
          (everyone signs in again).
@@ -122,7 +140,10 @@ Only what is still open for Kyle. None of it blocks the code.
       11. **Tag 1.1.0** in the GitHub UI after the judge's final GO on
           that exact SHA (the version bump and CHANGELOG date land in the
           release PR first).
-- [ ] **Install the watchdog on the PC (~1 min).** In PowerShell in the
+- [ ] **Install the watchdog on the PC (~1 min). No longer needed for the
+      cloud (2026-10-31): Kwil is cloud-only, the phone uses
+      https://heykwil.com, and Render restarts the cloud server itself; the
+      PC watchdog only watches apps running on the PC.** In PowerShell in the
       project folder: `.\scripts\install_watch_task.ps1` (or
       `.\scripts\install_family_tasks.ps1 -Watch`). It registers the hidden
       `\Kwil\Watch` task (every 5 minutes) that checks your app and
@@ -150,9 +171,9 @@ Only what is still open for Kyle. None of it blocks the code.
       family" -> "Their own Google").** Only you can: (1) in
       console.cloud.google.com, project `hey-claude-511904`, create an OAuth
       client of type **Web application** with redirect URI
-      `https://hey-claude.onrender.com/google/callback` (your real Render
-      address); (2) in Render -> hey-claude -> Environment set
-      `PUBLIC_ORIGIN` to that address and paste the client's JSON into
+      `https://heykwil.com/google/callback` (the address in
+      `PUBLIC_ORIGIN`); (2) in Render -> hey-claude -> Environment set
+      `PUBLIC_ORIGIN` to `https://heykwil.com` and paste the client's JSON into
       `GOOGLE_WEB_CLIENT_JSON`; (3) make sure the consent screen is
       **published** (Testing mode allows only listed test users, for 7
       days). Until then invites work and the Connect button stays hidden.
@@ -185,14 +206,14 @@ Only what is still open for Kyle. None of it blocks the code.
       `calendar.calendars.readonly` scopes, a support email and the privacy
       policy link; publish it ("In production", unverified: up to 100
       users see a warning screen); (2) create a **Web application** client
-      there with redirect URI `https://hey-claude.onrender.com/google/callback`;
+      there with redirect URI `https://heykwil.com/google/callback`;
       (3) paste its JSON into `GOOGLE_PUBLIC_CLIENT_JSON` in Render ->
       Environment; (4) submit the project for verification (demo video of
       the consent and a calendar question). Never add Gmail scopes to that
       project. Until (3), beta testers can't connect Google (the app says
       so); family members are unaffected.
-- [ ] **`USER_DATA_KEY` on Render (~2 min; README "Invite family" -> "Their
-      own Anthropic key").** It encrypts the testers' own Anthropic keys.
+- [x] **`USER_DATA_KEY` on Render (~2 min; README "Invite family" -> "Their
+      own Anthropic key").** Done (2026-10-31): Kyle confirmed it is set. It encrypts the testers' own Anthropic keys.
       `render.yaml` has Render generate it; if the service isn't synced from
       the Blueprint, add it in Render -> hey-claude -> Environment yourself:
       a random value of 32+ characters (e.g. the output of
@@ -206,9 +227,9 @@ Only what is still open for Kyle. None of it blocks the code.
       notion.so/profile/integrations create a **Public** integration ("Any
       workspace"), capabilities Read content + Update content, no user
       information with email; (2) fill in the company name, website, privacy
-      policy `https://hey-claude.onrender.com/privacy`, terms
-      `https://hey-claude.onrender.com/terms` and a support email, and the
-      redirect URI `https://hey-claude.onrender.com/notion/callback`;
+      policy `https://heykwil.com/privacy`, terms
+      `https://heykwil.com/terms` and a support email, and the
+      redirect URI `https://heykwil.com/notion/callback`;
       (3) paste its OAuth client ID and secret (shown once) into
       `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET` in Render ->
       Environment. Optional: publish an "Assignments" template page and set
@@ -224,17 +245,12 @@ Only what is still open for Kyle. None of it blocks the code.
       hey-claude -> Metrics (memory peak) and note it in PROGRESS.md
       ("Family invites, piece B"); if it nears 2 GB, set `FAMILY_ZH=0` or
       a larger plan.
-- [ ] **Chinese instance for Mom (~15 min, README "A Chinese instance for
-      someone else").** Only you can: (1) create a **Web application** OAuth
-      client in console.cloud.google.com with redirect URI
-      `https://<pc-name>.<tailnet>.ts.net:8443/google/callback`, save its
-      JSON as `data/mom/google_client.json`, and add her Gmail address as a
-      test user on the consent screen; (2) create `.env.mom` with
-      `ANTHROPIC_API_KEY`; (3) put the address in `config.mom.local.toml`
-      (`[webapp] public_origin`); (4) `tailscale serve --bg --https=8443
-      http://127.0.0.1:8766` and share the PC with her in the Tailscale
-      admin console; (5) `python -m kwil --download-voice
-      zh_CN-huayan-medium`. Then MANUAL_TEST.md "Chinese instance for Mom".
+- [ ] **Mom on the cloud (~5 min; replaces the PC "Chinese instance for
+      Mom", retired 2026-10-31: Kwil is cloud-only).** Only you can: at
+      https://heykwil.com, ⚙ -> **Invite someone**, account type
+      **Family**, language Chinese, her time zone; send her the link. If
+      she already has a PC copy, follow README "Move a PC family copy to
+      the cloud" to bring her history over and retire it.
 - [ ] **Google sign-in again for Gmail (one time, ~1 min).** The current
       `token.json` only allows Calendar, so the email tools stay off until
       you grant Gmail access:
@@ -361,7 +377,7 @@ Only what is still open for Kyle. None of it blocks the code.
       (README "Spotify by voice"). Until then the Spotify tools stay off.
 - [ ] **Cloud uptime alerts and error tracking (optional, free, ~10 min).**
       Only you can sign up: an UptimeRobot monitor on
-      `https://<your service>.onrender.com/healthz`, and (if you want crash
+      `https://heykwil.com/healthz`, and (if you want crash
       reports) a Sentry Python project whose DSN goes into Render's
       `SENTRY_DSN` (README "Uptime, error tracking and backups"). Without them nothing changes: no reports
       are sent and the PC watchdog's `[watch] cloud_url` still works.

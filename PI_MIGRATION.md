@@ -1,5 +1,9 @@
 # Moving Kwil to a Raspberry Pi
 
+> **Retired 2026-10-31: Kwil is cloud-only.** The phone app is https://heykwil.com
+> (the Render cloud server). Moving the phone app to a Pi is no longer the plan;
+> kept for reference only.
+
 Step by step, with a go/no-go check before and after. The PC setup is not
 touched, so you can go back to it at any time (see [Rollback](#8-rollback)).
 

@@ -1,5 +1,10 @@
 # Failover: Pi first, then the PC, then the cloud
 
+> **Retired 2026-10-31: Kwil is cloud-only.** The phone app is https://heykwil.com
+> (the Render cloud server), which no longer fails over to a Pi or PC: its
+> server profile sets `[failover] enabled = false`. Kept for reference (a PC or
+> Pi with `[failover] role` set still runs this code).
+
 The phone app always tries to talk to the **Raspberry Pi**. If the Pi
 can't be reached it uses the **PC**, and if neither answers it uses the
 **cloud host** (Render). When a better backend comes back, the app moves
