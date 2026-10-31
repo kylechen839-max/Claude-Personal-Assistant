@@ -4,7 +4,8 @@ Two kinds of account, one sign-in flow:
 
 - The owner's ([webapp] google_connect), for an instance whose user never
   touches the PC (e.g. config.mom.toml): the token goes to [calendar] token
-  and Calendar and Gmail (read, drafts) join the shared tools.
+  and Calendar, Gmail (read, drafts) and Drive (read-only) join the
+  shared tools.
 - The cloud server owner's ([webapp] owner_google, on in the server
   profile): the same, to /data/google_token.json, and that token then wins
   over GOOGLE_TOKEN_JSON (google_auth.owner_environ), which keeps working
@@ -20,15 +21,19 @@ Two kinds of account, one sign-in flow:
   A beta tester (family.py tier "beta") signs in through the public client
   (GOOGLE_PUBLIC_CLIENT_JSON / [family] public_google_client) and is asked
   for Calendar only; without that client their Google stays off (never the
-  family client: its consent screen lists Gmail).
+  family client: its consent screen lists Gmail and Drive).
 
   GET  /api/google/status      {"enabled", "connected", "disconnect",
                                "gmail", "note", "needs_reconnect",
-                               "server_owner"}: the caller's own account
+                               "missing", "server_owner"}: the caller's
+                               own account
                                (gmail false: no mail wording in the app;
                                note: why it is off, or null;
                                needs_reconnect: Google refused the saved
                                sign-in, google_auth.needs_reconnect;
+                               missing: scopes asked for that the saved
+                               token lacks, e.g. Drive's, Reconnect adds
+                               them;
                                server_owner: the cloud owner's, no
                                first-run guide)
   POST /api/google/connect     {"url": Google's consent page}
@@ -103,7 +108,7 @@ class Pending:
 
 class GoogleConnect:
     """The sign-in flow, without HTTP. `tools` is the web app's shared
-    ToolRegistry: once the owner signs in, Calendar and Gmail are added to
+    ToolRegistry: once the owner signs in, Calendar, Gmail and Drive are added to
     it, and every owner browser's SessionTools sees them (they share its
     dict). `family` (family.Family) handles family members' accounts;
     `owner` False: only family members can connect. `owner_google` ([webapp]
@@ -343,7 +348,7 @@ class GoogleConnect:
     def disconnect_owner(self) -> bool:
         """The cloud owner's Disconnect ([webapp] owner_google): revoke the
         grant at Google (best effort, as a family member's), delete the
-        token file, and rebuild Calendar and Gmail on GOOGLE_TOKEN_JSON, or
+        token file, and rebuild Calendar, Gmail and Drive on GOOGLE_TOKEN_JSON, or
         none without it. False if there was no file, or a new sign-in
         replaced it meanwhile (that one is kept, with its tools)."""
         if not self.owner_file():
@@ -371,7 +376,7 @@ class GoogleConnect:
         return True
 
     def _register_tools(self) -> None:
-        """Calendar and Gmail on the owner's current token. Every
+        """Calendar, Gmail and Drive on the owner's current token. Every
         SessionTools shares this registry's dict, so it is updated in place,
         adding before removing (a running turn never sees it empty), as
         family._refresh_tools does."""

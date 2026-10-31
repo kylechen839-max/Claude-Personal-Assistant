@@ -574,7 +574,9 @@ def main(prog: str = "python -m kwil.tools.google_auth") -> None:
                                   "requested", gmail),
                                  ("[drive] is disabled, so no Drive access was "
                                   "requested", drive)) if not on]
-    print(" and ".join(granted) + " authorized"
+    names = (", ".join(granted[:-1]) + " and " + granted[-1]) if len(granted) > 1 \
+        else granted[0]
+    print(names + " authorized"
           + (f" ({'; '.join(off)})" if off else "") + "; token saved to", token)
     print(f"For cloud hosting, put the contents of {token} in {TOKEN_ENV}.")
 

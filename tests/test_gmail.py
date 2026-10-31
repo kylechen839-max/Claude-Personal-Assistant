@@ -378,11 +378,13 @@ def test_google_auth_cli_flags(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     for var in ("GOOGLE_CREDENTIALS", "GOOGLE_TOKEN"):
         monkeypatch.delenv(var, raising=False)
-    google_auth.main()  # no config.toml: [gmail] enabled by default
-    assert called[-1] == (("credentials.json", "token.json"), google_auth.SCOPES)
-    (tmp_path / "config.toml").write_text("[gmail]\nenabled = false\n")
+    google_auth.main()  # no config.toml: [gmail] and [drive] enabled by default
+    assert called[-1] == (("credentials.json", "token.json"),
+                          google_auth.SCOPES + google_auth.DRIVE_SCOPES)
+    (tmp_path / "config.toml").write_text("[gmail]\nenabled = false\n"
+                                          "[drive]\nenabled = false\n")
     google_auth.main()
-    # no mail access asked
+    # no mail (or Drive) access asked
     assert called[-1][1] == (google_auth.CALENDAR_SCOPES
                              + google_auth.CALENDAR_EXTRA_SCOPES)
     assert not any("gmail" in s for s in called[-1][1])
