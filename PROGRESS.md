@@ -8726,8 +8726,17 @@ change, every id and hook kept.
   family.js, i18n.js and index.html reverted all 17 JS tests and the
   coverage test fail; with the route wiring reverted the 6 public-page
   tests fail, and with webapp.py reverted the `key_help` test fails.
-- Full suite: 4105 passed, 53 skipped (baseline 4097 passed, 54 skipped
-  in a clean archive of 1d3b0cf); JS 536 passed (baseline 518).
+- **Judge round 1 (5 LOW, fixed):** share `{text}` alone (no second link);
+  feedback `MAX_BODY` 8 KB -> 20 KB (three 2,000-character Chinese answers
+  are about 18 KB); focus goes to the message field when the survey card,
+  Hide or the last tick removes the card; the ~$0.02 is computed in
+  test_public_site from usage.PRICES and stated token counts (2 calls x
+  12,000 cache read, 1,500 cache write, 400 out), and the footnote names
+  the $2.50 cache-write price; one POST per feedback send (a second submit
+  while it is out sends nothing). Each with a test that fails without it.
+  Desktop (1280x800) shots of Settings, People and the checklist reviewed.
+- Full suite: 4106 passed, 53 skipped (baseline 4097 passed, 54 skipped
+  in a clean archive of 1d3b0cf); JS 538 passed (baseline 518).
   Screenshots (390x844, light/dark, en/zh, mocked APIs) were reviewed in
   the sandbox, not on a real phone.
 ## Google Drive, read-only (2026-10-31)
