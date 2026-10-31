@@ -25,6 +25,15 @@
     "Conversation history": "对话记录",
     "Settings": "设置",
     "Main navigation": "主导航",  // the phone's tab bar (aria-label)
+    // the desktop rail's Search and the Ctrl+K switcher (ui.js); "Results"
+    // (its list's label) is History's, below
+    "Search": "搜索",
+    "Go to": "前往",
+    "Go to a screen or conversation": "前往页面或对话",
+    "No matches": "没有匹配项",
+    "New chat": "新对话",
+    "Start voice conversation": "开始语音对话",
+    "Conversation": "对话",
     // the Settings page's section heads (Voice, Connections, People and
     // Backends are below; "Account" is the invite form's field, not a head)
     "Memory and projects": "记忆和项目",

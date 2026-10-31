@@ -8715,3 +8715,84 @@ change, every id and hook kept.
 - **LOW:** `sw.js` `kwil-shell-v29` (v27 and v28 are taken on master by
   #103 and #105), six pins.
 - Full suite: 4046 passed, 53 skipped (round 0's 4041 + 5); JS 482 passed.
+## Desktop layout v1 (2026-10-31)
+- **What:** at 48rem and up a 4.5rem rail (`<nav id="rail">`, the body's
+  first element): Search (its shortcut under it, "Ctrl K" or "⌘K"), Chat,
+  Today, History, Settings at the bottom; on every screen but the sign-in
+  and voice mode. Like the phone's tab bar each item clicks the header's
+  own control (`app.js` `onTab` now wires `tab-*` and `rail-*` alike;
+  `syncTabs` marks `aria-current="page"` and mirrors `#open-today` /
+  `#open-history`'s `hidden`), and the header's calendar, clock and gear
+  hide while the rail shows. `body:has(#rail:not([hidden]))` is a grid
+  (rail, then every `<main>` in row 1 column 2); the chat is a centred
+  46rem column; the Settings page starts right of the rail, which stays on
+  top. Below 48rem nothing changes.
+- **Two panes at 64rem and up:** `show()` sets `body.dataset.split`: Today
+  beside the chat, a transcript beside the History list (its row
+  `aria-current="true"`, `history.js` `markOpen`; the transcript's Back
+  hidden, Escape still goes back). `currentView` is kept and `show()` runs
+  again on the media query's `change`. No `document.body` or no
+  `matchMedia` (the vm test DOMs): one screen at a time, as before.
+- **Ctrl+K / Cmd+K switcher** (`ui.js` `KwilUI.switcher`, no new script):
+  a `<dialog id="switcher">` with a combobox over a listbox. Mac uses
+  `metaKey`, others `ctrlKey`; no Alt/Shift; works while typing; again
+  closes it; ignored on the sign-in, in voice mode and over any other open
+  dialog. Up/Down wrap, Home/End jump, Enter or a click picks, Esc closes
+  it (only it) and gives focus back. Commands (Chat, New chat when
+  `KwilApp.idle()`, Today, History, Settings, Memory, Projects, Reminders,
+  Start voice conversation) are listed only while their control is not
+  `[hidden]`, filtered by a case-insensitive substring of the translated
+  label, and click that control. With a query, up to 6 conversations from
+  `GET /api/conversations?q=&limit=6` (150 ms debounce, the previous
+  request aborted, a sequence number drops stale answers), opened through
+  the new `window.KwilHistory.openTranscript`.
+- **Voice mode:** still a full-window overlay; `voice.js` now calls
+  `KwilUI.voice.opened()`/`closed()`: the screens, rail and tab bar behind
+  it are `inert`, focus goes to the orb, Escape ends it (`#voice-end`;
+  not over an open dialog), focus returns to `#voice-open` or `#text`.
+  Captions widen to 40rem from 64rem. On a desktop, Settings' Done (and
+  Escape) focus the rail's Settings; a click in the rail doesn't close
+  Settings first.
+- `sw.js` `kwil-shell-v27`; zh: 搜索, 前往, 前往页面或对话, 没有匹配项,
+  新对话, 开始语音对话, 对话 ("Results" already had 搜索结果).
+  DESIGN_SYSTEM: "Desktop layout" section, Tab bar and sheet notes.
+- **Tests:** new `tests/js/desktop.test.mjs` (29 with judge round 1): app.js in node:vm with a
+  matchMedia stub (rail visibility and `aria-current` on every screen,
+  mirroring after /api/state, item clicks, both splits, narrow widths
+  unchanged, a resize re-laying out, no matchMedia/body), app.js +
+  history.js (the open row), ui.js (shortcut on Windows and Mac, ignored
+  cases, ARIA, filter in English and Chinese, keys, Esc focus return and
+  stopPropagation, conversation debounce/abort/stale answer/6 cap),
+  voice.js + ui.js (inert, orb focus, Esc ends, focus return), markup, CSS
+  (rail and grid only from 48rem, splits only from 64rem, tokens only) and
+  zh. `ui.test.mjs` +1 (desktop Done/Escape focus the rail's Settings; a
+  tap in the rail keeps Settings open). Fail-first against e5fbb70's
+  sources: 22 of the 25 and the ui case fail (the 3 that pass are the
+  "nothing changes" guards: narrow widths, the old fake DOM, the ignored
+  shortcut). Mutations: dropping the sequence check, the abort, the
+  debounce, Esc's stopPropagation or the `change` listener each fail their
+  test. v27 pinned in six test files.
+- **Screenshots** (Playwright Chromium, mocked APIs, not real hardware):
+  1280x800 and 1440x900, light and dark, English and Chinese: chat, the
+  Today split, History + transcript, Settings, the switcher open; plus
+  390x844 (rail not drawn, tab bar shown). The same run checked in the
+  browser: Esc returns focus to the message field, Settings' Esc focuses
+  the rail's Settings, a resize to 900 drops the split and back restores it.
+- **Judge round 1 (4 fixes, each fail-first: 4 new tests fail at
+  f5dc4b2):** the switcher's keys do nothing while an IME is composing
+  (`isComposing` or keyCode 229: Enter, Escape and the arrows pick the
+  pinyin candidate); after a pick, if focus was left on something not
+  drawn (Chat from History left it on History's hidden title) it moves to
+  the command's own place (`#text` for Chat, the rail item for Today and
+  History, the screen's title for Memory, Projects and Reminders); a
+  picked command whose control went `[hidden]` or `disabled`, or New chat
+  once a reply started, runs nothing and the list is redrawn (disabled
+  controls aren't listed); `#switcher-status` styles are scoped
+  `dialog.switcher .switcher-status` so `dialog.sheet p` no longer
+  overrides them. The judge's Playwright probes now show Enter during
+  composition doing nothing, focus on `#text` after Chat, and the status
+  padded.
+- Full suite: 4024 passed, 53 skipped, as at e5fbb70 (no Python test
+  added; a `git archive` copy of e5fbb70 runs 4022 passed, 54 skipped and
+  1 git-only failure, `test_ui_ux_pro_max_data_is_committed`, outside a
+  repo); JS 511 passed (baseline 481 + 30).

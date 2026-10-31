@@ -8,7 +8,7 @@
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts"
   },
-  "license": "ISC",
+  "license": "UNLICENSED",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@pinecone-database/pinecone": "^9.0.0",

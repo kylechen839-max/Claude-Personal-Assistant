@@ -121,3 +121,8 @@ body.voice-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .voice.camera-on .voice-orb { transition: none; }
 }
+
+/* a desktop window: wider captions (the overlay still fills the window) */
+@media (min-width: 64rem) {
+  .voice-captions, .voice-debug { max-width: 40rem; }
+}

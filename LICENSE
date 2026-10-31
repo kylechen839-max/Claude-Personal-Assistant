@@ -1,0 +1,10 @@
+Copyright (c) 2026 Kyle Chen. All rights reserved.
+
+This software and its source code ("Kwil") are proprietary and
+confidential. No license is granted to use, copy, modify, merge, publish,
+distribute, sublicense, or sell any part of it, in source or compiled form,
+without the prior written permission of the copyright holder.
+
+Third-party components bundled in this repository (for example under
+kwil/web/static/katex/ and .claude/skills/) remain under their own licenses,
+which are included alongside them.

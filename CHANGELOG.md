@@ -9,6 +9,10 @@
   (changes ask first) and is never logged. Reconnect Google once to add Drive
   (Settings shows "Reconnect to add Google Drive (read-only)"). Not for beta
   testers.
+- Desktop layout: a side rail on wide windows (Search, Chat, Today, History,
+  Settings); Today beside the chat and conversations beside History from
+  1024px; a Ctrl+K / Cmd+K switcher to jump to any screen or past
+  conversation; voice mode keeps keyboard focus and closes with Esc.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no
