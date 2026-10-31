@@ -27,7 +27,7 @@ status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 curl -sf $URL/healthz | python3 -c 'import json, sys
 d = json.load(sys.stdin); assert d["ok"] is True and set(d) == {"ok", "version"}, d'
 test "$(status $URL/api/state)" = 401                       # auth required
-test "$(status $URL/silence.wav)" = 401
+test "$(status $URL/silence.wav)" = 200                     # public: the app shell caches it
 test "$(status $URL/)" = 200                                # login page
 curl -sf $URL/ | grep -q '</html>'                          # ... all of it
 test "$(status $URL/manifest.webmanifest)" = 200

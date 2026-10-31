@@ -9,9 +9,10 @@ Only what is still open for Kyle. None of it blocks the code.
          beta tester's first $5 (`[family] beta_credit_usd`), up to $50 for
          all of them (`beta_credit_total_usd`). Add credits at
          console.anthropic.com -> Billing.
-      2. **Spend limit:** console.anthropic.com -> Limits: set a monthly
-         spend limit of at least $50 (the credit's cap, plus your own use)
-         as a second guard beside Kwil's own book.
+      2. [x] **Spend limit:** done (Kyle set it, 2026-10-31): a monthly
+         spend limit at console.anthropic.com -> Limits of at least $50 (the
+         credit's cap, plus your own use), a second guard beside Kwil's own
+         book.
       3. **Notion template:** published, and its link is in config.toml
          (`notion_template_url`). If you publish a new copy, paste its
          `https://` link there (without `?source=copy_link`).
@@ -174,9 +175,9 @@ Only what is still open for Kyle. None of it blocks the code.
          (README "Persistent disk").
       10. **Invite** the first testers from `/waitlist` (README "Inviting
           someone from the waitlist").
-      11. **Tag 1.1.0** in the GitHub UI after the judge's final GO on
-          that exact SHA (the version bump and CHANGELOG date land in the
-          release PR first).
+      11. **Tag 1.2.0** (`v1.2.0`) in the GitHub UI on the merge commit of
+          the 1.2.0 release PR (the version bump and CHANGELOG date are in
+          it). 1.1.0 is tagged (`v1.1.0`, done).
 - [ ] **Install the watchdog on the PC (~1 min). No longer needed for the
       cloud (2026-10-31): Kwil is cloud-only, the phone uses
       https://heykwil.com, and Render restarts the cloud server itself; the

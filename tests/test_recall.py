@@ -165,13 +165,21 @@ def test_hybrid_paging_past_the_fused_list(store):
     hybrid(store).backfill(limit=1000)
     page = history.search_conversations(store, "physics", None, limit=20, offset=210)
     assert len(page) == 20 and len(set(ids(page))) == 20
-    assert ids(page) == ids(recall.FtsRetriever(store).search("physics", k=20,
-                                                               offset=210))
-    seen = set()
+    # deep pages continue the fused top FUSE_MAX with the keyword hits it
+    # lacks, in keyword order (not a raw keyword page, whose first 200 can
+    # differ from the fused 200 when the meaning ranking reorders ties)
+    head = ids(history.search_conversations(store, "physics", None,
+                                            limit=recall.FUSE_MAX))
+    fts = recall.FtsRetriever(store)
+    keyword = ids(fts.search("physics", k=recall.FUSE_MAX)
+                  + fts.search("physics", k=recall.FUSE_MAX, offset=recall.FUSE_MAX))
+    rest = [cid for cid in keyword if cid not in set(head)]
+    assert ids(page) == (head + rest)[210:230]
+    pages = []
     for offset in range(0, 240, 20):
-        seen |= set(ids(history.search_conversations(store, "physics", None,
-                                                     limit=20, offset=offset)))
-    assert len(seen) >= 220 and seen <= set(many)
+        pages += ids(history.search_conversations(store, "physics", None,
+                                                  limit=20, offset=offset))
+    assert len(pages) == len(set(pages)) == 230 and set(pages) == set(many)
 
 
 def test_paging_never_skips_when_meaning_reorders_the_first_pages(store):

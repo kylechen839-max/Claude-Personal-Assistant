@@ -2,7 +2,10 @@
 and "Delete my account" in their own Settings (web/family.js).
 
   GET  /api/me/export   a zip of their conversations (history.export JSON),
-                        profile, school deadlines (deadlines.json), Canvas
+                        profile (with the starter credit they used),
+                        deep research jobs (research.json: each question,
+                        status, counts and times; the reports are
+                        conversations), school deadlines (deadlines.json), Canvas
                         course content text (coursefiles.json) and their
                         memory (memory.json: instructions, saved
                         memories and projects; each project file itself
@@ -142,8 +145,9 @@ def confirmed(given, user: dict) -> bool:
     return given == CONFIRM_WORD or bool(name) and given.casefold() == name.casefold()
 
 
-def profile(user: dict) -> dict:
-    """What the export says about them: never the invite hash, tokens or keys."""
+def profile(user: dict, credit_used: float = 0.0) -> dict:
+    """What the export says about them: never the invite hash, tokens or
+    keys. `credit_used`: $ of the starter credit they used (credit.py)."""
     from kwil.family import tier_of
 
     created = user.get("created")
@@ -151,7 +155,8 @@ def profile(user: dict) -> dict:
             "language": user.get("language"), "timezone": user.get("timezone") or "",
             "tier": tier_of(user),
             "created": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(created))
-                        if isinstance(created, (int, float)) else None)}
+                        if isinstance(created, (int, float)) else None),
+            "credit_used_usd": credit_used}
 
 
 class Account:
@@ -339,10 +344,18 @@ class Account:
                     "person who invited you for a copy", 413)
             zf.writestr(name, data)
 
+        ledger = getattr(self.family, "credit", None)
+        used = ledger.used(user["id"]) if ledger is not None else 0.0
         count = 0
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            add(zf, "profile.json", json.dumps(profile(user), indent=2,
+            add(zf, "profile.json", json.dumps(profile(user, used), indent=2,
                                                ensure_ascii=False))
+            # their deep research job files (research.py: <dir>/<id>/research/),
+            # read whether or not [research] is on now
+            from kwil.research import JobStore
+
+            jobs = JobStore(self.family.dir / user["id"] / "research").export()
+            add(zf, "research.json", json.dumps(jobs, indent=2, ensure_ascii=False))
             if hasattr(self.family, "keys"):  # their feedback notes (feedback.py)
                 from kwil import feedback
 

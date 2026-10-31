@@ -254,3 +254,13 @@ def test_pi_migration_go_no_go():
     for gate in ("preflight.ps1", "pi-arm64", "cloud_smoke", "preflight.sh --hardware",
                  "MANUAL_TEST.md"):
         assert gate in go, gate
+
+
+def test_readme_says_kwil_is_proprietary_and_vendored_parts_keep_theirs():
+    """README had no licensing note: Kwil is proprietary (LICENSE), and the
+    vendored KaTeX and design skills keep their own licenses."""
+    readme = " ".join(_text("README.md").split())
+    assert "Kwil is proprietary" in readme and "(LICENSE)" in readme
+    assert "`kwil/web/static/katex/`" in readme and "`.claude/skills/`" in readme
+    assert "proprietary" in (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert (ROOT / "kwil" / "web" / "static" / "katex" / "LICENSE").is_file()

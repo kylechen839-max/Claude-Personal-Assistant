@@ -10,6 +10,7 @@ import json
 import logging
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_login_page_manifest_and_icons_are_public(make_cloud, path):
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/state"), ("GET", "/api/events"), ("GET", "/api/audio/1-abc"),
     ("POST", "/api/turn"), ("POST", "/api/confirm"), ("POST", "/api/logout"),
-    ("GET", "/silence.wav"), ("GET", "/docs"), ("GET", "/openapi.json"),
+    ("GET", "/docs"), ("GET", "/openapi.json"),
     ("GET", "/web/"), ("GET", "/assistant/"), ("GET", "/.env"),
     ("GET", "/../config.toml"), ("GET", "/web/index.html"), ("GET", "/nope"),
     ("PUT", "/"), ("DELETE", "/api/state")])
@@ -515,6 +516,25 @@ def test_voice_page_files_are_public(make_cloud):
         assert client.get(path, headers=via_proxy(PUBLIC)).status_code == 200, path
     assert client.get("/static/vad/NOTICE.md",
                       headers=via_proxy(PUBLIC)).status_code == 401
+
+
+def test_every_service_worker_shell_file_is_served_signed_out(make_cloud):
+    """sw.js caches SHELL with addAll on install, before sign-in: one 401
+    (it had /backend-router.js and /silence.wav) and the worker never
+    installs on the login page, so the app has no offline shell."""
+    import re
+
+    sw = (Path(webapp.__file__).parent / "web" / "sw.js").read_text(encoding="utf-8")
+    shell = re.search(r"const SHELL = \[(.*?)\];", sw, re.S).group(1)
+    paths = re.findall(r'"([^"]+)"', shell)
+    assert "/" in paths and "/silence.wav" in paths
+    assert "/backend-router.js" not in paths  # failover only, retired
+    _, client = make_cloud()
+    for path in paths:
+        assert path in cloud.PUBLIC_GET, path
+        assert client.get(path, headers=via_proxy(PUBLIC)).status_code == 200, path
+    r = client.get("/silence.wav", headers=via_proxy(PUBLIC))
+    assert r.headers["content-type"] == "audio/wav" and r.content[:4] == b"RIFF"
 
 
 def test_cloud_server_caps_websocket_messages(monkeypatch, fake_client):

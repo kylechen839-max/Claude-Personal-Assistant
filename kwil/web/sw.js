@@ -5,8 +5,11 @@
 // (push.py) and opens the brief (/#brief, brief.js) or Settings, Reminders
 // (/#reminders, reminders.js) or a research report (/#research=<id>,
 // research.js) when one is tapped.
-const CACHE = "kwil-shell-v30";
-const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/backend-router.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/reminders.js", "/spotify.js", "/notion.js", "/voice-picker.js",
+// Every SHELL file must load signed out (cloud.PUBLIC_GET): addAll runs
+// before sign-in, and one 401 stops the install. /backend-router.js is not
+// here: it loads only with failover on (retired, cloud-only).
+const CACHE = "kwil-shell-v31";
+const SHELL = ["/", "/i18n.js", "/app.js", "/history.js", "/family.js", "/ui.js", "/attachments.js", "/app.css", "/manifest.webmanifest", "/icon.svg", "/memory.js", "/reminders.js", "/spotify.js", "/notion.js", "/voice-picker.js",
                "/student.js", "/brief.js", "/connect.js", "/connections.js", "/study.js", "/projects.js",
                "/sources.js", "/research.js", "/today.js",
                "/icon-180.png", "/icon-192.png", "/icon-512.png", "/silence.wav"];

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.2.0 (2026-10-31)
+
+- **Upgrading:** Pinecone recall and conversation summaries are now off by
+  default (`[memory] backend = "local"`: memories stay on your own machine).
+  If you used Pinecone and want to keep it, set `backend = "pinecone"` under
+  `[memory]` in your config.toml (or config.local.toml).
+- Kwil is now proprietary: see LICENSE. The vendored KaTeX and design skills
+  keep their own licenses, and the README says so.
+- Asking about earlier chats over several pages of results no longer skips
+  or repeats a conversation between pages.
+- The cloud server no longer logs a failover WARNING on every start: the
+  example `backends` list in config.toml (every URL empty) no longer counts
+  as a failover setting.
+- The phone app works offline again from the sign-in page: the offline
+  copy no longer includes the retired failover router and can fetch the
+  silent sound that unlocks audio on iPhone before you sign in (cache
+  `kwil-shell-v31`).
+- "Download my data" now also includes your deep research jobs
+  (`research.json`: each question, status, counts and times) and how much
+  of the starter credit you used.
+
 - Beta onboarding: a public guide at /help/anthropic-key (getting an
   Anthropic key; about $0.02 a message). Beta testers see their starter
   credit left in Settings, a "Things to try" checklist, and can send

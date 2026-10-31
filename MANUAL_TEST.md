@@ -963,6 +963,14 @@ for all of this except the Google sign-in.
     voice, spoken, with no reply from Claude and nothing added to that
     conversation in History; after the minute they answer normally. On your
     own phone the same burst is answered every time.
+- [ ] **The offline app from the sign-in page (1.2.0, ~3 min).** In a
+      private Safari window on the iPhone (signed out), open
+      https://heykwil.com, wait a few seconds, then turn on Airplane mode
+      and reload.
+  - Should: the sign-in page still loads (the service worker installed
+    before sign-in; before 1.2.0 it never did). In Render's log the start
+    shows no "[failover] enabled is false" WARNING once `ASSISTANT_ROLE`,
+    `APP_ORIGIN` and `FAILOVER_BACKENDS` are deleted (BLOCKERS.md).
 
 ### Public site and waitlist (~10 min)
 Only at the beta's launch, after `public_site` is turned on for the server

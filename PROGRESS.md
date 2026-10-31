@@ -8986,3 +8986,40 @@ deleted, the cloud just stops being part of a failover setup.
   added; a `git archive` copy of e5fbb70 runs 4022 passed, 54 skipped and
   1 git-only failure, `test_ui_ux_pro_max_data_is_committed`, outside a
   repo); JS 511 passed (baseline 481 + 30).
+
+## Release 1.2.0 (2026-10-31)
+
+`kwil.__version__` is "1.2.0"; CHANGELOG's Unreleased became "1.2.0
+(2026-10-31)" under a fresh empty Unreleased, with the proprietary LICENSE,
+the recall paging fix, the upgrade note (Pinecone recall and summaries off by
+default, `[memory] backend = "local"`; set `backend = "pinecone"` to keep
+them) and the four judge LOW fixes below. No test pinned 1.1.0 as the
+current version (`test_rebrand` names the `v1.1.0` tag, which stays).
+BLOCKERS: the Anthropic spend limit is done (Kyle set it, 2026-10-31) and
+the tag step now says 1.2.0 (v1.1.0 is tagged).
+
+- **No failover WARNING on every Render boot** (`failover/peers.py`): with
+  `[failover] enabled = false`, a `backends` entry counts as left over only
+  with a non-empty `url`, so config.toml's empty-url template stays quiet;
+  a real URL (or `role`, `app_origin`, `FAILOVER_BACKENDS`) still warns once.
+- **The service worker installs on the sign-in page** (`web/sw.js`,
+  `cloud.py`): `/backend-router.js` left SHELL (it loads only with failover
+  on), `/silence.wav` (50 ms of generated silence) joined
+  `cloud.PUBLIC_GET`. Cache `kwil-shell-v31`, pinned in six test files.
+- **"Download my data" is complete** (`account.py`, `research.py`):
+  `research.json` (their own job files via `JobStore.export`: question,
+  depth, status, counts, times, conversation id; not the taint flag) and
+  `credit_used_usd` in `profile.json`. PRIVACY.md, SECURITY.md and
+  `/privacy` say so.
+- **README licensing note:** proprietary (LICENSE); KaTeX and the vendored
+  skills keep their own licenses.
+- **Tests (4 new, each fail-first against e70f4af's source):**
+  `test_server_profile_with_the_shipped_config_boots_without_a_warning`
+  (failed on the warning), `test_every_service_worker_shell_file_is_served_signed_out`
+  (failed on `/backend-router.js`, then with sw.js fixed but cloud.py
+  reverted on `/silence.wav`), `test_export_has_their_research_jobs_and_credit_used`
+  (KeyError `research.json`) and
+  `test_readme_says_kwil_is_proprietary_and_vendored_parts_keep_theirs`.
+  Updated on purpose: `/silence.wav` left the "needs the cookie" list, the
+  export's file set and profile gained `research.json` and `credit_used_usd`.
+- Full suite (Linux sandbox, not real hardware): 4110 passed, 53 skipped, 1 deselected (`-k "not live_pinecone"`; baseline + 4); JS 538 passed (no JS test added, four sw pins bumped).
