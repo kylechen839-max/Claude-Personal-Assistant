@@ -236,10 +236,10 @@
     };
     function setActive(i) {
       active = options.length ? (i + options.length) % options.length : -1;
-      for (const [n, opt] of list.children.entries()) {
+      Array.from(list.children).forEach((opt, n) => {
         opt.setAttribute("aria-selected", String(n === active));
         if (n === active && typeof opt.scrollIntoView === "function") opt.scrollIntoView({ block: "nearest" });
-      }
+      });
       if (active >= 0) input.setAttribute("aria-activedescendant", `switcher-opt-${active}`);
       else if (typeof input.removeAttribute === "function") input.removeAttribute("aria-activedescendant");
     }
@@ -409,6 +409,8 @@
       const end = byId("voice-end");
       if (!end || typeof end.click !== "function") return;
       e.preventDefault();
+      // not also the screen behind it (history.js's Escape is Back)
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       end.click();
     };
     doc.addEventListener("keydown", onKey);

@@ -20,6 +20,8 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --row-h: 52px;
   /* the phone's tab bar, above the home indicator's safe area */
   --tabbar-h: 49px;
+  /* the desktop rail's width, the chat column's cap, the two panes' side widths */
+  --rail-w: 4.5rem; --chat-w: 46rem;
   /* motion: the sheet's slide, the scrim's fade, a press */
   --t-sheet: 240ms; --ease-sheet: cubic-bezier(.32,.72,0,1); --t-scrim: 200ms; --t-press: .15s;
   /* service tiles (static/icons/README.md): white marks at >= 3:1 */
@@ -884,3 +886,80 @@ dialog.sheet .sheet-quote:empty { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .tabbar-item { transition: none; }
 }
+
+/* ---------- the desktop layout (#rail, app.js show() and syncTabs) ----------
+   48rem and up: a 4.5rem rail on the left of every screen but the sign-in
+   and voice mode (Search, Chat, Today, History; Settings at the bottom),
+   standing in for the header's calendar, clock and gear like the phone's
+   tab bar; the chat is a centred column. 64rem and up: Today opens beside
+   the chat and a transcript beside the History list (body[data-split]).
+   Below 48rem nothing changes. */
+.rail { display: none; }
+@media (min-width: 48rem) {
+  body:has(#rail:not([hidden])) { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    grid-template-rows: 100%; }
+  body:has(#rail:not([hidden])) > main { grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; }
+  .rail { grid-row: 1; grid-column: 1; position: relative; z-index: 31; display: flex; flex-direction: column;
+    gap: var(--s1); min-height: 0; overflow-y: auto;
+    padding: calc(var(--s2) + env(safe-area-inset-top)) var(--s1) calc(var(--s2) + env(safe-area-inset-bottom))
+             calc(var(--s1) + env(safe-area-inset-left));
+    border-inline-end: 1px solid var(--line); background: var(--bg); }
+  .rail[hidden], body.voice-open .rail { display: none; }
+  .rail-item { flex: none; min-width: 0; min-height: 56px; padding: var(--s2) 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px; border-radius: var(--r-sm); background: none;
+    color: var(--text-2); font-size: var(--t-cap); font-weight: 500; line-height: 1.1; letter-spacing: 0; }
+  .rail-item svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round; }
+  .rail-label, .rail-key { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-key { font: inherit; font-size: var(--t-cap); font-weight: 400; color: var(--muted); }
+  .rail-key:empty { display: none; }
+  .rail-item:hover { background: var(--surface-2); color: var(--text); }
+  .rail-item[aria-current=page] { color: var(--accent-ink); background: var(--accent-soft); }
+  .rail-item:active:not(:disabled) { transform: none; }
+  .rail-item:focus-visible { box-shadow: var(--ring); }
+  .rail-settings { margin-top: auto; }
+  /* the rail's items stand in for the header's buttons (they stay: the rail clicks them) */
+  body:has(#rail:not([hidden])) .app > header > :is(#open-today, #open-history),
+  body:has(#rail:not([hidden])) .app > header .menu > summary { display: none; }
+  /* the chat: a centred column (the log still scrolls from the window's edge) */
+  body:has(#rail:not([hidden])) .app {
+    --gutter: max(var(--pad), calc((100% - var(--chat-w)) / 2 + var(--pad))); }
+  body:has(#rail:not([hidden])) .app > :is(header, .log, .queue, .research-cards, .status, footer, .panel) {
+    padding-inline: var(--gutter); }
+  body:has(#rail:not([hidden])) .app > :is(.confirm, .health-banner, .guide, .tabs) { margin-inline: var(--gutter); }
+  /* the Settings page leaves the rail showing, on top of it */
+  body:has(#rail:not([hidden])) .menu[open] .menu-body { inset-inline-start: var(--rail-w); }
+  /* the open conversation in the list beside its transcript (history.js) */
+  .conv-main[aria-current=true] { background: var(--accent-soft); }
+}
+/* the switcher (ui.js, Ctrl+K; from a tablet's keyboard too): near the top,
+   one field over its results, at most 32rem wide */
+dialog.switcher { width: min(32rem, calc(100% - 1rem)); margin: calc(var(--s4) + env(safe-area-inset-top)) auto auto;
+  padding: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-2); overflow: hidden; }
+.switcher-input[type=text] { min-height: 52px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: none; font-size: var(--t-body); }
+.switcher-input[type=text]:focus { box-shadow: none; border-color: var(--line); }
+.switcher-list { list-style: none; margin: 0; padding: var(--s1) 0; max-height: min(60vh, 24rem); overflow-y: auto; }
+.switcher-list:empty { display: none; }
+.switcher-opt { display: flex; align-items: center; gap: var(--s3); min-height: 44px; padding: 0 var(--s4);
+  cursor: pointer; font-size: var(--t-body); color: var(--text); }
+.switcher-opt[aria-selected=true] { background: var(--accent-soft); color: var(--accent-ink); }
+.switcher-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher-kind { flex: none; font-size: var(--t-cap); color: var(--muted); }
+.switcher-status { margin: 0; padding: var(--s3) var(--s4); text-align: center; color: var(--muted); font-size: var(--t-sub); }
+.switcher-status:empty { display: none; }
+@media (min-width: 48rem) { dialog.switcher { margin-top: 12vh; } }
+@media (min-width: 64rem) {
+  body:has(#rail:not([hidden]))[data-split=today-view] {
+    grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(20rem, 26rem); }
+  body:has(#rail:not([hidden]))[data-split=today-view] > #today-view {
+    grid-column: 3; border-inline-start: 1px solid var(--line); }
+  body:has(#rail:not([hidden]))[data-split=transcript-view] {
+    grid-template-columns: var(--rail-w) minmax(18rem, 24rem) minmax(0, 1fr); }
+  body:has(#rail:not([hidden]))[data-split=transcript-view] > #history-view {
+    grid-column: 2; border-inline-end: 1px solid var(--line); }
+  body:has(#rail:not([hidden]))[data-split=transcript-view] > #transcript-view { grid-column: 3; }
+  /* the list is beside it: no Back to it (Escape still goes back) */
+  body[data-split=transcript-view] #transcript-back { visibility: hidden; }
+}
+
