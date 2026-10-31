@@ -614,3 +614,24 @@ def test_a_title_overlapping_a_reply_waits_instead_of_being_refused(tmp_path):
     started = time.monotonic()
     assert not book.check(U) and book.admit(U, 0.01, wait=5) is None
     assert time.monotonic() - started < 1
+
+
+def test_a_beta_testers_history_title_is_on_the_credit(env, owner):
+    """The Recorder's title call (chat_factory's title_api) is reserved and
+    settled on the starter credit, not refused or left uncounted."""
+    from kwil.tools import ToolRegistry
+
+    tess, tess_id = env.member(owner, "Tess")
+    chat = env.fam.context(tess_id).chat_factory(ToolRegistry())
+    answer(env, 1, make_usage(1000, 100))  # the reply
+    chat.ask("hi there")
+    before, calls = env.fam.credit.used(tess_id), len(env.owner_api.calls)
+    env.owner_api.queue.append(make_response(
+        text_block('{"title": "Greeting", "summary": "Said hi."}'), usage=ONE_DOLLAR))
+    chat.end_conversation()
+    chat.recorder.flush()
+    from kwil.history import TITLE_PROMPT
+
+    assert any(c.get("system") == TITLE_PROMPT for c in env.owner_api.calls[calls:])
+    assert env.fam.credit.used(tess_id) == pytest.approx(before + 1.0, abs=1e-3)
+    assert not env.fam.credit._held
