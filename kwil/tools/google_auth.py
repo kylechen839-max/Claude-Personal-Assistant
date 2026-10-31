@@ -1,10 +1,12 @@
-"""Google sign-in shared by Calendar and Gmail (one OAuth client, one token).
+"""Google sign-in shared by Calendar, Gmail and Drive (one OAuth client,
+one token).
 
 The one-time sign-in asks for every scope the assistant uses. A token saved
 before Gmail support only has the Calendar scope: Calendar keeps working
 with it, and the Gmail tools say exactly what to re-run
 (`python -m kwil.tools.google_auth`). The same goes for the read-only
-calendar list and labels scopes (CALENDAR_EXTRA_SCOPES).
+calendar list and labels scopes (CALENDAR_EXTRA_SCOPES) and Drive's
+read-only scope (DRIVE_SCOPES): without it the Drive tools stay off.
 
 In cloud mode the token JSON comes from the GOOGLE_TOKEN_JSON environment
 variable (refreshed tokens stay in memory), until the owner taps "Connect
@@ -41,15 +43,23 @@ CALENDAR_EXTRA_SCOPES = [
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/calendar.calendars.readonly"]
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE]
-# everything, when Gmail is enabled
+# Read every Drive file (drive.py's search_drive and read_doc), never change
+# one: Docs, Sheets and Slides text comes through files.export, which needs
+# only a Drive scope (no Docs API scope). The main Google Cloud project only:
+# the public beta's consent screen never lists it (family.py).
+DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+DRIVE_SCOPES = [DRIVE_READ_SCOPE]
+# Calendar and Gmail (Drive is asked for on top, sign_in_scopes)
 SCOPES = CALENDAR_SCOPES + CALENDAR_EXTRA_SCOPES + GMAIL_SCOPES
 
 
-def sign_in_scopes(gmail_enabled: bool = False) -> list[str]:
-    """What sign-in asks for: Gmail access only if [gmail] is enabled, so a
-    Calendar-only setup never grants mail access."""
+def sign_in_scopes(gmail_enabled: bool = False, drive_enabled: bool = False) -> list[str]:
+    """What sign-in asks for: Gmail access only if [gmail] is enabled and
+    Drive only if [drive] is, so a Calendar-only setup never grants mail
+    or file access."""
     return (CALENDAR_SCOPES + CALENDAR_EXTRA_SCOPES
-            + (GMAIL_SCOPES if gmail_enabled else []))
+            + (GMAIL_SCOPES if gmail_enabled else [])
+            + (DRIVE_SCOPES if drive_enabled else []))
 # On a server the OAuth files come from the environment instead (no files
 # to upload, nothing written back): the contents of token.json and of
 # credentials.json, pasted into the host's secret settings.
@@ -323,6 +333,11 @@ class MissingScopes(RuntimeError):
     def __init__(self, missing: list[str], in_app: bool = False):
         self.missing = missing
         names = ", ".join(s.rsplit("/", 1)[-1] for s in missing)
+        if in_app and missing and set(missing) <= set(DRIVE_SCOPES):
+            from kwil import i18n  # a token from before Drive: reconnect adds it
+
+            super().__init__(i18n.t("drive_reconnect"))
+            return
         if in_app:  # a family member: allow everything when reconnecting
             super().__init__(f"Google access for {names} hasn't been granted. "
                              f"{reconnect_hint()}")
@@ -521,8 +536,9 @@ def main(prog: str = "python -m kwil.tools.google_auth") -> None:
 
     load_dotenv()
     parser = argparse.ArgumentParser(
-        prog=prog, description="Sign in to Google (Calendar, plus Gmail if "
-                               "[gmail] is enabled in config.toml)")
+        prog=prog, description="Sign in to Google (Calendar, plus Gmail and "
+                               "Drive if [gmail] and [drive] are enabled in "
+                               "config.toml)")
     parser.add_argument("--headless", action="store_true",
                         help="no local browser: print a link, then paste back "
                              "the localhost URL you land on")
@@ -533,7 +549,8 @@ def main(prog: str = "python -m kwil.tools.google_auth") -> None:
     args = parser.parse_args()
     config = load_config()
     gmail = bool(config["gmail"]["enabled"])
-    scopes = sign_in_scopes(gmail)
+    drive = bool(config["drive"]["enabled"])
+    scopes = sign_in_scopes(gmail, drive)
     creds = config["calendar"]["credentials"]
     token = config["calendar"]["token"]
     if args.finish:
@@ -548,10 +565,17 @@ def main(prog: str = "python -m kwil.tools.google_auth") -> None:
         headless_finish(input("\nPaste that address here: "), creds, token)
     else:
         sign_in(creds, token, scopes=scopes)
-    print(("Google Calendar (events, plus read-only calendar list and labels) "
-           "and Gmail (read, drafts) authorized"
-           if gmail else "Google Calendar authorized ([gmail] is disabled, so "
-           "no mail access was requested)") + "; token saved to", token)
+    granted = ["Google Calendar (events, plus read-only calendar list and labels)"]
+    if gmail:
+        granted.append("Gmail (read, drafts)")
+    if drive:
+        granted.append("Google Drive (read-only)")
+    off = [what for what, on in (("[gmail] is disabled, so no mail access was "
+                                  "requested", gmail),
+                                 ("[drive] is disabled, so no Drive access was "
+                                  "requested", drive)) if not on]
+    print(" and ".join(granted) + " authorized"
+          + (f" ({'; '.join(off)})" if off else "") + "; token saved to", token)
     print(f"For cloud hosting, put the contents of {token} in {TOKEN_ENV}.")
 
 
