@@ -11,7 +11,7 @@ from kwil.failover.peers import settings_from_config
 
 def cfg(**failover):
     c = copy.deepcopy(DEFAULTS)
-    c["failover"].update(failover)
+    c["failover"].update(enabled=True, **failover)  # opt in (off on the cloud)
     return c
 
 
@@ -84,3 +84,10 @@ def test_backends_from_the_environment(monkeypatch):
     # this machine stays the cloud (the list once overwrote it with "pc")
     assert s.role == "cloud"
     assert [b.role for b in s.peers] == ["pi", "pc"]
+
+
+def test_failover_is_on_by_default_and_off_in_the_server_profile():
+    assert DEFAULTS["failover"]["enabled"] is True  # the Pi and the PC keep it
+    assert load_config("config.toml", env_file=None)["failover"]["enabled"] is True
+    server = load_config(None, None, profile="server")
+    assert server["failover"]["enabled"] is False  # Kwil is cloud-only

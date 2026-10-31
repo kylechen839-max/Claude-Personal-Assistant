@@ -551,33 +551,23 @@ gets its own conversation; after `[assistant] conversation_timeout` (5
 minutes) of quiet it ends and is summarized to memory, like the voice loop.
 Opening pages in the PC's browser is off in this mode.
 
-**It is private by design.** The server listens on 127.0.0.1 only, so nothing
-outside the PC can reach it. Every request needs a session cookie that you
+**It is private by design.** Every request needs a session cookie that you
 get only by entering the access token once (`WEB_TOKEN`, a 43-character
-random value that is created in `.env` the first time you start web mode and
-is never written to the log). Wrong tokens are rate-limited; requests from
-other sites are refused; the page sends strict security headers.
+random value, never written to the log). Wrong tokens are rate-limited;
+requests from other sites are refused; the page sends strict security
+headers.
 
-The phone's mic only works over HTTPS, so reach the PC through
-[Tailscale](https://tailscale.com/download), which gives it a private
-HTTPS address that only your own devices can open:
+**Kwil is cloud-only (2026-10-31).** The phone app is the cloud server at
+**https://heykwil.com** ("Run it in the cloud (Render)" below): open it on
+the phone, paste the cloud's `WEB_TOKEN` once, and allow the microphone. Add
+it to the home screen (see below; on Android, Chrome menu -> Add to Home
+screen). Family members get their own account there with a cloud family
+invite ("Invite family (cloud)"). The phone no longer reaches a PC or Pi
+over a private network, and there is no Pi -> PC -> cloud failover.
 
-1. Install Tailscale on the PC and on the phone, and sign in to the same
-   account on both. In the Tailscale admin console (DNS page), make sure
-   MagicDNS and HTTPS certificates are enabled.
-2. On the PC, start the web app and print the token once:
-   ```powershell
-   python -m kwil --mode web --show-token
-   ```
-3. In a second PowerShell window, publish it to your tailnet (not the
-   internet; that would be `tailscale funnel`, don't use it):
-   ```powershell
-   tailscale serve --bg --https=443 http://127.0.0.1:8765
-   tailscale serve status    # shows https://<pc-name>.<tailnet>.ts.net
-   ```
-4. On the phone (Tailscale on), open that `https://...ts.net` address, paste
-   the token, and allow the microphone. Add it to the home screen (see
-   below; on Android, Chrome menu -> Add to Home screen).
+On the PC, `python -m kwil --mode web --show-token` still runs the same page
+for development; it listens on 127.0.0.1 only, so nothing outside the PC can
+reach it (the phone's mic needs HTTPS, which the cloud has).
 
 ### Attach photos and files
 
@@ -633,15 +623,13 @@ read a web address.
 
 ### Install on iPhone
 
-1. Install the Tailscale app on the iPhone and sign in to the same account
-   as the PC (leave it connected).
-2. Open the `https://<pc-name>.<tailnet>.ts.net` address in **Safari**.
-3. Share -> **Add to Home Screen** -> Add. A "Claude" icon appears.
-4. Open it **from the icon** and enter the token once. The home-screen app
+1. Open **https://heykwil.com** in **Safari**.
+2. Share -> **Add to Home Screen** -> Add. A "Kwil" icon appears.
+3. Open it **from the icon** and enter the token once. The home-screen app
    keeps its own cookies, separate from Safari, so sign in inside the app
    even if you already did in Safari. It stays signed in for 90 days, renewed
    each time you use it.
-5. Tap the mic and allow the microphone. If you said no by mistake: Settings
+4. Tap the mic and allow the microphone. If you said no by mistake: Settings
    -> Safari -> Microphone -> Allow (or in Safari, aA -> Website Settings ->
    Microphone), then reopen the app.
 
@@ -649,10 +637,9 @@ Replies play through the phone's speaker even with the ringer switch on
 silent. The app shell (page, script, icons) is cached so it opens quickly;
 conversations and audio are never cached.
 
-`tailscale serve reset` stops publishing it. "Sign out" in Settings (the gear)
+"Sign out" in Settings (the gear)
 revokes that phone's cookie on the server; "Sign out everywhere" (e.g. after
-losing a phone) revokes every browser's (with failover, every phone's access
-token on every backend too, see FAILOVER.md). Signed-in phones are listed in
+losing a phone) revokes every browser's. Signed-in phones are listed in
 `[webapp] sessions_file` (`data/web_sessions.json`, ids only, no token) so
 they stay signed in across restarts; on a host without a persistent disk a
 redeploy signs everyone out. Scripts using the token as a Bearer token are
@@ -661,9 +648,8 @@ a new one is created. Settings live in `config.toml` `[webapp]`: `port`
 (8765), `confirm_timeout` (seconds to wait for a yes, 120), `max_upload_mb`
 (10), `max_attachment_mb` (10, per attached PDF or text file),
 `max_audio_seconds` (60), and `allowed_origins` (only needed if a proxy
-other than Tailscale rewrites the Host header). Keep `host` at "127.0.0.1";
-`--check` reports whether the token is set. On the Pi it is the same: install
-Tailscale there and run the same two commands.
+rewrites the Host header). Keep `host` at "127.0.0.1" on a PC;
+`--check` reports whether the token is set.
 
 **On a public server** the ready-made way is the Docker image and Render
 Blueprint in the next section (it adds an auth wall in front of every route
@@ -672,7 +658,7 @@ as a secret in the host's environment (the app refuses to listen on anything
 but 127.0.0.1 without it), set `TRUSTED_PROXY=1` (or `[webapp]
 trusted_proxy`) so it uses the proxy's X-Forwarded-For/Proto headers (it
 also takes the proxy's address instead, e.g. `TRUSTED_PROXY=127.0.0.1` for
-`tailscale serve` on the same PC: the headers then count only from there), and
+a proxy on the same machine: the headers then count only from there), and
 run `python -m kwil --mode web --host 0.0.0.0` (it reads `PORT` from the
 environment). With a trusted proxy, plain-http requests are redirected to
 https and HSTS is sent. Five wrong tokens from one address lock that address
@@ -736,7 +722,7 @@ never sent to Claude as a new request.
   current answer is cancelled); tap **Tap to continue** to go on. The screen
   stays awake while it is open, where the browser allows it.
 - The connection is a WebSocket on the same address and sign-in as the rest
-  of the page (Tailscale or the hosted setup work unchanged). With
+  of the page (https://heykwil.com works unchanged). With
   `--timings`, each turn's latency line is printed on the PC's console too.
 
 **On an iPhone** (Safari, or the app added to the home screen):
@@ -752,7 +738,7 @@ never sent to Claude as a new request.
    **aA** -> **Website Settings** -> **Microphone** -> **Allow**; or go to
    iPhone **Settings -> Apps -> Safari -> Microphone** -> Ask or Allow. For
    the home-screen app, remove it and add it again after allowing. The page
-   must be opened over `https://` (the Tailscale or hosted address), never
+   must be opened over `https://` (https://heykwil.com), never
    `http://`.
 5. Locking the phone, switching apps, a call or Siri pauses it; tap **Tap to
    continue** when you're back.
@@ -799,6 +785,12 @@ made; the model is warmed up when the server starts.
 
 ## A Chinese instance for someone else (`config.mom.toml`)
 
+> **Retired for the phone (2026-10-31): Kwil is cloud-only.** Invite her to
+> **https://heykwil.com** with a cloud family invite instead ("Invite family
+> (cloud)", language Chinese), and move an existing PC copy over with
+> "Move a PC family copy to the cloud". The PC copy below is kept for
+> reference only; it is no longer reached over a private network.
+
 A second, separate copy of the phone app in Mandarin Chinese, for a family
 member to try. It runs on the same PC next to yours, on its own port, and
 uses **none of your connections**: no Notion, no Pinecone memory or notes,
@@ -821,9 +813,8 @@ Her app guides her itself: the sign-in screen asks for "the sign-in code you
 were sent", and after signing in a card lists only the steps still left for
 her (add the app to the home screen; connect Google, including what to tap
 on Google's "unverified app" screen). Each step disappears once done, and
-"知道了" (Got it) hides the card until she next opens the app. Steps before
-she can reach the app (installing Tailscale, accepting your share, opening
-the link) are yours to send her.
+"知道了" (Got it) hides the card until she next opens the app. The link to
+the app is yours to send her (on the cloud: her family invite link).
 
 One-time setup on the PC (PowerShell, in the project folder):
 
@@ -831,7 +822,7 @@ One-time setup on the PC (PowerShell, in the project folder):
    Desktop client, which only allows localhost): console.cloud.google.com ->
    your project -> APIs & Services -> Credentials -> Create credentials ->
    OAuth client ID -> **Web application**. Authorized redirect URI:
-   `https://<pc-name>.<tailnet>.ts.net:8443/google/callback`. Download the
+   `<public_origin>/google/callback` (step 4). Download the
    JSON as `data/mom/google_client.json`. On the OAuth consent screen ->
    Audience, add her Gmail address as a test user.
 2. **Secrets**: create `.env.mom` with `ANTHROPIC_API_KEY=...` (your key is
@@ -843,11 +834,10 @@ One-time setup on the PC (PowerShell, in the project folder):
 4. **Address**: create `config.mom.local.toml` (gitignored):
    ```toml
    [webapp]
-   public_origin = "https://<pc-name>.<tailnet>.ts.net:8443"
+   public_origin = "https://<this copy's HTTPS address>"
    ```
 5. **Run it from a clean shell** (a new PowerShell window that has not
-   loaded your own `.env` or set any of your variables) and publish it on
-   your tailnet. It refuses to start, naming the variables (never their
+   loaded your own `.env` or set any of your variables). It refuses to start, naming the variables (never their
    values), if `GOOGLE_TOKEN_JSON`, `GOOGLE_CLIENT_JSON`, `GOOGLE_TOKEN`,
    `GOOGLE_CREDENTIALS`, `HISTORY_PATH`, `WEB_TOKEN`, `NOTION_TOKEN`,
    `NOTION_ASSIGNMENTS_DB`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `HA_URL`
@@ -865,10 +855,7 @@ One-time setup on the PC (PowerShell, in the project folder):
    would replace yours); `config.mom.toml` sets `data/mom/student`.
    ```powershell
    python -m kwil --mode web --config config.mom.toml --env-file .env.mom --show-token
-   tailscale serve --bg --https=8443 http://127.0.0.1:8766
    ```
-   Share the PC with her (Tailscale admin console -> Machines -> the PC ->
-   Share), so her phone's Tailscale can open that address and nothing else.
 6. **On her phone**: open the address, enter the token once, Share -> Add to
    Home Screen. Then ⚙ -> **连接 Google 账户**, sign in, allow Calendar and
    Gmail. Google shows "Google hasn't verified this app" while the consent
@@ -909,10 +896,8 @@ Chinese), without sharing `WEB_TOKEN`. The server profile turns this on
 (`[family] enabled`); on a PC it is off unless you set it.
 
 Invites are managed from the cloud server's own address: open
-`https://<cloud>/` (e.g. `https://hey-claude.onrender.com/`) directly. With
-failover the app talks to whichever backend is active, normally your Pi or
-PC, where `[family]` is off, so the **Invite someone** menu only shows
-while the cloud is the active backend.
+**https://heykwil.com/** (the app itself: Kwil is cloud-only, so it always
+talks to the cloud).
 
 1. Signed in with your token at the cloud's address, open ⚙ -> **Invite
    someone**, enter their
@@ -920,8 +905,8 @@ while the cloud is the active backend.
    **Account** type (below; **Beta** is preselected), then
    **Create invite link**. The phone's share sheet opens (or the link is
    copied). Send it to them however you like. The link points at the
-   server itself (`[webapp] public_origin`, else with failover the cloud's
-   address, `APP_ORIGIN`).
+   server itself (`[webapp] public_origin`, `PUBLIC_ORIGIN` =
+   https://heykwil.com).
 2. They open the link on their phone: it signs that phone in as them and
    reloads the page in their language. Share -> Add to Home Screen.
 3. The link works once and for `invite_days` (30 days). If it expired, or
@@ -1122,8 +1107,8 @@ move to the cloud as a family member and keep their conversations:
    command line):
    ```powershell
    $env:KWIL_CLOUD_TOKEN = Read-Host "Cloud WEB_TOKEN"
-   python -m kwil.family_import --from data/mom/history.sqlite --to https://hey-claude.onrender.com --user Mom --dry-run
-   python -m kwil.family_import --from data/mom/history.sqlite --to https://hey-claude.onrender.com --user Mom
+   python -m kwil.family_import --from data/mom/history.sqlite --to https://heykwil.com --user Mom --dry-run
+   python -m kwil.family_import --from data/mom/history.sqlite --to https://heykwil.com --user Mom
    Remove-Item Env:KWIL_CLOUD_TOKEN
    ```
    `--user` is the name in your invite list (or their `u_...` id). It
@@ -1136,9 +1121,8 @@ move to the cloud as a family member and keep their conversations:
    conversations.
 5. **Retire the PC copy**: `.\scripts\install_family_tasks.ps1 -Uninstall`
    (this removes every family task; reinstall it if another copy stays),
-   move `.env.mom` (and `.env.kai`) out of the project folder, and stop
-   publishing their ports (`tailscale serve --https=8443 off`, and the same
-   for each copy's port).
+   and move `.env.mom` (and `.env.kai`) out of the project folder. If
+   anything still publishes their ports on the PC, turn it off.
 
 On the cloud, finding an old conversation and continuing it by voice
 ("what did we say about...") is owner-only; a family member searches,
@@ -2233,8 +2217,8 @@ Safety, in code rather than in the prompt:
   secure_entities, even with `enabled = false` (connecting is the opt-in).
 
 **Plain http.** Home Assistant usually serves http on the LAN, so the
-token travels unencrypted. That is fine inside your home network or over
-Tailscale; anywhere else use https (Nabu Casa or your own certificate).
+token travels unencrypted. That is fine inside your home network; anywhere
+else use https (Nabu Casa or your own certificate).
 The assistant warns at startup when `HA_URL` is a plain http address
 outside the home network.
 
@@ -2496,42 +2480,23 @@ invalid TOML). On a Pi with no screen, set `[web] browser = false`.
 - **Service doesn't start at boot:** `loginctl show-user $USER -p Linger`
   must say `Linger=yes` (`sudo loginctl enable-linger $USER`).
 
-## Phone app failover: Pi, then PC, then cloud
+## Phone app failover (retired 2026-10-31)
 
-The phone app (installed from the cloud host) uses the Raspberry Pi when it
-can reach it, the PC when it can't, and the cloud host when neither
-answers, and moves back up when a better one returns (never mid-reply).
-FAILOVER.md has the whole protocol. To set it up:
-
-1. Run the web app on each machine you want in the list, with the same
-   `WEB_TOKEN` in every `.env` (or the Render environment), and expose the Pi
-   and PC with `tailscale serve`.
-2. In each machine's `config.toml`, fill in `[failover]`: `role` (or pass
-   `--role pi` / `--role pc` / `--role cloud`), `app_origin` (the cloud
-   URL the phone app is installed from) and the three `backends` URLs:
-   ```toml
-   [failover]
-   role = "pi"
-   app_origin = "https://hey-claude.onrender.com"
-   backends = [
-     { role = "pi", url = "https://pi.tail1234.ts.net" },
-     { role = "pc", url = "https://kyle-pc.tail1234.ts.net" },
-     { role = "cloud", url = "https://hey-claude.onrender.com" },
-   ]
-   ```
-3. Copy the same `.env`, `credentials.json` and `token.json` to each machine
-   (one Google sign-in works on all of them; see FAILOVER.md section 6).
-4. On the phone, open the app's Settings -> Backends to check the URLs and
-   the badge (Pi / PC / Cloud), or force one backend.
-
-Conversation history is synced between the machines every
-`sync_interval` seconds (30). Memory (your instructions and saved
-memories) is kept per machine and not synced yet; with `[memory] backend =
-"pinecone"` the Pinecone notes are shared as before.
-Tests: `pytest` (server side) and `node --test tests/js/*.test.mjs` (the
-router; Node 18+).
+Kwil is cloud-only: the phone app is **https://heykwil.com** and nothing
+fails over to a Pi or PC any more. The cloud server's profile sets
+`[failover] enabled = false`, so it ignores `ASSISTANT_ROLE`, `APP_ORIGIN`
+and `FAILOVER_BACKENDS` (it logs one warning naming them while they are
+still set in Render) and serves no access tokens, `/api/sync` or backend
+router. A phone that cached an old failover setup clears it the next time it
+opens the app. The code is still there for now (a PC or Pi with
+`[failover] role` set keeps it); [FAILOVER.md](FAILOVER.md) is kept for
+reference.
 
 ## Windows PC as the always-on home host
+
+> **Not needed for the phone app (2026-10-31): Kwil is cloud-only**, so the
+> phone uses https://heykwil.com whether the PC is on or off. This is only
+> for the wake word ("Hey Claude") on the PC itself.
 
 No Pi needed if the PC stays on (see "Do I need a Pi?" in
 [PI_MIGRATION.md](PI_MIGRATION.md) for the trade-offs). In PowerShell, in the
@@ -2546,7 +2511,7 @@ project folder:
 
 It registers two Task Scheduler tasks under `Kwil` (no admin rights
 needed): **Wake** (`--mode wake`) and **Web** (`--mode web` on
-127.0.0.1:8765, the address `tailscale serve` points at; `-Port` changes it).
+127.0.0.1:8765; `-Port` changes it).
 They start 20 s after you sign in, run hidden, and are kept running by
 `python -m kwil.host`, which waits for the network, restarts the
 assistant 10 s after a crash (5 minutes after 5 crashes in 5 minutes) and
@@ -2558,11 +2523,10 @@ for no sign-in at all, turn on automatic sign-in for your account.
 the Task Scheduler Library, running `python -m kwil --mode web --host
 127.0.0.1 --port 8765`)? The script finds it, shows its command and asks
 before replacing it with `\Kwil\Web` (type `y`), so two servers never
-fight over port 8765. Your `tailscale serve` setup keeps working unchanged
-because the port is the same. If you answer no, only the wake-word task is
+fight over port 8765. If you answer no, only the wake-word task is
 installed. If something else holds the port, it says what and skips the web
-task. `-Uninstall` removes only the `Kwil` tasks and leaves `tailscale
-serve` and the power settings as they are.
+task. `-Uninstall` removes only the `Kwil` tasks and leaves the power
+settings as they are.
 
 Then it shows the power plan and offers, after you type `y`, to set **never
 sleep** and **never hibernate** when plugged in and to turn off **USB
@@ -2712,7 +2676,7 @@ Get-Content logs\host-web.log -Tail 5
 ```
 
 The phone keeps working throughout, apart from a few seconds while the web
-app restarts on the same `127.0.0.1:8765` (`tailscale serve` is untouched).
+app restarts on the same `127.0.0.1:8765`.
 To undo: `.\scripts\install_windows_service.ps1 -Uninstall`, then
 re-create the old task by hand.
 
@@ -2742,8 +2706,8 @@ in the environment, and `--status` and your banner show it as "running, but
 WEB_TOKEN isn't in its env file, so it can't be checked", with one alert:
 put `WEB_TOKEN` in its env file): `/healthz` on its port, the page and every
 script and stylesheet it loads, that it runs the checked-out version, and
-the address the phone opens (`[webapp] public_origin`, else the `tailscale
-serve` entry for its port; set `[watch] public_url` to override, `""` to
+the address the phone opens (`[webapp] public_origin`, else a local HTTPS
+proxy entry for its port if one is found; set `[watch] public_url` to override, `""` to
 skip). With `[watch] cloud_url` set, the cloud copy's `/healthz` is checked
 too, alerted on like the others but never restarted or rolled back from
 here (README "Uptime, error tracking and backups"). After every restart or new version, every `functional_hours` (6) and,
@@ -2776,7 +2740,7 @@ commits exist only on this machine, nor when HEAD or the branch moved
 meanwhile), the apps restart, and that commit is never taken again. Without
 a restart that ran (no restart command), it is only reported. Failures that
 aren't the code's (no internet, Claude unreachable, rate limits, a rejected
-API key) and a phone address (Tailscale) that doesn't answer are reported
+API key) and a phone address that doesn't answer are reported
 but never restarted for or rolled back.
 
 **New code goes live only after the go-live check** (`[watch] gate`, on by

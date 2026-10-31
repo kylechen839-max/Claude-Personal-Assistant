@@ -148,6 +148,9 @@ DEFAULTS: dict = {
                "embedding_dir": "models/fastembed",
                "embedding_min_score": 0.5},
     "failover": {  # Pi -> PC -> cloud, see FAILOVER.md
+        # false = no failover at all, whatever role/backends/ASSISTANT_ROLE/
+        # FAILOVER_BACKENDS say (the server profile: Kwil is cloud-only)
+        "enabled": True,
         "role": "",                 # "pi", "pc" or "cloud"; "" = standalone
         "app_origin": "",           # where the phone app is installed from
         "backends": [],             # [{role, url}], highest priority first
@@ -508,6 +511,9 @@ SERVER_PROFILE: dict = {
     "research": {"dir": "/data/research"},  # on the disk
     "projects": {"max_person_mb": 20},  # in each person's memory file, on a small shared disk
     "connect": {"dir": "/data/owner"},  # on the disk
+    # Kwil is cloud-only (2026-10-31): no Pi/PC failover, so no access
+    # tokens, /api/sync or backend router here, even with ASSISTANT_ROLE set
+    "failover": {"enabled": False},
     "logging": {"file": "", "console_level": "INFO"},
     # just under max_upload_mb (4) above, so check_limits has nothing to lower
     "lecture": {"chunk_mb": 3.9},
