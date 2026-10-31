@@ -6,10 +6,11 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Cloud-only, stage 1 (2026-10-31): the steps only Kyle can do.**
       Kwil is cloud-only: the cloud's server profile now sets `[failover]
       enabled = false` (README "Phone app failover (retired 2026-10-31)").
-      1. **Render -> hey-claude -> Environment:** confirm `PUBLIC_ORIGIN` is
-         exactly `https://heykwil.com` (invite links, Google and Notion
-         sign-in return there), then delete `ASSISTANT_ROLE`, `APP_ORIGIN`
-         and `FAILOVER_BACKENDS` and Save. Until then the log shows one
+      1. **Render -> hey-claude -> Environment:** `PUBLIC_ORIGIN` is
+         exactly `https://heykwil.com` (Kyle confirmed it on 2026-10-31;
+         invite links, Google and Notion sign-in return there, and without
+         failover `APP_ORIGIN` no longer stands in for it), so delete
+         `ASSISTANT_ROLE`, `APP_ORIGIN` and `FAILOVER_BACKENDS` and Save. Until then the log shows one
          warning at start-up that they are ignored; nothing else changes.
       2. **Before stage 2:** GitHub -> the repo -> Settings -> Rules
          (ruleset for master) -> Require status checks: remove
@@ -92,11 +93,12 @@ Only what is still open for Kyle. None of it blocks the code.
 - [ ] **Public beta launch (in this order; each step points to its own
       item below rather than repeating it).** Nothing in code is missing;
       these are Render, Google, Notion and wording steps only Kyle can do.
-      1. **Render environment.** **Done (2026-10-31): Kyle confirmed
-         `USER_DATA_KEY` is set** (item "`USER_DATA_KEY` on Render"); never
-         change it again: a new value makes every tester's stored key and
-         Notion token unreadable. Still open: `PUBLIC_ORIGIN` is the exact https origin people open (no
-         trailing slash). Decide on a custom domain *now*: changing it
+      1. **Done (2026-10-31): Kyle confirmed USER_DATA_KEY and
+         PUBLIC_ORIGIN.** **Render environment.** `USER_DATA_KEY` exists
+         (item "`USER_DATA_KEY` on Render") and is never changed again: a new
+         value makes every tester's stored key and Notion token unreadable.
+         `PUBLIC_ORIGIN` is the exact https origin people open, no trailing
+         slash (`https://heykwil.com`, the custom domain): changing it
          later changes the Google and Notion redirect URIs and the cookies
          (everyone signs in again).
       2. **Done (2026-10-22): Kyle approved the wording; support email
@@ -122,7 +124,9 @@ Only what is still open for Kyle. None of it blocks the code.
          with a custom domain), then submit the project for
          verification with a demo video (consent, then a calendar
          question). Lifts the warning screen and the 100-user cap.
-      6. **Notion:** item "Testers' Notion" below: the public integration,
+      6. **Done (2026-10-31): the public "Kwil" integration is reused and
+         its client ID and secret are on Render (item "Testers' Notion").**
+         **Notion:** item "Testers' Notion" below: the public integration,
          then `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET`.
       7. **Optional:** item "Cloud uptime alerts and error tracking"
          (UptimeRobot on `/healthz`, Sentry's `SENTRY_DSN`).
@@ -222,8 +226,18 @@ Only what is still open for Kyle. None of it blocks the code.
       enter their key again). Until it is set, beta testers can't save a key
       (the app says why) and so can't talk to Claude; family members keep
       using your key.
-- [ ] **Testers' Notion: a public Notion integration (~10 min; README
-      "Invite family" -> "Notion for beta testers").** Only you can: (1) at
+- [x] **Testers' Notion: a public Notion integration (~10 min; README
+      "Invite family" -> "Notion for beta testers").** Done (2026-10-31):
+      reused the public 'Kwil' integration (Oct 27). It has
+      Read/Update/Insert content and no user information. The redirect is
+      https://heykwil.com/notion/callback, and NOTION_OAUTH_CLIENT_ID/SECRET
+      are set on Render. Kyle's own cloud Notion connects and answers
+      assignments. Still open: (a) a tester account checks that Connect
+      Notion appears (part of the step 9 dry run); (b) Kyle may remove the
+      old hey-claude-tgml.onrender.com redirect URI. Note: Notion's current
+      Developer tools UI has no privacy policy or terms fields unless the
+      integration has a Marketplace listing, so step (2)'s privacy and terms
+      links below only apply with a listing. The original steps: (1) at
       notion.so/profile/integrations create a **Public** integration ("Any
       workspace"), capabilities Read content + Update content, no user
       information with email; (2) fill in the company name, website, privacy

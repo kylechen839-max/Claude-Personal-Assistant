@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kwil is cloud-only (stage 1): the cloud server no longer takes part in
+  Pi/PC failover (`[failover] enabled = false` in the server profile, so
+  `ASSISTANT_ROLE`, `APP_ORIGIN` and `FAILOVER_BACKENDS` are ignored); the
+  phone app stops trusting a cached failover setup and clears it; history
+  events on the cloud stay "cloud". Owner devices that used failover sign
+  in once more.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no
