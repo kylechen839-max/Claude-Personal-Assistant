@@ -645,7 +645,7 @@ def build_tools(config: dict, output_fn=print) -> ToolRegistry:
 
 
 def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> None:
-    """Calendar and Gmail tools. With [webapp] google_connect (the phone's
+    """Calendar, Gmail and Drive (read-only) tools. With [webapp] google_connect (the phone's
     "connect Google" button) only once that sign-in saved a token: without
     one, Calendar would start a browser sign-in on this computer. With
     [webapp] owner_google (the cloud server) the token the owner connected
@@ -673,6 +673,7 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
         output_fn(f"(Calendar tools off: {cal['credentials']} not found and "
                   "GOOGLE_TOKEN_JSON not set)")
         register_gmail(registry, config, output_fn)
+        register_drive(registry, config, output_fn)
         return
     registry.register(*GoogleCalendar(
         credentials_path=cal["credentials"], token_path=cal["token"],
@@ -682,6 +683,7 @@ def register_google(registry: ToolRegistry, config: dict, output_fn=print) -> No
         environ=environ, in_app=owner_connected(config),
         extras=calendar_extras(config, output_fn)).tools())
     register_gmail(registry, config, output_fn)
+    register_drive(registry, config, output_fn)
 
 
 def calendar_extras(config: dict, output_fn=print) -> bool:
@@ -846,6 +848,48 @@ def owner_gmail(config: dict, output_fn=print):
     return GmailInbox(credentials_path=cal["credentials"], token_path=cal["token"],
                       timezone=config["assistant"]["timezone"] or None,
                       max_summary=config["gmail"]["max_summary"],
+                      environ=environ, in_app=owner_connected(config))
+
+
+def register_drive(registry: ToolRegistry, config: dict, output_fn=print) -> bool:
+    """The read-only Drive tools, if the Google token has the Drive scope. A
+    token from before Drive support doesn't: say how to grant it and leave
+    them off (Calendar and Gmail keep working)."""
+    drive = owner_drive(config, output_fn)
+    if drive is None:
+        return False
+    registry.register(*drive.tools())
+    return True
+
+
+def owner_drive(config: dict, output_fn=print):
+    """The owner's DriveFiles (read-only), or None: [drive] off, no Google
+    sign-in, or the Drive scope not granted (said on output_fn, in the
+    "(Drive tools off: ...)" form preflight reads)."""
+    from kwil.tools.google_auth import (DRIVE_SCOPES, SIGN_IN_COMMAND,
+                                        load_token_info, missing_scopes,
+                                        owner_connected, owner_environ)
+
+    cal = config["calendar"]
+    if not config["drive"]["enabled"] or not cal["enabled"]:
+        return None
+    environ = owner_environ(config)  # the app's connected token wins on the server
+    try:
+        if load_token_info(cal["token"], environ) is None:
+            return None  # no Google sign-in at all (Calendar says so)
+        lacking = missing_scopes(DRIVE_SCOPES, cal["token"], environ)
+    except (OSError, ValueError) as e:
+        output_fn(f"(Drive tools off: Google token unreadable: {type(e).__name__})")
+        return None
+    if lacking:
+        output_fn("(Drive tools off: Google Drive access not granted yet. Run "
+                  f"{SIGN_IN_COMMAND} once to sign in again, or Reconnect Google "
+                  "in the app's settings.)")
+        return None
+    from kwil.tools.drive import DriveFiles
+
+    return DriveFiles(credentials_path=cal["credentials"], token_path=cal["token"],
+                      timezone=config["assistant"]["timezone"] or None,
                       environ=environ, in_app=owner_connected(config))
 
 

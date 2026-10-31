@@ -82,6 +82,7 @@ def test_status_and_consent_url(setup):
                                                        "disconnect": False,
                                                        "gmail": True, "note": None,
                                                        "needs_reconnect": False,
+                                                       "missing": [],
                                                        "server_owner": False}
     q = start(client)
     assert q["redirect_uri"] == [ORIGIN + "/google/callback"]
@@ -136,6 +137,11 @@ def test_callback_saves_the_token_and_adds_the_tools(setup, caplog):
                                                        "disconnect": False,
                                                        "gmail": True, "note": None,
                                                        "needs_reconnect": False,
+                                                       # this token predates the extras and Drive
+                                                       "missing": [
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.calendars.readonly",
+        "https://www.googleapis.com/auth/drive.readonly"],
                                                        "server_owner": False}
     # replaying the same callback does nothing
     with patch("google_auth_oauthlib.flow.Flow.fetch_token") as again:
@@ -360,8 +366,10 @@ def test_without_a_connected_token_the_env_token_is_used(server):
     kyle = owner_client(s)
     st = kyle.get("/api/google/status").json()
     assert st == {"enabled": True, "connected": True, "disconnect": False,
-                  "gmail": True, "note": None,
-                  "needs_reconnect": False, "server_owner": True}
+                  "gmail": True, "note": None, "needs_reconnect": False,
+                  # GOOGLE_TOKEN_JSON from before Drive: Reconnect adds it
+                  "missing": ["https://www.googleapis.com/auth/drive.readonly"],
+                  "server_owner": True}
     assert kyle.post("/api/google/disconnect", json={}).status_code == 404
     assert tool_refresh_token(s) == ENV_TOKEN["refresh_token"]
     from kwil.cli import register_google

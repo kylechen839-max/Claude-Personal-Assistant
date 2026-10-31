@@ -109,6 +109,10 @@ color_labels = {}
 enabled = true                # needs the Gmail scopes: python -m kwil.tools.google_auth
 max_summary = 15              # most emails in one spoken summary
 
+[drive]
+enabled = true                # read-only Google Drive (search, read Docs/Sheets/Slides/PDFs);
+                              # needs the drive.readonly scope: python -m kwil.tools.google_auth
+
 [notion]
 enabled = true
 database_id = "7eefabe3-0226-47a8-a287-584be0d2ea9b"   # Fall 2026 Assignments

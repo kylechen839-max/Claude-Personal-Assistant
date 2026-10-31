@@ -625,8 +625,11 @@ class ClaudeChat:
         saved now is marked untrusted only for this (tools/memory_tools)."""
         return (self.untrusted_memory or self.untrusted_context
                 or self.untrusted_attachments or self.untrusted_project_files
-                or (bool(self.tools) and has_untrusted_content(
-                    self.history, self.tools.untrusted_names())))
+                # web results and marked tool results count with any
+                # registry, an empty one too (its tools may have left)
+                or has_untrusted_content(
+                    self.history,
+                    self.tools.untrusted_names() if self.tools is not None else ()))
 
     def forget_memories(self, memory_ids=None) -> None:
         """Memories deleted (`memory_ids`; None = Forget all, instructions
@@ -1159,6 +1162,12 @@ class ClaudeChat:
         self._turn_events.append(tool_event(call.name, dict(call.input), status))
         if call.name in HISTORY_TOOLS and not is_error:
             self.untrusted_context = True  # past text is now in the context
+        if call.name in self.tools.untrusted_names():
+            # Sticky from now on: tainted() otherwise rereads history with
+            # the registry's *current* untrusted tools, and a tool can leave
+            # it mid-conversation (Google disconnected, or reconnected
+            # without Drive or Gmail: google_web/family refresh in place)
+            self.untrusted_context = True
         if call.name == "delete_note" and status == "ok":
             self.forget_note(str((call.input or {}).get("note_id", "")))
         if call.name == "forget_memory" and status == "ok" \
@@ -1273,8 +1282,8 @@ class ClaudeChat:
         # With untrusted text in the conversation (see tainted()), Claude's
         # side may repeat it (an injected instruction, say), so only Kyle's
         # own words go into the summary, and it is stored marked untrusted.
-        untrusted = untrusted or (bool(self.tools) and has_untrusted_content(
-            history, self.tools.untrusted_names()))
+        untrusted = untrusted or has_untrusted_content(
+            history, self.tools.untrusted_names() if self.tools is not None else ())
         text = transcript(history, user_only=untrusted)
         if not self.memory or not text:
             return None

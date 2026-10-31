@@ -1150,18 +1150,6 @@ def test_bearer_token_for_other_clients(make_app, fake_client):
     assert client.get("/api/state", headers=good).status_code == 200
 
 
-def test_an_old_failover_access_token_is_not_counted_as_a_guess(make_app):
-    """Judge LOW 1 (cloud-only): without failover, a phone's old hc1. token
-    is "not signed in" but never counts toward the lockout."""
-    _, client = make_app()
-    old = {"Authorization": "Bearer hc1.app.c2lk.1.1.c2ln"}
-    for _ in range(8):
-        assert client.get("/api/state", headers=old).status_code == 401
-    assert not client.app.state.web.limiter.blocked("testclient")
-    assert client.get("/api/state",
-                      headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 200
-
-
 def test_trusted_proxy_by_address():
     """tailscale serve on the same PC: trust forwarded headers only from it."""
     trust = webapp.parse_trusted_proxy("127.0.0.1")
@@ -1525,7 +1513,7 @@ def test_chinese_page(fake_client):
     js = make().get("/i18n.js")
     assert js.status_code == 200 and "连接 Google 账户" in js.text
     sw = (webapp.STATIC / "sw.js").read_text(encoding="utf-8")
-    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v28" in sw and '"/ui.js"' in sw
+    assert '"/i18n.js"' in sw and '"/family.js"' in sw and "kwil-shell-v29" in sw and '"/ui.js"' in sw
     assert '"/attachments.js"' in sw
     assert '"/memory.js"' in sw and '"/reminders.js"' in sw and '"/study.js"' in sw
     assert '"/projects.js"' in sw

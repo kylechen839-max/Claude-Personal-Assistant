@@ -111,6 +111,9 @@ DEFAULTS: dict = {
                  "color_labels": {}},
     "gmail": {"enabled": True,  # uses the [calendar] credentials and token
               "max_summary": 15},   # most emails in one summary
+    # read-only Google Drive: search files, read Docs/Sheets/Slides and
+    # uploaded PDFs; uses the [calendar] credentials and token
+    "drive": {"enabled": True},
     "notion": {"enabled": True,
                "database_id": "7eefabe3-0226-47a8-a287-584be0d2ea9b"},
     "web": {

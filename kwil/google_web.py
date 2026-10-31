@@ -4,7 +4,8 @@ Two kinds of account, one sign-in flow:
 
 - The owner's ([webapp] google_connect), for an instance whose user never
   touches the PC (e.g. config.mom.toml): the token goes to [calendar] token
-  and Calendar and Gmail (read, drafts) join the shared tools.
+  and Calendar, Gmail (read, drafts) and Drive (read-only) join the
+  shared tools.
 - The cloud server owner's ([webapp] owner_google, on in the server
   profile): the same, to /data/google_token.json, and that token then wins
   over GOOGLE_TOKEN_JSON (google_auth.owner_environ), which keeps working
@@ -20,15 +21,19 @@ Two kinds of account, one sign-in flow:
   A beta tester (family.py tier "beta") signs in through the public client
   (GOOGLE_PUBLIC_CLIENT_JSON / [family] public_google_client) and is asked
   for Calendar only; without that client their Google stays off (never the
-  family client: its consent screen lists Gmail).
+  family client: its consent screen lists Gmail and Drive).
 
   GET  /api/google/status      {"enabled", "connected", "disconnect",
                                "gmail", "note", "needs_reconnect",
-                               "server_owner"}: the caller's own account
+                               "missing", "server_owner"}: the caller's
+                               own account
                                (gmail false: no mail wording in the app;
                                note: why it is off, or null;
                                needs_reconnect: Google refused the saved
                                sign-in, google_auth.needs_reconnect;
+                               missing: scopes asked for that the saved
+                               token lacks, e.g. Drive's, Reconnect adds
+                               them;
                                server_owner: the cloud owner's, no
                                first-run guide)
   POST /api/google/connect     {"url": Google's consent page}
@@ -73,7 +78,7 @@ from typing import Callable
 
 from kwil import i18n
 from kwil.tools.google_auth import (OWNER, _relax_scope_check, clear_reconnect,
-                                    client_config, load_token_info,
+                                    client_config, granted_scopes, load_token_info,
                                     needs_reconnect, owner_environ,
                                     sign_in_scopes, token_info, token_json,
                                     web_client_config, write_private)
@@ -103,7 +108,7 @@ class Pending:
 
 class GoogleConnect:
     """The sign-in flow, without HTTP. `tools` is the web app's shared
-    ToolRegistry: once the owner signs in, Calendar and Gmail are added to
+    ToolRegistry: once the owner signs in, Calendar, Gmail and Drive are added to
     it, and every owner browser's SessionTools sees them (they share its
     dict). `family` (family.Family) handles family members' accounts;
     `owner` False: only family members can connect. `owner_google` ([webapp]
@@ -216,6 +221,33 @@ class GoogleConnect:
             return self.family is not None and self.family.gmail_allowed(user)
         return bool(self.config["gmail"]["enabled"])
 
+    def drive(self, user: str | None = None) -> bool:
+        """Does `user`'s sign-in ask for Drive (read-only)? Never a beta
+        tester's (their consent screen is Calendar only)."""
+        if user is not None:
+            return self.family is not None and self.family.drive_allowed(user)
+        return bool(self.config["drive"]["enabled"])
+
+    def scopes(self, user: str | None = None) -> list[str]:
+        """What `user`'s sign-in asks Google for."""
+        return sign_in_scopes(self.gmail(user), self.drive(user))
+
+    def missing(self, user: str | None = None) -> list[str]:
+        """Scopes `user`'s sign-in asks for that their saved token lacks (a
+        token from before Drive, or a box left unticked): Reconnect adds
+        them. [] when not connected (Connect asks for everything anyway)."""
+        if not self.connected(user):
+            return []
+        try:
+            if user is not None:  # their file only, never GOOGLE_TOKEN_JSON
+                info = load_token_info(self.family.google_token(user), environ={})
+            else:
+                info = load_token_info(self._cal["token"], owner_environ(self.config))
+        except (OSError, ValueError, AttributeError, TypeError):
+            return []
+        have = granted_scopes(info)
+        return [s for s in self.scopes(user) if s not in have]
+
     def note(self, user: str | None) -> str | None:
         """Why `user` can't connect, when the app should say so."""
         if user is None or self.family is None or self.enabled(user) \
@@ -227,7 +259,7 @@ class GoogleConnect:
         from google_auth_oauthlib.flow import Flow
 
         return Flow.from_client_config(
-            self._client(user), sign_in_scopes(self.gmail(user)),
+            self._client(user), self.scopes(user),
             redirect_uri=self._redirect(user), **kwargs)
 
     def start(self, user: str | None = None, sid: str | None = None) -> tuple[str, str]:
@@ -316,7 +348,7 @@ class GoogleConnect:
     def disconnect_owner(self) -> bool:
         """The cloud owner's Disconnect ([webapp] owner_google): revoke the
         grant at Google (best effort, as a family member's), delete the
-        token file, and rebuild Calendar and Gmail on GOOGLE_TOKEN_JSON, or
+        token file, and rebuild Calendar, Gmail and Drive on GOOGLE_TOKEN_JSON, or
         none without it. False if there was no file, or a new sign-in
         replaced it meanwhile (that one is kept, with its tools)."""
         if not self.owner_file():
@@ -344,7 +376,7 @@ class GoogleConnect:
         return True
 
     def _register_tools(self) -> None:
-        """Calendar and Gmail on the owner's current token. Every
+        """Calendar, Gmail and Drive on the owner's current token. Every
         SessionTools shares this registry's dict, so it is updated in place,
         adding before removing (a running turn never sees it empty), as
         family._refresh_tools does."""
@@ -376,11 +408,13 @@ def _read_bytes(path: Path) -> bytes | None:
 
 
 def _google_tool_names() -> set[str]:
-    """Every Calendar and Gmail tool name (built offline: no service yet)."""
+    """Every Calendar, Gmail and Drive tool name (built offline: no service yet)."""
     from kwil.tools.calendar import GoogleCalendar
+    from kwil.tools.drive import DriveFiles
     from kwil.tools.gmail import GmailInbox
 
-    return {t.name for t in GoogleCalendar(extras=True).tools() + GmailInbox().tools()}
+    return {t.name for t in GoogleCalendar(extras=True).tools() + GmailInbox().tools()
+            + DriveFiles().tools()}
 
 
 def from_config(config: dict, assistant) -> "GoogleConnect | None":
@@ -434,6 +468,9 @@ def register(app, connect: GoogleConnect, session_of, error, web=None) -> None:
                 # Google refused the saved sign-in: the app says "expired,
                 # reconnect" instead of "connected"
                 "needs_reconnect": connect.needs_reconnect(s.user),
+                # scopes the saved token lacks (e.g. Drive, on a token from
+                # before it): the app says "Reconnect to add Google Drive"
+                "missing": connect.missing(s.user),
                 # the cloud owner: no first-run guide (it's for invitees)
                 "server_owner": server_owner}
 

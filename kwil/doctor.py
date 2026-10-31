@@ -49,7 +49,8 @@ def check_google_files(config: dict, verify=None,
         Check(str(token), token.exists(), "found" if token.exists() else
               "missing (copy it from your PC, or run "
               "`python -m kwil.tools.calendar --headless`)", required=False),
-    ] + check_calendar_scopes(config) + check_gmail_scopes(config) + (
+    ] + check_calendar_scopes(config) + check_gmail_scopes(config) \
+        + check_drive_scopes(config) + (
         check_google_sign_in(config, verify, environ) if token.exists() else [])
 
 
@@ -102,6 +103,23 @@ def check_gmail_scopes(config: dict) -> list[Check]:
         return [Check("Gmail access", False, f"token unreadable: {e}",
                       required=False)]
     return [Check("Gmail access", not lacking, "granted (read + drafts)"
+                  if not lacking else "not granted yet (re-run the Google "
+                  f"sign-in: `{SIGN_IN_COMMAND}`)", required=False)]
+
+
+def check_drive_scopes(config: dict) -> list[Check]:
+    """A token from before Drive support lacks drive.readonly: Calendar and
+    Gmail work, the Drive tools stay off until a new sign-in."""
+    from kwil.tools.google_auth import DRIVE_SCOPES, SIGN_IN_COMMAND, missing_scopes
+
+    if not config.get("drive", {}).get("enabled", True):
+        return []
+    try:
+        lacking = missing_scopes(DRIVE_SCOPES, config["calendar"]["token"])
+    except (OSError, ValueError) as e:
+        return [Check("Google Drive access", False, f"token unreadable: {e}",
+                      required=False)]
+    return [Check("Google Drive access", not lacking, "granted (read-only)"
                   if not lacking else "not granted yet (re-run the Google "
                   f"sign-in: `{SIGN_IN_COMMAND}`)", required=False)]
 
