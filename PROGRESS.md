@@ -8634,19 +8634,26 @@ change, every id and hook kept.
   and the new i18n `credit_spent` / `credit_spent_help` sentence (en, zh;
   the key guide's link when `[webapp] public_site` is on and the origin is
   known), in text, voice (`cli.user_error_text`) and files. Hook:
-  `Family.api_for(uid, credit=True, hold=None)`; `UserApi.resolve` reserves
-  one call's worst case (about $0.39 with the defaults) and `UserApi.record`
-  settles the real cost (usage.cost plus $0.01 a web search). Book:
+  `Family.api_of(uid, credit)` (`api_for` keeps its two values); a call on
+  the credit goes through `family.CreditMessages`, which reserves that
+  request's worst case (`credit.request_bound`; with web search and fetch
+  on about $1.80 on Sonnet, $0.46 on Haiku for a short chat, measured in
+  the sandbox) and settles it in a `finally`: the response's usage, a
+  cut-short stream's snapshot input plus its whole `max_tokens`, the whole
+  reservation with no usage, nothing for an HTTP error or a connection
+  never made. Everyone's cap must fit whole reservations; a person needs
+  something left and at most 2 calls in flight (`MAX_IN_FLIGHT`), so one
+  person can be over by at most those calls' cost. A reservation unsettled
+  after `api_timeout * (api_max_retries + 1)` (120 s) is charged in full.
+  An unpriced model (model, fast_model, title_model) turns the credit off;
+  `call_cost` prices one at the dearest known rates. Book:
   `<dir>/beta_credit.json` (`write_private`, under a lock); Remove drops a
-  row, never the total. Reservations expire after `api_timeout *
-  (api_max_retries + 1)` (120 s). An unreadable book fails closed. Never on
+  row, never the total. An unreadable book fails closed. Never on
   the credit: deep research (`credit=False`), briefings (proactive.py) and
   "Sync now"'s email extraction (student_web.py). Unchanged: paid voices,
   quotas. `key_status` adds `credit_usd`/`credit_left_usd` (beta, credit
   on); `/api/users` adds each person's `credit_used_usd` and
   `credit_total_used`/`credit_total_cap`. `beta_credit_usd = 0` is off.
-- **Price fix:** Sonnet 5.5 cache reads are $0.10/MTok (0.05x, checked on
-  platform.claude.com/docs/en/about-claude/pricing), not $0.20.
 - **Feedback** (`kwil/feedback.py`): `POST /api/me/feedback`, `POST
   /api/me/feedback/dismiss`, owner-only `GET /api/feedback`; sealed per
   person (`kwil/feedback/v1`) in `<dir>/<id>/feedback.enc` (the owner's in
@@ -8661,13 +8668,13 @@ change, every id and hook kept.
   (i18n `invite_family`, `invite_beta`, `invite_credit`, `invite_template`,
   `invite_chat`; the invitee's language). config.toml carries Kyle's
   published Notion template link; the DEFAULTS value stays "".
-- **Tests:** new `test_credit.py` (15), `test_feedback.py` (9),
+- **Tests:** new `test_credit.py` (25), `test_feedback.py` (9),
   `test_invite_message.py` (5); +1 each in `test_research.py`,
   `test_voice_picker.py`; `test_userkeys.py`'s app is now `build_env`
-  (credit off in its fixture); `test_routing_caching` price;
-  `test_docs` allows only `notion_template_url` to differ from DEFAULTS.
+  (credit off in its fixture); `test_proactive` and `test_student_web`'s
+  beta tests also check the ledger is untouched; `test_docs` allows only `notion_template_url` to differ from DEFAULTS.
   Fail-first: with the source changes reverted (new modules kept), 30 of
   the new/changed tests fail; the pure ledger tests need `credit.py`
   itself.
-- Full suite: 4055 passed, 53 skipped (baseline 4024 + 31); JS 481 passed
+- Full suite: 4065 passed, 53 skipped (baseline 4024 + 41); JS 481 passed
   (unchanged; no web files touched).

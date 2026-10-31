@@ -533,8 +533,16 @@ def test_a_beta_tester_without_a_key_skips_the_email_step(s, monkeypatch):
         {"id": "m1", "subject": "x", "snippet": "y", "date": ""}]})()
     monkeypatch.setattr(s.fam, "gmail_inbox", lambda user, info=None: inbox)
     calls = len(s.client.calls)
+    assert s.fam.credit.enabled  # the starter credit is on, and still not used
     out = tess.post("/api/student/sync").json()
     assert out["errors"] == {"gmail": "no_key"} and len(s.client.calls) == calls
+    assert s.fam.credit.total == 0 and s.fam.credit.people == {} and not s.fam.credit._held
+    from kwil.userkeys import CreditSpent, MissingKey
+
+    api, _ = s.sync._claude(uid)
+    with pytest.raises(MissingKey) as e:
+        api.messages
+    assert not isinstance(e.value, CreditSpent)
 
 
 # --- the person's own tools, export and delete ---------------------------------------

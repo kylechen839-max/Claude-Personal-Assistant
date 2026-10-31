@@ -993,13 +993,27 @@ a link to the key guide, `/help/anthropic-key`, when the public site is on)
 and nothing is sent. Settings shows them `credit_left_usd`; your ⚙ -> people
 list shows what each has used and the total (`GET /api/users`:
 `credit_used_usd`, `credit_total_used`, `credit_total_cap`). How it is
-bounded: before each call the worst case for one call (a full
-`max_history_chars` prompt, `think_max_tokens` of output and `[web]
-max_searches` searches on `[assistant] model`, about $0.39) is reserved, and
-the call goes ahead only if it fits both budgets with every other call in
-flight; the real cost (tokens at list price plus $0.01 a web search)
-replaces it when the answer comes. So neither budget is overshot by more than
-one call's difference from its estimate. The book is
+bounded: right before each call Kwil reserves *that request's* worst case:
+its prompt counted one token a byte (an image or PDF page at a fixed
+allowance), priced at the dearest input rate (the cache write, $2.50/MTok
+on Sonnet), read again on every web search or fetch it may make, plus its
+whole `max_tokens` of output and $0.01 a search. With web search and fetch
+on that is about $1.80 on Sonnet and $0.46 on Haiku even for a short chat
+(measured in the sandbox); the real cost is usually cents. Everyone's
+calls in flight plus the new one must fit `beta_credit_total_usd`, so the
+$50 is never passed. A person's call needs only *something* left of their
+$5 (a whole worst case would make the last $1.80 unusable), with at most
+two of their calls running at once, so one person can end up over their $5
+by at most what those last two calls cost beyond it: cents for a chat,
+never more than their reservations (about $3.60 in the worst case). When a
+call ends, however it ends, the reservation becomes what Anthropic bills:
+the response's usage; for a stream cut short by Stop, a barge-in or a
+dropped connection, the input it reported plus its whole `max_tokens` of
+output; with no usage at all (a timeout) the whole reservation. A call
+Anthropic answered with an error, or never received, costs nothing. A
+reservation left unsettled past the call timeout is charged in full. A
+model without a price in `usage.PRICES` (`[assistant] model`, `fast_model`,
+`[history] title_model`) turns the credit off, logged at ERROR. The book is
 `<dir>/beta_credit.json` (kept across restarts; removing someone drops their
 row, never everyone's total, so re-inviting can't reset the cap). Deep
 research, background briefings and the email step of "Sync now" never use

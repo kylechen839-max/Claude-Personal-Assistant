@@ -950,27 +950,40 @@ server (`[family] enabled`, on in the server profile).
     and counted, not split.
 
 - **Starter credit (`credit.py`): a bound on what beta testers spend on the
-  owner's key.** A beta tester without a key runs on the owner's client only
-  while `admit` can reserve one call's worst case (a full
-  `max_history_chars` prompt, `think_max_tokens` of output and `[web]
-  max_searches` searches, on `[assistant] model`) within both their
-  `beta_credit_usd` and everyone's `beta_credit_total_usd`, counting every
-  call in flight; the check and the reservation are one step under a lock,
-  so parallel turns can't overshoot (tested with 8 threads on a Barrier).
-  The real cost replaces the reservation when the answer comes; a failed
-  call's reservation expires after `api_timeout * (api_max_retries + 1)`.
-  Used amounts persist in `<dir>/beta_credit.json` (written privately and
-  atomically); removing someone drops their row but never the total, so
-  re-inviting can't reset the cap. An unreadable book fails closed (no
-  credit for anyone). Deep research, briefings and "Sync now"'s email step
-  never use it; paid voices stay family-only, and the quotas are unchanged.
-  Not covered, on purpose: one process keeps the book (the cloud runs one);
-  the estimate is list prices, so the owner should also set a spend limit
-  on the key in the Anthropic console (BLOCKERS.md). One call can cost a
-  little more than its reserve (a prompt written to the cache costs 1.25x
-  input; attached files and project documents can make a prompt bigger
-  than the history trim), so a budget can be passed by at most that one
-  call's difference; the next call is then refused.
+  owner's key.** Every call a beta tester makes on the owner's client goes
+  through `family.CreditMessages` (`messages.create` and `.stream`, also
+  after `with_options`), which reserves that request's own worst case right
+  before sending (`credit.request_bound`: the prompt one token a UTF-8 byte,
+  images and PDF pages at fixed allowances, server tool results read again
+  on every server tool use, the whole `max_tokens` of output; priced at the
+  model's dearest input rate; an unpriced model at the dearest known rates)
+  and settles it in a `finally`, so no path skips it: the response's usage;
+  a stream cut short (Stop, barge-in, `StreamEndedEarly`, a dropped
+  connection) is charged the input its snapshot reports plus the whole
+  `max_tokens`; with no usage (a timeout) the whole reservation; nothing
+  only for an HTTP error answer or a connection never made. A reservation
+  unsettled past `api_timeout * (api_max_retries + 1)` is charged in full
+  (a late settle corrects it). The bounds, checked and reserved in one
+  step under a lock (8 threads on a Barrier in the tests): everyone's calls
+  in flight plus the new one must fit `beta_credit_total_usd`, so the
+  global cap is never passed. A person's call needs only something left of
+  their `beta_credit_usd`, with at most two of their calls in flight
+  (`MAX_IN_FLIGHT`), so a person can be over by at most those two calls'
+  real cost beyond it (each at most its reservation: about $1.80 on Sonnet
+  with web search and fetch on, so $3.60 at worst; a chat's real cost is
+  usually cents). Requiring a whole worst case per person would leave the
+  last $1.80 of $5 unusable. The server tools' results are an allowance
+  (`SEARCH_RESULT_TOKENS`, 20,000 tokens a search), not a proven bound.
+  A model in `[assistant] model`, `fast_model` or `[history] title_model`
+  with no price turns the credit off (ERROR). Used amounts persist in
+  `<dir>/beta_credit.json` (written privately and atomically); removing
+  someone drops their row but never the total, so re-inviting can't reset
+  the cap. An unreadable book fails closed (no credit for anyone). Deep
+  research, briefings and "Sync now"'s email step never use it; paid voices
+  stay family-only, and the quotas are unchanged. Not covered, on purpose:
+  one process keeps the book (the cloud runs one), and the prices are
+  usage.PRICES' list prices, so the owner should also set a spend limit on
+  the key in the Anthropic console (BLOCKERS.md).
 - **Feedback (`feedback.py`).** Notes are sealed per person
   (`userkeys.seal`, label `kwil/feedback/v1`, the person's id inside the
   ciphertext) in their folder, so Remove and "Delete my account" delete

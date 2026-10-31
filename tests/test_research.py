@@ -855,7 +855,7 @@ def attach(env, family_client=None):
     env.config["research"]["dir"] = str(env.tmp / "research")
     service = R.from_config(env.config, env.assistant, client=ContractClient())
     if family_client is not None:  # a "family" person on the owner's key
-        env.family.api_for = lambda uid, **kw: (family_client, False)
+        env.family.api_of = lambda uid, credit=True: (family_client, False, False)
     service._worker = None  # run in the caller's thread
     env.assistant.research = service
     env.family.research = service
