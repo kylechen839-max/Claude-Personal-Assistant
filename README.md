@@ -950,7 +950,7 @@ while the cloud is the active backend.
   People invited before tiers existed are Family automatically.
 - **Beta** (the default for a new invite): an invite-only public beta
   tester. Same chat, voice, web search and history, but Google is
-  **Calendar only**: no Gmail tools, and their Google consent screen asks
+  **Calendar only**: no Gmail or Drive tools, and their Google consent screen asks
   only for `calendar.events` plus the optional read-only calendar list and
   settings scopes, even with `[gmail] enabled`. Why: Gmail scopes are
   "restricted" for Google, so a public app that asks for them needs a paid
@@ -1574,6 +1574,39 @@ Email is written by other people, so it is treated like web pages: while
 an email is in the conversation, anything that changes something
 (calendar, Notion, notes, drafts) asks for a spoken yes first, and email
 text never goes into the log file (see SECURITY.md).
+
+### Google Drive (read-only)
+"Summarize my essay draft", "What's in the budget sheet?", "Find my notes
+about the lab." `search_drive` finds files by name or text (up to 10, with
+their kind, date and owner; with no words, the most recently changed), and
+`read_doc` reads one: Google Docs and Slides as text, Sheets as CSV (the
+first sheet), and uploaded PDF, Word (.docx), PowerPoint (.pptx) and text
+files, 6000 characters at a time (it pages through longer ones). Uploaded
+files over 10 MB, and anything else (images, video, zips), are refused with
+a plain "too large" or "can't read this kind of file".
+
+The sign-in asks for `drive.readonly` only (no Docs API scope: Docs text
+comes through Drive's export), and the Drive connection allows nothing but
+listing, reading and exporting files, so Kwil can never change, share or
+delete one. Drive access is requested only while `[drive] enabled = true`.
+A `token.json` from before Drive keeps Calendar and Gmail working; the
+startup line says "(Drive tools off: ...)" until you sign in once more
+(`python -m kwil.tools.google_auth`, or on the cloud ⚙ -> Google ->
+**Reconnect**, which says "Reconnect to add Google Drive (read-only)").
+Beta testers never get Drive; family members get their own Drive once they
+reconnect.
+
+Google Cloud console, once (the main "Hey Claude" project only, never the
+beta project): APIs & Services -> Library -> **Google Drive API** ->
+Enable; then Google Auth Platform -> Data Access -> Add or remove scopes ->
+tick `.../auth/drive.readonly` -> Update -> Save. It is a restricted scope,
+so leave the app in Testing (don't submit it for verification): you and
+your test users see "Google hasn't verified this app" once.
+
+Files can be written or shared by other people, so Drive text is treated
+like email: once a file was read, anything that changes something asks
+for a spoken yes first, and file names, queries and text never go into
+the log file (see SECURITY.md).
 
 ### Memory
 
@@ -2937,7 +2970,7 @@ kwil/
   mathspeech.py LaTeX read aloud
   web/          the page: index.html, app.js, app.css, sw.js;
                 static/ features.js/css, vendored KaTeX
-  tools/        calendar.py, gmail.py, google_auth.py (shared sign-in),
+  tools/        calendar.py, gmail.py, drive.py, google_auth.py (shared sign-in),
                 notion.py, notes.py, web.py, history.py, spotify.py, deadlines.py,
                 reminders.py, research.py, tool registry
   spotify_web.py  the phone app's "Connect Spotify" (owner only)

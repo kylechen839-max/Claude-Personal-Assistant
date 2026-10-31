@@ -233,7 +233,6 @@ class DriveFiles:
                 item["size_kb"] = max(1, int(f["size"]) // 1024)
             files.append(item)
         log.info("Drive search: %d file(s) (query of %d characters)", len(files), len(words))
-        log.debug("Drive search for %r", words)
         return {"note": UNTRUSTED_NOTE, "count": len(files), "files": files}
 
     def _text(self, file_id: str, meta: dict) -> str:

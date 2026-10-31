@@ -563,6 +563,48 @@ test('the Google row: a sign-in Google refused says so and asks to Reconnect, in
   assert.equal(t('Reconnect'), '重新连接');
 });
 
+test('a token from before Drive: "Reconnect to add Google Drive (read-only)", in Chinese too', async () => {
+  const DRIVE = 'https://www.googleapis.com/auth/drive.readonly';
+  const old = { enabled: true, connected: true, disconnect: true, needs_reconnect: false,
+                missing: [DRIVE] };
+  const url = 'https://accounts.google.com/o/oauth2/auth?state=d';
+  const p = page('en', { gstatus: old, connect: { url } });
+  const marks = [];
+  p.win.KwilConnections = { set: (id, info) => { marks.push([id, JSON.parse(JSON.stringify(info))]); } };
+  await p.flush();
+  // still connected (Calendar and Gmail work); the row and the sheet say how to add Drive
+  assert.deepEqual(marks.at(-1), ['google', { state: 'connected', status: 'Connected', action: 'Reconnect',
+                                              sub: 'Reconnect to add Google Drive (read-only)' }]);
+  assert.equal(p.hint.hidden, false);
+  assert.equal(p.hint.textContent, 'Reconnect to add Google Drive (read-only).');
+  assert.equal(p.google.textContent, 'Reconnect Google account');
+  for (const fn of p.google.listeners.click) await fn();  // the existing Connect flow
+  assert.equal(p.fetches.find((f) => f.url === '/api/google/connect').opts.method, 'POST');
+  assert.equal(p.win.location.href, url);
+  const zh = page('zh-CN', { gstatus: old });
+  await zh.flush();
+  assert.equal(zh.hint.textContent, '重新连接以添加 Google 云端硬盘（只读）。');
+  assert.equal(zh.win.KwilI18n.translate('Reconnect to add Google Drive (read-only)'),
+               '重新连接以添加 Google 云端硬盘（只读）');
+  // other missing scopes (the calendar extras), an expired sign-in, or no way
+  // to connect here: no Drive line
+  for (const st of [{ ...old, missing: ['https://www.googleapis.com/auth/calendar.calendars.readonly'] },
+                    { ...old, missing: [] }, { ...old, missing: 'drive.readonly' }]) {
+    const q = page('en', { gstatus: st });
+    const m = [];
+    q.win.KwilConnections = { set: (id, info) => { m.push(info); } };
+    await q.flush();
+    assert.equal(m.at(-1).action, 'Manage');
+    assert.equal(q.hint.textContent, 'Google account connected.');
+  }
+  const expired = page('en', { gstatus: { ...old, needs_reconnect: true } });
+  await expired.flush();
+  assert.equal(expired.hint.textContent, 'Google sign-in expired. Reconnect to keep using it.');
+  const off = page('en', { gstatus: { ...old, enabled: false } });
+  await off.flush();
+  assert.notEqual(off.hint.textContent, 'Reconnect to add Google Drive (read-only).');
+});
+
 test('a signed-out page never marks the Google row', async () => {
   const out = page('en', { gstatus: null });
   const marks = [];
