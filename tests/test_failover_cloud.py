@@ -423,3 +423,33 @@ def test_sign_out_everywhere_on_the_cloud_is_labelled_cloud(cloud_only):
     assert client.post("/api/logout-all", headers=hdr(Origin=APP)).status_code == 200
     revoke = history.sync_log.by_conv(REVOKE_CONV)
     assert revoke and [e.origin for e in revoke] == ["cloud"]
+
+
+def test_server_profile_with_the_shipped_config_boots_without_a_warning(
+        tmp_path, monkeypatch, caplog):
+    """Every Render boot warned "[failover] enabled is false ...": the
+    shipped config.toml's backends template (three entries, every url
+    empty) counted as something set. Only a backend with a url does."""
+    import logging
+    import shutil
+    from pathlib import Path
+
+    from kwil.config import load_config
+    from kwil.failover import peers
+
+    monkeypatch.setattr(peers, "_warned_disabled", False, raising=False)
+    for var in ("ASSISTANT_ROLE", "APP_ORIGIN", "FAILOVER_BACKENDS"):
+        monkeypatch.delenv(var, raising=False)
+    shipped = tmp_path / "config.toml"  # away from any config.local.toml
+    shutil.copy(Path(__file__).resolve().parents[1] / "config.toml", shipped)
+    config = load_config(shipped, None, profile="server")
+    assert config["failover"]["backends"]  # the empty-url template is there
+    with caplog.at_level(logging.WARNING, logger="kwil"):
+        assert peers.settings_from_config(config) == peers.FailoverSettings("", None, ())
+    assert not caplog.records, [r.getMessage() for r in caplog.records]
+    # a real url left in the list is still worth the warning
+    config["failover"]["backends"] = [{"role": "pi", "url": ""},
+                                      {"role": "pc", "url": "https://pc.t.ts.net"}]
+    with caplog.at_level(logging.WARNING, logger="kwil"):
+        peers.settings_from_config(config)
+    assert len(caplog.records) == 1

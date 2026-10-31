@@ -285,7 +285,7 @@ def test_export_has_their_conversations_and_profile(env, owner, acct):
     prof = json.loads(files["profile.json"])
     assert prof == {"id": uid, "name": "Mom", "language": "zh",
                     "timezone": "Asia/Shanghai", "tier": "beta",
-                    "created": "2023-11-14T22:13:20Z"}
+                    "created": "2023-11-14T22:13:20Z", "credit_used_usd": 0.0}
     convs = {n for n in files if n.startswith("conversations/")}
     assert convs == {f"conversations/{cid}.json" for cid in ids}
     one = json.loads(files[f"conversations/{ids[1]}.json"])
@@ -298,7 +298,7 @@ def test_export_has_no_tokens_or_keys(env, owner, acct):
     plant(env, link["user"]["id"])
     files = unzip(mom.get("/api/me/export"))
     assert set(files) == {"profile.json", "deadlines.json", "coursefiles.json",
-                          "memory.json", "reminders.json"} | {
+                          "memory.json", "reminders.json", "research.json"} | {
         n for n in files if n.startswith("conversations/")}
     blob = "\n".join(files.values())
     for secret in (REFRESH, ACCESS, "csecret", "invite_hash", *KEY_FILES.values()):
@@ -322,6 +322,47 @@ def test_export_never_includes_another_users_data(env, owner, acct):
     # an id in the query changes nothing
     files = unzip(mom.get(f"/api/me/export?id={dlink['user']['id']}"))
     assert "dad's own words" not in "\n".join(files.values())
+
+
+def test_export_has_their_research_jobs_and_credit_used(env, owner, acct):
+    """"Download my data" left out their research job files (the
+    questions they asked) and how much starter credit they used."""
+    from kwil.research import JobStore, Settings
+
+    mom, mlink = env.member(owner, name="Mom")
+    dad, dlink = env.member(owner, name="Dad")
+    uid = mlink["user"]["id"]
+    budget = Settings.from_config(env.config).budgets["standard"]
+    store = JobStore(env.family.dir / uid / "research", clock=lambda: 1_700_000_000)
+    job = store.create("best physics internships this summer", "standard", "en", 0, budget)
+    store.update(job["id"], status="done", searches=4, fetches=2, finished=1_700_000_600)
+    JobStore(env.family.dir / dlink["user"]["id"] / "research").create(
+        "dad's own question", "standard", "en", 0, budget)
+    env.family.credit.people[uid] = 1.2345
+    env.family.credit.people[dlink["user"]["id"]] = 3.0
+
+    files = unzip(mom.get("/api/me/export"))
+    jobs = json.loads(files["research.json"])
+    assert len(jobs) == 1
+    (one,) = jobs
+    assert one["id"] == job["id"]
+    assert one["question"] == "best physics internships this summer"
+    assert (one["status"], one["searches"], one["fetches"]) == ("done", 4, 2)
+    assert one["created"] == "2023-11-14T22:13:20Z"
+    assert one["finished"] == "2023-11-14T22:23:20Z"
+    assert "tainted" not in one
+    assert json.loads(files["profile.json"])["credit_used_usd"] == 1.2345
+    assert "dad's own question" not in "\n".join(files.values())
+    # nobody's research yet: an empty list, and no credit used
+    dad_files = unzip(dad.get("/api/me/export"))
+    assert json.loads(dad_files["profile.json"])["credit_used_usd"] == 3.0
+    env.family.credit.people.pop(uid)
+    for p in (env.family.dir / uid / "research").iterdir():
+        p.unlink()
+    acct._recent.clear()
+    files = unzip(mom.get("/api/me/export"))
+    assert json.loads(files["research.json"]) == []
+    assert json.loads(files["profile.json"])["credit_used_usd"] == 0.0
 
 
 def test_export_is_for_family_members_only(env, owner, acct):

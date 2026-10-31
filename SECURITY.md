@@ -57,7 +57,14 @@ itself starts with `hc1.` it is counted as before), no `/api/auth/token`,
 no `/api/sync` (404 once signed in) and no public `/backend-router.js` (401 before sign-in),
 and `/healthz` has no `role` (`tests/test_failover_cloud.py::
 test_server_profile_turns_failover_off_even_with_the_old_env`). It logs one
-WARNING naming those settings, never their values (tailnet addresses). The
+WARNING naming those settings, never their values (tailnet addresses); a
+`backends` entry counts only with a non-empty `url`, so config.toml's
+empty-url template alone stays quiet (1.2.0). `/backend-router.js` is not in
+the service worker's install list (`sw.js` SHELL), whose every file must be
+in `cloud.PUBLIC_GET` (one 401 stopped the install on the login page);
+`/silence.wav` joined `PUBLIC_GET` for that: 50 ms of generated silence,
+no input, nothing personal (`tests/test_cloud.py::
+test_every_service_worker_shell_file_is_served_signed_out`). The
 phone app no longer trusts a cached `failover` flag when `/healthz` can't
 be reached, and clears the old failover keys from localStorage. History
 events made on the cloud stay `origin = "cloud"` without `ASSISTANT_ROLE`,
@@ -933,10 +940,15 @@ server (`[family] enabled`, on in the server profile).
     own API key and Notion token files), retried as above. The response
     deletes the cookie and sends `Clear-Site-Data: "cookies"`.
   - `GET /api/me/export` is a zip of `profile.json` (id, name, language,
-    time zone, tier, created) and one `history.export(conv, "json")` file
+    time zone, tier, created, `credit_used_usd`: the starter credit they
+    used, from the ledger), `research.json` (their own
+    `<dir>/<id>/research/` job files through `JobStore.export`: question,
+    depth, status, counts, times, conversation id; never the internal
+    taint flag), their memory, reminders, deadlines, course text and
+    feedback, and one `history.export(conv, "json")` file
     per conversation (archived ones included; text masked with
     `config.redact` as in the single-conversation export). Nothing is
-    copied from their folder, so no token or key file can be included.
+    copied from their folder as a file, so no token or key file can be included.
     Bounded: `[family] export_max_mb` (50 MB) of content before
     compression (413 past it), one export at a time per person (409), 3
     per person per hour (429; every export that starts counts, one that

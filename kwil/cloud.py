@@ -135,7 +135,10 @@ PUBLIC_GET = {"/", "/app.js", "/app.css", "/sw.js", "/update-watch.js",
               "/welcome", "/privacy", "/terms", "/help/anthropic-key", "/site.css",
               # "Enable notifications" and the study brief's page code (its
               # /api/push and /api/student/brief routes need sign-in)
-              "/brief.js"}
+              "/brief.js",
+              # the iOS audio unlock (webapp.silence: 50 ms of generated
+              # silence, no input, nothing personal), in sw.js's SHELL
+              "/silence.wav"}
 PUBLIC_POST = {"/api/login"}
 # Accepting a family invite (family.py), or pairing the Canvas helper with
 # its one-time code (canvas_helper.py): public and limited like the login

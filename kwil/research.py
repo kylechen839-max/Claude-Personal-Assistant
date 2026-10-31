@@ -199,6 +199,13 @@ class Settings:
 
 # ---------- one person's jobs ----------
 
+# a job file's fields in a person's export (JobStore.export)
+EXPORT_FIELDS = ("id", "question", "depth", "language", "status", "searches",
+                 "max_searches", "fetches", "max_fetches", "step", "steps",
+                 "created", "updated", "finished", "conversation_id", "partial",
+                 "error", "notion_url")
+
+
 class JobStore:
     """One person's research jobs: one JSON file each in `folder`, written
     privately and atomically (google_auth.write_private). `lock` is shared
@@ -299,6 +306,17 @@ class JobStore:
             job.update(fields, updated=self.clock())
             self._write(job)
             return job
+
+    def export(self) -> "list[dict]":
+        """Their jobs for "Download my data" (account.py), newest first:
+        what each job file holds but the internal taint flag, times in ISO."""
+        out = []
+        for j in self.list():
+            row = {k: j.get(k) for k in EXPORT_FIELDS}
+            for k in ("created", "updated", "finished"):
+                row[k] = _iso(row[k]) if isinstance(row[k], (int, float)) else None
+            out.append(row)
+        return out
 
     def delete(self, job_id: str) -> None:
         from kwil.family import _unlink  # retried: Windows may hold it a moment

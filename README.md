@@ -3059,3 +3059,7 @@ See `PROGRESS.md` for what each stage does and how it was tested,
 `BLOCKERS.md` for what is still open for you, `MANUAL_TEST.md` for the final
 hands-on checklist, and [BACKLOG.md](BACKLOG.md) for planned work (such as
 the hybrid model, before a public release).
+
+**License:** Kwil is proprietary (see [LICENSE](LICENSE)); the third-party
+parts under `kwil/web/static/katex/` and `.claude/skills/` keep their own
+licenses (the LICENSE files beside them).

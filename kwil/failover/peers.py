@@ -130,7 +130,11 @@ def settings_from_config(config: dict) -> FailoverSettings:
     global _warned_disabled
     f = config.get("failover", {})
     if not f.get("enabled", True):
-        left = (f.get("role") or f.get("app_origin") or f.get("backends")
+        # a backend counts only with a url: config.toml ships a template
+        # of three empty-url entries, which warned on every Render boot
+        left = (f.get("role") or f.get("app_origin")
+                or any(isinstance(b, dict) and str(b.get("url") or "").strip()
+                       for b in f.get("backends") or [])
                 or os.environ.get("FAILOVER_BACKENDS", "").strip())
         if left and not _warned_disabled:
             _warned_disabled = True
