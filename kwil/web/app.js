@@ -543,14 +543,22 @@ function writeJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
 }
 
+// What an older failover setup left behind (Kwil is cloud-only since 2026-10-31).
+const FAILOVER_KEYS = ["failover", "backendsCache", "backendSettings", "backendOverride"];
+
 async function detectFailover() {
-  let on = readJSON("failover", false);
+  let on = false;
   try {
     const res = await fetch("/healthz", { cache: "no-store", credentials: "omit" });
     on = Boolean((await res.json()).role);
-    writeJSON("failover", on);
-  } catch (e) { /* the cloud is down: the cached answer decides */ }
-  if (!on) return;
+  } catch (e) { /* unreachable: no failover (a cached "on" is never trusted) */ }
+  if (!on) {
+    for (const key of FAILOVER_KEYS) {
+      try { localStorage.removeItem(key); } catch (e) { /* private mode */ }
+    }
+    return;
+  }
+  writeJSON("failover", on);
   routerMod = await import("/backend-router.js");
   tokens = routerMod.tokenStore();
   router = new routerMod.BackendRouter({

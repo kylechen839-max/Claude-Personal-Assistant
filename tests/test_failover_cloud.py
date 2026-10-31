@@ -294,7 +294,7 @@ def test_server_profile_turns_failover_off_even_with_the_old_env(
     from kwil.config import load_config
     from kwil.failover import peers
 
-    monkeypatch.setattr(peers, "_warned_disabled", False)
+    monkeypatch.setattr(peers, "_warned_disabled", False, raising=False)
     monkeypatch.setenv("ASSISTANT_PROFILE", "server")
     monkeypatch.setenv("ASSISTANT_ROLE", "cloud")
     monkeypatch.setenv("APP_ORIGIN", "https://app-origin-secret.example")
@@ -340,7 +340,7 @@ def test_failover_off_warns_once_and_only_when_something_is_set(monkeypatch, cap
 
     from kwil.failover import peers
 
-    monkeypatch.setattr(peers, "_warned_disabled", False)
+    monkeypatch.setattr(peers, "_warned_disabled", False, raising=False)
     monkeypatch.delenv("FAILOVER_BACKENDS", raising=False)
     config = copy.deepcopy(DEFAULTS)
     config["failover"]["enabled"] = False
