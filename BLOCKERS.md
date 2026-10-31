@@ -3,6 +3,21 @@
 Only what is still open for Kyle. None of it blocks the code.
 
 ## Open
+- [ ] **Google Drive: Console steps (2026-10-31, ~3 min).** The read-only
+      Drive tools are built (README "Google Drive (read-only)"); they stay
+      off until the token has `drive.readonly`. Calendar and Gmail keep
+      working meanwhile.
+      1. console.cloud.google.com, project **hey-claude-511904**: APIs &
+         Services -> Library -> **Google Drive API** -> Enable.
+      2. Google Auth Platform -> **Data Access** -> Add or remove scopes ->
+         tick `.../auth/drive.readonly` -> Update -> Save. Don't submit the
+         app for verification (it stays in Testing).
+      3. **Never** add it on the beta project (the public client's): beta
+         testers get no Drive by design.
+      4. Reconnect Google: on the cloud, ⚙ -> Google -> **Reconnect**
+         (the row says "Reconnect to add Google Drive (read-only)"); on the
+         PC, run `python -m kwil.tools.google_auth`. Then the Drive checks
+         in MANUAL_TEST.md.
 - [ ] **Canvas helper extension: the steps only Kyle can do (2026-10-27).**
       The code is in `tools/canvas-helper/` (its README).
       1. Load it unpacked in Chrome or Edge on your computer and run the

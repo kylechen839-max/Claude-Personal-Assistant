@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Google Drive, read-only: "summarize my essay draft". Kwil can search your
+  Drive and read Google Docs, Sheets and Slides and uploaded PDF, Word,
+  PowerPoint and text files (6000 characters at a time, under 10 MB); it can
+  never change, share or delete a file. Drive text counts as outside text
+  (changes ask first) and is never logged. Reconnect Google once to add Drive
+  (Settings shows "Reconnect to add Google Drive (read-only)"). Not for beta
+  testers.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no

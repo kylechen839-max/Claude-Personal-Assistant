@@ -199,6 +199,33 @@ revoke it at myaccount.google.com -> Security -> Third-party connections
 ("Prof. Smith at smith@uni.edu") and warns when Reply-To differs from the
 sender, since a display name can say anything.
 
+### Google Drive is untrusted input, and read-only (Drive tools)
+Files in Kyle's Drive can be written or shared by anyone (a shared Doc, a
+file a classmate dropped in a shared folder), so `search_drive` and
+`read_doc` (`tools/drive.py`) are `untrusted_output` and `private`, like
+the email tools: once one ran, every tool that changes something asks for
+a spoken yes first, and file names, queries and text never reach the log
+(INFO says counts and lengths only; Google's errors, whose text holds the
+request URL and so the query, are replaced by plain ones before the
+registry logs them). The scope is `drive.readonly` only, asked for only
+while `[drive] enabled` is on, and no Docs API scope (`files.export` needs
+only a Drive scope). On top of that the service is wrapped
+(`drive.ReadOnlyDrive`): an allowlist lets through only `files().list`,
+`get`, `export`, `export_media` and `get_media`; everything else
+(create, update, delete, copy, emptyTrash, permissions, comments, batch
+requests) raises `DriveWriteBlocked`, and a test checks it. Uploaded files
+are refused over 10 MB by Drive's size before any download, the download
+itself asks for at most that many bytes (a `Range` header), and the bytes
+go to `textextract` (zip-bomb and XML-bomb guards, a page cap and a time
+limit). Each read returns at most 6000 characters. Beta testers never get
+Drive: their consent screen (the public project) doesn't list the scope,
+and a beta token that somehow carried it still gets no Drive tools.
+Deliberate non-fix: read_doc downloads the whole file again for each
+6000-character page instead of caching other people's text in memory.
+
+The Google token is more powerful with Drive on: a stolen `token.json` (or
+`GOOGLE_TOKEN_JSON`) could also read every file in Kyle's Drive.
+
 Email (and web) text also stays out of long-term memory: when a
 conversation contained any, its summary is written from Kyle's own words
 only (`transcript(user_only=True)`, stored with `from_user_only`), so an

@@ -55,6 +55,7 @@ Kyle's PC with `.env` loaded, an earlier run had 0 skipped.
 | `test_failover_webapp.py` | 18 | failover: the phone web app with a role (bearer, CORS, CSP, WebSocket) |
 | `tests/js/backend-router.test.mjs` | 33 | failover: the phone app's backend router (`node --test`) |
 | `test_gmail.py` | 28 | Gmail tools, scopes, email as untrusted input |
+| `test_drive.py` | 17 | read-only Google Drive tools, the scope, an old token, Drive text as untrusted input |
 | `test_notes.py` | 9 | quick-capture notes |
 | `test_lecture.py` | 28 | lecture uploads, pipeline, Notion database |
 | `test_tutor.py` | 46 | tutor images, vision call, LaTeX read aloud |
@@ -8624,3 +8625,67 @@ change, every id and hook kept.
   Chinese, before and after.
 - Full suite: 4024 passed, 53 skipped (baseline 4020 + 4); JS 481 passed
   (baseline 469 + 12).
+
+## Google Drive, read-only (2026-10-31)
+"Summarize my essay draft": two new private, untrusted-output tools in
+`kwil/tools/drive.py`, on the same Google sign-in as Calendar and Gmail.
+- **`search_drive(query, max_results<=10)`:** `files.list` with
+  `(name contains '…' or fullText contains '…') and mimeType != folder
+  and trashed = false` (`\` and `'` escaped, the query capped at 200
+  characters), the fields `files(id,name,mimeType,modifiedTime,
+  owners(displayName,me),size)`; with no words, the newest files first
+  (`orderBy=modifiedTime desc`, which Drive refuses with fullText).
+- **`read_doc(file_id, offset=0)`:** 6000 characters a call with
+  `next_offset`. Docs and Slides through `files.export_media`
+  (`text/plain`), Sheets `text/csv`; uploaded PDF, .docx, .pptx and .txt
+  refused over 10 MB by Drive's size, downloaded with a `Range` cap, then
+  `textextract.extract`. Anything else, and Google's export limit, get a
+  plain "too large" / "can't read this kind of file". File ids are checked
+  before they reach Drive.
+- **Read-only twice over:** the `drive.readonly` scope (no Docs scope),
+  and `ReadOnlyDrive`, an allowlist of `files().list/get/export/
+  export_media/get_media`; anything else raises `DriveWriteBlocked`.
+  Google's `HttpError` (its text holds the request URL, so the query) is
+  replaced by a plain `DriveError` before the registry logs it. INFO says
+  counts and lengths only. Both tools are in `REDO_SAFE_TOOLS`.
+- **Scope and registration:** `google_auth.DRIVE_SCOPES`,
+  `sign_in_scopes(gmail_enabled, drive_enabled=False)`; the sign-in CLI,
+  the phone's Connect (`GoogleConnect.drive/scopes`) and the family
+  client ask for it with `[drive] enabled` (new, default on). The public
+  beta client never does, and `Family.drive_allowed` / `drive_files`
+  are family tier only. `cli.register_drive` / `owner_drive` (Gmail's
+  pattern): a token without the scope keeps Calendar and Gmail and prints
+  `(Drive tools off: … python -m kwil.tools.google_auth …)`, which
+  preflight's parser reads; `doctor` has a "Google Drive access" line. A
+  Drive call on such a token raises `MissingScopes`; in the app its words
+  are the new `drive_reconnect` (en, zh). `/api/google/status` has
+  `missing` (the asked-for scopes the saved token lacks); with Drive's in
+  it, Settings' Google row says "Reconnect to add Google Drive
+  (read-only)" and the button runs the same Connect flow
+  (`kwil/web/i18n.js`, en and zh). Disconnect removes the Drive tools
+  (`_google_tool_names`). `sw.js` `kwil-shell-v27`.
+- **Tests:** new `tests/test_drive.py` (17), on a fake Drive v3 service
+  with the real answer shapes and real `HttpError`s; fake tokens expire in
+  2099 and `Credentials.refresh` fails the test. Exports and the cap and
+  paging, CSV, uploaded text and .docx, too large (never downloaded),
+  unsupported, the export limit, 404, bad ids; the query escaping (a quote
+  can't close the string), caps and orderBy; only read methods reachable;
+  a shared Doc's injection makes calendar and Notion changes ask (6
+  cases); nothing of the query, names or text at INFO, nor at DEBUG, nor
+  in an error's traceback; an old token (Drive off with the preflight
+  line, doctor, `MissingScopes` on the PC and in the app); sign-in scopes;
+  beta never asked and never given Drive; status `missing` for the owner
+  and a family member; Disconnect removes the tools for both.
+  `tests/js/i18n.test.mjs` +1 (the row, the sheet line, zh, the Connect
+  flow, and no Drive line for other missing scopes). Status dict pins
+  (+`missing`) in test_google_web, test_family_google, test_family and
+  test_cloud; test_gmail's sign-in CLI test now expects Drive by default
+  and none with `[drive] enabled = false`; sw v27 in six files. Fail-first:
+  `test_drive.py` can't import at e5fbb70; each test also fails with only
+  its piece of the source reverted (16 one-change reverts, scripted: the
+  escape, the allowlist, `untrusted_output`, `private`, the error
+  replacement, the cap, the Range header, the scope check, the drive flag,
+  both tier gates, `missing`, the Drive tool names, the flow's scopes);
+  the JS test fails with `lacksDrive` returning false.
+- Full suite: 4041 passed, 53 skipped (baseline 4024 + 17); JS 482 passed
+  (baseline 481 + 1). Sandbox numbers, no real Google call.
