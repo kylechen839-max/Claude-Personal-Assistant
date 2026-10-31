@@ -1798,10 +1798,11 @@ In the Home Screen app, with Canvas course content synced if you have it.
   - Should: VoiceOver reads "Settings, heading" first. Swipe right through
     the page: each section head, then its rows. Double-tap **Done**:
     VoiceOver lands on the Settings tab ("Settings, button"; on a desktop,
-    the gear).
+    the rail's Settings).
 - [ ] On the desktop (Chrome or Edge), open Settings, press **Esc**.
-  - Should: Settings closes and focus is on the gear (Enter opens it
-    again). With a Connections sheet open, Esc closes only the sheet.
+  - Should: Settings closes and focus is on the rail's Settings (Enter
+    opens it again). With a Connections sheet open, Esc closes only the
+    sheet.
 - [ ] Phone set to dark mode, and the app in Chinese (a family member's).
   - Should: dark grey page with lighter cards, no white flashes; heads read
     语音, 记忆和项目, 通知, 服务连接, 隐私和数据, 家人, 服务器, 你的账户 and
@@ -1829,7 +1830,55 @@ In the Home Screen app.
   - Should: "Main navigation"; the current tab reads with "selected"
     (or "current page"), the others don't.
 - [ ] On the desktop (a window wider than about 770px).
-  - Should: no tab bar; the calendar, clock and gear at the top, as before.
+  - Should: no tab bar; the rail on the left instead (next section).
+
+## Desktop layout (~10 min, Chrome or Edge on Windows, and Safari on a Mac)
+Signed in, in a browser window you can resize.
+- [ ] A window about 1280 wide.
+  - Should: a narrow rail on the left: Search (with "Ctrl K" under it,
+    "⌘K" on a Mac), Chat, Today, History, and Settings at the bottom; the
+    current one tinted blue. No calendar, clock or gear at the top. The
+    chat is a centred column; scrolling with the mouse anywhere over it
+    scrolls the messages.
+- [ ] Click Today in the rail.
+  - Should: Today opens on the right, the chat stays on the left; you
+    can type and send while Today shows. Today's back arrow closes it.
+- [ ] Click History, then a conversation.
+  - Should: the list stays on the left with that row highlighted, the
+    conversation on the right, with no back arrow over it. Esc closes it
+    (the list alone).
+- [ ] Drag the window narrower than about 1020, then about 770, then back.
+  - Should: one screen at a time below about 1020 (the rail stays); below
+    about 770 the phone layout with the tab bar at the bottom; wider again,
+    the two panes come back for the screen you were on.
+- [ ] Click Settings in the rail.
+  - Should: Settings fills the window right of the rail, the rail still
+    there with Settings tinted. Done (or Esc) puts focus on the rail's
+    Settings.
+- [ ] Type in the message box, then press **Ctrl+K** (**Cmd+K** on a
+  Mac).
+  - Should: a search box near the top over a dimmed page, focus in it,
+    the screens listed. Type "hist": only History. Type a word from an
+    old chat's title: up to 6 conversations appear under the screens,
+    marked "Conversation". Up and Down move the highlight (wrapping),
+    Enter goes there; a click works too. Esc closes it and the cursor is
+    back in the message box with your text. Ctrl+K again also closes it.
+- [ ] With the Settings page or a sheet (Delete conversation?) open,
+  press Ctrl+K.
+  - Should: over Settings it opens; over a sheet nothing happens.
+- [ ] With a screen reader (NVDA or VoiceOver), open the switcher and
+  arrow through it.
+  - Should: "Go to, dialog", then each option read as you move ("History,
+    2 of 7" or similar).
+- [ ] Start a voice conversation (the round button by the message box).
+  - Should: it covers the whole window, rail too; Tab stays on its own
+    buttons, focus starts on the orb; captions are wider than on the
+    phone. Esc ends it and focus is back on the voice button.
+- [ ] The app in Chinese (a family member's), and the computer in dark
+  mode.
+  - Should: the rail reads 搜索, 聊天, 今天, 历史记录, 设置; the switcher's
+    box says 前往页面或对话 and nothing found reads 没有匹配项. Dark rail
+    and panes, no white edges.
 
 ## Copy and polish pass (~10 min, iPhone, English and Chinese)
 Do this once with the app in English and once in Chinese (`[assistant]

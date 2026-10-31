@@ -10,6 +10,10 @@
   in once more; an old phone's failover token is deleted and no longer
   counts toward the sign-in lockout; Sign out everywhere on the cloud is
   labelled cloud.
+- Desktop layout: a side rail on wide windows (Search, Chat, Today, History,
+  Settings); Today beside the chat and conversations beside History from
+  1024px; a Ctrl+K / Cmd+K switcher to jump to any screen or past
+  conversation; voice mode keeps keyboard focus and closes with Esc.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no
