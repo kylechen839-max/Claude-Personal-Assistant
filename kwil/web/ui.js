@@ -371,12 +371,12 @@
     dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
     dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
     doc.addEventListener("keydown", onShortcut, true);
-    const search_ = byId("rail-search");
-    if (search_ && typeof search_.addEventListener === "function") {
-      search_.addEventListener("click", open);
+    const railSearch = byId("rail-search");
+    if (railSearch && typeof railSearch.addEventListener === "function") {
+      railSearch.addEventListener("click", open);
       const key = byId("rail-search-key");
       if (key) key.textContent = mac ? "\u2318K" : "Ctrl K";
-      search_.setAttribute("aria-keyshortcuts", mac ? "Meta+K" : "Control+K");
+      railSearch.setAttribute("aria-keyshortcuts", mac ? "Meta+K" : "Control+K");
     }
     return { open, close, onShortcut, onKey, onInput, pick,
       options: () => options.map((o) => o.label), active: () => active, isMac: mac };

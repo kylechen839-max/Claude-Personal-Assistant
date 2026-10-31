@@ -63,7 +63,10 @@ CSP forbids them).
   focus returns to the row), on `--bg`, 22px top corners, a grab handle,
   a header (44px tile, `--t-head` title, Close), a one-paragraph
   explanation, then the controls. One sheet at a time.
-- Desktop: the same sheet, centred, at most 32rem wide.
+- Desktop: the same bottom sheet over the whole window (rail included),
+  at most 32rem wide. The one exception is the Ctrl+K switcher
+  (`dialog.sheet.switcher`): near the top (12vh from 48rem), at most
+  32rem, a field over its list, no grab handle.
 
 ## Icons
 - Service rows show the service's real mark from Simple Icons (CC0),
@@ -197,7 +200,7 @@ CSP forbids them).
   gear) over a `--t-cap` 500 label. `--tabbar-h` is 49px including the
   `--line` hairline on top; under it the home indicator's
   `env(safe-area-inset-bottom)`; the `.bar` blur background. 48rem and up
-  it never shows and the header keeps its buttons.
+  it never shows: the desktop rail takes its place (below).
 - Not tabs in the ARIA sense: no `role=tab`, no `.tabs` (that is the
   Chat/Lecture/Tutor segmented control). The current one is
   `aria-current="page"` (`--accent-ink`; the rest `--text-2`), focus is
@@ -216,6 +219,43 @@ CSP forbids them).
 - While it shows, `.app`, `.history`, the Settings page and `.panel` leave
   `--tabbar-h` + the safe area at the bottom, and the composer drops its
   own safe-area gap.
+
+## Desktop layout (48rem and up)
+- The rail: `<nav id="rail" class="rail" aria-label="Main navigation">`,
+  the body's first element, `--rail-w` (4.5rem) wide, a `--line` hairline
+  on its right, on `--bg`. `button.rail-item`s, each a 22px glyph over a
+  `--t-cap` label, at least 44px tall (56px): Search (its shortcut under
+  it, "Ctrl K" or "⌘K", filled in by `ui.js`), Chat, Today, History, and
+  Settings pinned to the bottom. The current one is `aria-current="page"`:
+  `--accent-ink` on `--accent-soft`; hover is `--surface-2`; focus is
+  `--ring`.
+- It shows on every screen but the sign-in and voice mode (`app.js`
+  `syncTabs`, `RAIL_FOR`): a transcript marks History; Memory, Projects,
+  Reminders and the brief mark nothing. Like the tab bar, each item clicks
+  the header's own control (Today and History show exactly when
+  `#open-today`/`#open-history` would); the header's calendar, clock and
+  gear are hidden while the rail shows, never removed.
+- `body:has(#rail:not([hidden]))` is a grid: the rail in column 1, every
+  `<main>` in row 1, column 2. The chat is one centred column of
+  `--chat-w` (46rem): its parts get `--gutter` as inline padding (the log
+  still scrolls from the window's edge). The Settings page starts at
+  `--rail-w`; the rail (z-index 31) stays on top of it.
+- 64rem and up, two panes (`body[data-split]`, set by `app.js` `show()`
+  and redone on the media query's change): Today beside the chat
+  (`minmax(20rem, 26rem)` on the right) and a transcript beside the
+  History list (`minmax(18rem, 24rem)` on the left; the open row
+  `aria-current="true"` on `--accent-soft`; the transcript's Back keeps its
+  space but is hidden, Escape still goes back). Every other screen is one
+  pane. A `--line` hairline between panes, never a shadow.
+- The switcher (Ctrl+K, Cmd+K on a Mac; Search in the rail): a combobox
+  (`#switcher-input`) over a listbox of `role=option` rows (44px,
+  `aria-selected` on `--accent-soft`), a "Conversation" tag in `--muted`
+  on past chats, "No matches" in a `role=status` line. Commands click the
+  existing controls and show only while those do.
+- Voice mode stays a full-window overlay: the page, rail and tab bar
+  behind it are `inert`, focus starts on the orb, Escape ends it, focus
+  returns to the Voice button (or the message field). Captions widen to
+  40rem from 64rem.
 
 ## Every change
 - Light and dark, phone (390x844) and desktop screenshots, English and

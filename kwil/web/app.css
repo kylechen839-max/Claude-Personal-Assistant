@@ -936,8 +936,8 @@ dialog.sheet .sheet-quote:empty { display: none; }
    one field over its results, at most 32rem wide */
 dialog.switcher { width: min(32rem, calc(100% - 1rem)); margin: calc(var(--s4) + env(safe-area-inset-top)) auto auto;
   padding: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-2); overflow: hidden; }
-.switcher-input[type=text] { min-height: 52px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
-  background: none; font-size: var(--t-body); }
+.switcher-input[type=text] { width: 100%; min-height: 52px; margin: 0; padding: 0 var(--s4); border: 0;
+  border-bottom: 1px solid var(--line); border-radius: 0; background: none; font-size: var(--t-body); }
 .switcher-input[type=text]:focus { box-shadow: none; border-color: var(--line); }
 .switcher-list { list-style: none; margin: 0; padding: var(--s1) 0; max-height: min(60vh, 24rem); overflow-y: auto; }
 .switcher-list:empty { display: none; }
