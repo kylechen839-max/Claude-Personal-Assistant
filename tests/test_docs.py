@@ -33,6 +33,9 @@ OTHER_IDENTIFIERS = {"open_in_browser", "search_conversations", "read_conversati
                      "remember_note", "recall_notes", "list_recent_notes",
                      "delete_note", "ha_list", "ha_state", "ha_control",
                      "month_usd", "cache_read",  # /api/state field, usage log
+                     # starter credit and feedback API fields (credit.py, feedback.py)
+                     "credit_used_usd", "credit_left_usd", "credit_total_used",
+                     "credit_total_cap", "feedback_due",
                      "chat_channels", "chat_read", "chat_search", "chat_files",
                      "chat_read_file", "chat_save_digest",
                      "list_assignments", "update_assignment_status",
@@ -110,10 +113,16 @@ def test_every_setting_name_in_docs_exists(doc):
 
 def test_family_section_is_mirrored_in_config_toml():
     """Every [family] setting has a commented line in config.toml with the
-    default value (piece B's zh_* keys included)."""
+    default value (piece B's zh_* keys included). One exception: the
+    shipped config.toml carries Kyle's published Notion template link
+    (public, not a secret) while the code default stays "" (none)."""
     with open(ROOT / "config.toml", "rb") as f:
         shipped = tomllib.load(f)["family"]
-    assert shipped == DEFAULTS["family"]
+    template = shipped.pop("notion_template_url")
+    assert DEFAULTS["family"]["notion_template_url"] == ""
+    assert template.startswith("https://") and "?" not in template
+    assert shipped == {k: v for k, v in DEFAULTS["family"].items()
+                       if k != "notion_template_url"}
     assert shipped["invite_days"] == 30
 
 

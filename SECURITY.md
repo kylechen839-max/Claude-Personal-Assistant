@@ -1011,6 +1011,61 @@ server (`[family] enabled`, on in the server profile).
     one-off migration. A conversation over ~3.5 MB on its own is left out
     and counted, not split.
 
+- **Starter credit (`credit.py`): a bound on what beta testers spend on the
+  owner's key.** Every call a beta tester makes on the owner's client goes
+  through `family.CreditMessages` (`messages.create` and `.stream`, also
+  after `with_options`), which reserves that request's own worst case right
+  before sending (`credit.request_bound`: the prompt one token a UTF-8 byte,
+  images and PDF pages at fixed allowances, server tool results read again
+  on every server tool use, the whole `max_tokens` of output; priced at the
+  model's dearest input rate; an unpriced model at the dearest known rates)
+  and settles it in a `finally`, so no path skips it: the response's usage;
+  a stream cut short (Stop, barge-in, `StreamEndedEarly`, a dropped
+  connection) is charged the input its snapshot reports plus the whole
+  `max_tokens`; with no usage (a timeout) the whole reservation; nothing
+  only for an HTTP error answer or a connection never made. A reservation
+  unsettled past `api_timeout * (api_max_retries + 1)` is charged in full
+  (a late settle corrects it). The owner's client under it doesn't retry
+  (`max_retries=0`): CreditMessages makes the same tries with the SDK's
+  rules and backoff itself, each reserved and settled, so a billed
+  timed-out try is charged. Nothing else of the client is reachable on the
+  credit (`beta`, `batches`, `with_raw_response`... raise; only `messages`
+  and `count_tokens`), and `Family.client(uid)` / `api_for(uid)` never
+  return the owner's client for the credit unless asked (`credit=True`,
+  only the chat, title and reminder calls). A call held up only by calls
+  in flight waits for them instead of being refused. The bounds, checked and reserved in one
+  step under a lock (8 threads on a Barrier in the tests): everyone's calls
+  in flight plus the new one must fit `beta_credit_total_usd`, so the
+  global cap is never passed. A person's call needs only something left of
+  their `beta_credit_usd`, with at most two of their calls in flight
+  (`MAX_IN_FLIGHT`), so a person can be over by at most those two calls'
+  real cost beyond it (each at most its reservation: about $1.80 on Sonnet
+  with web search and fetch on, so $3.60 at worst; a chat's real cost is
+  usually cents). Requiring a whole worst case per person would leave the
+  last $1.80 of $5 unusable. The server tools' results are an allowance
+  (`SEARCH_RESULT_TOKENS`, 20,000 tokens a search), not a proven bound.
+  A model in `[assistant] model`, `fast_model` or `[history] title_model`
+  with no price turns the credit off (ERROR). Used amounts persist in
+  `<dir>/beta_credit.json` (written privately and atomically); removing
+  someone drops their row but never the total, so re-inviting can't reset
+  the cap. An unreadable book fails closed (no credit for anyone). Deep
+  research, briefings and "Sync now"'s email step never use it; paid voices
+  stay family-only, and the quotas are unchanged. Not covered, on purpose:
+  one process keeps the book (the cloud runs one), and the prices are
+  usage.PRICES' list prices, so the owner should also set a spend limit on
+  the key in the Anthropic console (BLOCKERS.md).
+- **Feedback (`feedback.py`).** Notes are sealed per person
+  (`userkeys.seal`, label `kwil/feedback/v1`, the person's id inside the
+  ciphertext) in their folder, so Remove and "Delete my account" delete
+  them and an export includes them; without `USER_DATA_KEY` nothing is
+  stored (503). Bounded: 8 KB a request, 2,000 characters an answer, 50
+  notes a person, 5 an hour per person (cloud.RateLimiter, at most 1,000
+  people tracked). Their words are never logged (INFO: the id, kind and
+  lengths). Only the owner reads them (`GET /api/feedback`, 404 for anyone
+  else). The survey flag in users.json is "answered" or "dismissed", never
+  the answers. The beta's links (`notion_template_url`, `beta_chat_url`)
+  reach `/api/state` and invites only as `https://` URLs.
+
 Left as is: a family member's session lasts 90 days from its last use, like
 the owner's; a family member who is also on the owner's phone shares that
 phone's cookie jar (one account per browser at a time).

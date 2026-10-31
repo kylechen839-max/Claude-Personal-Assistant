@@ -56,8 +56,12 @@ their own Anthropic key in the app (PUT /api/me/anthropic-key,
 userkeys_web.py) talks to Claude on it, for their chats and their history
 titles alike, and that usage is counted in `<dir>/<id>/usage.json`, never
 the owner's month_usd. Without one, a "family" person uses the owner's key
-(as before); a "beta" tester never does: their turn stops with MissingKey
-("add your key in Settings") before any request is made. The client is
+(as before); a "beta" tester does only on the starter credit (credit.py:
+their first [family] beta_credit_usd, each call reserved and settled by
+CreditMessages; never for research, briefings or the email sync), then
+their turn stops with CreditSpent ("your $5 starter credit is used up"),
+or with the credit off MissingKey ("add your key in Settings"), before any
+request is made. The client is
 looked up on every call (UserApi), so a new or removed key applies at once,
 also to a conversation already open.
 
@@ -171,11 +175,14 @@ def tier_of(user: dict | None) -> str:
     return tier if tier in TIERS else "beta"
 
 
-def public(user: dict) -> dict:
-    """A user as the owner's page sees it (never the invite hash)."""
+def public(user: dict, credit_used: float | None = None) -> dict:
+    """A user as the owner's page sees it (never the invite hash), with
+    `credit_used` ($ of the starter credit, credit.py) when given."""
     out = {k: user.get(k) for k in ("id", "name", "language", "timezone",
                                     "created", "status", "invite_expires")}
     out["tier"] = tier_of(user)
+    if credit_used is not None:
+        out["credit_used_usd"] = credit_used
     return out
 
 
@@ -228,6 +235,10 @@ class Family:
         # anthropic.Anthropic for a person's own key (a seam for tests)
         self._user_client = user_client or self._new_user_client
         self.keys = KeyStore(self.dir, environ)  # their Anthropic keys, encrypted
+        from kwil.credit import CreditLedger
+
+        # the beta's starter credit on the owner's key (<dir>/beta_credit.json)
+        self.credit = CreditLedger(config, self.dir)
         # uid -> their client, or None (no usable key of their own); filled
         # on first use, dropped when they save or remove a key
         self._user_clients: dict[str, object] = {}
@@ -358,8 +369,8 @@ class Family:
     def members(self) -> list[dict]:
         self._finish_deletes()
         with self.lock:
-            return [public(u) for u in sorted(self.users.values(),
-                                              key=lambda u: u.get("created", 0))]
+            return [public(u, self.credit.used(u["id"]))
+                    for u in sorted(self.users.values(), key=lambda u: u.get("created", 0))]
 
     def get(self, uid: str | None) -> dict | None:
         with self.lock:
@@ -384,7 +395,9 @@ class Family:
                     or found.get("invite_expires", 0) < now:
                 return None
             found = {**found, "status": "active", "invite_hash": None,
-                     "invite_expires": None}
+                     "invite_expires": None,
+                     # when they first signed in (feedback.py's survey)
+                     "joined": found.get("joined") or int(now)}
             users = {**self.users, found["id"]: found}
             self._save(users)
             self.users = users
@@ -406,6 +419,7 @@ class Family:
             reminders = self._reminders.pop(uid, None)
             self._user_clients.pop(uid, None)
             self._meters.pop(uid, None)
+            self.credit.forget(uid)  # their row; everyone's total stays
             self._drop_notion_api(uid)
             self._notion_locks.pop(uid, None)
             self.quotas.forget(uid)
@@ -1063,7 +1077,10 @@ class Family:
 
         def chat_factory(session_registry):
             # their own key (or, for family, the owner's), looked up per call
-            chat_api, title_api = UserApi(self, user["id"]), UserApi(self, user["id"])
+            # on the starter credit too (credit.py): their chats, titles and
+            # scheduled reminder tasks (which run on this factory)
+            chat_api = UserApi(self, user["id"], credit=True)
+            title_api = UserApi(self, user["id"], credit=True)
             recorder = Recorder(store, "web", client_fn=title_api.client_or_none,
                                 title_model=h["title_model"], meter=title_api)
             return ClaudeChat(client=chat_api, meter=chat_api, model=a["model"],
@@ -1087,7 +1104,8 @@ class Family:
     def client(self, uid: str | None = None):
         """The owner's client (uid None), else the one `uid`'s calls use:
         their own key's, the owner's for a "family" person without one, or
-        MissingKey (a beta tester without a key, or someone no longer listed)."""
+        MissingKey (a beta tester without a key, or someone no longer listed;
+        never the starter credit: a bare client's calls can't be reserved)."""
         if uid is not None:
             return self.api_for(uid)[0]
         if self._client is None:
@@ -1107,8 +1125,18 @@ class Family:
         return user_client(key, max_retries=a["api_max_retries"],
                            timeout=a["api_timeout"])
 
-    def api_for(self, uid: str) -> tuple[object, bool]:
+    def api_for(self, uid: str, credit: bool = False) -> tuple[object, bool]:
         """(client, True if it is on their own key) for `uid`'s next call."""
+        client, own, _ = self.api_of(uid, credit)
+        return client, own
+
+    def api_of(self, uid: str, credit: bool = False) -> tuple[object, bool, bool]:
+        """api_for, and whether the call is on the starter credit. A beta
+        tester without a key gets the owner's client while some of their
+        starter credit is left (credit.py; `credit=False`: never, e.g. deep
+        research); the call itself reserves its worst case (UserApi's
+        CreditMessages). CreditSpent once it is used up, MissingKey with
+        the credit off."""
         from kwil.userkeys import MissingKey
 
         with self.lock:
@@ -1120,10 +1148,21 @@ class Family:
                 self._user_clients[uid] = self._user_client(key) if key else None
             own = self._user_clients[uid]
         if own is not None:
-            return own, True
+            return own, True, False
         if tier_of(user) == "family":
-            return self.client(), False
-        raise MissingKey()
+            return self.client(), False, False
+        if not (credit and self.credit.enabled):
+            raise MissingKey()
+        if not self.credit.check(uid):
+            raise self.credit_spent(uid)
+        return self.client(), False, True
+
+    def credit_spent(self, uid: str):
+        """The CreditSpent to raise for `uid` (logged by id)."""
+        from kwil.userkeys import CreditSpent
+
+        log.info("Credit: %s's starter credit is used up", uid)
+        return CreditSpent(self.credit.per_person, self.credit.help_url(self.config))
 
     # ---------- their own Anthropic key (userkeys_web.py) ----------
     def key_status(self, uid: str) -> dict:
@@ -1140,6 +1179,9 @@ class Family:
                "required": tier == "beta", "available": self.keys.problem() is None}
         if key is not None:  # their own estimate (usage.py prices)
             out["month_usd"] = self.meter(uid).month_usd()
+        if tier == "beta" and self.credit.enabled:  # the starter credit (credit.py)
+            out["credit_usd"] = self.credit.per_person
+            out["credit_left_usd"] = self.credit.left(uid)
         return out
 
     def set_key(self, uid: str, key: str) -> bool:
@@ -1178,6 +1220,21 @@ class Family:
             if uid in self.users:
                 self.meter(uid).record(model, usage)
 
+    def set_survey(self, uid: str, state: str) -> bool:
+        """Mark their one-time survey (feedback.py) "answered" or
+        "dismissed" in users.json (a flag, never their answers). False if
+        they aren't listed."""
+        with self.lock:
+            user = self.users.get(uid)
+            if user is None or not valid_id(uid):
+                return False
+            if user.get("survey") == state:
+                return True
+            users = {**self.users, uid: {**user, "survey": state}}
+            self._save(users)
+            self.users = users
+        return True
+
     def close(self) -> None:
         with self.lock:
             contexts, self._contexts = list(self._contexts.values()), {}
@@ -1193,42 +1250,268 @@ class Family:
 
 class UserApi:
     """The Anthropic client one person's conversation uses, looked up on
-    every use (Family.api_for), so a key they save or remove applies to the
+    every use (Family.api_of), so a key they save or remove applies to the
     very next call. ClaudeChat's `client` and `meter` (and the Recorder's):
     usage on their own key goes on their meter, on the owner's key to the
-    owner's (usage.METER). Raises MissingKey on use when they have none."""
+    owner's (usage.METER). Raises MissingKey on use when they have none.
+    A call on the beta's starter credit goes through CreditMessages, which
+    reserves and settles it (credit.py). `with_options` keeps the wrapper."""
 
-    def __init__(self, family: "Family", uid: str):
+    def __init__(self, family: "Family", uid: str, credit: bool = False,
+                 options: dict | None = None):
         self._family = family
         self._uid = uid
+        self._credit = credit  # may a beta tester's call use the starter credit?
+        self._options = options or {}
         self.own_key = False  # whose key the last call used (cli.friendly_error)
+        self.on_credit = False  # ... and whether that was the starter credit
 
     def resolve(self):
-        client, self.own_key = self._family.api_for(self._uid)
+        client, self.own_key, self.on_credit = self._family.api_of(self._uid, self._credit)
+        if self._options and callable(getattr(client, "with_options", None)):
+            return client.with_options(**self._options)
         return client
 
     def client_or_none(self):
-        """For history titles: None without a key (the Recorder then uses
-        the first words as the title)."""
+        """For history titles: this wrapper (so a title on the starter
+        credit is reserved and settled too), or None without a key (the
+        Recorder then uses the first words as the title)."""
         from kwil.userkeys import MissingKey
 
         try:
-            return self.resolve()
+            self.resolve()
         except MissingKey:
             return None
+        return self
 
-    def __getattr__(self, name):  # .messages, .with_options, ...
+    def with_options(self, **options) -> "UserApi":
+        view = UserApi(self._family, self._uid, self._credit,
+                       {**self._options, **options})
+        return view
+
+    @property
+    def messages(self):
+        client = self.resolve()
+        if not self.on_credit:
+            return client.messages
+        # the SDK's own retries would bill each timed-out try and settle one:
+        # CreditMessages retries itself, reserving and settling every try
+        retries = getattr(client, "max_retries", 0)
+        retries = retries if isinstance(retries, int) and not isinstance(retries, bool) \
+            else 0
+        if callable(getattr(client, "with_options", None)):
+            client = client.with_options(max_retries=0)
+        return CreditMessages(self._family, self._uid, client.messages, retries)
+
+    def __getattr__(self, name):  # anything else the SDK client has
         if name.startswith("_"):
             raise AttributeError(name)
-        return getattr(self.resolve(), name)
+        client = self.resolve()
+        if self.on_credit:  # only .messages is reserved and settled
+            raise AttributeError(f"{name} isn't available on the starter credit")
+        return getattr(client, name)
 
     def record(self, model: str, usage) -> None:
+        """The bill's meter (the credit is settled by CreditMessages)."""
         if self.own_key:
             self._family.record_usage(self._uid, model, usage)
         else:
             from kwil import usage as owner_usage
 
             owner_usage.record(model, usage)
+
+
+def _reached_anthropic(error: BaseException) -> bool:
+    """May a failed call have been billed? Not if Anthropic answered with an
+    error status (it bills only what it answers), nor if the connection was
+    never made; anything else (a timeout, a dropped stream) may have been."""
+    import anthropic
+
+    if isinstance(error, anthropic.APIStatusError):
+        return False
+    seen, e = set(), error
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        # httpx's or httpx2's (newer SDKs): by name, either library
+        if any(c.__name__ in ("ConnectError", "ConnectTimeout") for c in type(e).__mro__):
+            return False
+        e = e.__cause__ or e.__context__
+    return True
+
+
+def _retry_delay(error: BaseException, attempt: int) -> float | None:
+    """Seconds before trying again after `error` (try number `attempt`,
+    from 0), or None (not worth another try). The SDK's own rules
+    (anthropic._base_client): timeouts, connection errors, 408, 409, 429
+    and 5xx, an `x-should-retry` header winning; a `retry-after(-ms)` of at
+    most 60 s, else 0.5 s doubling up to 8 s, less up to 25% jitter."""
+    import random
+
+    import anthropic
+
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None) or {}
+    if isinstance(error, anthropic.APIStatusError):
+        should = str(headers.get("x-should-retry", "")).lower()
+        if should == "false":
+            return None
+        status = error.status_code
+        if should != "true" and status not in (408, 409, 429) and status < 500:
+            return None
+        for name, scale in (("retry-after-ms", 0.001), ("retry-after", 1.0)):
+            try:
+                wait = float(headers.get(name)) * scale
+            except (TypeError, ValueError):
+                continue
+            if 0 < wait <= 60:
+                return wait
+    elif not isinstance(error, anthropic.APIConnectionError):  # timeouts too
+        return None
+    return min(0.5 * 2 ** attempt, 8.0) * (1 - 0.25 * random.random())
+
+
+_sleep = time.sleep  # a seam for tests
+
+
+class CreditMessages:
+    """`client.messages` for a call on the starter credit: right before it
+    is sent, the request's worst case is reserved (credit.request_reserve;
+    CreditSpent if it doesn't fit), and when it ends, however it ends, the
+    reservation is settled in a `finally` (credit.py says with what). The
+    client under it doesn't retry: each of the `retries` tries this makes
+    (the SDK's rules and backoff, _retry_delay) is reserved and settled on
+    its own, so a timed-out try that was billed is charged too."""
+
+    def __init__(self, family: "Family", uid: str, messages, retries: int = 0):
+        self._family = family
+        self._uid = uid
+        self._messages = messages
+        self._retries = max(0, int(retries))
+
+    def _again(self, error: BaseException, attempt: int) -> bool:
+        """After a failed try: wait and say True if another one is due."""
+        if attempt >= self._retries:
+            return False
+        delay = _retry_delay(error, attempt)
+        if delay is None:
+            return False
+        log.info("Credit: %s's call failed (%s); try %d of %d in %.1f s", self._uid,
+                 type(error).__name__, attempt + 2, self._retries + 1, delay)
+        _sleep(delay)
+        return True
+
+    def _admit(self, kwargs: dict):
+        from kwil.credit import request_reserve
+
+        reserve = request_reserve(kwargs)
+        token = self._family.credit.admit(self._uid, reserve)
+        if token is None:
+            raise self._family.credit_spent(self._uid)
+        return token, reserve
+
+    def _settle(self, token, reserve: float, model: str, usage=None, error=None,
+                partial: bool = False, max_tokens: int = 0) -> None:
+        from kwil import usage as usage_mod
+        from kwil.credit import call_cost
+
+        if usage is not None:
+            counts = usage_mod.counts(usage)
+            if partial:  # cut short: the output so far isn't counted yet
+                counts["output"] = max(counts["output"], max_tokens)
+            usd = call_cost(model, counts)
+        elif error is not None and not _reached_anthropic(error):
+            usd = 0.0
+        else:
+            usd = reserve  # no usage at all: what it could have cost
+        self._family.credit.settle(self._uid, usd, token)
+
+    def create(self, **kwargs):
+        attempt = 0
+        while True:
+            try:
+                return self._try_create(kwargs)
+            except Exception as e:
+                if not self._again(e, attempt):
+                    raise
+            attempt += 1
+
+    def _try_create(self, kwargs: dict):
+        token, reserve = self._admit(kwargs)
+        usage, error = None, None
+        try:
+            response = self._messages.create(**kwargs)
+            usage = getattr(response, "usage", None)
+            return response
+        except BaseException as e:
+            error = e
+            raise
+        finally:
+            self._settle(token, reserve, str(kwargs.get("model") or ""), usage, error)
+
+    def stream(self, **kwargs):
+        return _CreditStream(self, kwargs)
+
+    def __getattr__(self, name):
+        if name == "count_tokens":  # free; anything else would bill unreserved
+            return self._messages.count_tokens
+        raise AttributeError(f"messages.{name} isn't available on the starter credit")
+
+
+class _CreditStream:
+    """The context manager messages.stream returns, settling on exit."""
+
+    def __init__(self, owner: CreditMessages, kwargs: dict):
+        self._owner = owner
+        self._kwargs = kwargs
+        self._manager = None
+        self._stream = None
+        self._token = None
+        self._reserve = 0.0
+
+    def __enter__(self):
+        attempt = 0
+        while True:  # the request itself, retried like create (once streaming: never)
+            self._token, self._reserve = self._owner._admit(self._kwargs)
+            try:
+                self._manager = self._owner._messages.stream(**self._kwargs)
+                self._stream = self._manager.__enter__()
+                return self._stream
+            except BaseException as e:
+                self._owner._settle(self._token, self._reserve, self._model(), error=e)
+                if not isinstance(e, Exception) or not self._owner._again(e, attempt):
+                    raise
+            attempt += 1
+
+    def _model(self) -> str:
+        return str(self._kwargs.get("model") or "")
+
+    def __exit__(self, kind, error, tb):
+        try:
+            return self._manager.__exit__(kind, error, tb)
+        finally:
+            snapshot = _snapshot(self._stream, error)
+            usage = getattr(snapshot, "usage", None) if snapshot is not None else None
+            partial = error is not None or getattr(snapshot, "stop_reason", None) is None
+            self._owner._settle(self._token, self._reserve, self._model(), usage,
+                                error if usage is None else None, partial=partial,
+                                max_tokens=int(self._kwargs.get("max_tokens") or 0))
+
+
+def _snapshot(stream, error):
+    """The stream's message: the final one after a clean end, else what
+    came so far (the SDK's current_message_snapshot, which asserts before
+    the first event), or None."""
+    if stream is None:
+        return None
+    if error is None:
+        try:
+            return stream.get_final_message()
+        except Exception:  # noqa: BLE001 - cut short after all: the snapshot
+            pass
+    try:
+        return stream.current_message_snapshot
+    except (AssertionError, AttributeError):
+        return None
 
 
 def _unlink(path: Path, attempts: int = 20) -> None:
@@ -1264,6 +1547,47 @@ def invite_url(origin: str, token: str) -> str:
     """The link to send: the token rides in the #fragment, which browsers
     never send to a server (family.js reads it, clears it and POSTs it)."""
     return f"{origin.rstrip('/')}/#invite={token}"
+
+
+def https_url(value) -> str:
+    """`value` if it is an https:// link with a host (and no spaces), else
+    "" (a setting left empty or mistyped is never shown)."""
+    from urllib.parse import urlsplit
+
+    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+        return ""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return ""
+    return value if parts.scheme == "https" and parts.netloc else ""
+
+
+def invite_message(family: "Family", user: dict, url: str, origin: str) -> str:
+    """The invite text in their language: the link, and for a beta tester
+    the key guide, Google's "unverified app" step, the starter credit, and
+    the Notion template and chat links when set (https only)."""
+    from kwil import i18n
+
+    lang = user.get("language") or "en"
+    name = user.get("name") or ""
+    if tier_of(user) != "beta":
+        return i18n.t("invite_family", lang, name=name, url=url)
+    from kwil.credit import HELP_PATH
+
+    f = family.config["family"]
+    lines = [i18n.t("invite_beta", lang, name=name, url=url,
+                    help=f"{origin.rstrip('/')}{HELP_PATH}")]
+    if family.credit.enabled:
+        usd = family.credit.per_person
+        lines.append(i18n.t("invite_credit", lang,
+                            usd=f"{usd:.0f}" if float(usd).is_integer() else f"{usd:.2f}"))
+    for key, setting in (("invite_template", "notion_template_url"),
+                         ("invite_chat", "beta_chat_url")):
+        link = https_url(f.get(setting))
+        if link:
+            lines.append(i18n.t(key, lang, url=link))
+    return "\n".join(lines)
 
 
 def own_origin(config: dict) -> str:
@@ -1319,8 +1643,10 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
         return own_origin(family.config) or f"https://{request.url.netloc}"
 
     def link(request: Request, user: dict, token: str):
-        return {"user": user, "url": invite_url(origin_of(request), token),
-                "expires_at": user["invite_expires"]}
+        url = invite_url(origin_of(request), token)
+        return {"user": user, "url": url, "expires_at": user["invite_expires"],
+                # the text to send them (PR-B's page shares it)
+                "message": invite_message(family, user, url, origin_of(request))}
 
     def off():
         return error("not found", 404) if family is None else None
@@ -1342,7 +1668,8 @@ def register(app, family: "Family | None", web, assistant, error) -> None:
     def list_users(session=Depends(webapp.require_owner)):
         if (e := off()) is not None:
             return e
-        return {"users": family.members(), "max_users": family.max_users}
+        return {"users": family.members(), "max_users": family.max_users,
+                **family.credit.totals()}
 
     @app.post("/api/users/{uid}/invite")
     async def new_link(uid: str, request: Request,

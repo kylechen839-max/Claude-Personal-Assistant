@@ -362,7 +362,8 @@ class StudentSync:
         if uid is not None:
             from kwil.family import UserApi
 
-            api = UserApi(self.family, uid)
+            # never the beta's starter credit (credit.py): it pays for what they ask
+            api = UserApi(self.family, uid, credit=False)
             return api, api
         if self.family is not None:
             return self.family.client(None), None

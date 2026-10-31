@@ -265,9 +265,18 @@ def test_a_beta_tester_without_a_key_gets_the_template_and_no_call(env):
     env.family._user_client = lambda key: env.client
     env.push.unsubscribe(None, env.push.subscriptions(None)[0]["endpoint"])
     env.store.items[uid] = [item("t1", "Essay", "2026-10-21", course="ENG 101")]
-    assert env.scheduler().tick() == {uid: ["morning"]}
+    assert env.family.credit.enabled  # the starter credit is on: still not for this
+    scheduler = env.scheduler()
+    assert scheduler.tick() == {uid: ["morning"]}
     assert env.client.requests == []  # never the owner's key for a beta tester
     assert env.bodies() == ["Coming up: Essay (ENG 101) today."]
+    credit = env.family.credit
+    assert credit.total == 0 and credit.people == {} and not credit._held
+    from kwil.userkeys import CreditSpent, MissingKey
+
+    with pytest.raises(MissingKey) as e:
+        scheduler._client(uid).messages
+    assert not isinstance(e.value, CreditSpent)
 
 
 def backend(env, tmp_path, role, log):

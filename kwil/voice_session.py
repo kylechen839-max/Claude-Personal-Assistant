@@ -46,7 +46,7 @@ import numpy as np
 from kwil import audio, i18n
 from kwil.cli import (classify_answer, get_reply, is_exit, is_yes,
                            loggable_reply, strip_wake_phrase, user_error_key,
-                           uses_own_key)
+                           user_error_text, uses_own_key)
 from kwil.sentences import SentenceSplitter
 from kwil.timing import TurnTimer
 
@@ -651,8 +651,9 @@ class VoiceConversation:
             # no key of their own (beta), or theirs was rejected: say so
             chat = getattr(self.backend, "chat", None) or getattr(
                 getattr(self.backend, "session", None), "chat", None)
-            message = i18n.t(user_error_key(e, uses_own_key(chat)) or "error",
-                             self.language)
+            key = user_error_key(e, uses_own_key(chat))
+            message = (user_error_text(e, key, self.language) if key is not None
+                       else i18n.t("error", self.language))
             self._send({"type": "error", "turn": turn.id, "message": message})
             turn.sentences.put(Chunk(message, 0, reply=False))
         finally:

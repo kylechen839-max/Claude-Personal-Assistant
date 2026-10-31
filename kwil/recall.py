@@ -289,12 +289,28 @@ class HybridRetriever:
     def search(self, query: str, k: int = 10, filters: dict | None = None,
                offset: int = 0, snippet_tokens: int = SNIPPET_TOKENS) -> list[dict]:
         k, offset = max(1, int(k)), max(0, int(offset))
-        if not history.query_terms(query) or offset + k > FUSE_MAX:
-            # no words: newest first; deep pages: keyword hits only (the
-            # fused list stops at FUSE_MAX; meaning hits are on page one)
+        if not history.query_terms(query):
+            # no words: newest first
             return self.fts.search(query, k=k, filters=filters, offset=offset,
                                    snippet_tokens=snippet_tokens)
-        want = offset + k
+        if offset + k > FUSE_MAX:
+            # deep pages: the fused top FUSE_MAX, then the keyword hits it
+            # doesn't hold, in keyword order, so paging never skips or
+            # repeats a conversation
+            head = self.search(query, k=FUSE_MAX, filters=filters,
+                               snippet_tokens=snippet_tokens)
+            shown = {h["id"] for h in head}
+            rest, at = [], 0
+            while len(head) + len(rest) < offset + k:
+                batch = self.fts.search(query, k=FUSE_MAX, filters=filters,
+                                        offset=at, snippet_tokens=snippet_tokens)
+                rest += [h for h in batch if h["id"] not in shown]
+                if len(batch) < FUSE_MAX:
+                    break
+                at += FUSE_MAX
+            return (head + rest)[offset:offset + k]
+        # one fixed-size fused list for every page, so pages never overlap
+        want = FUSE_MAX
         keyword = self.fts.search(query, k=max(want, CANDIDATES), filters=filters,
                                   snippet_tokens=snippet_tokens)
         semantic = self._vector_search(query, max(want, CANDIDATES), filters)

@@ -436,6 +436,18 @@ DEFAULTS: dict = {
         # "Download my data" (account.py): the zip's contents, before
         # compression, at most this big
         "export_max_mb": 50,
+        # the beta's starter credit (credit.py): a beta tester without their
+        # own key uses the owner's until they have used beta_credit_usd, and
+        # all of them together beta_credit_total_usd. 0 = off (no key, no Claude)
+        "beta_credit_usd": 5,
+        "beta_credit_total_usd": 50,
+        # links in a beta invite and /api/state (shown only if https; "" = none)
+        "notion_template_url": "",  # the published Notion Assignments template
+        "beta_chat_url": "",        # the beta testers' group chat
+        # the one-time survey (feedback.py): due this many days after they
+        # joined, or after this many conversations, whichever comes first; 0 = off
+        "feedback_after_days": 3,
+        "feedback_after_conversations": 10,
         # Chinese speakers' speech on a server whose language is English:
         # loaded on first use (Whisper small ~0.5 GB RAM, the voice ~60 MB)
         "zh_stt_model": "small",

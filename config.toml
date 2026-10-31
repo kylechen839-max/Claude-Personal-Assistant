@@ -382,6 +382,15 @@ turns_per_minute = 6          # messages (typed, push-to-talk or voice) a minute
 turns_per_day = 200           # messages a day
 stt_seconds_per_day = 1800    # seconds of their speech turned into text a day (30 min)
 export_max_mb = 50            # "Download my data": the zip's contents (before compression) at most this big
+# The beta's starter credit (README "Starter credit"): a beta tester without their own key
+# talks to Claude on yours until they've used beta_credit_usd, and all of them together
+# beta_credit_total_usd (kept in <dir>/beta_credit.json). 0 in either = off.
+beta_credit_usd = 5           # each beta tester's credit, in US dollars
+beta_credit_total_usd = 50    # everyone's together; removing someone doesn't give it back
+notion_template_url = "https://five-leo-17d.notion.site/Kwil-Assignments-template-40af8b8e230381148083f5740cc8ad4a"  # the Notion Assignments template in beta invites; https only, "" = none
+beta_chat_url = ""            # the beta testers' group chat link in beta invites; https only, "" = none
+feedback_after_days = 3       # the one-time survey is due this many days after they joined (0 = not by days)
+feedback_after_conversations = 10  # ... or after this many conversations (0 = not by count)
 # Each person's own Anthropic API key (Settings -> "Your Anthropic API key"): beta
 # testers must add one (they pay for their own use); family members may. Stored
 # encrypted in <dir>/<id>/anthropic_key.enc with a key derived from the env secret

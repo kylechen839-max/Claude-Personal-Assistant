@@ -88,11 +88,12 @@ class Env(SimpleNamespace):
         return found[0]["text"] if found[0]["type"] == "reply" else found[0]["message"]
 
 
-@pytest.fixture
-def env(tmp_path, monkeypatch):
+def build_env(tmp_path, monkeypatch, **family):
+    """The app with [family] on and `family` settings (test_credit.py
+    reuses it with the starter credit on); call `.close()` after."""
     monkeypatch.setenv("USER_DATA_KEY", SECRET)
     config = load_config(None, None)
-    config["family"].update(enabled=True, dir=str(tmp_path / "users"))
+    config["family"].update(enabled=True, dir=str(tmp_path / "users"), **family)
     owner_api = fake_api("owner")
     made: list = []
 
@@ -115,11 +116,22 @@ def env(tmp_path, monkeypatch):
                             sessions_file=tmp_path / "sessions.json")
     checked: list = []
     monkeypatch.setattr(userkeys, "check_key", lambda key: checked.append(key))
-    e = Env(app=app, fam=fam, owner_api=owner_api, made=made, checked=checked,
-            config=config, tmp=tmp_path, assistant=assistant)
+
+    def close():
+        fam.close()
+        owner_store.close()
+
+    return Env(app=app, fam=fam, owner_api=owner_api, made=made, checked=checked,
+               config=config, tmp=tmp_path, assistant=assistant, close=close)
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    # beta_credit_usd=0: the starter credit off (test_credit.py has it on), so
+    # a beta tester without a key gets no Claude at all, as before the credit
+    e = build_env(tmp_path, monkeypatch, beta_credit_usd=0)
     yield e
-    fam.close()
-    owner_store.close()
+    e.close()
 
 
 @pytest.fixture

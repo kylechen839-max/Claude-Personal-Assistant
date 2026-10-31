@@ -238,15 +238,30 @@ def uses_own_key(chat) -> bool:
 
 def user_error_key(e: Exception, own_key: bool = False) -> str | None:
     """The i18n sentence for errors about a person's own Anthropic key:
-    "no_key" (none saved, userkeys.MissingKey) or "bad_user_key" (theirs
-    was rejected); None for anything else."""
-    from kwil.userkeys import MissingKey
+    "credit_spent" (a beta tester's starter credit is used up,
+    userkeys.CreditSpent), "no_key" (none saved, userkeys.MissingKey) or
+    "bad_user_key" (theirs was rejected); None for anything else."""
+    from kwil.userkeys import CreditSpent, MissingKey
 
+    if isinstance(e, CreditSpent):
+        return "credit_spent"
     if isinstance(e, MissingKey):
         return "no_key"
     if own_key and isinstance(e, anthropic.AuthenticationError):
         return "bad_user_key"
     return None
+
+
+def user_error_text(e: Exception, key: str, lang: str | None = None) -> str:
+    """The sentence for user_error_key's `key`: "credit_spent" says their
+    credit's amount and, when there is one, links the key guide."""
+    if key != "credit_spent":
+        return i18n.t(key, lang)
+    usd, url = getattr(e, "usd", 0) or 0, getattr(e, "help_url", "") or ""
+    amount = f"{usd:.0f}" if float(usd).is_integer() else f"{usd:.2f}"
+    if url:
+        return i18n.t("credit_spent_help", lang, usd=amount, url=url)
+    return i18n.t("credit_spent", lang, usd=amount)
 
 
 # The API itself is down or overloaded (500, 503, 529), not this computer's
@@ -263,9 +278,11 @@ def friendly_error(e: Exception, user_text: str = "", output_fn=print,
     key = user_error_key(e, own_key)
     if key is not None:  # never the key itself: ids and kinds only
         log.warning("Their own Anthropic key: %s (%s)",
-                    "none saved" if key == "no_key" else "rejected", type(e).__name__)
-        output_fn(i18n.t(key))
-        return i18n.t(key)
+                    {"no_key": "none saved", "credit_spent": "starter credit used up"
+                     }.get(key, "rejected"), type(e).__name__)
+        sentence = user_error_text(e, key)
+        output_fn(sentence)
+        return sentence
     if isinstance(e, anthropic.APIConnectionError):  # includes timeouts
         log.warning("Connection error: %s", e)
         output_fn(f"Connection error: {e}")

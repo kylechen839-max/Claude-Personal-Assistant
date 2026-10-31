@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Beta testers: a $5 starter credit on the owner's key (at most $50 for all
+  testers together), then "add your own key"; feedback notes and a one-time
+  3-question survey; invites come with ready-to-send text (key guide, the
+  expected Google "unverified app" note, the Notion template and the testers'
+  chat).
 - Google Drive, read-only: "summarize my essay draft". Kwil can search your
   Drive and read Google Docs, Sheets and Slides and uploaded PDF, Word,
   PowerPoint and text files (6000 characters at a time, under 10 MB); it can
