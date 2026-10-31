@@ -49,15 +49,21 @@ level nothing secret was found being logged.
 Kwil is cloud-only. The cloud server's profile sets `[failover] enabled =
 false`, so even with `ASSISTANT_ROLE`, `APP_ORIGIN` or `FAILOVER_BACKENDS`
 still set in Render, `cloud.build_app` mounts no `EdgeMiddleware`: no CORS
-for another origin, no `hc1.` access tokens (an `hc1.` bearer is refused
-and counted as a wrong token), no `/api/auth/token`, no `/api/sync` (404
-once signed in) and no public `/backend-router.js` (401 before sign-in),
+for another origin, no `hc1.` access tokens (an old phone's `hc1.` bearer
+gets 401 "not signed in" and, like a Canvas helper key, is not counted
+toward the lockout: it can't match `WEB_TOKEN`, so it is no guess, and
+counting it would let a phone lock its own address out; if `WEB_TOKEN`
+itself starts with `hc1.` it is counted as before), no `/api/auth/token`,
+no `/api/sync` (404 once signed in) and no public `/backend-router.js` (401 before sign-in),
 and `/healthz` has no `role` (`tests/test_failover_cloud.py::
 test_server_profile_turns_failover_off_even_with_the_old_env`). It logs one
 WARNING naming those settings, never their values (tailnet addresses). The
 phone app no longer trusts a cached `failover` flag when `/healthz` can't
 be reached, and clears the old failover keys from localStorage. History
-events made on the cloud stay `origin = "cloud"` without `ASSISTANT_ROLE`.
+events made on the cloud stay `origin = "cloud"` without `ASSISTANT_ROLE`,
+and so does "Sign out everywhere"'s revoke event (labelled with the history
+store's origin). The app also deletes the old access token's IndexedDB
+database (`hey-claude`, backend-router.js `TOKEN_DB`).
 Kept on purpose: the sync event log and its sign-out-everywhere revoke
 events (history and sign-out read them), and the failover code a PC or Pi
 with `[failover] role` still uses. The section below describes that code.

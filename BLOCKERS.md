@@ -61,8 +61,8 @@ Only what is still open for Kyle. None of it blocks the code.
       2. **Render display name:** Dashboard -> `hey-claude` -> Settings ->
          Name -> "Kwil". Leave `render.yaml`'s `name: hey-claude` and the
          disk `hey-claude-data` alone: a renamed Blueprint service is a
-         new service with an empty disk. Render's own URL stays
-         `hey-claude.onrender.com`; the app is at the custom domain
+         new service with an empty disk. Render's own `*.onrender.com`
+         URL keeps the old name; the app is at the custom domain
          `https://heykwil.com` (`PUBLIC_ORIGIN`).
       3. **Optional: re-register the PC tasks** so they are under `\Kwil\`
          and run `python -m kwil`: `.\scripts\install_windows_service.ps1`,
@@ -113,8 +113,10 @@ Only what is still open for Kyle. None of it blocks the code.
          `/privacy` and `/terms` answer 404, and Google's consent screen
          and Notion's integration form both need those URLs, so it must be
          live before steps 4 and 6.
-      4. **Google for beta testers:** item "Beta testers' Google" below: a
-         *new* GCP project, consent screen with only `calendar.events`,
+      4. **Done (2026-10-31): project "Kwil Beta", its Web client and
+         `GOOGLE_PUBLIC_CLIENT_JSON` on Render (item "Beta testers'
+         Google").** **Google for beta testers:** item "Beta testers'
+         Google" below: a *new* GCP project, consent screen with only `calendar.events`,
          `calendar.calendarlist.readonly` and `calendar.calendars.readonly`,
          published "In production" unverified (100-user cap), a Web
          client with redirect `<PUBLIC_ORIGIN>/google/callback`, then its
@@ -203,8 +205,16 @@ Only what is still open for Kyle. None of it blocks the code.
       one project together), run `python -m kwil.tools.google_auth` there
       again.
 - [ ] **Beta testers' Google: a Calendar-only OAuth client (~20 min plus
-      Google's review; README "Invite family" -> "Account types").** Only
-      you can: (1) create a *new* Google Cloud project (e.g. "Hey Claude
+      Google's review; README "Invite family" -> "Account types").**
+      Steps (1) to (3) done (2026-10-31): project 'Kwil Beta' has only the
+      Calendar API enabled and exactly the three Calendar scopes. It is
+      published In production, unverified (100-user cap). Its Web client
+      has the redirect https://heykwil.com/google/callback, and
+      GOOGLE_PUBLIC_CLIENT_JSON is set on Render. Still open: (a) a sign-in
+      test with a non-family Google account, as part of the step 9 dry run;
+      (b) optionally, remove the old hey-claude-tgml.onrender.com redirect
+      URI and authorized domain; (c) step (4)/step 5, verification, stays
+      optional. The original steps: (1) create a *new* Google Cloud project (e.g. "Hey Claude
       Beta"), enable the Calendar API, and set up its OAuth consent screen
       with only the `calendar.events`, `calendar.calendarlist.readonly` and
       `calendar.calendars.readonly` scopes, a support email and the privacy

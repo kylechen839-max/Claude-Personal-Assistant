@@ -7,7 +7,9 @@
   `ASSISTANT_ROLE`, `APP_ORIGIN` and `FAILOVER_BACKENDS` are ignored); the
   phone app stops trusting a cached failover setup and clears it; history
   events on the cloud stay "cloud". Owner devices that used failover sign
-  in once more.
+  in once more; an old phone's failover token is deleted and no longer
+  counts toward the sign-in lockout; Sign out everywhere on the cloud is
+  labelled cloud.
 - Phone app copy and polish: Reminders' list is "Upcoming"; "Long-term
   notes" and an "Outside source" badge; one-line empty states; no exclamation
   marks; the first-run guide points to Settings; the Chinese app has no

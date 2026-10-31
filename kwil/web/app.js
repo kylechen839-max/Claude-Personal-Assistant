@@ -543,8 +543,11 @@ function writeJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
 }
 
-// What an older failover setup left behind (Kwil is cloud-only since 2026-10-31).
+// What an older failover setup left behind (Kwil is cloud-only since 2026-10-31):
+// these keys, and the access token in backend-router.js's TOKEN_DB (named
+// here: the router is never imported while failover is off).
 const FAILOVER_KEYS = ["failover", "backendsCache", "backendSettings", "backendOverride"];
+const TOKEN_DB = "hey-claude";
 
 async function detectFailover() {
   let on = false;
@@ -556,6 +559,9 @@ async function detectFailover() {
     for (const key of FAILOVER_KEYS) {
       try { localStorage.removeItem(key); } catch (e) { /* private mode */ }
     }
+    try {
+      if (window.indexedDB) window.indexedDB.deleteDatabase(TOKEN_DB);
+    } catch (e) { /* private mode, or no IndexedDB */ }
     return;
   }
   writeJSON("failover", on);

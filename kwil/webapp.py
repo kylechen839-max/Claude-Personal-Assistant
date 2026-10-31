@@ -1777,6 +1777,10 @@ class WebAuth:
                 # routes (which check it), never a session; not a guess at
                 # WEB_TOKEN, so not counted (as CloudGuard doesn't)
                 return None
+            if auth[7:].strip().startswith("hc1.") and not self.token.startswith("hc1."):
+                # a failover access token the failover layer didn't accept
+                # (failover off: an old phone's): not a guess, not counted
+                return None
             ip = self.client_ip(conn)
             if not self.limiter.blocked(ip):
                 # the HTTP middleware waits this long before answering
@@ -1816,10 +1820,15 @@ class WebAuth:
             nb = max(nb, revoked_before(log_))
         return nb
 
-    def revoke_tokens(self, role: str = "pc") -> None:
+    def revoke_tokens(self, role: str | None = None) -> None:
         """Sign out every phone holding an access token: on this backend
         (kept in the sessions file, so it survives a restart) and on every
-        other one through the synced history log (if history is on)."""
+        other one through the synced history log (if history is on). The
+        event is labelled with `role`, else the history store's own origin
+        ("cloud" under the server profile), else "pc"."""
+        if not role:
+            origin = getattr(getattr(self.assistant, "history", None), "origin", None)
+            role = origin if isinstance(origin, str) and origin else "pc"
         now = int(time.time())
         self.store.revoke_tokens(now)
         self.token_sessions.clear()
@@ -2338,7 +2347,7 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
         revoked = store.revoke_all()
         # failover access tokens (phones) too, on every synced backend
         revoked += list(web.token_sessions)
-        web.revoke_tokens(web.failover_role)
+        web.revoke_tokens()  # labelled with this backend's history origin
         await end_voice(dict.fromkeys([*revoked, *live]))  # each once
         for sid in revoked:
             await run_in_threadpool(assistant.end_session, sid)

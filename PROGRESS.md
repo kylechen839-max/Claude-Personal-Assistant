@@ -8677,5 +8677,28 @@ deleted, the cloud just stops being part of a failover setup.
   true`. Fail-first: with only the source reverted (config.py, peers.py,
   history.py, app.js) every new test fails except the two JS guard tests
   (the single import site, and the role case that already worked).
-- Full suite: 4029 passed, 53 skipped (baseline e5fbb70 4024 + 5); JS 485
-  passed (baseline 481 + 4).
+- **Judge round 1's three LOW findings, fixed:**
+  1. An old phone's `hc1.` bearer on the cloud (failover off) was counted
+     as a wrong `WEB_TOKEN` and could lock that address out. CloudGuard
+     (HTTP and the voice socket) and `WebAuth.sid` now answer it "not
+     signed in" without counting, as for a Canvas helper key (unless
+     `WEB_TOKEN` itself starts with `hc1.`). Tests: 8 old-token requests
+     plus 3 more, then a login works and the address isn't blocked, a
+     socket with one isn't counted, a real wrong token still is
+     (`test_failover_cloud.py`); the same on the plain web app
+     (`test_webapp.py`).
+  2. The old access token in IndexedDB (`hey-claude`, backend-router.js
+     `TOKEN_DB`) was never deleted: `detectFailover` now deletes that
+     database too when failover is off (guarded: no IndexedDB, private
+     mode). JS tests: the database is deleted with `/healthz` down or
+     roleless, kept with a role, the keys are still cleared without
+     IndexedDB, and the page's name matches the router's export.
+  3. "Sign out everywhere" labelled its revoke event "pc" on the cloud:
+     `WebAuth.revoke_tokens` now uses the history store's origin (else
+     "pc"). Test: a server-profile app's revoke event says "cloud".
+  Fail-first: with only `cloud.py` and `webapp.py` reverted the three
+  Python tests fail (`sign-in failed` instead of `not signed in`, origin
+  'pc', the address blocked); with only `app.js` reverted 3 of the 6 JS
+  tests fail.
+- Full suite: 4032 passed, 53 skipped (baseline e5fbb70 4024 + 8); JS 487
+  passed (baseline 481 + 6).

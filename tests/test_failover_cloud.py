@@ -357,3 +357,69 @@ def test_failover_off_warns_once_and_only_when_something_is_set(monkeypatch, cap
     assert "pi.t.ts.net" not in caplog.records[0].getMessage()
     config["failover"]["role"] = "nonsense"  # not even validated while off
     assert peers.settings_from_config(config).role == ""
+
+
+@pytest.fixture
+def cloud_only(fake_client, tmp_path, monkeypatch):
+    """The cloud as Render runs it now: the server profile (failover off),
+    a history store made by history.open_store (origin from the profile)."""
+    from kwil.config import load_config
+    from kwil.failover import peers
+    from kwil.history import open_store
+
+    monkeypatch.setattr(peers, "_warned_disabled", True, raising=False)  # quiet
+    monkeypatch.delenv("ASSISTANT_ROLE", raising=False)
+    monkeypatch.delenv("FAILOVER_BACKENDS", raising=False)
+    config = load_config(None, None, profile="server")
+    config["webapp"]["sessions_file"] = str(tmp_path / "sessions.json")
+    config["history"]["path"] = str(tmp_path / "history.sqlite")
+    history = open_store(config)
+    assistant = webapp.WebAssistant(
+        lambda reg: ClaudeChat(client=fake_client, model="m", tools=reg),
+        FakeTranscriber("hi"), PrintTTS(), history=history)
+    guard = cloud.build_app(config, assistant, TOKEN)
+    client = TestClient(at(PROXY, guard), base_url=APP, follow_redirects=False)
+    return guard, client, history
+
+
+def test_an_old_access_token_never_locks_the_phone_out_on_the_cloud(cloud_only, caplog):
+    """Judge LOW 1: with failover off, a phone still sending its old hc1.
+    token gets "not signed in", not a counted wrong guess, so it can't
+    lock its own address out before the owner signs in again."""
+    import logging
+
+    guard, client, _ = cloud_only
+    old, _ = TokenAuthority(TOKEN).mint("app")
+    with caplog.at_level(logging.WARNING, logger="kwil"):
+        for _ in range(8):
+            r = client.get("/api/state", headers=bearer(old))
+            assert r.status_code == 401 and r.json() == {"error": "not signed in"}
+        for _ in range(3):
+            assert client.post("/api/conversations/x/pin", headers=bearer(old + "x"),
+                               json={}).status_code == 401
+    assert not guard.lockout.blocked(PUBLIC)
+    assert not any("wrong" in r.getMessage().lower() for r in caplog.records)
+    assert client.post("/api/login", json={"token": TOKEN}, headers=hdr()).status_code == 200
+    assert client.get("/api/state", headers=hdr()).status_code == 200
+    # a voice socket with one is refused without counting either
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/api/voice",
+                                      headers=hdr(Origin=APP, Authorization=f"Bearer {old}")):
+            pass
+    assert not guard.lockout.blocked(PUBLIC)
+    # a real wrong WEB_TOKEN still counts
+    for _ in range(5):
+        client.get("/api/state", headers=bearer("x" * 43))
+    assert guard.lockout.blocked(PUBLIC)
+
+
+def test_sign_out_everywhere_on_the_cloud_is_labelled_cloud(cloud_only):
+    """Judge LOW 3: the revoke event comes from the cloud, not "pc"."""
+    from kwil.failover.sync import REVOKE_CONV
+
+    _, client, history = cloud_only
+    assert history.origin == "cloud"
+    assert client.post("/api/login", json={"token": TOKEN}, headers=hdr()).status_code == 200
+    assert client.post("/api/logout-all", headers=hdr(Origin=APP)).status_code == 200
+    revoke = history.sync_log.by_conv(REVOKE_CONV)
+    assert revoke and [e.origin for e in revoke] == ["cloud"]

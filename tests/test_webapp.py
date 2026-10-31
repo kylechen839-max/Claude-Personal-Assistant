@@ -1150,6 +1150,18 @@ def test_bearer_token_for_other_clients(make_app, fake_client):
     assert client.get("/api/state", headers=good).status_code == 200
 
 
+def test_an_old_failover_access_token_is_not_counted_as_a_guess(make_app):
+    """Judge LOW 1 (cloud-only): without failover, a phone's old hc1. token
+    is "not signed in" but never counts toward the lockout."""
+    _, client = make_app()
+    old = {"Authorization": "Bearer hc1.app.c2lk.1.1.c2ln"}
+    for _ in range(8):
+        assert client.get("/api/state", headers=old).status_code == 401
+    assert not client.app.state.web.limiter.blocked("testclient")
+    assert client.get("/api/state",
+                      headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 200
+
+
 def test_trusted_proxy_by_address():
     """tailscale serve on the same PC: trust forwarded headers only from it."""
     trust = webapp.parse_trusted_proxy("127.0.0.1")

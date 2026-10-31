@@ -20,6 +20,10 @@ const SOURCE = readFileSync(PATH, 'utf8');
 const IMPORT = 'import("/backend-router.js")';
 const SCRIPT = SOURCE.replace(IMPORT, '__import("/backend-router.js")');
 const KEYS = ['failover', 'backendsCache', 'backendSettings', 'backendOverride'];
+// the router's token database (backend-router.js TOKEN_DB), which the page
+// can't import while failover is off
+const ROUTER = readFileSync(new URL('../../kwil/web/backend-router.js', import.meta.url), 'utf8');
+const TOKEN_DB = ROUTER.match(/export const TOKEN_DB = '([^']+)';/)[1];
 
 class El {
   constructor(id = '') {
@@ -37,7 +41,7 @@ class El {
 
 const json = (status, body) => ({ ok: status < 400, status, json: async () => body });
 
-async function load(healthz) {
+async function load(healthz, { idb = true } = {}) {
   const byId = {};
   const $ = (id) => (byId[id] ??= new El(id));
   const store = new Map([
@@ -48,6 +52,7 @@ async function load(healthz) {
     ['other', 'kept'],
   ]);
   const imports = [];
+  const deleted = [];  // IndexedDB databases the page deleted
   const win = {
     document: {
       getElementById: $,
@@ -64,6 +69,7 @@ async function load(healthz) {
       removeItem: (k) => { store.delete(k); },
     },
     navigator: {},
+    ...(idb ? { indexedDB: { deleteDatabase: (name) => { deleted.push(name); return {}; } } } : {}),
     location: { hash: '', pathname: '/', origin: 'https://heykwil.com' },
     history: { replaceState() {} },
     FormData, Blob, TextDecoder, setTimeout, clearTimeout, console,
@@ -82,8 +88,13 @@ async function load(healthz) {
   };
   vm.runInContext(SCRIPT, win);
   for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
-  return { store, imports, $ };
+  return { store, imports, deleted, $ };
 }
+
+test("the page's token database name is the router's", () => {
+  assert.equal(TOKEN_DB, 'hey-claude');
+  assert.match(SOURCE, /const TOKEN_DB = "hey-claude";/);
+});
 
 test('the page imports the router in exactly one place', () => {
   assert.equal(SOURCE.split(IMPORT).length, 2);
@@ -97,6 +108,14 @@ test('a cached failover flag is not trusted when /healthz is unreachable', async
   assert.equal(p.store.get('other'), 'kept');  // only the failover keys go
   assert.equal(p.$('backends').hidden, true);
   assert.equal(p.$('badge').hidden, true);
+  assert.deepEqual(p.deleted, [TOKEN_DB]);  // the old access token goes too
+});
+
+test('the old failover token database is deleted, and no IndexedDB is fine', async () => {
+  const p = await load(async () => json(200, { ok: true, version: '1' }));
+  assert.deepEqual(p.deleted, ['hey-claude']);
+  const bare = await load(async () => json(200, { ok: true, version: '1' }), { idb: false });
+  for (const key of KEYS) assert.equal(bare.store.has(key), false, key);  // still cleared
 });
 
 test('/healthz without a role (the cloud) clears the old failover keys', async () => {
@@ -110,4 +129,5 @@ test('a server that still reports a role loads the router (the harness sees impo
   const p = await load(async () => json(200, { ok: true, version: '1', api: 1, role: 'pc' }));
   assert.deepEqual(p.imports, ['/backend-router.js']);
   assert.equal(p.store.get('failover'), 'true');
+  assert.deepEqual(p.deleted, []);  // with failover on, the token stays
 });
