@@ -1,4 +1,4 @@
-/* Kwil public pages (/welcome, /privacy, /terms, the owner's /waitlist).
+/* Kwil public pages (/welcome, /privacy, /terms, /help/anthropic-key, the owner's /waitlist).
    The app's palette and the system font; light by default, dark when the
    device is (prefers-color-scheme). No web fonts, nothing from another site. */
 :root {
@@ -95,6 +95,17 @@ td form { margin: 0; }
 td button { min-height: 40px; padding: .35rem .9rem; border: 1px solid var(--line); border-radius: 10px;
   background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
 
+/* the key guide (/help/anthropic-key): numbered steps, each a heading and a paragraph */
+.steps { padding-left: 1.4rem; }
+.steps li { margin: 1.5rem 0; scroll-margin-top: 1rem; }
+.steps li::marker { font-weight: 650; color: var(--muted); }
+h3 { font-size: 1.125rem; letter-spacing: -.01em; margin: 0 0 .35rem; }
+.steps p { margin: 0; color: var(--text-2); }
+code { font: .95em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: .05em .3em;
+  border-radius: 6px; background: var(--surface-2); }
+.costs { max-width: 24rem; }
+.costs td { font-variant-numeric: tabular-nums; }
+
 .site-footer { padding-top: 1.5rem; padding-bottom: max(2rem, env(safe-area-inset-bottom));
   margin-top: 4rem; color: var(--muted); font-size: .9rem; }
 .site-footer nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
@@ -109,6 +120,13 @@ td button { min-height: 40px; padding: .35rem .9rem; border: 1px solid var(--lin
   tbody th, tbody td:first-child { font-weight: 650; }
   td:empty { display: none; }
   td button { min-height: 44px; margin-top: .25rem; }
+  /* the key guide's two-column cost table stays a table */
+  table.costs { display: table; }
+  .costs thead { display: table-header-group; position: static; }
+  .costs tbody { display: table-row-group; }
+  .costs tr { display: table-row; }
+  .costs th, .costs td { display: table-cell; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+  .costs tbody th { font-weight: 400; }
 }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 @media (prefers-reduced-motion: reduce) { .button { transition: none; } .button:active { transform: none; } }

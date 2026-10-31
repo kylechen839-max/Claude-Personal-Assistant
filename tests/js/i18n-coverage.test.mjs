@@ -109,6 +109,26 @@ test('the scan finds the page\'s strings (a broken parser would pass anything)',
   for (const s of ['Phone voice mode', 'Course files', 'Summary', 'Source']) assert.ok(maps.includes(s), s);
 });
 
+test('the beta onboarding strings are scanned, and translate', () => {
+  // index.html: the feedback sheet, the survey card, the checklist, the key guide link
+  const html = htmlStrings().map((s) => s.text);
+  for (const s of ['Send feedback', 'What broke?', 'What confused you?', 'What would you pay for?',
+                   'No thanks', 'Things to try', 'How to get a key and what it costs', 'Feedback']) {
+    assert.ok(html.includes(s), s);
+  }
+  // the scripts' maps: family.js BETA_TEXT / FEEDBACK_TEXT, i18n.js CHECK_TEXT
+  const maps = mapStrings().map((s) => s.text);
+  for (const s of ["You're on the starter credit. Add your own key any time.",
+                   "That's plenty for this hour, thank you. Try again later.",
+                   'Ask “What’s due this week?”', "Join the beta testers' chat", 'Invite message copied.']) {
+    assert.ok(maps.includes(s), s);
+  }
+  const { translate } = i18n();
+  for (const s of ['$4.37 of $5 starter credit left', '$1.20 used', 'Starter credit: $12.40 of $50 used']) {
+    assert.notEqual(translate(s), s, s);
+  }
+});
+
 test('every text node, aria-label, placeholder and title in index.html translates', () => {
   assert.deepEqual(untranslated(htmlStrings()), []);
 });

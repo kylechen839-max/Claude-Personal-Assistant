@@ -1058,7 +1058,7 @@ server (`[family] enabled`, on in the server profile).
   (`userkeys.seal`, label `kwil/feedback/v1`, the person's id inside the
   ciphertext) in their folder, so Remove and "Delete my account" delete
   them and an export includes them; without `USER_DATA_KEY` nothing is
-  stored (503). Bounded: 8 KB a request, 2,000 characters an answer, 50
+  stored (503). Bounded: 20 KB a request (three full answers in Chinese), 2,000 characters an answer, 50
   notes a person, 5 an hour per person (cloud.RateLimiter, at most 1,000
   people tracked). Their words are never logged (INFO: the id, kind and
   lengths). Only the owner reads them (`GET /api/feedback`, 404 for anyone

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Beta onboarding: a public guide at /help/anthropic-key (getting an
+  Anthropic key; about $0.02 a message). Beta testers see their starter
+  credit left in Settings, a "Things to try" checklist, and can send
+  feedback; the one-time survey appears as a card. Invites share the whole
+  ready-to-send message. The owner sees credit used per tester and in total,
+  and everyone's feedback.
 - Beta testers: a $5 starter credit on the owner's key (at most $50 for all
   testers together), then "add your own key"; feedback notes and a one-time
   3-question survey; invites come with ready-to-send text (key guide, the

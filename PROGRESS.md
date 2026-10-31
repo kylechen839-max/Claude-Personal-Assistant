@@ -8688,6 +8688,57 @@ change, every id and hook kept.
   itself.
 - Full suite: 4069 passed, 53 skipped (baseline 4024 + 45); JS 481 passed
   (unchanged; no web files touched).
+## Beta onboarding UI (PR-B, help page and web UI, 2026-10-31)
+
+- **Key guide** `/help/anthropic-key` (`kwil/web/help-anthropic-key.html`,
+  site.css; in `public_site.PAGES` and `cloud.PUBLIC_GET`, so it needs no
+  sign-in and 404s with the public site off): the console steps (account,
+  Billing -> add credit, monthly spend limit, API keys -> Create key, paste
+  into Settings -> Connections -> Anthropic), five `<!-- SCREENSHOT -->`
+  spots for Kyle, and a cost estimate from usage.PRICES (Sonnet, cache
+  read $0.20): about $0.02 a message, $3 / $6 / $18 a month at 5 / 10 / 30
+  a day. English only, like /privacy. `/api/state` gets `key_help` (the
+  path) when the public site is on, the only backend change.
+- **Settings:** a beta tester on the credit sees "$X.XX of $5 starter
+  credit left" (and as the Anthropic row's subtitle, unflagged until it is
+  used up) and the guide link; the owner's People rows show "$1.20 used"
+  per tester and "Starter credit: $12.40 of $50 used" under the card.
+- **Invites:** the share sheet gets `{text: message}` (the message holds the link; a separate `url` showed it twice); the clipboard
+  copy is the message (the link alone when the server sent none).
+- **First-run checklist** (i18n.js `renderChecklist`, beta testers only,
+  called from family.js on every `/api/state`): connect Canvas or Notion
+  (the template link), ask "What's due this week?", voice mode, and the
+  testers' chat when set; ticks and Hide in localStorage (try/catch). At
+  most one card over the chat: the survey, then the guide, then this.
+- **Feedback** (family.js `setupFeedback`): "Send feedback" (Settings ->
+  Your account) opens a bottom sheet with three labelled textareas; the
+  one-time survey card (Answer / No thanks -> `POST
+  /api/me/feedback/dismiss`); the owner's "Feedback" row in People lists
+  `GET /api/feedback`, newest first, set with textContent only. 429, 409,
+  413 and 503 each get their own sentence; answers are kept on a failure.
+- zh for every new string (three new PATTERNS for the dollar lines); 44px
+  targets, labelled fields, focus back to the opener; tokens only, light and
+  dark. sw cache `kwil-shell-v30` (six pins updated).
+- **Tests:** new `tests/js/onboarding.test.mjs` (17), +1 in
+  `i18n-coverage.test.mjs`, +4 in `test_public_site.py` (the guide is
+  public, its steps/links/estimate, the price table behind it, `key_help`)
+  and `/help/anthropic-key` added to its public/404 lists. Fail-first: with
+  family.js, i18n.js and index.html reverted all 17 JS tests and the
+  coverage test fail; with the route wiring reverted the 6 public-page
+  tests fail, and with webapp.py reverted the `key_help` test fails.
+- **Judge round 1 (5 LOW, fixed):** share `{text}` alone (no second link);
+  feedback `MAX_BODY` 8 KB -> 20 KB (three 2,000-character Chinese answers
+  are about 18 KB); focus goes to the message field when the survey card,
+  Hide or the last tick removes the card; the ~$0.02 is computed in
+  test_public_site from usage.PRICES and stated token counts (2 calls x
+  12,000 cache read, 1,500 cache write, 400 out), and the footnote names
+  the $2.50 cache-write price; one POST per feedback send (a second submit
+  while it is out sends nothing). Each with a test that fails without it.
+  Desktop (1280x800) shots of Settings, People and the checklist reviewed.
+- Full suite: 4106 passed, 53 skipped (baseline 4097 passed, 54 skipped
+  in a clean archive of 1d3b0cf); JS 538 passed (baseline 518).
+  Screenshots (390x844, light/dark, en/zh, mocked APIs) were reviewed in
+  the sandbox, not on a real phone.
 ## Google Drive, read-only (2026-10-31)
 "Summarize my essay draft": two new private, untrusted-output tools in
 `kwil/tools/drive.py`, on the same Google sign-in as Calendar and Gmail.

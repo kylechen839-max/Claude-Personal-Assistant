@@ -246,6 +246,7 @@
                       <section id="api-key" class="api-key" hidden>
                         <p class="api-key-title">Your Anthropic API key</p>
                         <p id="api-key-state" class="hint" role="status"></p>
+                        <p id="api-key-credit" class="api-key-credit" hidden></p>
                         <p id="api-key-cost" class="hint" hidden></p>
                         <form id="api-key-form" class="api-key-form" autocomplete="off">
                           <input id="api-key-input" type="password" autocomplete="off" autocapitalize="off"
@@ -257,6 +258,7 @@
                         </form>
                         <p class="hint">You pay Anthropic for what you use. To get a key, sign in at console.anthropic.com, open API Keys, tap Create Key, and paste it here.</p>
                         <p class="hint api-key-link">console.anthropic.com/settings/keys</p>
+                        <a id="api-key-help" class="api-key-help" href="/help/anthropic-key" target="_blank" rel="noopener" hidden>How to get a key and what it costs</a>
                       </section>
                     </dialog>
                   </li>
@@ -288,7 +290,9 @@
               <div class="group family-group">
                 <ul id="family-list" class="family-list"></ul>
                 <button id="invite-open" type="button" class="row">Invite someone</button>
+                <button id="feedback-read" type="button" class="row" aria-haspopup="dialog" aria-controls="feedback-list-sheet" hidden><span class="row-label">Feedback</span><span class="row-chevron" aria-hidden="true"></span></button>
               </div>
+              <p id="family-credit" class="hint" hidden></p>
               <form id="invite-form" class="invite-form" autocomplete="off" hidden>
                 <label>Name <input id="invite-name" type="text" maxlength="40" required></label>
                 <label>Language
@@ -338,6 +342,7 @@
           <div class="set-sec">
             <h2 class="group-head">Your account</h2>
             <div class="group">
+              <button id="feedback-send" type="button" class="row" aria-haspopup="dialog" aria-controls="feedback-sheet" hidden><span class="row-label">Send feedback</span><span class="row-chevron" aria-hidden="true"></span></button>
               <button id="logout" type="button" class="row">Sign out</button>
               <button id="logout-all" type="button" class="row danger">Sign out everywhere</button>
             </div>
@@ -347,9 +352,23 @@
     </details>
   </header>
   <p id="health" class="health-banner" role="status" hidden></p>
+  <!-- at most one of these cards shows at a time (app.css): the survey, then
+       the guide, then a beta tester's checklist -->
+  <section id="feedback-due" class="guide fb-due" aria-labelledby="feedback-due-text" hidden>
+    <p id="feedback-due-text" class="guide-text">How's Kwil going so far? Three quick questions help make it better.</p>
+    <div class="fb-due-actions">
+      <button id="feedback-due-open" type="button" class="btn primary" aria-haspopup="dialog" aria-controls="feedback-sheet">Answer</button>
+      <button id="feedback-due-dismiss" type="button" class="btn plain">No thanks</button>
+    </div>
+  </section>
   <section id="guide" class="guide" hidden>
     <p id="guide-text" class="guide-text"></p>
     <button id="guide-done" type="button">Got it</button>
+  </section>
+  <section id="checklist" class="guide checklist" aria-labelledby="checklist-title" hidden>
+    <h2 id="checklist-title" class="checklist-title">Things to try</h2>
+    <ul id="checklist-items" class="checklist-items"></ul>
+    <button id="checklist-hide" type="button" class="btn plain">Hide</button>
   </section>
 
   <section id="log" class="log" aria-live="polite"></section>
@@ -771,6 +790,29 @@
       <button value="delete" class="danger">Delete</button>
     </div>
   </form>
+</dialog>
+<!-- beta feedback (family.js setupFeedback, feedback.py): the three
+     questions, and the owner's list of everyone's notes -->
+<dialog id="feedback-sheet" class="conn-sheet fb-sheet" aria-labelledby="feedback-title">
+  <div class="conn-grab" aria-hidden="true"></div>
+  <div class="conn-sheet-head"><h2 id="feedback-title">Send feedback</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+  <p class="conn-about">Anything helps, even one line. Only the person who runs Kwil reads it.</p>
+  <form id="feedback-form" class="fb-form" autocomplete="off">
+    <label for="feedback-broke">What broke?</label>
+    <textarea id="feedback-broke" rows="3" maxlength="2000"></textarea>
+    <label for="feedback-confused">What confused you?</label>
+    <textarea id="feedback-confused" rows="3" maxlength="2000"></textarea>
+    <label for="feedback-pay">What would you pay for?</label>
+    <textarea id="feedback-pay" rows="3" maxlength="2000"></textarea>
+    <button id="feedback-submit" type="submit" class="btn primary">Send</button>
+  </form>
+  <p id="feedback-status" class="hint" role="status"></p>
+</dialog>
+<dialog id="feedback-list-sheet" class="conn-sheet fb-sheet" aria-labelledby="feedback-list-title">
+  <div class="conn-grab" aria-hidden="true"></div>
+  <div class="conn-sheet-head"><h2 id="feedback-list-title">Feedback</h2><button class="icon-btn conn-close" type="button" aria-label="Close"></button></div>
+  <p id="feedback-list-status" class="hint" role="status"></p>
+  <ul id="feedback-list" class="fb-list"></ul>
 </dialog>
 <!-- Ctrl+K / Cmd+K (ui.js KwilUI.switcher): go to a screen or a conversation -->
 <dialog id="switcher" class="sheet switcher" aria-label="Go to">

@@ -42,7 +42,9 @@ OWNER = "owner"                   # the id sealed into the owner's file
 KINDS = ("general", "survey")
 FIELDS = ("broke", "confused", "pay")
 MAX_ANSWER = 2000                 # characters an answer
-MAX_BODY = 8 * 1024               # bytes a request
+# bytes a request: three full answers in Chinese (3 bytes a character in
+# UTF-8, as the page's JSON.stringify sends them: 18,000) plus the JSON
+MAX_BODY = 20 * 1024
 MAX_ENTRIES = 50                  # a person
 PER_HOUR = 5                      # a person
 

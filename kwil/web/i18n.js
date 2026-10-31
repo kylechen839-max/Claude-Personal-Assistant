@@ -358,6 +358,50 @@
       "用多少由你自己向 Anthropic 付费。获取密钥：登录 console.anthropic.com，" +
       "打开 API Keys，点 Create Key，然后粘贴到这里。",
     "This server can't store keys yet.": "这个服务器暂时还不能保存密钥。",
+    // a beta tester on the starter credit (family.js BETA_TEXT, credit.py)
+    "Starter credit": "新手额度",
+    "You're on the starter credit. Add your own key any time.":
+      "你正在用新手额度，随时可以添加你自己的密钥。",
+    "Your starter credit is used up. Add your key to keep talking with Claude.":
+      "你的新手额度已用完。添加你的密钥，就能继续和 Claude 对话。",
+    "How to get a key and what it costs": "怎么申请密钥，要花多少钱",
+    // the invite's ready-to-send message (family.js share)
+    "Invite message ready.": "邀请消息已准备好。",
+    "Invite message copied.": "邀请消息已复制。",
+    // beta feedback (family.js FEEDBACK_TEXT, feedback.py)
+    "Send feedback": "发送反馈",
+    "Feedback": "反馈",
+    "How's the beta going?": "测试用得怎么样？",
+    "Anything helps, even one line. Only the person who runs Kwil reads it.":
+      "什么都有帮助，一句话也行。只有运行 Kwil 的人会看到。",
+    "What broke?": "哪里出问题了？",
+    "What confused you?": "哪里让你困惑？",
+    "What would you pay for?": "你愿意为什么付费？",
+    "How's Kwil going so far? Three quick questions help make it better.":
+      "Kwil 用得怎么样？回答三个小问题，帮我们把它做得更好。",
+    "Answer": "回答",
+    "No thanks": "不用了",
+    "Sending…": "正在发送…",
+    "Thanks. Your feedback was sent.": "谢谢，反馈已发送。",
+    "Write something first.": "请先写点内容。",
+    "That's plenty for this hour, thank you. Try again later.": "这一小时已经发了很多条，谢谢。请稍后再试。",
+    "You've sent a lot of feedback already. Thank you.": "你已经发了很多条反馈了，谢谢。",
+    "That's too long. Shorten an answer.": "内容太长了，请缩短一些。",
+    "Feedback can't be saved on this server yet.": "这个服务器暂时还不能保存反馈。",
+    "Couldn't send it. Try again.": "没能发送，请再试一次。",
+    "No feedback yet.": "还没有反馈。",
+    "Couldn't load feedback. Try again.": "没能加载反馈，请再试一次。",
+    "Survey": "问卷",
+    "You": "你",
+    // a beta tester's first-run checklist (CHECK_TEXT below)
+    "Things to try": "可以先试试这些",
+    "Hide": "隐藏",
+    "Connect Canvas or Notion in Settings": "在“设置”里连接 Canvas 或 Notion",
+    "Notion template": "Notion 模板",
+    "Ask “What’s due this week?”": "问一句“这周有什么要交的？”",
+    "Try voice mode with the round button below": "用下面的圆形按钮试试语音模式",
+    "Join the beta testers' chat": "加入测试者群聊",
+    "Open the chat": "打开群聊",
     "Your saved key can't be read any more. Please enter it again.":
       "你保存的密钥已经读不出来了，请重新输入。",
     "Add your key to start talking with Claude.": "添加你的密钥，就可以开始和 Claude 对话了。",
@@ -778,6 +822,10 @@
     [/^(.+) · paid$/, "$1 · 付费"],
     [/^Your key ending in (\S{1,4}) is saved\.$/, "你的密钥（结尾 $1）已保存。"],
     [/^About \$(\d+\.\d\d) this month on your key\.$/, "这个月用你的密钥大约花了 $$$1。"],
+    // a beta tester's Settings and Connections row (family.js), the owner's People
+    [/^\$(\d+\.\d\d) of \$(\d+(?:\.\d\d)?) starter credit left$/, "新手额度还剩 $$$1（共 $$$2）"],
+    [/^\$(\d+\.\d\d) used$/, "已用 $$$1"],
+    [/^Starter credit: \$(\d+\.\d\d) of \$(\d+(?:\.\d\d)?) used$/, "新手额度：已用 $$$1（共 $$$2）"],
     [/^Found (\d+) new\.$/, "找到 $1 条新内容。"],
   ];
   const ATTRS = ["placeholder", "aria-label", "title"];
@@ -919,6 +967,110 @@
     text.textContent = lines.join("\n");
     box.setAttribute("data-examples", examples.length ? "1" : "");
     box.hidden = false;
+  }
+
+  // --- a beta tester's first-run checklist (family.js calls it on every
+  // /api/state): what to try first, ticked by hand. The ticks and "Hide"
+  // live in localStorage (private mode: nothing kept, still works). The
+  // links are the server's https-only notion_template_url / beta_chat_url.
+  const CHECK_TEXT = {
+    title: "Things to try",
+    connect: "Connect Canvas or Notion in Settings",
+    template: "Notion template",
+    ask: "Ask “What’s due this week?”",
+    voice: "Try voice mode with the round button below",
+    chat: "Join the beta testers' chat",
+    chatLink: "Open the chat",
+    hide: "Hide",
+  };
+  const CHECK_KEY = "betaChecklist";         // the ticked steps, a JSON list
+  const CHECK_HIDDEN = "betaChecklistHidden";  // "1" after Hide
+
+  function readTicks(win) {
+    try {
+      const list = JSON.parse(win.localStorage?.getItem(CHECK_KEY) || "[]");
+      return Array.isArray(list) ? list.filter((k) => typeof k === "string") : [];
+    } catch (e) { return []; }
+  }
+  function saveTicks(win, ticks) {
+    try { win.localStorage?.setItem(CHECK_KEY, JSON.stringify(ticks)); } catch (e) { /* private */ }
+  }
+  const httpsLink = (v) => (typeof v === "string" && /^https:\/\/[^\s"<>]+$/.test(v) ? v : "");
+
+  // the card hid with focus in it: give it to the message field, not <body>
+  function focusText(doc) {
+    const field = doc.getElementById("text");
+    if (field && typeof field.focus === "function") field.focus();
+  }
+
+  function renderChecklist(win, doc, state) {
+    const box = doc.getElementById("checklist");
+    const list = doc.getElementById("checklist-items");
+    if (!box || !list) return;
+    const say = (text) => (isActive(doc) ? translate(text) : text);
+    const beta = Boolean(state) && state.owner === false && state.api_key === "required";
+    let hidden = false;
+    try { hidden = win.localStorage?.getItem(CHECK_HIDDEN) === "1"; } catch (e) { /* private */ }
+    const chat = beta ? httpsLink(state.beta_chat_url) : "";
+    const steps = ["connect", "ask", "voice", ...(chat ? ["chat"] : [])];
+    const ticks = readTicks(win);
+    if (!beta || hidden || steps.every((k) => ticks.includes(k))) { box.hidden = true; return; }
+    const template = httpsLink(state.notion_template_url);
+    box.hidden = false;
+    // the same steps and links as last time: only the ticks (a rebuild on
+    // every /api/state would take focus from a checkbox)
+    const sig = JSON.stringify([steps, template, chat]);
+    if (list.dataset.sig === sig) {
+      for (const input of list.querySelectorAll("input[data-step]")) {
+        input.checked = ticks.includes(input.getAttribute("data-step"));
+      }
+      return;
+    }
+    list.dataset.sig = sig;
+    list.textContent = "";
+    for (const key of steps) {
+      const li = doc.createElement("li");
+      li.className = "check-item";
+      const label = doc.createElement("label");
+      label.className = "check-row";
+      const box2 = doc.createElement("input");
+      box2.type = "checkbox";
+      box2.checked = ticks.includes(key);
+      box2.setAttribute("data-step", key);
+      const words = doc.createElement("span");
+      words.textContent = say(CHECK_TEXT[key]);
+      label.append(box2, words);
+      li.appendChild(label);
+      const href = key === "connect" ? template : key === "chat" ? chat : "";
+      if (href) {
+        const a = doc.createElement("a");
+        a.className = "check-link";
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = say(key === "connect" ? CHECK_TEXT.template : CHECK_TEXT.chatLink);
+        li.appendChild(a);
+      }
+      box2.addEventListener("change", () => {
+        const now = readTicks(win).filter((k) => k !== key);
+        if (box2.checked) now.push(key);
+        saveTicks(win, now);
+        if (steps.every((k) => now.includes(k))) { box.hidden = true; focusText(doc); }  // all done
+      });
+      list.appendChild(li);
+    }
+    const title = doc.getElementById("checklist-title");
+    if (title) title.textContent = say(CHECK_TEXT.title);
+    const hide = doc.getElementById("checklist-hide");
+    if (hide && !hide.dataset.wired) {
+      hide.dataset.wired = "1";
+      hide.textContent = say(CHECK_TEXT.hide);
+      hide.addEventListener("click", () => {
+        try { win.localStorage?.setItem(CHECK_HIDDEN, "1"); } catch (e) { /* private */ }
+        box.hidden = true;
+        focusText(doc);
+      });
+    }
   }
 
   // the saved token lacks the Drive scope (a sign-in from before Drive)
@@ -1086,7 +1238,8 @@
     return { refresh };
   }
 
-  const api = { ZH, translate, translateNode, isActive, start, setupGoogle };
+  const api = { ZH, translate, translateNode, isActive, start, setupGoogle, renderChecklist,
+                CHECK_TEXT };
   root.KwilI18n = api;
   if (typeof root.document !== "undefined") {
     const doc = root.document;

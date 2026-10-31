@@ -1,0 +1,109 @@
+<!doctype html>
+<!-- The key guide (public_site.py PAGES: /help/anthropic-key). Linked from
+     beta invites (family.invite_message), the "starter credit is used up"
+     sentence (credit.help_url) and a beta tester's Settings (family.js).
+     English only, like /privacy. The cost estimate uses usage.PRICES for
+     Sonnet (input $2, cache read $0.20, output $10 per million tokens);
+     keep it in step with README "Starter credit". Kyle adds the
+     screenshots where the SCREENSHOT comments are. Keep this an HTML
+     comment: no inline script or style (CSP). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#121a24" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
+<title>Get an Anthropic API key: Kwil beta</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/welcome"><img src="/icon.svg" alt="" width="32" height="32"> Kwil</a>
+  <a class="sign-in" href="/">Sign in</a>
+</header>
+
+<main class="doc">
+  <h1>Get your own Anthropic API key</h1>
+  <p class="lead">Kwil talks to Claude with an API key from Anthropic, the company
+    that makes Claude. Your first few dollars are on a starter credit. After that
+    you add a key of your own and pay Anthropic directly for what you use. It
+    takes about five minutes.</p>
+
+  <h2>What it costs</h2>
+  <p>An estimate, not a price: Anthropic bills by how much text goes in and out,
+    so longer conversations, photos and files cost more. With Kwil's default
+    model a typical message costs about <strong>$0.02</strong>.</p>
+  <table class="costs">
+    <caption>Estimated cost a month</caption>
+    <thead><tr><th scope="col">Messages a day</th><th scope="col">About a month</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">5</th><td>$3</td></tr>
+      <tr><th scope="row">10</th><td>$6</td></tr>
+      <tr><th scope="row">30</th><td>$18</td></tr>
+    </tbody>
+  </table>
+  <p class="fine">Based on Anthropic's list prices for Claude Sonnet (per million
+    tokens: $2 in, $2.50 to keep new text ready for the next message, $0.20 for
+    text it has already read, $10 out), for a message of about 24,000 tokens
+    already read, 3,000 new and 800 out. Settings in Kwil
+    shows your own estimate for the month once your key is saved.</p>
+
+  <h2>Steps</h2>
+  <ol class="steps">
+    <li id="account">
+      <h3>Create an Anthropic account</h3>
+      <p>Go to <a href="https://console.anthropic.com/">console.anthropic.com</a>
+        and sign up with your email or Google account. This is the developer
+        console, separate from a Claude.ai subscription.</p>
+      <!-- SCREENSHOT: the console's sign-up page -->
+    </li>
+    <li id="credit">
+      <h3>Add credit</h3>
+      <p>Open <strong>Billing</strong> (under Settings) and add credit with a
+        card. $5 or $10 is plenty to start; Anthropic takes the cost of each
+        message from it.</p>
+      <!-- SCREENSHOT: Billing, the "Add credit" button -->
+    </li>
+    <li id="limit">
+      <h3>Set a monthly spend limit</h3>
+      <p>Still in Settings, open <strong>Limits</strong> and set a monthly spend
+        limit, for example $10. Once it is reached, the key stops working until
+        the next month, so you never spend more than you chose.</p>
+      <!-- SCREENSHOT: Limits, the monthly spend limit field -->
+    </li>
+    <li id="key">
+      <h3>Create a key</h3>
+      <p>Open <strong>API keys</strong>, tap <strong>Create key</strong>, give it
+        a name such as "Kwil" and copy it. It starts with
+        <code>sk-ant-</code>. Anthropic shows it only once.</p>
+      <!-- SCREENSHOT: API keys, the "Create key" dialog -->
+    </li>
+    <li id="paste">
+      <h3>Paste it into Kwil</h3>
+      <p>In Kwil, open <strong>Settings</strong>, then <strong>Connections</strong>,
+        then <strong>Anthropic</strong> (Your API key). Paste the key and tap
+        <strong>Save key</strong>. Kwil checks it with Anthropic, stores it
+        encrypted, and from then on shows only its last four characters.</p>
+      <!-- SCREENSHOT: Kwil Settings, the Anthropic sheet with the key field -->
+    </li>
+  </ol>
+
+  <h2>Keeping it safe</h2>
+  <p>Treat the key like a password: don't post it or send it in a chat. If you
+    think someone else has it, delete it in the console under API keys and make a
+    new one. To stop Kwil using it, choose <strong>Remove key</strong> in
+    Settings, or delete the key in the console.</p>
+  <p>More about what Kwil stores is on the <a href="/privacy">privacy page</a>.</p>
+</main>
+
+<footer class="site-footer">
+  <nav aria-label="Site">
+    <a href="/welcome">Home</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="/">Sign in</a>
+  </nav>
+</footer>
+</body>
+</html>

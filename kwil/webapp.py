@@ -2407,6 +2407,10 @@ def create_app(assistant: WebAssistant, token: str, allowed_origins=(),
                 link = https_url(family.config["family"].get(name))
                 if link:
                     out[name] = link
+            if public is not None:  # the key guide is served here (Settings links it)
+                from kwil.credit import HELP_PATH
+
+                out["key_help"] = HELP_PATH
         return out
 
     def research_available(s: Session) -> bool:
